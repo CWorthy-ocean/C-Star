@@ -439,13 +439,13 @@ def test_template_fill_variable_substitution(
 def test_template_fill_path_substitution(
     live_step_with_templates: LiveStep, tmp_path: Path
 ) -> None:
-    """{{work_dir: step_name}} tokens are replaced using the path resolver."""
+    """{{work_dir: step_name}} tokens are replaced using the scope resolver."""
     upstream_dir = tmp_path / "upstream"
 
     def _resolve(_x: str, _y: str) -> str:
         return str(upstream_dir)
 
-    transform = TemplateFillTransform(purpose_resolver=_resolve)
+    transform = TemplateFillTransform(scoped_resolver=_resolve)
     step = LiveStep.from_step(
         live_step_with_templates,
         update={"blueprint_overrides": {"output_dir": "{{work_dir: upstream}}/output"}},
@@ -510,7 +510,7 @@ def test_template_fill_missing_variable_resolver_raises(
 def test_template_fill_missing_path_resolver_raises(
     live_step_with_templates: LiveStep,
 ) -> None:
-    """ValueError is raised when a path placeholder is encountered with no path resolver."""
+    """ValueError is raised when a path placeholder is encountered with no scope resolver."""
     transform = TemplateFillTransform()
     step = LiveStep.from_step(
         live_step_with_templates,
@@ -529,11 +529,11 @@ def test_template_fill_with_path_resolver_returns_new_instance(
     def _resolve(_x: str, _y: str) -> str:
         return str(tmp_path)
 
-    bound = original.with_purpose_resolver(_resolve)
+    bound = original.with_scoped_resolver(_resolve)
 
     assert bound is not original
-    assert bound._purpose_resolver is not None
-    assert original._purpose_resolver is None
+    assert bound._scoped_resolver is not None
+    assert original._scoped_resolver is None
     assert bound._variable_resolver is original._variable_resolver
 
 
@@ -549,7 +549,7 @@ def test_template_fill_with_path_resolver_unknown_purpose(
     )
     resolver = get_fsm_resolver([step])
 
-    fill = TemplateFillTransform(variable_resolver=str, purpose_resolver=resolver)
+    fill = TemplateFillTransform(variable_resolver=str, scoped_resolver=resolver)
 
     with pytest.raises(ValueError, match="Unable to resolve"):
         list(fill(step))
@@ -599,7 +599,7 @@ def test_template_fill_yields_single_step(live_step_with_templates: LiveStep) ->
 def test_template_fill_combined_resolvers(
     tmp_path: Path, live_step_with_templates: LiveStep, purpose: str
 ) -> None:
-    """Variable and path resolvers can both operate in the same transform pass.
+    """Ensure that variable and scope resolvers both operate in the same transform pass.
 
     Parammeters
     -----------
@@ -610,7 +610,7 @@ def test_template_fill_combined_resolvers(
     variables = {"var1": "ALK"}
     transform = TemplateFillTransform(
         variable_resolver=variables.__getitem__,
-        purpose_resolver=lambda _key, _purpose: str(upstream_dir),
+        scoped_resolver=lambda _key, _scope: str(upstream_dir),
     )
     template = mustache(f"{purpose}: var1")
     step = LiveStep.from_step(

@@ -66,8 +66,8 @@ PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
 """Pattern matching double-brace template placeholders.
 
 Captures the full content between braces so dispatch logic can distinguish
-plain variable references (``{{my_var}}``) from purpose references
-(``{{<purpose>: step_name}}``).
+plain variable references (``{{my_var}}``) from scope references
+(``{{<scope>: step_name}}``).
 """
 
 
@@ -176,7 +176,7 @@ def mustache(s: str) -> str:
 def fsm_resolver(
     fsm_map: Mapping[str, JobFileSystemManager],
     step_name: str,
-    purpose: str,
+    scope: str,
 ) -> str:
     """A resolver for attributes available on a file-system manager.
 
@@ -186,8 +186,8 @@ def fsm_resolver(
         Mapping from the step safe name to the related file-system manager
     step_name: str
         The step name to retrieve an FSM for
-    purpose : str
-        The purpose to be resolved (which attribute on the FSM instance).
+    scope : str
+        The scope to be resolved (which attribute on the FSM instance).
     """
     fsm_attrs = [
         p
@@ -196,15 +196,16 @@ def fsm_resolver(
     ]
     fsm_attrs.append("root")
     resolution_map = {
-        f"{step_name}_{fsm_attr}": str(getattr(fsm, fsm_attr))
-        for step_name, fsm in fsm_map.items()
+        f"{name}_{fsm_attr}": str(getattr(fsm, fsm_attr))
+        for name, fsm in fsm_map.items()
         for fsm_attr in fsm_attrs
+        if name == step_name and fsm_attr == scope
     }
-    if value := resolution_map.get(f"{step_name}_{purpose}"):
+    if value := resolution_map.get(f"{step_name}_{scope}"):
         return value
 
-    ph = mustache(f"{purpose}: {step_name}")
-    msg = f"Unable to resolve {purpose!r} for placeholder {ph!r}"
+    ph = mustache(f"{scope}: {step_name}")
+    msg = f"Unable to resolve {scope!r} for placeholder {ph!r}"
     raise ValueError(msg)
 
 
@@ -219,7 +220,7 @@ def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:
     Returns
     -------
     Callable[[str, str], str]
-        Callable accepting the step name and purpose as parameters and returning
+        Callable accepting the step name and scope as parameters and returning
         the resolved value.
     """
     fsm_map: dict[str, JobFileSystemManager] = {s.name: s.fsm for s in steps}
@@ -227,16 +228,16 @@ def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:
 
 
 class TemplateFillTransform:
-    """Fill ``{{<purpose>: <placeholder>}}`` template strings in a step's blueprint_overrides.
+    """Fill ``{{<scope>: <placeholder>}}`` template strings in a step's blueprint_overrides.
 
     Recursively traverses the nested blueprint_overrides structure and
     dispatches each placeholder to one of two resolvers:
 
     - **variable resolver** — handles plain ``{{name}}`` tokens by looking up
       *name* in the caller-supplied mapping (e.g. user-defined runtime variables).
-    - **path resolver** — handles ``{{<purpose>: step_name}}`` tokens by returning
-      the working-directory path of the named step.  Must be bound via
-      :meth:`with_path_resolver` before any step that uses this syntax is
+    - **scope resolver** — handles ``{{<scope>: step_name}}`` tokens by returning
+      the resolved value for the named step.  Must be bound via
+      :meth:`with_scoped_resolver` before any step that uses this syntax is
       processed.
 
     The transform yields a single updated step; the original step's
@@ -244,12 +245,12 @@ class TemplateFillTransform:
     """
 
     _variable_resolver: Callable[[str], str] | None = None
-    _purpose_resolver: Callable[[str, str], str] | None = None
+    _scoped_resolver: Callable[[str, str], str] | None = None
 
     def __init__(
         self,
         variable_resolver: Callable[[str], str] | None = None,
-        purpose_resolver: Callable[[str, str], str] | None = None,
+        scoped_resolver: Callable[[str, str], str] | None = None,
     ) -> None:
         """Initialize the transform.
 
@@ -257,23 +258,23 @@ class TemplateFillTransform:
         ----------
         variable_resolver : Callable[[str], str] | None
             Maps a plain placeholder name to its replacement string.
-        purpose_resolver : Callable[[str, str], Path] | None
+        scoped_resolver : Callable[[str, str], Path] | None
             Maps a step name to a resolver handling job paths.  Required only
-            when ``blueprint_overrides`` contains ``{{<purpose>: <step>}}`` tokens.
+            when ``blueprint_overrides`` contains ``{{<scope>: <step>}}`` tokens.
         """
         self._variable_resolver = variable_resolver
-        self._purpose_resolver = purpose_resolver
+        self._scoped_resolver = scoped_resolver
 
-    def with_purpose_resolver(
+    def with_scoped_resolver(
         self,
         resolver: Callable[[str, str], str],
     ) -> "TemplateFillTransform":
-        """Return a new instance with the given path resolver bound.
+        """Return a new instance with the given resolver bound.
 
         Parameters
         ----------
-        path_resolver : Callable[[str], Path]
-            Maps a step name to its working-directory path.
+        resolver : Callable[[str, str], str]
+            Use this resolver to resolve values with a specific scope.
 
         Returns
         -------
@@ -310,12 +311,12 @@ class TemplateFillTransform:
         """
         parts = content.split(":", maxsplit=1)
         if len(parts) > 1:
-            purpose, ph = [x.strip() for x in parts]
-            if not self._purpose_resolver:
-                msg = f"No {purpose!r} resolver provided for placeholder {ph!r}"
+            scope, ph = [x.strip() for x in parts]
+            if not self._scoped_resolver:
+                msg = f"No {scope!r} resolver provided for placeholder {ph!r}"
                 raise ValueError(msg)
 
-            return self._purpose_resolver(ph, purpose)
+            return self._scoped_resolver(ph, scope)
 
         if self._variable_resolver is None:
             msg = f"No variable resolver provided for placeholder '{mustache(content)}'"
@@ -459,7 +460,7 @@ class WorkplanTransformer(LoggingMixin):
         # fill template placeholders before any other transform operates on overrides
         if self.fill_transform is not None:
             resolver = get_fsm_resolver(live_steps)
-            fill = self.fill_transform.with_purpose_resolver(resolver)
+            fill = self.fill_transform.with_scoped_resolver(resolver)
 
             live_steps = [filled for step in live_steps for filled in fill(step)]
 
