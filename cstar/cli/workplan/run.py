@@ -19,6 +19,7 @@ from cstar.cli.workplan.shared import (
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
+    ARG_CLOBBER_HELP,
     ARG_DRY_RUN,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
@@ -278,7 +279,7 @@ def run(
         typer.Option(
             ARG_CLOBBER,
             callback=clobber_callback,
-            help="Set this flag to remove any pre-existing files in the working directory.",
+            help=ARG_CLOBBER_HELP,
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
     ] = False,

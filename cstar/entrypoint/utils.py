@@ -1,6 +1,9 @@
 import typing as t
 
 ARG_CLOBBER: t.Literal["--clobber"] = "--clobber"
+ARG_CLOBBER_HELP: t.Final[str] = (
+    "Set this flag to remove any pre-existing files in the working directory."
+)
 ARG_DRY_RUN: t.Literal["--dry-run"] = "--dry-run"
 
 ARG_DIRECTIVES_URI_LONG: t.Literal["--directives"] = "--directives"
