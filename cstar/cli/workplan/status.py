@@ -26,8 +26,8 @@ def status(
 ) -> None:
     """Retrieve the current status of a workplan."""
     if not run_id:
-        print("A run-id must be provided.")
-        raise typer.Exit(1)
+        msg = "A run-id must be provided."
+        raise typer.BadParameter(msg)
 
     repo = TrackingRepository()
     workplan_run = asyncio.run(repo.get_workplan_run(run_id))
