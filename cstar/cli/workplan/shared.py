@@ -30,7 +30,7 @@ if t.TYPE_CHECKING:
     from cstar.orchestration.tracking import WorkplanRun
 
 
-async def list_runs(incomplete: str) -> list[tuple[str, str]]:
+def list_runs(incomplete: str) -> list[tuple[str, str]]:
     """Retrieve a list of all recorded run-ids asynchronously.
 
     Parameters
@@ -45,7 +45,7 @@ async def list_runs(incomplete: str) -> list[tuple[str, str]]:
     """
     incomplete = incomplete.lower()
     repo = TrackingRepository()
-    run_list = await repo.list_latest_runs(incomplete)
+    run_list = asyncio.run(repo.list_latest_runs(incomplete))
 
     if not run_list:
         if incomplete:
