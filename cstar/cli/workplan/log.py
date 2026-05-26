@@ -5,7 +5,7 @@ import typer
 
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.cli.workplan.shared import list_runs, list_steps
+from cstar.cli.workplan.shared import autocomplete_step_list, list_runs
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 
 log = get_logger(__name__)
@@ -37,7 +37,7 @@ def workplan_log(
         str,
         typer.Argument(
             help="The name of the step whose log should be printed.",
-            autocompletion=list_steps,
+            autocompletion=autocomplete_step_list,
         ),
     ],
     monitor: t.Annotated[

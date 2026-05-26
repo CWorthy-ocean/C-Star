@@ -30,8 +30,8 @@ if t.TYPE_CHECKING:
     from cstar.orchestration.tracking import WorkplanRun
 
 
-def list_runs(incomplete: str) -> list[tuple[str, str]]:
-    """Retrieve a list of all recorded run-ids.
+async def list_runs(incomplete: str) -> list[tuple[str, str]]:
+    """Retrieve a list of all recorded run-ids asynchronously.
 
     Parameters
     ----------
@@ -43,8 +43,9 @@ def list_runs(incomplete: str) -> list[tuple[str, str]]:
     list[tuple[str, str]]
         A tuple for each run-id discovered containing [run-id, workplan-path]
     """
+    incomplete = incomplete.lower()
     repo = TrackingRepository()
-    run_list = asyncio.run(repo.list_latest_runs(incomplete))
+    run_list = await repo.list_latest_runs(incomplete)
 
     if not run_list:
         if incomplete:
@@ -55,22 +56,37 @@ def list_runs(incomplete: str) -> list[tuple[str, str]]:
     return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list if r]
 
 
-def list_steps(ctx: typer.Context, incomplete: str) -> list[str]:
-    """Return step names for the already-typed run_id, for shell autocompletion."""
-    run_id = ctx.params.get("run_id")
+async def list_steps(run_id: str, incomplete: str) -> list[str]:
+    """Return step names for the already-typed run_id, for shell autocompletion.
+
+    Applies the `incomplete` parameter as a filter, when supplied.
+
+    Parameters
+    ----------
+    run_id : str
+        The run-id for which steps will be retrieved.
+    incomplete : str
+        A string used to filter results by matching to the start of the
+        discovered step names
+
+    Returns
+    -------
+    list[str]
+    """
     if not run_id:
         return []
 
+    incomplete = incomplete.lower()
     wp_run: WorkplanRun | None = None
     try:
         repo = TrackingRepository()
 
-        if wp_run := asyncio.run(repo.get_workplan_run(run_id)):
+        if wp_run := await repo.get_workplan_run(run_id):
             wp = deserialize(wp_run.trx_workplan_path, Workplan)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
-                step_names = [s for s in step_names if s.startswith(incomplete)]
+                step_names = [s for s in step_names if s.lower().startswith(incomplete)]
 
             return step_names
     except FileNotFoundError:
@@ -90,8 +106,26 @@ def list_steps(ctx: typer.Context, incomplete: str) -> list[str]:
     return [
         d.name
         for d in sorted(tasks_dir.iterdir())
-        if d.is_dir() and d.name.startswith(incomplete)
+        if d.is_dir() and d.name.lower().startswith(incomplete)
     ]
+
+
+def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
+    """Return an auto-completed list of step names.
+
+    Use the parameters on `ctx` to locate the run-id supplied by the user.
+
+    Returns
+    -------
+    list[str]
+    """
+    run_id: str = ctx.params.get("run_id", "")
+
+    if not run_id:
+        msg = "run-id is required to autocomplete steps"
+        raise typer.BadParameter(msg)
+
+    return asyncio.run(list_steps(run_id, incomplete))
 
 
 def checkmark(color: str) -> str:
