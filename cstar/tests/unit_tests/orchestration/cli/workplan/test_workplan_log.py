@@ -66,7 +66,7 @@ async def test_cli_workplan_log_step_with_logs(
 
     Parameters
     ----------
-    executed_workplan : tuple[Path, Workplan, str]
+    executed_workplan_with_sideeffects : tuple[Path, Workplan, str]
         The path to a workplan YAML file, the workplan instance, and a run-id.
     """
     _, wp, fake_run_id = executed_workplan_with_sideeffects
