@@ -16,7 +16,7 @@ executes a ROMS simulation.
 Hello World Blueprint
 ---------------------
 
-This `hello_world` blueprint is an example starting point for creating and
+The `hello_world` blueprint is an example starting point for creating and
 running custom applications with user-provided blueprints.
 
 - :download:`Hello World Blueprint Schema v1.0.0 </schemas/bp/hello_world/hello_world_schema.1.0.0.json>`
@@ -25,7 +25,7 @@ running custom applications with user-provided blueprints.
 Plotter Blueprint
 -----------------
 
-This `plotter` blueprint is a slightly more complex example of creating and
+The `plotter` blueprint is a more complex example of creating and
 running a custom application with user-provided blueprints.
 
 
