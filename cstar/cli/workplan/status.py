@@ -17,15 +17,15 @@ console = Console()
 @app.command(name="status", help="Retrieve the current status of a workplan.")
 def status(
     run_id: t.Annotated[
-        str | None,
+        str,
         typer.Argument(
             help="The unique identifier of a specific workplan execution.",
             autocompletion=list_runs,
         ),
-    ] = None,
+    ],
 ) -> None:
     """Retrieve the current status of a workplan."""
-    if run_id is None:
+    if not run_id:
         print("A run-id must be provided.")
         raise typer.Exit(1)
 
