@@ -31,7 +31,7 @@ if t.TYPE_CHECKING:
 
 
 def list_runs(incomplete: str) -> list[tuple[str, str]]:
-    """Retrieve a list of all recorded run-ids asynchronously.
+    """Retrieve a list of all recorded run-ids.
 
     Parameters
     ----------
