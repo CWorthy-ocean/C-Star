@@ -19,6 +19,7 @@ from cstar.cli.workplan.shared import (
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
+    ARG_CLOBBER_HELP,
     ARG_DRY_RUN,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
@@ -260,7 +261,7 @@ def run(
         bool,
         typer.Option(
             ARG_DRY_RUN,
-            help="Generate the execution plan without executing the workplan.",
+            help="Set this flag to generate an execution plan without executing the workplan.",
             envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
@@ -279,7 +280,7 @@ def run(
         typer.Option(
             ARG_CLOBBER,
             callback=clobber_callback,
-            help="Clobber the working directory if it exists.",
+            help=ARG_CLOBBER_HELP,
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
     ] = False,

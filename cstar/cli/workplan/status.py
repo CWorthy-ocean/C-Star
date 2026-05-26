@@ -18,11 +18,11 @@ console = Console()
 def status(
     run_id: t.Annotated[
         str,
-        typer.Option(
+        typer.Argument(
             help="The unique identifier of a specific workplan execution.",
             autocompletion=list_runs,
         ),
-    ] = "...",
+    ],
 ) -> None:
     """Retrieve the current status of a workplan."""
     repo = TrackingRepository()
