@@ -1,11 +1,20 @@
-Blueprint Schemas
-#################
+Schema Reference
+################
+
+Workplans
+---------
+
+Schemas for the built-in `Workplan` are listed here.
+
+- :download:`Workplan Schema v1.0.0 </schemas/wp/workplan_schema.1.0.0.json>`
+
+Blueprints
+----------
 
 Schemas for the built-in blueprints are listed here.
 
-
 ROMS-MARBL Blueprint
---------------------
+~~~~~~~~~~~~~~~~~~~~
 
 The `roms_marbl` blueprint enables the orchestration of an application that 
 executes a ROMS simulation.
@@ -14,7 +23,7 @@ executes a ROMS simulation.
 
 
 Hello World Blueprint
----------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 The `hello_world` blueprint is an example starting point for creating and
 running custom applications with user-provided blueprints.
@@ -23,7 +32,7 @@ running custom applications with user-provided blueprints.
 
 
 Plotter Blueprint
------------------
+~~~~~~~~~~~~~~~~~
 
 The `plotter` blueprint is a more complex example of creating and
 running a custom application with user-provided blueprints.
