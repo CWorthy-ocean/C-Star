@@ -115,6 +115,13 @@ def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
 
     Use the parameters on `ctx` to locate the run-id supplied by the user.
 
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context
+    incomplete : str
+        A string used to filter the step list to step names that start with the value.
+
     Returns
     -------
     list[str]
