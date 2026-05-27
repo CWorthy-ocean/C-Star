@@ -1658,12 +1658,12 @@ class ROMSSimulation(Simulation):
 
         roms_exec_cmd = " ".join(
             [
-                f"{cstar_sysmgr.environment.mpi_exec_prefix}",
+                cstar_sysmgr.environment.mpi_exec_prefix,
                 "-n",
                 f"{self.discretization.n_procs_tot}",
                 "./roms",
-                f"{runtime_settings_fname}",
-            ]
+                runtime_settings_fname,
+            ],
         )
 
         self.log.info(f"Running {roms_exec_cmd}")
