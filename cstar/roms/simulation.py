@@ -1637,23 +1637,21 @@ class ROMSSimulation(Simulation):
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
-        # we run ROMS in the work dir
+        # we run ROMS from the run directory
         run_path = self.fs_manager.run_dir
         runtime_settings_fname = "cstar_generated_roms.in"
 
         # save modified roms.in in the work directory
-        final_runtime_settings_file = self.fs_manager.run_dir / runtime_settings_fname
+        final_runtime_settings_file = run_path / runtime_settings_fname
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
-        script_path = self.fs_manager.run_dir / f"{safe_name}.sh"
+        script_path = run_path / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
-        # symlink roms exe into work dir for ability to easily rerun from the correct
-        # location if debugging
-
-        roms_symlink_path = self.fs_manager.run_dir / self.exe_path.name
+        # symlink roms exe into run dir to simplify running by hand for troubleshooting.
+        roms_symlink_path = run_path / self.exe_path.name
         roms_symlink_path.symlink_to(self.exe_path)
 
         ## 2: RUN ROMS
