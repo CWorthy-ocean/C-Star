@@ -828,6 +828,7 @@ class ROMSSimulation(Simulation):
             simulation_runtime_settings.initial.ininame = (
                 self.initial_conditions.path_for_roms[0]
             )
+            simulation_runtime_settings.initial.nrrec = 2
 
         if self.model_grid:
             simulation_runtime_settings.grid = cstar.roms.runtime_settings.Grid(
