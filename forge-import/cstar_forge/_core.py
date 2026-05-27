@@ -35,7 +35,7 @@ from . import config
 from . import source_data
 from . import models as forge_models
 from . import input_data
-from .settings import render_roms_settings
+from .settings import render_roms_settings, write_roms_namelist
 from .util import compute_timestep_from_cfl, roms_tools_default_nesting_period_seconds
 import roms_tools as rt
 
@@ -2044,15 +2044,6 @@ class CstarSpecBuilder(BaseModel):
         """
         # Initialize from defaults (deep copy to avoid modifying the original)
         self._settings_compile_time = copy.deepcopy(self._model_spec.settings.compile_time.settings_dict)
-        if self.grid_child is not None:
-            period_default = roms_tools_default_nesting_period_seconds()
-            if "metadata" in self.grid_kwargs_child:
-               if "period" in self.grid_kwargs_child["metadata"]:
-                  self._settings_compile_time["extract_data"]["extract_period"] = self.grid_kwargs_child["metadata"]["period"]
-               else:
-                  self._settings_compile_time["extract_data"]["extract_period"] = period_default
-            else:
-               self._settings_compile_time["extract_data"]["extract_period"] = period_default
 
         self._merge_settings_override_files("compile")
 
@@ -2085,17 +2076,28 @@ class CstarSpecBuilder(BaseModel):
         """
         # Initialize from defaults (deep copy to avoid modifying the original)
         self._settings_run_time = copy.deepcopy(self._model_spec.settings.run_time.settings_dict)
-        
+
         # Set dynamic values that depend on instance properties
-        self._settings_run_time["roms.in"]["title"] = dict( 
-            casename = self.casename,   
+        self._settings_run_time["roms.in"]["title"] = dict(
+            casename = self.casename,
         )
-        self._settings_run_time["roms.in"]["output_root_name"] = dict( 
+        self._settings_run_time["roms.in"]["output_root_name"] = dict(
             output_root_name = str(self.run_output_dir / "output" / self.casename),
         )
-        
+
         # Set timestepping defaults (will compute dt from CFL if dt is None)
         self._set_run_time_settings_timestepping_defaults(dt=dt)
+
+        # Set extract_data.extract_period from child grid metadata (nesting case)
+        if self.grid_child is not None:
+            period_default = roms_tools_default_nesting_period_seconds()
+            if "metadata" in self.grid_kwargs_child:
+               if "period" in self.grid_kwargs_child["metadata"]:
+                  self._settings_run_time["extract_data"]["extract_period"] = self.grid_kwargs_child["metadata"]["period"]
+               else:
+                  self._settings_run_time["extract_data"]["extract_period"] = period_default
+            else:
+               self._settings_run_time["extract_data"]["extract_period"] = period_default
 
         self._merge_settings_override_files("run")
 
@@ -2462,32 +2464,75 @@ class CstarSpecBuilder(BaseModel):
         else:
             raise ValueError("Model spec must have settings.properties.n_tracers")
 
-        # Ensure build output directories exist before rendering templates.
+        # Ensure build output directories exist before writing files.
         self.compile_time_code_dir.mkdir(parents=True, exist_ok=True)
         self.run_time_code_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        # ------------------------------------------------------------------
+        # 1. Compile-time: render cppdefs.opt from its Jinja2 template.
+        #    All other former *.opt outputs are now handled by the namelist.
+        #    The template may reference non-cppdefs namelist sections (e.g.
+        #    cdr_frc, upscale_output) to gate CPP flags, so we merge all
+        #    top-level run-time sections (except the nested "roms.in" block)
+        #    into the render context alongside the compile-time settings.
+        # ------------------------------------------------------------------
+        cppdefs_render_dict = {
+            **self._settings_compile_time,
+            **{k: v for k, v in self._settings_run_time.items() if k != "roms.in"},
+        }
         compile_time_code = render_roms_settings(
-            template_files=self._model_spec.templates.compile_time.filter.files,
+            template_files=["cppdefs.opt.j2"],
             template_dir=self._model_spec.templates.compile_time.location,
-            settings_dict=self._settings_compile_time,
+            settings_dict=cppdefs_render_dict,
             code_output_dir=self.compile_time_code_dir,
             n_tracers=n_tracers,
         )
-        run_time_code = render_roms_settings(
-            template_files=self._model_spec.templates.run_time.filter.files,
-            template_dir=self._model_spec.templates.run_time.location,
-            settings_dict=self._settings_run_time,
-            code_output_dir=self.run_time_code_dir,
+
+        # ------------------------------------------------------------------
+        # 2. Run-time static files: copy any non-template files listed in the
+        #    run_time filter (e.g. marbl_in, marbl_tracer_output_list).
+        #    These are model-specific support files that aren't templated.
+        # ------------------------------------------------------------------
+        run_time_static_files = [
+            f for f in self._model_spec.templates.run_time.filter.files
+            if not f.endswith(".j2")
+        ]
+        copied_run_time_files: list[str] = []
+        if run_time_static_files:
+            _copied = render_roms_settings(
+                template_files=run_time_static_files,
+                template_dir=self._model_spec.templates.run_time.location,
+                settings_dict={},   # plain copy — no template variables needed
+                code_output_dir=self.run_time_code_dir,
+            )
+            copied_run_time_files = _copied["filter"]["files"]
+
+        # ------------------------------------------------------------------
+        # 3. Run-time namelist: write namelist.nml from merged settings.
+        #    This replaces the former roms.in template output and absorbs
+        #    all former *.opt parameters (except cppdefs.opt).
+        # ------------------------------------------------------------------
+        write_roms_namelist(
+            settings_compile_time=self._settings_compile_time,
+            settings_run_time=self._settings_run_time,
+            output_dir=self.run_time_code_dir,
             n_tracers=n_tracers,
         )
+
+        # Build the run-time code descriptor: namelist + any copied static files.
+        run_time_code = {
+            "location": str(self.run_time_code_dir.resolve()),
+            "branch": "na",
+            "filter": {"files": sorted(["namelist.nml"] + copied_run_time_files)},
+        }
 
         # Suppress Pydantic serialization warnings when using model_dump(mode='json') and model_construct
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            
+
             blueprint_dict = self.blueprint.model_dump(mode='json')
             code_dict = blueprint_dict["code"]
-            # Convert dicts from render_roms_settings to CodeRepository objects
+            # Convert dicts from render_roms_settings / write_roms_namelist to CodeRepository objects
             code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(**compile_time_code)
             code_dict["run_time"] = cstar_models.CodeRepository.model_construct(**run_time_code)
             blueprint_dict["code"] = cstar_models.ROMSCompositeCodeRepository.model_construct(**code_dict)
