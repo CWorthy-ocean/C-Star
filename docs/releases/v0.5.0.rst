@@ -111,6 +111,7 @@ Bug Fixes
 - Fix bug where CSTAR_CLOBBER_WORK_DIR would also delete important workplan artifacts (`#527 <https://github.com/CWorthy-ocean/C-Star/pull/527>`_)
 - Fix bug in runner error handling (`#526 <https://github.com/CWorthy-ocean/C-Star/pull/526>`_)
 - Fix a case-sensitivity bug in run-id autocompletion (`#525 <https://github.com/CWorthy-ocean/C-Star/pull/525>`_)
+- Fix failing unit test causing new feature branches to fail (`#530 <https://github.com/CWorthy-ocean/C-Star/pull/530>`_)
 
 Improvements
 ~~~~~~~~~~~~
