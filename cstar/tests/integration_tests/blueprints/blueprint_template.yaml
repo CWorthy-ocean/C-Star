@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://c-star.readthedocs.io/en/latest/_downloads/0cebd53da53a3b20f172b17169be8f33/roms_marbl_schema.1.0.0.json
 name: roms_marbl_example_new_bp
 description: this is to test the new blueprint schema, here's "a few" weird characters.
 application: roms_marbl

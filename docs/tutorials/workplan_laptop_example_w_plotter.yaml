@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://c-star.readthedocs.io/en/latest/_downloads/d93c79fe7f8f58b0fa61da8ff8d25e87/workplan_schema.1.0.0.json
 name: example_workplan
 description: Runs a Wales model, then make some plots!
 state: draft
