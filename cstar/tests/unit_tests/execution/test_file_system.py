@@ -73,12 +73,30 @@ def test_file_system_clear(
         Fixture providing tmp_path and fake files
 
     """
-    output_dir, output_files = populated_output_dir
+    output_dir, _ = populated_output_dir
 
     fs = RomsFileSystemManager(output_dir)
+    fs.prepare()
+
+    (fs.compile_time_code_dir / "a.txt").touch()
+    (fs.runtime_code_dir / "b.txt").touch()
+    (fs.input_datasets_dir / "c.txt").touch()
+    (fs.joined_output_dir / "d.txt").touch()
+    (fs.work_dir / "e.txt").touch()
+    (fs.work_dir / "f.yaml").touch()
+    (fs.work_dir / "g.yml").touch()
+
     fs.clear()
 
-    assert all(not f.exists() for f in output_files)
+    assert not fs.compile_time_code_dir.exists()
+    assert not fs.runtime_code_dir.exists()
+    assert not fs.input_datasets_dir.exists()
+    assert not fs.joined_output_dir.exists()
+
+    # confirm yaml in work_dir is not removed.
+    assert not (fs.work_dir / "e.txt").exists()
+    assert (fs.work_dir / "f.yaml").exists()
+    assert (fs.work_dir / "g.yml").exists()
 
 
 def test_file_system_pickle_job_fs(tmp_path: Path) -> None:
