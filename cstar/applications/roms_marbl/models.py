@@ -133,7 +133,7 @@ class RuntimeParameterSet(ParameterSet):
     checkpoint_frequency: str = Field(
         default="1d",
         min_length=2,
-        pattern="(?P<scalar>[1-9][0-9]*)(?P<unit>[hdwmy])",
+        pattern="([1-9][0-9]*)([hdwmy])",
     )
     """Time period between creation of checkpoint files.
 
