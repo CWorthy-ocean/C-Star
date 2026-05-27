@@ -2,7 +2,6 @@ import typing as t
 from pathlib import Path
 
 import xarray as xr
-from roms_tools import Grid, InitialConditions
 
 from cstar.applications.core import (
     ApplicationDefinition,
@@ -11,9 +10,12 @@ from cstar.applications.core import (
 )
 from cstar.applications.roms_marbl.transforms import RestartFile
 from cstar.base.log import get_logger
+from cstar.base.utils import lazy_import
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
+
+roms_tools = lazy_import("roms_tools")
 
 APP_NAME: t.Literal["nest_ic"] = "nest_ic"
 """The unique identifier for the nest_ic application type."""
@@ -77,11 +79,11 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         rst = RestartFile(path=self.blueprint.parent_rst)
         restart_date = rst.timestamp
 
-        parent_grid = Grid(filename=self.blueprint.parent_grid)
+        parent_grid = roms_tools.Grid(filename=self.blueprint.parent_grid)
 
         # build InitialConditions kwargs
         ic_kwargs = dict(
-            grid=Grid(filename=self.blueprint.child_grid),
+            grid=roms_tools.Grid(filename=self.blueprint.child_grid),
             ini_time=restart_date,
             source={
                 "name": "ROMS",
@@ -103,7 +105,7 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         path = Path(self.blueprint.output_dir).expanduser() / fname
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        ic = InitialConditions(**ic_kwargs)
+        ic = roms_tools.InitialConditions(**ic_kwargs)
 
         # Write out initial conditions file for child
 
