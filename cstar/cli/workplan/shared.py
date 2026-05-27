@@ -61,6 +61,7 @@ def display_summary(
     dag_status: DagStatus,
     step_order: list[str] | None = None,
     step_deps: dict[str, list[str]] | None = None,
+    step_apps: dict[str, str] | None = None,
 ) -> None:
     """Display a summary describing the current state of
     a DAG executed by the orchestrator.
@@ -105,8 +106,10 @@ def display_summary(
             dag_status.details.get(dep) == Status.Done
             for dep in step_deps.get(task_name, [])
         )
+        app = step_apps.get(task_name) if step_apps else None
+        label = f"{task_name} [italic]({app})[/italic]" if app else task_name
         table.add_row(
-            task_name,
+            label,
             checkmark("gray") if status == Status.Submitted and not deps_done else "",
             checkmark("green") if status == Status.Submitted and deps_done else "",
             checkmark("cyan") if Status.is_running(status) else "",
