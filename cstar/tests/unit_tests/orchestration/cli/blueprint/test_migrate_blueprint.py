@@ -169,6 +169,4 @@ def test_blueprint_migrate_dry_run(
 
     assert not result.stderr, result.stderr
     assert not expected_output_path.exists()
-    assert "Migration from" in result.stdout
-    assert source in result.stdout
-    assert target in result.stdout
+    assert f"Migrating {source!r}->{target!r}" in result.stdout

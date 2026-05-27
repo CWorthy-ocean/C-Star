@@ -10,6 +10,7 @@ from cstar.applications.core import (
     get_application,
 )
 from cstar.base.env import (
+    ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
     get_env_item,
@@ -17,6 +18,7 @@ from cstar.base.env import (
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    execute_migration,
     set_env,
     set_flag,
     update_loggers,
@@ -30,14 +32,16 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_VERBOSE,
+    ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
+    from cstar.orchestration.models import Blueprint
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -49,7 +53,8 @@ def path_callback(
 ) -> str:
     """Validate the blueprint content after typer has parsed the path.
 
-    Additionally, loads the blueprint and stores in the context for later use.
+    Additionally, loads the blueprint, performs automatic schema migration
+    if necessary, and stores the updated blueprint in the context for later use.
 
     Parameters
     ----------
@@ -61,25 +66,29 @@ def path_callback(
     Returns
     -------
     str
-        The path to the blueprint.
+        The path to the blueprint (or the newly migrated blueprint file).
     """
     try:
-        with local_copy(path) as local_path:
-            if not local_path.exists():
-                msg = f"Blueprint not found at path: {path}"
-                raise typer.BadParameter(msg)
+        migration_result = execute_migration(path)
+        ctx.obj = migration_result.blueprint
 
-            # use the core blueprint fields to identify the application type
-            base_bp = deserialize(local_path, Blueprint)
-            bp_type: type[Blueprint] = get_application(base_bp.application).blueprint
-
-            ctx.obj = bp_type(**base_bp.model_dump())
+        if migration_result.path:
+            return str(migration_result.path)
 
     except FileNotFoundError as ex:
         msg = f"Blueprint file not found: {path}"
         raise typer.BadParameter(msg) from ex
     except ValidationError as ex:
         msg = f"Blueprint file is malformed: {ex}"
+        raise typer.BadParameter(msg) from ex
+    except Exception as ex:
+        # If the error is essentially that the file doesn't exist (e.g. from validate_serialized_entity)
+        # we want to preserve the "not found" message for tests and user clarity.
+        if "not found" in str(ex).lower() or "no such file" in str(ex).lower():
+            msg = f"Blueprint not found at path: {path}"
+            raise typer.BadParameter(msg) from ex
+
+        msg = f"Unable to process or migrate blueprint: {ex}"
         raise typer.BadParameter(msg) from ex
 
     return path
@@ -157,6 +166,15 @@ def run(
             callback=directives_callback,
         ),
     ] = None,
+    verbose: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_VERBOSE,
+            help=ARG_VERBOSE_HELP,
+            callback=set_flag(ENV_CSTAR_CLI_VERBOSE),
+            envvar=ENV_CSTAR_CLI_VERBOSE,
+        ),
+    ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
     bp = t.cast("Blueprint", ctx.obj)

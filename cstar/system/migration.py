@@ -2,8 +2,12 @@ import abc
 import typing as t
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from pathlib import Path
 
 from cstar.base.adapter import ModelAdapter
+
+if t.TYPE_CHECKING:
+    from cstar.orchestration.models import Blueprint
 
 APP_ROMS_MARBL: t.Literal["roms_marbl"] = "roms_marbl"
 APP_ROMS_MARBL_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
@@ -130,6 +134,15 @@ class MigrationPlan(t.NamedTuple):
     """The version of the schema that the document will be upgraded to."""
     adapters: Sequence[type[SchemaAdapter]]
     """An ordered list of adapters that will complete the migration when applied."""
+
+
+class MigrationResult(t.NamedTuple):
+    """The results of an executed migration."""
+
+    blueprint: "Blueprint"
+    """The migrated blueprint (or original if up-to-date)."""
+    path: Path | None
+    """The path where the migrated blueprint was saved (if applicable)."""
 
 
 class Migration(abc.ABC):

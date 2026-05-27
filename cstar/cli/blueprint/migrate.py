@@ -2,26 +2,23 @@ import typing as t
 from pathlib import Path
 
 import typer
-from rich.console import Console
-from rich.table import Column, Table
 
-from cstar.applications.core import get_application
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLI_VERBOSE
-from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import is_flag_enabled
-from cstar.cli.common import cb_pipeline, set_env
+from cstar.cli.common import (
+    cb_pipeline,
+    execute_migration,
+    set_env,
+    set_flag,
+)
 from cstar.entrypoint.utils import (
     ARG_DRY_RUN,
     ARG_OUTPUT_LONG,
     ARG_OUTPUT_SHORT,
     ARG_VERBOSE,
+    ARG_VERBOSE_HELP,
 )
-from cstar.execution.file_system import is_remote_resource, local_copy
-from cstar.orchestration.models import Blueprint
-from cstar.orchestration.serialization import serialize, validate_serialized_entity
-from cstar.system.migration import BlueprintMigration, MigrationPlan
+from cstar.execution.file_system import is_remote_resource
 
-console = Console()
 app = typer.Typer()
 
 
@@ -33,48 +30,6 @@ The schema will be updated to the latest available version. If an output
 path is not provided, it will be written next to the existing
 file with the version number appended to the file name.
 """
-
-
-def display_summary(bp_path: Path, migration_plan: MigrationPlan) -> None:
-    """Display a summary of the migration plan.
-
-    Parameters
-    ----------
-    bp_path : Path
-        The path to the blueprint being migrated.
-    migration_plan : MigrationPlan
-        Details of the planned migration.
-    """
-    source, target, plan = migration_plan
-
-    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
-        print(f"Migration from {source!r} to {target!r} will take {len(plan)} steps.")
-        return
-
-    source, target, plan = migration_plan
-    padding = (0, 1)
-
-    table = Table(
-        Column(header="Step", justify="center"),
-        Column(header="From", justify="center"),
-        Column(header="To", justify="center"),
-        title=f"Migration Plan for [yellow]{bp_path.name}[/yellow]",
-        show_lines=True,
-        padding=padding,
-        pad_edge=False,
-        row_styles=["", "dim"],
-        min_width=40,
-        caption=f"Initial Schema: [green]{source}[/green]\nFinal Schema: [red]{target}[/red]",
-    )
-
-    for i, adapter in enumerate(plan):
-        table.add_row(
-            str(i + 1),
-            adapter.source(),
-            adapter.target(),
-        )
-
-    console.print(table)
 
 
 def path_callback(value: str | None) -> str | None:
@@ -133,58 +88,11 @@ def migrate(
         bool,
         typer.Option(
             ARG_VERBOSE,
-            help="Enable printing verbose migration outputs.",
-            callback=set_env(ENV_CSTAR_CLI_VERBOSE),
+            help=ARG_VERBOSE_HELP,
+            callback=set_flag(ENV_CSTAR_CLI_VERBOSE),
             envvar=ENV_CSTAR_CLI_VERBOSE,
         ),
     ] = False,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
-    result = validate_serialized_entity(path, Blueprint)
-    if result.item is None:
-        raise typer.BadParameter(result.error_msg)
-
-    migrator = BlueprintMigration()
-    with local_copy(path) as local_path:
-        dumped = result.item.model_dump()
-
-        try:
-            plan = migrator.plan(dumped)
-        except CstarExpectationFailed as ex:
-            msg = f"Unable to complete migration plan: {ex}"
-            raise typer.BadParameter(msg) from ex
-
-        display_summary(local_path, plan)
-
-        if plan.source == plan.target:
-            print(f"The blueprint uses the latest schema ({plan.source})")
-            raise typer.Exit(0)
-
-        if dry_run:
-            raise typer.Exit(0)
-
-        try:
-            updated = migrator.migrate(dumped)
-        except CstarExpectationFailed as ex:
-            msg = f"Unable to complete migration: {ex}"
-            raise typer.BadParameter(msg) from ex
-        else:
-            print("Migration complete")
-
-        persist_to = (
-            Path(f"./{local_path.stem}_{plan.target}{local_path.suffix}")
-            if output is None
-            else Path(output)
-        )
-        persist_to = persist_to.expanduser().resolve()
-
-        try:
-            bp_type = get_application(result.item.application).blueprint
-            updated_bp = bp_type(**updated)
-            nbytes = serialize(persist_to, updated_bp)
-            assert nbytes, "The migrated blueprint failed to write content"
-        except SyntaxError as ex:
-            msg = f"Unable to complete migration: {ex}"
-            raise typer.BadParameter(msg) from ex
-        else:
-            print(f"Migrated blueprint persisted to {str(persist_to)!r}")
+    execute_migration(path, output, dry_run)
