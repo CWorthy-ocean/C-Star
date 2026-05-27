@@ -600,7 +600,7 @@ class ContinuanceTransform(Directive, OverrideTransform):
             restart_file = RestartFile(path=search_path)
             return RestartFileTrxAdapter.adapt(restart_file)
 
-        if restart_file := RestartFile.find(search_path, notfound_ok=False):
+        if restart_file := RestartFile.find(search_path, notfound_ok=False):  # type: ignore[assignment]
             return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
