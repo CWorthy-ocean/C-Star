@@ -4,7 +4,6 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.input_dataset import InputDataset
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.roms import ROMSInputDataset
-from cstar.roms.runtime_settings import ROMSRuntimeSettingsSection
 from cstar.simulation import Simulation
 
 
@@ -44,25 +43,6 @@ class FakeExternalCodeBase(ExternalCodeBase):
     @property
     def is_configured(self):
         return self._configured
-
-
-class FakeROMSRuntimeSettingsSection(ROMSRuntimeSettingsSection):
-    """A simple ROMSRuntimeSettingsSection subclass for testing."""
-
-    floats: list[float]
-    paths: list[Path]
-    others: list[str | int]
-    floatval: float
-    pathval: Path
-    otherval: str
-
-
-class FakeROMSRuntimeSettingsSectionEmpty(ROMSRuntimeSettingsSection):
-    """No actual values defined, just used to test some of the formatting/joining
-    functions.
-    """
-
-    pass
 
 
 class FakeInputDataset(InputDataset):
