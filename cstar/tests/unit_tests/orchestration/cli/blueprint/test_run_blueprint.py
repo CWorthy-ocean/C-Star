@@ -79,12 +79,22 @@ def test_blueprint_run_remote_blueprint() -> None:
         get_application("roms_marbl")
     )
 
-    with mock.patch.object(
-        app_config.runner,
-        "execute",
-        side_effect=modify_runner,
-        autospec=True,
-    ) as mock_exec_runner:
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            app_config.runner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+    ):
         runner = CliRunner()
         _ = runner.invoke(
             app,

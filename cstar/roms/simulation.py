@@ -7,9 +7,9 @@ from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 
+import f90nml
 import yaml
 
-import cstar.roms.runtime_settings
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
@@ -62,7 +62,6 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.simulation import Simulation
 from cstar.system.manager import cstar_sysmgr
 
@@ -171,10 +170,10 @@ class ROMSSimulation(Simulation):
     marbl_codebase : MARBLExternalCodeBase
         The repository containing the base source code for MARBL (Marine Biogeochemistry Library).
     runtime_code : AdditionalCode
-        Additional code needed by ROMS at runtime (e.g. a `.in` file)
-    roms_runtime_settings : ROMSRuntimeSettings
-        A structured representation of the `.in` file found in runtime_code, available
-        after the code has been fetched with ROMSSimulation.runtime_code.get() or ROMSSimulation.setup()
+        Additional code needed by ROMS at runtime (e.g. a `.nml` Fortran namelist)
+    roms_runtime_settings : f90nml.Namelist
+        A modified namelist read from the runtime_code, with key parameters overridden
+        from the simulation configuration.
     compile_time_code : AdditionalCode
         Additional ROMS source code to be included at compile time (e.g. `.opt` files)
     model_grid : ROMSModelGrid
@@ -264,7 +263,7 @@ class ROMSSimulation(Simulation):
         discretization : ROMSDiscretization
             The discretization settings defining the ROMS grid resolution and time step.
         runtime_code : AdditionalCode, optional
-            ROMS runtime configuration files (e.g. a `.in` file) required for execution.
+            ROMS runtime configuration files (e.g. a `.nml` Fortran namelist) required for execution.
         compile_time_code : AdditionalCode, optional
             Additional source code or modifications needed for compiling ROMS (e.g. `.opt` files).
         codebase : ROMSExternalCodeBase, optional
@@ -366,38 +365,36 @@ class ROMSSimulation(Simulation):
 
         self.marbl_codebase = marbl_codebase
 
-        # Determine which runtime_code file corresponds to the `.in` runtime settings
-        # And set the in_file attribute to be used internally
-        self._find_dotin_file()
+        self._find_namelist_file()
         # roms-specific
         self.exe_path: Path | None = None
         self._exe_hash: str | None = None
 
         self._execution_handler: ExecutionHandler | None = None
 
-    def _find_dotin_file(self) -> None:
-        """Identify the runtime settings (.in) file from runtime code.
+    def _find_namelist_file(self) -> None:
+        """Identify the Fortran namelist (.nml) file from runtime code.
 
         This internal method checks the `ROMSSimulation.runtime_code.source`
-        list for exactly one file ending in `.in`, which is required to
+        list for exactly one file ending in `.nml`, which is required to
         configure ROMS runtime settings.
 
         Raises
         ------
-        ValueError
-            If no `.in` file or more than one is found in the runtime code files.
+        RuntimeError
+            If no `.nml` file or more than one is found in the runtime code files.
         """
-        in_files = [
-            f.basename for f in self.runtime_code.source if f.basename.endswith(".in")
+        nml_files = [
+            f.basename for f in self.runtime_code.source if f.basename.endswith(".nml")
         ]
 
-        if not in_files:
-            raise RuntimeError("No .in file was provided")
+        if not nml_files:
+            raise RuntimeError("No .nml file was provided in runtime_code")
 
-        if len(in_files) > 1:
-            raise RuntimeError(f"Only 1 .in file is allowed. Got: {in_files}")
+        if len(nml_files) > 1:
+            raise RuntimeError(f"Only 1 .nml file is allowed. Got: {nml_files}")
 
-        self._in_file = in_files[0]
+        self._namelist_file = nml_files[0]
 
     T = TypeVar("T", bound=ROMSInputDataset)
 
@@ -781,64 +778,51 @@ class ROMSSimulation(Simulation):
         return run_length_seconds // self.discretization.time_step
 
     @property
-    def roms_runtime_settings(self) -> ROMSRuntimeSettings:
-        """Generate and return a ROMSRuntimeSettings object for the simulation.
+    def roms_runtime_settings(self) -> "f90nml.Namelist":
+        """Generate and return an f90nml.Namelist for the simulation.
 
-        This property constructs a `ROMSRuntimeSettings` instance from the ROMS `.in`
-        file found in the `runtime_code`, and updates key runtime values based on the
-        current simulation configuration. These include the time step, number of time
-        steps, grid path, initial conditions, forcing datasets, and optionally, MARBL
-        input files.
+        This property reads the Fortran namelist from the `runtime_code` and updates
+        key parameters based on the current simulation configuration, including the
+        time step, number of time steps, grid path, initial conditions, forcing
+        datasets, and MARBL input files.
 
         Returns
         -------
-        ROMSRuntimeSettings
-            A fully-populated runtime settings object representing the current state
-            of the ROMS simulation configuration.
+        f90nml.Namelist
+            A modified namelist with simulation-specific parameters applied.
 
         Raises
         ------
         ValueError
-            If the runtime `.in` file has not been retrieved locally via `setup()` or
+            If the runtime namelist has not been retrieved locally via `setup()` or
             `runtime_code.get()`.
-
-        Notes
-        -----
-        - This method overrides runtime settings using values from `self.discretization`,
-          `self.model_grid`, `self.initial_conditions`, and all forcing datasets.
-        - If MARBL configuration files are present in `runtime_code.files`, their paths
-          are also included.
         """
         if self.runtime_code.working_copy is None:
             raise ValueError(
                 "Cannot access runtime settings without local "
-                + "`.in` file. Call ROMSSimulation.setup() or "
+                + "namelist file. Call ROMSSimulation.setup() or "
                 + "ROMSSimulation.runtime_code.get() and try again."
             )
 
-        simulation_runtime_settings = ROMSRuntimeSettings.from_file(
-            self.runtime_code.working_copy.common_parent / self._in_file
+        nml = f90nml.read(
+            self.runtime_code.working_copy.common_parent / self._namelist_file
         )
 
-        # Modify each relevant section in the runtime settings object based on blueprint values
-        simulation_runtime_settings.time_stepping.dt = self.discretization.time_step
-        simulation_runtime_settings.time_stepping.ntimes = self._n_time_steps
+        nml["time_stepping"]["dt"] = self.discretization.time_step
+        nml["time_stepping"]["ntimes"] = self._n_time_steps
 
         if self.initial_conditions:
-            simulation_runtime_settings.initial.ininame = (
+            nml["initial_conditions"]["ininame"] = str(
                 self.initial_conditions.path_for_roms[0]
             )
 
         if self.model_grid:
-            simulation_runtime_settings.grid = cstar.roms.runtime_settings.Grid(
-                grid=self.model_grid.path_for_roms[0]
-            )
-        else:
-            simulation_runtime_settings.grid = None
+            nml["grid_settings"]["grdname"] = str(self.model_grid.path_for_roms[0])
 
-        simulation_runtime_settings.forcing.filenames = self._forcing_paths
+        if "forcing_files" not in nml:
+            nml["forcing_files"] = {}
+        nml["forcing_files"]["frcfile"] = [str(p) for p in self._forcing_paths]
 
-        # all MARBL files must be present to enable MARBL
         runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if all(
             f in runtime_code_filenames
@@ -849,26 +833,19 @@ class ROMSSimulation(Simulation):
             ]
         ):
             runtime_code_path = self.runtime_code.working_copy.common_parent
-            simulation_runtime_settings.marbl_biogeochemistry = (
-                cstar.roms.runtime_settings.MARBLBiogeochemistry(
-                    marbl_namelist_fname=runtime_code_path / "marbl_in",
-                    marbl_tracer_list_fname=runtime_code_path
-                    / "marbl_tracer_output_list",
-                    marbl_diag_list_fname=runtime_code_path
-                    / "marbl_diagnostic_output_list",
-                )
+            nml["marbl_biogeochemistry_settings"]["marbl_namelist_fname"] = str(
+                runtime_code_path / "marbl_in"
             )
-        else:
-            simulation_runtime_settings.marbl_biogeochemistry = None
-
-        # explicitly set output dir and basename
-        simulation_runtime_settings.output_root_name = (
-            cstar.roms.runtime_settings.OutputRootName(
-                output_root_name="../output/output"
+            nml["marbl_biogeochemistry_settings"]["marbl_tracer_list_fname"] = str(
+                runtime_code_path / "marbl_tracer_output_list"
             )
-        )
+            nml["marbl_biogeochemistry_settings"]["marbl_diag_list_fname"] = str(
+                runtime_code_path / "marbl_diagnostic_output_list"
+            )
 
-        return simulation_runtime_settings
+        nml["simulation_name_settings"]["output_root_name"] = "../output/output"
+
+        return nml
 
     @property
     def input_datasets(self) -> list[ROMSInputDataset]:
@@ -1639,11 +1616,11 @@ class ROMSSimulation(Simulation):
 
         # we run ROMS in the work dir
         run_path = self.fs_manager.work_dir
-        runtime_settings_fname = "cstar_generated_roms.in"
+        runtime_settings_fname = "cstar_generated_roms.nml"
 
-        # save modified roms.in in the work directory
+        # save modified namelist in the work directory
         final_runtime_settings_file = self.fs_manager.work_dir / runtime_settings_fname
-        self.roms_runtime_settings.to_file(final_runtime_settings_file)
+        self.roms_runtime_settings.write(str(final_runtime_settings_file), force=True)
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)

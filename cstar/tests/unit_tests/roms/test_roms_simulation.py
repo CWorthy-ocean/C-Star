@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any, cast
 from unittest import mock
 
+import f90nml
 import pytest
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.roms import ROMSRuntimeSettings
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -66,7 +66,7 @@ class TestROMSSimulationInitialization:
         )
         assert [s.basename for s in sim.runtime_code.source] == [
             "file1",
-            "file2.in",
+            "namelist.nml",
             "marbl_in",
             "marbl_tracer_output_list",
             "marbl_diagnostic_output_list",
@@ -237,25 +237,25 @@ class TestROMSSimulationInitialization:
 
         assert sim.marbl_codebase is None
 
-    def test_find_dotin_file(self, stub_romssimulation):
-        """Test that the `_find_dotin_file` helper function correctly finds and sets the
-        `_in_file` non-public attribute to the `.in` file.
+    def test_find_namelist_file(self, stub_romssimulation):
+        """Test that the `_find_namelist_file` helper function correctly finds and sets
+        the `_namelist_file` non-public attribute to the `.nml` file.
         """
         sim = stub_romssimulation
-        assert sim._in_file == "file2.in"
+        assert sim._namelist_file == "namelist.nml"
 
-    def test_find_dotin_file_raises_if_no_dot_in_files(
+    def test_find_namelist_file_raises_if_no_nml_files(
         self, stub_romssimulation, additionalcode_local
     ):
-        """Test that the `_find_dotin_file` helper function correctly raises a
-        ValueError if a single `.in` file is not found.
+        """Test that the `_find_namelist_file` helper function correctly raises a
+        RuntimeError if a single `.nml` file is not found.
         """
         sim = stub_romssimulation
         sim.runtime_code = additionalcode_local(
-            location="some/dir", files=["no", "dotin.files", "here"]
+            location="some/dir", files=["no", "nml.files", "here"]
         )
         with pytest.raises(RuntimeError):
-            sim._find_dotin_file()
+            sim._find_namelist_file()
 
     @pytest.mark.parametrize(
         "attrname, expected_type_name",
@@ -377,7 +377,7 @@ class TestROMSSimulationInitialization:
         assert sim._n_time_steps == 524160
         pass
 
-    @mock.patch("cstar.roms.simulation.ROMSRuntimeSettings.from_file")
+    @mock.patch("cstar.roms.simulation.f90nml.read")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
     @mock.patch.object(
         ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
@@ -388,91 +388,96 @@ class TestROMSSimulationInitialization:
         mock_grid_path,
         mock_ini_path,
         mock_forcing_paths,
-        mock_from_file,
+        mock_f90nml_read,
         stub_romssimulation,
         additionalcode_local,
         stageddatacollection_remote_files,
     ):
-        """Test that the ROMSSimulation.runtime_settings property correctly returns a
-        modified ROMSRuntimeSettings instance containing a combination of parameters
-        (mock) read from a file and those overriden by the ROMSSimulation itself (e.g.
-        number of timesteps).
+        """Test that the ROMSSimulation.roms_runtime_settings property correctly returns
+        a modified f90nml.Namelist with parameters overridden from the simulation
+        configuration (e.g. number of timesteps, grid path, forcing paths).
         """
         sim = stub_romssimulation
 
-        # Stop complaints about missing local paths:
         sim.runtime_code._working_copy = stageddatacollection_remote_files()
-        mock_grid_path.return_value = [
-            Path("grid.nc"),
-        ]
-        mock_ini_path.return_value = [
-            Path("fake_ini.nc"),
-        ]
-
+        mock_grid_path.return_value = [Path("grid.nc")]
+        mock_ini_path.return_value = [Path("fake_ini.nc")]
         mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
 
-        mock_settings = ROMSRuntimeSettings(
-            title={"title": "test_settings"},
-            time_stepping={"ntimes": 100, "dt": 0, "ndtfast": 1, "ninfo": 1},
-            bottom_drag={"rdrg": 100, "rdrg2": 10, "zob": 1},
-            initial={"nrrec": 2, "ininame": Path("fake_ini.nc")},
-            forcing={"filenames": [Path("forcing1.nc"), Path("forcing2.nc")]},
-            output_root_name={"output_root_name": "TEST"},
-        )
+        def make_test_nml():
+            return f90nml.Namelist(
+                {
+                    "simulation_name_settings": {
+                        "title": "test_settings",
+                        "output_root_name": "roms",
+                    },
+                    "time_stepping": {"ntimes": 100, "dt": 0, "ndtfast": 1, "ninfo": 1},
+                    "grid_settings": {"grdname": ""},
+                    "initial_conditions": {"ininame": "", "nrrec": 2},
+                    "forcing_files": {"frcfile": []},
+                    "marbl_biogeochemistry_settings": {
+                        "marbl_namelist_fname": "",
+                        "marbl_tracer_list_fname": "",
+                        "marbl_diag_list_fname": "",
+                    },
+                }
+            )
 
-        mock_from_file.return_value = mock_settings
+        mock_f90nml_read.side_effect = lambda _: make_test_nml()
 
         tested_settings = sim.roms_runtime_settings
 
-        assert tested_settings.title.title == "test_settings"
-        assert tested_settings.time_stepping.dt == sim.discretization.time_step
-        assert tested_settings.time_stepping.ntimes == sim._n_time_steps
-        assert tested_settings.grid.grid == sim.model_grid.path_for_roms[0]
-        assert tested_settings.initial.nrrec == 2
-        assert (
-            tested_settings.initial.ininame == sim.initial_conditions.path_for_roms[0]
+        assert tested_settings["simulation_name_settings"]["title"] == "test_settings"
+        assert tested_settings["time_stepping"]["dt"] == sim.discretization.time_step
+        assert tested_settings["time_stepping"]["ntimes"] == sim._n_time_steps
+        assert tested_settings["grid_settings"]["grdname"] == str(
+            sim.model_grid.path_for_roms[0]
         )
-        assert tested_settings.forcing.filenames == sim._forcing_paths
+        assert tested_settings["initial_conditions"]["nrrec"] == 2
+        assert tested_settings["initial_conditions"]["ininame"] == str(
+            sim.initial_conditions.path_for_roms[0]
+        )
+        assert tested_settings["forcing_files"]["frcfile"] == [
+            str(p) for p in sim._forcing_paths
+        ]
+
         runtime_parent = Path(sim.runtime_code.working_copy[0].path).parent
+        assert tested_settings["marbl_biogeochemistry_settings"][
+            "marbl_namelist_fname"
+        ] == str(runtime_parent / "marbl_in")
+        assert tested_settings["marbl_biogeochemistry_settings"][
+            "marbl_tracer_list_fname"
+        ] == str(runtime_parent / "marbl_tracer_output_list")
+        assert tested_settings["marbl_biogeochemistry_settings"][
+            "marbl_diag_list_fname"
+        ] == str(runtime_parent / "marbl_diagnostic_output_list")
 
-        assert (
-            tested_settings.marbl_biogeochemistry.marbl_namelist_fname
-            == runtime_parent / "marbl_in"
-        )
-        assert (
-            tested_settings.marbl_biogeochemistry.marbl_tracer_list_fname
-            == runtime_parent / "marbl_tracer_output_list"
-        )
-        assert (
-            tested_settings.marbl_biogeochemistry.marbl_diag_list_fname
-            == runtime_parent / "marbl_diagnostic_output_list"
-        )
-
-        # Test with no MARBL files:
+        # Test with no MARBL files — marbl paths should remain unchanged (empty)
         sim.runtime_code = additionalcode_local(
             location="nowhere",
-            files=[
-                "onefile.in",
-            ],
+            files=["onefile.nml"],
         )
         sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        result_no_marbl = sim.roms_runtime_settings
+        assert (
+            result_no_marbl["marbl_biogeochemistry_settings"]["marbl_namelist_fname"]
+            == ""
+        )
 
-        assert sim.roms_runtime_settings.marbl_biogeochemistry is None
-
-        # Test with no grid:
+        # Test with no grid — grdname should remain unchanged (empty)
         sim.model_grid = None
-        assert sim.roms_runtime_settings.grid is None
+        result_no_grid = sim.roms_runtime_settings
+        assert result_no_grid["grid_settings"]["grdname"] == ""
 
     def test_roms_runtime_settings_raises_if_no_runtime_code_working_copy(
         self, stub_romssimulation
     ):
-        """Test that the ROMSSimulation.runtime_settings property correctly raises a
-        ValueError if there is no local `.in` file from which to create a base
-        ROMSRuntimeSettings instance.
+        """Test that the ROMSSimulation.roms_runtime_settings property raises a
+        ValueError if the runtime namelist has not been retrieved locally.
         """
         sim = stub_romssimulation
         with pytest.raises(
-            ValueError, match="Cannot access runtime settings without local `.in` file."
+            ValueError, match="Cannot access runtime settings without local"
         ):
             sim.roms_runtime_settings
 
@@ -698,9 +703,9 @@ class TestStrAndRepr:
 
         Mocks & Fixtures
         ----------------
-        - `mock_runtime_settings` : mocked ROMRuntimeSettings instance
+        - `mock_runtime_settings` : mocked roms_runtime_settings property
         - `mock_exists_locally` : mocks ROMSSimulation.runtime_code.exists_locally so
-           ROMSRuntimeSettings are included in the __str__
+           runtime settings are included in the __str__
         - `stub_romssimulation` : A fixture providing an initalized `ROMSSimulation`
            instance
 
@@ -710,13 +715,11 @@ class TestStrAndRepr:
         """
         sim = stub_romssimulation
 
-        mock_settings = ROMSRuntimeSettings(
-            title={"title": "test_settings"},
-            time_stepping={"ntimes": 100, "dt": 0, "ndtfast": 1, "ninfo": 1},
-            bottom_drag={"rdrg": 100, "rdrg2": 10, "zob": 1},
-            initial={"nrrec": 2, "ininame": Path("fake_ini.nc")},
-            forcing={"filenames": [Path("forcing1.nc"), Path("forcing2.nc")]},
-            output_root_name={"output_root_name": "TEST"},
+        mock_settings = f90nml.Namelist(
+            {
+                "simulation_name_settings": {"title": "test_settings"},
+                "time_stepping": {"ntimes": 100, "dt": 0, "ndtfast": 1, "ninfo": 1},
+            }
         )
 
         mock_runtime_settings.return_value = mock_settings
@@ -737,7 +740,7 @@ Code:
 Codebase: ROMSExternalCodeBase instance (query using ROMSSimulation.codebase)
 Runtime code: AdditionalCode instance with 5 files (query using ROMSSimulation.runtime_code)
 Compile-time code: AdditionalCode instance with 2 files (query using ROMSSimulation.compile_time_code)
-Runtime Settings: ROMSRuntimeSettings instance (query using ROMSSimulation.roms_runtime_settings)
+Runtime Settings: Namelist instance (query using ROMSSimulation.roms_runtime_settings)
 
 MARBL Codebase: MARBLExternalCodeBase instance (query using ROMSSimulation.marbl_codebase)
 
@@ -828,7 +831,7 @@ forcing_corrections = <list of 1 ROMSForcingCorrections instances>
     │   └── sw_corr.nc
     ├── runtime_code
     │   ├── file1
-    │   ├── file2.in
+    │   ├── namelist.nml
     │   ├── marbl_in
     │   ├── marbl_tracer_output_list
     │   └── marbl_diagnostic_output_list
@@ -1590,7 +1593,7 @@ class TestProcessingAndExecution:
 
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
-                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} ./roms cstar_generated_roms.in",
+                commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} ./roms cstar_generated_roms.nml",
                 run_path=sim.fs_manager.work_dir,
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
@@ -1679,7 +1682,7 @@ class TestProcessingAndExecution:
             # Call `run()` without explicitly passing `queue_name` and `walltime`
             execution_handler = sim.run(account_key="some_key")
             mock_create_job.assert_called_once_with(
-                commands=f"{exp_mpi_prefix} -n 6 ./roms cstar_generated_roms.in",
+                commands=f"{exp_mpi_prefix} -n 6 ./roms cstar_generated_roms.nml",
                 job_name=None,
                 cpus=6,
                 account_key="some_key",

@@ -20,7 +20,7 @@ code:
     branch: roms_tools_3_1_2
     filter:
       files:
-        - roms.in
+        - namelist.nml
         - marbl_in
         - marbl_tracer_output_list
         - marbl_diagnostic_output_list
