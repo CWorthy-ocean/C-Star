@@ -585,8 +585,10 @@ def _prepare_woa(self: SourceData) -> Path:
     if not woa_path.exists():
         raise FileNotFoundError(
             f"WOA dataset directory not found at: {woa_path}\n"
-            f"Please download 12 WOA data files and place them in {woa_path}.\n"
-            f"2018 WOA data can be downloaded from: {WOA_DOWNLOAD_URL}."
+            f"2018 WOA data can be downloaded from: {WOA_DOWNLOAD_URL}.\n"
+            f"Please download files woa18_decav_s01_04.nc through woa18_decav_s12_04.nc "
+            f"from that website and place them in {woa_path}. "
+            f"Do not fetch files s00 or s13-s16 into that directory."
         )
 
     # Check that all required files exist
