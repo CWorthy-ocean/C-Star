@@ -143,6 +143,7 @@ def display_summary(
     run_id: str,
     dag_status: DagStatus,
     step_order: list[str] | None = None,
+    step_deps: dict[str, list[str]] | None = None,
 ) -> None:
     """Display a summary describing the current state of
     a DAG executed by the orchestrator.
@@ -159,7 +160,8 @@ def display_summary(
 
     table = Table(
         Column(header="Step", justify="right"),
-        Column(header="Ready", justify="center"),
+        Column(header="Submitted", justify="center"),
+        Column(header="In Queue", justify="center"),
         Column(header="Running", justify="center"),
         Column(header="Done", justify="center"),
         Column(header="Failed", justify="center"),
@@ -182,9 +184,14 @@ def display_summary(
         ordered = sorted(dag_status.details.items())
 
     for task_name, status in ordered:
+        deps_done = step_deps is None or all(
+            dag_status.details.get(dep) == Status.Done
+            for dep in step_deps.get(task_name, [])
+        )
         table.add_row(
             task_name,
-            checkmark("green") if Status.is_ready(status) else "",
+            checkmark("gray") if status == Status.Submitted and not deps_done else "",
+            checkmark("green") if status == Status.Submitted and deps_done else "",
             checkmark("cyan") if Status.is_running(status) else "",
             checkmark("green") if status == Status.Done else "",
             checkmark("red") if status == Status.Failed else "",
