@@ -38,11 +38,13 @@ def status(
 
     step_order: list[str] | None = None
     step_deps: dict[str, list[str]] | None = None
+    step_apps: dict[str, str] | None = None
     try:
         workplan = deserialize(workplan_run.trx_workplan_path, Workplan)
         step_deps = {
             slugify(s.name): [slugify(p) for p in s.depends_on] for s in workplan.steps
         }
+        step_apps = {slugify(s.name): s.application for s in workplan.steps}
         successors: dict[str, list[str]] = {slugify(s.name): [] for s in workplan.steps}
         for step in workplan.steps:
             for prereq in step.depends_on:
@@ -55,7 +57,13 @@ def status(
 
     try:
         status = asyncio.run(load_run_state(run_id, launcher))
-        display_summary(run_id, status, step_order=step_order, step_deps=step_deps)
+        display_summary(
+            run_id,
+            status,
+            step_order=step_order,
+            step_deps=step_deps,
+            step_apps=step_apps,
+        )
     except FileNotFoundError:  # blueprint not found.
         console.print_exception()
 
