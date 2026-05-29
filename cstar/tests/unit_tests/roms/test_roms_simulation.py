@@ -421,10 +421,20 @@ class TestROMSSimulationInitialization:
                         "marbl_tracer_list_fname": "",
                         "marbl_diag_list_fname": "",
                     },
+                    "cdr_frc_settings": {"cdr_file": ""},
+                    "extract_data_settings": {"extract_file": ""},
                 }
             )
 
         mock_f90nml_read.side_effect = lambda _: make_test_nml()
+
+        # Set up fake staged working copies for CDR forcing and nesting info
+        fake_cdr_path = Path("/staged/input_datasets/cdr.nc")
+        fake_nesting_path = Path("/staged/input_datasets/nesting.nc")
+        sim.cdr_forcing._working_copy = mock.Mock()
+        sim.cdr_forcing._working_copy.path = fake_cdr_path
+        sim.nesting_info._working_copy = mock.Mock()
+        sim.nesting_info._working_copy.path = fake_nesting_path
 
         tested_settings = sim.roms_runtime_settings
 
@@ -453,6 +463,11 @@ class TestROMSSimulationInitialization:
             "marbl_diag_list_fname"
         ] == str(runtime_parent / "marbl_diagnostic_output_list")
 
+        assert tested_settings["cdr_frc_settings"]["cdr_file"] == str(fake_cdr_path)
+        assert tested_settings["extract_data_settings"]["extract_file"] == str(
+            fake_nesting_path
+        )
+
         # Test with no MARBL files — marbl paths should remain unchanged (empty)
         sim.runtime_code = additionalcode_local(
             location="nowhere",
@@ -469,6 +484,16 @@ class TestROMSSimulationInitialization:
         sim.model_grid = None
         result_no_grid = sim.roms_runtime_settings
         assert result_no_grid["grid_settings"]["grdname"] == ""
+
+        # Test with no CDR forcing — cdr_file should remain unchanged (empty)
+        sim.cdr_forcing = None
+        result_no_cdr = sim.roms_runtime_settings
+        assert result_no_cdr["cdr_frc_settings"]["cdr_file"] == ""
+
+        # Test with no nesting info — extract_file should remain unchanged (empty)
+        sim.nesting_info = None
+        result_no_nesting = sim.roms_runtime_settings
+        assert result_no_nesting["extract_data_settings"]["extract_file"] == ""
 
     def test_roms_runtime_settings_raises_if_no_runtime_code_working_copy(
         self, stub_romssimulation

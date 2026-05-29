@@ -3,13 +3,11 @@ import typing as t
 from cstar.applications.roms_marbl.models import CodeRepository, RomsMarblBlueprint
 from cstar.base.adapter import ModelAdapter
 from cstar.base.additional_code import AdditionalCode
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration import models
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
-    DatasetLinker,
     ROMSBoundaryForcing,
     ROMSCdrForcing,
     ROMSForcingCorrections,
@@ -237,8 +235,6 @@ class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
         if self.model.cdr_forcing is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.working_dir)
-
         return ROMSCdrForcing(
             location=str(self.model.cdr_forcing.data[0].location),
             file_hash=(
@@ -248,12 +244,6 @@ class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
             ),
             start_date=None,
             end_date=None,
-            linker=DatasetLinker(
-                opt_file_name="cdr_frc.opt",
-                symlink_name="cdr.nc",
-                workdir=fs_manager.run_dir,
-                opt_file_dir=fs_manager.compile_time_code_dir,
-            ),
         )
 
 
@@ -265,8 +255,6 @@ class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
         if self.model.nesting_info is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.working_dir)
-
         return ROMSNestingInfo(
             location=str(self.model.nesting_info.data[0].location),
             file_hash=(
@@ -276,12 +264,6 @@ class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
             ),
             start_date=None,
             end_date=None,
-            linker=DatasetLinker(
-                opt_file_name="extract_data.opt",
-                symlink_name="nesting.nc",
-                workdir=fs_manager.run_dir,
-                opt_file_dir=fs_manager.compile_time_code_dir,
-            ),
         )
 
 
