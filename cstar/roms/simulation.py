@@ -834,14 +834,26 @@ class ROMSSimulation(Simulation):
             ]
         ):
             runtime_code_path = self.runtime_code.working_copy.common_parent
-            nml["marbl_biogeochemistry_settings"]["marbl_namelist_fname"] = str(
+            nml["marbl_biogeochemistry_settings"]["marbl_config_file"] = str(
                 runtime_code_path / "marbl_in"
             )
-            nml["marbl_biogeochemistry_settings"]["marbl_tracer_list_fname"] = str(
-                runtime_code_path / "marbl_tracer_output_list"
+            # nml["marbl_biogeochemistry_settings"]["marbl_tracer_list_fname"] = str(
+            #     runtime_code_path / "marbl_tracer_output_list"
+            # )
+            # nml["marbl_biogeochemistry_settings"]["marbl_diag_list_fname"] = str(
+            #     runtime_code_path / "marbl_diagnostic_output_list"
+            # )
+            # TODO do we need to be able to modify these? from here? probably not. though, we shouldn't allow
+            #  the user to provide them if we don't do anything.
+
+        if self.cdr_forcing and self.cdr_forcing.working_copy:
+            nml["cdr_frc_settings"]["cdr_file"] = str(
+                self.cdr_forcing.working_copy.path
             )
-            nml["marbl_biogeochemistry_settings"]["marbl_diag_list_fname"] = str(
-                runtime_code_path / "marbl_diagnostic_output_list"
+
+        if self.nesting_info and self.nesting_info.working_copy:
+            nml["extract_data_settings"]["extract_file"] = str(
+                self.nesting_info.working_copy.path
             )
 
         nml["simulation_name_settings"]["output_root_name"] = "../output/output"
