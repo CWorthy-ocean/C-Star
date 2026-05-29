@@ -1,12 +1,16 @@
 import asyncio
 import typing as t
 
+import networkx as nx
 import typer
 from rich.console import Console
 
 from cstar.base.log import get_logger
+from cstar.base.utils import slugify
 from cstar.cli.workplan.shared import display_summary, list_runs
 from cstar.orchestration.dag_runner import get_launcher, load_run_state
+from cstar.orchestration.models import Workplan
+from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
 log = get_logger(__name__)
@@ -32,11 +36,22 @@ def status(
         print("An unknown run-id was supplied.")
         return
 
+    step_order: list[str] | None = None
+    try:
+        workplan = deserialize(workplan_run.trx_workplan_path, Workplan)
+        data: dict[str, list[str]] = {slugify(s.name): [] for s in workplan.steps}
+        for step in workplan.steps:
+            for prereq in step.depends_on:
+                data[slugify(prereq)].append(slugify(step.name))
+        step_order = list(nx.topological_sort(nx.DiGraph(data)))
+    except Exception:
+        pass
+
     launcher = get_launcher()
 
     try:
         status = asyncio.run(load_run_state(run_id, launcher))
-        display_summary(run_id, status)
+        display_summary(run_id, status, step_order=step_order)
     except FileNotFoundError:  # blueprint not found.
         console.print_exception()
 

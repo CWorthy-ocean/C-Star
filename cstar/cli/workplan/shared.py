@@ -142,6 +142,7 @@ def checkmark(color: str) -> str:
 def display_summary(
     run_id: str,
     dag_status: DagStatus,
+    step_order: list[str] | None = None,
 ) -> None:
     """Display a summary describing the current state of
     a DAG executed by the orchestrator.
@@ -169,7 +170,18 @@ def display_summary(
         pad_edge=False,
     )
 
-    for task_name, status in sorted(dag_status.details.items()):
+    if step_order is not None:
+        ordered = [
+            (n, dag_status.details[n]) for n in step_order if n in dag_status.details
+        ]
+        seen = set(step_order)
+        ordered += [
+            (n, s) for n, s in sorted(dag_status.details.items()) if n not in seen
+        ]
+    else:
+        ordered = sorted(dag_status.details.items())
+
+    for task_name, status in ordered:
         table.add_row(
             task_name,
             checkmark("green") if Status.is_ready(status) else "",
