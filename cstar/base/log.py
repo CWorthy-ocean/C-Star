@@ -189,9 +189,18 @@ class LoggingMixin:
 
 
 def parse_log_level_name(log_level: int | str) -> int:
-    level = (
+    return (
         logging.getLevelNamesMapping()[log_level.upper()]
         if isinstance(log_level, str)
         else log_level
     )
-    return level
+
+
+def reset_log_level(level: LogLevelChoices) -> None:
+    # set the level on the root logger
+    logging.getLogger().setLevel(parse_log_level_name(level))
+
+    # force loggers to delegate level to root logger
+    loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
+    for logger in loggers:
+        logger.setLevel(logging.NOTSET)

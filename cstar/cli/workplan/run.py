@@ -21,6 +21,7 @@ from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
     ARG_DRY_RUN,
+    ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
@@ -271,7 +272,7 @@ def run(
             ARG_LOGLEVEL_LONG,
             ARG_LOGLEVEL_SHORT,
             callback=log_level_callback,
-            help="Set the log level for C-Star.",
+            help=ARG_LOGLEVEL_HELP,
             envvar=ENV_CSTAR_LOG_LEVEL,
         ),
     ] = LogLevelChoices.INFO,

@@ -1,6 +1,8 @@
+from collections.abc import Callable
 import importlib
 import os
 import typing as t
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -13,6 +15,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     FLAG_ON,
 )
+from cstar.base.log import LogLevelChoices, reset_log_level
 
 app = typer.Typer()
 
@@ -72,6 +75,15 @@ def common_callback(
     ] = False,
 ) -> None:
     pass
+
+
+def update_loggers(ctx: typer.Context, value: str) -> str:
+    """Perform a log-level reset on all loggers if the log level is updated via CLI."""
+    reset_log_level(LogLevelChoices[value])
+    return value
+
+
+log_level_callback = cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers)
 
 
 def locate_app_modules() -> list[str]:
