@@ -435,20 +435,15 @@ class BlueprintMigration(Migration):
             plan = self.plan(dumped)
         except CstarUnsupportedMigrationError as ex:
             msg = f"Unable to plan migration: {ex}"
-            # raise typer.BadParameter(msg) from ex
             return MigrateResult(dumped, {}, error=msg)
 
         if plan.is_latest:
-            # msg = f"The blueprint already uses the latest schema: {plan.source}"
-            # print(msg)
             return MigrateResult(dumped, dumped, plan=plan)
 
         try:
             migrated = self.migrate(dumped, plan)
-        # except (CstarExpectationFailed, CstarMigrationError) as ex:
         except CstarMigrationError as ex:
             msg = f"Unable to complete migration: {ex}"
-            # raise typer.BadParameter(msg) from ex
             return MigrateResult(dumped, {}, plan=plan, error=msg)
 
         return MigrateResult(
