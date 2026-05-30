@@ -1,0 +1,5 @@
+account: ees250129
+pes_per_node: 128
+queues:
+  default: wholenode
+  shared: shared

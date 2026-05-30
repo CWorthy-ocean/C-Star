@@ -42,7 +42,7 @@ import roms_tools as rt
 
 def resolve_catalog_dir(catalog_root: Optional[Union[str, Path]]) -> Path:
     """
-    Resolve the absolute inner *catalog* directory (direct parent of ``blueprints/`` and ``builds/``).
+    Resolve the absolute inner *catalog* directory (direct parent of ``blueprints/``).
 
     Parameters
     ----------
@@ -243,10 +243,37 @@ class CstarSpecBuilder(BaseModel):
         default=None,
         validate_default=False,
         description=(
-            "Optional *outer* catalog anchor. Blueprints and builds use "
-            "``<catalog_root>/catalog/blueprints`` and ``<catalog_root>/catalog/builds``. "
+            "Optional *outer* catalog anchor. Blueprints live under "
+            "``<catalog_root>/catalog/blueprints/<machine>/<name>/``. "
             "Omit to use ``config.paths.catalog``. Use ``catalog_root='local'`` for the "
             "in-repo ``cstar_forge/catalog`` package directory (no extra ``/catalog`` suffix)."
+        ),
+    )
+    initialize_catalog_from: Optional[Union[str, Path]] = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "Merge Machines/, ModelSpec/, and DomainSpec/ from this source catalog "
+            "into the resolved catalog_root before use. "
+            "Pass ``'local'`` to merge from the built-in package catalog."
+        ),
+    )
+    initialize_catalog_clobber: bool = Field(
+        default=False,
+        validate_default=False,
+        description=(
+            "When merging via ``initialize_catalog_from``, silently overwrite "
+            "files that already exist at the destination. "
+            "If False (default) and conflicts are found, raises ValueError listing them."
+        ),
+    )
+    suppress_catalog_validation: bool = Field(
+        default=True,
+        validate_default=False,
+        description=(
+            "Skip the catalog structure validation check when opening the catalog. "
+            "Defaults to True so that CstarSpecBuilder can operate on an empty or "
+            "partially populated catalog without raising an error."
         ),
     )
     # Internal attributes (computed/loaded)
@@ -291,7 +318,8 @@ class CstarSpecBuilder(BaseModel):
     _cstar_simulation: Optional[Any] = PrivateAttr(default=None)
     _settings_compile_time: Dict[str, Any] = PrivateAttr(default_factory=dict)
     _settings_run_time: Dict[str, Any] = PrivateAttr(default_factory=dict)
-    
+    _catalog_instance: Optional[Any] = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def _validate_dates(self) -> "CstarSpecBuilder":
         """Validate that start_date precedes end_date."""
@@ -322,6 +350,14 @@ class CstarSpecBuilder(BaseModel):
         and has been persisted to disk.
         """
         
+        if self.catalog_root is None:
+            print(
+                "Note: No catalog_root specified. Using internal cstar-forge catalog for ModelSpec "
+                "and MachineSpec (default/example values).\n"
+                f"      Blueprints will be written to: {config.paths.catalog}\n"
+                "      To use a custom catalog, set catalog_root=<path> when creating CstarSpecBuilder."
+            )
+
         # Create grids, 4 cases:
         # has child and no parent, has child and parent, has parent and no child, no parent no child
 
@@ -515,25 +551,37 @@ class CstarSpecBuilder(BaseModel):
             output_dir=self.run_output_dir,
         )
 
+    def _get_catalog(self) -> Any:
+        """Return (and cache) a DomainCatalog for this builder's resolved catalog directory."""
+        if self._catalog_instance is None:
+            from .domain_catalog import DomainCatalog
+            self._catalog_instance = DomainCatalog(
+                catalog_root=self.resolved_catalog_dir,
+                initialize_catalog_from=self.initialize_catalog_from,
+                initialize_catalog_clobber=self.initialize_catalog_clobber,
+                suppress_validation=self.suppress_catalog_validation,
+            )
+        return self._catalog_instance
+
     @property
     def resolved_catalog_dir(self) -> Path:
-        """Absolute inner *catalog* directory (contains ``blueprints/`` and ``builds/``)."""
+        """Absolute inner *catalog* directory (contains ``blueprints/``)."""
         return resolve_catalog_dir(self.catalog_root)
 
     @property
     def blueprint_dir(self) -> Path:
         """Return the blueprint directory path."""
-        return self.resolved_catalog_dir / "blueprints" / config.system_id / self.name
+        return self._get_catalog().blueprint_dir_for(config.system_id, self.name)
     
     @property
     def compile_time_code_dir(self) -> Path:
-        """Compile-time rendered templates under this builder's ``builds`` tree."""
-        return self.resolved_catalog_dir / "builds" / self.name / "compile-time"
-    
+        """Compile-time rendered templates inside this blueprint's Build/ directory."""
+        return self._get_catalog().build_dir_for(config.system_id, self.name) / "compile-time"
+
     @property
     def run_time_code_dir(self) -> Path:
-        """Run-time rendered templates under this builder's ``builds`` tree."""
-        return self.resolved_catalog_dir / "builds" / self.name / "run-time"
+        """Run-time rendered templates inside this blueprint's Build/ directory."""
+        return self._get_catalog().build_dir_for(config.system_id, self.name) / "run-time"
 
     def persist(self) -> None:
         """
@@ -938,11 +986,24 @@ class CstarSpecBuilder(BaseModel):
         return DatasetsDict(self._datasets)
     
     def _load_model_spec(self):
-        """Load ModelSpec from models.yml."""
-        self._model_spec = forge_models.load_models_yaml(
-            config.paths.models_yaml,
-            self.model_name
-        )
+        """Load ModelSpec from the builder's catalog when catalog_root is set, else from the default catalog."""
+        if self.catalog_root is not None:
+            self._model_spec = self._get_catalog().load_model_spec(self.model_name)
+        else:
+            from .domain_catalog import default_catalog
+            self._model_spec = default_catalog.load_model_spec(self.model_name)
+
+    def _get_machine_config(self):
+        """Return MachineConfig from the builder's catalog when catalog_root is set, else from config."""
+        if self.catalog_root is not None:
+            from .config import MachineConfig
+            data = self._get_catalog().machine_data(config.system)
+            return MachineConfig(
+                account=data.get("account"),
+                pes_per_node=data.get("pes_per_node"),
+                queues=data.get("queues"),
+            )
+        return config.machine_config
 
     def _prompt_yes_no(self, message: str) -> bool:
         """Prompt user for a yes/no answer in interactive runs."""
@@ -2139,6 +2200,104 @@ class CstarSpecBuilder(BaseModel):
             ninfo = 1,
         )
    
+    def register_domain(self) -> None:
+        """Register this builder's domain in the catalog.
+
+        Writes a ``DomainSpec/<grid_name>/Domain.yml`` file (and an empty
+        ``Assets/`` directory) into the catalog pointed to by ``catalog_root``,
+        recording ``grid_name``, ``model_name``, ``grid_kwargs``,
+        ``open_boundaries``, ``partitioning``, and date range from this builder.
+
+        Raises
+        ------
+        ValueError
+            If a valid catalog is not found at the resolved ``catalog_root``
+            (see ``initialize_catalog_from``).
+        """
+        self._get_catalog().register_domain(self)
+
+    @classmethod
+    def from_domain(
+        cls,
+        domain_data: Dict[str, Any],
+        catalog: Optional[Any] = None,
+        **overrides: Any,
+    ) -> "CstarSpecBuilder":
+        """Create a CstarSpecBuilder from a domain dict returned by DomainCatalog.
+
+        Handles date-string → datetime conversion, dict → Pydantic model
+        coercion, and resolution of ``_parent_grid_name`` / ``_child_grid_name``
+        cross-references via the optional *catalog* argument.
+
+        Parameters
+        ----------
+        domain_data : dict
+            Domain configuration dict, e.g. as returned by
+            ``DomainCatalog.domain('ccs-12km')``.
+        catalog : DomainCatalog, optional
+            Required when *domain_data* contains ``_parent_grid_name`` or
+            ``_child_grid_name`` reference keys that must be resolved to
+            ``grid_kwargs_parent`` / ``grid_kwargs_child`` dicts.
+        **overrides
+            Any ``CstarSpecBuilder`` field values that should override what is
+            in *domain_data* (e.g. ``start_time``, ``end_time``,
+            ``catalog_root``).
+
+        Returns
+        -------
+        CstarSpecBuilder
+
+        Examples
+        --------
+        Simple domain (no nesting)::
+
+            from cstar_forge.domain_catalog import DomainCatalog
+            dc = DomainCatalog()                   # package built-in catalog
+            builder = CstarSpecBuilder.from_domain(
+                dc.domain('ccs-12km'),
+                start_time='2020-01-01',
+                end_time='2020-06-30',
+            )
+
+        Nested domain (catalog required for cross-reference resolution)::
+
+            builder = CstarSpecBuilder.from_domain(
+                dc.domain('GoA-10th_deg'),
+                catalog=dc,
+                start_time='2020-01-01',
+                end_time='2020-06-30',
+            )
+        """
+        cfg = domain_data.copy()
+
+        # Resolve parent/child grid kwargs from the catalog when referenced by name.
+        for ref_key, kwarg_key in (
+            ("_parent_grid_name", "grid_kwargs_parent"),
+            ("_child_grid_name", "grid_kwargs_child"),
+        ):
+            if ref_key in cfg:
+                ref_name = cfg.pop(ref_key)
+                if catalog is None:
+                    raise ValueError(
+                        f"'catalog' must be provided to resolve '{ref_key}' "
+                        f"reference '{ref_name}' in domain_data."
+                    )
+                cfg[kwarg_key] = catalog.domain_data(ref_name)["grid_kwargs"]
+
+        # Convert ISO date strings → datetime.
+        for date_key in ("start_time", "end_time"):
+            if isinstance(cfg.get(date_key), str):
+                cfg[date_key] = datetime.fromisoformat(cfg[date_key])
+
+        # Convert plain dicts → Pydantic model instances.
+        if isinstance(cfg.get("open_boundaries"), dict):
+            cfg["open_boundaries"] = forge_models.OpenBoundaries(**cfg["open_boundaries"])
+        if isinstance(cfg.get("partitioning"), dict):
+            cfg["partitioning"] = cstar_models.PartitioningParameterSet(**cfg["partitioning"])
+
+        cfg.update(overrides)
+        return cls(**cfg)
+
     def configure_build(
         self,
         compile_time_settings: Dict[str, Any] = None,
@@ -2302,8 +2461,7 @@ class CstarSpecBuilder(BaseModel):
 
         return
 
-    @staticmethod
-    def prep_cstar_environment(
+    def prep_cstar_environment(self,
             account_key: Optional[str] = None,
             queue_name: Optional[str] = None,
             walltime: str | None = None,
@@ -2329,7 +2487,7 @@ class CstarSpecBuilder(BaseModel):
         """
 
 
-        mc = config.machine_config
+        mc = self._get_machine_config()
         queues = mc.queues or {}
 
         # precedence: passed variable > pre-existing env-var setting > internal machine config > some default
@@ -2643,7 +2801,8 @@ class CstarSpecEngine:
       partitioning: dict
     ```
     """
-    
+    import asyncio
+
     def __init__(
         self,
         domains_file: Union[str, Path],
@@ -2758,52 +2917,27 @@ class CstarSpecEngine:
         CstarSpecBuilder
             Configured CstarSpecBuilder instance.
         """
-        config_dict = self._get_domain_config(domain_name).copy()
-        
-        # Apply ensemble_id if provided
+        cfg = self._get_domain_config(domain_name).copy()
+
         if ensemble_id is not None:
-            config_dict["ensemble_id"] = ensemble_id
-        
+            cfg["ensemble_id"] = ensemble_id
 
-        if "_parent_grid_name" in config_dict:
-            parent_grid_config = self._get_domain_config(config_dict["_parent_grid_name"]).copy()
-            config_dict["grid_kwargs_parent"] = parent_grid_config["grid_kwargs"]
-            config_dict.pop("_parent_grid_name", None)
+        # Resolve parent/child grid kwargs from this engine's own domain registry
+        # (references here point to sibling entries in the engine's domains file).
+        for ref_key, kwarg_key in (
+            ("_parent_grid_name", "grid_kwargs_parent"),
+            ("_child_grid_name", "grid_kwargs_child"),
+        ):
+            if ref_key in cfg:
+                cfg[kwarg_key] = self._get_domain_config(cfg.pop(ref_key))["grid_kwargs"]
 
-        if "_child_grid_name" in config_dict:
-            child_grid_config = self._get_domain_config(config_dict["_child_grid_name"]).copy()
-            config_dict["grid_kwargs_child"] = child_grid_config["grid_kwargs"]
-            config_dict.pop("_child_grid_name", None)
-
-        # Apply overrides if provided
-        if overrides:
-            config_dict.update(overrides)
-
-        # catalog_root: explicit call wins, else engine default, else domain YAML only
+        # catalog_root: explicit call wins, else engine default, else domain YAML only.
         if catalog_root is not None:
-            config_dict["catalog_root"] = catalog_root
+            cfg["catalog_root"] = catalog_root
         elif getattr(self, "_engine_catalog_root", None) is not None:
-            config_dict.setdefault("catalog_root", self._engine_catalog_root)
-        
-        # Convert date strings to datetime objects
-        if "start_time" in config_dict:
-            if isinstance(config_dict["start_time"], str):
-                config_dict["start_time"] = datetime.fromisoformat(config_dict["start_time"])
-        if "end_time" in config_dict:
-            if isinstance(config_dict["end_time"], str):
-                config_dict["end_time"] = datetime.fromisoformat(config_dict["end_time"])
-        
-        # Convert open_boundaries dict to OpenBoundaries model
-        if "open_boundaries" in config_dict:
-            config_dict["open_boundaries"] = forge_models.OpenBoundaries(**config_dict["open_boundaries"])
-        
-        # Convert partitioning dict to PartitioningParameterSet
-        if "partitioning" in config_dict:
-            config_dict["partitioning"] = cstar_models.PartitioningParameterSet(**config_dict["partitioning"])
+            cfg.setdefault("catalog_root", self._engine_catalog_root)
 
-
-        # Create and return CstarSpecBuilder
-        return CstarSpecBuilder(**config_dict)
+        return CstarSpecBuilder.from_domain(cfg, **(overrides or {}))
     
     def generate_domain(
         self,
@@ -2875,8 +3009,16 @@ class CstarSpecEngine:
             compile_time_settings=compile_time_settings or {},
             run_time_settings=run_time_settings or {}
         )
-        builder.build()
-        builder.pre_run()
+        # TODO: pass prep args as dict to generate_domain()
+        builder.prep_cstar_environment(
+            account_key = None,  # None gets from machine config or override here
+            queue_name = None,  # None gets from machine config or override here
+            walltime = "00:10:00",
+            clobber = True,  # recommend True, but it will clear previous results from this run 
+            n_procs_available = 0,  # 0 is auto-detect, change if on a login or shared node to not overuse resources
+        )
+        #import asyncio
+        asyncio.run(builder.run())
         
         return builder
     

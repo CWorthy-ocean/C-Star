@@ -1,0 +1,30 @@
+description: "Gulf of Alaska 1/10 deg (nested)"
+model_name: "cson_roms-marbl_v0.1"
+grid_name: "GoA-10th_deg"
+start_time: "2012-01-01"
+end_time: "2012-01-02"
+grid_kwargs:
+  nx: 208
+  ny: 192
+  size_x: 1460
+  size_y: 2220
+  center_lon: -135
+  center_lat: 52.6
+  rot: -105
+  N: 10
+  theta_s: 6.0
+  theta_b: 3.0
+  hc: 250.0
+  metadata:
+    prefix: "child"
+    period: 3600.0
+    include_bgc: true
+open_boundaries:
+  south: true
+  east: false
+  north: true
+  west: true
+partitioning:
+  n_procs_x: 16
+  n_procs_y: 8
+_parent_grid_name: "NEP-4th_deg"

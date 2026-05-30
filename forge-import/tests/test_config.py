@@ -44,26 +44,22 @@ class TestDataPaths:
         cat = tmp_path / "catalog"
         paths = DataPaths(
             here=tmp_path,
-            model_configs=tmp_path / "model-configs",
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            builds=cat / "builds",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
             machines_yaml=tmp_path / "machines.yml",
         )
-        
+
         assert paths.here == tmp_path
-        assert paths.model_configs == tmp_path / "model-configs"
         assert paths.source_data == tmp_path / "source-data"
         assert paths.input_data == tmp_path / "input-data"
         assert paths.scratch == tmp_path / "run-dir"
         assert paths.catalog == cat
         assert paths.blueprints == cat / "blueprints"
-        assert paths.builds == cat / "builds"
         assert paths.models_yaml == tmp_path / "models.yml"
         assert paths.builds_yaml == tmp_path / "builds.yml"
         assert paths.machines_yaml == tmp_path / "machines.yml"
@@ -73,33 +69,29 @@ class TestDataPaths:
         cat = tmp_path / "catalog"
         paths = DataPaths(
             here=tmp_path,
-            model_configs=tmp_path / "model-configs",
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            builds=cat / "builds",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
             machines_yaml=tmp_path / "machines.yml",
         )
-        
+
         with pytest.raises(FrozenInstanceError):
             paths.here = tmp_path / "new"
 
     def test_with_catalog(self, tmp_path):
-        """Relocating catalog updates blueprints and builds together."""
+        """Relocating catalog updates blueprints."""
         cat = tmp_path / "catalog"
         paths = DataPaths(
             here=tmp_path,
-            model_configs=tmp_path / "model-configs",
             source_data=tmp_path / "source-data",
             input_data=tmp_path / "input-data",
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            builds=cat / "builds",
             models_yaml=tmp_path / "models.yml",
             builds_yaml=tmp_path / "builds.yml",
             machines_yaml=tmp_path / "machines.yml",
@@ -108,7 +100,6 @@ class TestDataPaths:
         moved = with_catalog(paths, other)
         assert moved.catalog == other
         assert moved.blueprints == other / "blueprints"
-        assert moved.builds == other / "builds"
         assert moved.here == paths.here
 
 
@@ -340,8 +331,6 @@ class TestGetDataPaths:
         assert paths.scratch.exists()
         assert paths.catalog.exists()
         assert paths.blueprints.exists()
-        assert paths.builds.exists()
-        assert paths.model_configs.exists()
         assert paths.catalog == default_catalog_inner_dir(paths.source_data)
         assert paths.blueprints == paths.catalog / "blueprints"
     
@@ -360,7 +349,6 @@ class TestGetDataPaths:
         assert paths.scratch.exists()
         assert paths.catalog.exists()
         assert paths.blueprints.exists()
-        assert paths.builds.exists()
 
 
 class TestLoadMachineConfig:
@@ -436,13 +424,11 @@ class TestCLI:
         # Create a real DataPaths object for testing
         test_paths = DataPaths(
             here=Path("/test/here"),
-            model_configs=Path("/test/model-configs"),
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            builds=Path("/test/catalog/builds"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
             machines_yaml=Path("/test/machines.yml"),
@@ -465,13 +451,11 @@ class TestCLI:
         # Create a real DataPaths object for testing
         test_paths = DataPaths(
             here=Path("/test/here"),
-            model_configs=Path("/test/model-configs"),
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            builds=Path("/test/catalog/builds"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
             machines_yaml=Path("/test/machines.yml"),
@@ -496,13 +480,11 @@ class TestCLI:
         # Create a real DataPaths object for testing
         test_paths = DataPaths(
             here=Path("/test"),
-            model_configs=Path("/test/model-configs"),
             source_data=Path("/test/source"),
             input_data=Path("/test/input"),
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            builds=Path("/test/catalog/builds"),
             models_yaml=Path("/test/models.yml"),
             builds_yaml=Path("/test/builds.yml"),
             machines_yaml=Path("/test/machines.yml"),

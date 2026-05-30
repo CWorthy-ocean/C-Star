@@ -1,0 +1,22 @@
+description: "Western Indian Ocean (toy)"
+model_name: "cson_roms-marbl_v0.1"
+grid_name: "wio-toy"
+start_time: "2012-01-01"
+end_time: "2012-01-02"
+grid_kwargs:
+  nx: 20
+  ny: 20
+  size_x: 8000
+  size_y: 8000
+  center_lon: 60.0
+  center_lat: -4.0
+  rot: 0
+  N: 10
+open_boundaries:
+  south: true
+  east: true
+  north: true
+  west: true
+partitioning:
+  n_procs_x: 2
+  n_procs_y: 5

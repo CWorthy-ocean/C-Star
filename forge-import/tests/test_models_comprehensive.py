@@ -325,77 +325,22 @@ class TestSettingsStage:
         assert stage.default_config_yaml == str(yaml_file)
         assert "test" in stage.settings_dict
     
-    def test_settingsstage_template_variable_resolution(self, tmp_path, monkeypatch):
-        """Test SettingsStage resolves template variables in path."""
-        from cstar_forge import config
-        from cstar_forge.config import DataPaths
-        
-        # Create a new DataPaths instance with model_configs set to tmp_path
-        # (frozen dataclasses can't be mutated, but we can create new instances)
-        original_paths = config.paths
-        mocked_paths = DataPaths(
-            here=original_paths.here,
-            model_configs=tmp_path,
-            source_data=original_paths.source_data,
-            input_data=original_paths.input_data,
-            scratch=original_paths.scratch,
-            catalog=original_paths.catalog,
-            blueprints=original_paths.blueprints,
-            builds=original_paths.builds,
-            models_yaml=original_paths.models_yaml,
-            builds_yaml=original_paths.builds_yaml,
-            machines_yaml=original_paths.machines_yaml,
-        )
-        # Patch both config.paths and models.config.paths since models.py imports config
-        monkeypatch.setattr(config, "paths", mocked_paths)
-        import cstar_forge.models as models_module
-        monkeypatch.setattr(models_module.config, "paths", mocked_paths)
-        
-        # Create a YAML file with template variable in path
-        model_dir = tmp_path / "model"
-        model_dir.mkdir()
-        yaml_file = model_dir / "defaults.yml"
+    def test_settingsstage_absolute_path(self, tmp_path):
+        """Test SettingsStage works with an absolute path."""
+        # Create a YAML file
+        yaml_file = tmp_path / "defaults.yml"
         yaml_file.write_text("test: value\n")
-        
-        template_path = "{{ config.path.model_configs }}/model/defaults.yml"
-        stage = SettingsStage(_default_config_yaml=template_path)
+
+        stage = SettingsStage(_default_config_yaml=str(yaml_file))
         assert "test" in stage.settings_dict
         assert stage.settings_dict["test"] == "value"
-    
-    def test_settingsstage_relative_path(self, tmp_path, monkeypatch):
-        """Test SettingsStage resolves relative paths."""
-        from cstar_forge import config
-        from cstar_forge.config import DataPaths
-        
-        # Create a new DataPaths instance with model_configs set to tmp_path
-        original_paths = config.paths
-        mocked_paths = DataPaths(
-            here=original_paths.here,
-            model_configs=tmp_path,
-            source_data=original_paths.source_data,
-            input_data=original_paths.input_data,
-            scratch=original_paths.scratch,
-            catalog=original_paths.catalog,
-            blueprints=original_paths.blueprints,
-            builds=original_paths.builds,
-            models_yaml=original_paths.models_yaml,
-            builds_yaml=original_paths.builds_yaml,
-            machines_yaml=original_paths.machines_yaml,
-        )
-        # Patch both config.paths and models.config.paths since models.py imports config
-        monkeypatch.setattr(config, "paths", mocked_paths)
-        import cstar_forge.models as models_module
-        monkeypatch.setattr(models_module.config, "paths", mocked_paths)
-        
-        # Create file in model_configs subdirectory
-        (tmp_path / "subdir").mkdir()
-        yaml_file = tmp_path / "subdir" / "defaults.yml"
-        yaml_file.write_text("test: value\n")
-        
-        # Use relative path
-        stage = SettingsStage(_default_config_yaml="subdir/defaults.yml")
-        assert "test" in stage.settings_dict
-        assert stage.settings_dict["test"] == "value"
+
+    def test_settingsstage_nonexistent_absolute_path_raises(self, tmp_path):
+        """Test SettingsStage raises FileNotFoundError for nonexistent absolute path."""
+        nonexistent = str(tmp_path / "nonexistent.yml")
+
+        with pytest.raises(FileNotFoundError):
+            SettingsStage(_default_config_yaml=nonexistent)
     
     def test_settingsstage_invalid_yaml(self, tmp_path):
         """Test SettingsStage handles invalid YAML gracefully."""
@@ -1854,40 +1799,22 @@ class TestLoadModelsYaml:
         assert spec.code.run_time.filter is None
         assert spec.code.compile_time.filter is None
     
-    def test_load_models_yaml_with_templates(self, tmp_path, monkeypatch):
-        """Test load_models_yaml with templates specification."""
-        import cstar_forge.models as models_module
-        from cstar_forge import config
-        from cstar_forge.config import DataPaths
-        
-        # Create a new DataPaths instance with model_configs set to tmp_path
-        original_paths = config.paths
-        mocked_paths = DataPaths(
-            here=original_paths.here,
-            model_configs=tmp_path,
-            source_data=original_paths.source_data,
-            input_data=original_paths.input_data,
-            scratch=original_paths.scratch,
-            catalog=original_paths.catalog,
-            blueprints=original_paths.blueprints,
-            builds=original_paths.builds,
-            models_yaml=original_paths.models_yaml,
-            builds_yaml=original_paths.builds_yaml,
-            machines_yaml=original_paths.machines_yaml,
-        )
-        monkeypatch.setattr(config, "paths", mocked_paths)
-        monkeypatch.setattr(models_module.config, "paths", mocked_paths)
-        
+    def test_load_models_yaml_with_templates(self, tmp_path):
+        """Test load_models_yaml with templates specification using relative paths."""
+        # Create model directory structure: model.yml lives in test_model/
+        model_dir = tmp_path / "test_model"
+        model_dir.mkdir()
+
         # Create template directory and files
-        template_dir = tmp_path / "test_model" / "templates" / "compile-time"
+        template_dir = model_dir / "templates" / "compile-time"
         template_dir.mkdir(parents=True, exist_ok=True)
         (template_dir / "cppdefs.opt.j2").touch()
         (template_dir / "param.opt.j2").touch()
-        
-        run_template_dir = tmp_path / "test_model" / "templates" / "run-time"
+
+        run_template_dir = model_dir / "templates" / "run-time"
         run_template_dir.mkdir(parents=True, exist_ok=True)
         (run_template_dir / "roms.in.j2").touch()
-        
+
         yaml_content = {
             "test_model": {
                 "code": {
@@ -1898,13 +1825,13 @@ class TestLoadModelsYaml:
                 },
                 "templates": {
                     "compile_time": {
-                        "location": "{{ config.path.model_configs }}/test_model/templates/compile-time",
+                        "location": "templates/compile-time",
                         "filter": {
                             "files": ["cppdefs.opt.j2", "param.opt.j2"]
                         }
                     },
                     "run_time": {
-                        "location": "{{ config.path.model_configs }}/test_model/templates/run-time",
+                        "location": "templates/run-time",
                         "filter": {
                             "files": ["roms.in.j2"]
                         }
@@ -1928,13 +1855,14 @@ class TestLoadModelsYaml:
                 }
             }
         }
-        
-        yaml_path = tmp_path / "models.yml"
+
+        # model.yml lives inside model_dir/
+        yaml_path = model_dir / "model.yml"
         with yaml_path.open("w") as f:
             yaml.safe_dump(yaml_content, f)
-        
+
         spec = load_models_yaml(yaml_path, "test_model")
-        
+
         assert spec.templates is not None
         assert spec.templates.compile_time is not None
         assert spec.templates.run_time is not None
@@ -1942,39 +1870,21 @@ class TestLoadModelsYaml:
         assert "cppdefs.opt.j2" in spec.templates.compile_time.filter.files
         assert "roms.in.j2" in spec.templates.run_time.filter.files
     
-    def test_load_models_yaml_with_settings(self, tmp_path, monkeypatch):
-        """Test load_models_yaml with settings specification."""
-        import cstar_forge.models as models_module
-        from cstar_forge import config
-        from cstar_forge.config import DataPaths
-        
-        # Create a new DataPaths instance with model_configs set to tmp_path
-        original_paths = config.paths
-        mocked_paths = DataPaths(
-            here=original_paths.here,
-            model_configs=tmp_path,
-            source_data=original_paths.source_data,
-            input_data=original_paths.input_data,
-            scratch=original_paths.scratch,
-            catalog=original_paths.catalog,
-            blueprints=original_paths.blueprints,
-            builds=original_paths.builds,
-            models_yaml=original_paths.models_yaml,
-            builds_yaml=original_paths.builds_yaml,
-            machines_yaml=original_paths.machines_yaml,
-        )
-        monkeypatch.setattr(config, "paths", mocked_paths)
-        monkeypatch.setattr(models_module.config, "paths", mocked_paths)
-        
-        # Create settings YAML files
-        compile_yaml = tmp_path / "test_model" / "templates" / "compile-time-defaults.yml"
+    def test_load_models_yaml_with_settings(self, tmp_path):
+        """Test load_models_yaml with settings specification using relative paths."""
+        # Create model directory structure: model.yml lives in test_model/
+        model_dir = tmp_path / "test_model"
+        model_dir.mkdir()
+
+        # Create settings YAML files using relative paths from model_dir
+        compile_yaml = model_dir / "templates" / "compile-time-defaults.yml"
         compile_yaml.parent.mkdir(parents=True, exist_ok=True)
         compile_yaml.write_text("cppdefs: {}\nparam: {}\n")
-        
-        run_yaml = tmp_path / "test_model" / "templates" / "run-time-defaults.yml"
+
+        run_yaml = model_dir / "templates" / "run-time-defaults.yml"
         run_yaml.parent.mkdir(parents=True, exist_ok=True)
         run_yaml.write_text("roms.in: {}\n")
-        
+
         yaml_content = {
             "test_model": {
                 "code": {
@@ -1988,10 +1898,10 @@ class TestLoadModelsYaml:
                         "n_tracers": 34
                     },
                     "compile_time": {
-                        "_default_config_yaml": "{{ config.path.model_configs }}/test_model/templates/compile-time-defaults.yml"
+                        "_default_config_yaml": "templates/compile-time-defaults.yml"
                     },
                     "run_time": {
-                        "_default_config_yaml": "{{ config.path.model_configs }}/test_model/templates/run-time-defaults.yml"
+                        "_default_config_yaml": "templates/run-time-defaults.yml"
                     }
                 },
                 "inputs": {
@@ -2012,13 +1922,14 @@ class TestLoadModelsYaml:
                 }
             }
         }
-        
-        yaml_path = tmp_path / "models.yml"
+
+        # model.yml lives inside model_dir/
+        yaml_path = model_dir / "model.yml"
         with yaml_path.open("w") as f:
             yaml.safe_dump(yaml_content, f)
-        
+
         spec = load_models_yaml(yaml_path, "test_model")
-        
+
         assert spec.settings is not None
         assert spec.settings.properties is not None
         assert spec.settings.properties.n_tracers == 34
@@ -2027,40 +1938,22 @@ class TestLoadModelsYaml:
         assert spec.settings.run_time is not None
         assert "roms.in" in spec.settings.run_time.settings_dict
     
-    def test_load_models_yaml_with_templates_and_settings(self, tmp_path, monkeypatch):
-        """Test load_models_yaml with both templates and settings."""
-        import cstar_forge.models as models_module
-        from cstar_forge import config
-        from cstar_forge.config import DataPaths
-        
-        # Create a new DataPaths instance with model_configs set to tmp_path
-        original_paths = config.paths
-        mocked_paths = DataPaths(
-            here=original_paths.here,
-            model_configs=tmp_path,
-            source_data=original_paths.source_data,
-            input_data=original_paths.input_data,
-            scratch=original_paths.scratch,
-            catalog=original_paths.catalog,
-            blueprints=original_paths.blueprints,
-            builds=original_paths.builds,
-            models_yaml=original_paths.models_yaml,
-            builds_yaml=original_paths.builds_yaml,
-            machines_yaml=original_paths.machines_yaml,
-        )
-        monkeypatch.setattr(config, "paths", mocked_paths)
-        monkeypatch.setattr(models_module.config, "paths", mocked_paths)
-        
+    def test_load_models_yaml_with_templates_and_settings(self, tmp_path):
+        """Test load_models_yaml with both templates and settings using relative paths."""
+        # Create model directory structure: model.yml lives in test_model/
+        model_dir = tmp_path / "test_model"
+        model_dir.mkdir()
+
         # Create template directory and files
-        template_dir = tmp_path / "test_model" / "templates" / "compile-time"
+        template_dir = model_dir / "templates" / "compile-time"
         template_dir.mkdir(parents=True, exist_ok=True)
         (template_dir / "cppdefs.opt.j2").touch()
-        
+
         # Create settings YAML file
-        compile_yaml = tmp_path / "test_model" / "templates" / "compile-time-defaults.yml"
+        compile_yaml = model_dir / "templates" / "compile-time-defaults.yml"
         compile_yaml.parent.mkdir(parents=True, exist_ok=True)
         compile_yaml.write_text("cppdefs: {}\n")
-        
+
         yaml_content = {
             "test_model": {
                 "code": {
@@ -2071,7 +1964,7 @@ class TestLoadModelsYaml:
                 },
                 "templates": {
                     "compile_time": {
-                        "location": "{{ config.path.model_configs }}/test_model/templates/compile-time",
+                        "location": "templates/compile-time",
                         "filter": {
                             "files": ["cppdefs.opt.j2"]
                         }
@@ -2079,7 +1972,7 @@ class TestLoadModelsYaml:
                 },
                 "settings": {
                     "compile_time": {
-                        "_default_config_yaml": "{{ config.path.model_configs }}/test_model/templates/compile-time-defaults.yml"
+                        "_default_config_yaml": "templates/compile-time-defaults.yml"
                     }
                 },
                 "inputs": {
@@ -2100,47 +1993,30 @@ class TestLoadModelsYaml:
                 }
             }
         }
-        
-        yaml_path = tmp_path / "models.yml"
+
+        # model.yml lives inside model_dir/
+        yaml_path = model_dir / "model.yml"
         with yaml_path.open("w") as f:
             yaml.safe_dump(yaml_content, f)
-        
+
         spec = load_models_yaml(yaml_path, "test_model")
-        
+
         # Should pass validation - templates and settings match
         assert spec.templates is not None
         assert spec.settings is not None
         assert "cppdefs" in spec.settings.compile_time.settings_dict
     
-    def test_load_models_yaml_template_path_resolution(self, tmp_path, monkeypatch):
-        """Test load_models_yaml resolves template variables in paths."""
-        import cstar_forge.models as models_module
-        from cstar_forge import config
-        from cstar_forge.config import DataPaths
-        
-        # Create a new DataPaths instance with model_configs set to tmp_path
-        original_paths = config.paths
-        mocked_paths = DataPaths(
-            here=original_paths.here,
-            model_configs=tmp_path,
-            source_data=original_paths.source_data,
-            input_data=original_paths.input_data,
-            scratch=original_paths.scratch,
-            catalog=original_paths.catalog,
-            blueprints=original_paths.blueprints,
-            builds=original_paths.builds,
-            models_yaml=original_paths.models_yaml,
-            builds_yaml=original_paths.builds_yaml,
-            machines_yaml=original_paths.machines_yaml,
-        )
-        monkeypatch.setattr(config, "paths", mocked_paths)
-        monkeypatch.setattr(models_module.config, "paths", mocked_paths)
-        
-        # Create template directory with model.name variable
-        template_dir = tmp_path / "my_model" / "templates" / "compile-time"
+    def test_load_models_yaml_template_path_resolution(self, tmp_path):
+        """Test load_models_yaml resolves relative paths against the model directory."""
+        # Create model directory: model.yml lives in my_model/
+        model_dir = tmp_path / "my_model"
+        model_dir.mkdir()
+
+        # Create template directory
+        template_dir = model_dir / "templates" / "compile-time"
         template_dir.mkdir(parents=True, exist_ok=True)
         (template_dir / "file.j2").touch()
-        
+
         yaml_content = {
             "my_model": {
                 "code": {
@@ -2151,7 +2027,7 @@ class TestLoadModelsYaml:
                 },
                 "templates": {
                     "compile_time": {
-                        "location": "{{ config.path.model_configs }}/{{ model.name }}/templates/compile-time",
+                        "location": "templates/compile-time",
                         "filter": {
                             "files": ["file.j2"]
                         }
@@ -2175,13 +2051,14 @@ class TestLoadModelsYaml:
                 }
             }
         }
-        
-        yaml_path = tmp_path / "models.yml"
+
+        # model.yml lives inside model_dir/
+        yaml_path = model_dir / "model.yml"
         with yaml_path.open("w") as f:
             yaml.safe_dump(yaml_content, f)
-        
+
         spec = load_models_yaml(yaml_path, "my_model")
-        
-        # Template variable should be resolved
+
+        # Relative path should be resolved against model_dir
         assert str(spec.templates.compile_time.location) == str(template_dir)
 

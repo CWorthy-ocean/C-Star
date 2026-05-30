@@ -48,16 +48,13 @@ def _create_mock_paths_core(tmp_path, blueprints_dir=None, scratch=None, here=No
     h = here if here is not None else config.paths.here
     cat = tmp_path / "catalog"
     bp = blueprints_dir if blueprints_dir is not None else cat / "blueprints"
-    bld = cat / "builds"
     return DataPaths(
         here=h,
-        model_configs=config.paths.model_configs,
         source_data=config.paths.source_data,
         input_data=config.paths.input_data,
         scratch=scratch if scratch is not None else config.paths.scratch,
         catalog=cat,
         blueprints=bp,
-        builds=bld,
         models_yaml=config.paths.models_yaml,
         builds_yaml=config.paths.builds_yaml,
         machines_yaml=config.paths.machines_yaml,
@@ -65,11 +62,10 @@ def _create_mock_paths_core(tmp_path, blueprints_dir=None, scratch=None, here=No
 
 
 def _attach_catalog_attrs(mock_paths, blueprints_path: Path) -> None:
-    """Align MagicMock ``catalog`` / ``builds`` with ``blueprints`` for path properties."""
+    """Align MagicMock ``catalog`` with ``blueprints`` for path properties."""
     mock_paths.catalog = (
         blueprints_path.parent if blueprints_path.name == "blueprints" else blueprints_path
     )
-    mock_paths.builds = mock_paths.catalog / "builds"
 
 
 @pytest.fixture
@@ -692,13 +688,11 @@ class TestCstarSpecBuilderModelPostInit:
                 # Create a real DataPaths object with tmp_path for blueprints
                 mock_paths_obj = DataPaths(
                     here=config.paths.here,
-                    model_configs=config.paths.model_configs,
                     source_data=config.paths.source_data,
                     input_data=config.paths.input_data,
                     scratch=config.paths.scratch,
                     catalog=tmp_path,
                     blueprints=tmp_path,
-                    builds=tmp_path / "builds",
                     models_yaml=config.paths.models_yaml,
                     builds_yaml=config.paths.builds_yaml,
                     machines_yaml=config.paths.machines_yaml,
@@ -1042,8 +1036,8 @@ class TestCstarSpecBuilderBuildAndRun:
                 with patch("cstar_forge._core.config.paths", new=mock_paths):
                     builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                         
-                    # Get expected code_output_dir path using mocked paths
-                    expected_code_output_dir = mock_paths.builds / builder.name / "compile-time"
+                    # Get expected code_output_dir path using builder property
+                    expected_code_output_dir = builder.compile_time_code_dir
                     expected_location = str(expected_code_output_dir.resolve())
                         
                     # Mock render_roms_settings to return the expected location

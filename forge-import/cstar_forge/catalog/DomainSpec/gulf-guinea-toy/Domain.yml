@@ -1,0 +1,22 @@
+description: "Gulf of Guinea (toy)"
+model_name: "cson_roms-marbl_v0.1"
+grid_name: "gulf-guinea-toy"
+start_time: "2012-01-01"
+end_time: "2012-01-02"
+grid_kwargs:
+  nx: 10
+  ny: 10
+  size_x: 4000
+  size_y: 2000
+  center_lon: 4.0
+  center_lat: -1.0
+  rot: 0
+  N: 5
+open_boundaries:
+  south: true
+  east: true
+  north: true
+  west: true
+partitioning:
+  n_procs_x: 2
+  n_procs_y: 5

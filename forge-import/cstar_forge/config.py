@@ -30,22 +30,18 @@ class DataPaths:
     - source_data
     - input_data
     - scratch
-    - catalog (root for generated blueprints and rendered build trees; inner directory
-      that directly contains ``blueprints`` and ``builds`` subdirectories)
+    - catalog (inner directory that directly contains the ``blueprints`` subdirectory)
     - blueprints (under ``catalog / "blueprints"`` by default)
-    - builds (under ``catalog / "builds"`` by default)
     - models_yaml
     - builds_yaml
     """
 
     here: Path
-    model_configs: Path
     source_data: Path
     input_data: Path
     scratch: Path
     catalog: Path
     blueprints: Path
-    builds: Path
     models_yaml: Path
     builds_yaml: Path
     machines_yaml: Path
@@ -187,10 +183,10 @@ def _layout_unknown(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 
 def default_catalog_inner_dir(source_data: Path) -> Path:
     """
-    Default inner *catalog* directory: the folder that directly contains ``blueprints/`` and ``builds/``.
+    Default inner *catalog* directory: the folder that directly contains ``blueprints/``.
 
     The catalog lives alongside ``source-data`` inside the base data directory, e.g.
-    ``~/cstar-forge-data/catalog/{blueprints,builds}``.
+    ``~/cstar-forge-data/catalog/blueprints/``.
     """
     return source_data.parent.resolve() / "catalog"
 
@@ -210,28 +206,24 @@ def get_data_paths() -> DataPaths:
     source_data, input_data, scratch = layout_fn(home, env)
 
     here = Path(__file__).resolve().parent
-    model_configs = here / "model-configs"
-    # Inner catalog dir: .../cstar_forge_data/catalog/{blueprints,builds}
+    # Inner catalog dir: .../cstar_forge_data/catalog/blueprints/
     catalog = default_catalog_inner_dir(source_data)
     blueprints_dir = catalog / "blueprints"
-    builds_dir = catalog / "builds"
     models_yaml = here / "models.yml"
     builds_yaml = here / "builds.yml"
     machines_yaml = here / "machines.yml"
 
     # ensure everything exists
-    for p in (source_data, input_data, scratch, catalog, blueprints_dir, builds_dir, model_configs):
+    for p in (source_data, input_data, scratch, catalog, blueprints_dir):
         _ensure_dir(p)
 
     return DataPaths(
         here=here,
-        model_configs=model_configs,
         source_data=source_data,
         input_data=input_data,
         scratch=scratch,
         catalog=catalog,
         blueprints=blueprints_dir,
-        builds=builds_dir,
         models_yaml=models_yaml,
         builds_yaml=builds_yaml,
         machines_yaml=machines_yaml,
@@ -240,10 +232,10 @@ def get_data_paths() -> DataPaths:
 
 def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
     """
-    Return a copy of *paths* with ``catalog``, ``blueprints``, and ``builds`` rooted under *catalog*.
+    Return a copy of *paths* with ``catalog`` and ``blueprints`` rooted under *catalog*.
 
-    ``blueprints`` and ``builds`` are set to ``catalog / "blueprints"`` and ``catalog / "builds"``
-    respectively. Other fields (``here``, data roots, YAML paths) are unchanged.
+    ``blueprints`` is set to ``catalog / "blueprints"``.
+    Other fields (``here``, data roots, YAML paths) are unchanged.
 
     Intended for relocating the on-disk catalog without editing ``get_data_paths``;
     assign the result to ``cstar_forge.config.paths`` (and create directories as needed).
@@ -253,7 +245,6 @@ def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
         paths,
         catalog=catalog,
         blueprints=catalog / "blueprints",
-        builds=catalog / "builds",
     )
 
 
@@ -491,11 +482,25 @@ def main(argv: list[str] | None = None) -> int:
 
 
 
+def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
+    """Load machine config from the default DomainCatalog (internal cstar-forge catalog)."""
+    try:
+        from .domain_catalog import default_catalog
+        data = default_catalog.machine_data(system_tag)
+        return MachineConfig(
+            account=data.get("account"),
+            pes_per_node=data.get("pes_per_node"),
+            queues=data.get("queues"),
+        )
+    except (KeyError, Exception):
+        return MachineConfig()
+
+
 # Initialize canonical instance
 paths = get_data_paths()
 system = _detect_system()
 system_id = system  # Alias for compatibility
-machine_config = load_machine_config(system, paths.machines_yaml)
+machine_config = _load_machine_config_from_catalog(system)
 cluster_type = _default_cluster_type(system)
 
 

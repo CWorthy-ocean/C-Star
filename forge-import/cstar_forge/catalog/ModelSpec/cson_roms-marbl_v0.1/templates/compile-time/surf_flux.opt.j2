@@ -1,0 +1,50 @@
+      ! ****************************************************************
+      ! User inputs
+
+      logical,public,parameter :: wrt_smflx = {{ surf_flux.wrt_smflx|lower }}              ! output surface momentum flux
+      logical,public,parameter :: wrt_stflx = {{ surf_flux.wrt_stflx|lower }}              ! output surface tracer flux
+      logical,public,parameter :: wrt_swflx = {{ surf_flux.wrt_swflx|lower }}              ! output surface tracer flux
+      logical,public,parameter :: wrt_rstflx = {{ surf_flux.wrt_rstflx|lower }}            ! output surface restoring flux (already accounted in stflx)
+      logical,parameter :: sflx_avg  = {{ surf_flux.sflx_avg|lower }}              ! write averaged sflx data
+
+      real,parameter           :: output_period = {{ surf_flux.output_period }}       ! output averaging period in seconds
+      integer,parameter        :: nrpf          = {{ surf_flux.nrpf }}        ! total recs per file
+
+#if defined(QCORRECTION) && !defined(ANA_SST)
+      ! edit variable name and time name to match input netcdf file if necessary:          
+      type (ncforce) :: nc_sst  = ncforce(vname='{{ surf_flux.sst_vname }}',tname='{{ surf_flux.sst_tname }}' )       ! sea-surface temperature (SST) data
+
+      ! Restoring time-scale. coefficient expressed kinematically as piston velocity (m/s):
+      real,public,parameter :: dSSTdt = 7.777/(100.*86400.)  ! SST correction     (required QCORRECTI
+#endif
+
+#if defined SFLX_CORR && defined SALINITY && !defined ANA_SSFLUX
+      real,public,parameter :: dSSSdt = 7.777/(100.*86400.)  ! SSS correction     (required SFLX_CORR)
+      type (ncforce) :: nc_sss  = ncforce(vname='{{ surf_flux.sss_vname }}',tname='{{ surf_flux.sss_tname }}' )       ! sea-surface salinity (SSS) data
+
+#endif
+#if defined CFLX_CORR && defined MARBL
+      type (ncforce) :: nc_sdic = ncforce(vname='sDIC',tname='sDIC_time' ) ! sea-surface DIC data
+      type (ncforce) :: nc_salk = ncforce(vname='sALK',tname='sALK_time' ) ! sea-surface ALK data
+      real,public,parameter :: dCdt   = 7.777/(100.*86400.)  ! DIC/Alk correction (required CFLX_COR
+#endif
+
+      ! Diagnose restoring surface fluxes  :
+#if defined(MARBL)
+      integer, parameter :: rst2diag(nt) = [0,1,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+#elif defined(BIOLOGY_BEC2)
+      integer, parameter :: rst2diag(nt) = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+#else
+#   ifdef SALINITY
+      integer, parameter :: rst2diag(nt) = [0,0]
+#   else
+      integer, parameter :: rst2diag(nt) = [0]
+#   endif
+#endif
+
+      ! interpolate forcing from coarser input grid (=1) or not (=0)
+      integer :: interp_frc = {{ surf_flux.interp_frc }} ! For SST and SSS correction
+
+      ! End of user inputs
+      ! *************************************************************
+
