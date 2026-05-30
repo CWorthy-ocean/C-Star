@@ -1,4 +1,3 @@
-from collections.abc import Callable
 import importlib
 import os
 import typing as t
@@ -9,9 +8,6 @@ import typer
 
 import cstar
 from cstar.base.env import (
-    ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLI_VERBOSE,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
     FLAG_ON,
 )
@@ -22,42 +18,16 @@ app = typer.Typer()
 HELP_SHORT = "Print the current version of the C-Star package and exit."
 
 
+BoolCallback: t.TypeAlias = Callable[[typer.Context, bool], bool]
+StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
+
+
 def version_callback(value: bool) -> bool:
     """Print the version of C-Star and exit."""
     if value:
         typer.echo(cstar.__version__)
-        raise typer.Exit()
+        raise typer.Exit(0)
 
-    return value
-
-
-def log_level_callback(value: str) -> str:
-    """Set the log level in the environment for C-Star."""
-    value = value.strip().upper()
-    if value:
-        os.environ[ENV_CSTAR_LOG_LEVEL] = value
-
-    return value
-
-
-def clobber_callback(value: bool) -> bool:
-    """Callback for the clobber option."""
-    if value:
-        os.environ[ENV_CSTAR_CLOBBER_WORKING_DIR] = FLAG_ON
-    return value
-
-
-def verbose_callback(value: bool) -> bool:
-    """Callback for the verbose option."""
-    if value:
-        os.environ[ENV_CSTAR_CLI_VERBOSE] = FLAG_ON
-    return value
-
-
-def dryrun_callback(ctx: typer.Context, value: bool | None) -> bool | None:
-    """Callback for the dry-run option."""
-    if value:
-        os.environ[ENV_CSTAR_CLI_DRY_RUN] = FLAG_ON
     return value
 
 
@@ -75,6 +45,99 @@ def common_callback(
     ] = False,
 ) -> None:
     pass
+
+
+P = t.ParamSpec("P")
+A = t.TypeVar("A")
+
+
+def cb_pipeline(
+    *callbacks: Callable[[typer.Context, A], A],
+) -> Callable[[typer.Context, A], A]:
+    """Create a typer Callback function composed of a series of individual callbacks.
+
+    Parameters
+    ----------
+    callbacks : Callable[[typer.Context, A], A]
+        The sequence of callbacks to be executed
+
+    Returns
+    -------
+    Callable[[typer.Context, A], A]
+    """
+
+    def _callback(ctx: typer.Context, value: A) -> A:
+        """Callback wrapper that executes all specified callbacks."""
+        for callback in callbacks:
+            value = callback(ctx, value)
+
+        return value
+
+    return _callback
+
+
+def set_flag(
+    key: str,
+    extra: BoolCallback | None = None,
+) -> BoolCallback:
+    """Create a typer Callback function that sets the value of an environment
+    variable to the value of the argument supplied by the user.
+
+    Parameters
+    ----------
+    key : str
+        The environment variable to be set
+    extra : StrCallback
+        Additional logic called after setting the environment variable.
+
+    Returns
+    -------
+    StrCallback
+    """
+
+    def _callback(ctx: typer.Context, value: bool) -> bool:
+        """Callback that sets the specified environment variable to `FLAG_ON`
+        if `value` is `True`.
+        """
+        if value:
+            os.environ[key] = FLAG_ON
+
+        if extra:
+            value = extra(ctx, value)
+
+        return value
+
+    return _callback
+
+
+def set_env(
+    key: str,
+    extra: StrCallback | None = None,
+) -> StrCallback:
+    """Create a typer Callback function that sets the value of an environment
+    variable to the value of the argument supplied by the user.
+
+    Parameters
+    ----------
+    key : str
+        The environment variable to be set
+    extra : StrCallback
+        Additional logic called after setting the environment variable.
+
+    Returns
+    -------
+    StrCallback
+    """
+
+    def _callback(ctx: typer.Context, value: str) -> str:
+        """Callback that sets the specified environment variable to the specified value."""
+        value = value.strip()
+        os.environ[key] = value
+        if extra:
+            value = extra(ctx, value)
+        return value
+
+    return _callback
 
 
 def update_loggers(ctx: typer.Context, value: str) -> str:
