@@ -1,13 +1,24 @@
 import abc
 import typing as t
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 
-from cstar.base.adapter import ModelAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FilePath,
+    NewPath,
+    ValidationInfo,
+    field_validator,
+)
 
-if t.TYPE_CHECKING:
-    from cstar.orchestration.models import Blueprint
+from cstar.base.adapter import ModelAdapter
+from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.feature import is_flag_enabled
+from cstar.base.log import LoggingMixin
+from cstar.execution.file_system import DirectoryManager
 
 APP_ROMS_MARBL: t.Literal["roms_marbl"] = "roms_marbl"
 APP_ROMS_MARBL_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
@@ -125,6 +136,56 @@ ConverterMap: t.TypeAlias = Mapping[tuple[str, str, str], type[SchemaAdapter]]
 """A mapping of (application, source version, target version) keys to adapters."""
 
 
+class MigrationRequest(BaseModel):
+    source: FilePath = Field(
+        frozen=True,
+        description="Path to a file containing a serialized blueprint",
+        alias="path",
+    )
+    target: NewPath | None = Field(
+        default=None,
+        description="Path where the migrated blueprint will be serialized",
+        frozen=True,
+        alias="output",
+    )
+
+    config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
+    """Model configuration ensuring attributes have whitespace stripped."""
+
+    @classmethod
+    def dry_run(cls) -> bool:
+        """Return `True` if dry-run is enabled."""
+        return is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)
+
+    @classmethod
+    def clobber(cls) -> bool:
+        """Return `True` if clobber is enabled."""
+        return is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR)
+
+    @field_validator("target", mode="before")
+    @classmethod
+    def _clobber_target(
+        cls,
+        value: str,
+        _info: "ValidationInfo",
+    ) -> str:
+        """Remove a pre-existing target file if clobber is enabled.
+
+        Parameters
+        ----------
+        value : str
+            The value of the target property
+        _info : ValidationInfo
+            Metadata for the current validation context
+        """
+        if cls.clobber() and value:
+            path = Path(value)
+            if path.exists() and path.is_file():
+                path.unlink()
+
+        return value
+
+
 class MigrationPlan(t.NamedTuple):
     """Results describing the plan that will be used to complete a migration."""
 
@@ -135,17 +196,34 @@ class MigrationPlan(t.NamedTuple):
     adapters: Sequence[type[SchemaAdapter]]
     """An ordered list of adapters that will complete the migration when applied."""
 
+    @property
+    def is_latest(self) -> bool:
+        return self.source == self.target
 
-class MigrationResult(t.NamedTuple):
+
+class MigrateResult(t.NamedTuple):
     """The results of an executed migration."""
 
-    blueprint: "Blueprint"
-    """The migrated blueprint (or original if up-to-date)."""
-    path: Path | None
-    """The path where the migrated blueprint was saved (if applicable)."""
+    original: dict[str, t.Any]
+    """The original model content."""
+    migrated: dict[str, t.Any]
+    """The migrated model content."""
+    error: str = ""
+    """Error(s) causing the migration to fail."""
+    plan: MigrationPlan | None = None
+    """The migration plan if migration was possible, otherwise `None`."""
+
+    @property
+    def application(self) -> str:
+        return self.migrated.get("application", "")
 
 
-class Migration(abc.ABC):
+class PersistedMigrateResult(t.NamedTuple):
+    result: MigrateResult
+    target: str | Path
+
+
+class Migration(abc.ABC, LoggingMixin):
     """Base class for types that will execute a version migration by executing
     one to many SchemaAdapters.
     """
@@ -156,7 +234,19 @@ class Migration(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def migrate(self, dumped: dict[str, t.Any]) -> dict[str, t.Any]:
+    def migrate(
+        self,
+        dumped: dict[str, t.Any],
+        plan: MigrationPlan,
+    ) -> dict[str, t.Any]:
+        """Execute the upgrade path."""
+        ...
+
+    @abc.abstractmethod
+    def plan_and_migrate(
+        self,
+        dumped: dict[str, t.Any],
+    ) -> MigrateResult:
         """Execute the upgrade path."""
         ...
 
@@ -208,6 +298,10 @@ class HelloWorldSchemaAdapter2025v1(SchemaAdapter):
         return {**model}
 
 
+OnPlannedCallback: t.TypeAlias = Callable[[MigrationPlan], None]
+OnMigratedCallback: t.TypeAlias = Callable[[MigrationPlan], None]
+
+
 class BlueprintMigration(Migration):
     """A migration controller for RomsMarblBlueprints."""
 
@@ -218,14 +312,23 @@ class BlueprintMigration(Migration):
     schema_bounds: Mapping[str, SchemaBounds]
     """A mapping of unique app names to their minimum and maximum schema version."""
 
+    on_planned_callback: Callable[[MigrationPlan], None] | None = None
+    """Callback executed when the migrator completes a plan."""
+    on_migrated_callback: Callable[[MigrationPlan], None] | None = None
+    """Callback executed when the migrator completes a migration."""
+
     def __init__(
         self,
         adapters: Sequence[type[SchemaAdapter]] | None = None,
         schema_bounds: Mapping[str, SchemaBounds] | None = None,
+        on_planned: OnPlannedCallback | None = None,
+        on_migrated: OnMigratedCallback | None = None,
     ) -> None:
         self.adapters = adapters or [RomsMarblSchemaAdapter2025v1]
         self.schema_bounds = schema_bounds or default_schema_bounds
         self.adapter_lookup = self._build_adapter_lookup()
+        self.on_planned_callback = on_planned
+        self.on_migrated_callback = on_migrated
 
     def _build_adapter_lookup(self) -> ConverterMap:
         """Build the mapping that enables the lookup of adapters.
@@ -256,7 +359,7 @@ class BlueprintMigration(Migration):
         CstarUnsupportedMigrationError
             If unable to identify a complete migration upgrade path.
         """
-        plan: list[type[SchemaAdapter]] = []
+        adapters: list[type[SchemaAdapter]] = []
         application = dumped["application"]
 
         if application not in self.schema_bounds:
@@ -283,16 +386,23 @@ class BlueprintMigration(Migration):
                 raise CstarUnsupportedMigrationError(msg)
 
             # store adapter and prepare to traverse the next edge
-            plan.append(self.adapter_lookup[key])
+            adapters.append(self.adapter_lookup[key])
             _, _, version = key
 
         if version != goal:
             msg = f"Incomplete migration from {initial_version!r} to {goal!r}"
             raise CstarUnsupportedMigrationError(msg)
 
-        return MigrationPlan(initial_version, goal, plan)
+        migration_plan = MigrationPlan(initial_version, goal, adapters)
+        if self.on_planned_callback:
+            self.on_planned_callback(migration_plan)
+        return migration_plan
 
-    def migrate(self, dumped: dict[str, t.Any]) -> dict[str, t.Any]:
+    def migrate(
+        self,
+        dumped: dict[str, t.Any],
+        plan: MigrationPlan,
+    ) -> dict[str, t.Any]:
         """Execute the plan to upgrade the blueprint to the latest version.
 
         Returns
@@ -305,14 +415,68 @@ class BlueprintMigration(Migration):
         CstarMigrationError
             If the migration cannot be completed.
         """
-        source, target, plan = self.plan(dumped)
+        # source, target, plan = self.plan(dumped)
         model = deepcopy(dumped)
 
-        for klass in plan:
+        for klass in plan.adapters:
             if model := klass(model).adapt():
                 continue
 
-            msg = f"Schema migration from {source!r} to {target!r} failed."
+            msg = f"Schema migration from {plan.source!r} to {plan.target!r} failed."
             raise CstarMigrationError(msg)
 
+        if self.on_migrated_callback:
+            self.on_migrated_callback(plan)
         return model
+
+    def plan_and_migrate(self, dumped: dict[str, t.Any]) -> MigrateResult:
+        """Create a migration plan and execute it."""
+        try:
+            plan = self.plan(dumped)
+        except CstarUnsupportedMigrationError as ex:
+            msg = f"Unable to plan migration: {ex}"
+            # raise typer.BadParameter(msg) from ex
+            return MigrateResult(dumped, {}, error=msg)
+
+        if plan.is_latest:
+            # msg = f"The blueprint already uses the latest schema: {plan.source}"
+            # print(msg)
+            return MigrateResult(dumped, dumped, plan=plan)
+
+        try:
+            migrated = self.migrate(dumped, plan)
+        # except (CstarExpectationFailed, CstarMigrationError) as ex:
+        except CstarMigrationError as ex:
+            msg = f"Unable to complete migration: {ex}"
+            # raise typer.BadParameter(msg) from ex
+            return MigrateResult(dumped, {}, plan=plan, error=msg)
+
+        return MigrateResult(
+            dumped,
+            migrated,
+            plan=plan,
+        )
+
+
+def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Path:
+    """Determine the persistence path for a migrated model.
+
+    If a target is not supplied by the user, write to the `CSTAR_STATE_HOME`
+    directory.
+
+    Parameters
+    ----------
+    source : Path
+        Path to the file containing the original, serialized model.
+    target : Path | None
+        The user-supplied path
+    """
+    if target is not None:
+        output = target
+    else:
+        stem = source.stem
+        suffix = source.suffix
+        state_dir = DirectoryManager.state_home()
+        output = state_dir / f"{stem}_{plan.target}{suffix}"
+
+    return output.expanduser().resolve()

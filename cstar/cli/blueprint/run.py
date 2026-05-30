@@ -1,5 +1,6 @@
 import asyncio
 import typing as t
+from pathlib import Path
 
 import typer
 from pydantic import ValidationError
@@ -15,10 +16,13 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     get_env_item,
 )
+from cstar.base.feature import ENV_FF_CLI_BP_MIGRATE_AUTO, is_feature_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
+    MigrationRequest,
     cb_pipeline,
     execute_migration,
+    print_validation_errors,
     set_env,
     set_flag,
     update_loggers,
@@ -36,12 +40,16 @@ from cstar.entrypoint.utils import (
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
-    from cstar.orchestration.models import Blueprint
+
+
+CMD_NAME: t.Final[str] = "run"
+CMD_HELP: t.Final[str] = "Execute a blueprint in a local worker service."
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -69,26 +77,28 @@ def path_callback(
         The path to the blueprint (or the newly migrated blueprint file).
     """
     try:
-        migration_result = execute_migration(path)
-        ctx.obj = migration_result.blueprint
+        with local_copy(path) as local_path:
+            if is_feature_enabled(ENV_FF_CLI_BP_MIGRATE_AUTO):
+                request = MigrationRequest(path=local_path)
+                result, bp_path = execute_migration(request)
 
-        if migration_result.path:
-            return str(migration_result.path)
+                if result.error:
+                    print(result.error)
+                    raise typer.Exit(1)
+            else:
+                bp_path = Path(local_path)
+
+            base_bp = deserialize(bp_path, Blueprint)
+            app = get_application(base_bp.application)
+            ctx.obj = app.blueprint(**base_bp.model_dump())
+            return str(bp_path)
 
     except FileNotFoundError as ex:
-        msg = f"Blueprint file not found: {path}"
+        msg = f"Blueprint file not found: {ex.filename}"
         raise typer.BadParameter(msg) from ex
     except ValidationError as ex:
-        msg = f"Blueprint file is malformed: {ex}"
-        raise typer.BadParameter(msg) from ex
-    except Exception as ex:
-        # If the error is essentially that the file doesn't exist (e.g. from validate_serialized_entity)
-        # we want to preserve the "not found" message for tests and user clarity.
-        if "not found" in str(ex).lower() or "no such file" in str(ex).lower():
-            msg = f"Blueprint not found at path: {path}"
-            raise typer.BadParameter(msg) from ex
-
-        msg = f"Unable to process or migrate blueprint: {ex}"
+        print_validation_errors(ex)
+        msg = f"Blueprint file is malformed: {path}"
         raise typer.BadParameter(msg) from ex
 
     return path
@@ -128,7 +138,7 @@ def directives_callback(path: str | None) -> str | None:
     return path
 
 
-@app.command(name="run", help="Execute a blueprint in a local worker service.")
+@app.command(name=CMD_NAME, help=CMD_HELP)
 def run(
     ctx: typer.Context,
     uri: t.Annotated[

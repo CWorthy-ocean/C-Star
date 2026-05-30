@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import functools
 import os
 import shutil
@@ -438,16 +439,21 @@ def write_local_copy(url: str, directory: Path) -> Path:
     -------
     Path
         The local path where the remote resource was copied
+
+    Raises
+    ------
+    FileNotFoundError
+        If the remote URL cannot be retrieved.
     """
     parsed_url = urlsplit(url)
     resource_path = Path(parsed_url.path)
     resource_name = resource_path.name
     http_ok: t.Final[int] = 200
 
-    get_request = request("GET", url, timeout=2.0)
+    get_request = request("GET", url, timeout=1.0)
     if get_request.status_code != http_ok:
-        msg = f"Unable to retrieve file from: {url}"
-        raise FileNotFoundError(msg)
+        msg = "Unable to retrieve remote file"
+        raise FileNotFoundError(errno.ENOENT, msg, url)
 
     local_path = directory / resource_name
     local_path.write_text(get_request.text)

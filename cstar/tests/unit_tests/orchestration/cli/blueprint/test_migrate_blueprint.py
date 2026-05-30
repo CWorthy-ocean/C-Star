@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.cli.blueprint.migrate import app
 from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
+from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import hw_bounds, rm_bounds
 
@@ -54,7 +55,8 @@ def test_blueprint_migrate_file_dne(tmp_path: Path) -> None:
         color=False,
     )
 
-    assert "not found" in result.stderr
+    assert "Invalid value for 'PATH'" in result.stderr
+    assert "was not found" in result.stderr
 
 
 def test_blueprint_migrate_remote_blueprint_dne() -> None:
@@ -68,9 +70,10 @@ def test_blueprint_migrate_remote_blueprint_dne() -> None:
         color=False,
     )
 
-    assert "not found" in result.stderr
+    assert "Unable to retrieve remote file" in result.stderr
 
 
+@pytest.mark.usefixtures("mock_state_dir")
 def test_blueprint_migrate_default_output(blueprint_1_0_0_sleep: Path) -> None:
     """Verify that a request to migrate a blueprint without specifying an output
     path explicitly results in the creation of a file matching the expected naming
@@ -78,7 +81,8 @@ def test_blueprint_migrate_default_output(blueprint_1_0_0_sleep: Path) -> None:
     """
     latest = rm_bounds["max"]
     bp_path = blueprint_1_0_0_sleep
-    expected_output_path = Path(f"./{bp_path.stem}_{latest}.yaml")
+    state_dir = DirectoryManager.state_home()
+    expected_output_path = state_dir / f"{bp_path.stem}_{latest}.yaml"
 
     runner = CliRunner()
     result = runner.invoke(
@@ -110,7 +114,7 @@ def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
         [bp_path.as_posix()],
         color=False,
     )
-    assert "uses the latest" in result.stdout
+    assert "No migration needed" in result.stdout
     assert latest in result.stdout
 
 
