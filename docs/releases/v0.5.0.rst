@@ -31,6 +31,7 @@ Breaking Changes
 - Core contracts for application building (e.g. `Transform`, `XRunner`, `RunnerRequest, etc) have been relocated  `cstar.applications.core` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Deprecated the `Registrar` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Deprecated unused `ComputingPlatform` model (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
+- The `WorkplanTransformer` no longer receives transforms to the `__init__` method (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -53,6 +54,7 @@ New features
 - Enable upgrading blueprint files using the `cstar blueprint migrate` command (`#515 <https://github.com/CWorthy-ocean/C-Star/pull/515>`_)
 - Added support for dynamic discovery of applications residing in subpackages of `cstar.application` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Add `cstar workplan log <run-id> <step>` command to easily view logs from a workplan step. (`#525 <https://github.com/CWorthy-ocean/C-Star/pull/525>`_)
+- The `OverrideTransform` is now applied automatically after all registered transforms and does not need to be registered for the application. (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -166,6 +168,7 @@ Improvements
 - Enabled state tracking when running blueprints for improved progress visibility (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Improved docstrings and type-hinting in affected code (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Remove unnecessary use of `Literal` types (`#525 <https://github.com/CWorthy-ocean/C-Star/pull/525>`_)
+- Replaced variable length tuple typehints with simpler `Sequence` (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
