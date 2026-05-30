@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://c-star.readthedocs.io/en/latest/_downloads/dab02d5a36151a29566f7f6b5a4c5533/plotter_schema.1.0.0.json
 name: wales_plotter
 description: plot outputs from wales domain
 application: plotter
@@ -9,9 +10,9 @@ variables:
   - "ALK"
   - "pH_3D"
 time_indices:
-  - "-1"
+  - -1
 s_indices:
   - 0
-  - "-1"
+  - -1
 grid_file_path: "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc"
 file_glob: "*bgc*.nc"
