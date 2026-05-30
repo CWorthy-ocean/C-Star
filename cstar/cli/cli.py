@@ -29,7 +29,6 @@ def attach_subcommands(app: typer.Typer) -> None:
                 app.add_typer(
                     command_app,
                     name=command_name,
-                    callback=common_callback,
                 )
     except Exception as ex:
         print(f"An error occurred while handling request: {ex}")
