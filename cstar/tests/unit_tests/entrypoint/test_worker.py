@@ -464,11 +464,6 @@ async def test_runner_can_shutdown_as_task(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # Configure the RomsMarblRunner to run as a task
     sim_runner._config.as_service = False
 
@@ -511,11 +506,6 @@ async def test_runner_shutdown_handler_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # Configure the RomsMarblRunner to run as a service
     sim_runner._config.as_service = True
 
@@ -568,11 +558,6 @@ async def test_runner_shutdown_handler_not_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # Configure the RomsMarblRunner to run as a service
     sim_runner._config.as_service = True
 
@@ -617,11 +602,6 @@ async def test_runner_shutdown_side_effects(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=status)
     mock_disposition = mock.Mock()
     mock_simulation = mock.Mock()
@@ -656,11 +636,6 @@ async def test_runner_on_start_without_uri(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     mock_simulation = mock.Mock()
@@ -702,11 +677,6 @@ async def test_runner_on_start_without_simulation(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     # mock_simulation = mock.Mock()
@@ -743,11 +713,6 @@ async def test_runner_on_start_user_unhandled_setup(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # configure the simulation to raise an exception during SETUP
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_run = mock.Mock(return_value=mock_handler)
@@ -794,11 +759,6 @@ async def test_runner_on_start_user_unhandled_build(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
     mocked_error_msg = "Mock build failure"
@@ -845,11 +805,6 @@ async def test_runner_on_start_user_unhandled_pre_run(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
     mocked_error_msg = "Mock pre-run failure"
@@ -896,11 +851,6 @@ async def test_runner_on_iteration(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
@@ -1178,11 +1128,6 @@ async def test_bluerintrunner_can_shutdown(
     runner_state : RunnerState
         A runner state that should trigger shutdown.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     result = RunnerResult[RomsMarblBlueprint](
         mock.MagicMock(),
         state=runner_state,
