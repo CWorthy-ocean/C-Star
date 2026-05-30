@@ -55,6 +55,7 @@ New features
 - Added support for dynamic discovery of applications residing in subpackages of `cstar.application` (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - Add `cstar workplan log <run-id> <step>` command to easily view logs from a workplan step. (`#525 <https://github.com/CWorthy-ocean/C-Star/pull/525>`_)
 - The `OverrideTransform` is now applied automatically after all registered transforms and does not need to be registered for the application. (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
+- Enable callback chaining for CLI arguments (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -115,6 +116,7 @@ Bug Fixes
 - Fix a case-sensitivity bug in run-id autocompletion (`#525 <https://github.com/CWorthy-ocean/C-Star/pull/525>`_)
 - Fix failing unit test causing new feature branches to fail (`#530 <https://github.com/CWorthy-ocean/C-Star/pull/530>`_)
 - Remove python-specific named group syntax in `checkpoint_frequency` regex. (`#531 <https://github.com/CWorthy-ocean/C-Star/pull/531>`_)
+- Enhance log-level callback to reset log levels to fix inconsistent logging levels when passing `--log-level` CLI parameter (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -171,6 +173,7 @@ Improvements
 - Remove unnecessary use of `Literal` types (`#525 <https://github.com/CWorthy-ocean/C-Star/pull/525>`_)
 - Replaced variable length tuple typehints with simpler `Sequence` (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
 - Removed unnecessary file creation during worker tests. (`#533 <https://github.com/CWorthy-ocean/C-Star/pull/533>`_)
+- Removed unnecessary addition of version callback to all typer apps (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
