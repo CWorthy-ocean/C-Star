@@ -8,7 +8,6 @@ from pathlib import Path
 
 from prefect import flow
 
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
@@ -234,7 +233,8 @@ async def prepare_workplan(
         file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
 
     transformer = WorkplanTransformer(
-        wp_orig, RomsMarblTimeSplitter(), fill_transform=fill_transform
+        wp_orig,
+        fill_transform,
     )
     wp = transformer.apply()
 

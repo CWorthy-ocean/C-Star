@@ -309,7 +309,7 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """The runner that executes the application blueprints."""
     blueprint: type[TBlueprint]
     """The blueprint containing the application configuration."""
-    applicable_transforms: tuple[type[t.Any], ...]
+    applicable_transforms: Sequence[type[Transform[t.Any]]]
     """Transforms that must be executed prior to execution."""
 
 

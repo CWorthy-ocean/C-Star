@@ -25,7 +25,6 @@ from cstar.orchestration.models import (
 from cstar.orchestration.serialization import register_representer, strenum_representer
 from cstar.orchestration.transforms import (
     DirectiveConfig,
-    OverrideTransform,
 )
 from cstar.roms import ROMSSimulation
 
@@ -128,7 +127,7 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     long_name: str = _APP_NAME_LONG
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
-    applicable_transforms = (RomsMarblTimeSplitter, OverrideTransform)
+    applicable_transforms = (RomsMarblTimeSplitter,)
 
 
 def main() -> int:

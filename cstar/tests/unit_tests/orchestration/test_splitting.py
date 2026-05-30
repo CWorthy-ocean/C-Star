@@ -8,6 +8,7 @@ import pytest
 
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
@@ -84,7 +85,11 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
     data_home = tmp_path / "data"
     with mock.patch.dict(
         os.environ,
-        {ENV_CSTAR_RUNID: "12345", ENV_CSTAR_DATA_HOME: data_home.as_posix()},
+        {
+            ENV_CSTAR_RUNID: "12345",
+            ENV_CSTAR_DATA_HOME: data_home.as_posix(),
+            ENV_FF_ORCH_TRX_TIMESPLIT: "1",
+        },
         clear=True,
     ):
         transformed_steps = list(transform(original_step))

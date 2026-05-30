@@ -3,15 +3,11 @@ import typing as t
 from cstar.applications.core import (
     ApplicationDefinition,
     RunnerResult,
-    Transform,
     register_application,
 )
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
-
-if t.TYPE_CHECKING:
-    from cstar.orchestration.orchestration import LiveStep
 
 APP_NAME: t.Literal["hello_world"] = "hello_world"
 
@@ -54,4 +50,4 @@ class HelloWorldApplication(
     long_name = APP_NAME
     runner = HelloWorldRunner
     blueprint = HelloWorldBlueprint
-    applicable_transforms: "tuple[type[Transform[LiveStep]], ...]" = ()
+    applicable_transforms = ()
