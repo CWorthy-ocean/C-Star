@@ -194,14 +194,13 @@ def fsm_resolver(
         for p in dir(next(iter(fsm_map.values())))
         if not p.startswith("_") and p.endswith("_dir")
     ]
+    fsm = fsm_map.get(step_name, None)
+    if not fsm:
+        msg = f"Unable to resolve {scope!r} for unknown step {step_name!r}"
+        raise ValueError(msg)
+
     fsm_attrs.append("root")
-    resolution_map = {
-        f"{name}_{fsm_attr}": str(getattr(fsm, fsm_attr))
-        for name, fsm in fsm_map.items()
-        for fsm_attr in fsm_attrs
-        if name == step_name and fsm_attr == scope
-    }
-    if value := resolution_map.get(f"{step_name}_{scope}"):
+    if value := str(getattr(fsm, scope, None)):
         return value
 
     ph = mustache(f"{scope}: {step_name}")
