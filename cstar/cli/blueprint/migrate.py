@@ -1,4 +1,3 @@
-import logging
 import typing as t
 from pathlib import Path
 
@@ -11,7 +10,7 @@ from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
 )
-from cstar.base.log import LogLevelChoices, get_logger, parse_log_level_name
+from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     MigrationRequest,
     cb_pipeline,
@@ -124,14 +123,6 @@ def clobber_output(ctx: typer.Context, value: bool) -> bool:
         if path.exists():
             path.unlink()
 
-    return value
-
-
-def update_logger(ctx: typer.Context, value: str) -> str:
-    logging.getLogger().setLevel(parse_log_level_name(value))
-    loggers = [logging.getLogger(name) for name in logging.root.manager.loggerDict]
-    for logger in loggers:
-        logger.setLevel(logging.NOTSET)
     return value
 
 
