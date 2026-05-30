@@ -11,6 +11,7 @@ ARG_DIRECTIVES_URI_SHORT: t.Final[str] = "-d"
 
 ARG_LOGLEVEL_LONG: t.Final[str] = "--log-level"
 ARG_LOGLEVEL_SHORT: t.Final[str] = "-l"
+ARG_LOGLEVEL_HELP: t.Final[str] = "Set the logging level for C-Star."
 
 ARG_OUTPUT_LONG: t.Final[str] = "--output"
 ARG_OUTPUT_SHORT: t.Final[str] = "-o"

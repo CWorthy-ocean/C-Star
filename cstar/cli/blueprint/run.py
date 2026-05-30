@@ -15,13 +15,19 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.log import LogLevelChoices, get_logger
-from cstar.cli.common import clobber_callback, log_level_callback
+from cstar.cli.common import (
+    cb_pipeline,
+    set_env,
+    set_flag,
+    update_loggers,
+)
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
     ARG_DIRECTIVES_URI_LONG,
     ARG_DIRECTIVES_URI_SHORT,
+    ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
 )
@@ -128,8 +134,8 @@ def run(
         typer.Option(
             ARG_LOGLEVEL_LONG,
             ARG_LOGLEVEL_SHORT,
-            callback=log_level_callback,
-            help="Set the log level for C-Star.",
+            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
+            help=ARG_LOGLEVEL_HELP,
             envvar=ENV_CSTAR_LOG_LEVEL,
         ),
     ] = LogLevelChoices.INFO,
@@ -137,7 +143,7 @@ def run(
         bool,
         typer.Option(
             ARG_CLOBBER,
-            callback=clobber_callback,
+            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
             help=ARG_CLOBBER_HELP,
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
