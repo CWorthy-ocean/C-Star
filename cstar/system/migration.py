@@ -10,8 +10,6 @@ from pydantic import (
     Field,
     FilePath,
     NewPath,
-    ValidationInfo,
-    field_validator,
 )
 
 from cstar.base.adapter import ModelAdapter
@@ -161,29 +159,6 @@ class MigrationRequest(BaseModel):
     def clobber(cls) -> bool:
         """Return `True` if clobber is enabled."""
         return is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR)
-
-    @field_validator("target", mode="before")
-    @classmethod
-    def _clobber_target(
-        cls,
-        value: str,
-        _info: "ValidationInfo",
-    ) -> str:
-        """Remove a pre-existing target file if clobber is enabled.
-
-        Parameters
-        ----------
-        value : str
-            The value of the target property
-        _info : ValidationInfo
-            Metadata for the current validation context
-        """
-        if cls.clobber() and value:
-            path = Path(value)
-            if path.exists() and path.is_file():
-                path.unlink()
-
-        return value
 
 
 class MigrationPlan(t.NamedTuple):

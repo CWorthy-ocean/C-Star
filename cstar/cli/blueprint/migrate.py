@@ -170,7 +170,10 @@ def migrate(
         typer.Option(
             ARG_CLOBBER,
             help=ARG_CLOBBER_HELP,
-            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),  # extra=clobber_output),
+            callback=cb_pipeline(
+                set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
+                clobber_output,
+            ),
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
     ] = False,
