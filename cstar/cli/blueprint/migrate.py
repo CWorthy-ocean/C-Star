@@ -64,7 +64,7 @@ def path_callback(value: str) -> str:
 
     Returns
     -------
-    Path
+    str
     """
     value = value.strip() if value else ""
 
@@ -105,7 +105,7 @@ def target_callback(value: str) -> str:
 
     Returns
     -------
-    Path
+    str
     """
     if not value or not value.strip():
         return value.strip()
@@ -116,7 +116,19 @@ def target_callback(value: str) -> str:
 
 
 def dryrun_notify(ctx: typer.Context, value: bool) -> bool:
-    """Display informational message to user if a parameter conflict is found."""
+    """Display informational message to user if a parameter conflict is found.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context object.
+    value : bool
+        The value of the dry-run parameter.
+
+    Returns
+    -------
+    bool
+    """
     output = ctx.params.get("output", "")
 
     if value and output:
@@ -135,6 +147,10 @@ def clobber_output(ctx: typer.Context, value: bool) -> bool:
         The typer context object.
     value : bool
         The value of the clobber parameter.
+
+    Returns
+    -------
+    bool
     """
     output = ctx.params.get("output", "")
     if value and output:
