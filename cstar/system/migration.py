@@ -193,11 +193,6 @@ class MigrateResult(t.NamedTuple):
         return self.migrated.get("application", "")
 
 
-class PersistedMigrateResult(t.NamedTuple):
-    result: MigrateResult
-    target: str | Path
-
-
 class Migration(abc.ABC, LoggingMixin):
     """Base class for types that will execute a version migration by executing
     one to many SchemaAdapters.

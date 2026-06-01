@@ -26,7 +26,6 @@ from cstar.system.migration import (
     MigrateResult,
     MigrationPlan,
     MigrationRequest,
-    PersistedMigrateResult,
     get_persist_to,
 )
 
@@ -187,6 +186,11 @@ def locate_app_modules() -> list[str]:
 def autoimport_apps(module_names: list[str]) -> None:
     for module_name in module_names:
         importlib.import_module(module_name)
+
+
+class PersistedMigrateResult(t.NamedTuple):
+    result: MigrateResult
+    target: str | Path
 
 
 def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
