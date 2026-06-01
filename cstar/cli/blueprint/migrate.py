@@ -57,6 +57,11 @@ def path_callback(value: str) -> str:
 
     Resulting path has been expanded and resolved.
 
+    Parameters
+    ----------
+    value : bool
+        The value of the path parameter.
+
     Returns
     -------
     Path
@@ -91,6 +96,13 @@ def target_callback(value: str) -> str:
 
     Resulting path has been expanded and resolved.
 
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context object.
+    value : bool
+        The value of the output parameter.
+
     Returns
     -------
     Path
@@ -116,6 +128,13 @@ def dryrun_notify(ctx: typer.Context, value: bool) -> bool:
 def clobber_output(ctx: typer.Context, value: bool) -> bool:
     """Callback for clobber parameter that removes a pre-existing output file
     and mitigates a FileExistsError.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context object.
+    value : bool
+        The value of the clobber parameter.
     """
     output = ctx.params.get("output", "")
     if value and output:
