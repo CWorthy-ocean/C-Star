@@ -57,6 +57,8 @@ New features
 - Add `cstar workplan log <run-id> <step>` command to easily view logs from a workplan step. (`#525 <https://github.com/CWorthy-ocean/C-Star/pull/525>`_)
 - The `OverrideTransform` is now applied automatically after all registered transforms and does not need to be registered for the application. (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
 - Enable callback chaining for CLI arguments (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
+- Execution of `cstar blueprint run` with any out-of-date blueprint automatically triggers a schema migration (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
+- Add `--clobber` flag to `cstar blueprint migrate ...` to allow overwriting prior migrations (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -175,6 +177,8 @@ Improvements
 - Replaced variable length tuple typehints with simpler `Sequence` (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
 - Removed unnecessary file creation during worker tests. (`#533 <https://github.com/CWorthy-ocean/C-Star/pull/533>`_)
 - Removed unnecessary addition of version callback to all typer apps (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
+- Minor de-duplication of help text in CLI via adding constants (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
+- Refactored as needed to share migration code with manual migration triggered via `cstar blueprint migrate ...` (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
