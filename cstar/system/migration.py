@@ -287,9 +287,9 @@ class BlueprintMigration(Migration):
     schema_bounds: Mapping[str, SchemaBounds]
     """A mapping of unique app names to their minimum and maximum schema version."""
 
-    on_planned_callback: Callable[[MigrationPlan], None] | None = None
+    on_planned_callback: OnPlannedCallback | None = None
     """Callback executed when the migrator completes a plan."""
-    on_migrated_callback: Callable[[MigrationPlan], None] | None = None
+    on_migrated_callback: OnMigratedCallback | None = None
     """Callback executed when the migrator completes a migration."""
 
     def __init__(
