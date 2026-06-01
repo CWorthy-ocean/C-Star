@@ -440,6 +440,11 @@ def write_local_copy(url: str, directory: Path) -> Path:
     -------
     Path
         The local path where the remote resource was copied
+
+    Raises
+    ------
+    FileNotFoundError
+        If the remote URL cannot be retrieved.
     """
     parsed_url = urlsplit(url)
     resource_path = Path(parsed_url.path)
