@@ -59,6 +59,7 @@ New features
 - Enable callback chaining for CLI arguments (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
 - Execution of `cstar blueprint run` with any out-of-date blueprint automatically triggers a schema migration (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 - Add `--clobber` flag to `cstar blueprint migrate ...` to allow overwriting prior migrations (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
+- `cstar workplan generate ...` enables the user to specify a glob pattern or file extension (`#536 <https://github.com/CWorthy-ocean/C-Star/pull/536>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
