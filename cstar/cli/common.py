@@ -300,8 +300,7 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         print(migration_result.error)
         raise typer.Exit(1)
 
-    plan = migration_result.plan
-    if not plan:
+    if not migration_result.plan:
         print("Migration failed to produce a plan.")
         raise typer.Exit(2)
 
