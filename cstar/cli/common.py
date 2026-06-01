@@ -1,3 +1,4 @@
+import functools
 import importlib
 import os
 import typing as t
@@ -5,14 +6,28 @@ from collections.abc import Callable
 from pathlib import Path
 
 import typer
+from pydantic import (
+    ValidationError,
+)
 
 import cstar
+from cstar.applications.core import get_application
 from cstar.base.env import (
+    ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_LOG_LEVEL,
     FLAG_ON,
 )
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, reset_log_level
-from cstar.execution.file_system import is_remote_resource
+from cstar.execution.file_system import DirectoryManager, is_remote_resource
+from cstar.orchestration.models import Blueprint
+from cstar.orchestration.serialization import serialize, validate_serialized_entity
+from cstar.system.migration import (
+    BlueprintMigration,
+    MigrateResult,
+    MigrationPlan,
+    MigrationRequest,
+)
 
 app = typer.Typer()
 
@@ -183,3 +198,165 @@ def locate_app_modules() -> list[str]:
 def autoimport_apps(module_names: list[str]) -> None:
     for module_name in module_names:
         importlib.import_module(module_name)
+
+
+class PersistedMigrateResult(t.NamedTuple):
+    result: MigrateResult
+    target: str | Path
+
+
+def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
+    """Display a summary of the migration plan.
+
+    Parameters
+    ----------
+    bp_path : Path
+        The path to the blueprint being migrated.
+    migration_plan : MigrationPlan
+        Details of the planned migration.
+    """
+    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE) or not plan.adapters:
+        if plan.is_latest:
+            print(f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}")
+        else:
+            num_steps = len(plan.adapters)
+            print(f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} steps.")
+        return
+
+    from rich.console import Console  # noqa: PLC0415
+    from rich.table import Column, Table  # noqa: PLC0415
+
+    source, target, adapters = plan
+    padding = (0, 1)
+    console = Console()
+
+    table = Table(
+        Column(header="Step", justify="center"),
+        Column(header="From", justify="center"),
+        Column(header="To", justify="center"),
+        title=f"Migration Plan for [yellow]{bp_path.name}[/yellow]",
+        show_lines=True,
+        padding=padding,
+        pad_edge=False,
+        row_styles=["", "dim"],
+        min_width=40,
+        caption=f"Initial Schema: [green]{source}[/green]\nFinal Schema: [red]{target}[/red]",
+    )
+
+    for i, adapter in enumerate(adapters):
+        table.add_row(
+            str(i + 1),
+            adapter.source(),
+            adapter.target(),
+        )
+
+    console.print(table)
+
+
+def on_migrated_callback(plan: MigrationPlan) -> None:
+    print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
+
+
+def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Path:
+    """Determine the persistence path for a migrated model.
+
+    If a target is not supplied by the user, write to the `CSTAR_STATE_HOME`
+    directory.
+
+    Parameters
+    ----------
+    source : Path
+        Path to the file containing the original, serialized model.
+    target : Path | None
+        The user-supplied path
+    """
+    if target is not None:
+        output = target
+    else:
+        stem = source.stem
+        suffix = source.suffix
+        state_dir = DirectoryManager.state_home()
+        output = state_dir / f"{stem}_{plan.target}{suffix}"
+
+    return output.expanduser().resolve()
+
+
+def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
+    """Serialize the migrated entity to disk.
+
+    Returns
+    -------
+    Path
+        The path to the persisted entity file.
+    """
+    if result.plan is None:
+        msg = "Unable to persist an unplanned migration"
+        raise ValueError(msg)
+
+    persist_to = get_persist_to(request.source, request.target, result.plan)
+
+    try:
+        bp_type = get_application(result.application).blueprint
+        updated_bp = bp_type(**result.migrated)
+        nbytes = serialize(persist_to, updated_bp)
+        assert nbytes, "The migrated blueprint failed to write content"
+    except SyntaxError as ex:
+        msg = f"Unable to complete migration: {ex}"
+        raise typer.BadParameter(msg) from ex
+
+    return persist_to
+
+
+def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
+    """Execute the schema migration for a blueprint.
+
+    Parameters
+    ----------
+    request : MigrationRequest
+        Parameters to pass to the migrator.
+
+    Returns
+    -------
+    PersistedMigrationResult
+        Named tuple containing the migration result and path where it was persisted.
+    """
+    validation_result = validate_serialized_entity(request.source, Blueprint)
+    if validation_result.item is None:
+        raise typer.BadParameter(validation_result.error_msg)
+
+    dumped = validation_result.item.model_dump()
+
+    migrator = BlueprintMigration(
+        on_planned=functools.partial(on_planned_callback, request.source),
+        on_migrated=on_migrated_callback,
+    )
+
+    if request.dry_run():
+        migrator.plan(dumped)
+        raise typer.Exit(0)
+
+    migration_result = migrator.plan_and_migrate(dumped)
+    if migration_result.error:
+        print(migration_result.error)
+        raise typer.Exit(1)
+
+    if not migration_result.plan:
+        print("Migration failed to produce a plan.")
+        raise typer.Exit(2)
+
+    persisted_to = persist_migration(request, migration_result)
+
+    return PersistedMigrateResult(migration_result, persisted_to)
+
+
+def print_validation_errors(ex: ValidationError) -> None:
+    """Display the contents of a validation error in a user-friendly format."""
+    error_format: t.Final[str] = "Invalid {0} value ({1}): {2}"
+
+    for error in ex.errors():
+        msg = error_format.format(
+            f"{error['loc'][0]!r}",
+            f"{error['input']!r}",
+            f"{error['msg']}",
+        )
+        print(msg)

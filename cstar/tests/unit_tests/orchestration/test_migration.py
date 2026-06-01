@@ -51,10 +51,10 @@ def test_migration_version(model: dict[str, t.Any], exp_version: str) -> None:
     bp0 = model
     migrator = BlueprintMigration()
 
-    migrated = migrator.migrate(bp0)
+    result = migrator.plan_and_migrate(bp0)
 
-    assert "schema_version" in migrated
-    assert exp_version == migrated["schema_version"]
+    assert "schema_version" in result.migrated
+    assert exp_version == result.migrated["schema_version"]
 
 
 def test_migration_simple_plan() -> None:
@@ -108,7 +108,8 @@ def test_migration_no_plan_no_changes(hello_world_bp_path: Path) -> None:
     assert not adapters
 
     dumped.pop(KEY_SV, None)  # remove version inserted by the fixture.
-    migrated = migrator.migrate(dumped)
+    plan = migrator.plan(dumped)
+    migrated = migrator.migrate(dumped, plan)
 
     assert KEY_SV not in migrated
 
