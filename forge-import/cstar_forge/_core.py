@@ -48,6 +48,8 @@ def resolve_catalog_dir(catalog_root: Optional[Union[str, Path]]) -> Path:
     ----------
     catalog_root
         - ``None``: use ``config.paths.catalog`` (default data-tree location).
+        - ``"default"`` (case-insensitive string): same as ``None``; uses the user's
+          writable catalog at ``config.paths.catalog`` but without suppressing validation.
         - ``"local"`` (case-insensitive string): use the package layout
           ``<cstar_forge>/catalog`` (same as ``config.paths.here / "catalog"``); no extra
           ``/catalog`` suffix is applied.
@@ -1034,12 +1036,15 @@ class CstarSpecBuilder(BaseModel):
         """Return MachineConfig from the builder's catalog when catalog_root is set, else from config."""
         if self._uses_explicit_catalog:
             from .config import MachineConfig
-            data = self._get_catalog().machine_data(config.system)
-            return MachineConfig(
-                account=data.get("account"),
-                pes_per_node=data.get("pes_per_node"),
-                queues=data.get("queues"),
-            )
+            try:
+                data = self._get_catalog().machine_data(config.system)
+                return MachineConfig(
+                    account=data.get("account"),
+                    pes_per_node=data.get("pes_per_node"),
+                    queues=data.get("queues"),
+                )
+            except KeyError:
+                return MachineConfig()
         return config.machine_config
 
     def _prompt_yes_no(self, message: str) -> bool:
