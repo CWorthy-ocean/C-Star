@@ -390,7 +390,6 @@ class BlueprintMigration(Migration):
         CstarMigrationError
             If the migration cannot be completed.
         """
-        # source, target, plan = self.plan(dumped)
         model = deepcopy(dumped)
 
         for klass in plan.adapters:
