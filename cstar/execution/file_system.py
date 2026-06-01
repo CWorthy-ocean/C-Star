@@ -5,7 +5,6 @@ import os
 import shutil
 import sys
 import typing as t
-from collections.abc import AsyncGenerator, Generator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +45,7 @@ class XdgMetaContainer:
     state: "EnvItem"
     """Metadata used to identify the state directory."""
 
-    def __iter__(self) -> Iterator["EnvItem"]:
+    def __iter__(self) -> t.Iterator["EnvItem"]:
         """Return an iterable containing all settings contained in the instance."""
         yield self.cache
         yield self.config
@@ -312,7 +311,7 @@ class RomsFileSystemManager(JobFileSystemManager):
                     self.input_datasets_dir,
                     self._codebases_dir,
                     self.joined_output_dir,
-                },
+                }
             )
         )
 
@@ -440,11 +439,6 @@ def write_local_copy(url: str, directory: Path) -> Path:
     -------
     Path
         The local path where the remote resource was copied
-
-    Raises
-    ------
-    FileNotFoundError
-        If the remote URL cannot be retrieved.
     """
     parsed_url = urlsplit(url)
     resource_path = Path(parsed_url.path)
@@ -463,7 +457,7 @@ def write_local_copy(url: str, directory: Path) -> Path:
 
 
 @contextmanager
-def local_copy(uri: str) -> Generator[Path, None, None]:
+def local_copy(uri: str) -> t.Generator[Path, None, None]:
     """Context manager used to create a local copy of a remote resource.
 
     When the uri references a local resource, it is used without being copied.
@@ -487,7 +481,7 @@ def local_copy(uri: str) -> Generator[Path, None, None]:
 
 
 @asynccontextmanager
-async def local_copy_async(uri: str) -> AsyncGenerator[Path, None]:
+async def local_copy_async(uri: str) -> t.AsyncGenerator[Path, None]:
     """Asynchronous context manager used to create a local copy of a remote resource.
 
     When the uri references a local resource, it is used without being copied.
