@@ -479,7 +479,7 @@ def local_copy(uri: str) -> Generator[Path, None, None]:
         A path to a local copy of the resource
     """
     if is_remote_resource(uri):
-        with TemporaryDirectory() as tmp_dir:
+        with TemporaryDirectory(delete=False) as tmp_dir:
             bp_path = write_local_copy(uri, Path(tmp_dir))
             yield bp_path
     else:
