@@ -2,7 +2,6 @@ import abc
 import typing as t
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from pathlib import Path
 
 from pydantic import (
     BaseModel,
@@ -16,7 +15,6 @@ from cstar.base.adapter import ModelAdapter
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LoggingMixin
-from cstar.execution.file_system import DirectoryManager
 
 APP_ROMS_MARBL: t.Literal["roms_marbl"] = "roms_marbl"
 APP_ROMS_MARBL_SCHEMA_1_0_0: t.Literal["1.0.0"] = "1.0.0"
@@ -420,27 +418,3 @@ class BlueprintMigration(Migration):
             migrated,
             plan=plan,
         )
-
-
-def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Path:
-    """Determine the persistence path for a migrated model.
-
-    If a target is not supplied by the user, write to the `CSTAR_STATE_HOME`
-    directory.
-
-    Parameters
-    ----------
-    source : Path
-        Path to the file containing the original, serialized model.
-    target : Path | None
-        The user-supplied path
-    """
-    if target is not None:
-        output = target
-    else:
-        stem = source.stem
-        suffix = source.suffix
-        state_dir = DirectoryManager.state_home()
-        output = state_dir / f"{stem}_{plan.target}{suffix}"
-
-    return output.expanduser().resolve()

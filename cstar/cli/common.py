@@ -19,6 +19,7 @@ from cstar.base.env import (
 )
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, reset_log_level
+from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import serialize, validate_serialized_entity
 from cstar.system.migration import (
@@ -26,7 +27,6 @@ from cstar.system.migration import (
     MigrateResult,
     MigrationPlan,
     MigrationRequest,
-    get_persist_to,
 )
 
 app = typer.Typer()
@@ -243,6 +243,30 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
 
 def on_migrated_callback(plan: MigrationPlan) -> None:
     print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
+
+
+def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Path:
+    """Determine the persistence path for a migrated model.
+
+    If a target is not supplied by the user, write to the `CSTAR_STATE_HOME`
+    directory.
+
+    Parameters
+    ----------
+    source : Path
+        Path to the file containing the original, serialized model.
+    target : Path | None
+        The user-supplied path
+    """
+    if target is not None:
+        output = target
+    else:
+        stem = source.stem
+        suffix = source.suffix
+        state_dir = DirectoryManager.state_home()
+        output = state_dir / f"{stem}_{plan.target}{suffix}"
+
+    return output.expanduser().resolve()
 
 
 def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
