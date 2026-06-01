@@ -87,6 +87,16 @@ ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
 """Enable automatic time-splitting of simulations."""
 
 
+ENV_FF_CLI_BP_MIGRATE_AUTO: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_AUTO"],
+    EnvVar(
+        "Enable automatic blueprint migration to the latest schema during execution.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_CLI_BP_MIGRATE_AUTO"
+"""Enable automatic blueprint migration to the latest schema during execution."""
+
 ENV_FF_CLI_BP_MIGRATE_SHOW: t.Annotated[
     t.Literal["CSTAR_FF_CLI_BP_MIGRATE_SHOW"],
     EnvVar(

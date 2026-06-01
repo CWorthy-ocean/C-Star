@@ -20,3 +20,4 @@ ARG_URI_LONG: t.Final[str] = "--blueprint-uri"
 ARG_URI_SHORT: t.Final[str] = "-b"
 
 ARG_VERBOSE: t.Final[str] = "--verbose"
+ARG_VERBOSE_HELP: t.Final[str] = "Set this flag to print verbose CLI outputs."

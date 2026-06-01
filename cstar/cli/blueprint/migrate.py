@@ -2,29 +2,46 @@ import typing as t
 from pathlib import Path
 
 import typer
-from rich.console import Console
-from rich.table import Column, Table
+from pydantic import ValidationError
 
-from cstar.applications.core import get_application
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_CLI_VERBOSE
-from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import is_flag_enabled
-from cstar.cli.common import cb_pipeline, set_env
+from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_CLI_VERBOSE,
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_LOG_LEVEL,
+)
+from cstar.base.log import LogLevelChoices, get_logger
+from cstar.cli.common import (
+    MigrationRequest,
+    cb_pipeline,
+    execute_migration,
+    print_validation_errors,
+    set_env,
+    set_flag,
+    update_loggers,
+)
 from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
+    ARG_CLOBBER_HELP,
     ARG_DRY_RUN,
+    ARG_LOGLEVEL_HELP,
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
     ARG_OUTPUT_LONG,
     ARG_OUTPUT_SHORT,
     ARG_VERBOSE,
+    ARG_VERBOSE_HELP,
 )
-from cstar.execution.file_system import is_remote_resource, local_copy
-from cstar.orchestration.models import Blueprint
-from cstar.orchestration.serialization import serialize, validate_serialized_entity
-from cstar.system.migration import BlueprintMigration, MigrationPlan
+from cstar.execution.file_system import (
+    DirectoryManager,
+    is_remote_resource,
+    write_local_copy,
+)
 
-console = Console()
 app = typer.Typer()
+log = get_logger(__name__)
 
-
+CMD_NAME: t.Final[str] = "migrate"
 HELP_SHORT = "Migrate the schema of a blueprint file."
 HELP_LONG = f"""\
 {HELP_SHORT}
@@ -35,96 +52,141 @@ file with the version number appended to the file name.
 """
 
 
-def display_summary(bp_path: Path, migration_plan: MigrationPlan) -> None:
-    """Display a summary of the migration plan.
+def path_callback(value: str) -> str:
+    """Ensure the user provided a non-empty path.
+
+    Resulting path has been expanded and resolved.
 
     Parameters
     ----------
-    bp_path : Path
-        The path to the blueprint being migrated.
-    migration_plan : MigrationPlan
-        Details of the planned migration.
-    """
-    source, target, plan = migration_plan
-
-    if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
-        print(f"Migration from {source!r} to {target!r} will take {len(plan)} steps.")
-        return
-
-    source, target, plan = migration_plan
-    padding = (0, 1)
-
-    table = Table(
-        Column(header="Step", justify="center"),
-        Column(header="From", justify="center"),
-        Column(header="To", justify="center"),
-        title=f"Migration Plan for [yellow]{bp_path.name}[/yellow]",
-        show_lines=True,
-        padding=padding,
-        pad_edge=False,
-        row_styles=["", "dim"],
-        min_width=40,
-        caption=f"Initial Schema: [green]{source}[/green]\nFinal Schema: [red]{target}[/red]",
-    )
-
-    for i, adapter in enumerate(plan):
-        table.add_row(
-            str(i + 1),
-            adapter.source(),
-            adapter.target(),
-        )
-
-    console.print(table)
-
-
-def path_callback(value: str | None) -> str | None:
-    """Ensure a path that was provided by a user has been expanded and resolved.
+    value : bool
+        The value of the path parameter.
 
     Returns
     -------
-    Path
+    str
     """
-    if value and not is_remote_resource(value):
-        return Path(value).expanduser().resolve().as_posix()
+    value = value.strip() if value else ""
+
+    if not value:
+        msg = "path is an empty string."
+        raise typer.BadParameter(msg)
+
+    if not is_remote_resource(value):
+        path = Path(value).expanduser().resolve()
+        if not path.exists():
+            msg = f"{str(path)!r} was not found"
+            raise typer.BadParameter(msg)
+        return path.as_posix()
+
+    try:
+        state_dir = DirectoryManager.state_home()
+        local_path = write_local_copy(value, state_dir)
+    except FileNotFoundError as ex:
+        msg = f"{ex.strerror}: {ex.filename!r}"
+        raise typer.BadParameter(msg) from ex
+    else:
+        msg = f"Remote file retrieved into: {local_path.as_posix()!r}"
+        log.debug(msg)
+        return local_path.as_posix()
+
+
+def target_callback(value: str) -> str:
+    """Ensure the user provided a non-empty path.
+
+    Resulting path has been expanded and resolved.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context object.
+    value : bool
+        The value of the output parameter.
+
+    Returns
+    -------
+    str
+    """
+    if not value or not value.strip():
+        return value.strip()
+
+    path = Path(value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path.as_posix()
+
+
+def dryrun_notify(ctx: typer.Context, value: bool) -> bool:
+    """Display informational message to user if a parameter conflict is found.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context object.
+    value : bool
+        The value of the dry-run parameter.
+
+    Returns
+    -------
+    bool
+    """
+    output = ctx.params.get("output", "")
+
+    if value and output:
+        print(f"Output path {output!r} will be ignored during dry-run")
+
     return value
 
 
-def migrate_dryrun_callback(ctx: typer.Context, value: bool | None) -> bool | None:
-    """Display informational message to user if a parameter conflict is found."""
-    output: str | None = ctx.params.get("output", None)
+def clobber_output(ctx: typer.Context, value: bool) -> bool:
+    """Callback for clobber parameter that removes a pre-existing output file
+    and mitigates a FileExistsError.
 
-    if value is not None and value and output is not None:
-        print(f"Ignoring output path {output!r} during dry-run")
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context object.
+    value : bool
+        The value of the clobber parameter.
+
+    Returns
+    -------
+    bool
+    """
+    output = ctx.params.get("output", "")
+    if value and output:
+        path = Path(output)
+        if path.exists():
+            path.unlink()
 
     return value
 
 
-@app.command(name="migrate", help=HELP_LONG, short_help=HELP_SHORT)
+@app.command(name=CMD_NAME, help=HELP_LONG, short_help=HELP_SHORT)
 def migrate(
     path: t.Annotated[
         str,
         typer.Argument(
-            help="Path to a blueprint file.",
+            help="Path to a file containing a serialized blueprint.",
             callback=path_callback,
         ),
     ],
     output: t.Annotated[
-        str | None,
+        str,
         typer.Option(
             ARG_OUTPUT_LONG,
             ARG_OUTPUT_SHORT,
-            help="Path to the output file",
-            callback=path_callback,
+            help="Path where the migrated blueprint will be serialized",
+            callback=target_callback,
         ),
-    ] = None,
+    ] = "",
     dry_run: t.Annotated[
         bool,
         typer.Option(
             ARG_DRY_RUN,
             help="Generate the migration plan without executing it.",
             callback=cb_pipeline(
-                set_env(ENV_CSTAR_CLI_DRY_RUN),
-                migrate_dryrun_callback,
+                set_flag(ENV_CSTAR_CLI_DRY_RUN),
+                dryrun_notify,
             ),
             envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
@@ -133,58 +195,50 @@ def migrate(
         bool,
         typer.Option(
             ARG_VERBOSE,
-            help="Enable printing verbose migration outputs.",
-            callback=set_env(ENV_CSTAR_CLI_VERBOSE),
+            help=ARG_VERBOSE_HELP,
+            callback=set_flag(ENV_CSTAR_CLI_VERBOSE),
             envvar=ENV_CSTAR_CLI_VERBOSE,
         ),
     ] = False,
+    clobber: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_CLOBBER,
+            help=ARG_CLOBBER_HELP,
+            callback=cb_pipeline(
+                set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
+                clobber_output,
+            ),
+            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ),
+    ] = False,
+    log_level: t.Annotated[
+        LogLevelChoices,
+        typer.Option(
+            ARG_LOGLEVEL_LONG,
+            ARG_LOGLEVEL_SHORT,
+            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
+            help=ARG_LOGLEVEL_HELP,
+            envvar=ENV_CSTAR_LOG_LEVEL,
+            is_eager=True,
+        ),
+    ] = LogLevelChoices.INFO,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
-    result = validate_serialized_entity(path, Blueprint)
-    if result.item is None:
-        raise typer.BadParameter(result.error_msg)
+    global log
+    log = get_logger(__name__)
 
-    migrator = BlueprintMigration()
-    with local_copy(path) as local_path:
-        dumped = result.item.model_dump()
-
-        try:
-            plan = migrator.plan(dumped)
-        except CstarExpectationFailed as ex:
-            msg = f"Unable to complete migration plan: {ex}"
-            raise typer.BadParameter(msg) from ex
-
-        display_summary(local_path, plan)
-
-        if plan.source == plan.target:
-            print(f"The blueprint uses the latest schema ({plan.source})")
-            raise typer.Exit(0)
-
-        if dry_run:
-            raise typer.Exit(0)
-
-        try:
-            updated = migrator.migrate(dumped)
-        except CstarExpectationFailed as ex:
-            msg = f"Unable to complete migration: {ex}"
-            raise typer.BadParameter(msg) from ex
-        else:
-            print("Migration complete")
-
-        persist_to = (
-            Path(f"./{local_path.stem}_{plan.target}{local_path.suffix}")
-            if output is None
-            else Path(output)
+    try:
+        request = MigrationRequest(
+            path=Path(path),
+            output=Path(output) if output else None,
         )
-        persist_to = persist_to.expanduser().resolve()
+    except ValidationError as ex:
+        print_validation_errors(ex)
+        raise typer.Exit(1) from ex
 
-        try:
-            bp_type = get_application(result.item.application).blueprint
-            updated_bp = bp_type(**updated)
-            nbytes = serialize(persist_to, updated_bp)
-            assert nbytes, "The migrated blueprint failed to write content"
-        except SyntaxError as ex:
-            msg = f"Unable to complete migration: {ex}"
-            raise typer.BadParameter(msg) from ex
-        else:
-            print(f"Migrated blueprint persisted to {str(persist_to)!r}")
+    result = execute_migration(request)
+    if not result.result.plan:
+        print("Migration failed to produce a plan.")
+
+    print(f"Migrated blueprint persisted to {str(result.target)!r}")
