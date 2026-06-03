@@ -43,6 +43,7 @@ from cstar.execution.file_system import local_copy
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
+from cstar.system.migration import CStarMigrationNotRegisteredError
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
@@ -78,15 +79,20 @@ def path_callback(
     """
     try:
         with local_copy(path) as local_path:
+            bp_path = local_path
+
             if is_feature_enabled(ENV_FF_CLI_BP_MIGRATE_AUTO):
                 request = MigrationRequest(path=local_path)
-                result, bp_path = execute_migration(request)
+                try:
+                    persist_result = execute_migration(request)
 
-                if result.error:
-                    print(result.error)
-                    raise typer.Exit(1)
-            else:
-                bp_path = Path(local_path)
+                    if persist_result.migration_result.error:
+                        print(persist_result.migration_result.error)
+                        raise typer.Exit(1)
+
+                    bp_path = Path(persist_result.target)
+                except CStarMigrationNotRegisteredError:
+                    log.info("Skipping schema migration; no registered adapters")
 
             base_bp = deserialize(bp_path, Blueprint)
             app = get_application(base_bp.application)

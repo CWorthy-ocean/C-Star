@@ -37,6 +37,11 @@ from cstar.execution.file_system import (
     is_remote_resource,
     write_local_copy,
 )
+from cstar.system.migration import (
+    CstarMigrationError,
+    CStarMigrationNotRegisteredError,
+    CstarUnsupportedMigrationError,
+)
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -225,9 +230,6 @@ def migrate(
     ] = LogLevelChoices.INFO,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
-    global log
-    log = get_logger(__name__)
-
     try:
         request = MigrationRequest(
             path=Path(path),
@@ -237,8 +239,23 @@ def migrate(
         print_validation_errors(ex)
         raise typer.Exit(1) from ex
 
-    result = execute_migration(request)
-    if not result.result.plan:
-        print("Migration failed to produce a plan.")
+    try:
+        result = execute_migration(request)
+    except CstarUnsupportedMigrationError as ex:
+        msg = f"Unable to migrate blueprint: {str(path)!r}"
+        log.exception(msg)
+        raise typer.Exit(1) from ex
+    except CStarMigrationNotRegisteredError as ex:
+        msg = f"No schema migrations available for {str(path)!r}"
+        log.exception(msg)
+        raise typer.Exit(0) from ex
+    except CstarMigrationError as ex:
+        msg = "Migration failed"
+        raise typer.BadParameter(msg) from ex
 
-    print(f"Migrated blueprint persisted to {str(result.target)!r}")
+    if not result.migration_result.plan:
+        print("Migration failed to produce a plan.")
+        raise typer.Exit(2)
+
+    if not result.migration_result.plan.is_latest:
+        print(f"Migrated blueprint persisted to {str(result.target)!r}")

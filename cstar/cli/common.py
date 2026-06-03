@@ -24,6 +24,7 @@ from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import serialize, validate_serialized_entity
 from cstar.system.migration import (
     BlueprintMigration,
+    CStarMigrationNotRegisteredError,
     MigrateResult,
     MigrationPlan,
     MigrationRequest,
@@ -201,7 +202,7 @@ def autoimport_apps(module_names: list[str]) -> None:
 
 
 class PersistedMigrateResult(t.NamedTuple):
-    result: MigrateResult
+    migration_result: MigrateResult
     target: str | Path
 
 
@@ -218,9 +219,11 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
     if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE) or not plan.adapters:
         if plan.is_latest:
             print(f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}")
-        else:
-            num_steps = len(plan.adapters)
-            print(f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} steps.")
+            return
+
+        num_steps = len(plan.adapters)
+        msg = f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} step(s)."
+        print(msg)
         return
 
     from rich.console import Console  # noqa: PLC0415
@@ -262,6 +265,13 @@ def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Pa
 
     If a target is not supplied by the user, write to the `CSTAR_STATE_HOME`
     directory.
+
+    The resulting filename follows the convention:
+        &lt;original_stem&gt;_&lt;latest_version&gt;.&lt;ext&gt;
+
+    Example:
+    - Input: foo.yaml with any prior version, latest == 3.0.0
+    - Output: foo_3.0.0.yaml
 
     Parameters
     ----------
@@ -319,14 +329,27 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     -------
     PersistedMigrationResult
         Named tuple containing the migration result and path where it was persisted.
+
+    Raises
+    ------
+    CStarMigrationNotRegisteredError
+        If there are no registered migrations for the requested schema.
     """
     validation_result = validate_serialized_entity(request.source, Blueprint)
     if validation_result.item is None:
         raise typer.BadParameter(validation_result.error_msg)
 
     dumped = validation_result.item.model_dump()
+    app_name = validation_result.item.application
+    app_def = get_application(app_name)
+    adapters = app_def.migrations or []
+
+    if not adapters:
+        msg = f"No schema adapters are registered for {app_def.name!r}"
+        raise CStarMigrationNotRegisteredError(msg)
 
     migrator = BlueprintMigration(
+        adapters=adapters,
         on_planned=functools.partial(on_planned_callback, request.source),
         on_migrated=on_migrated_callback,
     )

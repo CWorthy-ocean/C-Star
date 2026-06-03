@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from itertools import chain
 
+from cstar.base.adapter import SchemaAdapter
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
@@ -311,6 +312,8 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """The blueprint containing the application configuration."""
     applicable_transforms: Sequence[type[Transform[t.Any]]]
     """Transforms that must be executed prior to execution."""
+    migrations: Sequence[type[SchemaAdapter]] | None = None
+    """The available adapters for performing schema migrations."""
 
 
 _TAnyApp: t.TypeAlias = ApplicationDefinition[t.Any, t.Any]

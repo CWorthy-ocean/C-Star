@@ -477,3 +477,59 @@ def hello_world_bp_path(tmp_path: Path, hello_world_bp_content: str) -> Path:
     path = tmp_path / "helloworld.yaml"
     path.write_text(hello_world_bp_content)
     return path
+
+
+@pytest.fixture
+def plotter_v1_0_0_model() -> dict[str, t.Any]:
+    return {
+        "name": "Plotter Unit Test Blueprint",
+        "schema_version": "1.0.0",
+        "application": "plotter",
+        "description": "plot outputs",
+        "output_dir": "~/cstar/wales_plotter/plots-test",
+        "state": "draft",
+        "input_dir": "~/cstar/wales_toy_blueprint/joined_output",
+        "variables": ["ALK", "pH_3D"],
+        "time_indices": [-1],
+        "s_indices": [0, -1],
+        "grid_file_path": "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc",
+        "file_glob": "*bgc*.nc",
+    }
+
+
+@pytest.fixture
+def plotter_v2_0_0_model() -> dict[str, t.Any]:
+    return {
+        "name": "Plotter Unit Test Blueprint",
+        "schema_version": "2.0.0",
+        "application": "plotter",
+        "description": "plot outputs",
+        "working_dir": "~/cstar/wales_plotter/plots-test",
+        "state": "draft",
+        "input_dir": "~/cstar/wales_toy_blueprint/joined_output",
+        "variables": ["ALK", "pH_3D"],
+        "time_indices": [-1],
+        "s_indices": [0, -1],
+        "grid_file_path": "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc",
+        "file_glob": "*bgc*.nc",
+    }
+
+
+@pytest.fixture
+def plotter_v1_0_0_bp(tmp_path: Path, plotter_v1_0_0_model: dict[str, t.Any]) -> Path:
+    content = json.dumps(plotter_v1_0_0_model)
+
+    bp_path = tmp_path / "test-blueprints" / "plotter_1.0.0.json"
+    bp_path.parent.mkdir(parents=True, exist_ok=True)
+    bp_path.write_text(content)
+    return bp_path
+
+
+@pytest.fixture
+def plotter_v2_0_0_bp(tmp_path: Path, plotter_v2_0_0_model: dict[str, t.Any]) -> Path:
+    content = json.dumps(plotter_v2_0_0_model)
+
+    bp_path = tmp_path / "test-blueprints" / "plotter_2.0.0.json"
+    bp_path.parent.mkdir(parents=True, exist_ok=True)
+    bp_path.write_text(content)
+    return bp_path
