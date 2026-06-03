@@ -87,7 +87,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                 ),
             )
 
-            dynamic_name = f"{i + 1:03d}_{step.safe_name}"
+            dynamic_name = f"{i + 1:03d}"
             child_step_name = slugify(dynamic_name)
 
             child_fs = step.fsm.get_subtask_manager(child_step_name)
