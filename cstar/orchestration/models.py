@@ -2,7 +2,7 @@ import itertools
 import typing as t
 from abc import ABC
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from enum import StrEnum, auto
 from pathlib import Path
@@ -15,15 +15,17 @@ from pydantic import (
     HttpUrl,
     PlainSerializer,
     PrivateAttr,
+    SerializationInfo,
     SerializeAsAny,
     StringConstraints,
     ValidationInfo,
     WithJsonSchema,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
-from cstar.base.utils import slugify
+from cstar.base.utils import generate_schema_ref, slugify
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -182,6 +184,21 @@ class Blueprint(ConfiguredBaseModel, ABC):
         _info: "ValidationInfo",
     ) -> Path:
         return value.expanduser().resolve()
+
+    @model_serializer(mode="wrap")
+    def serialize_with_schema_ref(
+        self,
+        handler: Callable[[BaseModel], dict[str, t.Any]],
+        info: "SerializationInfo",
+    ) -> dict[str, t.Any]:
+        data = handler(self)
+        return {
+            "$schema": generate_schema_ref(
+                self.application,
+                self.schema_version,
+            ),
+            **data,
+        }
 
 
 class WorkplanState(StrEnum):

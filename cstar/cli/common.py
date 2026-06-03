@@ -6,9 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import typer
-from pydantic import (
-    ValidationError,
-)
+from pydantic import ValidationError
 
 import cstar
 from cstar.applications.core import get_application
@@ -21,7 +19,11 @@ from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, reset_log_level
 from cstar.execution.file_system import DirectoryManager, is_remote_resource
 from cstar.orchestration.models import Blueprint
-from cstar.orchestration.serialization import serialize, validate_serialized_entity
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    serialize,
+    validate_serialized_entity,
+)
 from cstar.system.migration import (
     BlueprintMigration,
     CStarMigrationNotRegisteredError,
@@ -306,17 +308,14 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     persist_to = get_persist_to(request.source, request.target, result.plan)
 
     try:
-        app_name = result.application
-        vtarget = result.plan.target
-
         bp_type = get_application(result.application).blueprint
         updated_bp = bp_type(**result.migrated)
 
-        schemas_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp"
-        app_schema = f"{schemas_uri}/{app_name}/{app_name}_schema.{vtarget}.json"
-        header = f"# yaml-language-server: $schema={app_schema}"
-
-        nbytes = serialize(persist_to, updated_bp, header=header)
+        nbytes = serialize(
+            persist_to,
+            updated_bp,
+            mode=PersistenceMode.auto,
+        )
         assert nbytes, "The migrated blueprint failed to write content"
     except SyntaxError as ex:
         msg = f"Unable to complete migration: {ex}"

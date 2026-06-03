@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from cstar.applications.plotter_app import PlotterBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
@@ -281,3 +282,29 @@ def test_serialization_handle(mode: PersistenceMode) -> None:
 
     assert dhandle.name == handle.name
     assert dhandle.pid == handle.pid
+
+
+def test_serializaton_json_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
+    """Verify a json-serialized file contains a schema reference."""
+    target = tmp_path / "output.json"
+
+    bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
+
+    assert serialize(target, bp, mode=PersistenceMode.auto)
+
+    content = target.read_text()
+    assert '"$schema":"http' in content
+    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
+
+
+def test_serializaton_yaml_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
+    """Verify a YAML-serialized file contains a schema reference."""
+    target = tmp_path / "output.yaml"
+
+    bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
+
+    assert serialize(target, bp, mode=PersistenceMode.auto)
+
+    content = target.read_text()
+    assert "# yaml-language-server: $schema=" in content
+    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
