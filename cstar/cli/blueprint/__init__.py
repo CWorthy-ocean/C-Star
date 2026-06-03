@@ -1,9 +1,14 @@
 import typer
 
-from cstar.base.feature import ENV_FF_CLI_BP_MIGRATE_SHOW, is_feature_enabled
+from cstar.base.feature import (
+    ENV_FF_CLI_BP_MIGRATE_SHOW,
+    ENV_FF_DEVELOPER_MODE,
+    is_feature_enabled,
+)
 from cstar.cli.blueprint.check import app as app_check
 from cstar.cli.blueprint.migrate import app as app_migrate
 from cstar.cli.blueprint.run import app as app_run
+from cstar.cli.blueprint.schemas import app as app_schemas
 
 app = typer.Typer(
     name="blueprint",
@@ -15,3 +20,6 @@ app.add_typer(app_check)
 
 if is_feature_enabled(ENV_FF_CLI_BP_MIGRATE_SHOW):
     app.add_typer(app_migrate)
+
+if is_feature_enabled(ENV_FF_DEVELOPER_MODE):
+    app.add_typer(app_schemas)
