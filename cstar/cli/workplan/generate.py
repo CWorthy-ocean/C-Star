@@ -118,8 +118,15 @@ def generate(
         print(f"No directory was found at: {search_dir!r}")
 
     results = list(_locate_blueprints(search_dir))
-    if results:
-        print(f"Found {len(results)} blueprints in {search_dir}")
+    if not results:
+        msg = f"No blueprints found in: {search_dir}"
+        raise typer.BadParameter(msg)
+
+    print(f"Found {len(results)} blueprints in {search_dir}")
+    for bp_path in results:
+        print(f"\t- {bp_path}")
+
+    if len(results) > 1:
         _display_order(results)
 
         while "y" in input("Do you want to change the order? (yes/no): ").lower():
@@ -157,6 +164,3 @@ def generate(
         serialize(wp_path, wp)
         print(f"Your workplan has been saved to: {wp_path}")
         print(f"Execute your workplan with `cstar workplan run {wp_path}`")
-
-    else:
-        print(f"No blueprints found in: {search_dir}")
