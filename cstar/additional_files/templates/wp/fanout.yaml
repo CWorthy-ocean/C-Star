@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://c-star.readthedocs.io/en/latest/_downloads/d93c79fe7f8f58b0fa61da8ff8d25e87/workplan_schema.1.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
 name: Fan-out Workplan
 description: A workplan that uses dependencies to gate execution of parallel steps.
 steps:

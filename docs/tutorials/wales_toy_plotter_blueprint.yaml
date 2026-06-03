@@ -1,9 +1,9 @@
-# yaml-language-server: $schema=https://c-star.readthedocs.io/en/latest/_downloads/dab02d5a36151a29566f7f6b5a4c5533/plotter_schema.1.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.1.0.0.json
 name: wales_plotter
 description: plot outputs from wales domain
 application: plotter
-schema_version: 2.0.0
-working_dir: "~/cstar/wales_plotter/plots"
+schema_version: 1.0.0
+output_dir: "~/cstar/wales_plotter/plotsx"
 state: draft
 input_dir: "~/cstar/wales_toy_blueprint/joined_output"
 variables:
