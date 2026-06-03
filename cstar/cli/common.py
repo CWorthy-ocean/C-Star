@@ -306,9 +306,17 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     persist_to = get_persist_to(request.source, request.target, result.plan)
 
     try:
+        app_name = result.application
+        vtarget = result.plan.target
+
         bp_type = get_application(result.application).blueprint
         updated_bp = bp_type(**result.migrated)
-        nbytes = serialize(persist_to, updated_bp)
+
+        schemas_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp"
+        app_schema = f"{schemas_uri}/{app_name}/{app_name}_schema.{vtarget}.json"
+        header = f"# yaml-language-server: $schema={app_schema}"
+
+        nbytes = serialize(persist_to, updated_bp, header=header)
         assert nbytes, "The migrated blueprint failed to write content"
     except SyntaxError as ex:
         msg = f"Unable to complete migration: {ex}"

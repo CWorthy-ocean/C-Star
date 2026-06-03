@@ -261,8 +261,9 @@ def deserialize(
 
 def serialize(
     path: Path,
-    model: _T,
+    model: SerializableModel,
     mode: PersistenceMode = PersistenceMode.yaml,
+    header: str = "",
 ) -> int:
     """Serialize a model into a file.
 
@@ -292,10 +293,14 @@ def serialize(
         PersistenceMode.yaml: model_to_yaml,
     }
 
-    content = handlers[mode](model)
+    content = t.cast("str", handlers[mode](model))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:
+        if header:
+            if not header.endswith("\n"):
+                header += "\n"
+            fp.write(header)
         nbytes = fp.write(content)
 
     return nbytes
