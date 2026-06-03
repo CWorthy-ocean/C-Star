@@ -87,11 +87,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                 ),
             )
 
-            compact_fmt = "%Y%m%d%H%M%S"
-            compact_sd = sd.strftime(compact_fmt)
-            compact_ed = ed.strftime(compact_fmt)
-
-            dynamic_name = f"{i + 1:03d}_{step.safe_name}_{compact_sd}_{compact_ed}"
+            dynamic_name = f"{i + 1:03d}_{step.safe_name}"
             child_step_name = slugify(dynamic_name)
 
             child_fs = step.fsm.get_subtask_manager(child_step_name)
