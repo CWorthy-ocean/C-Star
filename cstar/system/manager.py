@@ -1,4 +1,5 @@
 import functools
+import os
 import platform as platform
 from dataclasses import dataclass
 from typing import ClassVar, Final, Protocol
@@ -102,14 +103,18 @@ class HostNameEvaluator:
         EnvironmentError
             If the name cannot be determined.
         """
-        if lmod_hostname := self.lmod_hostname:
-            return lmod_hostname
+        if self.lmod_hostname:
+            return self.lmod_hostname
+
+        if os.getenv("HOSTNAME") == "elja-irhpc":
+            return _EljaSystemContext.name
 
         try:
             if AnvilEnvSettings().is_match:
                 return _AnvilSystemContext.name
         except ValidationError:
             ...  # not anvil
+
         if self.platform_hostname:
             return self.platform_hostname
 
@@ -301,6 +306,48 @@ class _DerechoSystemContext(_SystemContext):
             primary_queue_name="main",
             requires_task_distribution=True,
             documentation=cls.docs,
+        )
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _EljaSystemContext(_SystemContext):
+    """The contextual dependencies for the Elja system."""
+
+    name: ClassVar[str] = "elja"
+    """The unique name identifying the Elja system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Elja."""
+    mpi_prefix: ClassVar[str] = "srun"
+    """The MPI prefix used on Eja."""
+    docs: ClassVar[str] = "https://wiki.irei.is"
+    """URI for documentation of the Elja system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        regular_q = SlurmPartition(
+            name="wholenode",
+            query_name="128cpu_256mem",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        shared_q = SlurmPartition(
+            name="shared",
+            query_name="64cpu_256mem",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        debug_q = SlurmPartition(
+            name="debug",
+            query_name="48cpu_192mem",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+
+        return SlurmScheduler(
+            queues=[regular_q, shared_q, debug_q],
+            primary_queue_name="wholenode",
+            other_scheduler_directives={},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
         )
 
 
