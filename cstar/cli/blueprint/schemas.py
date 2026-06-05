@@ -65,7 +65,7 @@ def generate_schema(
     file_name = f"{app_name}_schema.{version}.json"
     schema_path = output_dir / app_name / file_name
 
-    nbytes = schema_path.write_text(content)
+    nbytes = schema_path.write_text(f"{content}\n")
     if not nbytes:
         print("Empty schema write occurred")
         raise typer.Exit(1)
