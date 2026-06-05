@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path, PosixPath
 
 import yaml
-from yaml import safe_load
+from pydantic_core import from_json
 from yaml.scanner import ScannerError
 
 from cstar.base.log import get_logger
@@ -71,6 +71,83 @@ class ValidationResult(t.Generic[_T]):
         return self.item is not None
 
 
+def read_json_to_raw(path: Path) -> dict[str, t.Any]:
+    """Read and process content as a JSON file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing JSON.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    with path.open("r", encoding="utf-8") as fp:
+        json_data = fp.read()
+        return from_json(json_data)
+
+
+def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
+    """Read and process content as a YAML file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing YAML.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    with path.open("r", encoding="utf-8") as fp:
+        return yaml.safe_load(fp)
+
+
+def read_raw(
+    path: Path,
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> dict[str, t.Any]:
+    """Given a path to a persisted model, use the file extension to identify
+    the data format and load the model data into a raw dictionary.
+
+    Parameters
+    ----------
+    path : Path
+        The path to the persisted entity.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    if not path.exists():
+        msg = f"Unable to read raw model from path: {path}"
+        raise FileNotFoundError(msg)
+
+    if mode == PersistenceMode.auto:
+        mode = _mode_detect(path)
+
+    readers = [read_json_to_raw]
+    if mode == PersistenceMode.json:
+        readers.append(read_yaml_to_raw)
+    else:
+        readers.insert(0, read_yaml_to_raw)
+
+    for reader_fn in readers:
+        try:
+            return reader_fn(path)
+        except (ScannerError, ValueError):
+            msg = f"Deserialization failed with {mode!r} for {str(path)!r}"
+            log.debug(msg)
+
+    msg = (
+        f"Failed to deserialize {str(path)!r}. If are loading a remote document, your URL "
+        "may point to an HTML page instead of the raw YAML content."
+    )
+    raise RuntimeError(msg)
+    # log.warning(msg)
+
+
 def _read_json(path: Path, klass: type[_T]) -> _T:
     """Read and process content as a JSON file.
 
@@ -85,8 +162,8 @@ def _read_json(path: Path, klass: type[_T]) -> _T:
     -------
     _T
     """
-    with path.open("r", encoding="utf-8") as fp:
-        return klass.model_validate_json(json_data=fp.read())
+    model_dict = read_json_to_raw(path)
+    return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
 def _read_yaml(path: Path, klass: type[_T]) -> _T:
@@ -103,16 +180,8 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
     -------
     _T
     """
-    with path.open("r", encoding="utf-8") as fp:
-        try:
-            model_dict = safe_load(fp)
-        except ScannerError as e:
-            msg = (
-                f"Failed to load yaml from {path}. If are loading a remote YAML, your URL "
-                f"may point to a HTML page instead of the raw YAML content."
-            )
-            raise RuntimeError(msg) from e
-        return klass.model_validate(model_dict)
+    model_dict = read_yaml_to_raw(path)
+    return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
 def path_representer(
