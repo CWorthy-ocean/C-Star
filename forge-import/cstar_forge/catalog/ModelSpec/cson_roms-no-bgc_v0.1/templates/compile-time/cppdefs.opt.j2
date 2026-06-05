@@ -354,8 +354,8 @@
 
 ! Use atmospheric forcing for CO2
 ! Usage notes: None
-#define PCO2AIR_FORCING
-#endif
+{% if cppdefs.co2_tvarying %}#define PCO2AIR_FORCING
+{% endif %}
 !----------------------------------------------------------
 
 ! Enable BEC biogeochemical model

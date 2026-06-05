@@ -766,9 +766,6 @@ class RomsMarblInputData(InputData):
                         stacklevel=2,
                     )
         else:
-            if input_args["type"] == "restoring":
-                if "sss" in input_args["restoring_forces"]:
-                    self._settings_compile_time["cppdefs"]["sal_restore"] = True
             frc = rt.SurfaceForcing(grid=self.grid, **input_args)
             paths = frc.save(output_path)
             try:
@@ -779,6 +776,10 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
+
+        if input_args["type"] == "restoring":
+            if "sss" in input_args["restoring_forces"]:
+                self._settings_compile_time["cppdefs"]["sal_restore"] = True
 
         # Append Resources directly to blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
@@ -853,7 +854,7 @@ class RomsMarblInputData(InputData):
         if type is None:
             raise ValueError(
                 f"Missing required 'type' key in input_args for '{key}'. "
-                f"Expected 'type' to be 'physics', 'bgc', or 'restoring'."
+                f"Expected 'type' to be 'physics' or 'bgc'."
             )
         if type not in {"physics", "bgc"}:
             raise ValueError(

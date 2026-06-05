@@ -70,12 +70,12 @@ inputs:
           climatology: true
         type: bgc
         coarse_grid_mode: "never"
-      # - source:  # salinity restoring disabled until further checks passed
-      #     name: WOA
-      #     climatology: true
-      #   restoring_forces: ['sss']
-      #   type: restoring
-      #   coarse_grid_mode: "never"
+      - source:  # salinity restoring disabled until further checks passed
+          name: WOA
+          climatology: true
+        restoring_forces: ['sss']
+        type: restoring
+        coarse_grid_mode: "never"
 
     boundary:
       - source:
