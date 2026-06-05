@@ -120,8 +120,10 @@ class LocalLauncher(Launcher[LocalHandle]):
             mp_process.start()
             create_time = datetime.datetime.now(tz=datetime.timezone.utc)
             if pid := mp_process.pid:
-                log.debug(f"Local run of `{step.application}` created pid: {pid}")
-                log.info(f"Logs for step {step.safe_name} can be found at {log_file}")
+                msg = f"Local run of {step.application!r} created pid: {pid}"
+                log.debug(msg)
+                msg = f"Logs for step {step.safe_name!r} can be found at: {log_file}"
+                log.info(msg)
 
                 try:
                     ps_process = PsProcess(pid)
@@ -130,7 +132,8 @@ class LocalLauncher(Launcher[LocalHandle]):
                         create_timestamp, tz=datetime.timezone.utc
                     )
                 except NoSuchProcess:
-                    log.debug(f"Unable to retrieve exact start time for pid: {pid}")
+                    msg = f"Unable to retrieve exact start time for pid: {pid}"
+                    log.debug(msg)
 
                 handle = LocalHandle(
                     pid=str(pid),
@@ -168,15 +171,21 @@ class LocalLauncher(Launcher[LocalHandle]):
             status = "RUNNING"
         elif rc == 0:
             status = "COMPLETED"
-            log.debug(f"Return code for handle `{handle}` is `{rc}`.")
+            msg = f"Return code for handle {handle!r} is `{rc}`."
+            log.debug(msg)
         else:
             status = "FAILED"
-            log.warning(f"Failure code for handle `{handle}` is `{rc}`.")
+            msg = f"Failure code for handle {handle!r} is `{rc}`."
+            log.warning(msg)
 
         return status
 
     @classmethod
-    async def launch(cls, step: "LiveStep", dependencies: list[LocalHandle]) -> Task:
+    async def launch(
+        cls,
+        step: "LiveStep",
+        dependencies: list[LocalHandle],
+    ) -> Task[LocalHandle]:
         """Launch a step in local process.
 
         Parameters
@@ -292,8 +301,8 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if process is not None:
             if process.exitcode is not None:
-                # can't cancel a completed process
-                log.debug(f"Unable to cancel a completed task `{process.pid}")
+                msg = f"Unable to cancel a completed task `{process.pid}"
+                log.debug(msg)
             else:
                 process.kill()
                 item.status = Status.Cancelled

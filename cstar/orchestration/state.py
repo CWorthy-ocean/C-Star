@@ -1,5 +1,6 @@
 import asyncio
 import typing as t
+from collections.abc import Iterable
 from pathlib import Path
 
 from cstar.execution.file_system import StateDirectoryManager
@@ -32,7 +33,8 @@ the `StateProxy` protocol.
 
 
 def sentinel_path(
-    proxy: StateProxy, mode: PersistenceMode = PersistenceMode.yaml
+    proxy: StateProxy,
+    mode: PersistenceMode = PersistenceMode.yaml,
 ) -> Path:
     """Get the path to a sentinel file for a given handle.
 
@@ -115,7 +117,7 @@ async def get_sentinel(
 def find_sentinels(
     *,
     mode: PersistenceMode = PersistenceMode.yaml,
-) -> t.Iterable[Path]:
+) -> Iterable[Path]:
     """Find all sentinel files located in the run directory.
 
     Parameters
@@ -128,9 +130,9 @@ def find_sentinels(
     list[Path]
     """
     state_dir = StateDirectoryManager.run_state_dir()
-    filter = f"*.{EXT_SENTINEL}.{mode.value}"
+    pattern = f"*.{EXT_SENTINEL}.{mode.value}"
 
-    yield from state_dir.rglob(filter)
+    yield from state_dir.rglob(pattern)
 
 
 async def load_sentinels(

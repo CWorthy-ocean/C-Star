@@ -605,10 +605,10 @@ class Orchestrator(LoggingMixin):
     planner: Planner
     """The planner used by the orchestrator to prioritize tasks."""
 
-    launcher: Launcher
+    launcher: Launcher[t.Any]
     """The launcher used by the orchestrator to manage task execution."""
 
-    def __init__(self, planner: Planner, launcher: Launcher) -> None:
+    def __init__(self, planner: Planner, launcher: Launcher[t.Any]) -> None:
         """Initialize the orchestrator.
 
         Parameters
