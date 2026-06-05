@@ -598,6 +598,11 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         """
         ...
 
+    @classmethod
+    def handle_klass(cls) -> type[_THandle]:
+        """Return the type used by the launcher instance for managing tasks."""
+        ...
+
 
 class Orchestrator(LoggingMixin):
     """Manage the execution of a `Workplan`."""

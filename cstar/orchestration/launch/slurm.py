@@ -429,3 +429,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             log.exception("Unable to cancel the task `%s`", handle.pid)
 
         return item
+
+    @classmethod
+    def handle_klass(cls) -> type[SlurmHandle]:
+        return SlurmHandle

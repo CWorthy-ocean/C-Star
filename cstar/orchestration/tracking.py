@@ -191,7 +191,12 @@ class TrackingRepository(LoggingMixin):
                 self.log.trace(msg)
                 return path
 
-        return self._latest_path(run_id)
+        path = self._latest_path(run_id)
+        if path.exists():
+            msg = f"Located latest run of {run_id!r} at: {path}"
+            self.log.trace(msg)
+
+        return path
 
     async def get_workplan_run(
         self, run_id: str, run_date: datetime | None = None
