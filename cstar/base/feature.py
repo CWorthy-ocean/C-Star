@@ -86,6 +86,15 @@ ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
 ] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
 """Enable automatic time-splitting of simulations."""
 
+ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
+    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"],
+    EnvVar(
+        "Enable long name generation during time-splitting.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"
+"""Enable long name generation during time-splitting."""
 
 ENV_FF_CLI_BP_MIGRATE_AUTO: t.Annotated[
     t.Literal["CSTAR_FF_CLI_BP_MIGRATE_AUTO"],
