@@ -187,6 +187,8 @@ class TrackingRepository(LoggingMixin):
         if run_date:
             path = self._history_path(run_id, run_date)
             if path.exists():
+                msg = f"Located workplan run in history for {run_id!r} at: {path}"
+                self.log.trace(msg)
                 return path
 
         return self._latest_path(run_id)

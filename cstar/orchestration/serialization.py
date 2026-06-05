@@ -1,5 +1,6 @@
 import enum
 import typing as t
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
 
@@ -28,21 +29,21 @@ class SerializableModel(t.Protocol):
     with metacalases in a protocol.
     """
 
-    def model_dump_json(self, *args: t.Any, **kwargs: t.Any) -> str:
+    def model_dump_json(self, *args, **kwargs) -> str:  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a JSON string representation of the object."""
         ...
 
-    def model_dump(self, *args: t.Any, **kwargs: t.Any) -> dict[str, t.Any]:
+    def model_dump(self, *args, **kwargs) -> dict[str, t.Any]:  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a dictionary representation of the object."""
         ...
 
     @classmethod
-    def model_validate_json(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
+    def model_validate_json(cls, *args, **kwargs) -> "t.Self":  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a dictionary representation of the object."""
         ...
 
     @classmethod
-    def model_validate(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
+    def model_validate(cls, *args, **kwargs) -> "t.Self":  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a dictionary representation of the object."""
         ...
 
@@ -151,14 +152,14 @@ _RT = t.TypeVar("_RT", enum.IntEnum, enum.StrEnum, PosixPath)
 
 def register_representer(
     model_type: type[_RT],
-    conversion_fn: t.Callable[[yaml.Dumper, _RT], yaml.ScalarNode],
+    conversion_fn: Callable[[yaml.Dumper, _RT], yaml.ScalarNode],
 ) -> None:
     """Register a yaml representer for the serialization of a specific entity type."""
     dumper = yaml.Dumper
     dumper.add_representer(model_type, conversion_fn)
 
 
-def model_to_yaml(model: _T) -> str:
+def model_to_yaml(model: SerializableModel) -> str:
     """Serialize a model to yaml.
 
     Parameters
@@ -176,7 +177,7 @@ def model_to_yaml(model: _T) -> str:
     # 'application' is required by the base Blueprint type for deserialization
     # routing; always include it even when it equals the subclass default.
     if hasattr(model, "application"):
-        dumped["application"] = model.application
+        dumped["application"] = str(getattr(model, "application"))  # noqa: B009
 
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
@@ -251,16 +252,13 @@ def deserialize(
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
 
-    handlers = {
-        PersistenceMode.json: _read_json,
-        PersistenceMode.yaml: _read_yaml,
-    }
+    if mode == PersistenceMode.json:
+        model = _read_json(path, klass)
+    else:
+        model = _read_yaml(path, klass)
 
-    model = handlers[mode](path, klass)
-
-    if model is None:
-        msg = f"Unable to deserialize a `{klass.__name__}` at `{path}` as `{mode}` from: \n{path.read_text()}"
-        raise ValueError(msg)
+    msg = f"Deserialized {str(path)!r} into: {model}"
+    log.trace(msg)
 
     return model
 
@@ -293,12 +291,12 @@ def serialize(
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
 
-    handlers = {
-        PersistenceMode.json: lambda model: model.model_dump_json(by_alias=True),
-        PersistenceMode.yaml: model_to_yaml,
-    }
-
-    content = t.cast("str", handlers[mode](model))
+    if mode == PersistenceMode.json:
+        content = model.model_dump_json(  # type: ignore[reportUnknownMemberType]
+            by_alias=True
+        )
+    else:
+        content = model_to_yaml(model)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:

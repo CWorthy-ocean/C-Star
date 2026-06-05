@@ -15,7 +15,6 @@ from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
-    Launcher,
     Orchestrator,
     Planner,
     RunMode,
@@ -57,7 +56,7 @@ class DagStatus:
         return (k for k, v in self.details.items() if Status.is_terminal(v))
 
 
-def get_launcher() -> "Launcher":
+def get_launcher() -> SlurmLauncher | LocalLauncher:
     """Get the appropriate launcher for the current environment."""
     launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
     launcher.check_preconditions()
@@ -83,7 +82,9 @@ def incremental_delays() -> Generator[float, None, None]:
     yield from delay_cycle
 
 
-async def load_run_state(run_id: str, launcher: Launcher) -> DagStatus:
+async def load_run_state(
+    run_id: str, launcher: SlurmLauncher | LocalLauncher
+) -> DagStatus:
     """Load the run state.
 
     Parameters
@@ -129,7 +130,8 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     DagStatus
     """
     wp = deserialize(wp_run.trx_workplan_path, Workplan)
-    log.debug(f"Reloading workplan run: {wp.name}")
+    msg = f"Reloading workplan run: {wp.name}"
+    log.debug(msg)
 
     configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
 
@@ -173,7 +175,8 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
         sleep_duration = next(delay_iter)
         await asyncio.sleep(sleep_duration)
 
-    log.info(f"Workplan {mode} is complete.")
+    msg = f"Workplan {mode!r} is complete."
+    log.info(msg)
 
     if open_set is None:
         open_set = {}

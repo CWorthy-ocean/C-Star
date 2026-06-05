@@ -279,7 +279,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
-        prior_handle = await get_sentinel(sentinel_path(step), SlurmHandle)
+        prior_handle = t.cast(
+            "SlurmHandle",
+            await get_sentinel(sentinel_path(step), SlurmHandle),
+        )
         submit_fn = SlurmLauncher._submit
         current_status = Status.Unsubmitted
 
@@ -343,8 +346,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 return Status.Cancelled
             case ExecutionStatus.FAILED:
                 return Status.Failed
-
-        return Status.Unsubmitted
+            case _:
+                return Status.Unsubmitted
 
     @classmethod
     async def query_status(
