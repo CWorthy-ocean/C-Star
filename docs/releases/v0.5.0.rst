@@ -33,6 +33,9 @@ Breaking Changes
 - Deprecated unused `ComputingPlatform` model (`#519 <https://github.com/CWorthy-ocean/C-Star/pull/519>`_)
 - The `WorkplanTransformer` no longer receives transforms to the `__init__` method (`#523 <https://github.com/CWorthy-ocean/C-Star/pull/523>`_)
 - Use of `{{path: <step-name>}}` in templates is no longer supported. Use `{{work_dir: <step-name>}}` instead (`#522 <https://github.com/CWorthy-ocean/C-Star/pull/522>`_)
+- The `RomsMarblBlueprint` model has been updated. Old blueprints may be upgraded by using `cstar blueprint migrate <blueprint-path>` (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
+- `JobFileSystemManager` attributes have been modified for clarity and naming consistency (`work_dir`->`run_dir`, `root`->`root_dir`, `output_dir`->`working_dir`). (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
+- Sample blueprints are updated to the latest schema version. (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -61,6 +64,9 @@ New features
 - Add `--clobber` flag to `cstar blueprint migrate ...` to allow overwriting prior migrations (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 - `cstar workplan generate ...` enables the user to specify a glob pattern or file extension (`#536 <https://github.com/CWorthy-ocean/C-Star/pull/536>`_)
 - Add feature flag `CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME` to enable using minimal length names for subtasks (to counter ROMS failures on long paths) (`#537 <https://github.com/CWorthy-ocean/C-Star/pull/537>`_)
+- Add schema references automatically during blueprint serialization (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
+- Add CLI tool for generating updated schemas from blueprint models (see: `CSTAR_FF_DEVELOPER_MODE=1 cstar blueprint schemas --help`) (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
+- Enable automatic migration boundary discovery (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
