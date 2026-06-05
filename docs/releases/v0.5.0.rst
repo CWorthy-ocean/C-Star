@@ -130,6 +130,7 @@ Bug Fixes
 - Enhance log-level callback to reset log levels to fix inconsistent logging levels when passing `--log-level` CLI parameter (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
 - Fix bug in `ExecutionHandler` where it attempts to open the log file before it exists. (`#537 <https://github.com/CWorthy-ocean/C-Star/pull/537>`_)
 - Fix bug when null restart file is passed to adapter (`#537 <https://github.com/CWorthy-ocean/C-Star/pull/537>`_)
+- Fix `no module named psutil` error after environment setup (`#543 <https://github.com/CWorthy-ocean/C-Star/pull/543>`_)
 
 Improvements
 ~~~~~~~~~~~~
