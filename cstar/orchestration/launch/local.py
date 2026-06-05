@@ -78,6 +78,10 @@ class LocalHandle(ProcessHandle):
     def safe_name(self) -> str:
         return slugify(self.name)
 
+    @property
+    def is_expired(self) -> bool:
+        return not hasattr(self, "_process")
+
 
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
@@ -165,6 +169,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         str
             The current status of the step.
         """
+        if handle.is_expired:
+            if not Status.is_terminal(handle.status):
+                return "RUNNING"
+            return "COMPLETED"
+
         rc = handle.process.exitcode
 
         if rc is None:
@@ -299,7 +308,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         """
         process = item.handle.process
 
-        if process is not None:
+        if not item.handle.is_expired:  # wonky is-null check...
             if process.exitcode is not None:
                 msg = f"Unable to cancel a completed task `{process.pid}"
                 log.debug(msg)
@@ -308,3 +317,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 item.status = Status.Cancelled
 
         return item
+
+    @classmethod
+    def handle_klass(cls) -> type[LocalHandle]:
+        return LocalHandle

@@ -12,9 +12,10 @@ from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
+from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
+    Launcher,
     Orchestrator,
     Planner,
     RunMode,
@@ -56,7 +57,7 @@ class DagStatus:
         return (k for k, v in self.details.items() if Status.is_terminal(v))
 
 
-def get_launcher() -> SlurmLauncher | LocalLauncher:
+def get_launcher() -> Launcher[t.Any]:
     """Get the appropriate launcher for the current environment."""
     launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
     launcher.check_preconditions()
@@ -83,7 +84,8 @@ def incremental_delays() -> Generator[float, None, None]:
 
 
 async def load_run_state(
-    run_id: str, launcher: SlurmLauncher | LocalLauncher
+    run_id: str,
+    launcher: Launcher[t.Any],
 ) -> DagStatus:
     """Load the run state.
 
@@ -97,7 +99,7 @@ async def load_run_state(
     DagStatus
     """
     configure_environment(run_id=run_id)
-    sentinels = await load_sentinels(SlurmHandle)
+    sentinels = await load_sentinels(launcher.handle_klass())
 
     open_set: dict[str, Status] = {}
     closed_set: dict[str, Status] = {}
@@ -175,7 +177,7 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
         sleep_duration = next(delay_iter)
         await asyncio.sleep(sleep_duration)
 
-    msg = f"Workplan {mode!r} is complete."
+    msg = f"Workplan {str(mode)!r} is complete."
     log.info(msg)
 
     if open_set is None:
