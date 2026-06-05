@@ -60,6 +60,7 @@ New features
 - Execution of `cstar blueprint run` with any out-of-date blueprint automatically triggers a schema migration (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 - Add `--clobber` flag to `cstar blueprint migrate ...` to allow overwriting prior migrations (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 - `cstar workplan generate ...` enables the user to specify a glob pattern or file extension (`#536 <https://github.com/CWorthy-ocean/C-Star/pull/536>`_)
+- Add feature flag `CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME` to enable using minimal length names for subtasks (to counter ROMS failures on long paths) (`#537 <https://github.com/CWorthy-ocean/C-Star/pull/537>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -121,6 +122,8 @@ Bug Fixes
 - Fix failing unit test causing new feature branches to fail (`#530 <https://github.com/CWorthy-ocean/C-Star/pull/530>`_)
 - Remove python-specific named group syntax in `checkpoint_frequency` regex. (`#531 <https://github.com/CWorthy-ocean/C-Star/pull/531>`_)
 - Enhance log-level callback to reset log levels to fix inconsistent logging levels when passing `--log-level` CLI parameter (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
+- Fix bug in `ExecutionHandler` where it attempts to open the log file before it exists. (`#537 <https://github.com/CWorthy-ocean/C-Star/pull/537>`_)
+- Fix bug when null restart file is passed to adapter (`#537 <https://github.com/CWorthy-ocean/C-Star/pull/537>`_)
 
 Improvements
 ~~~~~~~~~~~~
