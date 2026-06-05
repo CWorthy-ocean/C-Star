@@ -327,7 +327,7 @@ class RestartFileTrxAdapter:
     """Convert a restart file into a dictionary useful for use in an OverrideTransform."""
 
     @classmethod
-    def adapt(cls, rst_file: RestartFile) -> dict[str, t.Any]:
+    def adapt(cls, rst_file: RestartFile | None) -> dict[str, t.Any]:
         """Given a restart file, create a dictionary containing the overrides necessary to
         execute a simulation with the restart file specified in the initial conditions.
 
@@ -340,6 +340,9 @@ class RestartFileTrxAdapter:
         -------
         Mapping[str, t.Any]
         """
+        if rst_file is None:
+            return {}
+
         return {
             "runtime_params": {
                 "start_date": rst_file.timestamp,
