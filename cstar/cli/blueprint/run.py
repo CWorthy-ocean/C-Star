@@ -137,7 +137,7 @@ def directives_callback(path: str | None) -> str | None:
     except FileNotFoundError as ex:
         msg = f"Directive file not found: {path}"
         raise typer.BadParameter(msg) from ex
-    except (RuntimeError, ValidationError) as ex:
+    except (ValueError, ValidationError) as ex:
         msg = f"Directive file {path!r} is malformed: {ex}"
         raise typer.BadParameter(msg) from ex
 

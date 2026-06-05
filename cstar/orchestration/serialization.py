@@ -85,14 +85,7 @@ def read_json_to_raw(path: Path) -> dict[str, t.Any]:
     """
     with path.open("r", encoding="utf-8") as fp:
         json_data = fp.read()
-        try:
-            return from_json(json_data)
-        except ValueError as ex:
-            msg = (
-                f"Failed to load json from {str(path)!r}. If are loading a remote document, your URL "
-                f"may point to an HTML page instead of the raw YAML content."
-            )
-            raise RuntimeError(msg) from ex
+        return from_json(json_data)
 
 
 def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
@@ -108,15 +101,7 @@ def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
     dict[str, t.Any]
     """
     with path.open("r", encoding="utf-8") as fp:
-        try:
-            model_dict = yaml.safe_load(fp)
-        except ScannerError as e:
-            msg = (
-                f"Failed to load yaml from {str(path)!r}. If are loading a remote document, your URL "
-                f"may point to an HTML page instead of the raw YAML content."
-            )
-            raise RuntimeError(msg) from e
-        return model_dict
+        return yaml.safe_load(fp)
 
 
 def read_raw(
@@ -142,19 +127,25 @@ def read_raw(
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
 
+    readers = [read_json_to_raw]
     if mode == PersistenceMode.json:
-        reader = read_json_to_raw
-        alt = read_yaml_to_raw
+        readers.append(read_yaml_to_raw)
     else:
-        reader = read_yaml_to_raw
-        alt = read_json_to_raw
+        readers.insert(0, read_yaml_to_raw)
 
-    try:
-        return reader(path)
-    except (RuntimeError, ValueError):
-        msg = f"Deserialization failed with {mode!r} for {str(path)!r}. Using alternate reader"
-        log.debug(msg)
-        return alt(path)
+    for reader_fn in readers:
+        try:
+            return reader_fn(path)
+        except (ScannerError, ValueError):
+            msg = f"Deserialization failed with {mode!r} for {str(path)!r}"
+            log.debug(msg)
+
+    msg = (
+        f"Failed to deserialize {str(path)!r}. If are loading a remote document, your URL "
+        "may point to an HTML page instead of the raw YAML content."
+    )
+    raise RuntimeError(msg)
+    # log.warning(msg)
 
 
 def _read_json(path: Path, klass: type[_T]) -> _T:
