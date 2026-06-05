@@ -183,6 +183,8 @@ Improvements
 - Removed unnecessary addition of version callback to all typer apps (`#534 <https://github.com/CWorthy-ocean/C-Star/pull/534>`_)
 - Minor de-duplication of help text in CLI via adding constants (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 - Refactored as needed to share migration code with manual migration triggered via `cstar blueprint migrate ...` (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
+- Improved type-hints for `InputDataset` and `RomsInputDataset` (`#538 <https://github.com/CWorthy-ocean/C-Star/pull/538>`_)
+- Mitigated linter warnings (`#538 <https://github.com/CWorthy-ocean/C-Star/pull/538>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
