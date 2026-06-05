@@ -34,7 +34,7 @@ def test_time_splitting() -> None:
     assert time_slices[0][0] == start_date
     assert time_slices[-1][1] == end_date
 
-    for i, (curr_start, curr_end) in enumerate(reversed(time_slices[1:-1])):
+    for curr_start, curr_end in reversed(time_slices[1:-1]):
         assert curr_start < curr_end, (
             "Splitter may have produced reversed time boundaries"
         )
