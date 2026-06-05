@@ -67,6 +67,7 @@ New features
 - Add schema references automatically during blueprint serialization (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - Add CLI tool for generating updated schemas from blueprint models (see: `CSTAR_FF_DEVELOPER_MODE=1 cstar blueprint schemas --help`) (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - Enable automatic migration boundary discovery (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
+- Add support for deserializing files to a dictionary without immediate model creation (`#542 <https://github.com/CWorthy-ocean/C-Star/pull/542>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
