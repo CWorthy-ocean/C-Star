@@ -382,7 +382,7 @@ class CStarEnvironment:
         >>> CStarEnvironment._call_lmod("unload", "gcc")
         """
         lmod_path = Path(os.environ.get("LMOD_CMD", ""))
-        command = f"{lmod_path} python {' '.join(list(args))}"
+        command = f"{lmod_path} python {' '.join(args)}"
         stdout = _run_cmd(
             command,
             msg_err=f"Linux Environment Modules command `{command.strip()}` failed.",
