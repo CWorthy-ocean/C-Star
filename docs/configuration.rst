@@ -12,7 +12,7 @@ The following environment variables can be set by the user to control C-Star beh
 Frequent users may want to set preferred values for these variables in their ``.bash_profile`` or ``.zshrc`` files.
 
 .. tip::
-    Use ``CSTAR_FF_CLI_ENV_SHOW=1 cstar env show --display export`` to generate a starter script.
+    Use ``cstar env show --display export`` to generate a starter script.
 
 .. envvar-table::
     cstar.base.env

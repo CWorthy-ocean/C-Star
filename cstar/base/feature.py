@@ -16,15 +16,6 @@ ENV_FF_DEVELOPER_MODE: t.Annotated[
 ] = "CSTAR_FF_DEVELOPER_MODE"
 """Enable developer mode to enable all feature flags (not recommended)."""
 
-ENV_FF_CLI_ENV_SHOW: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_ENV_SHOW"],
-    EnvVar(
-        "Enable CLI for displaying environment configuration.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_ENV_SHOW"
-"""Enable CLI for displaying environment configuration."""
 
 ENV_FF_CLI_TEMPLATE_CREATE: t.Annotated[
     t.Literal["CSTAR_FF_CLI_TEMPLATE_CREATE"],
@@ -65,16 +56,6 @@ ENV_FF_CLI_WORKPLAN_PLAN: t.Annotated[
     ),
 ] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
 """Enable CLI for generating the execution plan of a workplan."""
-
-ENV_FF_CLI_WORKPLAN_STATUS: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_STATUS"],
-    EnvVar(
-        "Enable CLI for retrieving status about a workplan run.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_STATUS"
-"""Enable CLI for retrieving status about a workplan run."""
 
 ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
     t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT"],
