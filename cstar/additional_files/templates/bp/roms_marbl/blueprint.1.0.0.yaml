@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://c-star.readthedocs.io/en/latest/_downloads/0cebd53da53a3b20f172b17169be8f33/roms_marbl_schema.1.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.1.0.0.json
 name: Test Blueprint
 description: This is the description of my test blueprint
 application: sleep

@@ -373,7 +373,7 @@ class Simulation(ABC, LoggingMixin):
            The path where the state file will be created.
         """
         fs = cls._get_filesystem_manager(directory)
-        return fs.work_dir / "simulation_state.pkl"
+        return fs.run_dir / "simulation_state.pkl"
 
     @property
     def state_file(self) -> Path:

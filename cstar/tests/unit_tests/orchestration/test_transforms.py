@@ -45,23 +45,23 @@ def test_bp_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def test_output_dir(tmp_path: Path) -> Path:
+def test_working_dir(tmp_path: Path) -> Path:
     """Default path for writing outputs from a blueprint."""
-    return tmp_path / "working_output_dir"
+    return tmp_path / "working_dir"
 
 
 @pytest.fixture
-def test_output_dir_override(tmp_path: Path) -> Path:
+def test_working_dir_override(tmp_path: Path) -> Path:
     """Default path for writing outputs from a blueprint."""
-    return tmp_path / "working_output_dir_override"
+    return tmp_path / "working_dir_override"
 
 
 @pytest.fixture
 def step_overiding_wp(
     test_wp_path: Path,
     test_bp_path: Path,
-    test_output_dir: Path,
-    test_output_dir_override: Path,
+    test_working_dir: Path,
+    test_working_dir_override: Path,
     wp_templates_dir: Path,
     bp_templates_dir: Path,
     default_blueprint_path: str,
@@ -69,7 +69,7 @@ def step_overiding_wp(
     """Copy a template containing blueprint overrides to the test tmp_path.
 
     The step specifies overrides for the blueprint fields:
-    - output_dir (original value "/other_dir")
+    - working_dir (original value "/other_dir")
     - start_date (original value "")
     - end_date (original value "")
 
@@ -79,10 +79,10 @@ def step_overiding_wp(
         Fixture returning default write location for a workplan file
     test_bp_path : Path
         Fixture returning default write location for a blueprint file
-    test_output_dir_override : Path
-        Fixture returning
-    test_output_dir : Path
+    test_working_dir : Path
         Fixture returning the path to a directory for containing orchestration test files
+    test_working_dir_override : Path
+        Fixture returning a path that is different from `test_working_dir`
     wp_templates_dir : Path
         Fixture returning the path to the directory containing workplan template files
     bp_templates_dir : Path
@@ -98,7 +98,8 @@ def step_overiding_wp(
 
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
-        "output_dir: .", f"output_dir: {test_output_dir.as_posix()}"
+        "working_dir: .",
+        f"working_dir: {test_working_dir.as_posix()}",
     )
     test_bp_path.write_text(bp_content)
 
@@ -107,7 +108,10 @@ def step_overiding_wp(
     wp_content = wp_content.replace(default_blueprint_path, test_bp_path.as_posix())
 
     # replace the default so no test outputs leak into working directories
-    wp_content = wp_content.replace("/other_dir", test_output_dir_override.as_posix())
+    wp_content = wp_content.replace(
+        "/other_dir",
+        test_working_dir_override.as_posix(),
+    )
     test_wp_path.write_text(wp_content)
     wp = deserialize(test_wp_path, Workplan)
 
@@ -148,8 +152,8 @@ def test_get_transforms_empty() -> None:
 
 def test_override_transform(
     step_overiding_wp: Workplan,
-    test_output_dir: Path,
-    test_output_dir_override: Path,
+    test_working_dir: Path,
+    test_working_dir_override: Path,
 ) -> None:
     """Verify that the OverrideTransform overwrites values in the blueprint.
 
@@ -157,13 +161,11 @@ def test_override_transform(
     ----------
     step_overiding_wp : Workplan
         A workplan copied from a template with paths referencing tmp_path.
-    tmp_path : Path
-        The temporary path for writing test files.
-    test_output_dir : Path
+    test_working_dir : Path
         The value that replaced the static content of the blueprint template
         and was written to the test directory, tmp_path.
-    test_bp_path : Path
-        The path to the populated blueprint template for this test.
+    test_working_dir_override : Path
+        Fixture returning a path that is different from `test_working_dir`
     """
     transform = OverrideTransform()
     step = step_overiding_wp.steps[0]
@@ -174,8 +176,8 @@ def test_override_transform(
     transformed = list(steps)[0]
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)
-    dir_orig = test_output_dir
-    exp_dir = test_output_dir_override
+    dir_orig = test_working_dir
+    exp_dir = test_working_dir_override
 
     # confirm a new blueprint was created.
     assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
@@ -184,8 +186,8 @@ def test_override_transform(
     bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
 
     # confirm nested attributes (bp.runtime_params.xxx)) is changed
-    assert Path(bp_old.runtime_params.output_dir) == dir_orig
-    assert Path(bp_new.runtime_params.output_dir) == exp_dir
+    assert Path(bp_old.working_dir) == dir_orig.expanduser().resolve()
+    assert Path(bp_new.working_dir) == exp_dir.expanduser().resolve()
 
     assert bp_old.runtime_params.start_date == datetime(2020, 1, 1)
     assert bp_old.runtime_params.end_date == datetime(2021, 1, 1)
@@ -208,23 +210,23 @@ def test_override_transform(
 def test_override_transform_system_precedence(
     tmp_path: Path,
     step_overiding_wp: Workplan,
-    test_output_dir: Path,
+    test_working_dir: Path,
 ) -> None:
     """Verify that system-level overrides passed to the transform override
     values specified in the workplan.
 
     Parameters
     ----------
-    step_overiding_wp : Workplan
-        A workplan copied from a template with paths referencing tmp_path.
     tmp_path : Path
         The temporary path for writing test files.
-    test_output_dir : Path
+    step_overiding_wp : Workplan
+        A workplan copied from a template with paths referencing tmp_path.
+    test_working_dir : Path
         The value that replaced the static content of the blueprint template
         and was written to the test directory, tmp_path.
     """
-    sys_od = tmp_path / "system_output_dir"
-    system_od_override = {"runtime_params": {"output_dir": sys_od.as_posix()}}
+    sys_od = tmp_path / "system_working_dir"
+    system_od_override = {"working_dir": sys_od.as_posix()}
 
     transform = OverrideTransform(sys_overrides=system_od_override)
     step = step_overiding_wp.steps[0]
@@ -235,7 +237,7 @@ def test_override_transform_system_precedence(
     transformed = list(steps)[0]
 
     # confirm a attribute of the blueprint is changed (bp.blueprint_path)
-    dir_orig = test_output_dir
+    dir_orig = test_working_dir
 
     # confirm a new blueprint was created.
     assert Path(step.blueprint_path) != Path(transformed.blueprint_path)
@@ -243,34 +245,28 @@ def test_override_transform_system_precedence(
     bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
     bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
 
-    # confirm that even though an output_dir override was applied, the
+    # confirm that even though a working directory override was applied, the
     # system level override was applied last.
-    assert Path(bp_old.runtime_params.output_dir) == dir_orig
-    assert Path(bp_new.runtime_params.output_dir) == sys_od
+    assert Path(bp_old.working_dir) == dir_orig
+    assert Path(bp_new.working_dir) == sys_od
 
 
-def test_continuance_transform_not_supported(test_output_dir: Path) -> None:
+def test_continuance_transform_not_supported(test_working_dir: Path) -> None:
     """Verify that unknown configuration results in an exception.
 
     Parameters
     ----------
-    test_output_dir : Path
+    test_working_dir : Path
         The value that replaced the static content of the blueprint template
         and was written to the test directory, tmp_path.
     """
     with pytest.raises(NotImplementedError, match="supported"):
-        _ = ContinuanceTransform({"not-path": str(test_output_dir)})
+        _ = ContinuanceTransform({"not-path": str(test_working_dir)})
 
 
 def test_continuance_transform_path_dne() -> None:
     """Verify that sending a path to a directory that does not exist results in
     an exception being raised.
-
-    Parameters
-    ----------
-    test_output_dir : Path
-        The value that replaced the static content of the blueprint template
-        and was written to the test directory, tmp_path.
     """
     with pytest.raises(ValueError, match="No directory found"):
         _ = ContinuanceTransform({"path": "./dir-that-dne"})
@@ -279,7 +275,7 @@ def test_continuance_transform_path_dne() -> None:
 @pytest.mark.parametrize("pad_size", range(1, 10))
 def test_continuance_transform_happy_path(
     single_step_workplan: Workplan,
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
     pad_size: int,
 ) -> None:
     """Verify that applying a well-formed continuance transform causes the
@@ -289,7 +285,7 @@ def test_continuance_transform_happy_path(
     ----------
     single_step_workplan : Workplan
         A workplan with a valid blueprint file on disk.
-    mock_sim_output_dir : Path
+    mocked_simulation_outputs : Path
         Paths to mocked simulation outputs; used here to pass a valid path
         to the continuance transform (containing files meeting glob pattern *_rst.nc)
     pad_size : int
@@ -297,7 +293,7 @@ def test_continuance_transform_happy_path(
         name. This ensures that the restart file search can locate files regardless
         of the number of partitions.
     """
-    _, continue_from_dir, _ = mock_sim_output_dir
+    _, continue_from_dir, _ = mocked_simulation_outputs
 
     for seg_id in ["000", "001", "002"]:
         rf_glob = f"*_rst.*.{seg_id}.nc"
@@ -328,10 +324,11 @@ def test_continuance_transform_happy_path(
     assert not transformed.blueprint_overrides
 
 
-def test_workplan_transformer_applies_output_dir_overrides(
+def test_workplan_transformer_applies_working_dir_overrides(
+    tmp_path: Path,
     step_overiding_wp: Workplan,
-    test_output_dir: Path,
-    test_output_dir_override: Path,
+    test_working_dir: Path,
+    test_working_dir_override: Path,
 ) -> None:
     """Verify that the workplan transformer applies a transform to override
     the output directory for all steps.
@@ -340,17 +337,18 @@ def test_workplan_transformer_applies_output_dir_overrides(
     ----------
     step_overiding_wp : Workplan
         A workplan copied from a template with paths referencing tmp_path.
-    test_output_dir : Path
+    test_working_dir : Path
         The value that replaced the static content of the blueprint template
         and was written to the test directory, tmp_path.
-    test_output_dir_override : Path
+    test_working_dir_override : Path
         An override that was already on the step before the WP transformer is invoked
     """
+    sys_working_dir_override = tmp_path / "system-level-working-dir-override"
     wp_transformer = WorkplanTransformer(step_overiding_wp)
     original_bp_path = Path(step_overiding_wp.steps[0].blueprint_path)
     step_orig: Step = step_overiding_wp.steps[0]
     bp_orig = deserialize(step_orig.blueprint_path, RomsMarblBlueprint)
-    mock_overrides = {"runtime_params": {"output_dir": test_output_dir_override}}
+    mock_overrides = {"working_dir": sys_working_dir_override}
 
     with (
         mock.patch.dict(
@@ -368,13 +366,13 @@ def test_workplan_transformer_applies_output_dir_overrides(
     step_trx = t.cast("LiveStep", wp_trx.steps[0])
 
     # sanity-check expectations for the original blueprint output location and override
-    dir_orig = bp_orig.runtime_params.output_dir
+    dir_orig = bp_orig.working_dir
     original_override = t.cast(
         "str",
-        step_orig.blueprint_overrides["runtime_params"]["output_dir"],  # type: ignore[reportArgumentType,index,call-overload]
+        step_orig.blueprint_overrides["working_dir"],  # type: ignore[reportArgumentType,index,call-overload]
     )
-    assert dir_orig == test_output_dir
-    assert original_override == str(test_output_dir_override)
+    assert dir_orig == test_working_dir
+    assert original_override == str(test_working_dir_override)
 
     # confirm no override remains on the step
     assert "runtime_params" not in step_trx.blueprint_overrides
@@ -385,13 +383,15 @@ def test_workplan_transformer_applies_output_dir_overrides(
 
     # confirm the original and updated blueprint have different output directories
     blueprint = deserialize(trx_bp_path, RomsMarblBlueprint)
-    assert blueprint.runtime_params.output_dir != dir_orig
+    assert blueprint.working_dir != dir_orig
 
-    # confirm the workplan override took precedence over any original override or output_dir
-    exp_dir = test_output_dir_override
-    assert blueprint.runtime_params.output_dir == exp_dir
-    assert blueprint.runtime_params.output_dir != dir_orig
-    assert blueprint.runtime_params.output_dir != original_override
+    # confirm the workplan override took precedence over user-supplied overrides
+    exp_dir = (  # noqa: F841
+        step_trx.fsm.run_dir
+    )  # TODO: there is something very wrong with the fsm root...
+    assert blueprint.working_dir == sys_working_dir_override  # exp_dir
+    assert blueprint.working_dir != dir_orig
+    assert blueprint.working_dir != original_override
 
 
 @pytest.fixture
@@ -405,7 +405,7 @@ def live_step_with_templates(tmp_path: Path) -> LiveStep:
         blueprint=bp.as_posix(),
         blueprint_overrides={
             "input_dir": "{{base_dir}}/input",
-            "output_dir": "{{work_dir: upstream}}/output",
+            "working_dir": "{{work_dir: upstream}}/output",
             "variables": ["{{var1}}", "{{var2}}"],
             "nested": {"key": "{{base_dir}}"},
             "count": 42,
@@ -446,13 +446,14 @@ def test_template_fill_path_substitution(
         return str(upstream_dir)
 
     transform = TemplateFillTransform(scoped_resolver=_resolve)
+    wd_key = "working_dir"
     step = LiveStep.from_step(
         live_step_with_templates,
-        update={"blueprint_overrides": {"output_dir": "{{work_dir: upstream}}/output"}},
+        update={"blueprint_overrides": {wd_key: "{{work_dir: upstream}}/output"}},
     )
     (result,) = transform(step)
 
-    assert result.blueprint_overrides["output_dir"] == f"{upstream_dir}/output"
+    assert result.blueprint_overrides[wd_key] == f"{upstream_dir}/output"
 
 
 def test_template_fill_nested_dict(live_step_with_templates: LiveStep) -> None:

@@ -15,7 +15,7 @@ app = typer.Typer()
 BP_DEFAULT: t.Final[str] = (
     "~/code/cstar/cstar/additional_files/templates/blueprint.yaml"
 )
-BP_OUTDIR_DEFAULT: t.Final[str] = "output_dir: ."
+BP_WORKINGDIR_DEFAULT: t.Final[str] = "working_dir: ."
 
 HELP_SHORT = "Execute a workplan composed of user-supplied blueprints."
 HELP_LONG = f"""\
@@ -33,12 +33,12 @@ class WorkplanTemplate(StrEnum):
 
 
 def create_host_workplan(
-    template: WorkplanTemplate, bp_path: Path, output_path: Path, run_id: str
+    template: WorkplanTemplate, bp_path: Path, working_dir: Path, run_id: str
 ) -> Path:
     """Replace the default blueprint path in a template and write the
     modified workplan in a new location.
     """
-    run_dir = output_path / run_id
+    run_dir = working_dir / run_id
     assets_dir = additional_files_dir()
     templates_dir = assets_dir / "templates"
     template_path = templates_dir / "wp" / f"{template}.yaml"
@@ -49,7 +49,8 @@ def create_host_workplan(
     # update the workplan output directory found in the template
     bp_content = bp_source_path.read_text()
     bp_content = bp_content.replace(
-        BP_OUTDIR_DEFAULT, f"output_dir: {output_path.as_posix()}"
+        BP_WORKINGDIR_DEFAULT,
+        f"working_dir: {working_dir.as_posix()}",
     )
     # write the modified blueprint to the working directory
     bp_target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -67,10 +68,10 @@ def create_host_workplan(
     return wp_path
 
 
-def _run(wp_path: Path, output_path: Path, run_id: str) -> None:
+def _run(wp_path: Path, working_dir: Path, run_id: str) -> None:
     """Execute the DAG synchronously."""
     try:
-        asyncio.run(build_and_run_dag(wp_path, run_id, output_path))
+        asyncio.run(build_and_run_dag(wp_path, run_id, working_dir))
         print(f"Completed execution of composed workplan: {wp_path}.")
     except Exception as ex:
         print(
@@ -86,7 +87,7 @@ def compose(
     blueprint: t.Annotated[
         str | None, typer.Argument(help="Path to a blueprint file.")
     ] = None,
-    output_dir: t.Annotated[
+    working_dir: t.Annotated[
         str,
         typer.Option(
             help="Override the output in the blueprint file(s) with this path."
@@ -103,7 +104,7 @@ def compose(
     execute: t.Annotated[
         bool,
         typer.Option(
-            help="Set this flag to automatically execute the generated workplan."
+            help="Set this flag to automatically execute the generated workplan.",
         ),
     ] = False,
 ) -> Path:
@@ -116,10 +117,10 @@ def compose(
     Path
         The path to the workplan that was generated.
     """
-    output_path = Path(output_dir).expanduser().resolve()
+    working_path = Path(working_dir).expanduser().resolve()
     wp_path = Path(workplan) if workplan is not None else None
     bp_path = Path(blueprint) if blueprint is not None else None
-    template = WorkplanTemplate.SINGLE_STEP if not template else template
+    template = template or WorkplanTemplate.SINGLE_STEP
 
     if wp_path is None and bp_path is None and not template:
         print("Run aborted. A workplan, blueprint, or template must be provided")
@@ -127,18 +128,18 @@ def compose(
 
     if bp_path:
         # host the blueprint in a workplan template
-        wp_path = create_host_workplan(template, bp_path, output_path, run_id)
+        wp_path = create_host_workplan(template, bp_path, working_path, run_id)
         print(f"Running template workplan at `{wp_path}` with blueprint at `{bp_path}`")
     else:
         bp_path = Path(BP_DEFAULT)
-        wp_path = create_host_workplan(template, bp_path, output_path, run_id)
+        wp_path = create_host_workplan(template, bp_path, working_path, run_id)
         print(f"Running workplan at `{wp_path}` with sample blueprint at `{bp_path}`")
 
     if wp_path is None or not wp_path.exists():
         raise ValueError("Workplan path is malformed.")
 
     if execute:
-        _run(wp_path, output_path, run_id)
+        _run(wp_path, working_path, run_id)
 
     return wp_path
 

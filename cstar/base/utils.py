@@ -424,6 +424,25 @@ def utc_now() -> dt.datetime:
     return dt.datetime.now(tz=dt.timezone.utc)
 
 
+def generate_schema_ref(app_name: str, vtarget: str) -> str:
+    """Generate a schema reference header for a built-in blueprint.
+
+    Parameters
+    ----------
+    app_name : str
+        The application name
+
+    Returns
+    -------
+    str
+    """
+    filename = f"{app_name}_schema.{vtarget}.json"
+    repo_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star"
+    resource_path = f"refs/heads/main/docs/schemas/bp/{app_name}/{filename}"
+
+    return f"{repo_uri}/{resource_path}"
+
+
 def min_padded_index(i: int, n: int) -> str:
     """Generate the min-length zero padded string for a 0-based index.
 

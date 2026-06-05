@@ -302,6 +302,8 @@ def fill_blueprint_template(
             state: draft
             valid_start_date: 2020-01-01 00:00:00
             valid_end_date: 2020-02-01 00:00:00
+            schema_version: 2.0.0
+            working_dir: .
             code:
               roms:
                 location: http://github.com/ankona/ucla-roms
@@ -366,7 +368,6 @@ def fill_blueprint_template(
               start_date: 2020-01-01 00:00:00
               end_date: 2020-01-02 00:00:00
               checkpoint_frequency: 1d
-              output_dir: .
             grid:
               documentation: http://mockdoc.com/model-params
               data:
@@ -416,12 +417,12 @@ def single_step_workplan(
     Workplan
     """
     bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    default_output_dir = "output_dir: ."
+    default_working_dir = "working_dir: ."
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
-        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
+        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
     )
     bp_content.replace(Application.SLEEP, Application.ROMS_MARBL)
     bp_path.write_text(bp_content)
@@ -476,3 +477,59 @@ def hello_world_bp_path(tmp_path: Path, hello_world_bp_content: str) -> Path:
     path = tmp_path / "helloworld.yaml"
     path.write_text(hello_world_bp_content)
     return path
+
+
+@pytest.fixture
+def plotter_v1_0_0_model() -> dict[str, t.Any]:
+    return {
+        "name": "Plotter Unit Test Blueprint",
+        "schema_version": "1.0.0",
+        "application": "plotter",
+        "description": "plot outputs",
+        "output_dir": "~/cstar/wales_plotter/plots-test",
+        "state": "draft",
+        "input_dir": "~/cstar/wales_toy_blueprint/joined_output",
+        "variables": ["ALK", "pH_3D"],
+        "time_indices": [-1],
+        "s_indices": [0, -1],
+        "grid_file_path": "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc",
+        "file_glob": "*bgc*.nc",
+    }
+
+
+@pytest.fixture
+def plotter_v2_0_0_model() -> dict[str, t.Any]:
+    return {
+        "name": "Plotter Unit Test Blueprint",
+        "schema_version": "2.0.0",
+        "application": "plotter",
+        "description": "plot outputs",
+        "working_dir": "~/cstar/wales_plotter/plots-test",
+        "state": "draft",
+        "input_dir": "~/cstar/wales_toy_blueprint/joined_output",
+        "variables": ["ALK", "pH_3D"],
+        "time_indices": [-1],
+        "s_indices": [0, -1],
+        "grid_file_path": "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc",
+        "file_glob": "*bgc*.nc",
+    }
+
+
+@pytest.fixture
+def plotter_v1_0_0_bp(tmp_path: Path, plotter_v1_0_0_model: dict[str, t.Any]) -> Path:
+    content = json.dumps(plotter_v1_0_0_model)
+
+    bp_path = tmp_path / "test-blueprints" / "plotter_1.0.0.json"
+    bp_path.parent.mkdir(parents=True, exist_ok=True)
+    bp_path.write_text(content)
+    return bp_path
+
+
+@pytest.fixture
+def plotter_v2_0_0_bp(tmp_path: Path, plotter_v2_0_0_model: dict[str, t.Any]) -> Path:
+    content = json.dumps(plotter_v2_0_0_model)
+
+    bp_path = tmp_path / "test-blueprints" / "plotter_2.0.0.json"
+    bp_path.parent.mkdir(parents=True, exist_ok=True)
+    bp_path.write_text(content)
+    return bp_path

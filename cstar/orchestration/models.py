@@ -2,7 +2,7 @@ import itertools
 import typing as t
 from abc import ABC
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from enum import StrEnum, auto
 from pathlib import Path
@@ -15,14 +15,17 @@ from pydantic import (
     HttpUrl,
     PlainSerializer,
     PrivateAttr,
+    SerializationInfo,
     SerializeAsAny,
     StringConstraints,
+    ValidationInfo,
     WithJsonSchema,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
-from cstar.base.utils import slugify
+from cstar.base.utils import generate_schema_ref, slugify
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -159,8 +162,11 @@ class Blueprint(ConfiguredBaseModel, ABC):
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
-    schema_version: str = ""
+    schema_version: str = Field("1.0.0", frozen=True)
     """The schema version for the document."""
+
+    working_dir: TargetDirectoryPath = Path()
+    """Path to a directory where assets are stored when executing the blueprint."""
 
     @property
     def cpus_needed(self) -> int:
@@ -169,6 +175,30 @@ class Blueprint(ConfiguredBaseModel, ABC):
         Defaults to 1. Can be overridden by subclasses.
         """
         return 1
+
+    @field_validator("working_dir", mode="after")
+    @classmethod
+    def _resolve_out_dir(
+        cls,
+        value: Path,
+        _info: "ValidationInfo",
+    ) -> Path:
+        return value.expanduser().resolve()
+
+    @model_serializer(mode="wrap")
+    def serialize_with_schema_ref(
+        self,
+        handler: Callable[[BaseModel], dict[str, t.Any]],
+        info: "SerializationInfo",
+    ) -> dict[str, t.Any]:
+        data = handler(self)
+        return {
+            "$schema": generate_schema_ref(
+                self.application,
+                self.schema_version,
+            ),
+            **data,
+        }
 
 
 class WorkplanState(StrEnum):

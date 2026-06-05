@@ -1860,7 +1860,7 @@ def bp_templates_dir(templates_dir: Path) -> Path:
 
 
 @pytest.fixture
-def mock_sim_output_dir(
+def mocked_simulation_outputs(
     tmp_path: Path,
     bp_templates_dir: Path,
 ) -> tuple[Path, Path, Path]:
@@ -1922,16 +1922,16 @@ def mock_sim_output_dir(
 
 @pytest.fixture
 def preprocessable_roms_step(
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> Step:
     """Create a valid step with an underlying RomsMarblBlueprint.
 
     Parameters
     ----------
-    mock_sim_output_dir: tuple[Path, Path, Path]
+    mocked_simulation_outputs: tuple[Path, Path, Path]
         Paths to directories created to mock output of a ROMS simulation.
     """
-    *_, step_dir, bp_path = mock_sim_output_dir
+    *_, step_dir, bp_path = mocked_simulation_outputs
     joined_dir = step_dir / "joined_output"
 
     return Step(
@@ -1949,30 +1949,30 @@ def preprocessable_roms_step(
 @pytest.fixture
 def preprocessable_roms_livestep(
     preprocessable_roms_step: Step,
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> LiveStep:
     """Create a valid step with an underlying RomsMarblBlueprint.
 
     Parameters
     ----------
-    mock_sim_output_dir: tuple[Path, Path, Path]
+    mocked_simulation_outputs: tuple[Path, Path, Path]
         Paths to directories created to mock output of a ROMS simulation.
 
     Returns
     -------
     LiveStep
     """
-    *_, step_dir, _ = mock_sim_output_dir
+    *_, step_dir, _ = mocked_simulation_outputs
     return LiveStep.from_step(
         preprocessable_roms_step,
-        update={"work_dir": step_dir},
+        update={"working_dir": step_dir},
     )
 
 
 @pytest.fixture
 def preprocessable_workplan_path(
     tmp_path: Path,
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
     wp_templates_dir: Path,
 ) -> Path:
     """Modify a basic workplan template to include directives in the last step.
@@ -1981,7 +1981,7 @@ def preprocessable_workplan_path(
     ----------
     tmp_path : Path
         Used to write some temporary workplans to disk
-    mock_sim_output_dir : Path
+    mocked_simulation_outputs : Path
         Used to identify a directory containing mocked restart files
     wp_templates_dir : Path
         Used to load a workplan template that can be modified to include directives
@@ -1989,7 +1989,7 @@ def preprocessable_workplan_path(
     wp_template = wp_templates_dir / "workplan.yaml"
 
     # add directives to the last step in the workplan file
-    _, continue_from_dir, _ = mock_sim_output_dir
+    _, continue_from_dir, _ = mocked_simulation_outputs
     content = wp_template.read_text()
     base_indent = 6  # indentation of the "directives" element
     directives = ["directives:", "continue-from:", f"path: {continue_from_dir}"]

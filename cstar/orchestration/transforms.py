@@ -597,7 +597,7 @@ class OverrideTransform(Transform[LiveStep]):
         live_step = LiveStep.from_step(step, update=update)
 
         bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
-        live_step.blueprint_path = live_step.fsm.work_dir / bp_renamed
+        live_step.blueprint_path = live_step.fsm.run_dir / bp_renamed
 
         serialize(live_step.blueprint_path, updated_bp)
         return (live_step,)
@@ -623,7 +623,7 @@ def get_system_overrides(step: LiveStep) -> dict[str, t.Any]:
         The transformed step.
     """
     if step.application == "roms_marbl":
-        return {"runtime_params": {"output_dir": step.fsm.root}}
+        return {"working_directory": step.fsm.root_dir}
     return {}
 
 

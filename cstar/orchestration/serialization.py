@@ -184,7 +184,13 @@ def model_to_yaml(model: _T) -> str:
 
     register_representer(PosixPath, path_representer)
 
-    return yaml.dump(dumped, sort_keys=False)
+    if schema_url := str(dumped.pop("$schema", "")):
+        content = yaml.dump(dumped, sort_keys=False)
+        content = f"# yaml-language-server: $schema={schema_url}\n{content}"
+    else:
+        content = yaml.dump(dumped, sort_keys=False)
+
+    return content
 
 
 def _mode_detect(path: Path) -> PersistenceMode:
@@ -261,7 +267,7 @@ def deserialize(
 
 def serialize(
     path: Path,
-    model: _T,
+    model: SerializableModel,
     mode: PersistenceMode = PersistenceMode.yaml,
 ) -> int:
     """Serialize a model into a file.
@@ -292,7 +298,7 @@ def serialize(
         PersistenceMode.yaml: model_to_yaml,
     }
 
-    content = handlers[mode](model)
+    content = t.cast("str", handlers[mode](model))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:

@@ -187,7 +187,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job_name = step.safe_name
         job_dep_ids = [d.pid for d in dependencies]
 
-        script_path = step.fsm.work_dir / "script.sh"
+        script_path = step.fsm.run_dir / "script.sh"
         output_file = step.fsm.logs_dir / f"{job_name}.out"
 
         if not script_path.parent.exists():

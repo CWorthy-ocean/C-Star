@@ -57,7 +57,7 @@ def test_converter_defaults(
         name="test step",
         application=target_application,
         blueprint=bp_path,
-        work_dir=tmp_path / "unit-test-work-dir",
+        working_dir=tmp_path / "unit-test-work-dir",
     )
 
     mapped_fn = get_command_mapping(target_application)
@@ -90,7 +90,7 @@ def test_converter_registration(
         name="test step",
         application=target_application,
         blueprint=bp_path,
-        work_dir=tmp_path / "unit-test-work-dir",
+        working_dir=tmp_path / "unit-test-work-dir",
     )
 
     # ensure registration doesn't persist after test completes.
@@ -191,13 +191,13 @@ async def test_converter_hello_world(
     hello_world_bp_path : Path
         Path to the hello world blueprint.
     """
-    work_dir = tmp_path / "work"
+    working_dir = tmp_path / "work"
 
     step = LiveStep(
         name=f"{__name__}",
         application=Application.HELLO_WORLD,
         blueprint=hello_world_bp_path.as_posix(),
-        work_dir=work_dir,
+        working_dir=working_dir,
     )
 
     # find the registered command converter for this application and launcher type
@@ -253,13 +253,13 @@ def test_convert_step_to_preprocessed_roms_sim_no_reset_files(
     step = preprocessable_roms_livestep
 
     # delete any mocked reset files to trigger validation failure
-    assert step.work_dir, "Fixture failed to set work_dir on step"
-    fsm = RomsFileSystemManager(step.work_dir)
+    assert step.working_dir, "Fixture failed to set `working_dir` on step"
+    fsm = RomsFileSystemManager(step.working_dir)
     shutil.rmtree(fsm.joined_output_dir, ignore_errors=True)
     fsm.joined_output_dir.mkdir(parents=True)
 
     assert not step.blueprint_overrides, "Empty overrides expected"
-    assert step.work_dir, "Ensure fixture sets workdir"
+    assert step.working_dir, "Ensure fixture sets workdir"
 
     config = {"path": fsm.joined_output_dir}
 
@@ -281,10 +281,10 @@ def test_continuance_transform(
     """
     step = preprocessable_roms_livestep
     assert not step.blueprint_overrides, "Empty overrides expected"
-    assert step.work_dir, "Ensure fixture sets workdir"
+    assert step.working_dir, "Ensure fixture sets workdir"
 
     bp_path_before = step.blueprint_path
-    fsm = RomsFileSystemManager(step.work_dir)
+    fsm = RomsFileSystemManager(step.working_dir)
 
     original_bp = deserialize(bp_path_before, RomsMarblBlueprint)
     assert original_bp.initial_conditions.data, "data list is unexpectedly empty"

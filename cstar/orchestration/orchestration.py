@@ -211,14 +211,14 @@ class LiveStep(Step):
 
     parent: t.Self | None = Field(default=None, exclude=True)
     """The step for which this step is a sub-task."""
-    work_dir: Path | None = Field(default=None, exclude=True)
+    working_dir: Path | None = Field(default=None, exclude=True)
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
 
     @property
     def get_working_dir(self) -> Path:
-        if self.work_dir is None:
+        if self.working_dir is None:
             if self.parent:
                 root_fsm = self.parent.fsm
             else:
@@ -227,9 +227,9 @@ class LiveStep(Step):
                     root_dir = root_dir.joinpath(run_id)
                 root_fsm = JobFileSystemManager(root_dir)
 
-            self.work_dir = root_fsm.tasks_dir / self.safe_name
+            self.working_dir = root_fsm.tasks_dir / self.safe_name
 
-        return self.work_dir
+        return self.working_dir
 
     @property
     def fsm(self) -> JobFileSystemManager:
@@ -297,7 +297,7 @@ class LiveStep(Step):
             effective_parent = step.parent
 
         if effective_parent is not None:
-            step_attrs.pop("work_dir", None)
+            step_attrs.pop("working_dir", None)
             step_attrs["parent"] = effective_parent
 
         return LiveStep(**step_attrs)

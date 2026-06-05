@@ -132,7 +132,7 @@ def modify_template_blueprint(
                 oldstr, newstr
             )
         modified_template_content = modified_template_content.replace(
-            "<output_dir>", str(out_dir)
+            "<working_dir>", str(out_dir)
         )
         temp_path = tmpdir.join(template_blueprint_path.name)
         with open(temp_path, "w") as temp_file:

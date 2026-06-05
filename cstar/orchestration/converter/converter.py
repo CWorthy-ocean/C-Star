@@ -50,9 +50,9 @@ def prepare_directive_file(step: "LiveStep") -> Path:
     str
         The path to the directive file.
     """
-    directives_path = step.fsm.work_dir / "directives.yaml"
-    if not step.fsm.work_dir.exists():
-        step.fsm.work_dir.mkdir(parents=True)
+    directives_path = step.fsm.run_dir / "directives.yaml"
+    if not step.fsm.run_dir.exists():
+        step.fsm.run_dir.mkdir(parents=True)
     with directives_path.open("w") as fp:
         model = step.model_dump(include={"directives"})
         content = yaml.dump(model, sort_keys=False)
@@ -106,8 +106,8 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     str
         The complete CLI command.
     """
-    if not step.fsm.work_dir.exists():
-        step.fsm.work_dir.mkdir(parents=True)
+    if not step.fsm.run_dir.exists():
+        step.fsm.run_dir.mkdir(parents=True)
 
     sleep_time = random.random()
     script = textwrap.dedent(
@@ -120,7 +120,7 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     )
 
     # write it to a script asset
-    script_path = step.fsm.work_dir / "placeholder_script.sh"
+    script_path = step.fsm.run_dir / "placeholder_script.sh"
     script_path.write_text(script)
 
     return f"sh {script_path}"
