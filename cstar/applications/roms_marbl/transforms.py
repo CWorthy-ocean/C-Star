@@ -164,8 +164,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
             partition_segment: str | None = None
             if partitioning := bp_copy.partitioning:
                 num_partitions = partitioning.n_procs_x * partitioning.n_procs_y
-                pad_size = len(str(num_partitions - 1))
-                partition_segment = "0".zfill(pad_size)
+                partition_segment = min_padded_index(0, num_partitions)
 
             # Use the last restart file as initial conditions for the follow-up step
             restart_file = RestartFile.from_parts(
