@@ -85,7 +85,14 @@ def read_json_to_raw(path: Path) -> dict[str, t.Any]:
     """
     with path.open("r", encoding="utf-8") as fp:
         json_data = fp.read()
-        return from_json(json_data)
+        try:
+            return from_json(json_data)
+        except ValueError as ex:
+            msg = (
+                f"Failed to load json from {str(path)!r}. If are loading a remote document, your URL "
+                f"may point to an HTML page instead of the raw YAML content."
+            )
+            raise RuntimeError(msg) from ex
 
 
 def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
@@ -105,8 +112,8 @@ def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
             model_dict = yaml.safe_load(fp)
         except ScannerError as e:
             msg = (
-                f"Failed to load yaml from {path}. If are loading a remote YAML, your URL "
-                f"may point to a HTML page instead of the raw YAML content."
+                f"Failed to load yaml from {str(path)!r}. If are loading a remote document, your URL "
+                f"may point to an HTML page instead of the raw YAML content."
             )
             raise RuntimeError(msg) from e
         return model_dict
@@ -136,9 +143,18 @@ def read_raw(
         mode = _mode_detect(path)
 
     if mode == PersistenceMode.json:
-        return read_json_to_raw(path)
+        reader = read_json_to_raw
+        alt = read_yaml_to_raw
+    else:
+        reader = read_yaml_to_raw
+        alt = read_json_to_raw
 
-    return read_yaml_to_raw(path)
+    try:
+        return reader(path)
+    except (RuntimeError, ValueError):
+        msg = f"Deserialization failed with {mode!r} for {str(path)!r}. Using alternate reader"
+        log.debug(msg)
+        return alt(path)
 
 
 def _read_json(path: Path, klass: type[_T]) -> _T:
@@ -155,7 +171,7 @@ def _read_json(path: Path, klass: type[_T]) -> _T:
     -------
     _T
     """
-    model_dict = read_raw(path, PersistenceMode.json)
+    model_dict = read_json_to_raw(path)
     return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
@@ -173,7 +189,7 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
     -------
     _T
     """
-    model_dict = read_raw(path, PersistenceMode.yaml)
+    model_dict = read_yaml_to_raw(path)
     return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
@@ -318,6 +334,10 @@ def deserialize(
         model = _read_json(path, klass)
     else:
         model = _read_yaml(path, klass)
+
+    # if model is None:
+    #     msg = f"Unable to deserialize a `{klass.__name__}` at `{path}` as `{mode}` from: \n{path.read_text()}"
+    #     raise ValueError(msg)
 
     msg = f"Deserialized {str(path)!r} into: {model}"
     log.trace(msg)
