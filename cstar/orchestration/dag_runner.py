@@ -12,7 +12,7 @@ from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.models import UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Orchestrator,
