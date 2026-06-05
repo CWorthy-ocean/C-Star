@@ -335,10 +335,6 @@ def deserialize(
     else:
         model = _read_yaml(path, klass)
 
-    # if model is None:
-    #     msg = f"Unable to deserialize a `{klass.__name__}` at `{path}` as `{mode}` from: \n{path.read_text()}"
-    #     raise ValueError(msg)
-
     msg = f"Deserialized {str(path)!r} into: {model}"
     log.trace(msg)
 
