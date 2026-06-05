@@ -65,6 +65,10 @@ inputs:
         type: bgc
         coarse_grid_mode: "never"
       - source:
+          name: MBL_co2
+        type: bgc
+        coarse_grid_mode: "never"
+      - source:
           name: WOA
           climatology: true
         restoring_forces: ['sss']

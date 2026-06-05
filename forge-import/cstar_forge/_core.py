@@ -500,7 +500,11 @@ class CstarSpecBuilder(BaseModel):
                         elif hasattr(entry, "type"):
                             forcing_type = entry.type
 
-                        stem = f"{category}-{forcing_type}" if forcing_type else category
+                        source_name = entry.get("source").get("name")
+                        if entry.get("type") == "bgc" and source_name == "MBL_co2":
+                                stem = f"{category}-{forcing_type}-co2" if forcing_type else category
+                        else:
+                            stem = f"{category}-{forcing_type}" if forcing_type else category
                         _add_nc(stem)
                     continue
 

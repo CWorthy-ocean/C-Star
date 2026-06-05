@@ -452,7 +452,7 @@ class RomsMarblInputData(InputData):
         if path.exists():
             matches.append(path)
         else:
-            pattern = f"{path.stem}*.nc"
+            pattern = f"{path.stem}_*.nc"
             matches.extend(sorted(path.parent.glob(pattern)))
 
         # De-duplicate while preserving order.
@@ -741,8 +741,13 @@ class RomsMarblInputData(InputData):
                 f"Expected 'type' to be 'physics', 'bgc', or 'restoring'."
             )
 
-        yaml_path = self._yaml_filename(f"{key}-{type}")
-        output_path = self._forcing_filename(input_name=f"surface-{type}")
+        source_name = input_args.get("source").get("name")
+        if input_args.get("type") == "bgc" and source_name == "MBL_co2":
+            yaml_path = self._yaml_filename(f"{key}-{type}-co2")
+            output_path = self._forcing_filename(input_name=f"surface-{type}-co2")
+        else:
+            yaml_path = self._yaml_filename(f"{key}-{type}")
+            output_path = self._forcing_filename(input_name=f"surface-{type}")
 
         existing_paths = self._existing_output_paths(output_path)
         frc = None
@@ -780,8 +785,11 @@ class RomsMarblInputData(InputData):
         if input_args["type"] == "restoring":
             if "sss" in input_args["restoring_forces"]:
                 self._settings_compile_time["cppdefs"]["sal_restore"] = True
+        elif input_args["type"] == "bgc" and input_args["source"]["name"] == "MBL_co2":
+            self._settings_compile_time["cppdefs"]["co2_tvarying"] = True
 
         # Append Resources directly to blueprint_elements.forcing[subkey]
+        
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)

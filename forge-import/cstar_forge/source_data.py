@@ -74,6 +74,12 @@ glorys_dataset_id: str = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
 
 
 # -----------------------------------------
+# constants: MBL_CO2
+# -----------------------------------------
+
+MBL_CO2_URL = f"https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+
+# -----------------------------------------
 # Constants (WOA versioning)
 # -----------------------------------------
 
@@ -98,6 +104,8 @@ SOURCE_ALIAS: Dict[str, str] = {
     "UNIFIED_BGC": "UNIFIED_BGC",
     # SRTM15 bathymetry
     "SRTM15": f"SRTM15_{SRTM15_VERSION}".upper(),
+    # MBL_CO2 xco2
+    "MBL_CO2": f"MBL_CO2".upper(),
     # TPXO tidal data (user-provided)
     "TPXO": "TPXO",
     # WOA salinity data (user-provided)
@@ -489,6 +497,54 @@ def _prepare_srtm15(self: SourceData) -> Path:
 def _prepare_era5(self: SourceData) -> Path:
     pass
 
+
+# ---------------------------
+# MBL_CO2 handler
+# ---------------------------
+
+
+@register_dataset("MBL_CO2")
+def _prepare_mblco2(self: SourceData) -> Path:
+    """
+    Ensure the MBL xco2 dataset exists locally.
+
+    Download if:
+      - the file does not exist, or
+      - clobber=True.
+
+    The file is stored under config.paths.source_data / "MBL_CO2" / "co2_GHGreference.1785677502_surface.txt".
+    """
+    dataset_dir = config.paths.source_data / "MBL_CO2"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    path = dataset_dir / f"co2_GHGreference.1785677502_surface.txt"
+
+    needs_download = self.clobber or (not path.exists())
+
+    if needs_download:
+        if path.exists():
+            print(f"⚠️  Clobber=True: removing existing MBL_CO2 file {path.name}")
+            path.unlink()
+
+        print(f"⬇️  Downloading MBL_CO2, 1979-2025 xco2 surface data → {path}")
+
+        with tempfile.NamedTemporaryFile(delete=False, dir=str(dataset_dir)) as tmpfile:
+            with urlopen(MBL_CO2_URL) as r:
+                shutil.copyfileobj(r, tmpfile)
+            tmp_path = Path(tmpfile.name)
+
+        tmp_path.replace(path)
+        print(f"✔️  MBL_CO2 download complete: {path}")
+    else:
+        print(f"✔️  Using existing MBL_CO2 dataset: {path}")
+
+    self.mblco2_path = path
+    return path
+
+
+@register_dataset("ERA5")
+def _prepare_era5(self: SourceData) -> Path:
+    pass
+
 # ---------------------------
 # TPXO handler (user-provided dataset)
 # ---------------------------
@@ -608,7 +664,6 @@ def _prepare_woa(self: SourceData) -> Path:
 
         )
 
-    #import pdb;pdb.set_trace()
     print(f"✔️  WOA dataset verified at: {woa_path}")
     self.paths["WOA"] = woa_path
     return woa_path / "woa*_decav_s*.nc"
