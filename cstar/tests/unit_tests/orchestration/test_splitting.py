@@ -1,5 +1,6 @@
 import os
 import typing as t
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -16,6 +17,8 @@ from cstar.orchestration.transforms import (
     get_time_slices,
     get_transforms,
 )
+
+N_MONTHS: t.Final[int] = 12
 
 
 def test_time_splitting() -> None:
@@ -47,7 +50,7 @@ def test_time_splitting() -> None:
     ],
 )
 def test_roms_marbl_transform_registry(
-    application: str, transform_fn: t.Callable[[Step], t.Iterable[Step]]
+    application: str, transform_fn: Callable[[Step], Iterable[Step]]
 ) -> None:
     """Verify that the transform registry returns the expected transform."""
     with mock.patch.dict(
@@ -95,7 +98,7 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
         transformed_steps = list(transform(original_step))
 
         # one step transforms into 12 monthly steps
-        assert len(transformed_steps) == 12
+        assert len(transformed_steps) == N_MONTHS
 
         working_dirs: list[str] = []
 

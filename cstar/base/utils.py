@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import typing as t
+from collections.abc import Generator
 from itertools import zip_longest
 from pathlib import Path
 from types import ModuleType
@@ -440,3 +441,27 @@ def generate_schema_ref(app_name: str, vtarget: str) -> str:
     resource_path = f"refs/heads/main/docs/schemas/bp/{app_name}/{filename}"
 
     return f"{repo_uri}/{resource_path}"
+
+
+def min_padded_index(i: int, n: int) -> str:
+    """Generate the min-length zero padded string for a 0-based index.
+
+    E.g. With 1000 segments & indices [0, 999] return strings such that
+    no padding is required for the maximum value: ["000", "001", "002", ..., "999"].
+    """
+    pad_size = len(str(n - 1))
+    return str(i).zfill(pad_size)
+
+
+def min_padded_indices(n: int) -> Generator[str]:
+    """Enumerate `n` min-padded indices.
+
+    See: min_padded_index
+
+    Returns
+    -------
+    Generator[str]
+    """
+    pad_size = len(str(n - 1))
+    for i in range(n):
+        yield str(i).zfill(pad_size)

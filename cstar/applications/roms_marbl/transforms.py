@@ -16,8 +16,17 @@ from pydantic import (
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT, is_feature_enabled
-from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, deep_merge, slugify
+from cstar.base.feature import (
+    ENV_FF_ORCH_TRX_TIMESPLIT,
+    ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
+    is_feature_enabled,
+)
+from cstar.base.utils import (
+    DEFAULT_OUTPUT_ROOT_NAME,
+    deep_merge,
+    min_padded_index,
+    slugify,
+)
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import (
@@ -42,6 +51,31 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         """Initialize the transform instance."""
         freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
         self.frequency = freq_config.lower()
+
+    def get_subtask_name(
+        self,
+        i: int,
+        n: int,
+        sd: datetime,
+        ed: datetime,
+        name: str,
+    ) -> str:
+        """Generate an appropriate subtask name given subtask-specific metadata.
+
+        Returns
+        -------
+        str
+        """
+        padded_idx = min_padded_index(i, n)
+        dynamic_name = f"{self.suffix()}{padded_idx}"
+
+        if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME):
+            compact_fmt = "%Y%m%d%H%M"
+            compact_sd = sd.strftime(compact_fmt)
+            compact_ed = ed.strftime(compact_fmt)
+            dynamic_name = f"{padded_idx}_{name}_{compact_sd}_{compact_ed}"
+
+        return slugify(dynamic_name)
 
     def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Split a step into multiple sub-steps.
@@ -87,18 +121,13 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                 ),
             )
 
-            compact_fmt = "%Y%m%d%H%M%S"
-            compact_sd = sd.strftime(compact_fmt)
-            compact_ed = ed.strftime(compact_fmt)
-
-            dynamic_name = f"{i + 1:03d}_{step.safe_name}_{compact_sd}_{compact_ed}"
-            child_step_name = slugify(dynamic_name)
+            child_step_name = self.get_subtask_name(i, n_slices, sd, ed, step.safe_name)
 
             child_fs = step.fsm.get_subtask_manager(child_step_name)
 
             description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
             overrides: dict[str, t.Any] = {
-                "name": dynamic_name,
+                "name": child_step_name,
                 "description": description,
                 "runtime_params": {
                     "start_date": sd,
@@ -331,7 +360,7 @@ class RestartFileTrxAdapter:
     """Convert a restart file into a dictionary useful for use in an OverrideTransform."""
 
     @classmethod
-    def adapt(cls, rst_file: RestartFile) -> dict[str, t.Any]:
+    def adapt(cls, rst_file: RestartFile | None) -> dict[str, t.Any]:
         """Given a restart file, create a dictionary containing the overrides necessary to
         execute a simulation with the restart file specified in the initial conditions.
 
@@ -344,6 +373,9 @@ class RestartFileTrxAdapter:
         -------
         Mapping[str, t.Any]
         """
+        if rst_file is None:
+            return {}
+
         return {
             "runtime_params": {
                 "start_date": rst_file.timestamp,

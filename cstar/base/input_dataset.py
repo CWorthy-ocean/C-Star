@@ -1,6 +1,7 @@
 import datetime as dt
 from abc import ABC
 from pathlib import Path
+from typing import Any
 
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import coerce_datetime
@@ -11,21 +12,16 @@ from cstar.io.staged_data import StagedDataCollection, StagedFile
 class InputDataset(ABC, LoggingMixin):
     """Describes spatiotemporal data needed to run a unique instance of a model
     simulation.
-
-    Attributes:
-    -----------
-    source: SourceData
-        Describes the location of and classifies the source data
-    working_copy: StagedFile or StagedDataCollection or None
-        Describes the locally staged version (if any) of the data
-    exists_locally: bool
-        True if this InputDataset has been staged for use locally
-
-    Methods:
-    --------
-    get(local_dir) -> StagedFile | StagedDataCollection
-        Stage this InputDataset for local use by C-Star
     """
+
+    source: SourceData
+    """The location of and classifies the source data"""
+    start_date: dt.datetime | None = None
+    """The minimum date in the dataset."""
+    end_date: dt.datetime | None = None
+    """The maximum date in the dataset."""
+    _working_copy: StagedFile | StagedDataCollection | None = None
+    """The locally staged version (if any) of the data"""
 
     def __init__(
         self,
@@ -33,7 +29,7 @@ class InputDataset(ABC, LoggingMixin):
         file_hash: str | None = None,
         start_date: str | dt.datetime | None = None,
         end_date: str | dt.datetime | None = None,
-    ):
+    ) -> None:
         """Initialize an InputDataset object associated with a model simulation.
 
         Parameters:
@@ -54,7 +50,7 @@ class InputDataset(ABC, LoggingMixin):
         # Subclass-specific  confirmation that everything is set up correctly:
         self.validate()
 
-    def validate(self):
+    def validate(self) -> None:
         pass
 
     @property
@@ -76,9 +72,7 @@ class InputDataset(ABC, LoggingMixin):
         -------
         bool: True if all files are known to exist locally, otherwise False
         """
-        if (self.working_copy) and not (self.working_copy.changed_from_source):
-            return True
-        return False
+        return bool(self.working_copy and not self.working_copy.changed_from_source)
 
     @property
     def _local(self) -> list[Path]:
@@ -86,9 +80,7 @@ class InputDataset(ABC, LoggingMixin):
         if self.working_copy:
             if isinstance(self.working_copy, StagedDataCollection):
                 return self.working_copy.paths
-            return [
-                self.working_copy.path,
-            ]
+            return [self.working_copy.path]
         return []
 
     def __str__(self) -> str:
@@ -126,7 +118,7 @@ class InputDataset(ABC, LoggingMixin):
 
         return repr_str
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Represent this InputDataset object as a dictionary of kwargs.
 
         Returns:
@@ -135,14 +127,14 @@ class InputDataset(ABC, LoggingMixin):
            A dictionary of kwargs that can be used to initialize the
            InputDataset object.
         """
-        input_dataset_dict = {}
-        input_dataset_dict["location"] = self.source.location
+        input_dataset_dict = {"location": self.source.location}
+
         if self.source.file_hash is not None:
             input_dataset_dict["file_hash"] = self.source.file_hash
         if self.start_date is not None:
-            input_dataset_dict["start_date"] = self.start_date.__str__()
+            input_dataset_dict["start_date"] = str(self.start_date)
         if self.end_date is not None:
-            input_dataset_dict["end_date"] = self.end_date.__str__()
+            input_dataset_dict["end_date"] = str(self.end_date)
 
         return input_dataset_dict
 
@@ -159,10 +151,12 @@ class InputDataset(ABC, LoggingMixin):
         target_path = Path(local_dir).expanduser().resolve() / self.source.basename
 
         if self.exists_locally:
-            self.log.info(f"⏭️ {target_path} already exists, skipping.")
+            msg = f"⏭️ {target_path} already exists, skipping."
+            self.log.info(msg)
             return
+
         staged = self.source.stage(target_dir=local_dir)
-        assert isinstance(staged, StagedFile) or isinstance(
-            staged, StagedDataCollection
-        )
+        if not isinstance(staged, (StagedFile, StagedDataCollection)):
+            msg = f"Require StagedFile or StagedDataCollection; received {type(staged)}"
+            raise TypeError(msg)
         self._working_copy = staged
