@@ -26,9 +26,10 @@ classifiers = [
 requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
+    "fakeredis<2.35",
     "networkx>=3.6.1",
     "prefect>=3.6.1",
-    "fakeredis<2.35",
+    "psutil>=7.2.2",
     "pydantic>=2.12",
     "python-dateutil>=2.8.2",
     "pytimeparse>=1.1.8",
