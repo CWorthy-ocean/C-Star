@@ -191,6 +191,7 @@ Improvements
 - Refactored as needed to share migration code with manual migration triggered via `cstar blueprint migrate ...` (`#535 <https://github.com/CWorthy-ocean/C-Star/pull/535>`_)
 - Improved type-hints for `InputDataset` and `RomsInputDataset` (`#538 <https://github.com/CWorthy-ocean/C-Star/pull/538>`_)
 - Mitigated linter warnings (`#538 <https://github.com/CWorthy-ocean/C-Star/pull/538>`_)
+- Improved formatting, linting, and type hinting in serialization, tracking, and launcher modules. (`#541 <https://github.com/CWorthy-ocean/C-Star/pull/541>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
