@@ -1,5 +1,6 @@
 import os
 import subprocess
+import typing as t
 from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
@@ -25,6 +26,9 @@ from cstar.system.environment import (
     CStarEnvironment,
     LmodEnvSettings,
 )
+
+if t.TYPE_CHECKING:
+    from importlib.machinery import ModuleSpec
 
 
 class MockEnvironment(CStarEnvironment):
@@ -533,8 +537,9 @@ class TestExceptions:
 
     @patch("cstar.system.environment.importlib.util.find_spec", return_value=None)
     def test_package_root_raises_import_error_when_package_not_found(
-        self, mock_find_spec
-    ):
+        self,
+        _mock_find_spec: "ModuleSpec | None",
+    ) -> None:
         """Tests that missing package spec raises an ImportError in package_root
         property.
 
@@ -564,8 +569,15 @@ class TestExceptions:
         - Raises EnvironmentError with a message indicating Lmod modules are not supported on the system.
         """
         self.mock_uses_lmod.return_value = False
-        with pytest.raises(
-            EnvironmentError, match="does not appear to use Linux Environment Modules"
+
+        with (
+            pytest.raises(
+                EnvironmentError,
+                match="does not appear to use Linux Environment Modules",
+            ),
+            mock.patch.object(
+                type(MockEnvironment), "lmod_path", return_value=Path("/some/file")
+            ),
         ):
             env = MockEnvironment()
             env.load_lmod_modules()
