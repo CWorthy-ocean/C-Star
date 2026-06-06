@@ -16,7 +16,7 @@ from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
-from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
 from cstar.orchestration.orchestration import Status
 from cstar.orchestration.serialization import deserialize
@@ -139,12 +139,13 @@ def checkmark(color: str) -> str:
     return f"[{color}]:heavy_check_mark:"
 
 
+def label(name: str, app: str | None) -> str:
+    return f"{name} [italic]({app})[/italic]" if app else name
+
+
 def display_summary(
     run_id: str,
-    dag_status: DagStatus,
-    step_order: list[str] | None = None,
-    step_deps: dict[str, list[str]] | None = None,
-    step_apps: dict[str, str] | None = None,
+    lookup: t.OrderedDict[str, DagDetailRecord],
 ) -> None:
     """Display a summary describing the current state of
     a DAG executed by the orchestrator.
@@ -173,32 +174,15 @@ def display_summary(
         pad_edge=False,
     )
 
-    if step_order is not None:
-        ordered = [
-            (n, dag_status.details[n]) for n in step_order if n in dag_status.details
-        ]
-        seen = set(step_order)
-        ordered += [
-            (n, s) for n, s in sorted(dag_status.details.items()) if n not in seen
-        ]
-    else:
-        ordered = sorted(dag_status.details.items())
-
-    for task_name, status in ordered:
-        deps_done = step_deps is None or all(
-            dag_status.details.get(dep) == Status.Done
-            for dep in step_deps.get(task_name, [])
-        )
-        app = step_apps.get(task_name) if step_apps else None
-        label = f"{task_name} [italic]({app})[/italic]" if app else task_name
+    for x in lookup.values():
         table.add_row(
-            label,
-            checkmark("gray") if status == Status.Submitted and not deps_done else "",
-            checkmark("green") if status == Status.Submitted and deps_done else "",
-            checkmark("cyan") if Status.is_running(status) else "",
-            checkmark("green") if status == Status.Done else "",
-            checkmark("red") if status == Status.Failed else "",
-            checkmark("yellow") if status == Status.Cancelled else "",
+            label(x.step.safe_name, x.step.application),
+            (checkmark("gray") if x.status == Status.Submitted and not x.ready else ""),
+            (checkmark("green") if x.status == Status.Submitted and x.ready else ""),
+            checkmark("cyan") if Status.is_running(x.status) else "",
+            checkmark("green") if x.status == Status.Done else "",
+            checkmark("red") if x.status == Status.Failed else "",
+            checkmark("yellow") if x.status == Status.Cancelled else "",
         )
 
     console.print(table)

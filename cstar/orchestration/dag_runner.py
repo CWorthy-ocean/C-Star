@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+from collections import OrderedDict
 from collections.abc import Awaitable, Generator, Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import cycle
@@ -10,10 +11,11 @@ from prefect import flow
 
 from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
+from cstar.base.utils import slugify
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
-from cstar.orchestration.models import UserDefinedVariables, Workplan
+from cstar.orchestration.models import Step, UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Launcher,
     Orchestrator,
@@ -55,6 +57,43 @@ class DagStatus:
     def closed_items(self) -> Iterable[str]:
         """Return the name of all items that have completed."""
         return (k for k, v in self.details.items() if Status.is_terminal(v))
+
+    def __getitem__(self, key: str) -> Status:
+        """Access a status record using the step safe-name."""
+        return self.details[key]
+
+
+class DagDetailRecord(t.NamedTuple):
+    """Detail record used for displaying dependency-related information in table."""
+
+    step: "Step"
+    """The step."""
+    status: Status
+    """The status of the step."""
+    ready: bool
+    """Flag indicating if all dependencies are complete."""
+
+
+def get_status_detail_map(
+    planner: Planner,
+    dag_status: DagStatus,
+) -> OrderedDict[str, DagDetailRecord]:
+    return OrderedDict(
+        {
+            step.safe_name: DagDetailRecord(
+                step,
+                dag_status[step.safe_name],
+                all(
+                    (
+                        Status.is_terminal(dag_status[slugify(s)])
+                        and not Status.is_failure(dag_status[slugify(s)])
+                    )
+                    for s in step.depends_on
+                ),
+            )
+            for step in planner.flatten()
+        }
+    )
 
 
 def get_launcher() -> Launcher[t.Any]:
