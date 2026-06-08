@@ -575,12 +575,55 @@ class TestExceptions:
                 EnvironmentError,
                 match="does not appear to use Linux Environment Modules",
             ),
-            mock.patch.object(
-                type(MockEnvironment), "lmod_path", return_value=Path("/some/file")
-            ),
         ):
             env = MockEnvironment()
             env.load_lmod_modules()
+
+    def test_lmod_system_default_modules_is_set(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify that LMOD_SYSTEM_DEFAULT_MODULES is set when missing and
+        we attempt to load modules.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Used to create a mock modules file to be "loaded" by the mocked `_call_lmod`
+
+        Asserts
+        -------
+        - Raises EnvironmentError with a message indicating Lmod modules are not supported on the system.
+        """
+        mock_module_names = ["mock-module-1", "mock-module-2"]
+        modules_file = tmp_path / "mock_modules.lmod"
+        modules_file.write_text("\n".join(mock_module_names))
+        modules_var: t.Final[str] = "LMOD_SYSTEM_DEFAULT_MODULES"
+        modules_exp_value: t.Final[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
+
+        with (
+            # ensure the variable isn't set at the outset by clearning os.environ.
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                MockEnvironment,
+                "lmod_path",
+                modules_file,
+            ),
+            mock.patch.object(MockEnvironment, "_call_lmod") as mock_call_lmod,
+        ):
+            env = MockEnvironment()
+            env.load_lmod_modules()
+
+            # confirm the reset and load fired
+            mock_call_lmod.assert_has_calls(
+                [
+                    mock.call("reset"),
+                    mock.call("load", *mock_module_names),
+                ]
+            )
+
+            # confirm the env var is set after the call completes
+            assert os.environ[modules_var] == modules_exp_value
 
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
