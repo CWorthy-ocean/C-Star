@@ -417,7 +417,7 @@ class CStarEnvironment:
         self._call_lmod("reset")
 
         with open(self.lmod_path) as fp:
-            lmod_list = fp.readlines()
+            lmod_list = [x.strip() for x in fp.readlines()]
 
         modules = " ".join(x.strip() for x in lmod_list)
         self._call_lmod(f"load {modules}")
