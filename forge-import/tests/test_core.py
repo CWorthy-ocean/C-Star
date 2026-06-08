@@ -331,8 +331,8 @@ class TestCstarSpecBuilderInitialization:
             "grid": {"topography_source": "ETOPO5"},
             "initial_conditions": {"source": {"name": "GLORYS"}},
             "forcing": {
-                "surface": [{"type": "physics"}, {"type": "bgc"}],
-                "boundary": [{"type": "physics"}],
+                "surface": [{"type": "physics", "source": {"name": "ERA5"}}, {"type": "bgc", "source": {"name": "UNIFIED"}}],
+                "boundary": [{"type": "physics", "source": {"name": "GLORYS"}}],
                 "tidal": [{"source": {"name": "TPXO"}}],
             },
         }
