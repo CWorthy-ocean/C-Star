@@ -67,28 +67,40 @@ class DagDetailRecord(t.NamedTuple):
 
     step: "Step"
     """The step."""
-    key: int
+    ref_id: int
     status: Status
     """The status of the step."""
     awaiting: list[str]
     """A list of tasks this step is waiting on."""
+    satisfied: list[str]
+    """A list of tasks this step depends on that have successfully completed."""
+    blocking: list[str]
+    """A list of tasks this step depends on that have failed and block it from starting."""
 
     @property
     def ready(self) -> bool:
         """Flag indicating if all dependencies are complete."""
-        return not any(self.awaiting) and self.status == Status.Submitted
+        # return not any(self.awaiting) and self.status == Status.Submitted
+        return (
+            self.status == Status.Submitted and not self.awaiting and not self.blocking
+        )
 
     @property
     def waiting(self) -> bool:
         """Flag indicating if all dependencies are complete."""
-        return any(self.awaiting) and self.status == Status.Submitted
+        return (
+            self.status == Status.Submitted
+            and bool(self.awaiting)
+            and not self.blocking
+        )
+
+    @property
+    def blocked(self) -> bool:
+        return self.status == Status.Submitted and bool(self.blocking)
 
     @classmethod
-    def get_ref_map(
-        cls, d: OrderedDict[str, "DagDetailRecord"]
-    ) -> dict[str, list[int]]:
-        ref_map = {name: i for i, name in enumerate(d)}
-        return {k: [ref_map[kdep] for kdep in v.step.depends_on] for k, v in d.items()}
+    def get_ref_map(cls, d: OrderedDict[str, "DagDetailRecord"]) -> dict[str, int]:
+        return {name: value.ref_id for name, value in d.items()}
 
 
 def get_status_detail_map(
@@ -111,10 +123,13 @@ def get_status_detail_map(
     return OrderedDict(
         {
             step.name: DagDetailRecord(
-                step,
-                i,
-                dag_status[step.name],
-                [
+                step=step,
+                ref_id=i,
+                status=dag_status[step.name],
+                awaiting=[
+                    s for s in step.depends_on if not Status.is_terminal(dag_status[s])
+                ],
+                satisfied=[
                     s
                     for s in step.depends_on
                     if (
@@ -122,8 +137,11 @@ def get_status_detail_map(
                         and not Status.is_failure(dag_status[s])
                     )
                 ],
+                blocking=[
+                    s for s in step.depends_on if Status.is_failure(dag_status[s])
+                ],
             )
-            for i, step in enumerate(planner.flatten())
+            for i, step in enumerate(planner.flatten(), start=1)
         }
     )
 

@@ -147,9 +147,18 @@ def id_label(id: int, name: str, app: str | None) -> str:
     return f"{id}. {name} [italic]({app})[/italic]" if app else name
 
 
-def ref_label(record: DagDetailRecord, ref_map: dict[str, list[int]]) -> str:
-    if record.awaiting:
-        return ", ".join(str(x) for x in ref_map[record.step.name])
+def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:
+    items: list[str] = []
+    for d in record.step.depends_on:
+        if d in record.awaiting:
+            items.append(f"[yellow]{ref_map[d]}[/yellow]")
+        elif d in record.satisfied:
+            items.append(f"[green]{ref_map[d]}[/green]")
+        elif d in record.blocking:
+            items.append(f"[red]{ref_map[d]}[/red]")
+
+    if items:
+        return ", ".join(str(x) for x in items)
     return ""
 
 
@@ -178,7 +187,7 @@ def display_summary(
         Column(header="Done", justify="center"),
         Column(header="Failed", justify="center"),
         Column(header="Cancelled", justify="center"),
-        Column(header="[red]*[/red] Dependencies", justify="center"),
+        Column(header="Dependencies", justify="center"),
         title=f"Run [yellow]{run_id}[/yellow] Results",
         show_lines=True,
         padding=padding,
@@ -189,9 +198,9 @@ def display_summary(
 
     for x in lookup.values():
         table.add_row(
-            id_label(x.key, x.step.safe_name, x.step.application),
+            id_label(refs_map[x.step.name], x.step.safe_name, x.step.application),
             (checkmark("gray") if x.waiting else ""),
-            (checkmark("green") if x.ready else ""),
+            (checkmark("white") if x.ready else ""),
             checkmark("cyan") if Status.is_running(x.status) else "",
             checkmark("green") if x.status == Status.Done else "",
             checkmark("red") if x.status == Status.Failed else "",
