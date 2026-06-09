@@ -648,7 +648,7 @@ async def executed_workplan(
         )
         await repo.put_workplan_run(wp_run)
 
-        mock_get_wp = mock.Mock(return_value=wp_run)
+        mock_get_wp = mock.AsyncMock(return_value=wp_run)
 
         with (
             mock.patch(

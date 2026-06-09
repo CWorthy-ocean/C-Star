@@ -11,7 +11,6 @@ from prefect import flow
 
 from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
-from cstar.base.utils import slugify
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -70,26 +69,45 @@ class DagDetailRecord(t.NamedTuple):
     """The step."""
     status: Status
     """The status of the step."""
-    ready: bool
-    """Flag indicating if all dependencies are complete."""
+    awaiting: list[str]
+    """A list of tasks this step is waiting on."""
+
+    @property
+    def ready(self) -> bool:
+        """Flag indicating if all dependencies are complete."""
+        return any(self.awaiting)
 
 
 def get_status_detail_map(
     planner: Planner,
     dag_status: DagStatus,
 ) -> OrderedDict[str, DagDetailRecord]:
+    """Return a mapping from step names to their detailed status record.
+
+    Parameters
+    ----------
+    planner : Planner
+        The planner used to generate an execution graph for the workplan
+    dag_status : DagStatus
+        The overall completion status of the workplan.
+
+    Returns
+    -------
+    OrderedDict[str, DagDetailRecord]
+    """
     return OrderedDict(
         {
-            step.safe_name: DagDetailRecord(
+            step.name: DagDetailRecord(
                 step,
-                dag_status[step.safe_name],
-                all(
-                    (
-                        Status.is_terminal(dag_status[slugify(s)])
-                        and not Status.is_failure(dag_status[slugify(s)])
-                    )
+                dag_status[step.name],
+                [
+                    s
                     for s in step.depends_on
-                ),
+                    if (
+                        Status.is_terminal(dag_status[s])
+                        and not Status.is_failure(dag_status[s])
+                    )
+                ],
             )
             for step in planner.flatten()
         }
@@ -97,7 +115,14 @@ def get_status_detail_map(
 
 
 def get_launcher() -> Launcher[t.Any]:
-    """Get the appropriate launcher for the current environment."""
+    """Get the appropriate launcher for the current environment.
+
+    See: `cstar.system.manager.CStarSystemManager` for more information.
+
+    Returns
+    -------
+    Launcher[t.Any]
+    """
     launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
     launcher.check_preconditions()
     return launcher
@@ -131,7 +156,9 @@ async def load_run_state(
     Parameters
     ----------
     run_id : str
-        The run-id to load status for
+        The run-id to load status for.
+    launcher : Launcher[t.Any]
+        The launcher used to execute the workplan.
 
     Returns
     -------
