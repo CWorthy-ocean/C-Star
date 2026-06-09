@@ -951,7 +951,8 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         else:
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
-        scheduler_script += f"\n#SBATCH --account={self.account_key}"
+        if self.account_key:  # HACK / TEMP FOR ELJA
+            scheduler_script += f"\n#SBATCH --account={self.account_key}"
         scheduler_script += "\n#SBATCH --export=ALL"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
         scheduler_script += f"\n#SBATCH --time={self.walltime}"
