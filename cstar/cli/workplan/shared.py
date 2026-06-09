@@ -143,6 +143,16 @@ def label(name: str, app: str | None) -> str:
     return f"{name} [italic]({app})[/italic]" if app else name
 
 
+def id_label(id: int, name: str, app: str | None) -> str:
+    return f"{id}. {name} [italic]({app})[/italic]" if app else name
+
+
+def ref_label(record: DagDetailRecord, ref_map: dict[str, list[int]]) -> str:
+    if record.awaiting:
+        return ", ".join(str(ref_map[x]) for x in record.awaiting)
+    return ""
+
+
 def display_summary(
     run_id: str,
     lookup: OrderedDict[str, DagDetailRecord],
@@ -168,21 +178,25 @@ def display_summary(
         Column(header="Done", justify="center"),
         Column(header="Failed", justify="center"),
         Column(header="Cancelled", justify="center"),
+        Column(header="[red]*[/red] Awaiting", justify="center"),
         title=f"Run [yellow]{run_id}[/yellow] Results",
         show_lines=True,
         padding=padding,
         pad_edge=False,
     )
 
+    refs_map = DagDetailRecord.get_ref_map(lookup)
+
     for x in lookup.values():
         table.add_row(
-            label(x.step.safe_name, x.step.application),
-            (checkmark("gray") if x.status == Status.Submitted and not x.ready else ""),
-            (checkmark("green") if x.status == Status.Submitted and x.ready else ""),
+            id_label(x.key, x.step.safe_name, x.step.application),
+            (checkmark("gray") if x.waiting else ""),
+            (checkmark("green") if x.ready else ""),
             checkmark("cyan") if Status.is_running(x.status) else "",
             checkmark("green") if x.status == Status.Done else "",
             checkmark("red") if x.status == Status.Failed else "",
             checkmark("yellow") if x.status == Status.Cancelled else "",
+            ref_label(x, refs_map),
         )
 
     console.print(table)

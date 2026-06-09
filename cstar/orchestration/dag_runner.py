@@ -67,6 +67,7 @@ class DagDetailRecord(t.NamedTuple):
 
     step: "Step"
     """The step."""
+    key: int
     status: Status
     """The status of the step."""
     awaiting: list[str]
@@ -75,7 +76,19 @@ class DagDetailRecord(t.NamedTuple):
     @property
     def ready(self) -> bool:
         """Flag indicating if all dependencies are complete."""
-        return any(self.awaiting)
+        return not any(self.awaiting) and self.status == Status.Submitted
+
+    @property
+    def waiting(self) -> bool:
+        """Flag indicating if all dependencies are complete."""
+        return any(self.awaiting) and self.status == Status.Submitted
+
+    @classmethod
+    def get_ref_map(
+        cls, d: OrderedDict[str, "DagDetailRecord"]
+    ) -> dict[str, list[int]]:
+        ref_map = {name: i for i, name in enumerate(d)}
+        return {k: [ref_map[kdep] for kdep in v.step.depends_on] for k, v in d.items()}
 
 
 def get_status_detail_map(
@@ -99,6 +112,7 @@ def get_status_detail_map(
         {
             step.name: DagDetailRecord(
                 step,
+                i,
                 dag_status[step.name],
                 [
                     s
@@ -109,7 +123,7 @@ def get_status_detail_map(
                     )
                 ],
             )
-            for step in planner.flatten()
+            for i, step in enumerate(planner.flatten())
         }
     )
 
