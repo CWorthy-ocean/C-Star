@@ -149,7 +149,7 @@ def id_label(id: int, name: str, app: str | None) -> str:
 
 def ref_label(record: DagDetailRecord, ref_map: dict[str, list[int]]) -> str:
     if record.awaiting:
-        return ", ".join(str(ref_map[x]) for x in record.awaiting)
+        return ", ".join(str(x) for x in ref_map[record.step.name])
     return ""
 
 
@@ -178,7 +178,7 @@ def display_summary(
         Column(header="Done", justify="center"),
         Column(header="Failed", justify="center"),
         Column(header="Cancelled", justify="center"),
-        Column(header="[red]*[/red] Awaiting", justify="center"),
+        Column(header="[red]*[/red] Dependencies", justify="center"),
         title=f"Run [yellow]{run_id}[/yellow] Results",
         show_lines=True,
         padding=padding,
