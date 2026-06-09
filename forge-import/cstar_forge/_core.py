@@ -19,7 +19,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import xarray as xr
 import yaml
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR, ENV_CSTAR_IN_ACTIVE_ALLOCATION, ENV_CSTAR_NPROCS_POST
 from cstar.orchestration.models import Resource
+from cstar.orchestration.utils import ENV_CSTAR_SLURM_MAX_WALLTIME, ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 import cstar.applications.roms_marbl.models as cstar_models
@@ -2536,25 +2538,27 @@ class CstarSpecBuilder(BaseModel):
         mc = self._get_machine_config()
         queues = mc.queues or {}
 
+
+
         # precedence: passed variable > pre-existing env-var setting > internal machine config > some default
-        account_key = account_key or os.getenv("CSTAR_SLURM_ACCOUNT") or mc.account or ""
-        queue_name = queue_name or os.getenv("CSTAR_SLURM_QUEUE") or queues.get("default") or ""
-        walltime = walltime or os.getenv("CSTAR_SLURM_WALLTIME") or "6:00:00"
-        clobber = "1" if clobber else os.getenv("CSTAR_CLOBBER_WORKING_DIR", "0")
-        in_active_alloc = "1" if on_compute_node else os.getenv("CSTAR_IN_ACTIVE_ALLOCATION", "0")
+        account_key = account_key or os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or mc.account or ""
+        queue_name = queue_name or os.getenv(ENV_CSTAR_SLURM_QUEUE) or queues.get("default") or ""
+        walltime = walltime or os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME) or "6:00:00"
+        clobber = "1" if clobber else os.getenv(ENV_CSTAR_CLOBBER_WORKING_DIR, "0")
+        in_active_alloc = "1" if on_compute_node else os.getenv(ENV_CSTAR_IN_ACTIVE_ALLOCATION, "0")
 
         # set everything
-        os.environ["CSTAR_CLOBBER_WORKING_DIR"] = clobber
-        os.environ["CSTAR_IN_ACTIVE_ALLOCATION"] = in_active_alloc
-        os.environ["CSTAR_SLURM_ACCOUNT"] = account_key
-        os.environ["CSTAR_SLURM_QUEUE"] = queue_name
-        os.environ["CSTAR_SLURM_WALLTIME"] = walltime
+        os.environ[ENV_CSTAR_CLOBBER_WORKING_DIR] = clobber
+        os.environ[ENV_CSTAR_IN_ACTIVE_ALLOCATION] = in_active_alloc
+        os.environ[ENV_CSTAR_SLURM_ACCOUNT] = account_key
+        os.environ[ENV_CSTAR_SLURM_QUEUE] = queue_name
+        os.environ[ENV_CSTAR_SLURM_MAX_WALLTIME] = walltime
 
         if n_procs_available:
-            os.environ["CSTAR_NPROCS_POST"] = str(n_procs_available)
+            os.environ[ENV_CSTAR_NPROCS_POST] = str(n_procs_available)
         elif n_procs_available == 0:
-            if os.getenv("CSTAR_NPROCS_POST"):
-                del os.environ["CSTAR_NPROCS_POST"]
+            if os.getenv(ENV_CSTAR_NPROCS_POST):
+                del os.environ[ENV_CSTAR_NPROCS_POST]
         #implicit: elif n_procs_available is None, do nothing
 
         if config.system == "RCAC_anvil":
