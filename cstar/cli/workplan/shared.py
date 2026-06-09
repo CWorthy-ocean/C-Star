@@ -1,6 +1,6 @@
 import asyncio
 import typing as t
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Mapping
 
 import typer
@@ -145,7 +145,7 @@ def label(name: str, app: str | None) -> str:
 
 def display_summary(
     run_id: str,
-    lookup: t.OrderedDict[str, DagDetailRecord],
+    lookup: OrderedDict[str, DagDetailRecord],
 ) -> None:
     """Display a summary describing the current state of
     a DAG executed by the orchestrator.
