@@ -33,9 +33,9 @@
       type (ncforce) :: nc_dust        = ncforce(vname='dust', tname='dust_time' )  ! dust forcing
       type (ncforce) :: nc_iron        = ncforce(vname='iron', tname='iron_time' )  ! iron forcing      
 #ifdef PCO2AIR_FORCING
-      type (ncforce) :: nc_pco2air     = ncforce(vname='pco2_air',   tname='pco2_time' )
+      type (ncforce) :: nc_xco2air     = ncforce(vname='xco2_air',   tname='xco2_time' )
 #ifdef MARBL      
-      type (ncforce) :: nc_pco2air_alt = ncforce(vname='pco2_air_alt',   tname='pco2_time' )
+      type (ncforce) :: nc_xco2air_alt = ncforce(vname='xco2_air_alt',   tname='xco2_time' )
 #endif      
 #endif            
 #if defined DAILYPAR_PHOTOINHIBITION || defined DAILYPAR_BEC
