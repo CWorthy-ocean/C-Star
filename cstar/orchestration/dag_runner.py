@@ -68,6 +68,7 @@ class DagDetailRecord(t.NamedTuple):
     step: "Step"
     """The step."""
     ref_id: int
+    """Numeric identifier used to refer dependencies among tasks in a summary."""
     status: Status
     """The status of the step."""
     awaiting: list[str]
@@ -80,7 +81,6 @@ class DagDetailRecord(t.NamedTuple):
     @property
     def ready(self) -> bool:
         """Flag indicating if all dependencies are complete."""
-        # return not any(self.awaiting) and self.status == Status.Submitted
         return (
             self.status == Status.Submitted and not self.awaiting and not self.blocking
         )

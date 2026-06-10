@@ -271,7 +271,6 @@ async def test_dag_runner_get_status_detail_map(
         random.shuffle(steps)
 
         for step in steps:
-            # slug = slugify(step.name)
             detail = detail_map[step.name]
 
             if step.name == "Step 0":
