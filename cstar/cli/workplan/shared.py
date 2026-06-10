@@ -144,7 +144,7 @@ def label(name: str, app: str | None) -> str:
 
 
 def id_label(id: int, name: str, app: str | None) -> str:
-    return f"{id}. {name} [italic]({app})[/italic]" if app else name
+    return f"{id}. {label(name, app)}"
 
 
 def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:
