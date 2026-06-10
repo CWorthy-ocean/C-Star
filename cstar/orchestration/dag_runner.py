@@ -95,6 +95,26 @@ class DagDetailRecord(t.NamedTuple):
         )
 
     @property
+    def running(self) -> bool:
+        """Flag indicating if a task is currently executing."""
+        return Status.is_running(self.status)
+
+    @property
+    def done(self) -> bool:
+        """Flag indicating if a task successfully completed."""
+        return self.status == Status.Done
+
+    @property
+    def failed(self) -> bool:
+        """Flag indicating if a task failed."""
+        return self.status == Status.Failed
+
+    @property
+    def cancelled(self) -> bool:
+        """Flag indicating if a task was cancelled."""
+        return self.status == Status.Cancelled
+
+    @property
     def blocked(self) -> bool:
         return self.status == Status.Submitted and bool(self.blocking)
 

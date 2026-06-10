@@ -18,7 +18,6 @@ from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
-from cstar.orchestration.orchestration import Status
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
@@ -201,10 +200,10 @@ def display_summary(
             id_label(refs_map[x.step.name], x.step.safe_name, x.step.application),
             (checkmark("gray") if x.waiting else ""),
             (checkmark("white") if x.ready else ""),
-            checkmark("cyan") if Status.is_running(x.status) else "",
-            checkmark("green") if x.status == Status.Done else "",
-            checkmark("red") if x.status == Status.Failed else "",
-            checkmark("yellow") if x.status == Status.Cancelled else "",
+            checkmark("cyan") if x.running else "",
+            checkmark("green") if x.done else "",
+            checkmark("red") if x.failed else "",
+            checkmark("yellow") if x.cancelled else "",
             ref_label(x, refs_map),
         )
 
