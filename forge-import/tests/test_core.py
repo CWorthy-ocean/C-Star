@@ -221,12 +221,24 @@ def mock_model_spec():
     mock_settings.compile_time = MagicMock()
     mock_settings.compile_time.settings_dict = {"cppdefs": {"test": True}}  # Non-empty dict
     mock_settings.run_time = MagicMock()
-    mock_settings.run_time.settings_dict = {
-        "roms.in": {
-            "title": {"casename": "test"},
-            "time_stepping": {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1},
-        }
-    }
+    # write_roms_namelist requires a fully-populated run-time settings dict (the
+    # real flow loads run-time-defaults.yml then has generate_inputs() fill the
+    # dynamic fields). Load the actual marbl defaults and overlay concrete
+    # values for the fields normally set during input generation.
+    _rt_defaults_path = (
+        Path(forge_models.__file__).parent
+        / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
+        / "templates" / "run-time-defaults.yml"
+    )
+    with open(_rt_defaults_path) as _f:
+        _rt_defaults = yaml.safe_load(_f)
+    _rt_defaults["roms.in"]["title"] = {"casename": "test"}
+    _rt_defaults["roms.in"]["time_stepping"] = {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1}
+    _rt_defaults["roms.in"]["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
+    _rt_defaults["roms.in"]["grid"] = {"grid_file": "/tmp/test_grid.nc"}
+    _rt_defaults["roms.in"]["initial"] = {"nrrec": 1, "initial_file": "/tmp/test_init.nc"}
+    _rt_defaults["roms.in"]["output_root_name"] = {"output_root_name": "/tmp/test_out"}
+    mock_settings.run_time.settings_dict = _rt_defaults
     mock_settings.properties = MagicMock()
     mock_settings.properties.n_tracers = 34
     mock_spec.settings = mock_settings
