@@ -1,5 +1,6 @@
 import asyncio
 import typing as t
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -36,7 +37,7 @@ class WorkplanRun(BaseModel):
     environment: dict[str, str] = Field(default_factory=dict)
     """The environment variables at the time of the run."""
 
-    user_variables: t.Mapping[str, str] = Field(default_factory=dict)
+    user_variables: Mapping[str, str] = Field(default_factory=dict)
     """User-supplied runtime variable overrides."""
 
     @staticmethod
