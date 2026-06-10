@@ -785,6 +785,8 @@ class RomsMarblInputData(InputData):
             if "sss" in input_args["restoring_forces"]:
                 self._settings_compile_time["cppdefs"]["sal_restore"] = True
         elif input_args["type"] == "bgc" and input_args["source"]["name"] == "MBL_co2":
+            if "cppdefs" not in self._settings_compile_time:
+                self._settings_compile_time["cppdefs"] = {}
             self._settings_compile_time["cppdefs"]["co2_tvarying"] = True
 
         # Append Resources directly to blueprint_elements.forcing[subkey]

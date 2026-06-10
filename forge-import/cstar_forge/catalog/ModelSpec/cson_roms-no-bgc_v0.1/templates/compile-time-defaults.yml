@@ -10,3 +10,4 @@ cppdefs:
   obc_south: true
   marbl: false
   cdr_forcing: false
+  co2_tvarying: false  # Set to true when using time-varying CO2 atmospheric forcing (MBL_co2)
