@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterable, Mapping
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.env import (
@@ -47,24 +47,6 @@ class RunMode(StrEnum):
 
     Schedule = auto()
     """Block until tasks are scheduled."""
-
-
-class ProcessHandle(BaseModel):
-    """Contract used to identify processes created by any launcher."""
-
-    pid: str
-    """The process identifier."""
-
-    name: str
-    """The name of the process."""
-
-    @property
-    def safe_name(self) -> str:
-        """Return a path-safe version of the name."""
-        return slugify(self.name)
-
-
-_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
 
 class Status(IntEnum):
@@ -209,6 +191,31 @@ class Status(IntEnum):
         bool
         """
         return status in cls.in_progress_states()
+
+
+class ProcessHandle(BaseModel):
+    """Contract used to identify processes created by any launcher."""
+
+    pid: str
+    """The process identifier."""
+    name: str
+    """The name of the process."""
+    run_id: str = Field(default_factory=lambda: str(os.getenv(ENV_CSTAR_RUNID, "")))
+    """The run-id the process was run under."""
+    launcher_name: str = ""
+    """The launcher used to launch the process."""
+    status: Status = Status.Unsubmitted
+    """The current status of the task."""
+
+    @property
+    def safe_name(self) -> str:
+        """Return a path-safe version of the name."""
+        return slugify(self.name)
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(extra="allow")
+
+
+_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
 
 class LiveStep(Step):

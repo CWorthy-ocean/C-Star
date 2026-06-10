@@ -47,6 +47,9 @@ class LocalHandle(ProcessHandle):
     status: Status = Status.Unsubmitted
     """The current status of the task."""
 
+    launcher_name: str = "local"
+    """The launcher used to launch the process."""
+
     @property
     def start_ts(self) -> float:
         if isinstance(self.start_at, datetime.datetime):

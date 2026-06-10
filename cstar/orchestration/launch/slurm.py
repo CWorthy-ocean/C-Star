@@ -85,6 +85,10 @@ class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
     status: Status = Status.Unsubmitted
+    """The current status of the task."""
+
+    launcher_name: str = "slurm"
+    """The launcher used to launch the process."""
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
