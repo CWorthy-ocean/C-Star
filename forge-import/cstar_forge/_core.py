@@ -2502,7 +2502,8 @@ class CstarSpecBuilder(BaseModel):
                 "end_date": self.end_date,
                 "output_dir": self.run_output_dir,
             }
-
+            blueprint_dict["working_dir"] = self.run_output_dir
+            
             self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_dict)
             self._stage = BlueprintStage.BUILD
             self.persist()
