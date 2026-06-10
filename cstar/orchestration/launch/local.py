@@ -109,7 +109,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         cmd = step.command
 
         step.fsm.prepare()
-        log_file = step.fsm.logs_dir / f"{step.safe_name}.out"
+        log_file = step.log_path
 
         try:
             if not step.fsm.root_dir.exists():

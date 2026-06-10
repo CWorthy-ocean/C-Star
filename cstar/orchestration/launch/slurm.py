@@ -187,15 +187,14 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job_name = step.safe_name
         job_dep_ids = [d.pid for d in dependencies]
 
-        script_path = step.fsm.run_dir / "script.sh"
-        output_file = step.fsm.logs_dir / f"{job_name}.out"
+        script_path = step.script_path
+        output_file = step.log_path
 
-        if not script_path.parent.exists():
-            script_path.parent.mkdir(parents=True)
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        if not output_file.parent.exists():
-            output_file.parent.mkdir(parents=True)
-            output_file.write_text("ready\n")
+        run_id = os.getenv(ENV_CSTAR_RUNID)
+        step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
         command = step.command
         job = create_scheduler_job(

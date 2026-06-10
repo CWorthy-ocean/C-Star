@@ -264,6 +264,16 @@ class LiveStep(Step):
         step_converter = get_command_mapping(self.application)
         return step_converter(self)
 
+    @property
+    def script_path(self) -> Path:
+        """Return the path to the the log file written by this task."""
+        return self.fsm.run_dir / "script.sh"
+
+    @property
+    def log_path(self) -> Path:
+        """Return the path to the the log file written by this task."""
+        return self.fsm.logs_dir / f"{self.safe_name}.out"
+
     @classmethod
     def from_step(
         cls,

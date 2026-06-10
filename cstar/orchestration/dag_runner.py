@@ -10,12 +10,13 @@ from prefect import flow
 
 from cstar.base.env import capture_environment
 from cstar.base.log import get_logger
-from cstar.execution.file_system import DirectoryManager
+from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Launcher,
+    LiveStep,
     Orchestrator,
     Planner,
     RunMode,
@@ -301,6 +302,30 @@ async def build_and_run_dag(
     )
 
     planner = Planner(workplan=wp)
+
+    log.info("#" * 80)
+    log.info("# Workplan Execution Details")
+    log.info("#" * 80)
+    log.info("#")
+    log.info(f"# - run-id: {run_id}")
+    log.info(f"# - C-Star state directory: {StateDirectoryManager.run_state_dir()}")
+    log.info("#")
+    log.info("# Step Details")
+    log.info("# ------------")
+    log.info("#")
+
+    for step in planner.flatten():
+        live_step = t.cast("LiveStep", step)
+        step_header = f"{live_step.name!r}"
+        step_underline = "-" * len(step_header)
+        log.info(f"# - {live_step.name!r}")
+        log.info(f"#   {step_underline}")
+        log.info(f"#   - configured blueprint: {str(live_step.blueprint_path)!r}")
+        log.info(f"#   - working directory: {str(live_step.fsm.root_dir)!r}")
+        log.info(f"#   - script path: {str(live_step.script_path)!r}")
+        log.info(f"#   - log path: {str(live_step.log_path)!r}")
+        log.info("#")
+    log.info("#" * 80)
 
     orchestrator = Orchestrator(planner, launcher)
 
