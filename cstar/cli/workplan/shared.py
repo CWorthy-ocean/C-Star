@@ -144,7 +144,7 @@ def highvis(msg: str, color: str = "cyan") -> str:
 
 
 def present(prompt: str, value: str, color: str = "cyan", width: int = 0) -> str:
-    return f"{prompt.rjust(width)}: {highvis(value, color)}]"
+    return f"{prompt.rjust(width)}: {highvis(value, color)}"
 
 
 def display_summary(
