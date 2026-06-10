@@ -249,38 +249,48 @@ async def test_dag_runner_get_status_detail_map(
             handle.status = Status.Done
         await put_sentinel(handle)
 
-    launcher = LocalLauncher()
-    run_id = os.getenv(ENV_CSTAR_RUNID) or ""
+    # mock out update_status - with LocalLauncher, it  _starts_
+    # anything marked as "submitted", resulting in a status change.
+    with mock.patch(
+        "cstar.orchestration.dag_runner.LocalLauncher.update_status",
+        return_value=mock.AsyncMock(),
+    ):
+        launcher = LocalLauncher()
 
-    planner = Planner(workplan)
-    # draw_graph(planner). # leave for quicker debugging
+        run_id = os.getenv(ENV_CSTAR_RUNID) or ""
 
-    dag_status = await load_run_state(run_id, launcher)
-    detail_map = get_status_detail_map(planner, dag_status)
-    ordered_names = list(detail_map.keys())
+        planner = Planner(workplan)
+        # draw_graph(planner). # leave for quicker debugging
 
-    # shuffle steps to ensure workplan order does not matter
-    steps = list(workplan.steps)
-    random.shuffle(steps)
+        dag_status = await load_run_state(run_id, launcher)
+        detail_map = get_status_detail_map(planner, dag_status)
+        ordered_names = list(detail_map.keys())
 
-    for step in steps:
-        # slug = slugify(step.name)
-        detail = detail_map[step.name]
+        # shuffle steps to ensure workplan order does not matter
+        steps = list(workplan.steps)
+        random.shuffle(steps)
 
-        if step.name == "Step 0":
-            # by the graph structure, we know the first step has no dependdencies
-            continue
+        for step in steps:
+            # slug = slugify(step.name)
+            detail = detail_map[step.name]
 
-        # get the position of the step in the output
-        slug_idx = ordered_names.index(step.name)
-        # ... and the position of all tasks it depends on to start
-        dep_indices = [ordered_names.index(d) for d in deps[step.name]]
-        # then, confirm the step comes afer all of it's dependencies
-        assert slug_idx > max(dep_indices)
+            if step.name == "Step 0":
+                # by the graph structure, we know the first step has no dependdencies
+                continue
 
-        # confirm the step indicates it's waiting on a dependency if any are open
-        if set(step.depends_on).intersection(open_names) and step.name in open_names:
-            assert not detail.ready
-        elif step.name in open_names:
-            # it has no dependencies in the open set
-            assert detail.ready
+            # get the position of the step in the output
+            slug_idx = ordered_names.index(step.name)
+            # ... and the position of all tasks it depends on to start
+            dep_indices = [ordered_names.index(d) for d in deps[step.name]]
+            # then, confirm the step comes afer all of it's dependencies
+            assert slug_idx > max(dep_indices)
+
+            # confirm the step indicates it's waiting on a dependency if any are open
+            if (
+                set(step.depends_on).intersection(open_names)
+                and step.name in open_names
+            ):
+                assert not detail.ready
+            elif step.name in open_names:
+                # it has no dependencies in the open set
+                assert detail.ready
