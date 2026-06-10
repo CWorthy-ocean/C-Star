@@ -372,12 +372,13 @@ def write_roms_namelist(
         :func:`render_roms_settings`).
     settings_run_time : dict
         The fully merged run-time settings dict (``_settings_run_time`` on the
-        builder).  Must have at minimum a ``"roms.in"`` top-level key holding
-        the sub-sections for grid/forcing/time-stepping.  All former
-        compile-time namelist sections (``"param"``, ``"tides"``,
-        ``"river_frc"``, ``"blk_frc"``, ``"bgc"``, ``"ocean_vars"``, etc.)
-        are now top-level keys of this dict alongside ``"lin_rho_eos"``,
-        ``"sss_correction"``, ``"sst_correction"``, and ``"marbl_bgc"``.
+        builder).  Every namelist section is a top-level key: grid/forcing/
+        time-stepping sections (``"grid"``, ``"forcing"``, ``"time_stepping"``,
+        ``"s_coord"``, ``"initial"``, ``"title"``, …) sit flat alongside the
+        former compile-time sections (``"param"``, ``"tides"``, ``"river_frc"``,
+        ``"blk_frc"``, ``"bgc"``, ``"ocean_vars"``, …) and the newer
+        ``"lin_rho_eos"``, ``"sss_correction"``, ``"sst_correction"``, and
+        ``"marbl_bgc"``.
     output_dir : str or Path
         Directory into which ``namelist.nml`` will be written.  Must already
         exist.
@@ -410,7 +411,9 @@ def write_roms_namelist(
     # directly rather than carrying inline hard-coded fallbacks — a missing
     # key indicates an incomplete defaults YAML and should fail loudly.
     # ------------------------------------------------------------------
-    rt = settings_run_time["roms.in"]
+    # ``rt`` aliases the run-time dict itself: all sections (former roms.in
+    # entries and the rest) now live flat at the top level.
+    rt = settings_run_time
 
     # Namelist sub-dicts (all top-level run-time sections)
     param       = settings_run_time["param"]
@@ -440,7 +443,7 @@ def write_roms_namelist(
     sst_corr    = settings_run_time["sst_correction"]
     marbl_bgc   = settings_run_time["marbl_bgc"]
 
-    # roms.in sub-dicts
+    # Former roms.in sub-dicts (now top-level)
     title_sec   = rt["title"]
     out_root    = rt["output_root_name"]
     time_step   = rt["time_stepping"]

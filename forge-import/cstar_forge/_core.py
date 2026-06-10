@@ -766,7 +766,7 @@ class CstarSpecBuilder(BaseModel):
         directory at run time, so we rewrite relevant ``roms.in`` path fields to
         match that location.
         """
-        rt_cfg = self._settings_run_time.get("roms.in")
+        rt_cfg = self._settings_run_time
         if not isinstance(rt_cfg, dict):
             return
 
@@ -2078,10 +2078,10 @@ class CstarSpecBuilder(BaseModel):
         self._settings_run_time = copy.deepcopy(self._model_spec.settings.run_time.settings_dict)
 
         # Set dynamic values that depend on instance properties
-        self._settings_run_time["roms.in"]["title"] = dict(
+        self._settings_run_time["title"] = dict(
             casename = self.casename,
         )
-        self._settings_run_time["roms.in"]["output_root_name"] = dict(
+        self._settings_run_time["output_root_name"] = dict(
             output_root_name = str(self.run_output_dir / "output" / self.casename),
         )
 
@@ -2183,10 +2183,8 @@ class CstarSpecBuilder(BaseModel):
                     value_copy = copy.deepcopy(value)
                     # TODO: Evaluate whether corrective logic for passed-in values should live here
                     # Do we need to correct anything else?
-                    if key == "roms.in" and "time_stepping" in value_copy:
-                        ts = value_copy["time_stepping"]
-                        if isinstance(ts, dict) and "ntimes" in ts:
-                            ts["ntimes"] = int(round(ts["ntimes"]))
+                    if key == "time_stepping" and "ntimes" in value_copy:
+                        value_copy["ntimes"] = int(round(value_copy["ntimes"]))
                     _deep_merge_settings_dict(self._settings_run_time[key], value_copy)
                 else:
                     self._settings_run_time[key] = (
@@ -2205,7 +2203,7 @@ class CstarSpecBuilder(BaseModel):
         """
         Update run-time timestepping settings in the settings dictionary.
         
-        Sets the `time_stepping` section of `_settings_run_time["roms.in"]` with
+        Sets the `time_stepping` section of `_settings_run_time` with
         calculated values based on simulation dates and timestep.
         
         **Timestep Calculation:**
@@ -2241,7 +2239,7 @@ class CstarSpecBuilder(BaseModel):
             )
             
         ntimes = int(round((self.end_date - self.start_date).days * 24 * 3600 / dt))
-        self._settings_run_time["roms.in"]["time_stepping"] = dict(
+        self._settings_run_time["time_stepping"] = dict(
             ntimes = ntimes,
             dt = dt,
             ndtfast = 60, # TODO: Think about if how to better NDTFAST based on this dt
@@ -2448,12 +2446,12 @@ class CstarSpecBuilder(BaseModel):
 
 
         # Ensure ntimes is an integer (don't recalculate, just ensure type is correct)
-        if "roms.in" in self._settings_run_time and "time_stepping" in self._settings_run_time["roms.in"]:
-            if "ntimes" in self._settings_run_time["roms.in"]["time_stepping"]:
-                ntimes = self._settings_run_time["roms.in"]["time_stepping"]["ntimes"]
+        if "time_stepping" in self._settings_run_time:
+            if "ntimes" in self._settings_run_time["time_stepping"]:
+                ntimes = self._settings_run_time["time_stepping"]["ntimes"]
                 # Convert to integer if it's a float
                 if isinstance(ntimes, float):
-                    self._settings_run_time["roms.in"]["time_stepping"]["ntimes"] = int(round(ntimes))
+                    self._settings_run_time["time_stepping"]["ntimes"] = int(round(ntimes))
 
 
             
@@ -2471,14 +2469,14 @@ class CstarSpecBuilder(BaseModel):
         # ------------------------------------------------------------------
         # 1. Compile-time: render cppdefs.opt from its Jinja2 template.
         #    All other former *.opt outputs are now handled by the namelist.
-        #    The template may reference non-cppdefs namelist sections (e.g.
-        #    cdr_frc, upscale_output) to gate CPP flags, so we merge all
-        #    top-level run-time sections (except the nested "roms.in" block)
-        #    into the render context alongside the compile-time settings.
+        #    The template may reference run-time namelist sections (e.g.
+        #    cdr_frc, upscale_output) to gate CPP flags, so we merge the
+        #    run-time settings into the render context alongside the
+        #    compile-time settings. Extra keys are ignored by the template.
         # ------------------------------------------------------------------
         cppdefs_render_dict = {
             **self._settings_compile_time,
-            **{k: v for k, v in self._settings_run_time.items() if k != "roms.in"},
+            **self._settings_run_time,
         }
         compile_time_code = render_roms_settings(
             template_files=["cppdefs.opt.j2"],
@@ -2538,7 +2536,7 @@ class CstarSpecBuilder(BaseModel):
             blueprint_dict["code"] = cstar_models.ROMSCompositeCodeRepository.model_construct(**code_dict)
 
             blueprint_dict["model_params"] = {
-                "time_step": self._settings_run_time["roms.in"]["time_stepping"]["dt"],
+                "time_step": self._settings_run_time["time_stepping"]["dt"],
             }
             blueprint_dict["runtime_params"] = {
                 "start_date": self.start_date,

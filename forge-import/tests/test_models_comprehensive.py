@@ -1883,7 +1883,7 @@ class TestLoadModelsYaml:
 
         run_yaml = model_dir / "templates" / "run-time-defaults.yml"
         run_yaml.parent.mkdir(parents=True, exist_ok=True)
-        run_yaml.write_text("roms.in: {}\n")
+        run_yaml.write_text("time_stepping: {}\n")
 
         yaml_content = {
             "test_model": {
@@ -1936,7 +1936,7 @@ class TestLoadModelsYaml:
         assert spec.settings.compile_time is not None
         assert "cppdefs" in spec.settings.compile_time.settings_dict
         assert spec.settings.run_time is not None
-        assert "roms.in" in spec.settings.run_time.settings_dict
+        assert "time_stepping" in spec.settings.run_time.settings_dict
     
     def test_load_models_yaml_with_templates_and_settings(self, tmp_path):
         """Test load_models_yaml with both templates and settings using relative paths."""

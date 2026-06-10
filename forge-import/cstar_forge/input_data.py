@@ -311,7 +311,7 @@ class RomsMarblInputData(InputData):
         
         # Initialize settings dictionaries to empty dicts
         self._settings_compile_time = {}
-        self._settings_run_time = {"roms.in": {}}
+        self._settings_run_time = {}
     
     def generate_all(self, clobber: bool = False, partition_files: bool = False, test: bool = False):
         """
@@ -635,9 +635,9 @@ class RomsMarblInputData(InputData):
         resource = Resource(location=str(out_path), partitioned=False)
         self.blueprint_elements.grid.data.append(resource)
 
-        self._settings_run_time["roms.in"]["grid"] = dict(
+        self._settings_run_time["grid"] = dict(
             grid_file = out_path,
-        )        
+        )
 
         if "cppdefs" not in self._settings_compile_time:
             self._settings_compile_time["cppdefs"] = {}
@@ -666,7 +666,7 @@ class RomsMarblInputData(InputData):
             self._settings_run_time["extract_data"]["theta_b_chd"] = self.grid_child.theta_b
             self._settings_run_time["extract_data"]["hc_chd"] = self.grid_child.hc
 
-        self._settings_run_time["roms.in"]["s_coord"] = dict(
+        self._settings_run_time["s_coord"] = dict(
             tcline = self.grid.hc,
             theta_b = self.grid.theta_b,
             theta_s = self.grid.theta_s,
@@ -711,7 +711,7 @@ class RomsMarblInputData(InputData):
             resource = Resource(location=paths, partitioned=False)
             self.blueprint_elements.initial_conditions.data.append(resource)
 
-        self._settings_run_time["roms.in"]["initial"] = dict(
+        self._settings_run_time["initial"] = dict(
             nrrec = 1,
             initial_file = paths[0],
         )
@@ -836,13 +836,13 @@ class RomsMarblInputData(InputData):
         
         self.include_coarse_dims = interp_frc == 1
         
-        if "forcing" not in self._settings_run_time["roms.in"]:
-            self._settings_run_time["roms.in"]["forcing"] = {}
+        if "forcing" not in self._settings_run_time:
+            self._settings_run_time["forcing"] = {}
 
         if "bgc" in type:
-            self._settings_run_time["roms.in"]["forcing"]["surface_forcing_bgc_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
+            self._settings_run_time["forcing"]["surface_forcing_bgc_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
         else:
-            self._settings_run_time["roms.in"]["forcing"]["surface_forcing_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
+            self._settings_run_time["forcing"]["surface_forcing_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
     
     @register_input(name="forcing.boundary", order=40, label="Generating boundary forcing")
     def _generate_boundary_forcing(self, key: str = "forcing.boundary", **kwargs):
@@ -916,13 +916,13 @@ class RomsMarblInputData(InputData):
 
         # TODO: Update self._settings_compile_time with related forcing parameter sets and cppdefs
         
-        if "forcing" not in self._settings_run_time["roms.in"]:
-            self._settings_run_time["roms.in"]["forcing"] = {}
+        if "forcing" not in self._settings_run_time:
+            self._settings_run_time["forcing"] = {}
 
         if "bgc" in type:
-            self._settings_run_time["roms.in"]["forcing"]["boundary_forcing_bgc_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
+            self._settings_run_time["forcing"]["boundary_forcing_bgc_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
         else:
-            self._settings_run_time["roms.in"]["forcing"]["boundary_forcing_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
+            self._settings_run_time["forcing"]["boundary_forcing_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
     
     @register_input(name="forcing.tidal", order=50, label="Generating tidal forcing")
     def _generate_tidal_forcing(self, key: str = "forcing.tidal", **kwargs):
@@ -998,9 +998,9 @@ class RomsMarblInputData(InputData):
             ana_tides = False
         )
 
-        if "forcing" not in self._settings_run_time["roms.in"]:
-            self._settings_run_time["roms.in"]["forcing"] = {}
-        self._settings_run_time["roms.in"]["forcing"]["tidal_forcing_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
+        if "forcing" not in self._settings_run_time:
+            self._settings_run_time["forcing"] = {}
+        self._settings_run_time["forcing"]["tidal_forcing_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
 
     @register_input(name="forcing.river", order=60, label="Generating river forcing")
     def _generate_river_forcing(self, key: str = "forcing.river", **kwargs):
@@ -1036,9 +1036,9 @@ class RomsMarblInputData(InputData):
             self._settings_run_time["river_frc"]["rvol_tname"] = "river_time"
             self._settings_run_time["river_frc"]["rtrc_vname"] = "river_tracer"
             self._settings_run_time["river_frc"]["rtrc_tname"] = "river_time"
-            if "forcing" not in self._settings_run_time["roms.in"]:
-                self._settings_run_time["roms.in"]["forcing"] = {}
-            self._settings_run_time["roms.in"]["forcing"]["river_path"] = (
+            if "forcing" not in self._settings_run_time:
+                self._settings_run_time["forcing"] = {}
+            self._settings_run_time["forcing"]["river_path"] = (
                 paths[0] if isinstance(paths, (list, tuple)) else paths
             )
             for path in paths:
@@ -1109,9 +1109,9 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["river_frc"]["rtrc_vname"] = "river_tracer"
         self._settings_run_time["river_frc"]["rtrc_tname"] = "river_time"
 
-        if "forcing" not in self._settings_run_time["roms.in"]:
-            self._settings_run_time["roms.in"]["forcing"] = {}
-        self._settings_run_time["roms.in"]["forcing"]["river_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
+        if "forcing" not in self._settings_run_time:
+            self._settings_run_time["forcing"] = {}
+        self._settings_run_time["forcing"]["river_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
 
     @register_input(name="cdr_forcing", order=80, label="Generating CDR forcing")
     def _generate_cdr_forcing(self, key: str = "cdr_forcing", cdr_kwargs=None, **kwargs):

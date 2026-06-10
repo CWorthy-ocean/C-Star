@@ -232,12 +232,12 @@ def mock_model_spec():
     )
     with open(_rt_defaults_path) as _f:
         _rt_defaults = yaml.safe_load(_f)
-    _rt_defaults["roms.in"]["title"] = {"casename": "test"}
-    _rt_defaults["roms.in"]["time_stepping"] = {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1}
-    _rt_defaults["roms.in"]["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
-    _rt_defaults["roms.in"]["grid"] = {"grid_file": "/tmp/test_grid.nc"}
-    _rt_defaults["roms.in"]["initial"] = {"nrrec": 1, "initial_file": "/tmp/test_init.nc"}
-    _rt_defaults["roms.in"]["output_root_name"] = {"output_root_name": "/tmp/test_out"}
+    _rt_defaults["title"] = {"casename": "test"}
+    _rt_defaults["time_stepping"] = {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1}
+    _rt_defaults["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
+    _rt_defaults["grid"] = {"grid_file": "/tmp/test_grid.nc"}
+    _rt_defaults["initial"] = {"nrrec": 1, "initial_file": "/tmp/test_init.nc"}
+    _rt_defaults["output_root_name"] = {"output_root_name": "/tmp/test_out"}
     mock_settings.run_time.settings_dict = _rt_defaults
     mock_settings.properties = MagicMock()
     mock_settings.properties.n_tracers = 34
@@ -402,22 +402,20 @@ class TestCstarSpecBuilderInitialization:
 
         source_root = builder.input_data_dir.resolve()
         builder._settings_run_time = {
-            "roms.in": {
-                "grid": {"grid_file": str(source_root / "case_grid.nc")},
-                "initial": {"initial_file": str(source_root / "case_initial.nc")},
-                "forcing": {
-                    "surface_forcing_path": str(source_root / "case_surface.nc"),
-                    "boundary_forcing_path": str(source_root / "case_boundary.nc"),
-                    "tidal_forcing_path": str(source_root / "case_tidal.nc"),
-                    "river_path": "/tmp/custom_river.nc",
-                },
-            }
+            "grid": {"grid_file": str(source_root / "case_grid.nc")},
+            "initial": {"initial_file": str(source_root / "case_initial.nc")},
+            "forcing": {
+                "surface_forcing_path": str(source_root / "case_surface.nc"),
+                "boundary_forcing_path": str(source_root / "case_boundary.nc"),
+                "tidal_forcing_path": str(source_root / "case_tidal.nc"),
+                "river_path": "/tmp/custom_river.nc",
+            },
         }
 
         builder._rewrite_roms_input_paths_to_staged_runtime_paths()
 
         staged_root = builder.run_output_dir / "input" / "input_datasets"
-        roms_settings = builder._settings_run_time["roms.in"]
+        roms_settings = builder._settings_run_time
         assert roms_settings["grid"]["grid_file"] == str(staged_root / "case_grid.nc")
         assert roms_settings["initial"]["initial_file"] == str(staged_root / "case_initial.nc")
         assert roms_settings["forcing"]["surface_forcing_path"] == str(staged_root / "case_surface.nc")
@@ -501,20 +499,16 @@ class TestOverrideSettings:
         self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path
     ):
         mock_model_spec.settings.run_time.settings_dict = {
-            "roms.in": {
-                "title": {"casename": "test"},
-                "time_stepping": {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1},
-                "foo_section": {"bar": 0},
-            }
+            "title": {"casename": "test"},
+            "time_stepping": {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1},
+            "foo_section": {"bar": 0},
         }
         override_file = tmp_path / "run-time-overrides.yml"
         override_file.write_text(
             yaml.dump(
                 {
-                    "roms.in": {
-                        "foo_section": {"bar": 99},
-                        "time_stepping": {"ndtfast": 12},
-                    }
+                    "foo_section": {"bar": 99},
+                    "time_stepping": {"ndtfast": 12},
                 }
             ),
             encoding="utf-8",
@@ -525,9 +519,9 @@ class TestOverrideSettings:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-        assert builder._settings_run_time["roms.in"]["foo_section"]["bar"] == 99
-        assert builder._settings_run_time["roms.in"]["time_stepping"]["ndtfast"] == 12
-        assert "ntimes" in builder._settings_run_time["roms.in"]["time_stepping"]
+        assert builder._settings_run_time["foo_section"]["bar"] == 99
+        assert builder._settings_run_time["time_stepping"]["ndtfast"] == 12
+        assert "ntimes" in builder._settings_run_time["time_stepping"]
 
 
 class TestCstarSpecBuilderProperties:
@@ -2137,7 +2131,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                                 # Manually set settings so the guard passes
                                 builder._settings_compile_time = {"cppdefs": {}}
-                                builder._settings_run_time = {"roms.in": {}}
+                                builder._settings_run_time = {"time_stepping": {}}
 
                                 builder.generate_inputs(clobber=True, test=False)
 
@@ -2180,7 +2174,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                             with patch('cstar_forge._core.CstarSpecBuilder.persist'):
                                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                                 builder._settings_compile_time = {"cppdefs": {}}
-                                builder._settings_run_time = {"roms.in": {}}
+                                builder._settings_run_time = {"time_stepping": {}}
 
                                 builder.generate_inputs(clobber=True, test=False)
 
@@ -2352,18 +2346,16 @@ class TestDeepMergeSettingsDict:
     def test_preserves_sibling_keys_under_time_stepping(self):
         """"Verify that merging dictionaries does not remove/not copy any upstream dict entries"""
         target = {
-            "roms.in": {
-                "time_stepping": {
-                    "ntimes": 100,
-                    "dt": 60,
-                    "ndtfast": 30,
-                    "ninfo": 1,
-                },
-            }
+            "time_stepping": {
+                "ntimes": 100,
+                "dt": 60,
+                "ndtfast": 30,
+                "ninfo": 1,
+            },
         }
-        update = {"roms.in": {"time_stepping": {"dt": 1800}}}
+        update = {"time_stepping": {"dt": 1800}}
         _deep_merge_settings_dict(target, update)
-        ts = target["roms.in"]["time_stepping"]
+        ts = target["time_stepping"]
         assert ts["dt"] == 1800
         assert ts["ntimes"] == 100
         assert ts["ndtfast"] == 30
@@ -2372,16 +2364,14 @@ class TestDeepMergeSettingsDict:
     def test_preserves_sibling_keys_under_forcing(self):
         """"Verify that merging dictionaries does not replace the shared ancestor"""
         target = {
-            "roms.in": {
-                "forcing": {
-                    "surface_forcing_path": "/a",
-                    "boundary_forcing_path": "/b",
-                },
-            }
+            "forcing": {
+                "surface_forcing_path": "/a",
+                "boundary_forcing_path": "/b",
+            },
         }
-        update = {"roms.in": {"forcing": {"surface_forcing_path": "/c"}}}
+        update = {"forcing": {"surface_forcing_path": "/c"}}
         _deep_merge_settings_dict(target, update)
-        f = target["roms.in"]["forcing"]
+        f = target["forcing"]
         assert f["surface_forcing_path"] == "/c"
         assert f["boundary_forcing_path"] == "/b"
 
