@@ -11,7 +11,6 @@ from pydantic import PrivateAttr
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import slugify
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -73,10 +72,6 @@ class LocalHandle(ProcessHandle):
     def process(self, value: _mp.Process) -> None:
         self.status = Status.Submitted
         self._process = value
-
-    @property
-    def safe_name(self) -> str:
-        return slugify(self.name)
 
     @property
     def is_expired(self) -> bool:

@@ -58,6 +58,11 @@ class ProcessHandle(BaseModel):
     name: str
     """The name of the process."""
 
+    @property
+    def safe_name(self) -> str:
+        """Return a path-safe version of the name."""
+        return slugify(self.name)
+
 
 _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 

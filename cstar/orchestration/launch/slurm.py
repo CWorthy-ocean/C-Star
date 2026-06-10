@@ -14,7 +14,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd, slugify
+from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
@@ -85,14 +85,6 @@ class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
     status: Status = Status.Unsubmitted
-
-    @property
-    def safe_name(self) -> str:
-        """Return the path-safe name for the handle.
-
-        Implements the `StateProxy` protocol.
-        """
-        return slugify(self.name)
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
