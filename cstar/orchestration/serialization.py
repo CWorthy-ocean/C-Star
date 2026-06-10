@@ -332,6 +332,19 @@ def deserialize(
     return model
 
 
+def try_deserialize(
+    path: Path | str,
+    klass: type[_T],
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> _T | None:
+    try:
+        return deserialize(path, klass, mode=mode)
+    except Exception:
+        msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
+        log.warning(msg)
+        return None
+
+
 def serialize(
     path: Path,
     model: SerializableModel,
