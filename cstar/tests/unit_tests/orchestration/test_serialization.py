@@ -18,7 +18,7 @@ from cstar.orchestration.serialization import (
     read_yaml_to_raw,
     serialize,
 )
-from cstar.orchestration.state import sentinel_path
+from cstar.orchestration.state import StateRepository
 
 
 def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
@@ -268,7 +268,7 @@ def test_serialization_handle(mode: PersistenceMode) -> None:
     pid, job_name = "test-pid", "abc123"
     handle = SlurmHandle(pid=pid, name=job_name)
 
-    persist_as = sentinel_path(handle, mode)
+    persist_as = StateRepository.sentinel_path(handle, mode=mode)
 
     # confirm the parametrized serialization mode is supported
     nbytes = serialize(

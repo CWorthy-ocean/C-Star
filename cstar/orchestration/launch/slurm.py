@@ -28,11 +28,10 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.state import (
-    get_sentinel,
+    StateRepository,
     load_sentinels,
-    put_sentinel,
-    sentinel_path,
 )
+from cstar.orchestration.tracking import TrackingRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -274,9 +273,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
+        state_repo = StateRepository()
+
         prior_handle = t.cast(
             "SlurmHandle",
-            await get_sentinel(sentinel_path(step), SlurmHandle),
+            await state_repo.get_sentinel(step.name, SlurmHandle),
         )
         submit_fn = SlurmLauncher._submit
         current_status = Status.Unsubmitted
@@ -391,7 +392,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if prior != current:
             handle.status = current
-            await put_sentinel(handle)
+            state_repo = StateRepository()
+            run_repo = TrackingRepository()
+
+            if path := await state_repo.put_sentinel(handle):
+                _paths = await run_repo.attach_sentinel(path)
 
         return item
 
