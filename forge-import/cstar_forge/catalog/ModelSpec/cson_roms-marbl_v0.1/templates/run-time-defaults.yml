@@ -317,6 +317,22 @@ sst_correction:
 
 marbl_bgc:
   marbl_config_file: "marbl_in"
-  marbl_tracers_to_write: ""
-  marbl_diagnostics_to_write: ""
+  marbl_tracers_to_write:
+    - PO4
+    - NO3
+    - SiO3
+    - NH4
+    - Fe
+    - O2
+    - DIC
+    - ALK
+    - spChl
+    - diatChl
+  marbl_diagnostics_to_write:
+    - PH
+    - PH_ALT_CO2
+    - pCO2SURF_ALT_CO2
+    - pCO2SURF
+    - FG_CO2
+    - FG_ALT_CO2
   marbl_timestep_ratio: 1

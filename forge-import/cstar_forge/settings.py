@@ -345,6 +345,42 @@ def _attach_roms_jinja_filters(env: Environment) -> None:
     env.filters["fort_cdr_file_decl"] = _fortran_cdr_file_decl
 
 
+# Fortran array bounds declared in ROMS src/marbl_driver.F90 for the namelist
+# string lists (pinned ucla-roms commit). A list longer than these would
+# overflow the declared array at run time.
+MARBL_TRACERS_TO_WRITE_MAX = 40
+MARBL_DIAGNOSTICS_TO_WRITE_MAX = 64
+
+
+def _namelist_str_list(value: Any, *, max_len: Optional[int] = None,
+                       name: Optional[str] = None) -> Union[str, list[str]]:
+    """
+    Normalize a namelist string-list field (e.g. ``marbl_tracers_to_write``).
+
+    ROMS declares these as Fortran string arrays. A YAML sequence becomes a
+    list of strings (``f90nml`` emits a multi-element array, ``= 'a', 'b'``); a
+    scalar string or ``None`` becomes the string itself, with an empty/absent
+    value rendered as ``''`` (ROMS reads an empty first entry as "none").
+
+    If ``max_len`` is given and a list exceeds it, a warning is emitted (the
+    list is still written as-is; ROMS would overflow its fixed-size array).
+    """
+    if isinstance(value, (list, tuple)):
+        items = [str(x) for x in value]
+        if max_len is not None and len(items) > max_len:
+            warnings.warn(
+                f"{name or 'namelist list'} has {len(items)} entries but ROMS "
+                f"declares it with {max_len}; the model will overflow this array. "
+                f"Trim the list in run-time-defaults.yml.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return items if items else ""
+    if value is None:
+        return ""
+    return str(value)
+
+
 def write_roms_namelist(
     settings_compile_time: Dict[str, Any],
     settings_run_time: Dict[str, Any],
@@ -676,10 +712,18 @@ def write_roms_namelist(
     }
 
     # ---- MARBL biogeochemistry settings (new section; formerly in roms.in) ----
+    # marbl_tracers_to_write / marbl_diagnostics_to_write are Fortran string
+    # arrays in ROMS. A YAML list is passed through as a list so f90nml emits a
+    # multi-element array (e.g. = 'PO4', 'NO3', ...); a scalar/empty value stays
+    # a string ('' means "none", matching ROMS's default).
     nml_dict["marbl_biogeochemistry_settings"] = {
         "marbl_config_file":          str(marbl_bgc["marbl_config_file"]),
-        "marbl_tracers_to_write":     str(marbl_bgc["marbl_tracers_to_write"]),
-        "marbl_diagnostics_to_write": str(marbl_bgc["marbl_diagnostics_to_write"]),
+        "marbl_tracers_to_write":     _namelist_str_list(
+            marbl_bgc["marbl_tracers_to_write"],
+            max_len=MARBL_TRACERS_TO_WRITE_MAX, name="marbl_tracers_to_write"),
+        "marbl_diagnostics_to_write": _namelist_str_list(
+            marbl_bgc["marbl_diagnostics_to_write"],
+            max_len=MARBL_DIAGNOSTICS_TO_WRITE_MAX, name="marbl_diagnostics_to_write"),
         "marbl_timestep_ratio":       int(marbl_bgc["marbl_timestep_ratio"]),
     }
 
