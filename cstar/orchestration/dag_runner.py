@@ -340,6 +340,8 @@ class ExecutiveRunSummary(BaseModel):
     """The directory where c-star state information will be stored."""
     steps: list[ExecutiveStepSummary]
     """An executive summary for each step in the run."""
+    dry_run: bool = False
+    """Flag indicating a planning-only run was requested."""
 
     def __str__(self) -> str:
         """Generate an _Executive Summary_ for a workplan run."""
@@ -351,7 +353,9 @@ class ExecutiveRunSummary(BaseModel):
         section_del = "-"
         steps_section = "\n".join(str(summary) for summary in step_summaries)
 
-        header = "Workplan Execution Details"
+        header = "Workplan Execution Plan"
+        if self.dry_run:
+            header = f"{header} - DRY-RUN ONLY"
         section_del_wp = section_del * len(header)
         section_header_steps = "Task Details"
         section_del_steps = section_del * len(section_header_steps)
