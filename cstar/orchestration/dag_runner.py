@@ -370,24 +370,6 @@ class ExecutiveRunSummary(BaseModel):
             summary = summary.replace(tpl, value)
         return summary
 
-    @classmethod
-    async def from_run(cls, run_id: str) -> "ExecutiveRunSummary":
-        run_repo = TrackingRepository()
-        run = await run_repo.get_workplan_run(run_id)
-        if not run:
-            msg = f"Unable to retrieve run with run-id: {run_id}"
-            raise RuntimeError(msg)
-
-        # step_repo = StateRepository()
-        # sentinels = await step_repo.list_sentinels(ProcessHandle, run_id=run_id)
-        steps: list[ExecutiveStepSummary] = []
-
-        return ExecutiveRunSummary(
-            run_id=run_id,
-            state_dir=str(run.state_dir),
-            steps=steps,
-        )
-
 
 async def get_executive_summary(
     run_id: str,
