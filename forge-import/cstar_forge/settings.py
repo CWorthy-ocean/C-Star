@@ -14,6 +14,11 @@ from typing import Dict, Any, Union, Set, Optional
 
 import f90nml
 
+# Fortran array bounds declared in ROMS src/marbl_driver.F90 for the namelist
+# string lists (pinned ucla-roms commit). A list longer than these would
+# overflow the declared array at run time.
+MARBL_TRACERS_TO_WRITE_MAX = 40
+MARBL_DIAGNOSTICS_TO_WRITE_MAX = 64
 
 def _fortran_cdr_file_decl(path: Any, max_line_len: int = 72) -> str:
     """
@@ -345,12 +350,6 @@ def _attach_roms_jinja_filters(env: Environment) -> None:
     env.filters["fort_cdr_file_decl"] = _fortran_cdr_file_decl
 
 
-# Fortran array bounds declared in ROMS src/marbl_driver.F90 for the namelist
-# string lists (pinned ucla-roms commit). A list longer than these would
-# overflow the declared array at run time.
-MARBL_TRACERS_TO_WRITE_MAX = 40
-MARBL_DIAGNOSTICS_TO_WRITE_MAX = 64
-
 
 def _namelist_str_list(value: Any, *, max_len: Optional[int] = None,
                        name: Optional[str] = None) -> Union[str, list[str]]:
@@ -382,30 +381,24 @@ def _namelist_str_list(value: Any, *, max_len: Optional[int] = None,
 
 
 def write_roms_namelist(
-    settings_compile_time: Dict[str, Any],
     settings_run_time: Dict[str, Any],
     output_dir: Union[str, Path],
     n_tracers: int,
 ) -> None:
     """
-    Write a ROMS Fortran namelist file (``namelist.nml``) from the merged
-    compile-time and run-time settings dictionaries.
+    Write a ROMS Fortran namelist file (``namelist.nml``) from the run-time
+    settings dictionary.
 
     This function replaces the previous approach of rendering many individual
     ``*.opt`` Jinja2 templates and a ``roms.in`` template.  The ``cppdefs.opt``
-    file is still produced separately via :func:`render_roms_settings`; all
-    other former opt-file parameters are now collected here.
+    file is still produced separately via :func:`render_roms_settings` from the
+    compile-time settings; all other former opt-file parameters are now
+    collected here.
 
     The output file is written to ``<output_dir>/namelist.nml``.
 
     Parameters
     ----------
-    settings_compile_time : dict
-        The fully merged compile-time settings dict (``_settings_compile_time``
-        on the builder).  After the namelist refactor this contains only the
-        ``"cppdefs"`` key; it is accepted for API compatibility but not used
-        by this function (cppdefs go to ``cppdefs.opt`` via
-        :func:`render_roms_settings`).
     settings_run_time : dict
         The fully merged run-time settings dict (``_settings_run_time`` on the
         builder).  Every namelist section is a top-level key: grid/forcing/

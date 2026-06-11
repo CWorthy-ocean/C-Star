@@ -27,40 +27,38 @@ _TPL = (Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec"
 
 
 def _base_settings():
-    """Load the real model defaults and fill the dynamic fields that
+    """Load the real run-time defaults and fill the dynamic fields that
     ``generate_inputs()`` / ``_init_settings_run_time`` would populate, yielding
-    a complete (compile_time, run_time) pair ready for ``write_roms_namelist``."""
-    ct = yaml.safe_load((_TPL / "compile-time-defaults.yml").read_text())
+    a complete run-time settings dict ready for ``write_roms_namelist``."""
     rt = yaml.safe_load((_TPL / "run-time-defaults.yml").read_text())
     rt["title"] = {"casename": "test_case"}
     rt["output_root_name"] = {"output_root_name": "/run/out"}
     rt["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
     rt["grid"] = {"grid_file": "/in/grid.nc"}
     rt["initial"] = {"nrrec": 1, "initial_file": "/in/init.nc"}
-    return ct, rt
+    return rt
 
 
-def _write_and_read(tmp_path, ct, rt, n_tracers=34):
-    write_roms_namelist(settings_compile_time=ct, settings_run_time=rt,
-                        output_dir=tmp_path, n_tracers=n_tracers)
+def _write_and_read(tmp_path, rt, n_tracers=34):
+    write_roms_namelist(settings_run_time=rt, output_dir=tmp_path, n_tracers=n_tracers)
     return f90nml.read(tmp_path / "namelist.nml")
 
 
 @pytest.fixture
 def nml(tmp_path):
-    ct, rt = _base_settings()
+    rt = _base_settings()
     rt["forcing"]["surface_forcing_path"] = "/in/surf.nc"
     rt["forcing"]["boundary_forcing_path"] = "/in/bry.nc"
     rt["forcing"]["river_path"] = "/in/river.nc"
-    return _write_and_read(tmp_path, ct, rt)
+    return _write_and_read(tmp_path, rt)
 
 
 # ---------------------------------------------------------------------------
 # Structure
 # ---------------------------------------------------------------------------
 def test_namelist_file_written(tmp_path):
-    ct, rt = _base_settings()
-    write_roms_namelist(ct, rt, tmp_path, n_tracers=34)
+    rt = _base_settings()
+    write_roms_namelist(rt, tmp_path, n_tracers=34)
     assert (tmp_path / "namelist.nml").is_file()
 
 
@@ -95,9 +93,9 @@ def test_key_renames(nml):
 
 
 def test_code_check_mode_sourced_from_ocean_vars(tmp_path):
-    ct, rt = _base_settings()
+    rt = _base_settings()
     rt["ocean_vars"]["code_check"] = True
-    nml = _write_and_read(tmp_path, ct, rt)
+    nml = _write_and_read(tmp_path, rt)
     # ocean_vars.code_check feeds diagnostics_settings.code_check_mode
     assert nml["diagnostics_settings"]["code_check_mode"] is True
 
@@ -111,11 +109,11 @@ def test_calc_pflx_from_section(nml):
 # Per-tracer array expansion
 # ---------------------------------------------------------------------------
 def test_per_tracer_arrays_expand_to_n_tracers(tmp_path):
-    ct, rt = _base_settings()
+    rt = _base_settings()
     rt["tracer_diff2"]["tnu2_default"] = 1.5
     rt["vertical_mixing"]["akt_default"] = 2.5
     rt["vertical_mixing"]["akv"] = 9.0
-    nml = _write_and_read(tmp_path, ct, rt, n_tracers=5)
+    nml = _write_and_read(tmp_path, rt, n_tracers=5)
     assert nml["tracer_diff2"]["tnu2"] == [1.5] * 5
     assert nml["vertical_mixing_settings"]["akt_bak"] == [2.5] * 5
     assert nml["vertical_mixing_settings"]["akv_bak"] == 9.0  # scalar, not expanded
@@ -131,8 +129,8 @@ def test_frcfile_canonical_order_non_none(nml):
 
 
 def test_frcfile_omitted_when_all_none(tmp_path):
-    ct, rt = _base_settings()  # all forcing paths default to null
-    nml = _write_and_read(tmp_path, ct, rt)
+    rt = _base_settings()  # all forcing paths default to null
+    nml = _write_and_read(tmp_path, rt)
     assert "frcfile" not in nml["forcing_files"]
 
 
@@ -140,35 +138,35 @@ def test_frcfile_omitted_when_all_none(tmp_path):
 # MARBL string lists
 # ---------------------------------------------------------------------------
 def test_marbl_lists_emit_fortran_arrays(tmp_path):
-    ct, rt = _base_settings()
+    rt = _base_settings()
     rt["marbl_bgc"]["marbl_tracers_to_write"] = ["DIC", "ALK", "O2"]
     rt["marbl_bgc"]["marbl_diagnostics_to_write"] = ["PH", "FG_CO2"]
-    nml = _write_and_read(tmp_path, ct, rt)
+    nml = _write_and_read(tmp_path, rt)
     g = nml["marbl_biogeochemistry_settings"]
     assert g["marbl_tracers_to_write"] == ["DIC", "ALK", "O2"]
     assert g["marbl_diagnostics_to_write"] == ["PH", "FG_CO2"]
 
 
 def test_marbl_empty_list_renders_as_empty_string(tmp_path):
-    ct, rt = _base_settings()
+    rt = _base_settings()
     rt["marbl_bgc"]["marbl_tracers_to_write"] = []
-    nml = _write_and_read(tmp_path, ct, rt)
+    nml = _write_and_read(tmp_path, rt)
     assert nml["marbl_biogeochemistry_settings"]["marbl_tracers_to_write"] == ""
 
 
 def test_marbl_over_bounds_warns(tmp_path):
-    ct, rt = _base_settings()
+    rt = _base_settings()
     rt["marbl_bgc"]["marbl_tracers_to_write"] = [f"T{i}" for i in range(MARBL_TRACERS_TO_WRITE_MAX + 1)]
     with pytest.warns(UserWarning, match="marbl_tracers_to_write.*overflow"):
-        write_roms_namelist(ct, rt, tmp_path, n_tracers=34)
+        write_roms_namelist(rt, tmp_path, n_tracers=34)
 
 
 def test_marbl_within_bounds_does_not_warn(tmp_path):
-    ct, rt = _base_settings()
+    rt = _base_settings()
     rt["marbl_bgc"]["marbl_diagnostics_to_write"] = [f"D{i}" for i in range(MARBL_DIAGNOSTICS_TO_WRITE_MAX)]
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
-        write_roms_namelist(ct, rt, tmp_path, n_tracers=34)  # must not raise
+        write_roms_namelist(rt, tmp_path, n_tracers=34)  # must not raise
 
 
 # ---------------------------------------------------------------------------

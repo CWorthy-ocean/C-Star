@@ -2443,7 +2443,6 @@ class CstarSpecBuilder(BaseModel):
         #    all former *.opt parameters (except cppdefs.opt).
         # ------------------------------------------------------------------
         write_roms_namelist(
-            settings_compile_time=self._settings_compile_time,
             settings_run_time=self._settings_run_time,
             output_dir=self.run_time_code_dir,
             n_tracers=n_tracers,
