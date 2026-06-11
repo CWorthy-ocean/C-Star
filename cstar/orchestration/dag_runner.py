@@ -295,17 +295,22 @@ class ExecutiveStepSummary(BaseModel):
         job_header = "Job"
         job_underline = underline_char * len(job_header)
 
-        handle = deserialize(self.sentinel_path, ProcessHandle)
-        handle.model_extra
-        pid = handle.pid if handle else "N/A"
-        status = (
-            handle.status.name if hasattr(handle, "status") else Status.Unsubmitted.name
-        )
-        task_prompt = (
-            "Process ID"
-            if handle and handle.launcher_name != "slurm"
-            else "SLURM Job ID"
-        )
+        handle = try_deserialize(self.sentinel_path, ProcessHandle)
+
+        task_prompt = "Process ID"
+        if handle is None:
+            pid = "N/A"
+            status = Status.Unsubmitted.name
+        else:
+            pid = handle.pid if handle else "N/A"
+            status = (
+                handle.status.name
+                if hasattr(handle, "status")
+                else Status.Unsubmitted.name
+            )
+            if handle.launcher_name == "slurm":
+                task_prompt = "SLURM Job ID"
+
         summary = textwrap.dedent(f"""\
           {self.name!r}
           {step_underline}
