@@ -500,6 +500,28 @@ class TestROMSSimulationInitialization:
         ):
             sim.roms_runtime_settings
 
+    @mock.patch("cstar.roms.simulation.f90nml.read")
+    def test_roms_runtime_settings_raises_if_namelist_missing_section(
+        self,
+        mock_f90nml_read,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Test that ``roms_runtime_settings`` raises a clear ``RuntimeError`` naming the
+        missing group when the runtime namelist omits a section C-Star must populate,
+        rather than surfacing a bare ``KeyError`` from f90nml.
+        """
+        sim = stub_romssimulation
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+
+        # Namelist missing the required &time_stepping group (the first override)
+        mock_f90nml_read.side_effect = lambda _: f90nml.Namelist({})
+
+        with pytest.raises(
+            RuntimeError, match=r"missing the required &time_stepping group"
+        ):
+            sim.roms_runtime_settings
+
     def test_input_datasets(self, stub_romssimulation):
         """Test that the `input_datasets` property returns the correct list of
         `ROMSInputDataset` instances.
