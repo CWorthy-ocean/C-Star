@@ -20,7 +20,9 @@ from cstar.cli.common import (
 )
 from cstar.cli.workplan.shared import (
     check_and_capture_kvps,
+    console,
     list_runs,
+    present,
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
@@ -322,7 +324,15 @@ def run(
         print(f"Workplan run {run_id!r} has failed: {ex}")
         raise typer.Exit(3) from ex
     else:
-        print(f"Workplan run `{run_id}` has completed")
+        prompts = [
+            ("For run status details", f"cstar workplan status {run_id}"),
+            ("To review logs", f"cstar workplan log {run_id} <step-name>"),
+        ]
+        maxlen = max(len(x[0]) for x in prompts)
+
+        for prompt in prompts:
+            msg = present(*prompt, width=maxlen)
+            console.print(msg)
 
 
 if __name__ == "__main__":
