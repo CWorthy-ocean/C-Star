@@ -1,5 +1,6 @@
 import asyncio
 import os
+import textwrap
 import typing as t
 from collections.abc import Awaitable, Generator, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -7,8 +8,10 @@ from itertools import cycle
 from pathlib import Path
 
 from prefect import flow
+from pydantic import BaseModel
 
 from cstar.base.env import capture_environment
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
@@ -19,13 +22,14 @@ from cstar.orchestration.orchestration import (
     LiveStep,
     Orchestrator,
     Planner,
+    ProcessHandle,
     RunMode,
     Status,
     check_environment,
     configure_environment,
 )
-from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.state import load_sentinels
+from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
+from cstar.orchestration.state import StateRepository, load_sentinels
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     TemplateFillTransform,
@@ -261,6 +265,169 @@ async def prepare_workplan(
     return wp, persist_as
 
 
+class ExecutiveStepSummary(BaseModel):
+    """Aggregates and display metadata about the inputs and outputs of a step."""
+
+    name: str
+    """The step/process name."""
+    log_path: str
+    """The path to the logfile produced by the step."""
+    script_path: str
+    """The path to the script file used by the step."""
+    working_dir: str
+    """The path to the step's working directory."""
+    blueprint_path: str
+    """The path to the blueprint used to execute the step."""
+    launcher: str
+    """The name of the launcher used to launch the step."""
+    task_id: str
+    """The value of the `ProcessHandle.pid` for the underlying task."""
+    sentinel_path: Path
+    """The path to a sentinel file containing step state information."""
+
+    def __str__(self) -> str:
+        """Generate an _Executive Summary_ for a step from a workplan run."""
+        step_header = f"{self.name!r}"
+        step_underline = "-" * len(step_header)
+
+        handle = deserialize(self.sentinel_path, ProcessHandle)
+        handle.model_extra
+        pid = handle.pid if handle else "N/A"
+        status = (
+            Status((handle.model_extra or {}).get("status", 1)).name
+            if "status" in (handle.model_extra or {}).keys()
+            else Status.Unsubmitted.name
+        )
+
+        summary = textwrap.dedent(f"""\
+          {self.name!r}
+          {step_underline}
+            - Configured blueprint: {self.blueprint_path}
+            - Working directory: {self.working_dir}
+            - Script path: {self.script_path}
+            - Log path: {self.log_path}
+            - Task ID: {pid}
+            - Status: {status}
+          """)
+
+        return summary
+
+
+class ExecutiveRunSummary(BaseModel):
+    """Aggregate and display metadata about the inputs and outputs
+    of a run.
+    """
+
+    run_id: str
+    """The current run-id."""
+    state_dir: str
+    """The directory where c-star state information will be stored."""
+    steps: list[ExecutiveStepSummary]
+    """An executive summary for each step in the run."""
+
+    def __str__(self) -> str:
+        """Generate an _Executive Summary_ for a workplan run."""
+        prefix = "# "
+        section_delimiter = "#" * 78
+        step_summaries = [
+            f"{prefix}{line}" for s in self.steps for line in str(s).split("\n")
+        ]
+        steps_section = "\n".join(str(summary) for summary in step_summaries)
+
+        header = "Workplan Execution Details"
+        section_del_wp = "-" * len(header)
+        section_header_steps = "Task Details"
+        section_del_steps = "-" * len(section_header_steps)
+
+        summary = textwrap.dedent(f"""\
+                {prefix}{section_delimiter}
+                {prefix}{header}
+                {prefix}{section_del_wp}
+                {prefix}- Run ID: {self.run_id}
+                {prefix}- State directory: {self.state_dir}
+                {prefix}
+                {prefix}{section_header_steps}
+                {prefix}{section_del_steps}
+                {prefix}
+                <steps>
+                {section_delimiter}
+                """)
+        return summary.replace("<steps>", steps_section)
+
+    @classmethod
+    async def from_run(cls, run_id: str) -> "ExecutiveRunSummary":
+        run_repo = TrackingRepository()
+        run = await run_repo.get_workplan_run(run_id)
+        if not run:
+            msg = f"Unable to retrieve run with run-id: {run_id}"
+            raise RuntimeError(msg)
+
+        # step_repo = StateRepository()
+        # sentinels = await step_repo.list_sentinels(ProcessHandle, run_id=run_id)
+        steps: list[ExecutiveStepSummary] = []
+
+        return ExecutiveRunSummary(
+            run_id=run_id,
+            state_dir=str(run.state_dir),
+            steps=steps,
+        )
+
+
+async def get_executive_summary(
+    run_id: str,
+    *,
+    run: WorkplanRun | None = None,
+) -> ExecutiveRunSummary:
+    repo = TrackingRepository()
+    run = run or await repo.get_workplan_run(run_id)
+    if not run:
+        msg = f"No run found with the run-id: {run_id}"
+        raise CstarExpectationFailed(msg)
+
+    workplan = deserialize(run.trx_workplan_path, Workplan)
+
+    steps = t.cast("list[LiveStep]", workplan.steps)
+    step_summaries: list[ExecutiveStepSummary] = []
+
+    sentinels = await asyncio.gather(
+        *[
+            asyncio.to_thread(
+                try_deserialize, StateRepository.sentinel_path(s), ProcessHandle
+            )
+            for s in steps
+        ]
+    )
+    sentinel_map = {
+        # s.name: try_deserialize(s.sentinel_path, ProcessHandle) for s in steps
+        s.name: h
+        for s, h in zip(steps, sentinels)
+    }
+
+    for step in steps:
+        blueprint_path = Path(step.blueprint_path)
+        # application = get_application(step.application)
+        live_step = LiveStep.from_step(step)
+        handle = sentinel_map[step.name]
+
+        summary = ExecutiveStepSummary(
+            name=step.name,
+            log_path=str(live_step.log_path),
+            script_path=str(live_step.script_path),
+            working_dir=str(live_step.working_dir) if live_step.working_dir else "",
+            blueprint_path=str(blueprint_path),
+            launcher=handle.launcher_name if handle else "",
+            task_id=handle.pid if handle else "",
+            sentinel_path=StateRepository.sentinel_path(live_step),
+        )
+        step_summaries.append(summary)
+
+    return ExecutiveRunSummary(
+        run_id=run_id,
+        state_dir=StateDirectoryManager.run_state_dir().as_posix(),
+        steps=step_summaries,
+    )
+
+
 @flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path,
@@ -302,50 +469,35 @@ async def build_and_run_dag(
     )
 
     planner = Planner(workplan=wp)
+    steps = t.cast("list[LiveStep]", planner.flatten())
 
-    log.info("#" * 80)
-    log.info("# Workplan Execution Details")
-    log.info("#" * 80)
-    log.info("#")
-    log.info(f"# - run-id: {run_id}")
-    log.info(f"# - C-Star state directory: {StateDirectoryManager.run_state_dir()}")
-    log.info("#")
-    log.info("# Step Details")
-    log.info("# ------------")
-    log.info("#")
-
-    for step in planner.flatten():
-        live_step = t.cast("LiveStep", step)
-        step_header = f"{live_step.name!r}"
-        step_underline = "-" * len(step_header)
-        log.info(f"# - {live_step.name!r}")
-        log.info(f"#   {step_underline}")
-        log.info(f"#   - configured blueprint: {str(live_step.blueprint_path)!r}")
-        log.info(f"#   - working directory: {str(live_step.fsm.root_dir)!r}")
-        log.info(f"#   - script path: {str(live_step.script_path)!r}")
-        log.info(f"#   - log path: {str(live_step.log_path)!r}")
-        log.info("#")
-    log.info("#" * 80)
+    wp_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=prepared_wp_path,
+        output_path=output_dir,
+        run_id=run_id,
+        environment=capture_environment(),
+        user_variables=user_variables or {},
+        sentinels=[StateRepository.sentinel_path(s) for s in steps],
+    )
 
     orchestrator = Orchestrator(planner, launcher)
 
     if dry_run:
         msg = f"Dry run complete. Prepared workplan location: {prepared_wp_path}"
         log.debug(msg)
+
+        summary = await get_executive_summary(run_id, run=wp_run)
+        log.info("\n" + str(summary))
+
         return prepared_wp_path
 
-    await repo.put_workplan_run(
-        WorkplanRun(
-            workplan_path=wp_path,
-            trx_workplan_path=prepared_wp_path,
-            output_path=output_dir,
-            run_id=run_id,
-            environment=capture_environment(),
-        ),
-    )
+    await repo.put_workplan_run(wp_run)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
+    summary = await get_executive_summary(run_id)
+    log.info("\n" + str(summary))
 
     # monitor the scheduled tasks until they complete
     await process_plan(orchestrator, RunMode.Monitor)
