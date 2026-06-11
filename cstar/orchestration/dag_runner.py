@@ -287,8 +287,13 @@ class ExecutiveStepSummary(BaseModel):
 
     def __str__(self) -> str:
         """Generate an _Executive Summary_ for a step from a workplan run."""
+        underline_char = "-"
         step_header = f"{self.name!r}"
-        step_underline = "-" * len(step_header)
+        step_underline = underline_char * len(step_header)
+        assets_header = "Assets"
+        assets_underline = underline_char * len(assets_header)
+        job_header = "Job"
+        job_underline = underline_char * len(job_header)
 
         handle = deserialize(self.sentinel_path, ProcessHandle)
         handle.model_extra
@@ -298,17 +303,25 @@ class ExecutiveStepSummary(BaseModel):
             if "status" in (handle.model_extra or {}).keys()
             else Status.Unsubmitted.name
         )
-
+        task_prompt = (
+            "Process ID"
+            if handle and handle.launcher_name != "slurm"
+            else "SLURM Job ID"
+        )
         summary = textwrap.dedent(f"""\
           {self.name!r}
           {step_underline}
-            - Configured blueprint: {self.blueprint_path}
-            - Working directory: {self.working_dir}
-            - Script path: {self.script_path}
-            - Log path: {self.log_path}
-            - Task ID: {pid}
-            - Status: {status}
-          """)
+           {assets_header}
+           {assets_underline}
+           - Log file: {self.log_path}
+           - Configured blueprint: {self.blueprint_path}
+           - Working directory: {self.working_dir}
+           - Script path: {self.script_path}
+           {job_header}
+           {job_underline}
+           - {task_prompt}: {pid}
+           - Status: {status}
+         """)
 
         return summary
 
