@@ -339,19 +339,20 @@ class ExecutiveRunSummary(BaseModel):
     def __str__(self) -> str:
         """Generate an _Executive Summary_ for a workplan run."""
         prefix = "# "
-        section_delimiter = "#" * 78
+        content_delimiter = "#" * 78
         step_summaries = [
             f"{prefix}{line}" for s in self.steps for line in str(s).split("\n")
         ]
+        section_del = "-"
         steps_section = "\n".join(str(summary) for summary in step_summaries)
 
         header = "Workplan Execution Details"
-        section_del_wp = "-" * len(header)
+        section_del_wp = section_del * len(header)
         section_header_steps = "Task Details"
-        section_del_steps = "-" * len(section_header_steps)
+        section_del_steps = section_del * len(section_header_steps)
 
         summary = textwrap.dedent(f"""\
-                {prefix}{section_delimiter}
+                {prefix}{content_delimiter}
                 {prefix}{header}
                 {prefix}{section_del_wp}
                 {prefix}- Run ID: {self.run_id}
@@ -361,9 +362,13 @@ class ExecutiveRunSummary(BaseModel):
                 {prefix}{section_del_steps}
                 {prefix}
                 <steps>
-                {section_delimiter}
+                {prefix}{content_delimiter}
                 """)
-        return summary.replace("<steps>", steps_section)
+
+        value_map = {"<steps>": steps_section}
+        for tpl, value in value_map.items():
+            summary = summary.replace(tpl, value)
+        return summary
 
     @classmethod
     async def from_run(cls, run_id: str) -> "ExecutiveRunSummary":
@@ -408,15 +413,10 @@ async def get_executive_summary(
             for s in steps
         ]
     )
-    sentinel_map = {
-        # s.name: try_deserialize(s.sentinel_path, ProcessHandle) for s in steps
-        s.name: h
-        for s, h in zip(steps, sentinels)
-    }
+    sentinel_map = {s.name: h for s, h in zip(steps, sentinels)}
 
     for step in steps:
         blueprint_path = Path(step.blueprint_path)
-        # application = get_application(step.application)
         live_step = LiveStep.from_step(step)
         handle = sentinel_map[step.name]
 
