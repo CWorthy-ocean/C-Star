@@ -490,7 +490,8 @@ async def build_and_run_dag(
 
         return prepared_wp_path
 
-    await repo.put_workplan_run(wp_run)
+    run_repo = TrackingRepository()
+    await run_repo.put_workplan_run(wp_run)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
