@@ -454,14 +454,8 @@ class TestROMSSimulationInitialization:
 
         runtime_parent = Path(sim.runtime_code.working_copy[0].path).parent
         assert tested_settings["marbl_biogeochemistry_settings"][
-            "marbl_namelist_fname"
+            "marbl_config_file"
         ] == str(runtime_parent / "marbl_in")
-        assert tested_settings["marbl_biogeochemistry_settings"][
-            "marbl_tracer_list_fname"
-        ] == str(runtime_parent / "marbl_tracer_output_list")
-        assert tested_settings["marbl_biogeochemistry_settings"][
-            "marbl_diag_list_fname"
-        ] == str(runtime_parent / "marbl_diagnostic_output_list")
 
         assert tested_settings["cdr_frc_settings"]["cdr_file"] == str(fake_cdr_path)
         assert tested_settings["extract_data_settings"]["extract_file"] == str(
