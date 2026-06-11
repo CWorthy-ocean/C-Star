@@ -18,8 +18,6 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.state import StateRepository
-from cstar.orchestration.tracking import TrackingRepository
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
@@ -287,11 +285,6 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if prior != current:
             handle.status = current
-            state_repo = StateRepository()
-            run_repo = TrackingRepository()
-
-            if path := await state_repo.put_sentinel(handle):
-                _paths = await run_repo.attach_sentinel(path)
 
         return item
 

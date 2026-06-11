@@ -1,5 +1,4 @@
 import asyncio
-import os
 import typing as t
 from collections.abc import Mapping
 from datetime import datetime
@@ -7,7 +6,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
@@ -42,7 +40,7 @@ class WorkplanRun(BaseModel):
     user_variables: Mapping[str, str] = Field(default_factory=dict)
     """User-supplied runtime variable overrides."""
 
-    sentinels: list[Path] = Field(default_factory=list[Path])
+    sentinels: set[Path] = Field(default_factory=set[Path])
     """State files expected to be created during execution of the run."""
 
     @staticmethod
@@ -307,22 +305,3 @@ class TrackingRepository(LoggingMixin):
             for run_path in run_paths
         ]
         return await asyncio.gather(*coros)
-
-    async def attach_sentinel(
-        self,
-        path: Path,
-        *,
-        run_id: str | None = None,
-    ) -> list[Path]:
-        run_id = run_id or str(os.getenv(ENV_CSTAR_RUNID, ""))
-        run = await self.get_workplan_run(run_id)
-        if not run:
-            msg = f"No run exists for run-id: {run_id}"
-            raise RuntimeError(msg)
-
-        if path not in run.sentinels:
-            run.sentinels.append(path)
-            await self.put_workplan_run(run)
-            self.log.debug(f"Sentinel path {str(path)!r} added to run {run_id!r}")
-
-        return run.sentinels

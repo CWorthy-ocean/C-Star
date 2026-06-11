@@ -31,7 +31,6 @@ from cstar.orchestration.state import (
     StateRepository,
     load_sentinels,
 )
-from cstar.orchestration.tracking import TrackingRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -392,11 +391,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if prior != current:
             handle.status = current
-            state_repo = StateRepository()
-            run_repo = TrackingRepository()
-
-            if path := await state_repo.put_sentinel(handle):
-                _paths = await run_repo.attach_sentinel(path)
 
         return item
 

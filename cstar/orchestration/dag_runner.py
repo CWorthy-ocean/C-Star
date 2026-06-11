@@ -480,7 +480,7 @@ async def build_and_run_dag(
         run_id=run_id,
         environment=capture_environment(),
         user_variables=user_variables or {},
-        sentinels=[StateRepository.sentinel_path(s) for s in steps],
+        sentinels={StateRepository.sentinel_path(s) for s in steps},
     )
 
     orchestrator = Orchestrator(planner, launcher)
