@@ -1,12 +1,22 @@
 import json
+import os
 import textwrap
 import typing as t
+import uuid
 from collections.abc import Callable, Generator
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import (
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_RUNID,
+    ENV_CSTAR_STATE_HOME,
+)
 from cstar.orchestration.models import Application, Step, Workplan
 
 
@@ -533,3 +543,41 @@ def plotter_v2_0_0_bp(tmp_path: Path, plotter_v2_0_0_model: dict[str, t.Any]) ->
     bp_path.parent.mkdir(parents=True, exist_ok=True)
     bp_path.write_text(content)
     return bp_path
+
+
+@pytest.fixture
+def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
+    """Configure the XDG_* environment variables to write to temporary files."""
+    XDG_DIR: t.Final[str] = "xdg"
+
+    xdg_vars = {
+        ENV_CSTAR_CACHE_HOME: tmp_path / XDG_DIR / "cache",
+        ENV_CSTAR_CONFIG_HOME: tmp_path / XDG_DIR / "config",
+        ENV_CSTAR_DATA_HOME: tmp_path / XDG_DIR / "data",
+        ENV_CSTAR_STATE_HOME: tmp_path / XDG_DIR / "state",
+    }
+
+    for p in xdg_vars.values():
+        p.mkdir(parents=True, exist_ok=True)
+
+    variables = {k: p.expanduser().resolve().as_posix() for k, p in xdg_vars.items()}
+
+    with mock.patch.dict(os.environ, variables):
+        yield xdg_vars
+
+
+@pytest.fixture
+def mock_run_id() -> Generator[str]:
+    """Configure the CSTAR_RUNID environment variable."""
+    run_id = str(uuid.uuid4())
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: run_id}):
+        yield run_id
+
+
+@pytest.fixture(autouse=True)
+def mock_env(
+    mock_xdg_dirs: dict[str, Path],
+    mock_run_id: str,
+) -> Generator[tuple[dict[str, Path], str]]:
+    """Aggregate all env manipulation fixtures."""
+    yield mock_xdg_dirs, mock_run_id

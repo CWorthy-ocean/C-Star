@@ -1,55 +1,14 @@
 import os
-from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_STATE_HOME
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
-
-
-@pytest.fixture
-def mock_state_dir(
-    tmp_path: Path,
-) -> Generator[Path, None, None]:
-    """Verify that CLI plan action generates an output image from a workplan.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs; used to create a temporary location
-        for writing state directory content.
-
-    """
-    mock_state_dir = tmp_path / "mock-state-dir"
-    mock_state_dir.mkdir(exist_ok=True)
-
-    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: mock_state_dir.as_posix()}):
-        yield mock_state_dir
-
-
-@pytest.fixture
-def mock_data_dir(
-    tmp_path: Path,
-) -> Generator[Path, None, None]:
-    """Verify that CLI plan action generates an output image from a workplan.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs; used to create a temporary location
-        for writing data directory content.
-
-    """
-    mock_data_dir = tmp_path / "mock-data-dir"
-    mock_data_dir.mkdir(exist_ok=True)
-
-    with mock.patch.dict(os.environ, {ENV_CSTAR_DATA_HOME: mock_data_dir.as_posix()}):
-        yield mock_data_dir
 
 
 @pytest.fixture(params=["fanout", "linear", "parallel", "single_step"])
@@ -100,11 +59,10 @@ def prepared_workplan(
 async def executed_workplan(
     tmp_path: Path,
     prepared_workplan: tuple[Path, Workplan],
-    mock_state_dir: Path,  # noqa: ARG001
 ) -> tuple[Path, Workplan, str]:
     """Create a WorkplanRun record for the prepared workplan."""
     wp_path, wp = prepared_workplan
-    fake_run_id = "fake-run-id"
+    fake_run_id = str(os.getenv(ENV_CSTAR_RUNID))
 
     repo = TrackingRepository()
     wp_run = WorkplanRun(
@@ -129,7 +87,6 @@ async def executed_workplan(
 @pytest.fixture
 async def executed_workplan_with_sideeffects(
     executed_workplan: tuple[Path, Workplan, str],
-    mock_data_dir: Path,  # noqa: ARG001
 ) -> tuple[Path, Workplan, str]:
     """Create a WorkplanRun record for the prepared workplan and populate
     the run directories with logs.

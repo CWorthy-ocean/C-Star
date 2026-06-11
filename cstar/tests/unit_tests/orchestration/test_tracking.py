@@ -70,7 +70,6 @@ async def test_tracking_retrieve(tmp_path: Path) -> None:
     tmp_path : Path
         Temporary directory for test outputs
     """
-    state_dir = tmp_path / "state"
     output_path = tmp_path / "output"
     wp_path = tmp_path / "fake_workplan.yaml"
     wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
@@ -87,9 +86,8 @@ async def test_tracking_retrieve(tmp_path: Path) -> None:
         environment=captured_env,
     )
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
-        repo = TrackingRepository()
-        _ = await repo.put_workplan_run(wp_run)
+    repo = TrackingRepository()
+    _ = await repo.put_workplan_run(wp_run)
 
     # use public API to retrieve using "latest" record (by passing only run_id)
     latest = await repo.get_workplan_run(run_id=run_id)

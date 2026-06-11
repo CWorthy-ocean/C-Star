@@ -153,7 +153,6 @@ def test_capture_kvps_duplicate(
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_state_dir")
 async def test_list_steps_empty_run_id() -> None:
     """Verify that listing steps with no filter returns all available steps
     in the results.
@@ -170,7 +169,6 @@ async def test_list_steps_empty_run_id() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_state_dir")
 async def test_list_steps_unfiltered(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
@@ -192,7 +190,6 @@ async def test_list_steps_unfiltered(
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_state_dir")
 async def test_list_steps_filtered(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
@@ -218,7 +215,6 @@ async def test_list_steps_filtered(
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_state_dir")
 async def test_list_steps_filter_all(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
@@ -238,7 +234,6 @@ async def test_list_steps_filter_all(
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_state_dir")
 async def test_autocomplete_step_list_no_run_id() -> None:
     """Verify that a missing run-id parameter raises a typer exception."""
     mock_typer_ctx = mock.Mock(params={"no-run-id-param-to-locate": 0})
@@ -251,7 +246,6 @@ async def test_autocomplete_step_list_no_run_id() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("mock_state_dir")
 async def test_autocomplete_step_list_empty_run_id() -> None:
     """Verify that a missing run-id parameter raises a typer exception."""
     mock_typer_ctx = mock.Mock(params={"run-id": ""})
@@ -263,7 +257,6 @@ async def test_autocomplete_step_list_empty_run_id() -> None:
         autocomplete_step_list(mock_typer_ctx, incomplete="")
 
 
-@pytest.mark.usefixtures("mock_state_dir")
 def test_autocomplete_step_list_happy_path(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
