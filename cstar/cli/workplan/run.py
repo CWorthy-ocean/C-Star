@@ -334,6 +334,8 @@ def run(
             msg = present(*prompt, width=maxlen)
             console.print(msg)
 
+        console.print(f"{'dry-run' if dry_run else 'run'} has completed")
+
 
 if __name__ == "__main__":
     typer.run(run)
