@@ -334,8 +334,15 @@ class Task(BaseModel, t.Generic[_THandle]):
     handle: _THandle
     """The unique process identifier for the task."""
 
-    status: Status = Status.Unsubmitted
-    """Current task status."""
+    @property
+    def status(self) -> Status:
+        """Return the current status of the task."""
+        return self.handle.status
+
+    @status.setter
+    def status(self, value: Status) -> None:
+        """Update the status of the task."""
+        self.handle.status = value
 
 
 class Planner(LoggingMixin):
