@@ -10,8 +10,9 @@ from pathlib import Path
 from prefect import flow
 from pydantic import BaseModel
 
-from cstar.base.env import capture_environment
+from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
@@ -427,6 +428,7 @@ async def get_executive_summary(
         run_id=run_id,
         state_dir=StateDirectoryManager.run_state_dir().as_posix(),
         steps=step_summaries,
+        dry_run=is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
     )
 
 
