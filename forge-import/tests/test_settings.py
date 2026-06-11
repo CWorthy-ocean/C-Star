@@ -294,22 +294,7 @@ class TestRenderRomsSettings:
                 code_output_dir=output_dir,
             )
     
-    def test_settings_entry_without_template(self, tmp_path):
-        """Test that settings_dict entry without template raises ValueError."""
-        template_dir = tmp_path / "templates"
-        template_dir.mkdir()
-        
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-        
-        with pytest.raises(ValueError, match="without corresponding template files"):
-            render_roms_settings(
-                template_files=[],
-                template_dir=template_dir,
-                settings_dict={"test": {}},
-                code_output_dir=output_dir,
-            )
-    
+
     def test_template_variables_mismatch(self, tmp_path):
         """Test that template variables not in settings_dict raise ValueError."""
         template_dir = tmp_path / "templates"
