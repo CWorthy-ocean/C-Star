@@ -17,28 +17,20 @@ code:
 
   run_time:
     location: <additional_code_location>
-    branch: roms_tools_3_1_2
+    branch: namelist
     filter:
       files:
         - namelist.nml
         - marbl_in
-        - marbl_tracer_output_list
-        - marbl_diagnostic_output_list
       directory: additional_code/ROMS/runtime_code
   compile_time:
     location: <additional_code_location>
-    branch: roms_tools_3_1_2
+    branch: namelist
     filter:
       directory: additional_code/ROMS/compile_time_code
       files:
-      - bgc.opt
-      - bulk_frc.opt
       - cppdefs.opt
-      - diagnostics.opt
-      - ocean_vars.opt
-      - param.opt
-      - tracers.opt
-      - Makefile
+
 
 grid:
   documentation: my favorite grid
