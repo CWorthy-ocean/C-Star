@@ -2420,7 +2420,7 @@ class CstarSpecBuilder(BaseModel):
 
         # ------------------------------------------------------------------
         # 2. Run-time static files: copy any non-template files listed in the
-        #    run_time filter (e.g. marbl_in, marbl_tracer_output_list).
+        #    run_time filter (e.g. marbl_in).
         #    These are model-specific support files that aren't templated.
         # ------------------------------------------------------------------
         run_time_static_files = [

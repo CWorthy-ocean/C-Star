@@ -10,8 +10,6 @@ templates:
     filter:
       files:
       - marbl_in
-      - marbl_tracer_output_list
-      - marbl_diagnostic_output_list
 
 settings:
   properties:
