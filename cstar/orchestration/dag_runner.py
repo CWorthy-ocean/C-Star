@@ -299,9 +299,7 @@ class ExecutiveStepSummary(BaseModel):
         handle.model_extra
         pid = handle.pid if handle else "N/A"
         status = (
-            Status((handle.model_extra or {}).get("status", 1)).name
-            if "status" in (handle.model_extra or {}).keys()
-            else Status.Unsubmitted.name
+            handle.status.name if hasattr(handle, "status") else Status.Unsubmitted.name
         )
         task_prompt = (
             "Process ID"
