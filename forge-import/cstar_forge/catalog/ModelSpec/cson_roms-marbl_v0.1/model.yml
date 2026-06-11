@@ -40,7 +40,7 @@ settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit:  "6d64531b34a9d7654995ac1c0d32fad12e503724" # "6588486"
+    commit:  "365f40015daea2f1010a886f717b5b2185a2a995"
 
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
@@ -74,12 +74,12 @@ inputs:
           name: MBL_co2
         type: bgc
         coarse_grid_mode: "never"
-      - source:  # salinity restoring disabled until further checks passed
-          name: WOA
-          climatology: true
-        restoring_forces: ['sss']
-        type: restoring
-        coarse_grid_mode: "never"
+      # - source:  # salinity restoring disabled until ROMS main supports it
+      #     name: WOA
+      #     climatology: true
+      #   restoring_forces: ['sss']
+      #   type: restoring
+      #   coarse_grid_mode: "never"
 
     boundary:
       - source:
