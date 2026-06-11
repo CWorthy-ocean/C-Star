@@ -229,7 +229,7 @@ async def test_dag_runner_get_status_detail_map(
     layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
     mock_state_dir: Path,
 ) -> None:
-    """Verify the status output matches expectations when all states are a single value."""
+    """Verify the status output matches expectations when both open and closed tasks exist."""
     workplan, handles = layered_workplan
     deps = {step.name: step.depends_on for step in workplan.steps}
 
