@@ -809,46 +809,61 @@ class ROMSSimulation(Simulation):
             self.runtime_code.working_copy.common_parent / self._namelist_file
         )
 
-        nml["time_stepping"]["dt"] = self.discretization.time_step
-        nml["time_stepping"]["ntimes"] = self._n_time_steps
+        def _set(section: str, key: str, value: Any) -> None:
+            """Set ``nml[section][key] = value``, failing clearly if ``section`` is absent.
+
+            f90nml raises a bare ``KeyError`` for a missing group, which gives no
+            indication of which namelist or group is at fault. ROMS runtime templates
+            are expected to declare every group C-Star overrides, so a misconfigured
+            template should fail with an actionable message rather than a raw KeyError.
+            """
+            if section not in nml:
+                raise RuntimeError(
+                    f"Runtime namelist {self._namelist_file!r} is missing the "
+                    f"required &{section} group that C-Star must populate. Add an "
+                    f"(even empty) &{section} group to the namelist and try again."
+                )
+            nml[section][key] = value
+
+        _set("time_stepping", "dt", self.discretization.time_step)
+        _set("time_stepping", "ntimes", self._n_time_steps)
 
         if self.initial_conditions:
-            nml["initial_conditions"]["ininame"] = str(
-                self.initial_conditions.path_for_roms[0]
+            _set(
+                "initial_conditions",
+                "ininame",
+                str(self.initial_conditions.path_for_roms[0]),
             )
 
         if self.model_grid:
-            nml["grid_settings"]["grdname"] = str(self.model_grid.path_for_roms[0])
+            _set("grid_settings", "grdname", str(self.model_grid.path_for_roms[0]))
 
-        if "forcing_files" not in nml:
-            nml["forcing_files"] = {}
-        nml["forcing_files"]["frcfile"] = [str(p) for p in self._forcing_paths]
+        _set("forcing_files", "frcfile", [str(p) for p in self._forcing_paths])
 
         runtime_code_filenames = [f.basename for f in self.runtime_code.source]
-        if all(
-            f in runtime_code_filenames
-            for f in [
-                "marbl_in",
-            ]
-        ):
+        if "marbl_in" in runtime_code_filenames:
             runtime_code_path = self.runtime_code.working_copy.common_parent
-            nml["marbl_biogeochemistry_settings"]["marbl_config_file"] = str(
-                runtime_code_path / "marbl_in"
+            _set(
+                "marbl_biogeochemistry_settings",
+                "marbl_config_file",
+                str(runtime_code_path / "marbl_in"),
             )
 
         if self.cdr_forcing and self.cdr_forcing.working_copy:
-            nml["cdr_frc_settings"]["cdr_file"] = str(
-                self.cdr_forcing.working_copy.path  # type: ignore[union-attr]
+            _set(
+                "cdr_frc_settings",
+                "cdr_file",
+                str(self.cdr_forcing.working_copy.path),  # type: ignore[union-attr]
             )
 
-        if (
-            self.nesting_info and self.nesting_info.working_copy
-        ):  # ignore: type[union-attr]
-            nml["extract_data_settings"]["extract_file"] = str(
-                self.nesting_info.working_copy.path  # type: ignore[union-attr]
+        if self.nesting_info and self.nesting_info.working_copy:
+            _set(
+                "extract_data_settings",
+                "extract_file",
+                str(self.nesting_info.working_copy.path),  # type: ignore[union-attr]
             )
 
-        nml["simulation_name_settings"]["output_root_name"] = "../output/output"
+        _set("simulation_name_settings", "output_root_name", "../output/output")
 
         return nml
 
