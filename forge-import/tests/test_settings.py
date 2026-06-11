@@ -166,16 +166,16 @@ class TestRenderRomsSettings:
         assert (output_dir / "Makefile").read_text() == "compile:\n\techo 'compiling'"
     
     def test_render_with_full_match_key(self, tmp_path):
-        """Test rendering with full match key (e.g., roms.in.j2 -> roms.in)."""
+        """Test rendering with full match key (e.g., namelist.nml.j2 -> namelist.nml)."""
         template_dir = tmp_path / "templates"
         template_dir.mkdir()
-        (template_dir / "roms.in.j2").write_text("Title: {{ title.casename }}")
+        (template_dir / "namelist.nml.j2").write_text("Title: {{ title.casename }}")
         
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         
         settings_dict = {
-            "roms.in": {
+            "namelist.nml": {
                 "title": {
                     "casename": "test_case"
                 }
@@ -183,13 +183,13 @@ class TestRenderRomsSettings:
         }
         
         result = render_roms_settings(
-            template_files=["roms.in.j2"],
+            template_files=["namelist.nml.j2"],
             template_dir=template_dir,
             settings_dict=settings_dict,
             code_output_dir=output_dir,
         )
         
-        assert (output_dir / "roms.in").read_text() == "Title: test_case"
+        assert (output_dir / "namelist.nml").read_text() == "Title: test_case"
     
     def test_render_with_partial_match_key(self, tmp_path):
         """Test rendering with partial match key (e.g., bgc.opt.j2 -> bgc)."""

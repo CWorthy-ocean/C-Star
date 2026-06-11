@@ -755,75 +755,6 @@ class CstarSpecBuilder(BaseModel):
             return obj
 
 
-
-    def _rewrite_roms_input_paths_to_staged_runtime_paths(self) -> None:
-        """
-        Point ``roms.in`` input paths at C-Star staged runtime datasets.
-
-        Generated inputs are first written under ``self.input_data_dir``. During setup,
-        C-Star stages/symlinks these files under
-        ``<run_output_dir>/input/input_datasets``. ROMS reads from this staged
-        directory at run time, so we rewrite relevant ``roms.in`` path fields to
-        match that location.
-        """
-        rt_cfg = self._settings_run_time
-        if not isinstance(rt_cfg, dict):
-            return
-
-        source_root = self.input_data_dir.resolve()
-        staged_root = (self.run_output_dir / "input" / "input_datasets").resolve()
-        sections = ("grid", "initial", "forcing")
-
-        for section_name in sections:
-            section = rt_cfg.get(section_name)
-            if not isinstance(section, dict):
-                continue
-
-            for key, value in list(section.items()):
-                if not isinstance(value, str) or not value.strip():
-                    continue
-                if key not in {"grid_file", "initial_file"} and not key.endswith("_path"):
-                    continue
-
-                candidate = Path(value).expanduser()
-                if not candidate.is_absolute():
-                    continue
-
-                try:
-                    candidate.resolve().relative_to(source_root)
-                except ValueError:
-                    continue
-
-                section[key] = str(staged_root / candidate.name)
-
-
-    def _rewrite_staged_runtime_roms_in_paths(self) -> None:
-        """
-        Rewrite staged ``input/runtime_code/roms.in`` to use staged dataset paths.
-
-        This is a final safety pass after C-Star setup has staged runtime files.
-        """
-        roms_in = self.run_output_dir / "input" / "runtime_code" / "roms.in"
-        if not roms_in.is_file():
-            return
-
-        source_prefix = str(self.input_data_dir.resolve())
-        staged_prefix = str((self.run_output_dir / "input" / "input_datasets").resolve())
-
-        try:
-            text = roms_in.read_text()
-        except OSError:
-            return
-
-        if source_prefix not in text:
-            return
-
-        updated = text.replace(source_prefix, staged_prefix)
-        if updated == text:
-            return
-
-        roms_in.write_text(updated)
-    
     def _persist_settings(self, blueprint_path: Path) -> None:
         """
         Persist settings dictionaries to a sidecar file.
@@ -2361,9 +2292,10 @@ class CstarSpecBuilder(BaseModel):
         1. Validates blueprint is initialized and template configuration exists
         2. Merges user-provided settings overrides with existing settings
         3. Clears compile-time and run-time code output directories
-        4. Renders Jinja2 templates:
-           - Compile-time templates (e.g., bgc.opt, cppdefs.opt, param.opt)
-           - Run-time templates (e.g., roms.in)
+        4. Produces configuration files:
+           - Compile-time: renders cppdefs.opt from its Jinja2 template
+           - Run-time: writes namelist.nml (write_roms_namelist) and copies
+             static run-time files (e.g., marbl_in)
         5. Updates blueprint with rendered code locations and file lists
         6. Sets blueprint model_params and runtime_params
         7. Sets `_stage` to BUILD

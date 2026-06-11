@@ -207,7 +207,7 @@ def mock_model_spec():
         run_time=cstar_models.CodeRepository(
             location="https://github.com/test/run_time.git",
             branch="main",
-            filter=cstar_models.PathFilter(files=["roms.in"])
+            filter=cstar_models.PathFilter(files=["namelist.nml"])
         ),
         compile_time=cstar_models.CodeRepository(
             location="https://github.com/test/compile_time.git",
@@ -253,7 +253,7 @@ def mock_model_spec():
         run_time=cstar_models.CodeRepository(
             location="/tmp/templates/run-time",
             branch="na",
-            filter=cstar_models.PathFilter(files=["roms.in.j2"])
+            filter=cstar_models.PathFilter(files=["namelist.nml.j2"])
         )
     )
     # Add inputs attribute for datasets property
@@ -388,41 +388,6 @@ class TestCstarSpecBuilderInitialization:
         old_path = builder.input_data_dir.parent / raw / f"{raw}_grid.nc"
         assert builder._canonicalize_stored_input_netcdf_path(old_path) == expected
         assert builder._canonicalize_stored_input_netcdf_path(Path(f"{raw}_grid.nc")) == expected
-
-    def test_rewrite_roms_input_paths_to_staged_runtime_paths(
-        self,
-        minimal_cstar_spec_builder_args,
-        mock_model_spec,
-    ):
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-
-        source_root = builder.input_data_dir.resolve()
-        builder._settings_run_time = {
-            "grid": {"grid_file": str(source_root / "case_grid.nc")},
-            "initial": {"initial_file": str(source_root / "case_initial.nc")},
-            "forcing": {
-                "surface_forcing_path": str(source_root / "case_surface.nc"),
-                "boundary_forcing_path": str(source_root / "case_boundary.nc"),
-                "tidal_forcing_path": str(source_root / "case_tidal.nc"),
-                "river_path": "/tmp/custom_river.nc",
-            },
-        }
-
-        builder._rewrite_roms_input_paths_to_staged_runtime_paths()
-
-        staged_root = builder.run_output_dir / "input" / "input_datasets"
-        roms_settings = builder._settings_run_time
-        assert roms_settings["grid"]["grid_file"] == str(staged_root / "case_grid.nc")
-        assert roms_settings["initial"]["initial_file"] == str(staged_root / "case_initial.nc")
-        assert roms_settings["forcing"]["surface_forcing_path"] == str(staged_root / "case_surface.nc")
-        assert roms_settings["forcing"]["boundary_forcing_path"] == str(staged_root / "case_boundary.nc")
-        assert roms_settings["forcing"]["tidal_forcing_path"] == str(staged_root / "case_tidal.nc")
-        assert roms_settings["forcing"]["river_path"] == "/tmp/custom_river.nc"
-
 
     def test_validation_end_date_before_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test that validation raises error when end_date is before start_date."""

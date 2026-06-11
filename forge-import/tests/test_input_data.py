@@ -110,7 +110,7 @@ def sample_model_spec(tmp_path):
         run_time=cstar_models.CodeRepository(
             location="placeholder://run_time",
             branch="main",
-            filter=cstar_models.PathFilter(files=["roms.in"])
+            filter=cstar_models.PathFilter(files=["namelist.nml"])
         ),
         compile_time=cstar_models.CodeRepository(
             location="placeholder://compile_time",
@@ -502,7 +502,7 @@ class TestRomsMarblInputDataInitialization:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",

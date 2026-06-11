@@ -119,8 +119,8 @@ def render_roms_settings(
     for template_file in template_files:
         if template_file.endswith('.j2'):
             # Extract the key from template filename
-            # First try the entire base name (e.g., "roms.in.j2" -> "roms.in")
-            # If that doesn't exist in settings_dict, try the part before the last dot (e.g., "bgc.opt.j2" -> "bgc")
+            # First try the entire base name (e.g., "<name>.j2" -> "<name>")
+            # If that doesn't exist in settings_dict, try the part before the last dot (e.g., "cppdefs.opt.j2" -> "cppdefs")
             base_name = template_file[:-3]  # Remove .j2
             # Check if the entire base name exists as a key in settings_dict
             if settings_dict and base_name in settings_dict:
@@ -153,8 +153,8 @@ def render_roms_settings(
             continue  # Skip non-template files
         
         # Extract the key from template filename
-        # First try the entire base name (e.g., "roms.in.j2" -> "roms.in")
-        # If that doesn't exist in settings_dict, try the part before the last dot (e.g., "bgc.opt.j2" -> "bgc")
+        # First try the entire base name (e.g., "<name>.j2" -> "<name>")
+        # If that doesn't exist in settings_dict, try the part before the last dot (e.g., "cppdefs.opt.j2" -> "cppdefs")
         base_name = template_file[:-3]  # Remove .j2
         # Check if the entire base name exists as a key in settings_dict
         if settings_dict and base_name in settings_dict:
@@ -162,7 +162,7 @@ def render_roms_settings(
         else:
             # Fall back to the part before the last dot
             key = base_name.rsplit('.', 1)[0] if '.' in base_name else base_name
-        
+
         if key not in settings_dict:
             continue  # Already caught by earlier validation
         
@@ -198,7 +198,7 @@ def render_roms_settings(
         # If key matches base_name (full match case), template_vars should match settings_nested_keys directly
         # Otherwise (partial match case), template_vars should contain the key itself
         if key == base_name:
-            # Full match case: template variables like {{ title.casename }} -> 'title' should match settings_dict['roms.in'].keys()
+            # Full match case: template variables like {{ section.field }} -> 'section' should match settings_dict[key].keys()
             # Check for template variables without settings_dict entries
             missing_nested_settings = template_vars_to_check - settings_nested_keys
             if missing_nested_settings:
@@ -259,8 +259,8 @@ def render_roms_settings(
                 key = base_name.rsplit('.', 1)[0] if '.' in base_name else base_name
             
             # Get the context for this template
-            # - Full match case (key == base_name): use nested dict (e.g., roms.in.j2 -> settings_dict['roms.in'])
-            # - Partial match case (key != base_name): use full settings_dict (e.g., bgc.opt.j2 uses {{ bgc.wrt_his }})
+            # - Full match case (key == base_name): use nested dict (e.g., "<name>.j2" -> settings_dict["<name>"])
+            # - Partial match case (key != base_name): use full settings_dict (e.g., cppdefs.opt.j2 uses {{ cppdefs.obc_west }})
             if key == base_name and key in settings_dict:
                 # Full match: template uses variables like {{ title.casename }}, context is the nested dict
                 context = settings_dict[key].copy()

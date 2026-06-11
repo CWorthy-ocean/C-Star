@@ -108,10 +108,10 @@ class TestRunTime:
     
     def test_runtime_creation(self):
         """Test creating RunTime with filter."""
-        filter_obj = Filter(files=["roms.in", "marbl_in"])
+        filter_obj = Filter(files=["namelist.nml", "marbl_in"])
         runtime = RunTime(filter=filter_obj)
         assert len(runtime.filter.files) == 2
-        assert "roms.in" in runtime.filter.files
+        assert "namelist.nml" in runtime.filter.files
     
     def test_runtime_validation_missing_filter(self):
         """Test that RunTime raises error when filter is missing."""
@@ -478,7 +478,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -528,7 +528,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -626,7 +626,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in", "marbl_in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml", "marbl_in"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -667,12 +667,12 @@ class TestModelSpec:
         # Check if master_settings_file_name exists as a property
         # If it doesn't exist, skip this assertion (attribute may have been removed)
         if hasattr(spec, 'master_settings_file_name'):
-            assert spec.master_settings_file_name == "roms.in"
+            assert spec.master_settings_file_name == "namelist.nml"
         else:
-            # If attribute doesn't exist, check that run_time filter contains roms.in
+            # If attribute doesn't exist, check that run_time filter contains namelist.nml
             assert spec.code.run_time is not None
             assert spec.code.run_time.filter is not None
-            assert "roms.in" in spec.code.run_time.filter.files
+            assert "namelist.nml" in spec.code.run_time.filter.files
     
     def test_modelspec_cross_validation_templates_settings(self, tmp_path):
         """Test ModelSpec cross-validation between templates and settings."""
@@ -689,7 +689,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -759,7 +759,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -826,7 +826,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -890,7 +890,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -956,7 +956,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -989,13 +989,13 @@ class TestModelSpec:
         # Create run_time template directory
         run_template_dir = tmp_path / "run_templates"
         run_template_dir.mkdir()
-        (run_template_dir / "roms.in.j2").touch()
+        (run_template_dir / "namelist.nml.j2").touch()
         
         templates = TemplatesSpec(
             run_time=cstar_models.CodeRepository(
                 location=str(run_template_dir),
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in.j2"])
+                filter=cstar_models.PathFilter(files=["namelist.nml.j2"])
             )
         )
         
@@ -1021,7 +1021,7 @@ class TestModelSpec:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -1813,7 +1813,7 @@ class TestLoadModelsYaml:
 
         run_template_dir = model_dir / "templates" / "run-time"
         run_template_dir.mkdir(parents=True, exist_ok=True)
-        (run_template_dir / "roms.in.j2").touch()
+        (run_template_dir / "namelist.nml.j2").touch()
 
         yaml_content = {
             "test_model": {
@@ -1833,7 +1833,7 @@ class TestLoadModelsYaml:
                     "run_time": {
                         "location": "templates/run-time",
                         "filter": {
-                            "files": ["roms.in.j2"]
+                            "files": ["namelist.nml.j2"]
                         }
                     }
                 },
@@ -1868,7 +1868,7 @@ class TestLoadModelsYaml:
         assert spec.templates.run_time is not None
         assert str(spec.templates.compile_time.location) == str(template_dir)
         assert "cppdefs.opt.j2" in spec.templates.compile_time.filter.files
-        assert "roms.in.j2" in spec.templates.run_time.filter.files
+        assert "namelist.nml.j2" in spec.templates.run_time.filter.files
     
     def test_load_models_yaml_with_settings(self, tmp_path):
         """Test load_models_yaml with settings specification using relative paths."""
