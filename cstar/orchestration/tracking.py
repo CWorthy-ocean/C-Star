@@ -1,4 +1,5 @@
 import asyncio
+import os
 import typing as t
 from collections.abc import Mapping
 from datetime import datetime
@@ -6,6 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
@@ -40,6 +42,9 @@ class WorkplanRun(BaseModel):
     user_variables: Mapping[str, str] = Field(default_factory=dict)
     """User-supplied runtime variable overrides."""
 
+    sentinels: list[Path] = Field(default_factory=list[Path])
+    """State files expected to be created during execution of the run."""
+
     @staticmethod
     def get_default_run_id(uri: str) -> str:
         """Generate a run-id based on the name of a `Workplan`
@@ -57,6 +62,16 @@ class WorkplanRun(BaseModel):
             wp = deserialize(local_path, Workplan)
 
         return slugify(wp.name)
+
+    @property
+    def state_dir(self) -> Path:
+        """The path to the directory containing state files for the run.
+
+        Returns
+        -------
+        Path
+        """
+        return StateDirectoryManager.run_state_dir(run_id=self.run_id)
 
 
 class TrackingRepository(LoggingMixin):
@@ -292,3 +307,22 @@ class TrackingRepository(LoggingMixin):
             for run_path in run_paths
         ]
         return await asyncio.gather(*coros)
+
+    async def attach_sentinel(
+        self,
+        path: Path,
+        *,
+        run_id: str | None = None,
+    ) -> list[Path]:
+        run_id = run_id or str(os.getenv(ENV_CSTAR_RUNID, ""))
+        run = await self.get_workplan_run(run_id)
+        if not run:
+            msg = f"No run exists for run-id: {run_id}"
+            raise RuntimeError(msg)
+
+        if path not in run.sentinels:
+            run.sentinels.append(path)
+            await self.put_workplan_run(run)
+            self.log.debug(f"Sentinel path {str(path)!r} added to run {run_id!r}")
+
+        return run.sentinels
