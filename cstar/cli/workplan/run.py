@@ -270,6 +270,7 @@ def run(
             ARG_DRY_RUN,
             help="Set this flag to generate an execution plan without executing the workplan.",
             envvar=ENV_CSTAR_CLI_DRY_RUN,
+            callback=set_flag(ENV_CSTAR_CLI_DRY_RUN),
         ),
     ] = False,
     log_level: t.Annotated[
