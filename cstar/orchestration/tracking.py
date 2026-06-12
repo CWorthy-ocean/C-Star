@@ -61,9 +61,6 @@ class WorkplanRun(BaseModel):
 class TrackingRepository(LoggingMixin):
     """The API for persisting tracking data."""
 
-    _root: t.Final[Path]
-    """The root directory where tracking files are stored."""
-
     _LATEST_DIR: t.Final[str] = "latest"
     """The directory containing a mapping to the last run using a given run-id."""
 
@@ -73,9 +70,10 @@ class TrackingRepository(LoggingMixin):
     _MODE: PersistenceMode = PersistenceMode.yaml
     """The serialization mode to use."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
-        self._root = StateDirectoryManager.tracking_dir()
+    @property
+    def _root(self) -> Path:
+        """Return the root directory where tracking files are stored."""
+        return StateDirectoryManager.tracking_dir()
 
     @property
     def latest_dir(self) -> Path:

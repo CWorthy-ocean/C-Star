@@ -91,15 +91,15 @@ async def test_tracking_retrieve(tmp_path: Path) -> None:
         repo = TrackingRepository()
         _ = await repo.put_workplan_run(wp_run)
 
-    # use public API to retrieve using "latest" record (by passing only run_id)
-    latest = await repo.get_workplan_run(run_id=run_id)
-    assert latest
-    assert latest.__dict__ == wp_run.__dict__  # confirm same stored values
+        # use public API to retrieve using "latest" record (by passing only run_id)
+        latest = await repo.get_workplan_run(run_id=run_id)
+        assert latest
+        assert latest.__dict__ == wp_run.__dict__  # confirm same stored values
 
-    # use public API to retrieve using "history" record (by passing run_id & run_date)
-    history = await repo.get_workplan_run(run_id=run_id, run_date=wp_run.start_at)
-    assert history
-    assert history.__dict__ == wp_run.__dict__  # confirm same stored values
+        # use public API to retrieve using "history" record (by passing run_id & run_date)
+        history = await repo.get_workplan_run(run_id=run_id, run_date=wp_run.start_at)
+        assert history
+        assert history.__dict__ == wp_run.__dict__  # confirm same stored values
 
     assert history.output_path == output_path
     assert history.workplan_path == wp_path
