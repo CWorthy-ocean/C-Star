@@ -267,8 +267,9 @@ class TrackingRepository(LoggingMixin):
         if not latest_path.parent.exists():
             latest_path.parent.mkdir(parents=True)
 
-        await asyncio.to_thread(latest_path.unlink, missing_ok=True)
-        await asyncio.to_thread(latest_path.symlink_to, run_path)
+        if latest_path.resolve() != run_path:
+            await asyncio.to_thread(latest_path.unlink, missing_ok=True)
+            await asyncio.to_thread(latest_path.symlink_to, run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)
