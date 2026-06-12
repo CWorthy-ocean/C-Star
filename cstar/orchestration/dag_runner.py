@@ -9,7 +9,7 @@ from itertools import cycle
 from pathlib import Path
 
 from prefect import flow
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
 from cstar.base.exceptions import CstarExpectationFailed
@@ -387,21 +387,37 @@ async def prepare_workplan(
 class ExecutiveStepSummary(BaseModel):
     """Aggregates and display metadata about the inputs and outputs of a step."""
 
-    name: str
+    name: str = Field(
+        description="The step/process name.",
+    )
     """The step/process name."""
-    log_path: str
+    log_path: str = Field(
+        description="The path to the logfile produced by the step.",
+    )
     """The path to the logfile produced by the step."""
-    script_path: str
+    script_path: str = Field(
+        description="The path to the script file used by the step.",
+    )
     """The path to the script file used by the step."""
-    working_dir: str
+    working_dir: str = Field(
+        description="The path to the step's working directory.",
+    )
     """The path to the step's working directory."""
-    blueprint_path: str
+    blueprint_path: str = Field(
+        description="The path to the blueprint used to execute the step.",
+    )
     """The path to the blueprint used to execute the step."""
-    launcher: str
+    launcher: str = Field(
+        description="The name of the launcher used to launch the step.",
+    )
     """The name of the launcher used to launch the step."""
-    task_id: str
+    task_id: str = Field(
+        description="The value of the `ProcessHandle.pid` for the underlying task.",
+    )
     """The value of the `ProcessHandle.pid` for the underlying task."""
-    sentinel_path: Path
+    sentinel_path: Path = Field(
+        description="The path to a sentinel file containing step state information.",
+    )
     """The path to a sentinel file containing step state information."""
 
     def __str__(self) -> str:
@@ -453,17 +469,28 @@ class ExecutiveRunSummary(BaseModel):
     of a run.
     """
 
-    run_id: str
-    """The current run-id."""
-    state_dir: str
+    run_id: str = Field(
+        description="The run-id associated with the run being summarized",
+    )
+    """The run-id associated with the run being summarized."""
+    state_dir: str = Field(
+        default_factory=lambda: StateDirectoryManager.run_state_dir().as_posix(),
+        description="The directory where c-star state information will be stored.",
+    )
     """The directory where c-star state information will be stored."""
-    steps: list[ExecutiveStepSummary]
+    steps: list[ExecutiveStepSummary] = Field(
+        default_factory=list[ExecutiveStepSummary],
+        description="An executive summary for each step in the run.",
+    )
     """An executive summary for each step in the run."""
-    dry_run: bool = False
+    dry_run: bool = Field(
+        default=False,
+        description="Flag indicating a planning-only run was requested.",
+    )
     """Flag indicating a planning-only run was requested."""
 
     def __str__(self) -> str:
-        """Generate an _Executive Summary_ for a workplan run."""
+        """Generate a print-friendly summary for a workplan run."""
         prefix = "# "
         content_delimiter = "#" * 78
         step_summaries = [
