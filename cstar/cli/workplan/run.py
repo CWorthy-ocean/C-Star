@@ -317,12 +317,17 @@ def run(
             console.print(str(summary))
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
+        log.exception(msg)
         print(msg)
         raise typer.Exit(1) from ex
     except ValueError as ex:
+        msg = "Invalid inputs encountered while running the dag"
+        log.exception(msg)
         raise typer.BadParameter(ex.args[0]) from ex
     except Exception as ex:
-        print(f"Workplan run {run_id!r} has failed: {ex}")
+        msg = f"Workplan run {run_id!r} has failed: {ex}"
+        log.exception(msg)
+        print(msg)
         raise typer.Exit(3) from ex
     else:
         prompts = [
