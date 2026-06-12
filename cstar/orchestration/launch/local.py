@@ -141,7 +141,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
                 handle = LocalHandle(
                     pid=str(pid),
-                    name=step.safe_name,
+                    name=step.name,
                     start_at=create_time,
                     status=Status.Submitted,
                 )

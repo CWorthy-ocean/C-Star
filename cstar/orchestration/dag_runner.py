@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+from collections import OrderedDict
 from collections.abc import Awaitable, Generator, Iterable, Mapping
 from dataclasses import dataclass, field
 from itertools import cycle
@@ -13,7 +14,7 @@ from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
-from cstar.orchestration.models import UserDefinedVariables, Workplan
+from cstar.orchestration.models import Step, UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Launcher,
     Orchestrator,
@@ -56,9 +57,124 @@ class DagStatus:
         """Return the name of all items that have completed."""
         return (k for k, v in self.details.items() if Status.is_terminal(v))
 
+    def __getitem__(self, key: str) -> Status:
+        """Access a status record using the step safe-name."""
+        return self.details[key]
+
+
+class DagDetailRecord(t.NamedTuple):
+    """Detail record used for displaying dependency-related information in table."""
+
+    step: "Step"
+    """The step."""
+    ref_id: int
+    """Numeric identifier used to refer dependencies among tasks in a summary."""
+    status: Status
+    """The status of the step."""
+    awaiting: list[str]
+    """A list of tasks this step is waiting on."""
+    satisfied: list[str]
+    """A list of tasks this step depends on that have successfully completed."""
+    blocking: list[str]
+    """A list of tasks this step depends on that have failed and block it from starting."""
+
+    @property
+    def ready(self) -> bool:
+        """Flag indicating if all dependencies are complete."""
+        return (
+            self.status == Status.Submitted and not self.awaiting and not self.blocking
+        )
+
+    @property
+    def waiting(self) -> bool:
+        """Flag indicating if all dependencies are complete."""
+        return (
+            self.status == Status.Submitted
+            and bool(self.awaiting)
+            and not self.blocking
+        )
+
+    @property
+    def running(self) -> bool:
+        """Flag indicating if a task is currently executing."""
+        return Status.is_running(self.status)
+
+    @property
+    def done(self) -> bool:
+        """Flag indicating if a task successfully completed."""
+        return self.status == Status.Done
+
+    @property
+    def failed(self) -> bool:
+        """Flag indicating if a task failed."""
+        return self.status == Status.Failed
+
+    @property
+    def cancelled(self) -> bool:
+        """Flag indicating if a task was cancelled."""
+        return self.status == Status.Cancelled
+
+    @property
+    def blocked(self) -> bool:
+        return self.status == Status.Submitted and bool(self.blocking)
+
+    @classmethod
+    def get_ref_map(cls, d: OrderedDict[str, "DagDetailRecord"]) -> dict[str, int]:
+        return {name: value.ref_id for name, value in d.items()}
+
+
+def get_status_detail_map(
+    planner: Planner,
+    dag_status: DagStatus,
+) -> OrderedDict[str, DagDetailRecord]:
+    """Return a mapping from step names to their detailed status record.
+
+    Parameters
+    ----------
+    planner : Planner
+        The planner used to generate an execution graph for the workplan
+    dag_status : DagStatus
+        The overall completion status of the workplan.
+
+    Returns
+    -------
+    OrderedDict[str, DagDetailRecord]
+    """
+    return OrderedDict(
+        {
+            step.name: DagDetailRecord(
+                step=step,
+                ref_id=i,
+                status=dag_status[step.name],
+                awaiting=[
+                    s for s in step.depends_on if not Status.is_terminal(dag_status[s])
+                ],
+                satisfied=[
+                    s
+                    for s in step.depends_on
+                    if (
+                        Status.is_terminal(dag_status[s])
+                        and not Status.is_failure(dag_status[s])
+                    )
+                ],
+                blocking=[
+                    s for s in step.depends_on if Status.is_failure(dag_status[s])
+                ],
+            )
+            for i, step in enumerate(planner.flatten(), start=1)
+        }
+    )
+
 
 def get_launcher() -> Launcher[t.Any]:
-    """Get the appropriate launcher for the current environment."""
+    """Get the appropriate launcher for the current environment.
+
+    See: `cstar.system.manager.CStarSystemManager` for more information.
+
+    Returns
+    -------
+    Launcher[t.Any]
+    """
     launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
     launcher.check_preconditions()
     return launcher
@@ -92,7 +208,9 @@ async def load_run_state(
     Parameters
     ----------
     run_id : str
-        The run-id to load status for
+        The run-id to load status for.
+    launcher : Launcher[t.Any]
+        The launcher used to execute the workplan.
 
     Returns
     -------

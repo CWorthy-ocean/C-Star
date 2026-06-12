@@ -1,6 +1,6 @@
 import asyncio
 import typing as t
-from collections import Counter
+from collections import Counter, OrderedDict
 from collections.abc import Mapping
 
 import typer
@@ -16,9 +16,8 @@ from cstar.base.log import get_logger
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
-from cstar.orchestration.dag_runner import DagStatus
+from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
-from cstar.orchestration.orchestration import Status
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
@@ -139,9 +138,32 @@ def checkmark(color: str) -> str:
     return f"[{color}]:heavy_check_mark:"
 
 
+def label(name: str, app: str | None) -> str:
+    return f"{name} [italic]({app})[/italic]" if app else name
+
+
+def id_label(id: int, name: str, app: str | None) -> str:
+    return f"{id}. {label(name, app)}"
+
+
+def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:
+    items: list[str] = []
+    for d in record.step.depends_on:
+        if d in record.awaiting:
+            items.append(f"[yellow]{ref_map[d]}[/yellow]")
+        elif d in record.satisfied:
+            items.append(f"[green]{ref_map[d]}[/green]")
+        elif d in record.blocking:
+            items.append(f"[red]{ref_map[d]}[/red]")
+
+    if items:
+        return ", ".join(str(x) for x in items)
+    return ""
+
+
 def display_summary(
     run_id: str,
-    dag_status: DagStatus,
+    lookup: OrderedDict[str, DagDetailRecord],
 ) -> None:
     """Display a summary describing the current state of
     a DAG executed by the orchestrator.
@@ -158,25 +180,31 @@ def display_summary(
 
     table = Table(
         Column(header="Step", justify="right"),
-        Column(header="Ready", justify="center"),
+        Column(header="Submitted", justify="center"),
+        Column(header="In Queue", justify="center"),
         Column(header="Running", justify="center"),
         Column(header="Done", justify="center"),
         Column(header="Failed", justify="center"),
         Column(header="Cancelled", justify="center"),
+        Column(header="Dependencies", justify="center"),
         title=f"Run [yellow]{run_id}[/yellow] Results",
         show_lines=True,
         padding=padding,
         pad_edge=False,
     )
 
-    for task_name, status in sorted(dag_status.details.items()):
+    refs_map = DagDetailRecord.get_ref_map(lookup)
+
+    for x in lookup.values():
         table.add_row(
-            task_name,
-            checkmark("green") if Status.is_ready(status) else "",
-            checkmark("cyan") if Status.is_running(status) else "",
-            checkmark("green") if status == Status.Done else "",
-            checkmark("red") if status == Status.Failed else "",
-            checkmark("yellow") if status == Status.Cancelled else "",
+            id_label(refs_map[x.step.name], x.step.safe_name, x.step.application),
+            (checkmark("gray") if x.waiting else ""),
+            (checkmark("white") if x.ready else ""),
+            checkmark("cyan") if x.running else "",
+            checkmark("green") if x.done else "",
+            checkmark("red") if x.failed else "",
+            checkmark("yellow") if x.cancelled else "",
+            ref_label(x, refs_map),
         )
 
     console.print(table)
