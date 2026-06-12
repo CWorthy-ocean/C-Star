@@ -9,10 +9,9 @@ from itertools import cycle
 from pathlib import Path
 
 from prefect import flow
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
@@ -465,19 +464,12 @@ class ExecutiveStepSummary(BaseModel):
 
 
 class ExecutiveRunSummary(BaseModel):
-    """Aggregate and display metadata about the inputs and outputs
-    of a run.
-    """
+    """Aggregate and display metadata about the inputs and outputs of a `Workplan` run."""
 
     run_id: str = Field(
         description="The run-id associated with the run being summarized",
     )
     """The run-id associated with the run being summarized."""
-    state_dir: str = Field(
-        default_factory=lambda: StateDirectoryManager.run_state_dir().as_posix(),
-        description="The directory where c-star state information will be stored.",
-    )
-    """The directory where c-star state information will be stored."""
     steps: list[ExecutiveStepSummary] = Field(
         default_factory=list[ExecutiveStepSummary],
         description="An executive summary for each step in the run.",
@@ -488,6 +480,13 @@ class ExecutiveRunSummary(BaseModel):
         description="Flag indicating a planning-only run was requested.",
     )
     """Flag indicating a planning-only run was requested."""
+
+    @computed_field(
+        description="The directory where c-star state information will be stored.",
+    )
+    def state_dir(self) -> str:
+        """The directory where c-star state information will be stored."""
+        return str(StateDirectoryManager.run_state_dir(run_id=self.run_id))
 
     def __str__(self) -> str:
         """Generate a print-friendly summary for a workplan run."""
@@ -525,56 +524,44 @@ class ExecutiveRunSummary(BaseModel):
             summary = summary.replace(tpl, value)
         return summary
 
+    @classmethod
+    async def from_run(
+        cls,
+        run: WorkplanRun,
+    ) -> "ExecutiveRunSummary":
+        workplan = deserialize(run.trx_workplan_path, Workplan)
+        steps = [LiveStep.from_step(s) for s in workplan.steps]
+        step_summaries: list[ExecutiveStepSummary] = []
 
-async def get_executive_summary(
-    run_id: str,
-    *,
-    run: WorkplanRun | None = None,
-) -> ExecutiveRunSummary:
-    repo = TrackingRepository()
-    run = run or await repo.get_workplan_run(run_id)
-    if not run:
-        msg = f"No run found with the run-id: {run_id}"
-        raise CstarExpectationFailed(msg)
-
-    workplan = deserialize(run.trx_workplan_path, Workplan)
-
-    steps = t.cast("list[LiveStep]", workplan.steps)
-    step_summaries: list[ExecutiveStepSummary] = []
-
-    sentinels = await asyncio.gather(
-        *[
-            asyncio.to_thread(
-                try_deserialize, StateRepository.sentinel_path(s), ProcessHandle
-            )
-            for s in steps
-        ]
-    )
-    sentinel_map = {s.name: h for s, h in zip(steps, sentinels)}
-
-    for step in steps:
-        blueprint_path = Path(step.blueprint_path)
-        live_step = LiveStep.from_step(step)
-        handle = sentinel_map[step.name]
-
-        summary = ExecutiveStepSummary(
-            name=step.name,
-            log_path=str(live_step.log_path),
-            script_path=str(live_step.script_path),
-            working_dir=str(live_step.working_dir) if live_step.working_dir else "",
-            blueprint_path=str(blueprint_path),
-            launcher=handle.launcher_name if handle else "",
-            task_id=handle.pid if handle else "",
-            sentinel_path=StateRepository.sentinel_path(live_step),
+        sentinels = await asyncio.gather(
+            *[
+                asyncio.to_thread(try_deserialize, path, ProcessHandle)
+                for path in run.sentinels
+            ]
         )
-        step_summaries.append(summary)
 
-    return ExecutiveRunSummary(
-        run_id=run_id,
-        state_dir=StateDirectoryManager.run_state_dir().as_posix(),
-        steps=step_summaries,
-        dry_run=is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
-    )
+        for step, sentinel_path, handle in zip(
+            steps,
+            run.sentinels,
+            sentinels,
+        ):
+            summary = ExecutiveStepSummary(
+                name=step.name,
+                log_path=str(step.log_path),
+                script_path=str(step.script_path),
+                working_dir=str(step.working_dir) if step.working_dir else "",
+                blueprint_path=str(step.blueprint_path),
+                launcher=handle.launcher_name if handle else "",
+                task_id=handle.pid if handle else "",
+                sentinel_path=sentinel_path,
+            )
+            step_summaries.append(summary)
+
+        return ExecutiveRunSummary(
+            run_id=run.run_id,
+            steps=step_summaries,
+            dry_run=is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
+        )
 
 
 async def on_status_changed(handle: ProcessHandle) -> None:
@@ -648,16 +635,14 @@ async def build_and_run_dag(
     if dry_run:
         msg = f"Dry run complete. Prepared workplan location: {prepared_wp_path}"
         log.debug(msg)
-        summary = await get_executive_summary(run_id, run=wp_run)
-
-        return summary
+        return await ExecutiveRunSummary.from_run(wp_run)
 
     run_repo = TrackingRepository()
     await run_repo.put_workplan_run(wp_run)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
-    summary = await get_executive_summary(run_id)
+    summary = await ExecutiveRunSummary.from_run(wp_run)
 
     # monitor the scheduled tasks until they complete
     await process_plan(orchestrator, RunMode.Monitor)
