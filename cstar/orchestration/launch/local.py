@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import multiprocessing as _mp
+import textwrap
 import typing as t
 from pathlib import Path
 from subprocess import run as sprun
@@ -18,6 +19,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
+from cstar.orchestration.state import StateRepository
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
@@ -83,9 +85,50 @@ class LocalHandle(ProcessHandle):
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
+    tasks: t.ClassVar[dict[str, str]] = {}
+
     @classmethod
     def check_preconditions(cls) -> None:
         """Perform launcher-specific startup validation."""
+
+    @staticmethod
+    def _create_updating_script(
+        step: "LiveStep", dependencies: list[LocalHandle]
+    ) -> str:
+        """Create a script that will execute the desired command for a
+        `Step` while also waiting for any dependencies to complete.
+
+        Returns
+        -------
+        str
+        """
+        blocks = [
+            f"tail --pid={LocalLauncher.tasks[dep.name]} -f /dev/null"
+            for dep in dependencies
+        ]
+        script = textwrap.dedent(f"""\
+            #!/bin/bash
+            {step.command}
+            RC=$?
+            STATUS=7
+            if [ $RC -eq 0 ]; then
+                STATUS=5
+            fi
+            <deps>
+            sed -i '' "s/^status:.*$/status: $STATUS/" '{StateRepository.sentinel_path(step.name)}'
+        """)
+
+        # perform replacements separately to ensure consistent dedent whitespace.
+        script = script.replace(
+            "<deps>",
+            (
+                "\n".join(blocks)
+                if dependencies
+                else "echo 'no dependencies; executing immediately.'"
+            ),
+        )
+
+        return script
 
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
@@ -103,9 +146,10 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        cmd = step.command
+        script = LocalLauncher._create_updating_script(step, dependencies)
 
         step.fsm.prepare()
+        step.script_path.write_text(script)
         log_file = step.log_path
 
         try:
@@ -115,7 +159,11 @@ class LocalLauncher(Launcher[LocalHandle]):
             mp_process = mp.Process(
                 target=run_as_process,
                 name=step.safe_name,
-                args=(step, cmd.split(), log_file),
+                args=(
+                    step,
+                    f"sh {str(step.script_path)} &".split(),
+                    step.log_path,
+                ),
                 daemon=True,
             )
             mp_process.start()
@@ -125,6 +173,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 log.debug(msg)
                 msg = f"Logs for step {step.safe_name!r} can be found at: {log_file}"
                 log.info(msg)
+                LocalLauncher.tasks[step.name] = str(pid)
 
                 try:
                     ps_process = PsProcess(pid)
@@ -226,8 +275,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         live_step = LiveStep.from_step(step)
         handle = await LocalLauncher._submit(live_step, dependencies)
-        return Task(
-            status=Status.Submitted,
+        return Task[LocalHandle](
             step=live_step,
             handle=handle,
         )
