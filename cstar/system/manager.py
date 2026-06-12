@@ -318,7 +318,7 @@ class _EljaSystemContext(_SystemContext):
     """The unique name identifying the Elja system."""
     compiler: ClassVar[str] = "gnu"
     """The compiler used on Elja."""
-    mpi_prefix: ClassVar[str] = "srun"
+    mpi_prefix: ClassVar[str] = "mpirun"
     """The MPI prefix used on Eja."""
     docs: ClassVar[str] = "https://wiki.irei.is"
     """URI for documentation of the Elja system."""
