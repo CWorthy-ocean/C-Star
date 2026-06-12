@@ -432,6 +432,17 @@ async def get_executive_summary(
     )
 
 
+async def on_status_changed(handle: ProcessHandle) -> None:
+    """Persist updates to process handles."""
+    state_repo = StateRepository()
+    run_repo = TrackingRepository()
+
+    if path := await state_repo.put_sentinel(handle):
+        if run := await run_repo.get_workplan_run(handle.run_id):
+            run.sentinels.add(path)
+            await run_repo.put_workplan_run(run)
+
+
 @flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path,
@@ -486,6 +497,8 @@ async def build_and_run_dag(
     )
 
     orchestrator = Orchestrator(planner, launcher)
+    orchestrator.set_callback("status_changed", on_status_changed)
+    orchestrator.set_callback("launched", on_status_changed)
 
     if dry_run:
         msg = f"Dry run complete. Prepared workplan location: {prepared_wp_path}"

@@ -229,6 +229,10 @@ class TrackingRepository(LoggingMixin):
         WorkplanRun | None
             The record when it can be located in history or latest runs, otherwise `None`.
         """
+        if not run_id:
+            msg = "A valid run-id was not provided; unable to retrieve run"
+            raise ValueError(msg)
+
         run_path = self._find_run_path(run_id, run_date)
 
         if not run_path.exists():

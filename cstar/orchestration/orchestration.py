@@ -1,7 +1,7 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
@@ -642,6 +642,12 @@ class Orchestrator(LoggingMixin):
     launcher: Launcher[t.Any]
     """The launcher used by the orchestrator to manage task execution."""
 
+    _on_status_changed: Callable[[ProcessHandle], Awaitable[None]] | None = None
+    """A callback to be executed when the orchestrator detects a status change."""
+
+    _on_launched: Callable[[ProcessHandle], Awaitable[None]] | None = None
+    """A callback to be executed when the orchestrator launches a task."""
+
     def __init__(self, planner: Planner, launcher: Launcher[t.Any]) -> None:
         """Initialize the orchestrator.
 
@@ -774,12 +780,20 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            if updated := await self.launcher.update_status(task.handle):
-                task.status = updated.status
+            old_status = task.status
+            new_status = await self.launcher.query_status(task)
+            if old_status != new_status:
+                task.status = new_status
+
+                if self._on_status_changed:
+                    await self._on_status_changed(task.handle)
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
             self.log.info(f"Launched step: {step.name}")
+
+            if self._on_launched:
+                await self._on_launched(task.handle)
 
         self.planner.store(node, KEY_STATUS, task.status)
         return task
@@ -876,6 +890,22 @@ class Orchestrator(LoggingMixin):
                 msg = f"The orchestrator requested cancellation of: {task.step.name}"
                 self.log.warning(msg)
                 self.planner.store(task.step.name, KEY_STATUS, task.status)
+
+    def set_callback(
+        self,
+        event: t.Literal["status_changed", "launched"],
+        func: Callable[[_THandle], Awaitable[None]],
+    ) -> None:
+        match event:
+            case "status_changed":
+                attr_name = "_on_status_changed"
+            case "launched":
+                attr_name = "_on_launched"
+            case _:
+                msg = f"Invalid launcher callback event specified: {event}"
+                raise ValueError(msg)
+
+        setattr(self, attr_name, func)
 
 
 def check_environment() -> None:
