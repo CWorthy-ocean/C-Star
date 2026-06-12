@@ -14,7 +14,6 @@ from cstar.applications.hello_world_app import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )
-from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
@@ -249,6 +248,7 @@ async def test_hello_world_workplan(
     )
 
 
+@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     "dry_run",
     [
@@ -257,17 +257,13 @@ async def test_hello_world_workplan(
     ],
 )
 def test_hello_world_workplan_dry_run(
-    tmp_path: Path,
     hw_single_step_wp_path: Path,
     dry_run: bool,
-    prefect_server_url: str,
 ) -> None:
     """Test the preparation of a workplan containing a non ROMS-MARBL application (--dry-run).
 
     Parameters
     ----------
-    tmp_path : Path
-        Temporary output location for writing the test workplan and outputs from the run.
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the hello_world application.
     dry_run : bool
@@ -275,13 +271,11 @@ def test_hello_world_workplan_dry_run(
     prefect_server_url: str
         Implicitly declare dependence on the prefect server
     """
-    state_dir = tmp_path / "state"
     runner = CliRunner()
     custom_env = {
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
-        ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
         ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
 
@@ -308,6 +302,7 @@ def test_hello_world_workplan_dry_run(
     assert "completed" in result.stdout
 
 
+@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     "dry_run",
     [
@@ -316,17 +311,13 @@ def test_hello_world_workplan_dry_run(
     ],
 )
 def test_heterogeneous_workplan(
-    tmp_path: Path,
     heterogeneous_workplan_path: Path,
     dry_run: bool,
-    prefect_server_url: str,
 ) -> None:
     """Test the preparation of a workplan containing multiple applications (--dry-run).
 
     Parameters
     ----------
-    tmp_path : Path
-        Temporary output location for writing the test workplan and outputs from the run.
     heterogeneous_workplan_path : Path
         The path to the workplan containing a step relying on the hello_world application
         and a step relying on the ROMS-MARBL application.
@@ -335,13 +326,11 @@ def test_heterogeneous_workplan(
     prefect_server_url: str
         Implicitly declare dependence on the prefect server
     """
-    state_dir = tmp_path / "state"
     runner = CliRunner()
     custom_env = {
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
-        ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
         ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
     run_id = str(uuid.uuid4())
@@ -367,30 +356,25 @@ def test_heterogeneous_workplan(
     assert "completed" in result.stdout
 
 
+@pytest.mark.usefixtures("prefect_server_url")
 def test_hw_runner_bp_only(
-    tmp_path: Path,
     hello_world_bp_path: Path,
-    prefect_server_url: str,
 ) -> None:
     """Verify that a blueprint containing the sample application is executed
     correctly by the `cstar blueprint run` command.
 
     Parameters
     ----------
-    tmp_path : Path
-        Temporary output location for writing the test workplan and outputs from the run.
     hello_world_bp_path : Path
         A fixture that stores an HW blueprint and returns the path.
     prefect_server_url: str
         Implicitly declare dependence on the prefect server
     """
-    state_dir = tmp_path / "state"
     runner = CliRunner()
-    custom_env = {
+    custom_env: dict[str, str] = {
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
-        ENV_CSTAR_STATE_HOME: state_dir.as_posix(),
         ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
     with (
