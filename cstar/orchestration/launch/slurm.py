@@ -217,7 +217,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
 
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
-            return SlurmHandle(pid=str(job.id), name=job_name)
+            return SlurmHandle(pid=str(job.id), name=step.name)
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
         raise RuntimeError(msg)
