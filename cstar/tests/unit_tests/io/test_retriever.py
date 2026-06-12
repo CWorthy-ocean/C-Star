@@ -199,22 +199,20 @@ class TestRemoteRepositoryRetriever:
 
     def test_save_clones_and_checkouts(
         self,
-        tmp_path: Path,
         mocksourcedata_remote_repo: SourceDataFactory,
+        working_dir: Path,
     ) -> None:
         """Test that RemoteRepositoryRetriever.save() clones the repo."""
         source = mocksourcedata_remote_repo()
-        with (
-            mock.patch("cstar.io.retriever._clone") as mock_clone,
-        ):
+        with mock.patch("cstar.io.retriever._clone") as mock_clone:
             r = retriever.RemoteRepositoryRetriever(source)
-            result = r._save(tmp_path)
+            result = r._save(working_dir)
 
         mock_clone.assert_called_once_with(
-            source_repo=source.location, local_path=tmp_path
+            source_repo=source.location, local_path=working_dir
         )
 
-        assert result == tmp_path
+        assert working_dir == result
 
     def test_save_raises_if_dir_not_empty(
         self,

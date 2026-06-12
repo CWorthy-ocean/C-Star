@@ -15,6 +15,12 @@ import pytest
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
+from cstar.base.env import (
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_STATE_HOME,
+)
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
@@ -42,15 +48,52 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 @pytest.fixture(scope="module")
-def blueprint_path(tests_path: Path) -> Path:
+def complete_blueprint_path(tests_path: Path) -> Path:
     """Fixture that returns the path to a valid, fully-populated blueprint.
 
     Returns
     -------
     Path
     """
-    relative_path = Path("integration_tests") / "blueprints" / "blueprint_complete.yaml"
-    return tests_path / relative_path
+    filename = "blueprint_complete.yaml"
+    relative_path = Path("integration_tests") / "blueprints" / filename
+    return (tests_path / relative_path).expanduser().resolve()
+
+
+@pytest.fixture
+def copies_dir(tmp_path: Path) -> Path:
+    """Fixture to return a re-usable directory path for copying modified templates."""
+    bp_copies_dir = (tmp_path / "input-copies").expanduser().resolve()
+    bp_copies_dir.mkdir(parents=True, exist_ok=True)
+    return bp_copies_dir
+
+
+@pytest.fixture
+def working_dir(tmp_path: Path) -> Path:
+    """Fixture to return a re-usable directory path for copying modified templates."""
+    bp_working_dir = (tmp_path / "bp-workdir").expanduser().resolve()
+    bp_working_dir.mkdir(parents=True, exist_ok=True)
+    return bp_working_dir
+
+
+@pytest.fixture
+def blueprint_path(
+    complete_blueprint_path: Path, copies_dir: Path, working_dir: Path
+) -> Path:
+    """Fixture that returns the path to a valid, fully-populated blueprint.
+
+    Returns
+    -------
+    Path
+    """
+    # replace workdir that can result in writing to the working directory
+    bp_content = complete_blueprint_path.read_text()
+    bp_content = bp_content.replace("temp_out_dir", str(working_dir))
+
+    # write a copy of the modified template and return that path
+    bp_copy_path = copies_dir / complete_blueprint_path.name
+    bp_copy_path.write_text(bp_content)
+    return bp_copy_path
 
 
 ################################################################################
@@ -2003,3 +2046,24 @@ def preprocessable_workplan_path(
     assert nbytes
 
     return write_to
+
+
+@pytest.fixture(autouse=True)
+def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
+    """Configure the XDG_* environment variables to write to temporary files."""
+    xdg_dir = "xdg"
+
+    xdg_vars = {
+        ENV_CSTAR_CACHE_HOME: tmp_path / xdg_dir / "cache",
+        ENV_CSTAR_CONFIG_HOME: tmp_path / xdg_dir / "config",
+        ENV_CSTAR_DATA_HOME: tmp_path / xdg_dir / "data",
+        ENV_CSTAR_STATE_HOME: tmp_path / xdg_dir / "state",
+    }
+
+    for p in xdg_vars.values():
+        p.mkdir(parents=True, exist_ok=True)
+
+    variables = {k: p.expanduser().resolve().as_posix() for k, p in xdg_vars.items()}
+
+    with mock.patch.dict(os.environ, variables):
+        yield xdg_vars
