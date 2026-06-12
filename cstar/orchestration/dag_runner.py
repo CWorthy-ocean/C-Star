@@ -63,7 +63,9 @@ class DagStatus:
 
     def __getitem__(self, key: str) -> Status:
         """Access a status record using the step safe-name."""
-        return self.details[key]
+        if status := self.details.get(key, None):
+            return status
+        return Status.Unsubmitted
 
 
 class DagDetailRecord(t.NamedTuple):
