@@ -36,6 +36,7 @@ Breaking Changes
 - The `RomsMarblBlueprint` model has been updated. Old blueprints may be upgraded by using `cstar blueprint migrate <blueprint-path>` (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - `JobFileSystemManager` attributes have been modified for clarity and naming consistency (`work_dir`->`run_dir`, `root`->`root_dir`, `output_dir`->`working_dir`). (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - Sample blueprints are updated to the latest schema version. (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
+- the `name` of a task is now the step name (not `step.safe_name`). using `cstar workplan status` on old outputs will result in a key error (`#532 <https://github.com/CWorthy-ocean/C-Star/pull/532>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -196,6 +197,7 @@ Improvements
 - Mitigated linter warnings (`#538 <https://github.com/CWorthy-ocean/C-Star/pull/538>`_)
 - Improved formatting, linting, and type hinting in serialization, tracking, and launcher modules. (`#541 <https://github.com/CWorthy-ocean/C-Star/pull/541>`_)
 - Promote `env show` and `workplan status` to always-on & deprecate feature flags (`#540 <https://github.com/CWorthy-ocean/C-Star/pull/540>`_)
+- Improved level of detail in `cstar workplan status` output (`#532 <https://github.com/CWorthy-ocean/C-Star/pull/532>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
