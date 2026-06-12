@@ -9,6 +9,7 @@ from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
+    ENV_CSTAR_RUNID,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
@@ -224,7 +225,7 @@ def run(
         typer.Option(
             help="The unique identifier for an execution of the workplan.",
             autocompletion=list_runs,
-            callback=preprocess_runid,
+            callback=cb_pipeline(preprocess_runid, set_env(ENV_CSTAR_RUNID)),
         ),
     ] = "",
     user_variables: t.Annotated[
