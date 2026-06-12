@@ -306,7 +306,7 @@ def run(
 
     try:
         with local_copy(path) as wp_path:
-            asyncio.run(
+            summary = asyncio.run(
                 build_and_run_dag(
                     wp_path,
                     run_id,
@@ -314,6 +314,7 @@ def run(
                     dry_run=dry_run,
                 ),
             )
+            console.print(str(summary))
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
         print(msg)

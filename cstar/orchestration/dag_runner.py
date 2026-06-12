@@ -450,7 +450,7 @@ async def build_and_run_dag(
     output_dir: Path | None = None,
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
-) -> Path:
+) -> ExecutiveRunSummary:
     """Execute the steps in the workplan.
 
     Parameters
@@ -503,11 +503,9 @@ async def build_and_run_dag(
     if dry_run:
         msg = f"Dry run complete. Prepared workplan location: {prepared_wp_path}"
         log.debug(msg)
-
         summary = await get_executive_summary(run_id, run=wp_run)
-        log.info("\n" + str(summary))
 
-        return prepared_wp_path
+        return summary
 
     run_repo = TrackingRepository()
     await run_repo.put_workplan_run(wp_run)
@@ -515,9 +513,8 @@ async def build_and_run_dag(
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
     summary = await get_executive_summary(run_id)
-    log.info("\n" + str(summary))
 
     # monitor the scheduled tasks until they complete
     await process_plan(orchestrator, RunMode.Monitor)
 
-    return prepared_wp_path
+    return summary
