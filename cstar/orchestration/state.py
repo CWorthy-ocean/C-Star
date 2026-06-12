@@ -2,6 +2,7 @@ import asyncio
 import typing as t
 from pathlib import Path
 
+from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import (
     PersistenceMode,
@@ -91,7 +92,9 @@ class StateRepository:
         Path
             The path to the sentinel file
         """
-        if not isinstance(proxy, str):
+        if isinstance(proxy, str):
+            proxy = slugify(proxy)
+        else:
             proxy = proxy.safe_name
 
         state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
