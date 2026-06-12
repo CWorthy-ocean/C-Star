@@ -1,6 +1,5 @@
 import asyncio
 import os
-import textwrap
 import typing as t
 from collections import OrderedDict
 from collections.abc import Awaitable, Generator, Iterable, Mapping
@@ -386,81 +385,51 @@ async def prepare_workplan(
 class ExecutiveStepSummary(BaseModel):
     """Aggregates and display metadata about the inputs and outputs of a step."""
 
-    name: str = Field(
-        description="The step/process name.",
-    )
+    name: str = Field(description="The step/process name.", title="Step name")
     """The step/process name."""
     log_path: str = Field(
         description="The path to the logfile produced by the step.",
+        title="Logfile path",
     )
     """The path to the logfile produced by the step."""
     script_path: str = Field(
         description="The path to the script file used by the step.",
+        title="Script path",
     )
     """The path to the script file used by the step."""
     working_dir: str = Field(
         description="The path to the step's working directory.",
+        title="Working directory",
     )
     """The path to the step's working directory."""
     blueprint_path: str = Field(
         description="The path to the blueprint used to execute the step.",
+        title="Configured blueprint",
     )
     """The path to the blueprint used to execute the step."""
     launcher: str = Field(
         description="The name of the launcher used to launch the step.",
+        title="Launcher name",
     )
     """The name of the launcher used to launch the step."""
     task_id: str = Field(
         description="The value of the `ProcessHandle.pid` for the underlying task.",
+        title="Process ID",
     )
     """The value of the `ProcessHandle.pid` for the underlying task."""
     sentinel_path: Path = Field(
         description="The path to a sentinel file containing step state information.",
+        title="State-file path",
     )
     """The path to a sentinel file containing step state information."""
 
-    def __str__(self) -> str:
-        """Generate an _Executive Summary_ for a step from a workplan run."""
-        underline_char = "-"
-        step_header = f"{self.name!r}"
-        step_underline = underline_char * len(step_header)
-        assets_header = "Assets"
-        assets_underline = underline_char * len(assets_header)
-        job_header = "Job"
-        job_underline = underline_char * len(job_header)
-
-        handle = try_deserialize(self.sentinel_path, ProcessHandle)
-
-        task_prompt = "Process ID"
-        if handle is None:
-            pid = "N/A"
-            status = Status.Unsubmitted.name
-        else:
-            pid = handle.pid if handle else "N/A"
-            status = (
-                handle.status.name
-                if hasattr(handle, "status")
-                else Status.Unsubmitted.name
-            )
-            if handle.launcher_name == "slurm":
-                task_prompt = "SLURM Job ID"
-
-        summary = textwrap.dedent(f"""\
-          {self.name!r}
-          {step_underline}
-           {assets_header}
-           {assets_underline}
-           - Log file: {self.log_path}
-           - Configured blueprint: {self.blueprint_path}
-           - Working directory: {self.working_dir}
-           - Script path: {self.script_path}
-           {job_header}
-           {job_underline}
-           - {task_prompt}: {pid}
-           - Status: {status}
-         """)
-
-        return summary
+    @computed_field(title="Status")
+    def status(self) -> str:
+        if not hasattr(self, "_handle"):
+            self._handle = try_deserialize(self.sentinel_path, ProcessHandle)
+        if self._handle is None:
+            return Status.Unsubmitted.name
+        return self._handle.status.name
 
 
 class ExecutiveRunSummary(BaseModel):
@@ -468,61 +437,29 @@ class ExecutiveRunSummary(BaseModel):
 
     run_id: str = Field(
         description="The run-id associated with the run being summarized",
+        title="Run ID",
     )
     """The run-id associated with the run being summarized."""
     steps: list[ExecutiveStepSummary] = Field(
         default_factory=list[ExecutiveStepSummary],
         description="An executive summary for each step in the run.",
+        title="Step details",
     )
     """An executive summary for each step in the run."""
     dry_run: bool = Field(
         default=False,
         description="Flag indicating a planning-only run was requested.",
+        title="Dry-run only",
     )
     """Flag indicating a planning-only run was requested."""
 
     @computed_field(
         description="The directory where c-star state information will be stored.",
+        title="State directory",
     )
     def state_dir(self) -> str:
         """The directory where c-star state information will be stored."""
         return str(StateDirectoryManager.run_state_dir(run_id=self.run_id))
-
-    def __str__(self) -> str:
-        """Generate a print-friendly summary for a workplan run."""
-        prefix = "# "
-        content_delimiter = "#" * 78
-        step_summaries = [
-            f"{prefix}{line}" for s in self.steps for line in str(s).split("\n")
-        ]
-        section_del = "-"
-        steps_section = "\n".join(str(summary) for summary in step_summaries)
-
-        header = "Workplan Execution Plan"
-        if self.dry_run:
-            header = f"{header} - DRY-RUN ONLY"
-        section_del_wp = section_del * len(header)
-        section_header_steps = "Task Details"
-        section_del_steps = section_del * len(section_header_steps)
-
-        summary = textwrap.dedent(f"""\
-                {prefix}{content_delimiter}
-                {prefix}{header}
-                {prefix}{section_del_wp}
-                {prefix}- Run ID: {self.run_id}
-                {prefix}- State directory: {self.state_dir}
-                {prefix}
-                {prefix}{section_header_steps}
-                {prefix}{section_del_steps}
-                {prefix}
-                <steps>
-                {prefix}{content_delimiter}
-                """)
-
-        value_map = {"<steps>": steps_section}
-        for tpl, value in value_map.items():
-            summary = summary.replace(tpl, value)
-        return summary
 
     @classmethod
     async def from_run(
@@ -642,9 +579,4 @@ async def build_and_run_dag(
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
-    summary = await ExecutiveRunSummary.from_run(wp_run)
-
-    # monitor the scheduled tasks until they complete
-    await process_plan(orchestrator, RunMode.Monitor)
-
-    return summary
+    return await ExecutiveRunSummary.from_run(wp_run)

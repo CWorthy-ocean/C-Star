@@ -341,7 +341,7 @@ def try_deserialize(
         return deserialize(path, klass, mode=mode)
     except Exception:
         msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
-        log.warning(msg)
+        log.debug(msg)
         return None
 
 

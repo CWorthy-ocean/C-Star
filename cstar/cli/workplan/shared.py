@@ -138,12 +138,12 @@ def checkmark(color: str) -> str:
     return f"[{color}]:heavy_check_mark:"
 
 
-def highvis(msg: str, color: str = "cyan") -> str:
+def colored(msg: str, color: str = "cyan") -> str:
     return f"[{color}]{msg}[/{color}]"
 
 
 def present(prompt: str, value: str, color: str = "cyan", width: int = 0) -> str:
-    return f"{prompt.rjust(width)}: {highvis(value, color)}"
+    return f"{prompt.rjust(width)}: {colored(value, color)}"
 
 
 def label(name: str, app: str | None) -> str:
@@ -157,13 +157,15 @@ def id_label(id: int, name: str, app: str | None) -> str:
 def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:
     items: list[str] = []
     for d in record.step.depends_on:
+        color = "white"
         if d in record.awaiting:
-            items.append(f"[yellow]{ref_map[d]}[/yellow]")
+            color = "yellow"
         elif d in record.satisfied:
-            items.append(f"[green]{ref_map[d]}[/green]")
+            color = "green"
         elif d in record.blocking:
-            items.append(f"[red]{ref_map[d]}[/red]")
+            color = "red"
 
+        items.append(colored(str(ref_map[d]), color))
     if items:
         return ", ".join(str(x) for x in items)
     return ""
