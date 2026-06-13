@@ -1,12 +1,17 @@
+import asyncio
 import time
 import typing as t
 
 import typer
 
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
-from cstar.base.utils import slugify
+from cstar.cli.common import set_env
 from cstar.cli.workplan.shared import autocomplete_step_list, list_runs
-from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
+from cstar.orchestration.models import Workplan
+from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.tracking import TrackingRepository
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -31,6 +36,7 @@ def workplan_log(
         typer.Argument(
             help="The unique identifier of a specific workplan execution.",
             autocompletion=list_runs,
+            callback=set_env(ENV_CSTAR_RUNID),
         ),
     ],
     step_name: t.Annotated[
@@ -50,9 +56,24 @@ def workplan_log(
     ] = False,
 ) -> None:
     """Print the log for a workplan step."""
-    root_fsm = JobFileSystemManager(DirectoryManager.data_home() / run_id)
-    step_fsm = root_fsm.get_subtask_manager(step_name)
-    log_path = step_fsm.logs_dir / f"{slugify(step_name)}.out"
+    repo = TrackingRepository()
+    wp_run = asyncio.run(repo.get_workplan_run(run_id))
+    if not wp_run:
+        raise typer.BadParameter(
+            f"Unable to monitor logs for unknown run-id: {run_id}",
+            param_hint="run_id",
+        )
+
+    wp = deserialize(wp_run.trx_workplan_path, Workplan)
+    step = next((x for x in wp.steps if x.name == step_name), None)
+    if step is None:
+        valid_steps = ", ".join(f"{s.name!r}" for s in wp.steps)
+        raise typer.BadParameter(
+            f"Unable to monitor logs for unknown step: {step_name!r}. Valid values: {valid_steps}",
+            param_hint="step_name",
+        )
+
+    log_path = LiveStep.from_step(step).log_path
 
     if not monitor and not log_path.exists():
         print(f"No log file found for step {step_name!r} in run {run_id!r}.")
