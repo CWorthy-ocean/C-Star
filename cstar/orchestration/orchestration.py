@@ -223,7 +223,7 @@ class LiveStep(Step):
 
     parent: t.Self | None = Field(default=None, exclude=True)
     """The step for which this step is a sub-task."""
-    working_dir: Path | None = Field(default=None, exclude=True)
+    working_dir: Path | None = Field(default=None)
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
