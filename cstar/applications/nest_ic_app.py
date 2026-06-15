@@ -68,6 +68,10 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
     @staticmethod
     def _has_bgc(filepath: Path) -> bool:
         """Check if the parent restart file has BGC tracers."""
+        if not filepath.exists():
+            msg = f"Unable to locate tracers, file not found: {filepath}"
+            raise ValueError(msg)
+
         with xr.open_dataset(filepath) as ds:
             # Example: check if nitrate, DIC exist
             # These are specific to MARBL but other than capitalization are likely to be in any BGC or mCDR model
