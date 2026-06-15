@@ -23,7 +23,7 @@ log = get_logger(__name__)
 
 
 class UpscalerBlueprint(Blueprint):
-    """A blueprint for an example plotting application."""
+    """A blueprint used to perform upscaling of a high resolution nested grid to a lower resolution parent grid."""
 
     application: str = APP_NAME
     """The application identifier."""
