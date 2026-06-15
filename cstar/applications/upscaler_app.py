@@ -14,7 +14,7 @@ from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Blueprint
 
-APP_NAME: t.Literal["upscaler"] = "upscaler"
+APP_NAME: t.Final[str] = "upscaler"
 """The unique identifier for the upscaler application type."""
 _APP_NAME_LONG: t.Literal["Nesting Data Processor"] = "Nesting Data Processor"
 """The long-form application name."""
