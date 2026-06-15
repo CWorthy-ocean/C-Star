@@ -32,10 +32,12 @@ ARG_MONITOR: t.Final[str] = "--monitor"
 
 
 def preload_step(context: typer.Context, step_name: str) -> str:
-    """Given a step-name,  is a valid name from the target workplan.
+    """Given a step-name, ensure is a valid name in a preloaded workplan
 
     NOTE: Requires the workplan to be loaded into context dict as "workplan", e.g.
-    `wp = context.obj["workplan"]`
+    `wp = cstar.cli.common.get_from_ctxmap(context, "workplan", Workplan)`
+
+    See also: `cstar.cli.common.set_ctxmap`
 
     Parameters
     ----------
@@ -50,7 +52,7 @@ def preload_step(context: typer.Context, step_name: str) -> str:
 
     Raises
     ------
-    typer.BadParamter
+    typer.BadParameter
         - Raised when the step-name cannot be found in the target workplan.
     """
     run_id = str(context.params.get("run_id", ""))

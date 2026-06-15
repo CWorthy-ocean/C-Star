@@ -352,7 +352,7 @@ def preload_run(context: typer.Context, run_id: str) -> str:
 
     Raises
     ------
-    typer.BadParamter
+    typer.BadParameter
         - Raised when the run-id is invalid and a `WorkplanRun` cannot be loaded
     """
     if not run_id.strip():
