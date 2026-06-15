@@ -28,12 +28,13 @@ preferred over strict validation.
 """
 from __future__ import annotations
 
+import os
 import warnings
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Annotated, Any, List, Optional, Union
 
 import f90nml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 # Fortran array bounds declared in ROMS src/marbl_driver.F90 for the namelist
 # string lists (pinned ucla-roms commit). A list longer than these would
@@ -78,6 +79,18 @@ def _as_list(v):
     if isinstance(v, (list, tuple)):
         return list(v)
     return [v]
+
+
+def _coerce_pathlike(v):
+    """Accept ``pathlib.Path``/``os.PathLike`` for path-valued settings fields —
+    input generation fills them with ``Path`` objects — coercing to ``str``.
+    ``None`` and ``str`` pass through unchanged."""
+    return os.fspath(v) if isinstance(v, os.PathLike) else v
+
+
+# An optional path string that also accepts a Path (coerced to str). Used for
+# the settings fields that input generation populates with Path objects.
+PathStr = Annotated[Optional[str], BeforeValidator(_coerce_pathlike)]
 
 
 # ===========================================================================
@@ -527,7 +540,7 @@ class TimeSteppingCfg(_SettingsSection):
 
 
 class GridCfg(_SettingsSection):
-    grid_file: Optional[str] = Field(default=None, serialization_alias="grdname")  # set from generated grid
+    grid_file: PathStr = Field(default=None, serialization_alias="grdname")  # set from generated grid
 
 
 class SCoordCfg(_SettingsSection):
@@ -550,16 +563,16 @@ class ParamCfg(_SettingsSection):
 
 class InitialCfg(_SettingsSection):
     nrrec: int
-    initial_file: Optional[str] = Field(default=None, serialization_alias="ininame")  # set from generated IC
+    initial_file: PathStr = Field(default=None, serialization_alias="ininame")  # set from generated IC
 
 
 class ForcingCfg(_SettingsSection):
-    surface_forcing_path: Optional[str] = None
-    surface_forcing_bgc_path: Optional[str] = None
-    boundary_forcing_path: Optional[str] = None
-    boundary_forcing_bgc_path: Optional[str] = None
-    tidal_forcing_path: Optional[str] = None
-    river_path: Optional[str] = None
+    surface_forcing_path: PathStr = None
+    surface_forcing_bgc_path: PathStr = None
+    boundary_forcing_path: PathStr = None
+    boundary_forcing_bgc_path: PathStr = None
+    tidal_forcing_path: PathStr = None
+    river_path: PathStr = None
 
 
 class BlkFrcCfg(_SettingsSection):

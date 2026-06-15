@@ -55,6 +55,22 @@ def test_defaults_come_from_yaml_not_the_model():
     assert rt.ocean_vars.output_period_rst == 12345.0
 
 
+def test_path_objects_coerced_to_str():
+    """Input generation fills grid/initial/forcing with pathlib.Path objects;
+    the model coerces them to str rather than rejecting them."""
+    d = _populated_rt_dict()
+    d["grid"]["grid_file"] = Path("/in/grid.nc")
+    d["initial"]["initial_file"] = Path("/in/init.nc")
+    d["forcing"]["surface_forcing_path"] = Path("/in/surf.nc")
+    rt = RunTimeSettings.model_validate(d)
+    assert rt.grid.grid_file == "/in/grid.nc" and isinstance(rt.grid.grid_file, str)
+    assert rt.initial.initial_file == "/in/init.nc"
+    assert rt.forcing.surface_forcing_path == "/in/surf.nc"
+    nml = build_namelist(rt, n_tracers=34)
+    assert nml.grid_settings.grdname == "/in/grid.nc"
+    assert "/in/surf.nc" in nml.forcing_files.frcfile
+
+
 def test_incomplete_modelspec_fails_loudly():
     """A YAML missing a required section/key is rejected (no silent default)."""
     missing_section = _populated_rt_dict()

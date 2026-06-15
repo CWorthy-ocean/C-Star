@@ -235,8 +235,12 @@ def mock_model_spec():
     _rt_defaults["title"] = {"casename": "test"}
     _rt_defaults["time_stepping"] = {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1}
     _rt_defaults["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
-    _rt_defaults["grid"] = {"grid_file": "/tmp/test_grid.nc"}
-    _rt_defaults["initial"] = {"nrrec": 1, "initial_file": "/tmp/test_init.nc"}
+    # grid/initial/forcing paths are pathlib.Path objects in practice (input
+    # generation fills them with Path, not str) — mirror that here.
+    _rt_defaults["grid"] = {"grid_file": Path("/tmp/test_grid.nc")}
+    _rt_defaults["initial"] = {"nrrec": 1, "initial_file": Path("/tmp/test_init.nc")}
+    _rt_defaults["forcing"]["surface_forcing_path"] = Path("/tmp/test_surface.nc")
+    _rt_defaults["forcing"]["river_path"] = Path("/tmp/test_river.nc")
     _rt_defaults["output_root_name"] = {"output_root_name": "/tmp/test_out"}
     mock_settings.run_time.settings_dict = _rt_defaults
     mock_settings.properties = MagicMock()
