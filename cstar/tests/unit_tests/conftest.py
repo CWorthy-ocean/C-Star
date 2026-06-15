@@ -2079,6 +2079,6 @@ def mock_local_delay() -> float:
     """
     LocalLauncher.use_proxy = False
 
-    delay = 1.0
+    delay = 0.1
     os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
     return delay
