@@ -1192,3 +1192,71 @@ async def test_bluerintrunner_can_shutdown(
     with mock.patch.object(sim_runner, "_result", result):
         # and confirm it does not say it can exit
         assert sim_runner.can_shutdown
+
+
+@pytest.mark.parametrize(
+    ("handler_status", "expect_errors"),
+    [
+        (ExecutionStatus.FAILED, True),
+        (ExecutionStatus.COMPLETED, False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_records_error_on_failed_handler_status(
+    sim_runner: RomsMarblRunner,
+    handler_status: ExecutionStatus,
+    expect_errors: bool,
+) -> None:
+    """Regression: when the execution handler reports a FAILED status (e.g. ROMS
+    crashed under Slurm but the job ran to completion), `run()` must record the FAILED
+    state *with* an error message rather than silently, so the failure surfaces in
+    `result.errors`. A non-failed status must not gain spurious errors.
+    """
+    mock_handler = mock.Mock(spec=ExecutionHandler)
+    type(mock_handler).status = mock.PropertyMock(return_value=handler_status)
+    mock_handler.updates = mock.AsyncMock()
+
+    with mock.patch.object(sim_runner, "_handler", mock_handler):
+        result = await sim_runner.run()
+
+    assert result.state.status == handler_status
+    assert bool(result.errors) == expect_errors
+
+
+def test_worker_main_returns_nonzero_on_failed_status(
+    blueprint_path: Path,
+) -> None:
+    """Regression: `main()` returns a non-zero exit code when the runner ends in a
+    FAILED state, even if `result.errors` is empty (e.g. a ROMS/Slurm job that runs to
+    completion but reports failure). Previously the exit code keyed only off
+    `result.errors`, so a FAILED-but-error-less run incorrectly exited 0.
+    """
+
+    async def fail_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        # terminal FAILED state with NO errors recorded
+        self.add_state(ExecutionStatus.FAILED)
+        return self.result
+
+    args = [
+        "cstar.applications.roms_marbl",
+        ARG_URI_LONG,
+        str(blueprint_path),
+        ARG_LOGLEVEL_LONG,
+        "DEBUG",
+    ]
+
+    with (
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=fail_runner,
+            autospec=True,
+        ) as mock_execute,
+        mock.patch.object(sys, "argv", args),
+    ):
+        return_code = main()
+
+    assert return_code == 1
+    assert mock_execute.call_count == 1
