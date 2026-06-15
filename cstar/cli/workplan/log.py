@@ -104,7 +104,7 @@ def workplan_log(
     ] = False,
 ) -> None:
     """Print the log for a workplan step."""
-    step = get_from_ctxmap(context, "step", LiveStep)
+    step = get_from_ctxmap(context, "live_step", LiveStep)
     log_path = step.log_path
 
     if not monitor and not log_path.exists():
