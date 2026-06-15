@@ -13,11 +13,8 @@ import yaml
 
 import cstar_forge
 from cstar_forge.settings import write_roms_namelist
-from cstar_forge.namelist_model import (
-    RunTimeSettings,
-    RomsNamelist,
-    build_namelist,
-)
+from cstar_forge.namelist_model import RunTimeSettings, build_namelist
+from cstar.roms.namelist import RomsNamelist
 from pydantic import ValidationError
 
 _TPL = (Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec"

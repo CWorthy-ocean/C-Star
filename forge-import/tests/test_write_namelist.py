@@ -16,7 +16,7 @@ import f90nml
 
 import cstar_forge
 from cstar_forge.settings import write_roms_namelist
-from cstar_forge.namelist_model import (
+from cstar.roms.namelist import (
     _namelist_str_list,
     MARBL_TRACERS_TO_WRITE_MAX,
     MARBL_DIAGNOSTICS_TO_WRITE_MAX,
