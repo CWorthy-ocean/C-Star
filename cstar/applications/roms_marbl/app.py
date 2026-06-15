@@ -103,7 +103,11 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
 
         try:
             await self._handler.updates(seconds=1.0)
-            self.add_state(self._handler.status)
+            status = self._handler.status
+            if status == ExecutionStatus.FAILED:
+                self.add_state(status, ["ROMS execution reported a failed status"])
+            else:
+                self.add_state(status)
         except Exception as ex:
             msg = "An error occurred while running the simulation"
             self.log.exception(msg)
@@ -162,8 +166,9 @@ def main() -> int:
 
     try:
         asyncio.run(runner.execute())
-        if runner.result.errors:
-            print(f"Errors occurred: {', '.join(runner.result.errors)}")
+        if runner.state.status == ExecutionStatus.FAILED or runner.result.errors:
+            if runner.result.errors:
+                print(f"Errors occurred: {', '.join(runner.result.errors)}")
             return 1
     except CstarError as ex:
         print(f"An error occurred during the simulation: {ex}")
