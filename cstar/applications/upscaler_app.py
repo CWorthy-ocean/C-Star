@@ -27,9 +27,10 @@ class UpscalerBlueprint(Blueprint):
 
     application: str = APP_NAME
     """The application identifier."""
-
     uscl_file_location: str
+    """Path to the .uscl file."""
     output_dir: Path
+    """Path to the directory where outputs will be written."""
 
 
 class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
