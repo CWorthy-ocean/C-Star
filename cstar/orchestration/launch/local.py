@@ -90,7 +90,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         """Perform launcher-specific startup validation."""
 
     @staticmethod
-    def _create_updating_script(
+    def _create_dep_aware_script(
         step: "LiveStep", dependencies: list[LocalHandle]
     ) -> str:
         """Create a script that will execute the desired command for a
@@ -100,33 +100,53 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         str
         """
-        blocks = [
-            f"tail --pid={LocalLauncher.tasks[dep.name]} -f /dev/null"
-            for dep in dependencies
-        ]
-        script = textwrap.dedent(f"""\
+        blueprint_path = str(step.blueprint_path)
+        command = step.command.replace(blueprint_path, '"$BLUEPRINT_PATH"')
+        pids = " ".join([f'"{h.pid}"' for h in dependencies])
+
+        return textwrap.dedent(f"""\
             #!/bin/bash
-            <deps>
-            {step.command}
+            SENTINEL_PATH="{StateRepository.sentinel_path(step.name)}"
+            BLUEPRINT_PATH="{step.blueprint_path}"
+            DEP_PIDS=({pids})
+
+            # values from `Status` enum
+            RUNNING={Status.Running.value}
+            DONE={Status.Done.value}
+            FAILED={Status.Failed.value}
+
+            update_status() {{
+                local status=$1
+                if [ "$(uname)" = "Darwin" ]; then
+                    sed -i '' "s/^status:.*$/status: $status/" "$2"
+                else
+                    sed -i "s/^status:.*$/status: $status/" "$2"
+                fi
+            }}
+
+            # wait for dependencies to complete.
+            for DEP_PID in "${{DEP_PIDS[@]}}"; do
+                while kill -0 "$DEP_PID" 2>/dev/null; do
+                    echo "Awaiting process $DEP_PID"
+                    sleep 10
+                done
+            done
+
+            # update status to running
+            update_status $RUNNING $SENTINEL_PATH
+
+            # run the target command
+            {command}
+
+            # update the status to `Done` if target command is successful, otherwise `Failed`
             RC=$?
-            STATUS=7
+            STATUS=$FAILED
             if [ $RC -eq 0 ]; then
-                STATUS=5
+                STATUS=$DONE
             fi
-            sed -i '' "s/^status:.*$/status: $STATUS/" '{StateRepository.sentinel_path(step.name)}'
+            update_status $STATUS $SENTINEL_PATH
+            exit $RC
         """)
-
-        # perform replacements separately to ensure consistent dedent whitespace.
-        script = script.replace(
-            "<deps>",
-            (
-                "\n".join(blocks)
-                if dependencies
-                else "echo 'no dependencies; executing immediately.'"
-            ),
-        )
-
-        return script
 
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
@@ -144,7 +164,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        script = LocalLauncher._create_updating_script(step, dependencies)
+        script = LocalLauncher._create_dep_aware_script(step, dependencies)
 
         step.fsm.prepare()
         step.script_path.write_text(script)
@@ -155,8 +175,10 @@ class LocalLauncher(Launcher[LocalHandle]):
             if not step.fsm.root_dir.exists():
                 step.fsm.prepare()
 
+            cmd = ["sh", str(step.script_path)]
+
             local_process = subprocess.Popen(
-                f"sh {str(step.script_path)}".split(),
+                cmd,
                 cwd=step.fsm.run_dir,
                 stdin=subprocess.PIPE,
                 stdout=step.log_path.open("w"),
