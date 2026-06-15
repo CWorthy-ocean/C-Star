@@ -10,6 +10,7 @@ from psutil import NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import PrivateAttr
 
+from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.orchestration.orchestration import (
@@ -84,6 +85,7 @@ class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
     tasks: t.ClassVar[dict[str, str]] = {}
+    use_proxy: t.ClassVar[bool] = False
 
     @classmethod
     def check_preconditions(cls) -> None:
@@ -103,6 +105,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         blueprint_path = str(step.blueprint_path)
         command = step.command.replace(blueprint_path, '"$BLUEPRINT_PATH"')
         pids = " ".join([f'"{h.pid}"' for h in dependencies])
+        local_dep_delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
 
         return textwrap.dedent(f"""\
             #!/bin/bash
@@ -128,7 +131,7 @@ class LocalLauncher(Launcher[LocalHandle]):
             for DEP_PID in "${{DEP_PIDS[@]}}"; do
                 while kill -0 "$DEP_PID" 2>/dev/null; do
                     echo "Awaiting process $DEP_PID"
-                    sleep 10
+                    sleep {local_dep_delay}
                 done
             done
 
@@ -164,7 +167,10 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        script = LocalLauncher._create_dep_aware_script(step, dependencies)
+        if LocalLauncher.use_proxy:
+            script = LocalLauncher._create_dep_aware_script(step, dependencies)
+        else:
+            script = step.command
 
         step.fsm.prepare()
         step.script_path.write_text(script)

@@ -19,6 +19,7 @@ from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_ORCH_LOCAL_DELAY,
     ENV_CSTAR_STATE_HOME,
 )
 from cstar.base.external_codebase import ExternalCodeBase
@@ -38,6 +39,7 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
 from cstar.tests.unit_tests.fake_abc_subclasses import (
@@ -2067,3 +2069,16 @@ def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
 
     with mock.patch.dict(os.environ, variables):
         yield xdg_vars
+
+
+@pytest.fixture(autouse=True)
+def mock_local_delay() -> float:
+    """Set a tiny delay between status queries made by the local launcher during unit tests.
+
+    NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
+    """
+    LocalLauncher.use_proxy = False
+
+    delay = 1.0
+    os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
+    return delay
