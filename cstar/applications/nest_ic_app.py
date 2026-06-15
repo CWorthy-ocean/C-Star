@@ -31,6 +31,7 @@ class NestIcBlueprint(Blueprint):
     application: str = APP_NAME
     """The application identifier."""
     parent_rst: Path
+    """Path to a netCDF file containing initial conditions for the nested simulation."""
     parent_grid: Path
     """Path to a netCDF file defining the parent grid attributes."""
     child_grid: Path
