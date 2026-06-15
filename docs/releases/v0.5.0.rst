@@ -200,6 +200,7 @@ Improvements
 - Improved formatting, linting, and type hinting in serialization, tracking, and launcher modules. (`#541 <https://github.com/CWorthy-ocean/C-Star/pull/541>`_)
 - Promote `env show` and `workplan status` to always-on & deprecate feature flags (`#540 <https://github.com/CWorthy-ocean/C-Star/pull/540>`_)
 - Improved level of detail in `cstar workplan status` output (`#532 <https://github.com/CWorthy-ocean/C-Star/pull/532>`_)
+- Reduce code duplication for producing minimally-padded indices (`#539 <https://github.com/CWorthy-ocean/C-Star/pull/539>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
