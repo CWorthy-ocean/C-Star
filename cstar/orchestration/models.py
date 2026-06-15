@@ -145,6 +145,7 @@ class Application(StrEnum):
     NEST_IC = "nest_ic"
     """Application performing a nested simulation run."""
     UPSCALER = "upscaler"
+    """Application performing an upscaled simulation run."""
 
 
 class Blueprint(ConfiguredBaseModel, ABC):
