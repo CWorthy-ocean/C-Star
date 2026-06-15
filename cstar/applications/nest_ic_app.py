@@ -82,14 +82,13 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
     def _create_initial_conditions(
         self,
     ) -> Path:
-    """Create initial conditions for a simulation using the parent grid and restart file.
-    
-    Returns
-    -------
-    Path
-        The path to the persisted `InitialConditions`
-    """
+        """Create initial conditions for a simulation using the parent grid and restart file.
 
+        Returns
+        -------
+        Path
+            The path to the persisted `InitialConditions`
+        """
         rst = RestartFile(path=self.blueprint.parent_rst)
         restart_date = rst.timestamp
 
@@ -131,7 +130,8 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
 class NestIcApplication(
     ApplicationDefinition[NestIcBlueprint, NestIcRunner],
 ):
-   """Register the components used to orchestrate a nested simulation."""
+    """Register the components used to orchestrate a nested simulation."""
+
     name = APP_NAME
     long_name = _APP_NAME_LONG
     runner = NestIcRunner

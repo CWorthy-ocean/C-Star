@@ -60,7 +60,7 @@ class UpscalerRunner(BlueprintRunner[UpscalerBlueprint]):
             msg = f"Specified path of upscale files doesn't exist or isn't a directory: {uscl_dir}"
             raise FileNotFoundError(msg)
 
-        files = list(uscl_dir.glob("*_uscl.??????????????.nc"))
+        files: list[Path | str] = list(uscl_dir.glob("*_uscl.??????????????.nc"))
         if len(files) == 0:
             msg = f"No uscl files found in {uscl_dir}"
             raise FileNotFoundError(msg)
@@ -107,11 +107,11 @@ class CDRUpscaler:
     4. The CDR forcing dataset can then be saved with
     `cu.save()`
     """
+
     files: list[Path | str]
     """Paths to data files used by the upscaler."""
 
-
-    def __init__(self, files: list[Path]) -> None:
+    def __init__(self, files: list[Path | str]) -> None:
         """
         Generate a CDRUpscaler instance from a list of joined, time-evolving `_uscl` files.
 
@@ -119,10 +119,9 @@ class CDRUpscaler:
         Determines how many boundary columns are present to be transformed into CDR profiles.
         """
         self.files = files
-
         self.validate()
 
-        self.log.debug(f"Opening {len(self.files)} `_uscl` files...")
+        log.debug(f"Opening {len(self.files)} `_uscl` files...")
         self.uscl_dataset = xr.open_mfdataset(
             self.files,
             concat_dim="time",
@@ -183,9 +182,11 @@ class CDRUpscaler:
                     ]).filename_prefix()
         >> "output/roms_run"
         """
-        prefixes = [f.split("_uscl")[0] for f in self.files]
+        prefixes = [str(f).split("_uscl")[0] for f in self.files]
         if not all([prefix == prefixes[0] for prefix in prefixes]):
-            raise ValueError("Files must have a common prefix. Received: {', '.join(set(prefixes))}")
+            raise ValueError(
+                "Files must have a common prefix. Received: {', '.join(set(prefixes))}"
+            )
         return prefixes[0]
 
     def create_cdr_dataset(self) -> None:
@@ -292,22 +293,26 @@ class CDRUpscaler:
                     data_arrays.append(da)
             return xr.concat(data_arrays, dim="ncdr_prof")
 
-        print("Populating `cdr_lat`...")
+        if self.cdr_dataset is None:
+            msg = "Unable to populate null dataset."
+            raise RuntimeError(msg)
+
+        log.info("Populating `cdr_lat`...")
         self.cdr_dataset["cdr_lat"][:] = boundaries_to_profiles("lat")
-        print("Populating `cdr_lon`...")
+        log.info("Populating `cdr_lon`...")
         self.cdr_dataset["cdr_lon"][:] = boundaries_to_profiles("lon")
-        print("Populating `cdr_trcflx_profile` for tracer ALK...")
+        log.info("Populating `cdr_trcflx_profile` for tracer ALK...")
         self.cdr_dataset["cdr_trcflx_profile"][:, :, 0, :] = boundaries_to_profiles(
             "ALK_add"
         )
-        print("Populating `cdr_trcflx_profile` for tracer DIC...")
+        log.info("Populating `cdr_trcflx_profile` for tracer DIC...")
         self.cdr_dataset["cdr_trcflx_profile"][:, :, 1, :] = boundaries_to_profiles(
             "DIC_add"
         )
-        print("Populating `cdr_layer_thickness`...")
+        log.info("Populating `cdr_layer_thickness`...")
         self.cdr_dataset["cdr_layer_thickness"][:] = boundaries_to_profiles("h")
 
-    def save(self, filename: str | None = None) -> None:
+    def save(self, filename: str | Path | None = None) -> Path:
         """
         Save the CDRForcing dataset to a netCDF file to be used in ROMS.
 
@@ -332,6 +337,12 @@ class CDRUpscaler:
         else:
             filepath = Path(filename)
 
-        print(f"Saving output to {filepath}")
+        msg = f"Saving output to {filepath}"
+        log.info(msg)
+
         self.cdr_dataset.to_netcdf(filepath)
-        print("Done.")
+
+        msg = "CDRUpscaler.save is done."
+        log.info(msg)
+
+        return filepath
