@@ -14,7 +14,7 @@ from cstar.applications.roms_marbl.transforms import (
     RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
 )
-from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
+from cstar.base.env import FLAG_OFF
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.models import Application, BlueprintState, Step, Workplan
@@ -170,8 +170,7 @@ def test_override_transform(
     transform = OverrideTransform()
     step = step_overiding_wp.steps[0]
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
-        steps = transform(step)
+    steps = transform(step)
 
     transformed = list(steps)[0]
 
@@ -231,8 +230,7 @@ def test_override_transform_system_precedence(
     transform = OverrideTransform(sys_overrides=system_od_override)
     step = step_overiding_wp.steps[0]
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
-        steps = transform(step)
+    steps = transform(step)
 
     transformed = list(steps)[0]
 
@@ -308,8 +306,7 @@ def test_continuance_transform_happy_path(
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()  # ensure nothing existing
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: "12345"}, clear=True):
-        steps = transform(step)
+    steps = transform(step)
 
     transformed = steps[0]
 
@@ -351,11 +348,7 @@ def test_workplan_transformer_applies_working_dir_overrides(
     mock_overrides = {"working_dir": sys_working_dir_override}
 
     with (
-        mock.patch.dict(
-            os.environ,
-            {ENV_CSTAR_RUNID: "12345", ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF},
-            clear=True,
-        ),
+        mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF}),
         mock.patch(
             "cstar.orchestration.transforms.get_system_overrides",
             mock.Mock(return_value=mock_overrides),

@@ -389,7 +389,7 @@ class StateDirectoryManager:
         return DirectoryManager.state_home()
 
     @classmethod
-    def run_state_dir(cls) -> Path:
+    def run_state_dir(cls, *, run_id: str | None = None) -> Path:
         """The directory for run-state files.
 
         The result is a _run-specific_ directory that varies
@@ -399,7 +399,7 @@ class StateDirectoryManager:
         -------
         Path
         """
-        run_id = get_env_item(ENV_CSTAR_RUNID).value
+        run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
         return cls.root_dir() / cls._RUN_STATE_NAME / run_id
 
     @classmethod

@@ -1,8 +1,8 @@
 import asyncio
 import typing as t
-from collections.abc import Iterable
 from pathlib import Path
 
+from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.serialization import (
     PersistenceMode,
@@ -32,109 +32,6 @@ the `StateProxy` protocol.
 """
 
 
-def sentinel_path(
-    proxy: StateProxy,
-    mode: PersistenceMode = PersistenceMode.yaml,
-) -> Path:
-    """Get the path to a sentinel file for a given handle.
-
-    Parameters
-    ----------
-    proxy : StateProxy
-        The handle to serialize
-    mode : PersistenceMode
-        The persistence mode to use when serializing
-
-    Returns
-    -------
-    Path
-        The path to the sentinel file
-    """
-    return (
-        StateDirectoryManager.run_state_dir()
-        / f"{proxy.safe_name}.{EXT_SENTINEL}.{mode.value}"
-    )
-
-
-async def put_sentinel(
-    proxy: StateProxy,
-    *,
-    mode: PersistenceMode = PersistenceMode.yaml,
-) -> bool:
-    """Store a sentinel file on disk.
-
-    The sentinel indicates that a step has been previously executed.
-
-    Parameters
-    ----------
-    proxy : StateProxy
-        The handle to serialize
-    mode : PersistenceMode
-        The persistence mode to use when serializing
-
-    Returns
-    -------
-    bool
-        Whether the sentinel was successfully stored
-    """
-    persist_to = sentinel_path(proxy, mode)
-
-    if persist_to.exists():
-        persist_to.unlink()
-
-    num_bytes = await asyncio.to_thread(serialize, persist_to, proxy, mode=mode)
-    return num_bytes > 0
-
-
-async def get_sentinel(
-    persist_to: Path,
-    klass: type[_TStateProxy],
-    *,
-    mode: PersistenceMode = PersistenceMode.yaml,
-) -> _TStateProxy | None:
-    """Read a sentinel file from disk.
-
-    Parameters
-    ----------
-    persist_to : Path
-        Path to a sentinel file
-    klass : type[_TStateProxy]
-        The type of handles to deserialize
-    mode : PersistenceMode
-        The persistence mode to use when deserializing
-
-    Returns
-    -------
-    _TStateProxy | None
-        Returns the handle loaded from disk if the file exists,
-        otherwise `None`
-    """
-    if persist_to.exists():
-        return await asyncio.to_thread(deserialize, persist_to, klass, mode=mode)
-    return None
-
-
-def find_sentinels(
-    *,
-    mode: PersistenceMode = PersistenceMode.yaml,
-) -> Iterable[Path]:
-    """Find all sentinel files located in the run directory.
-
-    Parameters
-    ----------
-    mode : PersistenceMode
-        The persistence mode to use when deserializing
-
-    Returns
-    -------
-    list[Path]
-    """
-    state_dir = StateDirectoryManager.run_state_dir()
-    pattern = f"*.{EXT_SENTINEL}.{mode.value}"
-
-    yield from state_dir.rglob(pattern)
-
-
 async def load_sentinels(
     klass: type[_TStateProxy],
     *,
@@ -154,8 +51,159 @@ async def load_sentinels(
     list[_TStateProxy]
         All previously persisted sentinels
     """
-    sentinel_paths = find_sentinels(mode=mode)
+    repo = StateRepository()
+    return await repo.list_sentinels(klass, mode=mode)
 
-    coros = [get_sentinel(p, klass, mode=mode) for p in sentinel_paths]
-    results = await asyncio.gather(*coros)
-    return [x for x in results if x]
+
+class StateRepository:
+    """API used to manage storage of state information related to a run.
+
+    Contains standard CRUD operations for sentinel (task) records.
+    """
+
+    @classmethod
+    def sentinel_name(
+        cls,
+        proxy: StateProxy | str,
+        *,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ):
+        return f"{proxy}.{EXT_SENTINEL}.{mode.value}"
+
+    @classmethod
+    def sentinel_path(
+        cls,
+        proxy: StateProxy | str,
+        *,
+        run_id: str | None = None,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ) -> Path:
+        """Get the path to a sentinel file for a given handle.
+
+        Parameters
+        ----------
+        proxy : StateProxy | str
+            The handle to serialize or the name of the handle/step.
+        mode : PersistenceMode
+            The persistence mode to use when serializing
+
+        Returns
+        -------
+        Path
+            The path to the sentinel file
+        """
+        if isinstance(proxy, str):
+            proxy = slugify(proxy)
+        else:
+            proxy = proxy.safe_name
+
+        state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
+        return state_dir / StateRepository.sentinel_name(proxy, mode=mode)
+
+    async def get_sentinel(
+        self,
+        proxy: StateProxy | str,
+        klass: type[_TStateProxy],
+        *,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ) -> _TStateProxy | None:
+        """Read a sentinel file from disk.
+
+        Parameters
+        ----------
+        proxy : StateProxy | str
+            The handle to serialize or the name of the handle/step.
+        klass : type[_TStateProxy]
+            The type of handles to deserialize
+        mode : PersistenceMode
+            The persistence mode to use when deserializing
+
+        Returns
+        -------
+        _TStateProxy | None
+            Returns the handle loaded from disk if the file exists,
+            otherwise `None`
+        """
+        if not isinstance(proxy, str):
+            proxy = proxy.safe_name
+
+        persist_to = StateRepository.sentinel_path(proxy)
+        if persist_to.exists():
+            return await asyncio.to_thread(deserialize, persist_to, klass, mode=mode)
+        return None
+
+    async def put_sentinel(
+        self,
+        proxy: StateProxy,
+        *,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ) -> Path | None:
+        """Store a sentinel file on disk.
+
+        The sentinel indicates that a step has been previously executed.
+
+        Parameters
+        ----------
+        proxy : StateProxy
+            The handle to serialize
+        mode : PersistenceMode
+            The persistence mode to use when serializing
+
+        Returns
+        -------
+        bool
+            Whether the sentinel was successfully stored
+        """
+        persist_to = self.sentinel_path(proxy, mode=mode)
+
+        if persist_to.exists():
+            persist_to.unlink()
+
+        num_bytes = await asyncio.to_thread(serialize, persist_to, proxy, mode=mode)
+        return persist_to if num_bytes > 0 else None
+
+    async def list_sentinels(
+        self,
+        klass: type[_TStateProxy],
+        *,
+        run_id: str | None = None,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ) -> list[_TStateProxy]:
+        """Find all sentinel files located in the run directory.
+
+        Parameters
+        ----------
+        mode : PersistenceMode
+            The persistence mode to use when deserializing
+
+        Returns
+        -------
+        list[Path]
+        """
+        files = await self._list_sentinel_files(run_id=run_id, mode=mode)
+        coros = [
+            asyncio.to_thread(deserialize, path, klass, mode=mode) for path in files
+        ]
+        return await asyncio.gather(*coros)
+
+    async def _list_sentinel_files(
+        self,
+        *,
+        run_id: str | None = None,
+        mode: PersistenceMode = PersistenceMode.yaml,
+    ) -> list[Path]:
+        """Find all sentinel files located in the run directory.
+
+        Parameters
+        ----------
+        mode : PersistenceMode
+            The persistence mode to use when deserializing
+
+        Returns
+        -------
+        list[Path]
+        """
+        state_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
+        pattern = StateRepository.sentinel_name("*", mode=mode)
+
+        return list(state_dir.rglob(pattern))

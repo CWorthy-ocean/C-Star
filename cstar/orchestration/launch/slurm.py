@@ -14,7 +14,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd, slugify
+from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
@@ -28,10 +28,8 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.state import (
-    get_sentinel,
+    StateRepository,
     load_sentinels,
-    put_sentinel,
-    sentinel_path,
 )
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
@@ -85,14 +83,10 @@ class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
     status: Status = Status.Unsubmitted
+    """The current status of the task."""
 
-    @property
-    def safe_name(self) -> str:
-        """Return the path-safe name for the handle.
-
-        Implements the `StateProxy` protocol.
-        """
-        return slugify(self.name)
+    launcher_name: str = "slurm"
+    """The launcher used to launch the process."""
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
@@ -187,15 +181,14 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job_name = step.safe_name
         job_dep_ids = [d.pid for d in dependencies]
 
-        script_path = step.fsm.run_dir / "script.sh"
-        output_file = step.fsm.logs_dir / f"{job_name}.out"
+        script_path = step.script_path
+        output_file = step.log_path
 
-        if not script_path.parent.exists():
-            script_path.parent.mkdir(parents=True)
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        if not output_file.parent.exists():
-            output_file.parent.mkdir(parents=True)
-            output_file.write_text("ready\n")
+        run_id = os.getenv(ENV_CSTAR_RUNID)
+        step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
         command = step.command
         job = create_scheduler_job(
@@ -279,9 +272,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
+        state_repo = StateRepository()
+
         prior_handle = t.cast(
             "SlurmHandle",
-            await get_sentinel(sentinel_path(step), SlurmHandle),
+            await state_repo.get_sentinel(step.name, SlurmHandle),
         )
         submit_fn = SlurmLauncher._submit
         current_status = Status.Unsubmitted
@@ -396,7 +391,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if prior != current:
             handle.status = current
-            await put_sentinel(handle)
 
         return item
 

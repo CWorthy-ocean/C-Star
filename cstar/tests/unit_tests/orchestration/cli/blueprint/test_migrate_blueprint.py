@@ -1,3 +1,4 @@
+import os
 import uuid
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from cstar.applications.plotter_app import APP_NAME as APP_PLOTTER
 from cstar.applications.plotter_app import PlotterSchemaAdapterV1V2
 from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
 from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
+from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.cli.blueprint.migrate import app
 from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.system.migration import KEY_APP, identify_bounds
@@ -76,7 +78,6 @@ def test_blueprint_migrate_remote_blueprint_dne() -> None:
 
 
 def test_blueprint_migrate_persist_to_default(
-    mock_state_dir: Path,
     plotter_v1_0_0_bp: Path,
 ) -> None:
     """Verify that a request to migrate a blueprint without specifying an output
@@ -88,7 +89,8 @@ def test_blueprint_migrate_persist_to_default(
     latest = bounds["max"]
 
     bp_path = plotter_v1_0_0_bp
-    expected_output_path = mock_state_dir / f"{bp_path.stem}_{latest}{bp_path.suffix}"
+    state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
+    expected_output_path = state_dir / f"{bp_path.stem}_{latest}{bp_path.suffix}"
 
     runner = CliRunner()
     result = runner.invoke(

@@ -11,7 +11,6 @@ from pydantic import PrivateAttr
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import slugify
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -19,7 +18,6 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.state import put_sentinel
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
@@ -48,6 +46,9 @@ class LocalHandle(ProcessHandle):
     status: Status = Status.Unsubmitted
     """The current status of the task."""
 
+    launcher_name: str = "local"
+    """The launcher used to launch the process."""
+
     @property
     def start_ts(self) -> float:
         if isinstance(self.start_at, datetime.datetime):
@@ -73,10 +74,6 @@ class LocalHandle(ProcessHandle):
     def process(self, value: _mp.Process) -> None:
         self.status = Status.Submitted
         self._process = value
-
-    @property
-    def safe_name(self) -> str:
-        return slugify(self.name)
 
     @property
     def is_expired(self) -> bool:
@@ -109,7 +106,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         cmd = step.command
 
         step.fsm.prepare()
-        log_file = step.fsm.logs_dir / f"{step.safe_name}.out"
+        log_file = step.log_path
 
         try:
             if not step.fsm.root_dir.exists():
@@ -288,7 +285,6 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if prior != current:
             handle.status = current
-            await put_sentinel(handle)
 
         return item
 

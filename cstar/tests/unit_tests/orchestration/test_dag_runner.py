@@ -8,14 +8,14 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world_app import HelloWorldBlueprint
-from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.dag_runner import get_status_detail_map, load_run_state
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.models import BlueprintState, Step, Workplan, WorkplanState
 from cstar.orchestration.orchestration import Planner, Status
 from cstar.orchestration.serialization import serialize
-from cstar.orchestration.state import put_sentinel
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 
@@ -33,8 +33,6 @@ def draw_graph(planner: Planner) -> None:
 @pytest.fixture
 async def layered_workplan(
     tmp_path: Path,
-    mock_data_dir: Path,
-    mock_state_dir: Path,
 ) -> AsyncGenerator[tuple[Workplan, dict[str, LocalHandle]]]:
     """Create a layered workplan with the structure:
     0
@@ -52,6 +50,7 @@ async def layered_workplan(
     last_parent: str | None = None
     asset_path = tmp_path / "assets"
     handles: dict[str, LocalHandle] = {}
+    mock_data_dir = Path(str(os.getenv(ENV_CSTAR_DATA_HOME)))
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
         fsm_map = {"": JobFileSystemManager(mock_data_dir)}
@@ -103,7 +102,8 @@ async def layered_workplan(
                 start_at=datetime.now(),
             )
             handles[step.name] = handle
-            await put_sentinel(handle)
+            state_repo = StateRepository()
+            await state_repo.put_sentinel(handle)
 
             steps.append(step)
 
@@ -159,11 +159,11 @@ async def test_dag_runner_load_run_state(
     open_indices: list[str],
     closed_indices: list[str],
     layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
-    mock_state_dir: Path,
 ) -> None:
     """Verify the status output matches expectations when all states are a single value."""
     workplan, handles = layered_workplan
 
+    state_repo = StateRepository()
     open_names = [f"Step {idx}" for idx in open_indices]
     closed_names = [f"Step {idx}" for idx in closed_indices]
 
@@ -178,7 +178,8 @@ async def test_dag_runner_load_run_state(
             handle.status = Status.Submitted
         if handle.name in closed_names:
             handle.status = Status.Done
-        await put_sentinel(handle)
+
+        await state_repo.put_sentinel(handle)
 
     launcher = LocalLauncher()
     run_id = os.getenv(ENV_CSTAR_RUNID) or ""
@@ -227,12 +228,12 @@ async def test_dag_runner_get_status_detail_map(
     open_indices: list[str],
     closed_indices: list[str],
     layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
-    mock_state_dir: Path,
 ) -> None:
     """Verify the status output matches expectations when both open and closed tasks exist."""
     workplan, handles = layered_workplan
     deps = {step.name: step.depends_on for step in workplan.steps}
 
+    state_repo = StateRepository()
     open_names = [f"Step {idx}" for idx in open_indices]
     closed_names = [f"Step {idx}" for idx in closed_indices]
 
@@ -247,7 +248,8 @@ async def test_dag_runner_get_status_detail_map(
             handle.status = Status.Submitted
         if handle.name in closed_names:
             handle.status = Status.Done
-        await put_sentinel(handle)
+
+        await state_repo.put_sentinel(handle)
 
     # mock out update_status - with LocalLauncher, it  _starts_
     # anything marked as "submitted", resulting in a status change.

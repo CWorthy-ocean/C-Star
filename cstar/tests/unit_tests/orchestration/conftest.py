@@ -2,6 +2,7 @@ import json
 import os
 import textwrap
 import typing as t
+import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
 from datetime import datetime
 from pathlib import Path
@@ -10,12 +11,12 @@ from unittest import mock
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.state import put_sentinel
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 
@@ -545,43 +546,20 @@ def plotter_v2_0_0_bp(tmp_path: Path, plotter_v2_0_0_model: dict[str, t.Any]) ->
 
 
 @pytest.fixture
-def mock_state_dir(
-    tmp_path: Path,
-) -> Generator[Path, None, None]:
-    """Verify that CLI plan action generates an output image from a workplan.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs; used to create a temporary location
-        for writing state directory content.
-
-    """
-    mock_state_dir = tmp_path / "mock-state-dir"
-    mock_state_dir.mkdir(exist_ok=True)
-
-    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: mock_state_dir.as_posix()}):
-        yield mock_state_dir
+def mock_run_id() -> Generator[str]:
+    """Configure the CSTAR_RUNID environment variable."""
+    run_id = str(uuid.uuid4())
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: run_id}):
+        yield run_id
 
 
-@pytest.fixture
-def mock_data_dir(
-    tmp_path: Path,
-) -> Generator[Path, None, None]:
-    """Verify that CLI plan action generates an output image from a workplan.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs; used to create a temporary location
-        for writing data directory content.
-
-    """
-    mock_data_dir = tmp_path / "mock-data-dir"
-    mock_data_dir.mkdir(exist_ok=True)
-
-    with mock.patch.dict(os.environ, {ENV_CSTAR_DATA_HOME: mock_data_dir.as_posix()}):
-        yield mock_data_dir
+@pytest.fixture(autouse=True)
+def mock_env(
+    mock_xdg_dirs: dict[str, Path],
+    mock_run_id: str,
+) -> Generator[tuple[dict[str, Path], str]]:
+    """Aggregate all env manipulation fixtures."""
+    yield mock_xdg_dirs, mock_run_id
 
 
 @pytest.fixture(params=["fanout", "linear", "parallel", "single_step"])
@@ -604,8 +582,6 @@ def prepared_workplan(
         Fixture returning the path to the directory containing workplan template files
     default_blueprint_path : str
         Fixture returning the default blueprint path contained in template workplans
-    # mock_state_dir: Path
-    #     Path to a temporary state directory for the test.
     """
     workplan_name = request.param
     template_file = f"{workplan_name}.yaml"  # "single_step.yaml"
@@ -632,7 +608,6 @@ def prepared_workplan(
 async def executed_workplan(
     tmp_path: Path,
     prepared_workplan: tuple[Path, Workplan],
-    mock_state_dir: Path,  # noqa: ARG001
 ) -> AsyncGenerator[tuple[Path, Workplan, str]]:
     """Create a WorkplanRun record for the prepared workplan."""
     wp_path, wp = prepared_workplan
@@ -662,7 +637,6 @@ async def executed_workplan(
 @pytest.fixture
 async def executed_workplan_with_sideeffects(
     executed_workplan: tuple[Path, Workplan, str],
-    mock_data_dir: Path,  # noqa: ARG001
 ) -> AsyncGenerator[tuple[Path, Workplan, str]]:
     """Create a WorkplanRun record for the prepared workplan and populate
     the run directories with logs.
@@ -681,6 +655,8 @@ async def executed_workplan_with_sideeffects(
             name=step.name,
             start_at=datetime.now(),
         )
-        await put_sentinel(handle)
+
+        run_repo = StateRepository()
+        await run_repo.put_sentinel(handle)
 
     yield wp_path, wp, fake_run_id

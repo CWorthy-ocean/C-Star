@@ -78,7 +78,14 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     wp_uri : str
         A working URL referencing a valid workplan
     """
-    mock_build_and_run_dag = mock.AsyncMock(return_value=0)
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+    )
 
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag
@@ -493,7 +500,14 @@ def test_workplan_run_nonexistent_runid(
         Fixture providing the path to a directory containing template workplans
     """
     state_dir = tmp_path / "state"
-    mock_build_and_run_dag = mock.AsyncMock(return_value=0)
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+    )
 
     runner = CliRunner()
     with (
@@ -542,7 +556,14 @@ def test_workplan_run_default_run_id(
 
     runner = CliRunner()
 
-    mock_build_and_run_dag = mock.AsyncMock(return_value=0)
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+    )
 
     with (
         mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
@@ -575,7 +596,14 @@ def test_workplan_run_invalid_file_content(
 
     runner = CliRunner()
 
-    mock_build_and_run_dag = mock.AsyncMock(return_value=0)
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+    )
 
     with (
         mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),

@@ -1,11 +1,11 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.env import (
@@ -47,19 +47,6 @@ class RunMode(StrEnum):
 
     Schedule = auto()
     """Block until tasks are scheduled."""
-
-
-class ProcessHandle(BaseModel):
-    """Contract used to identify processes created by any launcher."""
-
-    pid: str
-    """The process identifier."""
-
-    name: str
-    """The name of the process."""
-
-
-_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
 
 class Status(IntEnum):
@@ -206,12 +193,37 @@ class Status(IntEnum):
         return status in cls.in_progress_states()
 
 
+class ProcessHandle(BaseModel):
+    """Contract used to identify processes created by any launcher."""
+
+    pid: str
+    """The process identifier."""
+    name: str
+    """The name of the process."""
+    run_id: str = Field(default_factory=lambda: str(os.getenv(ENV_CSTAR_RUNID, "")))
+    """The run-id the process was run under."""
+    launcher_name: str = ""
+    """The launcher used to launch the process."""
+    status: Status = Status.Unsubmitted
+    """The current status of the task."""
+
+    @property
+    def safe_name(self) -> str:
+        """Return a path-safe version of the name."""
+        return slugify(self.name)
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(extra="allow")
+
+
+_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
+
+
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
     parent: t.Self | None = Field(default=None, exclude=True)
     """The step for which this step is a sub-task."""
-    working_dir: Path | None = Field(default=None, exclude=True)
+    working_dir: Path | None = Field(default=None)
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
@@ -264,6 +276,16 @@ class LiveStep(Step):
         step_converter = get_command_mapping(self.application)
         return step_converter(self)
 
+    @property
+    def script_path(self) -> Path:
+        """Return the path to the the log file written by this task."""
+        return self.fsm.run_dir / "script.sh"
+
+    @property
+    def log_path(self) -> Path:
+        """Return the path to the the log file written by this task."""
+        return self.fsm.logs_dir / f"{self.safe_name}.out"
+
     @classmethod
     def from_step(
         cls,
@@ -312,8 +334,15 @@ class Task(BaseModel, t.Generic[_THandle]):
     handle: _THandle
     """The unique process identifier for the task."""
 
-    status: Status = Status.Unsubmitted
-    """Current task status."""
+    @property
+    def status(self) -> Status:
+        """Return the current status of the task."""
+        return self.handle.status
+
+    @status.setter
+    def status(self, value: Status) -> None:
+        """Update the status of the task."""
+        self.handle.status = value
 
 
 class Planner(LoggingMixin):
@@ -613,6 +642,12 @@ class Orchestrator(LoggingMixin):
     launcher: Launcher[t.Any]
     """The launcher used by the orchestrator to manage task execution."""
 
+    _on_status_changed: Callable[[ProcessHandle], Awaitable[None]] | None = None
+    """A callback to be executed when the orchestrator detects a status change."""
+
+    _on_launched: Callable[[ProcessHandle], Awaitable[None]] | None = None
+    """A callback to be executed when the orchestrator launches a task."""
+
     def __init__(self, planner: Planner, launcher: Launcher[t.Any]) -> None:
         """Initialize the orchestrator.
 
@@ -745,12 +780,20 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            if updated := await self.launcher.update_status(task.handle):
-                task.status = updated.status
+            old_status = task.status
+            new_status = await self.launcher.query_status(task)
+            if old_status != new_status:
+                task.status = new_status
+
+                if self._on_status_changed:
+                    await self._on_status_changed(task.handle)
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
             self.log.info(f"Launched step: {step.name}")
+
+            if self._on_launched:
+                await self._on_launched(task.handle)
 
         self.planner.store(node, KEY_STATUS, task.status)
         return task
@@ -847,6 +890,22 @@ class Orchestrator(LoggingMixin):
                 msg = f"The orchestrator requested cancellation of: {task.step.name}"
                 self.log.warning(msg)
                 self.planner.store(task.step.name, KEY_STATUS, task.status)
+
+    def set_callback(
+        self,
+        event: t.Literal["status_changed", "launched"],
+        func: Callable[[_THandle], Awaitable[None]],
+    ) -> None:
+        match event:
+            case "status_changed":
+                attr_name = "_on_status_changed"
+            case "launched":
+                attr_name = "_on_launched"
+            case _:
+                msg = f"Invalid launcher callback event specified: {event}"
+                raise ValueError(msg)
+
+        setattr(self, attr_name, func)
 
 
 def check_environment() -> None:
