@@ -625,7 +625,6 @@ class NestingTransform(Directive, OverrideTransform):
     def __init__(self, config: dict[str, t.Any]) -> None:
         """Initialize the instance.
 
-
         Parameters
         ----------
         config : dict[str, t.Any] | None
