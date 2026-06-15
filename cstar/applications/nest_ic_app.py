@@ -19,7 +19,7 @@ roms_tools = lazy_import("roms_tools")
 
 APP_NAME: t.Final[str] = "nest_ic"
 """The unique identifier for the nest_ic application type."""
-_APP_NAME_LONG: t.Literal["Nesting Data Processor"] = "Nesting Data Processor"
+_APP_NAME_LONG: t.Final[str] = "Nesting Data Processor"
 """The long-form application name."""
 
 log = get_logger(__name__)
