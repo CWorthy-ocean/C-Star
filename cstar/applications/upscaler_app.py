@@ -119,7 +119,7 @@ class CDRUpscaler:
 
         self.validate()
 
-        print(f"Opening {len(self.files)} `_uscl` files...")
+        self.log.debug(f"Opening {len(self.files)} `_uscl` files...")
         self.uscl_dataset = xr.open_mfdataset(
             self.files,
             concat_dim="time",
