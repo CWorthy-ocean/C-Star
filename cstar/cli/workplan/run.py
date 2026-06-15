@@ -207,7 +207,9 @@ def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
     prefix = "# "
     content_delimiter = "#" * 78
 
-    header = "Run Summary - DRY-RUN ONLY" if summary.dry_run else "Run Summary"
+    header = f"{summary.workplan_name!r} Run Summary"
+    if summary.dry_run:
+        header = f"{header} - DRY-RUN ONLY"
     run_header, run_underline = _hdr(header, CATEGORY_HEADER_COLOR)
     section_header_steps, section_del_steps = _hdr(
         _runft("steps"), CATEGORY_HEADER_COLOR
@@ -466,7 +468,9 @@ def run(
         print(msg)
         raise typer.Exit(3) from ex
 
-    console.print(f"{'dry-run' if dry_run else 'run'} scheduling has completed")
+    console.print(
+        f"{summary.workplan_name!r} {'dry-run' if dry_run else 'run'} scheduling has completed"
+    )
 
 
 if __name__ == "__main__":
