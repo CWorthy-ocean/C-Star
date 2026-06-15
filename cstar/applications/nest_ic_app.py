@@ -32,6 +32,7 @@ class NestIcBlueprint(Blueprint):
     """The application identifier."""
     parent_rst: Path
     parent_grid: Path
+    """Path to a netCDF file defining the parent grid attributes."""
     child_grid: Path
     """Path to a netCDF file defining the child grid attributes."""
     output_dir: Path
