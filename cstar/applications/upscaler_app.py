@@ -16,7 +16,7 @@ from cstar.orchestration.models import Blueprint
 
 APP_NAME: t.Final[str] = "upscaler"
 """The unique identifier for the upscaler application type."""
-_APP_NAME_LONG: t.Literal["Nesting Data Processor"] = "Nesting Data Processor"
+_APP_NAME_LONG: t.Final[str] = "Nesting Data Processor"
 """The long-form application name."""
 
 log = get_logger(__name__)
