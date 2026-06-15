@@ -3,6 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 from pathlib import Path
+from typing import TextIO
 
 from cstar.base.log import LoggingMixin
 
@@ -136,7 +137,22 @@ class ExecutionHandler(ABC, LoggingMixin):
           required before proceeding.
         """
         _status = self.status
+
+        # Track how far the output file has already been forwarded so that repeated
+        # calls (e.g. the worker polling once per second) resume without gaps or
+        # duplication. Initialized lazily so subclasses need not set it.
+        if not hasattr(self, "_log_read_position"):
+            self._log_read_position = 0
+
         if _status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
+            # The job may have reached a terminal state between polls. Forward any
+            # output written since the last poll (the tail is frequently written
+            # right before exit, especially on failures) before returning.
+            if self.output_file.exists():
+                with open(self.output_file) as f:
+                    f.seek(self._log_read_position)
+                    self._forward_available(f)
+
             error_msg = f"This job is currently not running ({_status}). Live updates cannot be provided."
             is_complete = _status in {
                 ExecutionStatus.FAILED,
@@ -164,36 +180,56 @@ class ExecutionHandler(ABC, LoggingMixin):
                     self.log.info(msg)
                     break
 
-            if not self.output_file.exists():
-                msg = f"Log `{self.output_file}` does not exist. Skipping update check."
-                self.log.info(msg)
-                return
-
-        if _status == ExecutionStatus.PENDING:
-            start_time = time.time()
-            msg = "This job is still pending. Updates will be available after it starts running."
-            while seconds == 0 or (time.time() - start_time < seconds):
-                self.log.info(msg)
-                time.sleep(STATUS_RECHECK_SECONDS)
-                _status = self.status
-                if _status != ExecutionStatus.PENDING:
-                    msg = f"Job status is now {_status}"
-                    self.log.info(msg)
-                    break
+        if not self.output_file.exists():
+            msg = f"Log `{self.output_file}` does not exist yet. Skipping update check."
+            self.log.info(msg)
+            return
 
         try:
             with open(self.output_file) as f:
-                f.seek(0, 2)  # Move to the end of the file
+                f.seek(self._log_read_position)
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
-                    if self.output_file.exists():
-                        line = f.readline()
+                    line = f.readline()
+                    if line:
+                        self.log.info(line.rstrip())
+                        continue
+
+                    # Caught up to the current end of the file.
+                    self._log_read_position = f.tell()
 
                     if self.status != ExecutionStatus.RUNNING:
+                        # The job has finished. Allow a brief moment for the final
+                        # flush, then forward any remaining output so the tail of
+                        # the ROMS log is never lost on exit.
+                        await asyncio.sleep(0.1)
+                        self._forward_available(f)
                         return
-                    elif line:
-                        self.log.info(line.rstrip())
-                    else:
-                        await asyncio.sleep(0.1)  # 100ms delay between updates
+
+                    await asyncio.sleep(0.1)  # 100ms delay between updates
+
+                # Time budget expired while still running; remember our position
+                # so the next call resumes without gaps.
+                self._log_read_position = f.tell()
         except KeyboardInterrupt:
             self.log.info("Live status updates stopped by user.")
+
+    def _forward_available(self, file_handle: TextIO) -> None:
+        """Forward all currently-available lines from ``file_handle`` to the log.
+
+        Reads from the handle's current position to end-of-file, logging each line,
+        and records the new read position so subsequent calls resume without gaps or
+        duplication.
+
+        Parameters
+        ----------
+        file_handle : TextIO
+            An open text handle for the task's output file, positioned at the point
+            from which to begin reading.
+        """
+        while True:
+            line = file_handle.readline()
+            if not line:
+                break
+            self.log.info(line.rstrip())
+        self._log_read_position = file_handle.tell()
