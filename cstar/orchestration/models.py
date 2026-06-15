@@ -143,6 +143,7 @@ class Application(StrEnum):
     PLOTTER = "plotter"
     """Demo plotting application."""
     NEST_IC = "nest_ic"
+    """Application performing a nested simulation run."""
     UPSCALER = "upscaler"
 
 
