@@ -648,7 +648,6 @@ class NestingTransform(Directive, OverrideTransform):
         search_path = Path(self._config["rst_path"])
         if restart_file := RestartFile.find(search_path, notfound_ok=False):
             rst_override_dict = RestartFileTrxAdapter.adapt(restart_file)
-
         else:
             msg = f"No restart file located in search path: {search_path!r}"
             raise ValueError(msg)
