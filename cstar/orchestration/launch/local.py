@@ -108,13 +108,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         ]
         script = textwrap.dedent(f"""\
             #!/bin/bash
+            <deps>
             {step.command}
             RC=$?
             STATUS=7
             if [ $RC -eq 0 ]; then
                 STATUS=5
             fi
-            <deps>
             sed -i '' "s/^status:.*$/status: $STATUS/" '{StateRepository.sentinel_path(step.name)}'
         """)
 
