@@ -35,7 +35,6 @@ from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import cstar_sysmgr
 
 log = get_logger(__name__)
-repo = TrackingRepository()
 
 
 @dataclass
@@ -427,6 +426,7 @@ async def build_and_run_dag(
         log.debug(msg)
         return prepared_wp_path
 
+    repo = TrackingRepository()
     await repo.put_workplan_run(
         WorkplanRun(
             workplan_path=wp_path,
