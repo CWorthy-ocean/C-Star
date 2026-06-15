@@ -95,7 +95,6 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
 
         parent_grid = roms_tools.Grid(filename=self.blueprint.parent_grid)
 
-        # build InitialConditions kwargs
         ic_kwargs = dict(
             grid=roms_tools.Grid(filename=self.blueprint.child_grid),
             ini_time=restart_date,
