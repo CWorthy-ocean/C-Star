@@ -801,3 +801,53 @@ class TestDatasetLinker:
         symlink = workdir / "cdr.nc"
         assert symlink.is_symlink()
         assert symlink.resolve() == target.resolve()
+
+
+@pytest.mark.parametrize(
+    ("num_partitions", "exp_length", "exp_max_suffix"),
+    [(2, 1, "1"), (10, 1, "9"), (100, 2, "99"), (101, 3, "100"), (1000, 3, "999")],
+)
+def test_suffix_generation(
+    num_partitions: int,
+    exp_length: int,
+    exp_max_suffix: str,
+) -> None:
+    """Verify suffix creation adds the minimal amount of padding."""
+    # suffix format: ".xxx.nc" - add 3 to exp_length for alpha chars.
+    num_extra_chars = 4
+    total_length = exp_length + num_extra_chars
+
+    # verify correct padding on 0-th index
+    suffix = ROMSPartitioning.suffix(0, num_partitions)
+    assert suffix.startswith(".")
+    assert suffix.endswith(".nc")
+    assert len(suffix) == total_length
+
+    # verify correct padding on last index
+    suffix = ROMSPartitioning.suffix(num_partitions - 1, num_partitions)
+    assert suffix.startswith(".")
+    assert suffix.endswith(".nc")
+    assert len(suffix) == total_length
+
+    exp_suffix = f".{exp_max_suffix}.nc"
+    assert exp_suffix == suffix
+
+
+def test_suffix_collection_generation() -> None:
+    """Verify suffix creation adds the minimal amount of padding."""
+    # suffix format: ".xxx.nc" - add 3 to exp_length for alpha chars.
+    suffixes = list(ROMSPartitioning.suffixes(100))
+
+    for i in range(0, 100, 10):
+        assert f".{i:02d}.nc" in suffixes
+
+    # test edge case
+    assert f".{9:02d}.nc" in suffixes
+
+    suffixes = list(ROMSPartitioning.suffixes(1000))
+
+    for i in range(0, 1000, 100):
+        assert f".{i:03d}.nc" in suffixes
+
+    # test edge case
+    assert f".{999:02d}.nc" in suffixes

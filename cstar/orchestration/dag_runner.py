@@ -39,7 +39,6 @@ from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
 from cstar.system.manager import cstar_sysmgr
 
 log = get_logger(__name__)
-repo = TrackingRepository()
 
 
 @dataclass
@@ -442,6 +441,11 @@ class ExecutiveRunSummary(BaseModel):
         title="Run ID",
     )
     """The run-id associated with the run being summarized."""
+    workplan_name: str = Field(
+        description="The name of the workplan executed by the run.",
+        title="Workplan name",
+    )
+    """The run-id associated with the run being summarized."""
     steps: list[ExecutiveStepSummary] = Field(
         default_factory=list[ExecutiveStepSummary],
         description="An executive summary for each step in the run.",
@@ -498,6 +502,7 @@ class ExecutiveRunSummary(BaseModel):
 
         return ExecutiveRunSummary(
             run_id=run.run_id,
+            workplan_name=workplan.name,
             steps=step_summaries,
             dry_run=is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
         )
