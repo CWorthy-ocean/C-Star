@@ -5,10 +5,9 @@ import typer
 
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, set_env
+from cstar.cli.common import cb_pipeline, get_from_ctxmap, set_env
 from cstar.cli.workplan.shared import (
     autocomplete_step_list,
-    get_from_ctxmap,
     list_runs,
     preload_run,
     set_ctxmap,
