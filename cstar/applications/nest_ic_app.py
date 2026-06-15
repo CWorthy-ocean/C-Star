@@ -122,6 +122,7 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
 
         # Write out initial conditions file for child
         ic.save(path)
+        self.log.debug(f"Initial conditions created and persisted to: {path}")
 
         return path
 
