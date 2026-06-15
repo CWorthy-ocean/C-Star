@@ -486,7 +486,7 @@ class BoundaryFile(BaseModel):
 
         Returns
         -------
-        ResetFile
+        BoundaryFile
         """
         matches = re.fullmatch(
             BoundaryFile.PATTERN_RST, self.path.as_posix(), flags=re.ASCII
