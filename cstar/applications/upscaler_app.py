@@ -247,7 +247,7 @@ class CDRUpscaler:
         )
         self.cdr_dataset = ds
 
-    def populate_cdr_dataset(self):
+    def populate_cdr_dataset(self) -> None:
         """
         Populates the CDRUpscaler.cdr_forcing() xarray Dataset created by CDRUpscaler.create_cdr_dataset().
 
