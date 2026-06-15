@@ -442,7 +442,7 @@ class BoundaryFile(BaseModel):
 
         Returns
         -------
-        ResetFile
+        BoundaryFile
 
         Raises
         ------
