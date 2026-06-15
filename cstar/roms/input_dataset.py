@@ -2,13 +2,21 @@ import datetime as dt
 import shutil
 import tempfile
 from abc import ABC
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, ClassVar
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import _list_to_concise_str, coerce_datetime, lazy_import
+from cstar.base.utils import (
+    _list_to_concise_str,
+    coerce_datetime,
+    lazy_import,
+    min_padded_index,
+    min_padded_indices,
+)
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
@@ -44,6 +52,8 @@ class ROMSPartitioning:
         Paths to the partitioned files.
     """
 
+    SUFFIX_FMT: ClassVar[str] = ".{0}.nc"
+
     def __init__(self, np_xi: int, np_eta: int, files: list[Path]) -> None:
         self.np_xi = np_xi
         self.np_eta = np_eta
@@ -54,6 +64,20 @@ class ROMSPartitioning:
 
     def __len__(self) -> int:
         return len(self.files)
+
+    @classmethod
+    def suffix(cls, i: int, num_partitions: int) -> str:
+        """Return a minimally padded suffix."""
+        padded_idx = min_padded_index(i, num_partitions)
+        return cls.SUFFIX_FMT.format(padded_idx)
+
+    @classmethod
+    def suffixes(cls, num_partitions: int) -> Generator[str, None, None]:
+        """Return an iterator producing all minimally padded suffixes
+        for a given partitition size.
+        """
+        for padded_idx in min_padded_indices(num_partitions):
+            yield cls.SUFFIX_FMT.format(padded_idx)
 
 
 @dataclass
@@ -137,12 +161,12 @@ class ROMSInputDataset(InputDataset, ABC):
                 raise rte
 
             n_source_partitions = self.source_np_xi * self.source_np_eta  # type: ignore[operator]
-            ndigits = len(str(n_source_partitions - 1))
-            locations = []
-            for i in range(n_source_partitions):
-                old_suffix = f".{0:0{ndigits}d}.nc"
-                new_suffix = f".{i:0{ndigits}d}.nc"
-                locations.append(location.replace(old_suffix, new_suffix))
+
+            suffixes = ROMSPartitioning.suffixes(n_source_partitions)
+            suffix0 = ROMSPartitioning.suffix(0, n_source_partitions)
+
+            locations = [location.replace(suffix0, suffix) for suffix in suffixes]
+
             self.partitioned_source = SourceDataCollection.from_locations(locations)
             # muting the linter because we only enter this block if np_xi and np_eta are not None
             self.partitioning = ROMSPartitioning(
@@ -159,7 +183,7 @@ class ROMSInputDataset(InputDataset, ABC):
             return self.source_np_xi, self.source_np_eta
         return None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         input_dataset_dict = super().to_dict()
         if self.source_partitioning is not None:
             input_dataset_dict["source_np_xi"] = self.source_np_xi
