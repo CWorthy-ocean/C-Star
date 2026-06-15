@@ -117,7 +117,6 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         ic = roms_tools.InitialConditions(**ic_kwargs)
 
         # Write out initial conditions file for child
-
         ic.save(path)
 
         return path
