@@ -17,7 +17,7 @@ from cstar.orchestration.models import Blueprint
 
 roms_tools = lazy_import("roms_tools")
 
-APP_NAME: t.Literal["nest_ic"] = "nest_ic"
+APP_NAME: t.Final[str] = "nest_ic"
 """The unique identifier for the nest_ic application type."""
 _APP_NAME_LONG: t.Literal["Nesting Data Processor"] = "Nesting Data Processor"
 """The long-form application name."""
