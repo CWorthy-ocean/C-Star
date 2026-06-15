@@ -108,7 +108,7 @@ class CDRUpscaler:
     `cu.save()`
     """
 
-    def __init__(self, files: list):
+    def __init__(self, files: list[Path]) -> None:
         """
         Generate a CDRUpscaler instance from a list of joined, time-evolving `_uscl` files.
 
