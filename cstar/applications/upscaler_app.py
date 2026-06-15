@@ -144,7 +144,7 @@ class CDRUpscaler:
                 self.child_boundaries[bry] = True
                 rho_var = "eta_rho" if bry.endswith("st") else "xi_rho"
                 self.n_profiles = self.n_profiles + self.uscl_dataset.sizes.get(rho_var)
-        print(
+        log.debug(
             f"Found {self.n_profiles} boundary tracer profiles to convert to CDR forcing profiles"
         )
 
