@@ -134,6 +134,8 @@ Bug Fixes
 - Fix bug when null restart file is passed to adapter (`#537 <https://github.com/CWorthy-ocean/C-Star/pull/537>`_)
 - Fix `no module named psutil` error after environment setup (`#543 <https://github.com/CWorthy-ocean/C-Star/pull/543>`_)
 - Fix failure caused by `cstar workplan status` using `SlurmHandle` with `LocalLauncher` (`#544 <https://github.com/CWorthy-ocean/C-Star/pull/544>`_)
+- Fix XDG directory caching bug resulting in writes to default directory (`#547 <https://github.com/CWorthy-ocean/C-Star/pull/547>`_)
+- Fix failure to set `CSTAR_RUNID` and `CSTAR_CLI_DRY_RUN` when supplied in CLI (`#547 <https://github.com/CWorthy-ocean/C-Star/pull/547>`_)
 
 Improvements
 ~~~~~~~~~~~~
