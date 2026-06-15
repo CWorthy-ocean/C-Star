@@ -150,6 +150,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         step.fsm.prepare()
         step.script_path.write_text(script)
+        log.debug(f"Created run script at path: {step.script_path}")
         log_file = step.log_path
 
         try:
