@@ -37,6 +37,8 @@ Breaking Changes
 - `JobFileSystemManager` attributes have been modified for clarity and naming consistency (`work_dir`->`run_dir`, `root`->`root_dir`, `output_dir`->`working_dir`). (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - Sample blueprints are updated to the latest schema version. (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - the `name` of a task is now the step name (not `step.safe_name`). using `cstar workplan status` on old outputs will result in a key error (`#532 <https://github.com/CWorthy-ocean/C-Star/pull/532>`_)
+- The _monitor loop_ has been removed after scheduling a run. `cstar workplan log ...` should be used in it's place (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- `StateRepository` class now comprises functions from `cstar.orchestration.state` (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -69,6 +71,9 @@ New features
 - Add CLI tool for generating updated schemas from blueprint models (see: `CSTAR_FF_DEVELOPER_MODE=1 cstar blueprint schemas --help`) (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - Enable automatic migration boundary discovery (`#521 <https://github.com/CWorthy-ocean/C-Star/pull/521>`_)
 - Add support for deserializing files to a dictionary without immediate model creation (`#542 <https://github.com/CWorthy-ocean/C-Star/pull/542>`_)
+- Added `ExecutiveRunSummary` containing useful metadata about assets and processes created during a run (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Added `try_deserialize` to `cstar.orchestration` to enable loop-based deserialization without exceptions (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Added user-facing display of `ExecutiveRunSummary` after run-scheduling (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -136,6 +141,9 @@ Bug Fixes
 - Fix failure caused by `cstar workplan status` using `SlurmHandle` with `LocalLauncher` (`#544 <https://github.com/CWorthy-ocean/C-Star/pull/544>`_)
 - Fix XDG directory caching bug resulting in writes to default directory (`#547 <https://github.com/CWorthy-ocean/C-Star/pull/547>`_)
 - Fix failure to set `CSTAR_RUNID` and `CSTAR_CLI_DRY_RUN` when supplied in CLI (`#547 <https://github.com/CWorthy-ocean/C-Star/pull/547>`_)
+- Fix _no-default-status_ bug in `DagStatus` (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Fix _use-incorrect-working-dir-attribute_ bug in `LiveStep` and during automatic step overrides (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Fix _step-working-dir-changes-after-deserialization_ bug (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -201,6 +209,11 @@ Improvements
 - Promote `env show` and `workplan status` to always-on & deprecate feature flags (`#540 <https://github.com/CWorthy-ocean/C-Star/pull/540>`_)
 - Improved level of detail in `cstar workplan status` output (`#532 <https://github.com/CWorthy-ocean/C-Star/pull/532>`_)
 - Reduce code duplication for producing minimally-padded indices (`#539 <https://github.com/CWorthy-ocean/C-Star/pull/539>`_)
+- Improved exception logging during workplan run (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Increased detail stored on `ProcessHandle` (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- `log_path` and `script_path` added to `LiveStep` and re-used where appropriate to encapsulate path building (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Added _on-status-changed_ and _on-launched_ callbacks to orchestrator to reduce launcher coupling (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Refactored `StateRepository` into class; subsumed sentinel path building (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
