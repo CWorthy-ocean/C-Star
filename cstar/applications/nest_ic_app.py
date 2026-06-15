@@ -131,6 +131,7 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
 class NestIcApplication(
     ApplicationDefinition[NestIcBlueprint, NestIcRunner],
 ):
+   """Register the components used to orchestrate a nested simulation."""
     name = APP_NAME
     long_name = _APP_NAME_LONG
     runner = NestIcRunner
