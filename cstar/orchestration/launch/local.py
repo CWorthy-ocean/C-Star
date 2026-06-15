@@ -1,6 +1,6 @@
 import asyncio
 import datetime
-import multiprocessing as _mp
+import subprocess
 import textwrap
 import typing as t
 from pathlib import Path
@@ -27,8 +27,6 @@ if t.TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-mp = _mp.get_context("forkserver")
-
 
 def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, int]:
     with log_file.open("w+") as log:
@@ -42,7 +40,7 @@ class LocalHandle(ProcessHandle):
     start_at: datetime.datetime | float
     """The process creation time as a posix timestamp (in seconds)."""
 
-    _process: _mp.Process = PrivateAttr()
+    _process: subprocess.Popen[bytes] = PrivateAttr()
     """The process handle (used only for simulating local processes)."""
 
     status: Status = Status.Unsubmitted
@@ -69,11 +67,11 @@ class LocalHandle(ProcessHandle):
         return now - self.start_ts
 
     @property
-    def process(self) -> _mp.Process:
+    def process(self) -> subprocess.Popen[bytes]:
         return self._process
 
     @process.setter
-    def process(self, value: _mp.Process) -> None:
+    def process(self, value: subprocess.Popen[bytes]) -> None:
         self.status = Status.Submitted
         self._process = value
 
@@ -157,19 +155,17 @@ class LocalLauncher(Launcher[LocalHandle]):
             if not step.fsm.root_dir.exists():
                 step.fsm.prepare()
 
-            mp_process = mp.Process(
-                target=run_as_process,
-                name=step.safe_name,
-                args=(
-                    step,
-                    f"sh {str(step.script_path)} &".split(),
-                    step.log_path,
-                ),
-                daemon=True,
+            local_process = subprocess.Popen(
+                f"sh {str(step.script_path)}".split(),
+                cwd=step.fsm.run_dir,
+                stdin=subprocess.PIPE,
+                stdout=step.log_path.open("w"),
+                stderr=subprocess.STDOUT,
             )
-            mp_process.start()
+
             create_time = datetime.datetime.now(tz=datetime.timezone.utc)
-            if pid := mp_process.pid:
+
+            if pid := local_process.pid:
                 msg = f"Local run of {step.application!r} created pid: {pid}"
                 log.debug(msg)
                 msg = f"Logs for step {step.safe_name!r} can be found at: {log_file}"
@@ -193,7 +189,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     status=Status.Submitted,
                 )
 
-                handle.process = mp_process  # type: ignore[assignment]
+                handle.process = local_process
                 return handle
 
         finally:
@@ -221,7 +217,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 return "RUNNING"
             return "COMPLETED"
 
-        rc = handle.process.exitcode
+        rc = handle.process.returncode
 
         if rc is None:
             status = "RUNNING"
@@ -354,7 +350,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         process = item.handle.process
 
         if not item.handle.is_expired:  # wonky is-null check...
-            if process.exitcode is not None:
+            if process.returncode is not None:
                 msg = f"Unable to cancel a completed task `{process.pid}"
                 log.debug(msg)
             else:
