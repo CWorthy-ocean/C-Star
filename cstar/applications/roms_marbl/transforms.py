@@ -396,7 +396,7 @@ class BoundaryFile(BaseModel):
 
         Returns
         -------
-        ResetFile
+        Sequence["BoundaryFile"] | None
 
         Raises
         ------
