@@ -185,7 +185,7 @@ class CDRUpscaler:
         """
         prefixes = [f.split("_uscl")[0] for f in self.files]
         if not all([prefix == prefixes[0] for prefix in prefixes]):
-            raise ValueError("Filenames do not share a common prefix")
+            raise ValueError("Files must have a common prefix. Received: {', '.join(set(prefixes))}")
         return prefixes[0]
 
     def create_cdr_dataset(self) -> None:
