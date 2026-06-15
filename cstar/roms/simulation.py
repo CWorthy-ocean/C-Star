@@ -7,7 +7,6 @@ from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 
-import f90nml
 import yaml
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
@@ -62,6 +61,7 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
+from cstar.roms.namelist import RomsNamelist
 from cstar.simulation import Simulation
 from cstar.system.manager import cstar_sysmgr
 
@@ -171,8 +171,8 @@ class ROMSSimulation(Simulation):
         The repository containing the base source code for MARBL (Marine Biogeochemistry Library).
     runtime_code : AdditionalCode
         Additional code needed by ROMS at runtime (e.g. a `.nml` Fortran namelist)
-    roms_runtime_settings : f90nml.Namelist
-        A modified namelist read from the runtime_code, with key parameters overridden
+    roms_runtime_settings : RomsNamelist
+        A validated namelist read from the runtime_code, with key parameters overridden
         from the simulation configuration.
     compile_time_code : AdditionalCode
         Additional ROMS source code to be included at compile time (e.g. `.opt` files)
@@ -778,24 +778,28 @@ class ROMSSimulation(Simulation):
         return run_length_seconds // self.discretization.time_step
 
     @property
-    def roms_runtime_settings(self) -> "f90nml.Namelist":
-        """Generate and return an f90nml.Namelist for the simulation.
+    def roms_runtime_settings(self) -> "RomsNamelist":
+        """Generate and return a :class:`RomsNamelist` for the simulation.
 
-        This property reads the Fortran namelist from the `runtime_code` and updates
-        key parameters based on the current simulation configuration, including the
-        time step, number of time steps, grid path, initial conditions, forcing
-        datasets, and MARBL input files.
+        Reads the Fortran namelist from the `runtime_code`, validates it into a
+        :class:`~cstar.roms.namelist.RomsNamelist`, and overrides key parameters
+        based on the current simulation configuration: time step, number of time
+        steps, grid path, initial conditions, forcing datasets, MARBL/CDR/nesting
+        files, and output root.
 
         Returns
         -------
-        f90nml.Namelist
-            A modified namelist with simulation-specific parameters applied.
+        RomsNamelist
+            A validated namelist with simulation-specific parameters applied.
 
         Raises
         ------
         ValueError
             If the runtime namelist has not been retrieved locally via `setup()` or
             `runtime_code.get()`.
+        pydantic.ValidationError
+            If the runtime namelist is missing a required group/key or contains an
+            invalid value (RomsNamelist is a strict, fully-typed schema).
         """
         if self.runtime_code.working_copy is None:
             raise ValueError(
@@ -804,65 +808,39 @@ class ROMSSimulation(Simulation):
                 + "ROMSSimulation.runtime_code.get() and try again."
             )
 
-        nml = f90nml.read(
+        nml = RomsNamelist.read(
             self.runtime_code.working_copy.common_parent / self._namelist_file
         )
 
-        def _set(section: str, key: str, value: Any) -> None:
-            """Set ``nml[section][key] = value``, failing clearly if ``section`` is absent.
-
-            f90nml raises a bare ``KeyError`` for a missing group, which gives no
-            indication of which namelist or group is at fault. ROMS runtime templates
-            are expected to declare every group C-Star overrides, so a misconfigured
-            template should fail with an actionable message rather than a raw KeyError.
-            """
-            if section not in nml:
-                raise RuntimeError(
-                    f"Runtime namelist {self._namelist_file!r} is missing the "
-                    f"required &{section} group that C-Star must populate. Add an "
-                    f"(even empty) &{section} group to the namelist and try again."
-                )
-            nml[section][key] = value
-
-        _set("time_stepping", "dt", self.discretization.time_step)
-        _set("time_stepping", "ntimes", self._n_time_steps)
+        nml.time_stepping.dt = self.discretization.time_step
+        nml.time_stepping.ntimes = self._n_time_steps
 
         if self.initial_conditions:
-            _set(
-                "initial_conditions",
-                "ininame",
-                str(self.initial_conditions.path_for_roms[0]),
+            nml.initial_conditions.ininame = str(
+                self.initial_conditions.path_for_roms[0]
             )
 
         if self.model_grid:
-            _set("grid_settings", "grdname", str(self.model_grid.path_for_roms[0]))
+            nml.grid_settings.grdname = str(self.model_grid.path_for_roms[0])
 
-        _set("forcing_files", "frcfile", [str(p) for p in self._forcing_paths])
+        nml.forcing_files.frcfile = [str(p) for p in self._forcing_paths]
 
         runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if "marbl_in" in runtime_code_filenames:
             runtime_code_path = self.runtime_code.working_copy.common_parent
-            _set(
-                "marbl_biogeochemistry_settings",
-                "marbl_config_file",
-                str(runtime_code_path / "marbl_in"),
+            nml.marbl_biogeochemistry_settings.marbl_config_file = str(
+                runtime_code_path / "marbl_in"
             )
 
         if self.cdr_forcing and self.cdr_forcing.working_copy:
-            _set(
-                "cdr_frc_settings",
-                "cdr_file",
-                str(self.cdr_forcing.working_copy.path),  # type: ignore[union-attr]
-            )
+            nml.cdr_frc_settings.cdr_file = str(self.cdr_forcing.working_copy.path)  # type: ignore[union-attr]
 
         if self.nesting_info and self.nesting_info.working_copy:
-            _set(
-                "extract_data_settings",
-                "extract_file",
-                str(self.nesting_info.working_copy.path),  # type: ignore[union-attr]
+            nml.extract_data_settings.extract_file = str(
+                self.nesting_info.working_copy.path  # type: ignore[union-attr]
             )
 
-        _set("simulation_name_settings", "output_root_name", "../output/output")
+        nml.simulation_name_settings.output_root_name = "../output/output"
 
         return nml
 
@@ -1639,7 +1617,7 @@ class ROMSSimulation(Simulation):
 
         # save modified namelist in the work directory
         final_runtime_settings_file = self.fs_manager.work_dir / runtime_settings_fname
-        self.roms_runtime_settings.write(str(final_runtime_settings_file), force=True)
+        self.roms_runtime_settings.write(final_runtime_settings_file)
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
