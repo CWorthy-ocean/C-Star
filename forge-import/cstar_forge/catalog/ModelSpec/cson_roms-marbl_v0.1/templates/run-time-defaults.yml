@@ -68,13 +68,13 @@ initial:
 # ---------------------------------------------------------------------------
 
 param:
-  LLm: 512
-  MMm: 512
-  N: 60
-  NP_XI: 16
-  NP_ETA: 16
-  NSUB_X: 1
-  NSUB_E: 1
+  llm: 512
+  mmm: 512
+  n: 60
+  np_xi: 16
+  np_eta: 16
+  nsub_x: 1
+  nsub_e: 1
   nt_passive: 0
   ntrc_bio: 32
 
@@ -113,35 +113,35 @@ ocean_vars:
   wrt_file_his: false
   output_period_his: 86400  # 24*3600 seconds
   nrpf_his: 7
-  wrt_Z: true
-  wrt_Ub: true
-  wrt_Vb: true
-  wrt_U: true
-  wrt_V: true
-  wrt_R: false
-  wrt_O: false
-  wrt_W: true
-  wrt_Akv: false
-  wrt_Akt: false
-  wrt_Aks: false
-  wrt_Hbls: false
-  wrt_Hbbl: false
+  wrt_z: true
+  wrt_ub: true
+  wrt_vb: true
+  wrt_u: true
+  wrt_v: true
+  wrt_r: false
+  wrt_o: false
+  wrt_w: true
+  wrt_akv: false
+  wrt_akt: false
+  wrt_aks: false
+  wrt_hbls: false
+  wrt_hbbl: false
   wrt_file_avg: false
   output_period_avg: 604800  # 7*24*3600 seconds
   nrpf_avg: 1
-  wrt_avg_Z: true
-  wrt_avg_Ub: true
-  wrt_avg_Vb: true
-  wrt_avg_U: true
-  wrt_avg_V: true
-  wrt_avg_R: true
-  wrt_avg_O: true
-  wrt_avg_W: true
-  wrt_avg_Akv: true
-  wrt_avg_Akt: true
-  wrt_avg_Aks: true
-  wrt_avg_Hbls: true
-  wrt_avg_Hbbl: true
+  wrt_avg_z: true
+  wrt_avg_ub: true
+  wrt_avg_vb: true
+  wrt_avg_u: true
+  wrt_avg_v: true
+  wrt_avg_r: true
+  wrt_avg_o: true
+  wrt_avg_w: true
+  wrt_avg_akv: true
+  wrt_avg_akt: true
+  wrt_avg_aks: true
+  wrt_avg_hbls: true
+  wrt_avg_hbbl: true
   code_check: false
 
 surf_flux:
@@ -213,7 +213,7 @@ extract_data:
   extract_file: 'sample_edata.nc'
   nrpf: 24
   edat_prec: nf90_double
-  N_chd: 90
+  n_chd: 90
   theta_s_chd: 5.0
   theta_b_chd: 2.0
   hc_chd: 250.0
@@ -268,9 +268,9 @@ calc_pflx:
 zslice:
   do_zslice: false
   zslice_avg: false
-  wrt_T_zsl: false
-  wrt_U_zsl: false
-  wrt_V_zsl: false
+  wrt_t_zsl: false
+  wrt_u_zsl: false
+  wrt_v_zsl: false
   output_period: 1200
   nrpf: 72
   ndep: 2
@@ -304,16 +304,16 @@ particles:
   pmin: 200
 
 lin_rho_eos:
-  Tcoef: 0.2    # Thermal expansion coefficient (kg/m2/K); unused if NONLIN_EOS active
-  T0: 1.0       # Reference temperature (*C)
-  Scoef: 0.822  # Saline contraction coefficient (kg/m3/psu)
-  S0: 1.0       # Reference salinity (psu)
+  tcoef: 0.2    # Thermal expansion coefficient (kg/m2/K); unused if NONLIN_EOS active
+  t0: 1.0       # Reference temperature (*C)
+  scoef: 0.822  # Saline contraction coefficient (kg/m3/psu)
+  s0: 1.0       # Reference salinity (psu)
 
 sss_correction:
-  dSSSdt: 0.0  # SSS correction piston velocity (cm/day); requires SFLX_CORR + SALINITY
+  dsssdt: 0.0  # SSS correction piston velocity (cm/day); requires SFLX_CORR + SALINITY
 
 sst_correction:
-  dSSTdt: 0.0  # SST correction piston velocity (cm/day); requires QCORRECTION
+  dsstdt: 0.0  # SST correction piston velocity (cm/day); requires QCORRECTION
 
 marbl_bgc:
   marbl_config_file: "marbl_in"

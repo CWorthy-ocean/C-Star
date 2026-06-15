@@ -1036,7 +1036,7 @@ class TestRomsMarblInputDataGeneration:
             # extract_data settings should be set
             extract_data = sample_roms_marbl_input_data._settings_run_time["extract_data"]
             assert extract_data["do_extract"] is True
-            assert extract_data["N_chd"] == mock_child.N
+            assert extract_data["n_chd"] == mock_child.N
             assert extract_data["theta_s_chd"] == mock_child.theta_s
             assert extract_data["theta_b_chd"] == mock_child.theta_b
             assert extract_data["hc_chd"] == mock_child.hc

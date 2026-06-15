@@ -648,20 +648,20 @@ class RomsMarblInputData(InputData):
 
         if "param" not in self._settings_run_time:
             self._settings_run_time["param"] = {}
-        self._settings_run_time["param"]["LLm"] = self.grid.nx
-        self._settings_run_time["param"]["MMm"] = self.grid.ny
-        self._settings_run_time["param"]["N"] = self.grid.N
-        self._settings_run_time["param"]["NP_XI"] = self.partitioning.n_procs_x
-        self._settings_run_time["param"]["NP_ETA"] = self.partitioning.n_procs_y
-        self._settings_run_time["param"]["NSUB_X"] = 1
-        self._settings_run_time["param"]["NSUB_E"] = 1
+        self._settings_run_time["param"]["llm"] = self.grid.nx
+        self._settings_run_time["param"]["mmm"] = self.grid.ny
+        self._settings_run_time["param"]["n"] = self.grid.N
+        self._settings_run_time["param"]["np_xi"] = self.partitioning.n_procs_x
+        self._settings_run_time["param"]["np_eta"] = self.partitioning.n_procs_y
+        self._settings_run_time["param"]["nsub_x"] = 1
+        self._settings_run_time["param"]["nsub_e"] = 1
 
         if out_path_nesting is not None:
             if "extract_data" not in self._settings_run_time:
                 self._settings_run_time["extract_data"] = {}
             self._settings_run_time["extract_data"]["do_extract"] = True
             self._settings_run_time["extract_data"]["extract_file"] = "nesting.nc"
-            self._settings_run_time["extract_data"]["N_chd"] = self.grid_child.N
+            self._settings_run_time["extract_data"]["n_chd"] = self.grid_child.N
             self._settings_run_time["extract_data"]["theta_s_chd"] = self.grid_child.theta_s
             self._settings_run_time["extract_data"]["theta_b_chd"] = self.grid_child.theta_b
             self._settings_run_time["extract_data"]["hc_chd"] = self.grid_child.hc

@@ -15,8 +15,8 @@ import yaml
 import f90nml
 
 import cstar_forge
-from cstar_forge.settings import (
-    write_roms_namelist,
+from cstar_forge.settings import write_roms_namelist
+from cstar_forge.namelist_model import (
     _namelist_str_list,
     MARBL_TRACERS_TO_WRITE_MAX,
     MARBL_DIAGNOSTICS_TO_WRITE_MAX,
@@ -87,7 +87,7 @@ def test_key_renames(nml):
     # cdr_output do_cdr/do_avg -> do_cdr_output/wrt_cdr_avg
     assert nml["cdr_output_settings"]["do_cdr_output"] is False
     assert nml["cdr_output_settings"]["wrt_cdr_avg"] is True
-    # param case-folding (NP_XI -> np_xi, LLm -> llm)
+    # param dims
     assert nml["param_settings"]["np_xi"] == 16
     assert nml["param_settings"]["llm"] == 512
 
