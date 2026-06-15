@@ -66,7 +66,7 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         return self.result
 
     @staticmethod
-    def _has_bgc(filepath):
+    def _has_bgc(filepath: Path) -> bool:
         """Check if the parent restart file has BGC tracers."""
         with xr.open_dataset(filepath) as ds:
             # Example: check if nitrate, DIC exist
