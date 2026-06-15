@@ -97,8 +97,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
             if self.result.errors:
                 err_clause = f" Errors: {', '.join(self.result.errors)}"
             msg = f"Simulation failed.{err_clause}"
-            self.log.error(msg)
-            # raise SimulationError(err_clause)
+            self.log.error(msg)  # raise SimulationError(err_clause)
         else:
             msg = f"Simulation ended with status: {self.state.status}."
             self.log.warning(msg)
