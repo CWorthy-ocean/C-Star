@@ -107,6 +107,9 @@ class CDRUpscaler:
     4. The CDR forcing dataset can then be saved with
     `cu.save()`
     """
+    files: list[Path | str]
+    """Paths to data files used by the upscaler."""
+
 
     def __init__(self, files: list[Path]) -> None:
         """
