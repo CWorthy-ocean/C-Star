@@ -59,7 +59,6 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         RunnerResult
             The result of the blueprint processing.
         """
-        self.log.trace("Executing handler function on blueprint runner")
         self.log.info(f"Running nest ic application for {self.blueprint}")
 
         self._create_initial_conditions()
