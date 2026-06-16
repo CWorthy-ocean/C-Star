@@ -74,12 +74,12 @@ inputs:
           name: MBL_co2
         type: bgc
         coarse_grid_mode: "never"
-      - source:  # salinity restoring disabled until ROMS main supports it
-          name: WOA
-          climatology: true
-        restoring_forces: ['sss']
-        type: restoring
-        coarse_grid_mode: "never"
+      #- source:  # salinity restoring disabled until ROMS main supports it
+      #    name: WOA
+      #    climatology: true
+      #  restoring_forces: ['sss']
+      #  type: restoring
+      #  coarse_grid_mode: "never"
 
     boundary:
       - source:
