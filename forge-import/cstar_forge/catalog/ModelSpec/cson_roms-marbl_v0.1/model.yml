@@ -40,7 +40,7 @@ settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit:  "365f40015daea2f1010a886f717b5b2185a2a995"
+    commit:  "8167645bdcb3c6ada951e0c6d69d384e985382b0"
 
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
