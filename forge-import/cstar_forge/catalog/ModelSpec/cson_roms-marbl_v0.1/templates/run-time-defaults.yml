@@ -212,7 +212,6 @@ extract_data:
   do_extract: false
   extract_file: 'sample_edata.nc'
   nrpf: 24
-  edat_prec: nf90_double
   n_chd: 90
   theta_s_chd: 5.0
   theta_b_chd: 2.0
