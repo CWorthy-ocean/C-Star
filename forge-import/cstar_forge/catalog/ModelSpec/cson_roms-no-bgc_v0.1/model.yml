@@ -33,7 +33,7 @@ settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: "6d64531b34a9d7654995ac1c0d32fad12e503724" # with restoring
+    commit: "8167645bdcb3c6ada951e0c6d69d384e985382b0"
 
 
   marbl:
@@ -68,12 +68,12 @@ inputs:
           name: MBL_co2
         type: bgc
         coarse_grid_mode: "never"
-      - source:
-          name: WOA
-          climatology: true
-        restoring_forces: ['sss']
-        type: restoring
-        coarse_grid_mode: "never"
+      #- source:
+      #    name: WOA
+      #    climatology: true
+      #  restoring_forces: ['sss']
+      #  type: restoring
+      #  coarse_grid_mode: "never"
 
     boundary:
       - source:
