@@ -493,6 +493,57 @@ class TestOverrideSettings:
         assert "ntimes" in builder._settings_run_time["time_stepping"]
 
 
+class TestVSpongeDefault:
+    """Tests for default v_sponge from grid spacing."""
+
+    def test_v_sponge_default_from_grid_on_init(
+        self, minimal_cstar_spec_builder_args, mock_model_spec
+    ):
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        # grid mock: size_x=100 km, nx=100 -> spacing 1 km -> v_sponge = 100 m^2/s
+        assert builder._settings_run_time["v_sponge"]["v_sponge"] == 100.0
+
+    def test_v_sponge_explicit_run_time_settings_override(
+        self, minimal_cstar_spec_builder_args, mock_model_spec
+    ):
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        builder._update_settings_run_time({"v_sponge": {"v_sponge": 42.0}})
+        assert builder._settings_run_time["v_sponge"]["v_sponge"] == 42.0
+
+    def test_v_sponge_override_file_takes_priority(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path
+    ):
+        override_file = tmp_path / "run-time-overrides.yml"
+        override_file.write_text(
+            yaml.dump(
+                {
+                    "run_time": {
+                        "v_sponge": {"v_sponge": 7.5},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        minimal_cstar_spec_builder_args["override"] = [str(override_file)]
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        assert builder._settings_run_time["v_sponge"]["v_sponge"] == 7.5
+
+
 class TestCstarSpecBuilderProperties:
     """Tests for CstarSpecBuilder properties."""
 
