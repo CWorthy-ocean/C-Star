@@ -207,6 +207,7 @@ class RomsMarblInputData(InputData):
     blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     cdr_forcing: Optional[dict] = None
+    grid_parent: Optional[rt.Grid] = None
     grid_child: Optional[rt.Grid] = None
     metadata_child: Optional[dict[str, Any]] = None
     use_dask: bool = True
@@ -395,9 +396,13 @@ class RomsMarblInputData(InputData):
                 planned.append(self._forcing_filename("initial_conditions"))
                 continue
 
-            if step.name == "forcing.boundary" and not any(self.boundaries.model_dump().values()):
+            if step.name == "forcing.boundary" and (
+                self.grid_parent is not None
+                or not any(self.boundaries.model_dump().values())
+            ):
                 # Keep planned outputs consistent with generate_all(), which skips this step
-                # when all open boundaries are disabled.
+                # for child/nested domains (boundaries come from the parent's extraction)
+                # and when all open boundaries are disabled.
                 continue
 
             if step.name in {"forcing.surface", "forcing.boundary"}:
@@ -847,7 +852,10 @@ class RomsMarblInputData(InputData):
     @register_input(name="forcing.boundary", order=40, label="Generating boundary forcing")
     def _generate_boundary_forcing(self, key: str = "forcing.boundary", **kwargs):
         """Generate boundary forcing input files."""
-        if hasattr(self, 'grid_parent'):
+        # Child/nested domains receive their boundaries from the parent's data
+        # extraction (nesting.nc), so they must not generate boundary forcing
+        # from reanalysis. A domain is "child" iff it has a parent grid.
+        if self.grid_parent is not None:
             return
         # Extract subkey from "forcing.boundary" -> "boundary"
         subkey = key.split(".", 1)[1] if "." in key else key

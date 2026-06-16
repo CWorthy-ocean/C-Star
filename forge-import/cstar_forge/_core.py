@@ -1815,6 +1815,7 @@ class CstarSpecBuilder(BaseModel):
                 input_data_dir_override=self.input_data_dir,
                 model_spec=self._model_spec,
                 grid=self.grid,
+                grid_parent=self.grid_parent,
                 grid_child=self.grid_child,
                 metadata_child=self.metadata_child,
                 boundaries=self.open_boundaries,
