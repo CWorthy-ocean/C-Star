@@ -17,6 +17,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    dynamic_table,
     set_env,
     set_flag,
     update_loggers,
@@ -452,7 +453,9 @@ def run(
                     dry_run=dry_run,
                 ),
             )
-            console.print(get_run_summary_display(summary))
+            table = dynamic_table(summary.model_dump())
+            console.print(table)
+            # console.print(get_run_summary_display(summary))
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
         log.exception(msg)

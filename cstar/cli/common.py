@@ -7,6 +7,8 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from rich.box import box
+from rich.table import Column, Table
 
 import cstar
 from cstar.applications.core import get_application
@@ -390,3 +392,91 @@ def print_validation_errors(ex: ValidationError) -> None:
             f"{error['msg']}",
         )
         print(msg)
+
+
+def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
+    if container is None:
+        container = Table(
+            title="Run Summary",
+            show_header=False,
+            expand=True,
+            width=100,
+            padding=(0, 1, 0, 1),
+        )
+
+    if isinstance(data, list):
+        # if not data:
+        #     container.add_row("[i]None[/i]")
+        #     return container
+
+        for item in data:
+            if isinstance(item, dict):
+                col_attr = Column(justify="right", style="blue", ratio=1)
+                col_val = Column(justify="left", ratio=3)
+                child_table = Table(
+                    col_attr,
+                    col_val,
+                    show_header=False,
+                    box=box.SQUARE,
+                    expand=True,
+                    # collapse_padding=True,
+                    # padding=(0, 1, 0, 1),
+                )
+                dynamic_table(item, child_table)
+                container.add_row(child_table)
+            else:
+                container.add_row(item)
+
+    elif isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(value, dict):
+                col_attr = Column(justify="right", style="blue", ratio=1)
+                col_val = Column(justify="left", ratio=3)
+                child_container = Table(
+                    col_attr,
+                    col_val,
+                    title=key,
+                    show_header=False,
+                    box=box.SQUARE,
+                    expand=True,
+                    collapse_padding=True,
+                    title_style="bold yellow",
+                    title_justify="left",
+                    padding=0,
+                    # padding=(0, 1, 0, 1),
+                )
+                dynamic_table(value, child_container)
+                container.add_row(child_container)
+            elif isinstance(value, list):
+                if not value:
+                    value = ["No records"]
+                if all(isinstance(x, str) for x in value):
+                    child_container = Table(
+                        show_header=False,
+                        box=box.HORIZONTALS,
+                        expand=True,
+                        collapse_padding=True,
+                        row_styles=["#ffffff", "#cccccc"],
+                        padding=0,
+                        # padding=(0, 1, 0, 1),
+                    )
+                    for item in value:
+                        child_container.add_row(item)
+                    container.add_row(key, child_container)
+                else:
+                    child_container = Table(
+                        title=key,
+                        show_header=False,
+                        box=None,
+                        expand=True,
+                        collapse_padding=True,
+                        title_style="bold yellow",
+                        title_justify="left",
+                        padding=0,
+                        # padding=(0, 1, 0, 1),
+                    )
+                    dynamic_table(value, child_container)
+                    container.add_row(child_container)
+            else:
+                container.add_row(key, value)
+    return container
