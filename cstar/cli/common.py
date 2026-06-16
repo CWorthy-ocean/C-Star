@@ -7,7 +7,7 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
-from rich.box import box
+from rich import box
 from rich.table import Column, Table
 
 import cstar
@@ -400,8 +400,9 @@ def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
             title="Run Summary",
             show_header=False,
             expand=True,
-            width=100,
+            # width=100,
             padding=(0, 1, 0, 1),
+            # highlight=True,
         )
 
     if isinstance(data, list):
@@ -411,8 +412,10 @@ def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
 
         for item in data:
             if isinstance(item, dict):
-                col_attr = Column(justify="right", style="blue", ratio=1)
-                col_val = Column(justify="left", ratio=3)
+                col_attr = Column(
+                    justify="right", style="blue", ratio=1, overflow="fold"
+                )
+                col_val = Column(justify="left", ratio=5, overflow="fold")
                 child_table = Table(
                     col_attr,
                     col_val,
@@ -421,6 +424,7 @@ def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
                     expand=True,
                     # collapse_padding=True,
                     # padding=(0, 1, 0, 1),
+                    # highlight=True,
                 )
                 dynamic_table(item, child_table)
                 container.add_row(child_table)
@@ -431,7 +435,7 @@ def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
         for key, value in data.items():
             if isinstance(value, dict):
                 col_attr = Column(justify="right", style="blue", ratio=1)
-                col_val = Column(justify="left", ratio=3)
+                col_val = Column(justify="left", ratio=5, overflow="fold")
                 child_container = Table(
                     col_attr,
                     col_val,
@@ -444,6 +448,7 @@ def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
                     title_justify="left",
                     padding=0,
                     # padding=(0, 1, 0, 1),
+                    # highlight=True,
                 )
                 dynamic_table(value, child_container)
                 container.add_row(child_container)
@@ -459,13 +464,14 @@ def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
                         row_styles=["#ffffff", "#cccccc"],
                         padding=0,
                         # padding=(0, 1, 0, 1),
+                        # highlight=True,
                     )
                     for item in value:
-                        child_container.add_row(item)
+                        child_container.add_row(str(item))
                     container.add_row(key, child_container)
                 else:
                     child_container = Table(
-                        title=key,
+                        # title=key,
                         show_header=False,
                         box=None,
                         expand=True,
@@ -474,9 +480,12 @@ def dynamic_table(data: dict | list, container: Table | None = None) -> Table:
                         title_justify="left",
                         padding=0,
                         # padding=(0, 1, 0, 1),
+                        # highlight=True,
                     )
                     dynamic_table(value, child_container)
-                    container.add_row(child_container)
+                    container.add_row(key, child_container)
             else:
+                if key == "name":
+                    value = f"{value!r}"
                 container.add_row(key, value)
     return container

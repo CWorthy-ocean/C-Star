@@ -209,7 +209,7 @@ def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
     content_delimiter = "#" * 78
 
     header = f"{summary.workplan_name!r} Run Summary"
-    if summary.dry_run:
+    if summary.dry_run == "True":
         header = f"{header} - DRY-RUN ONLY"
     run_header, run_underline = _hdr(header, CATEGORY_HEADER_COLOR)
     section_header_steps, section_del_steps = _hdr(

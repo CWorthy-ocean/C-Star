@@ -418,7 +418,7 @@ class ExecutiveStepSummary(BaseModel):
         title="Process ID",
     )
     """The value of the `ProcessHandle.pid` for the underlying task."""
-    sentinel_path: Path = Field(
+    sentinel_path: str = Field(
         description="The path to a sentinel file containing step state information.",
         title="State-file path",
     )
@@ -445,15 +445,9 @@ class ExecutiveRunSummary(BaseModel):
         description="The name of the workplan executed by the run.",
         title="Workplan name",
     )
-    """The run-id associated with the run being summarized."""
-    steps: list[ExecutiveStepSummary] = Field(
-        default_factory=list[ExecutiveStepSummary],
-        description="An executive summary for each step in the run.",
-        title="Step details",
-    )
     """An executive summary for each step in the run."""
-    dry_run: bool = Field(
-        default=False,
+    dry_run: str = Field(
+        default="False",
         description="Flag indicating a planning-only run was requested.",
         title="Dry-run only",
     )
@@ -466,6 +460,13 @@ class ExecutiveRunSummary(BaseModel):
     def state_dir(self) -> str:
         """The directory where c-star state information will be stored."""
         return str(StateDirectoryManager.run_state_dir(run_id=self.run_id))
+
+    """The run-id associated with the run being summarized."""
+    steps: list[ExecutiveStepSummary] = Field(
+        default_factory=list[ExecutiveStepSummary],
+        description="An executive summary for each step in the run.",
+        title="Step details",
+    )
 
     @classmethod
     async def from_run(
@@ -496,7 +497,7 @@ class ExecutiveRunSummary(BaseModel):
                 blueprint_path=str(step.blueprint_path),
                 launcher=handle.launcher_name if handle else "",
                 task_id=handle.pid if handle else "",
-                sentinel_path=sentinel_path,
+                sentinel_path=str(sentinel_path),
             )
             step_summaries.append(summary)
 
@@ -504,7 +505,7 @@ class ExecutiveRunSummary(BaseModel):
             run_id=run.run_id,
             workplan_name=workplan.name,
             steps=step_summaries,
-            dry_run=is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
+            dry_run=str(is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN)),
         )
 
 
