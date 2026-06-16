@@ -144,6 +144,7 @@ Bug Fixes
 - Fix _no-default-status_ bug in `DagStatus` (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Fix _use-incorrect-working-dir-attribute_ bug in `LiveStep` and during automatic step overrides (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Fix _step-working-dir-changes-after-deserialization_ bug (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- ROMS-MARBL app will now exit non-zero if ROMS crashes (`#550 <https://github.com/CWorthy-ocean/C-Star/pull/550>`_)
 
 Improvements
 ~~~~~~~~~~~~
