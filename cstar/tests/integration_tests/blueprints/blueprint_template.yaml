@@ -32,8 +32,7 @@ code:
     filter:
       directory: additional_code/ROMS/compile_time_code
       files:
-      - cppdefs.opt
-
+        - cppdefs.opt
 
 grid:
   documentation: my favorite grid

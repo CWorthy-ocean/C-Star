@@ -91,7 +91,6 @@
 /
 
 &diagnostics_settings
-    code_check_mode = .false.
     diag_avg = .false.
     diag_trc = .false.
     diag_uv = .false.
