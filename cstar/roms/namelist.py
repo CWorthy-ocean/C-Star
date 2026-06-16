@@ -14,6 +14,9 @@ group/key is rejected, catching drift/typos. A namelist that legitimately
 carries other groups needs them added here; relax a model to ``extra="allow"``
 for pass-through if strict validation is not wanted.
 
+Per-field docstrings are transcribed from the ucla-roms reference
+``src/namelist.nml`` (``! ...`` comments).
+
 (C-Star Forge builds these from its settings dict — see
 ``cstar_forge.namelist_model.build_namelist`` — and writes a ``namelist.nml``
 that this model reads back.)
@@ -78,50 +81,76 @@ def _as_list(v):
 
 class _NmlGroup(BaseModel):
     # validate_assignment => edits in the read->edit->write flow are re-checked.
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    # use_attribute_docstrings => the per-field docstrings below become the field
+    # descriptions in the generated JSON schema.
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, use_attribute_docstrings=True
+    )
 
 
 class SimulationNameSettings(_NmlGroup):
     output_root_name: str
+    """output file prefix (e.g. `roms_bgc.20120101120000.nc`)"""
     title: str
+    """title used in output metadata"""
 
 
 class TimeStepping(_NmlGroup):
     ntimes: int
+    """Number of time steps in this run"""
     dt: float
+    """Time step (seconds)"""
     ndtfast: int
+    """Number of fast time-steps per slow timestep"""
     ninfo: int
+    """Number of steps between runtime diagnostics (STDOUT)"""
 
 
 class GridSettings(_NmlGroup):
     grdname: str
+    """grid filepath"""
 
 
 class SCoord(_NmlGroup):
     theta_s: float
+    """S-coordinate surface stretching parameter"""
     theta_b: float
+    """S-coordinate bottom stretching parameter"""
     hc: float
+    """Critical depth (m)"""
 
 
 class ParamSettings(_NmlGroup):
     np_xi: int
+    """Number of processors following X"""
     np_eta: int
+    """Number of processors following Y"""
     nsub_x: int
+    """Number of shared-memory subdomains in X"""
     nsub_e: int
+    """Number of shared-memory subdomains in Y"""
     llm: int
+    """Number of grid points in X"""
     mmm: int
+    """Number of grid points in Y"""
     n: int
+    """Number of vertical levels"""
     nt_passive: int
+    """Number of passive tracers"""
     ntrc_bio: int
+    """Number of BGC tracers"""
 
 
 class InitialConditions(_NmlGroup):
     ininame: str
+    """Initial conditions (IC) file path"""
     nrrec: int
+    """Number of time records in IC file"""
 
 
 class ForcingFiles(_NmlGroup):
     frcfile: list[str] = Field(default_factory=list)
+    """Forcing file paths (e.g. boundary, surface flux, and river forcing)"""
 
     @field_validator("frcfile", mode="before")
     @classmethod
@@ -131,116 +160,197 @@ class ForcingFiles(_NmlGroup):
 
 class BulkFrcSettings(_NmlGroup):
     interp_bulk_frc: bool
+    """Interpolate forcing from coarser input grid if T"""
     check_bulk_frc_units: bool
+    """Check units of input vars if T"""
 
 
 class FluxFrcSettings(_NmlGroup):
     interp_flux_frc: bool
+    """Interpolate forcing from coarser input grid if T"""
 
 
 class RiverFrcSettings(_NmlGroup):
     river_source: bool
+    """T if river inputs used, else F"""
     river_analytical: bool
+    """T if river inputs specified analytically"""
     nriv: int
+    """Number of rivers"""
 
 
 class TidesSettings(_NmlGroup):
     bry_tides: bool
+    """Barotropic tides at domain boundaries"""
     pot_tides: bool
+    """Surface potential tides"""
     ana_tides: bool
+    """Tidal forcing specified analytically"""
     ntides: int
+    """Number of tidal constituents"""
 
 
 class BasicOutputSettings(_NmlGroup):
     wrt_file_his: bool
+    """Write instantaneous ocean physical state to output"""
     output_period_his: float
+    """Frequency of instantaneous output (s)"""
     nrpf_his: int
+    """Number of time records in instantaneous output file"""
     wrt_z: bool
+    """Include `zeta`"""
     wrt_ub: bool
+    """Include `ubar`"""
     wrt_vb: bool
+    """Include `vbar`"""
     wrt_u: bool
+    """Include `u`"""
     wrt_v: bool
+    """Include `v`"""
     wrt_r: bool
+    """Include `rho`"""
     wrt_o: bool
+    """Include `omega`"""
     wrt_w: bool
+    """Include `w`"""
     wrt_akv: bool
+    """Include `Akv`"""
     wrt_akt: bool
+    """Include `Akt`"""
     wrt_aks: bool
+    """Include `Aks`"""
     wrt_hbls: bool
+    """Include `hbls`"""
     wrt_hbbl: bool
+    """Include `hbbl`"""
     wrt_file_avg: bool
+    """Write averages of ocean physical state to output"""
     output_period_avg: float
+    """Frequency of averaged output/averaging period (s)"""
     nrpf_avg: int
+    """Number of time records in averaged output file"""
     wrt_avg_z: bool
+    """Include `zeta`"""
     wrt_avg_ub: bool
+    """Include `ubar`"""
     wrt_avg_vb: bool
+    """Include `vbar`"""
     wrt_avg_u: bool
+    """Include `u`"""
     wrt_avg_v: bool
+    """Include `v`"""
     wrt_avg_r: bool
+    """Include `rho`"""
     wrt_avg_o: bool
+    """Include `omega`"""
     wrt_avg_w: bool
+    """Include `w`"""
     wrt_avg_akv: bool
+    """Include `Akv`"""
     wrt_avg_akt: bool
+    """Include `Akt`"""
     wrt_avg_aks: bool
+    """Include `Aks`"""
     wrt_avg_hbls: bool
+    """Include `hbls`"""
     wrt_avg_hbbl: bool
+    """Include `hbbl`"""
     wrt_file_rst: bool
+    """Write restart files (containing full model state)"""
     monthly_restarts: bool
+    """Write restart files at start of calendar month"""
     output_period_rst: float
+    """Write restart files at regular frequency (s)"""
     nrpf_rst: int
+    """Number of time records in restart files"""
 
 
 class TsOutputSettings(_NmlGroup):
     wrt_temp: bool
+    """Include temperature in output fields"""
     wrt_salt: bool
+    """Include salinity in output fields"""
     wrt_temp_dia: bool
+    """Include temperature diagnostics in output fields"""
     wrt_salt_dia: bool
+    """Include salinity diagnostics in output fields"""
 
 
 class FrcOutputSettings(_NmlGroup):
     wrt_frc: bool
+    """Write model forcing to its own output file"""
     wrt_frc_avg: bool
+    """Forcing output averaged (T) or instantaneous (F)"""
     output_period: float
+    """Frequency/averaging period of forcing output"""
     nrpf: int
+    """Number of time records in forcing files"""
 
 
 class ExtractDataSettings(_NmlGroup):
     do_extract: bool
+    """Generate boundary files for a nested domain"""
     extract_period: float
+    """How often to output these files"""
     nrpf_extract: int
+    """Number of time records per file"""
     extract_file: str
+    """File path containing nesting info"""
     n_chd: int
+    """Number of vertical levels in nested domain"""
     theta_s_chd: float
+    """`theta_s` of nested domain"""
     theta_b_chd: float
+    """`theta_b` of nested domain"""
     hc_chd: float
+    """`hc` of nested domain"""
 
 
 class SpongeTuneSettings(_NmlGroup):
     ub_tune: bool
+    """Tune boundary "sponge" to match parent bry conditions"""
     sp_timscale: float
+    """Filtering time scale (s)"""
     wrt_sponge: bool
+    """Write out sponge tuning values"""
     spn_avg: bool
+    """Sponge tuning output averaged (T) or instantaneous (F)"""
     nrpf: int
+    """Number of records per sponge file"""
     output_period: float
+    """Output frequency of sponge tuning file"""
 
 
 class CalcPflxSettings(_NmlGroup):
     calc_pflx: bool
+    """Enable baroclinic pressure flux calculation"""
     timescale: float
+    """timescale for filtering pressure fluxes (s)"""
 
 
 class ZsliceSettings(_NmlGroup):
     do_zslice: bool
+    """Output certain variables on regular z-levels"""
     zslice_avg: bool
+    """Averaged output (T) or instantaneous (F)"""
     wrt_t_zsl: bool
+    """Write tracers to z-level output"""
     wrt_u_zsl: bool
+    """Write zonal velocity to z-level output"""
     wrt_v_zsl: bool
+    """Write meridional velocity to z-level output"""
     output_period: float
+    """Frequency of z-level output"""
     nrpf: int
+    """Number of records per file"""
     ndep: int
+    """Number of depth levels on which to write"""
     vecdep: list[float]
+    """Depths of levels on which to write"""
     nt_z: int
+    """Number of tracers to include"""
     trc2zsc: list[int]
+    """Indices of tracers to include"""
 
     @field_validator("vecdep", "trc2zsc", mode="before")
     @classmethod
@@ -250,25 +360,42 @@ class ZsliceSettings(_NmlGroup):
 
 class BgcSettings(_NmlGroup):
     interp_bgc_frc: bool
+    """Interpolate forcing from coarser input grid if T"""
     wrt_bgc_his: bool
+    """Write instantaneous BGC tracers to output"""
     output_period_his: float
+    """Frequency of instantaneous BGC output (s)"""
     nrpf_his: int
+    """Number of time records per BGC output file"""
     wrt_bgc_avg: bool
+    """Write averaged BGC tracers to output"""
     output_period_avg: float
+    """Output frequency/averaging period (s)"""
     nrpf_avg: int
+    """Number of time records per BGC average file"""
     wrt_bgc_dia_his: bool
+    """Write instantaneous BGC diagnostics to output"""
     output_period_his_dia: float
+    """Frequency of diagnostics output (s)"""
     nrpf_his_dia: int
+    """Number of time records per BGC diagnostics file"""
     wrt_bgc_dia_avg: bool
+    """Write averaged BGC diagnostics to output"""
     output_period_avg_dia: float
+    """Frequency/period of averaged diagnostic output"""
     nrpf_avg_dia: int
+    """Number of time records per BGC diagnostics file"""
 
 
 class MarblBiogeochemistrySettings(_NmlGroup):
     marbl_config_file: str = "marbl_in"
+    """MARBL configuration file"""
     marbl_tracers_to_write: list[str] | str = ""
+    """MARBL tracers to include in BGC output"""
     marbl_diagnostics_to_write: list[str] | str = ""
+    """MARBL diagnostics to include in BGC output"""
     marbl_timestep_ratio: int = 1
+    """If "N", solve BGC equations every N model steps"""
 
     @field_validator("marbl_tracers_to_write", mode="before")
     @classmethod
@@ -287,48 +414,73 @@ class MarblBiogeochemistrySettings(_NmlGroup):
 
 class CdrFrcSettings(_NmlGroup):
     cdr_source: bool
+    """Apply CDR perturbation (T) or not (F)"""
     cdr_file: str
+    """File path to CDR perturbation"""
     ncdr_parm: int
+    """number of CDR releases if `3D`/`parameterized`"""
     nz_chd: int
+    """Number of vertical levels in CDR forcing"""
     forcing_depth_profiles: bool
+    """Apply CDR forcing from a depth profile"""
     forcing_3d: bool
+    """Apply CDR forcing from a fully 3D distribution"""
     forcing_parameterized: bool
+    """Apply CDR forcing from Gaussian parameters"""
     time_interpolation: bool
+    """Interpolate linearly between forcing records"""
     relocate_to_wet_pts: bool
+    """Relocate CDR perturbation to sea if on land"""
     cdr_volume: bool
+    """Read in volume flux/tracer concentration"""
 
 
 class CdrOutputSettings(_NmlGroup):
     do_cdr_output: bool
+    """Output CDR-relevant fields"""
     wrt_cdr_avg: bool
+    """Write averaged (T) or instantaneous (F) output"""
     cdr_monthly_averages: bool
+    """Write averaged outputs per calendar month"""
     output_period: float
+    """Frequency of CDR-relevant output"""
     nrpf: int
+    """Time records per output file"""
 
 
 class UpscaleSettings(_NmlGroup):
     do_upscale: bool
+    """Record CDR tracer fluxes thru domain boundaries"""
     nrpf_uscl: int
+    """Number of records per file"""
     output_period_uscl: float
+    """Output frequency"""
 
 
 class LinRhoEosSettings(_NmlGroup):
     tcoef: float
+    """Thermal expansion coefficient (kg/m2/K)"""
     t0: float
+    """Reference temperature (*C)"""
     scoef: float
+    """Saline contraction coefficient (kg/m3/psu)"""
     s0: float
+    """Reference salinity (psu)"""
 
 
 class Rho0Settings(_NmlGroup):
     rho0: float
+    """Boussinesq reference density (kg/m3)"""
 
 
 class Gamma2Settings(_NmlGroup):
     gamma2: float
+    """Slipperiness parameter (free-slip = +1, no-slip = -1)"""
 
 
 class TracerDiff2(_NmlGroup):
     tnu2: list[float]
+    """Horizontal Laplacian diffusion (m2/s) for each tracer"""
 
     @field_validator("tnu2", mode="before")
     @classmethod
@@ -338,13 +490,18 @@ class TracerDiff2(_NmlGroup):
 
 class BottomDragSettings(_NmlGroup):
     rdrg: float
+    """Linear bottom drag co-efficient (m/s)"""
     rdrg2: float
+    """Quadratic bottom drag co-efficient (dimensionless)"""
     zob: float
+    """Bottom roughness height (m)"""
 
 
 class VerticalMixingSettings(_NmlGroup):
     akv_bak: float
+    """Vertical viscosity (m2/s)"""
     akt_bak: list[float]
+    """Vertical mixing (m2/s) for each tracer"""
 
     @field_validator("akt_bak", mode="before")
     @classmethod
@@ -354,69 +511,103 @@ class VerticalMixingSettings(_NmlGroup):
 
 class LateralViscSettings(_NmlGroup):
     visc2: float
+    """Horizontal Laplacian kinematic viscosity (m2/s)"""
 
 
 class UbindSettings(_NmlGroup):
     ubind: float
+    """Open boundary binding velocity (m/s)"""
 
 
 class VSpongeSettings(_NmlGroup):
     v_sponge: float
+    """Maximum viscosity in sponge layer (m2/s)"""
 
 
 class SssCorrection(_NmlGroup):
     dsssdt: float
+    """SSS correction co-efficient as piston velocity (cm/day)"""
 
 
 class SstCorrection(_NmlGroup):
     dsstdt: float
+    """SST correction co-efficient as piston velocity (cm/day)"""
 
 
 class DiagnosticsSettings(_NmlGroup):
     diag_avg: bool
+    """Output physics diags as avgs (T) or snapshots (F)"""
     diag_uv: bool
+    """Output momentum diagnostics"""
     diag_trc: bool
+    """Output tracer diagnostics"""
     output_period: float
+    """Output frequency (s)"""
     nrpf: int
-    code_check_mode: bool
+    """Number of records per output file"""
 
 
 class StdoutDiagSettings(_NmlGroup):
+    # code_check_mode lives only here (ROMS &STDOUT_DIAG_SETTINGS), not in
+    # &DIAGNOSTICS_SETTINGS.
     code_check_mode: bool
+    """diagnostics in stdout formatted for code testing"""
 
 
 class RandomOutputSettings(_NmlGroup):
     do_random: bool
+    """Output user-customized output fields"""
     output_period: float
+    """Frequency of custom output (s)"""
     nrpf: int
+    """Number of records per output file"""
 
 
 class SurfFlxSettings(_NmlGroup):
     wrt_smflx: bool
+    """Output surface momentum flux"""
     wrt_stflx: bool
+    """Output surface tracer flux"""
     wrt_swflx: bool
+    """Output surface water flux (P-E)"""
     sflx_avg: bool
+    """Output average (T) or instantaneous (F) fields"""
     output_period: float
+    """Frequency of surface flux output (s)"""
     nrpf: int
+    """Number of records per surface flux file"""
 
 
 class PipeFrcSettings(_NmlGroup):
     pipe_source: bool
+    """T if pipe inputs used, else F"""
     p_analytical: bool
+    """T if pipe inputs specified analytically"""
     npip: int
+    """Number of pipe inputs"""
 
 
 class ParticlesSettings(_NmlGroup):
     floats: bool
+    """Release Lagrangian particles (T) or not (F)"""
     np: int
+    """Local number of particles"""
     extra_space_fac: float
+    """Buffer space to receive extra exchanged particles"""
     exchange_facx: float
+    """Maximum number of particles for transfer in N-S"""
     exchange_facy: float
+    """Maximum number of particles for transfer in E-W"""
     exchange_facc: float
+    """Maximum number of particles for transfer in corners"""
     output_period: float
+    """Frequency of outputs"""
     nrpf: int
+    """Number of records per file"""
     ppm3: float
+    """Target particles per cubic meter"""
     pmin: int
+    """Minimum of allocated space for particle array"""
 
 
 class RomsNamelist(BaseModel):
@@ -425,7 +616,9 @@ class RomsNamelist(BaseModel):
     Group order matches ``write_roms_namelist`` / the reference namelist.
     """
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, use_attribute_docstrings=True
+    )
 
     simulation_name_settings: SimulationNameSettings
     time_stepping: TimeStepping

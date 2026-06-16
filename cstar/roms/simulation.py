@@ -718,7 +718,7 @@ class ROMSSimulation(Simulation):
         Calls `ROMSInputDataset.path_for_roms` to strip any partitioning information from the
         local path, in accordance with ROMS' expectations.
 
-        This property is used to populate ROMSRuntimeSettings.forcing
+        This property is used to populate the namelist's `forcing_files.frcfile`
 
         Returns
         -------
