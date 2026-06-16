@@ -179,7 +179,6 @@ class OceanVarsCfg(_SettingsSection):
     monthly_restarts: bool
     output_period_rst: float
     nrpf_rst: int
-    code_check: bool
 
 
 class TsOutputCfg(_SettingsSection):
@@ -434,9 +433,8 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
     namelist name, and case-only keys were lowercased in both vocabularies. The
     only explicit logic left is genuinely structural: the title/output-root
     regroup, the frcfile assembly, the scalar -> per-tracer-array expansion, and
-    the two cross-section reads (``rho0`` from ``lateral_visc``; ``code_check``
-    from ``ocean_vars`` into ``diagnostics_settings``). ``exclude=`` drops the
-    settings-only fields with no namelist counterpart.
+    the cross-section read of ``rho0`` from ``lateral_visc``. ``exclude=`` drops
+    the settings-only fields with no namelist counterpart.
     """
     def grp(section) -> dict:
         return section.model_dump(by_alias=True)
@@ -457,11 +455,9 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         rho0_settings=Rho0Settings(rho0=rt.lateral_visc.rho0),    # cross-section
         gamma2_settings=Gamma2Settings(gamma2=rt.gamma2),
         ubind_settings=UbindSettings(ubind=rt.ubind),
-        diagnostics_settings=DiagnosticsSettings(
-            **grp(rt.diagnostics),
-            code_check_mode=rt.ocean_vars.code_check),            # cross-section
+        diagnostics_settings=DiagnosticsSettings(**grp(rt.diagnostics)),
         basic_output_settings=BasicOutputSettings(
-            **rt.ocean_vars.model_dump(by_alias=True, exclude={"code_check"})),
+            **rt.ocean_vars.model_dump(by_alias=True)),
         lateral_visc_settings=LateralViscSettings(
             **rt.lateral_visc.model_dump(by_alias=True, exclude={"rho0"})),
         # ---- 1:1 groups (aliases handle the renames) ----

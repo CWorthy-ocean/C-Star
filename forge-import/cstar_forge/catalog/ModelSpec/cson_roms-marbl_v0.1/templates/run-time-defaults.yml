@@ -28,7 +28,6 @@ forcing:
 
 lateral_visc:
   visc2: 0.0  # m^2/sec
-  visc4: 0.0  # m^2/sec
   rho0: 1000.0
 
 output_root_name:
@@ -49,8 +48,6 @@ bottom_drag:
   rdrg: 0.0E-4  # m/s
   rdrg2: 1.0E-3
   zob: 1.0E-2  # meters
-  cdb_min: 1.0E-4
-  cdb_max: 1.0E-2
 
 v_sponge:
   v_sponge: 0.0  # m^2/sec
@@ -142,7 +139,6 @@ ocean_vars:
   wrt_avg_aks: true
   wrt_avg_hbls: true
   wrt_avg_hbbl: true
-  code_check: false
 
 surf_flux:
   wrt_smflx: false
@@ -155,7 +151,6 @@ surf_flux:
   sst_tname: 'sst_time'
   sss_vname: 'sss'
   sss_tname: 'sss_time'
-  interp_frc: 1
 
 tides:
   ntides: 10
@@ -178,12 +173,6 @@ diagnostics:
   nrpf: 7
   diag_uv: false
   diag_trc: false
-  diag_pflx: true
-  timescale: 86400  # 1*3600*24 seconds
-  diag_prec: 'nf90_double'
-
-tracers:
-  interp_t: 1
 
 cdr_frc:
   cdr_source: false
@@ -238,7 +227,6 @@ upscale_output:
   do_upscale: false
   nrpf_uscl: 48
   output_period_uscl: 3600
-  uscl_prec: 'nf90_double'
 
 # ---------------------------------------------------------------------------
 # New namelist-only sections (no previous .opt file equivalent)

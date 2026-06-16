@@ -92,12 +92,14 @@ def test_key_renames(nml):
     assert nml["param_settings"]["llm"] == 512
 
 
-def test_code_check_mode_sourced_from_ocean_vars(tmp_path):
+def test_code_check_mode_in_stdout_diag_not_diagnostics(tmp_path):
     rt = _base_settings()
-    rt["ocean_vars"]["code_check"] = True
+    rt["stdout_diag"]["code_check_mode"] = True
     nml = _write_and_read(tmp_path, rt)
-    # ocean_vars.code_check feeds diagnostics_settings.code_check_mode
-    assert nml["diagnostics_settings"]["code_check_mode"] is True
+    # code_check_mode belongs to &stdout_diag_settings (matches ROMS), and must
+    # NOT leak into &diagnostics_settings (ROMS would reject the unknown key).
+    assert nml["stdout_diag_settings"]["code_check_mode"] is True
+    assert "code_check_mode" not in nml["diagnostics_settings"]
 
 
 def test_calc_pflx_from_section(nml):

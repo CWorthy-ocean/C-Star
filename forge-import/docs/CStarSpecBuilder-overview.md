@@ -6,8 +6,8 @@ The C-STAR Forge workflow progresses through distinct stages, transforming a mod
 
 ```{mermaid}
 flowchart TD
-    S[settings-defaults.yml] --> A[models.yml]
-    T["templates:<br/>*.opt.j2"] --> A[models.yml]
+    S[settings-defaults.yml] --> A[model.yml]
+    T["templates:<br/>cppdefs.opt.j2"] --> A[model.yml]
     A -->|load_models_yaml| B[ModelSpec]
 
     C["User input (or domains.yml)"] -->|domain config| D[CstarSpecBuilder]
@@ -41,7 +41,7 @@ flowchart TD
 ### Workflow Stages
 
 1. **PRECONFIG** (Initialization)
-   - Load `ModelSpec` from `models.yml`
+   - Load `ModelSpec` from the model's `model.yml` (under `catalog/ModelSpec/<model>/`)
    - Create `CstarSpecBuilder` with domain configuration
    - Initialize grid object from `grid_kwargs`
    - Create blueprint structure with placeholder data
@@ -63,8 +63,8 @@ flowchart TD
 
 3. **BUILD** (Configuration)
    - Render Jinja2 templates (`configure_build()`):
-     - Compile-time templates → `*.opt` files
-     - Run-time templates → `roms.in`, `marbl_in`
+     - Compile-time template → `cppdefs.opt`
+     - Run-time → `namelist.nml` (via f90nml) + `marbl_in`
    - Update blueprint with rendered code locations
    - Create `ROMSSimulation` instance
    - Persist blueprint to `B_{name}_build.yml`
