@@ -52,32 +52,38 @@ class SourceSpec(BaseModel):
 class GridInput(BaseModel):
     """
     Grid input specification.
-    
+
     Parameters
     ----------
     topography_source : str
         Source for topography data (e.g., "ETOPO5").
+
+    Any additional keyword arguments are passed directly to the roms-tools
+    Grid constructor.
     """
-    
-    model_config = ConfigDict(extra="forbid")
-    
+
+    model_config = ConfigDict(extra="allow")
+
     topography_source: str
 
 
 class InitialConditionsInput(BaseModel):
     """
     Initial conditions input specification.
-    
+
     Parameters
     ----------
     source : SourceSpec
         Source specification for physics initial conditions.
     bgc_source : Optional[SourceSpec]
         Source specification for biogeochemical initial conditions.
+
+    Any additional keyword arguments are passed directly to the roms-tools
+    InitialConditions constructor (e.g. ``apply_2d_horizontal_fill=True``).
     """
-    
-    model_config = ConfigDict(extra="forbid")
-    
+
+    model_config = ConfigDict(extra="allow")
+
     source: SourceSpec
     bgc_source: Optional[SourceSpec] = Field(default=None, validate_default=False)
 
@@ -85,7 +91,7 @@ class InitialConditionsInput(BaseModel):
 class SurfaceForcingItem(BaseModel):
     """
     Individual surface forcing item specification.
-    
+
     Parameters
     ----------
     source : SourceSpec
@@ -99,10 +105,13 @@ class SurfaceForcingItem(BaseModel):
         Common values: "auto", "always", "never".
     restoring_forces: Optional[list], optional
         List of variables to create restoring forces data for.
+
+    Any additional keyword arguments are passed directly to the roms-tools
+    SurfaceForcing constructor.
     """
-    
-    model_config = ConfigDict(extra="forbid")
-    
+
+    model_config = ConfigDict(extra="allow")
+
     source: SourceSpec
     type: str = Field(pattern="^(physics|bgc|restoring)$")
     correct_radiation: bool = Field(default=False, validate_default=False)
@@ -113,17 +122,20 @@ class SurfaceForcingItem(BaseModel):
 class BoundaryForcingItem(BaseModel):
     """
     Individual boundary forcing item specification.
-    
+
     Parameters
     ----------
     source : SourceSpec
         Source specification for this forcing item.
     type : str
         Type of forcing: "physics" or "bgc".
+
+    Any additional keyword arguments are passed directly to the roms-tools
+    BoundaryForcing constructor (e.g. ``apply_2d_horizontal_fill=True``).
     """
-    
-    model_config = ConfigDict(extra="forbid")
-    
+
+    model_config = ConfigDict(extra="allow")
+
     source: SourceSpec
     type: str = Field(pattern="^(physics|bgc)$")
 
@@ -131,17 +143,20 @@ class BoundaryForcingItem(BaseModel):
 class TidalForcingItem(BaseModel):
     """
     Individual tidal forcing item specification.
-    
+
     Parameters
     ----------
     source : SourceSpec
         Source specification for tidal data.
     ntides : int, optional
         Number of tidal constituents. Default is None.
+
+    Any additional keyword arguments are passed directly to the roms-tools
+    TidalForcing constructor.
     """
-    
-    model_config = ConfigDict(extra="forbid")
-    
+
+    model_config = ConfigDict(extra="allow")
+
     source: SourceSpec
     ntides: Optional[int] = Field(default=None, validate_default=False)
 
@@ -149,7 +164,7 @@ class TidalForcingItem(BaseModel):
 class RiverForcingItem(BaseModel):
     """
     Individual river forcing item specification.
-    
+
     Parameters
     ----------
     source : SourceSpec
@@ -157,10 +172,13 @@ class RiverForcingItem(BaseModel):
         specified either in the source or at the top level (for backward compatibility).
     include_bgc : bool, optional
         Whether to include biogeochemical components. Default is False.
+
+    Any additional keyword arguments are passed directly to the roms-tools
+    RiverForcing constructor.
     """
-    
-    model_config = ConfigDict(extra="forbid")
-    
+
+    model_config = ConfigDict(extra="allow")
+
     source: SourceSpec
     include_bgc: bool = Field(default=False, validate_default=False)
 

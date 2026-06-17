@@ -241,12 +241,12 @@ class RomsMarblInputData(InputData):
         if model_inputs.grid:
             kwargs = model_inputs.grid.model_dump() if hasattr(model_inputs.grid, 'model_dump') else {}
             input_list.append(("grid", kwargs))
-        
+
         # Process initial_conditions
         if model_inputs.initial_conditions:
             kwargs = model_inputs.initial_conditions.model_dump() if hasattr(model_inputs.initial_conditions, 'model_dump') else {}
             input_list.append(("initial_conditions", kwargs))
-        
+
         # Process forcing
         if model_inputs.forcing:
             # Loop over all keys in forcing (e.g., surface, boundary, tidal, river, etc.)

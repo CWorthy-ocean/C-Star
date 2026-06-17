@@ -81,11 +81,12 @@ class TestGridInput:
             GridInput()
         assert "topography_source" in str(exc_info.value).lower()
     
-    def test_gridinput_validation_extra_fields(self):
-        """Test that GridInput rejects extra fields."""
-        with pytest.raises(ValidationError) as exc_info:
-            GridInput(topography_source="ETOPO5", extra_field="not allowed")
-        assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
+    def test_gridinput_accepts_extra_fields(self):
+        """Test that GridInput passes extra fields through to roms-tools constructors."""
+        item = GridInput(topography_source="ETOPO5", some_roms_kwarg=True)
+        dumped = item.model_dump()
+        assert dumped["topography_source"] == "ETOPO5"
+        assert dumped["some_roms_kwarg"] is True
 
 
 class TestInitialConditionsInput:
@@ -469,8 +470,8 @@ class TestModelInputs:
             ModelInputs(grid=grid, initial_conditions=ic)
         assert "forcing" in str(exc_info.value).lower()
     
-    def test_modelinputs_validation_extra_fields(self):
-        """Test that ModelInputs rejects extra fields."""
+    def test_modelinputs_rejects_extra_fields(self):
+        """Test that ModelInputs (structural container) still rejects unknown top-level sections."""
         grid = GridInput(topography_source="ETOPO5")
         source = SourceSpec(name="GLORYS")
         ic = InitialConditionsInput(source=source)
@@ -494,6 +495,26 @@ class TestModelInputs:
                 extra_field="not allowed"
             )
         assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
+
+    def test_boundaryforcingitem_accepts_extra_fields(self):
+        """Test that BoundaryForcingItem passes extra fields through to roms-tools constructors."""
+        item = BoundaryForcingItem(
+            source=SourceSpec(name="GLORYS"),
+            type="physics",
+            apply_2d_horizontal_fill=True,
+        )
+        dumped = item.model_dump()
+        assert dumped["apply_2d_horizontal_fill"] is True
+        assert dumped["type"] == "physics"
+
+    def test_initialconditionsinput_accepts_extra_fields(self):
+        """Test that InitialConditionsInput passes extra fields through to roms-tools constructors."""
+        item = InitialConditionsInput(
+            source=SourceSpec(name="GLORYS"),
+            apply_2d_horizontal_fill=True,
+        )
+        dumped = item.model_dump()
+        assert dumped["apply_2d_horizontal_fill"] is True
 
 
 class TestModelInputsFromDict:
