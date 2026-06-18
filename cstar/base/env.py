@@ -1,7 +1,7 @@
-from collections import defaultdict
 import os
 import sys
 import typing as t
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -327,7 +327,17 @@ def discover_env_vars() -> dict[str, EnvItem]:
 
             if meta:
                 container[actual] = EnvItem.from_env_var(meta, actual)
-            if not meta and not actual in container:
+            if not meta and actual not in container:
                 container[actual] = EnvItem.from_env_var(unknown_meta, actual)
 
     return container
+
+
+def env_var_groups() -> dict[str, list[EnvItem]]:
+    """Return a mapping from group-name to the associated list of env variables."""
+    groups: dict[str, list[EnvItem]] = defaultdict(list)
+
+    for item in discover_env_vars().values():
+        groups[item.group].append(item)
+
+    return groups
