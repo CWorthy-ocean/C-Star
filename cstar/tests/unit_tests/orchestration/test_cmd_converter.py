@@ -7,7 +7,6 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceTransform
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.converter.converter import (
@@ -263,7 +262,7 @@ def test_convert_step_to_preprocessed_roms_sim_no_reset_files(
 
     config = {"path": fsm.joined_output_dir}
 
-    with pytest.raises(CstarExpectationFailed, match="No restart files"):
+    with pytest.raises(FileNotFoundError, match="No restart files"):
         _ = ContinuanceTransform(config)
 
 

@@ -14,7 +14,6 @@ from cstar.applications.roms_marbl.transforms import (
     RomsMarblTimeSplitter,
 )
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
@@ -267,7 +266,7 @@ def test_continuance_transform_path_dne() -> None:
         The value that replaced the static content of the blueprint template
         and was written to the test directory, tmp_path.
     """
-    with pytest.raises(ValueError, match="No directory found"):
+    with pytest.raises(ValueError, match="No directory or file found"):
         _ = ContinuanceTransform({"path": "./dir-that-dne"})
 
 
@@ -670,7 +669,7 @@ def test_restart_file_find_dne_notok(tmp_path: Path) -> None:
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
 
-    with pytest.raises(CstarExpectationFailed, match="No restart files"):
+    with pytest.raises(FileNotFoundError, match="No restart files"):
         _ = RestartFile.find(search_path, notfound_ok=False)
 
 

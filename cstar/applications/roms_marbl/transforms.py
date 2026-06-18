@@ -15,7 +15,6 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME, deep_merge, slugify
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
@@ -179,6 +178,11 @@ class RestartFile(BaseModel):
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
+        If `search_path` identifies a directory, the first item matching the `RestarFile`
+        naming convention is returned.
+
+        If `search_path` identifies a file, that `RestartFile` will be returned.
+
         Parameters
         ----------
         search_path : Path
@@ -193,12 +197,14 @@ class RestartFile(BaseModel):
         Raises
         ------
         ValueError
-            If the search path does not exist or contains no recognizable restart files.
+            If no directory or file exists at the search path.
+        FileNotFoundError
+            If no recognizable restart files are found.
         """
         search_path = search_path.expanduser().resolve()
 
         if not search_path.exists():
-            msg = f"No directory found at path: {search_path!r}"
+            msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
         if matches := sorted(search_path.rglob(f"*{cls.SUFFIX}.*.*.{cls.EXT}")):
@@ -211,7 +217,7 @@ class RestartFile(BaseModel):
 
         if not notfound_ok:
             msg = f"No restart files located. Unable to continue from {search_path!r}"
-            raise CstarExpectationFailed(msg)
+            raise FileNotFoundError(msg)
 
         return None
 
@@ -591,18 +597,14 @@ class ContinuanceTransform(Directive, OverrideTransform):
         NotImplementedError
             If the supplied configuration is not supported.
         ValueError
-            If unknown or invalid configuration is supplied.
+            If a restart file cannot be located with the supplied configuration.
         """
         if "path" not in self._config:
             msg = "Invalid continuance transform configuration. Only restart paths are supported."
             raise NotImplementedError(msg)
 
         search_path = Path(self._config["path"])
-        if search_path.is_file():
-            restart_file = RestartFile(path=search_path)
-            return RestartFileTrxAdapter.adapt(restart_file)
-
-        if restart_file := RestartFile.find(search_path, notfound_ok=False):  # type: ignore[assignment]
+        if restart_file := RestartFile.find(search_path, notfound_ok=False):
             return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
