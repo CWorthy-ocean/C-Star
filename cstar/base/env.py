@@ -305,7 +305,6 @@ ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
 @lru_cache
 def discover_env_vars() -> dict[str, EnvItem]:
     """Return a mapping from env-var constant to the associated metadata."""
-    unknown_meta: t.Final[EnvVar] = EnvVar(NOT_SET, GROUP_UNK, NOT_SET)
     container: dict[str, EnvItem] = {}
     modules: list[ModuleType] = [
         sys.modules[__name__],
@@ -315,20 +314,15 @@ def discover_env_vars() -> dict[str, EnvItem]:
 
     for module in modules:
         hints = t.get_type_hints(module, include_extras=True)
-        variables = (x for x in dir(module) if x.startswith(CONSTANT_PREFIX))
-
-        for var_name in variables:
+        matches = {k: v for k, v in hints.items() if k.startswith(CONSTANT_PREFIX)}
+        for var_name, hint in matches.items():
             actual = getattr(module, var_name)
-            meta: EnvVar | None = None
-            hint = hints.get(var_name, None)
 
-            if hint and (metadata := getattr(hint, "__metadata__", None)):
-                meta = next((x for x in metadata if x and isinstance(x, EnvVar)), None)
+            if not (meta := getattr(hint, "__metadata__", None)):
+                continue
 
-            if meta:
-                container[actual] = EnvItem.from_env_var(meta, actual)
-            if not meta and actual not in container:
-                container[actual] = EnvItem.from_env_var(unknown_meta, actual)
+            if annotation := next((x for x in meta if isinstance(x, EnvVar)), None):
+                container[actual] = EnvItem.from_env_var(annotation, actual)
 
     return container
 
