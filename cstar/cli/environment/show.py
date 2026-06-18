@@ -6,7 +6,7 @@ from enum import StrEnum, auto
 import typer
 from rich import print  # noqa: A004, ignore shadowing of built-in print
 
-from cstar.base.env import discover_env_vars
+from cstar.base.env import NOT_SET, discover_env_vars
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem
@@ -16,8 +16,6 @@ app = typer.Typer()
 
 H_CONFIG_ALL: t.Final[str] = "C-Star Environment Configuration"
 """Main header displayed before all configuration sections."""
-
-NOT_SET: t.Literal["<not-set>"] = "<not-set>"
 
 
 def _interactive(all_config: dict[str, list["EnvItem"]]) -> None:

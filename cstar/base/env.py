@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 import sys
 import typing as t
@@ -26,8 +27,10 @@ FLAG_OFF: t.Final[str] = "0"
 
 ENV_PREFIX: t.Final[str] = "CSTAR_"
 """The common env var prefix that identifies a C-Star configuration setting."""
-CONSTANT_PREFIX = "ENV_"
+CONSTANT_PREFIX: t.Final[str] = "ENV_"
 """The common prefix used to name an annotated environment variable constant."""
+NOT_SET: t.Final[str] = "<not-set>"
+"""Default description and default for variables missing annotations."""
 
 
 @dataclass(slots=True)
@@ -301,6 +304,8 @@ ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
 
 @lru_cache
 def discover_env_vars() -> dict[str, EnvItem]:
+    """Return a mapping from env-var constant to the associated metadata."""
+    unknown_meta: t.Final[EnvVar] = EnvVar(NOT_SET, GROUP_UNK, NOT_SET)
     container: dict[str, EnvItem] = {}
     modules: list[ModuleType] = [
         sys.modules[__name__],
@@ -323,12 +328,6 @@ def discover_env_vars() -> dict[str, EnvItem]:
             if meta:
                 container[actual] = EnvItem.from_env_var(meta, actual)
             else:
-                # EnvVar type annotation not found
-                container[actual] = EnvItem(
-                    description="unknown",
-                    group=GROUP_UNK,
-                    default="unknown",
-                    name=actual,
-                )
+                container[actual] = EnvItem.from_env_var(unknown_meta, actual)
 
     return container
