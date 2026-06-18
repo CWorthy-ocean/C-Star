@@ -26,7 +26,9 @@ log = get_logger(__name__)
 
 
 class NestIcBlueprint(Blueprint):
-    """A blueprint for an example plotting application."""
+    """A blueprint for triggering a nested child simulation using the parent
+    simulation's outputs to generate initial conditions.
+    """
 
     application: str = APP_NAME
     """The application identifier."""
