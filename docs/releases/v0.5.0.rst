@@ -39,6 +39,7 @@ Breaking Changes
 - the `name` of a task is now the step name (not `step.safe_name`). using `cstar workplan status` on old outputs will result in a key error (`#532 <https://github.com/CWorthy-ocean/C-Star/pull/532>`_)
 - The _monitor loop_ has been removed after scheduling a run. `cstar workplan log ...` should be used in it's place (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - `StateRepository` class now comprises functions from `cstar.orchestration.state` (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Env var constants missing correct type annotations are ignored. (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -147,6 +148,8 @@ Bug Fixes
 - Fix _use-incorrect-working-dir-attribute_ bug in `LiveStep` and during automatic step overrides (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Fix _step-working-dir-changes-after-deserialization_ bug (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - ROMS-MARBL app will now exit non-zero if ROMS crashes (`#550 <https://github.com/CWorthy-ocean/C-Star/pull/550>`_)
+- Fix variable name with matching prefix causing erroneous registration (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
+- Fix overwriting existing metadata with secondary import (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -217,6 +220,7 @@ Improvements
 - `log_path` and `script_path` added to `LiveStep` and re-used where appropriate to encapsulate path building (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Added _on-status-changed_ and _on-launched_ callbacks to orchestrator to reduce launcher coupling (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Refactored `StateRepository` into class; subsumed sentinel path building (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- Improved discovery speed by caching var metadata (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
