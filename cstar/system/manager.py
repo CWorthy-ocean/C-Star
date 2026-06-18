@@ -1,12 +1,14 @@
 import functools
-import os
 import platform as platform
 from dataclasses import dataclass, field
-from typing import ClassVar, Protocol
+from typing import Final, Protocol
+
+from pydantic import ClassVar, Field, ValidationError
 
 from cstar.base.exceptions import CstarError
 from cstar.system.environment import (
     CStarEnvironment,
+    CStarEnvSettingsBase,
     LmodEnvSettings,
 )
 from cstar.system.scheduler import (
@@ -18,6 +20,27 @@ from cstar.system.scheduler import (
     SlurmScheduler,
     query_max_walltime_via_sacctmgr,
 )
+
+
+class AnvilEnvSettings(CStarEnvSettingsBase):
+    """Environment variables required to execute a simulation on the *Anvil* system."""
+
+    HOST_IDENTIFIER: Final[str] = "anvil"
+    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
+    HOSTNAME: str = Field(default="", alias="RCAC_CLUSTER")
+    """The hostname of the machine.
+
+    Used to identify the system as `Anvil` by matching value: `anvil`
+    """
+    SLURM_ACCOUNT: str = Field(default="")
+    """The SLURM account name."""
+    SLURM_QUEUE: str = Field(default="")
+    """The SLURM queue name."""
+
+    @property
+    def is_match(self) -> bool:
+        """Return `True` if the current system is identified as *Elja*."""
+        return self.HOSTNAME == self.HOST_IDENTIFIER
 
 
 @dataclass(frozen=True)
@@ -53,7 +76,6 @@ class HostNameEvaluator:
 
         return ", ".join(f"{item=}" for item in attributes)
 
-
     @property
     def name(self) -> str:
         """Determine the system name that will be used by C-Star.
@@ -69,6 +91,11 @@ class HostNameEvaluator:
         if self.lmod_settings.lmod_hostname:
             return self.lmod_settings.lmod_hostname
 
+        try:
+            if AnvilEnvSettings().is_match:
+                return _AnvilSystemContext.name
+        except ValidationError:
+            ...  # not anvil
         if self.platform_hostname:
             return self.platform_hostname
 
@@ -90,6 +117,11 @@ class _SystemContext(Protocol):
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
         """Instantiate a scheduler configured for the system."""
+
+    @classmethod
+    def settings(cls) -> CStarEnvSettingsBase | None:
+        """Return the settings required by the target system."""
+        return None
 
 
 _registry: dict[str, type[_SystemContext]] = {}
@@ -206,6 +238,17 @@ class _AnvilSystemContext(_SystemContext):
             documentation=cls.docs,
             max_cpus_per_node=128,
         )
+
+    @classmethod
+    def settings(cls) -> CStarEnvSettingsBase | None:
+        """Return the settings required by the target system.
+
+        Raises
+        ------
+        ValidationError
+            If required environment variables are not set.
+        """
+        return AnvilEnvSettings()
 
 
 @register_sys_context
