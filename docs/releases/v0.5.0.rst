@@ -75,6 +75,7 @@ New features
 - Added `try_deserialize` to `cstar.orchestration` to enable loop-based deserialization without exceptions (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Added user-facing display of `ExecutiveRunSummary` after run-scheduling (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - `LocalLauncher` now honors dependencies and can exit after scheduling tasks. (`#548 <https://github.com/CWorthy-ocean/C-Star/pull/548>`_)
+- Setting `CSTAR_FF_DEBUG_BUILD_MODE=1` results in `ROMS` build in debug mode (`#553 <https://github.com/CWorthy-ocean/C-Star/pull/553>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
