@@ -13,12 +13,13 @@ from cstar.applications.core import (
     get_application,
 )
 from cstar.base.log import get_logger
+from cstar.cli.common import set_ctxmap
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
 console = Console()
@@ -333,3 +334,48 @@ def create_xrunner(
     )
     klass = app.runner
     return klass(request, service_cfg, job_cfg)
+
+
+def preload_run(context: typer.Context, run_id: str) -> str:
+    """Verify a run-id is valid then load the `WorkplanRun` record and transformed `Workplan`.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context.
+    run_id : str
+        The user-suppplied run-id.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    typer.BadParameter
+        - Raised when the run-id is invalid and a `WorkplanRun` cannot be loaded
+    """
+    if not run_id.strip():
+        msg = "An invalid run-id was supplied"
+        raise typer.BadParameter(msg, param_hint="run_id")
+
+    repo = TrackingRepository()
+    wp_run = asyncio.run(repo.get_workplan_run(run_id))
+    if not wp_run:
+        raise typer.BadParameter(
+            f"Unable to monitor logs for unknown run-id: {run_id}",
+            param_hint="run_id",
+        )
+    set_ctxmap(context, "run", wp_run)
+
+    wp_path = wp_run.trx_workplan_path
+    wp = try_deserialize(wp_path, Workplan)
+    if not wp:
+        msg = f"Unable to deserialize workplan for run {run_id!r} from {str(wp_path)!r}"
+        raise typer.BadParameter(
+            msg,
+            param_hint="run_id",
+        )
+    set_ctxmap(context, "workplan", wp)
+
+    return run_id

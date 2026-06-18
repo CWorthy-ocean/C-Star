@@ -390,3 +390,46 @@ def print_validation_errors(ex: ValidationError) -> None:
             f"{error['msg']}",
         )
         print(msg)
+
+
+_TValue = t.TypeVar("_TValue")
+
+
+def get_from_ctxmap(context: typer.Context, key: str, klass: type[_TValue]) -> _TValue:
+    """Retrieve a strongly-typed value from the typer context from the supplied key."""
+    context_map: dict[str, t.Any] | None = context.obj
+
+    if not context_map:
+        print("Unable to retrieve value from empty context map")
+        raise typer.Exit(100)
+
+    if key not in context_map:
+        items = ", ".join(context_map.keys())
+        print(f"Unable to retrieve key {key!r} from context. Available data: {items}")
+
+    value: _TValue | None = context.obj[key]
+    if value is None:
+        print(f"Context map contains null value for key: {key}")
+        raise typer.Exit(101)
+
+    if not isinstance(value, klass):
+        print(
+            "Context map contains value with type mismatch. "
+            f"Expected {klass.__name__!r} but received {value.__class__.__name__!r}."
+        )
+        raise typer.Exit(102)
+
+    return value
+
+
+def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
+    """Prepare a mapping in the typer context and store the supplied value at the chosen key."""
+    if context.obj is None:
+        context.obj = {}
+
+    context_map: dict[str, t.Any] = context.obj
+
+    if key in context_map and context_map[key] is not None:
+        print(f"Value in context map using key {key!r} will be overwritten")
+
+    context_map[key] = value
