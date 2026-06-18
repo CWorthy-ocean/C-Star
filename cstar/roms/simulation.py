@@ -20,6 +20,7 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE, is_feature_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -1467,8 +1468,12 @@ class ROMSSimulation(Simulation):
 
         self._ensure_makefile(build_dir)
 
+        mode_clause = ""
+        if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
+            mode_clause = "BUILD_MODE=debug "
+
         _run_cmd(
-            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {mode_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             msg_pre="Compiling UCLA-ROMS configuration...",
             msg_post=f"UCLA-ROMS compiled at {build_dir}",

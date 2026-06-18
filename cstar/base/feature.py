@@ -98,6 +98,17 @@ ENV_FF_CLI_BP_MIGRATE_SHOW: t.Annotated[
 """Enable CLI for migrating blueprints to the latest schema."""
 
 
+ENV_FF_DEBUG_BUILD_MODE: t.Annotated[
+    t.Literal["CSTAR_FF_DEBUG_BUILD_MODE"],
+    EnvVar(
+        "Enable building dependent packages in developer/debug mode.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_DEBUG_BUILD_MODE"
+"""Enable building dependent packages in developer/debug mode."""
+
+
 def is_flag_enabled(flag: str) -> bool:
     """Determine if a boolean environment varible is enabled.
 

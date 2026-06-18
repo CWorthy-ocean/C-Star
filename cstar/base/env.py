@@ -2,6 +2,7 @@ import os
 import sys
 import types
 import typing as t
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,7 @@ class EnvVar:
     """A group name used to identify the variable use."""
     default: str = ""
     """The default value for the setting."""
-    default_factory: t.Callable[["EnvVar"], str | None] | None = None
+    default_factory: Callable[["EnvVar"], str | None] | None = None
     """A function used at run-time to generate the default value."""
     indirect_var: str = ""
     """An environment variable name to be used when the primary variable is not set."""
