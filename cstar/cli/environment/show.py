@@ -1,15 +1,11 @@
 import textwrap
 import typing as t
-from collections import defaultdict
 from enum import StrEnum, auto
 
 import typer
 from rich import print  # noqa: A004, ignore shadowing of built-in print
 
-from cstar.base import env, feature
-from cstar.base import utils as base_utils
-from cstar.base.env import discover_env_vars
-from cstar.orchestration import utils as orch_utils
+from cstar.base.env import NOT_SET, env_var_groups
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem
@@ -19,8 +15,6 @@ app = typer.Typer()
 
 H_CONFIG_ALL: t.Final[str] = "C-Star Environment Configuration"
 """Main header displayed before all configuration sections."""
-
-NOT_SET: t.Literal["<not-set>"] = "<not-set>"
 
 
 def _interactive(all_config: dict[str, list["EnvItem"]]) -> None:
@@ -111,15 +105,10 @@ def show(
     ] = DisplayFormat.INTERACTIVE,
 ) -> None:
     """Display the active environment configuration."""
-    all_items = discover_env_vars([base_utils, env, orch_utils, feature])
+    group_map = env_var_groups()
 
     if group != "all":
-        all_items = [item for item in all_items if group.lower() in item.group.lower()]
-
-    # Group items by their group name for display
-    group_map: dict[str, list[EnvItem]] = defaultdict(list)
-    for item in all_items:
-        group_map[item.group].append(item)
+        group_map = {k: v for k, v in group_map.items() if group in k.lower()}
 
     if not group_map:
         msg = f"[bold red]No environment variables found for group '{group}'[/bold red]"

@@ -79,14 +79,15 @@ class EnvVarTableDirective(Directive):
 
     def _load_variable_groups(
         self,
-        module: ModuleType,
-        groups: dict[str, list[EnvVarRow]],
-    ) -> None:
+    ) -> dict[str, list[EnvVarRow]]:
         """Reflect through the supplied module to discover all environment variables."""
-        env_vars = discover_env_vars([module])
+        env_vars = discover_env_vars()
+        groups: dict[str, list[EnvVarRow]] = defaultdict(list)
 
-        for var in env_vars:
+        for var in env_vars.values():
             groups[var.group].append(EnvVarRow(var))
+
+        return groups
 
     def _render_table(self, groups: dict[str, list[EnvVarRow]]) -> list[str]:
         """Render restructuredText for all discovered environment variables."""
@@ -116,14 +117,12 @@ class EnvVarTableDirective(Directive):
 
         return input_lines
 
-    def run(self) -> list:
+    def run(self) -> list[EnvVarRow]:
         """Build the content for the environment variable table."""
         all_groups: dict[str, list[EnvVarRow]] = defaultdict(list)
 
         try:
-            for module_name in self.arguments:
-                module = importlib.import_module(module_name)
-                self._load_variable_groups(module, all_groups)
+            all_groups = self._load_variable_groups()
         except ImportError:
             msg = f"Unable to import all modules from: {self.arguments}"
             log.exception(msg)
