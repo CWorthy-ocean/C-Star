@@ -1,6 +1,5 @@
 import typing as t
 from datetime import datetime
-from pathlib import Path
 
 from pydantic import (
     Field,
@@ -18,7 +17,6 @@ from cstar.orchestration.models import (
     Dataset,
     DocLocMixin,
     PathFilter,
-    TargetDirectoryPath,
 )
 
 APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
@@ -133,7 +131,7 @@ class RuntimeParameterSet(ParameterSet):
     checkpoint_frequency: str = Field(
         default="1d",
         min_length=2,
-        pattern="(?P<scalar>[1-9][0-9]*)(?P<unit>[hdwmy])",
+        pattern="([1-9][0-9]*)([hdwmy])",
     )
     """Time period between creation of checkpoint files.
 
@@ -146,9 +144,6 @@ class RuntimeParameterSet(ParameterSet):
     A short time period will reduce data re-processing upon restart at the cost
     of additional disk usage and compute used for checkpointing.
     """
-
-    output_dir: TargetDirectoryPath = Path()
-    """Directory where runtime outputs will be stored."""
 
     @field_validator("checkpoint_frequency", mode="after")
     @classmethod
@@ -179,15 +174,6 @@ class RuntimeParameterSet(ParameterSet):
 
         return self
 
-    @field_validator("output_dir", mode="after")
-    @classmethod
-    def _resolve_out_dir(
-        cls,
-        value: Path,
-        _info: "ValidationInfo",
-    ) -> Path:
-        return value.expanduser().resolve()
-
 
 class PartitioningParameterSet(ParameterSet):
     """Parameters for the partitioning of the model."""
@@ -211,6 +197,9 @@ class ModelParameterSet(ParameterSet):
 
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     """Blueprint schema for running a ROMS-MARBL simulation."""
+
+    schema_version: str = Field("2.0.0", frozen=True)
+    """The blueprint schema version."""
 
     application: str = APP_NAME
     """The process type to be executed by the blueprint."""

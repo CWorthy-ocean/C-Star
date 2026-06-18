@@ -237,19 +237,21 @@ class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
         if self.model.cdr_forcing is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.runtime_params.output_dir)
+        fs_manager = RomsFileSystemManager(self.model.working_dir)
 
         return ROMSCdrForcing(
             location=str(self.model.cdr_forcing.data[0].location),
-            file_hash=self.model.cdr_forcing.data[0].hash
-            if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
-            else None,
+            file_hash=(
+                self.model.cdr_forcing.data[0].hash
+                if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
+                else None
+            ),
             start_date=None,
             end_date=None,
             linker=DatasetLinker(
                 opt_file_name="cdr_frc.opt",
                 symlink_name="cdr.nc",
-                workdir=fs_manager.work_dir,
+                workdir=fs_manager.run_dir,
                 opt_file_dir=fs_manager.compile_time_code_dir,
             ),
         )
@@ -263,19 +265,21 @@ class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
         if self.model.nesting_info is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.runtime_params.output_dir)
+        fs_manager = RomsFileSystemManager(self.model.working_dir)
 
         return ROMSNestingInfo(
             location=str(self.model.nesting_info.data[0].location),
-            file_hash=self.model.nesting_info.data[0].hash
-            if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
-            else None,
+            file_hash=(
+                self.model.nesting_info.data[0].hash
+                if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
+                else None
+            ),
             start_date=None,
             end_date=None,
             linker=DatasetLinker(
                 opt_file_name="extract_data.opt",
                 symlink_name="nesting.nc",
-                workdir=fs_manager.work_dir,
+                workdir=fs_manager.run_dir,
                 opt_file_dir=fs_manager.compile_time_code_dir,
             ),
         )

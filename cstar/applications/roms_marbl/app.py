@@ -9,6 +9,7 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
+from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.exceptions import CstarError
@@ -25,7 +26,6 @@ from cstar.orchestration.models import (
 from cstar.orchestration.serialization import register_representer, strenum_representer
 from cstar.orchestration.transforms import (
     DirectiveConfig,
-    OverrideTransform,
 )
 from cstar.roms import ROMSSimulation
 
@@ -103,7 +103,11 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
 
         try:
             await self._handler.updates(seconds=1.0)
-            self.add_state(self._handler.status)
+            status = self._handler.status
+            if status == ExecutionStatus.FAILED:
+                self.add_state(status, ["ROMS execution reported a failed status"])
+            else:
+                self.add_state(status)
         except Exception as ex:
             msg = "An error occurred while running the simulation"
             self.log.exception(msg)
@@ -128,7 +132,8 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     long_name: str = _APP_NAME_LONG
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
-    applicable_transforms = (RomsMarblTimeSplitter, OverrideTransform)
+    applicable_transforms = (RomsMarblTimeSplitter,)
+    migrations = (RomsMarblSchemaAdapter2025v1,)
 
 
 def main() -> int:
@@ -161,8 +166,9 @@ def main() -> int:
 
     try:
         asyncio.run(runner.execute())
-        if runner.state.errors:
-            print(f"Errors occurred: {', '.join(runner.state.errors)}")
+        if runner.state.status == ExecutionStatus.FAILED or runner.result.errors:
+            if runner.result.errors:
+                print(f"Errors occurred: {', '.join(runner.result.errors)}")
             return 1
     except CstarError as ex:
         print(f"An error occurred during the simulation: {ex}")

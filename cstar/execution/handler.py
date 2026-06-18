@@ -163,31 +163,20 @@ class ExecutionHandler(ABC, LoggingMixin):
                     msg = f"Job status is now {_status}"
                     self.log.info(msg)
                     break
+            return
 
-            if not self.output_file.exists():
-                msg = f"Log `{self.output_file}` does not exist. Skipping update check."
-                self.log.info(msg)
-                return
-
-        if _status == ExecutionStatus.PENDING:
-            start_time = time.time()
-            msg = "This job is still pending. Updates will be available after it starts running."
-            while seconds == 0 or (time.time() - start_time < seconds):
-                self.log.info(msg)
-                time.sleep(STATUS_RECHECK_SECONDS)
-                _status = self.status
-                if _status != ExecutionStatus.PENDING:
-                    msg = f"Job status is now {_status}"
-                    self.log.info(msg)
-                    break
+        if not self.output_file.exists():
+            await asyncio.sleep(1)
+            msg = f"Log `{self.output_file}` does not exist. Skipping update check."
+            self.log.info(msg)
+            return
 
         try:
             with open(self.output_file) as f:
                 f.seek(0, 2)  # Move to the end of the file
                 start_time = time.time()
                 while seconds == 0 or (time.time() - start_time < seconds):
-                    if self.output_file.exists():
-                        line = f.readline()
+                    line = f.readline()
 
                     if self.status != ExecutionStatus.RUNNING:
                         return

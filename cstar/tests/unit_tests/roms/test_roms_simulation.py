@@ -11,6 +11,7 @@ import pytest
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.roms import ROMSRuntimeSettings
@@ -1591,7 +1592,7 @@ class TestProcessingAndExecution:
             # Check LocalProcess was instantiated correctly
             mock_local_process.assert_called_once_with(
                 commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} ./roms cstar_generated_roms.in",
-                run_path=sim.fs_manager.work_dir,
+                run_path=sim.fs_manager.run_dir,
                 output_file=sim.fs_manager.logs_dir / "romstest.out",
             )
 
@@ -1633,7 +1634,7 @@ class TestProcessingAndExecution:
         sim = stub_romssimulation
         build_dir = sim.fs_manager.compile_time_code_dir
         runtime_code_dir = sim.fs_manager.runtime_code_dir
-        script_dir = sim.fs_manager.work_dir
+        script_dir = sim.fs_manager.run_dir
         sim.runtime_code._working_copy = stageddatacollection_remote_files(
             paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
             sources=sim.runtime_code.source,
@@ -1683,7 +1684,7 @@ class TestProcessingAndExecution:
                 job_name=None,
                 cpus=6,
                 account_key="some_key",
-                run_path=sim.fs_manager.work_dir,
+                run_path=sim.fs_manager.run_dir,
                 script_path=script_dir / "romstest.sh",
                 queue_name="default_queue",
                 walltime="12:00:00",
@@ -1792,7 +1793,7 @@ class TestProcessingAndExecution:
     @mock.patch("subprocess.run")  # Mock ncjoin execution
     def test_post_run_merges_netcdf_files(
         self, mock_subprocess, mock_persist, stub_romssimulation: ROMSSimulation
-    ):
+    ) -> None:
         """Tests that `post_run` correctly merges partitioned NetCDF output files.
 
         This test verifies that `post_run` identifies NetCDF output files, executes
@@ -1853,11 +1854,11 @@ class TestProcessingAndExecution:
         )
 
         # Check that output file was moved
-        new_out_dir = sim.fs_manager.joined_output_dir
-        assert new_out_dir.exists()
-        assert (new_out_dir / "ocean_his.20240101000000.nc").exists()
-        assert (new_out_dir / "ocean_rst.20240101000000.nc").exists()
-        assert (new_out_dir / "child_bry.20240101000000.nc").exists()
+        new_joined_dir = sim.fs_manager.joined_output_dir
+        assert new_joined_dir.exists()
+        assert (new_joined_dir / "ocean_his.20240101000000.nc").exists()
+        assert (new_joined_dir / "ocean_rst.20240101000000.nc").exists()
+        assert (new_joined_dir / "child_bry.20240101000000.nc").exists()
 
         # assert all non-rst partitioned files got cleaned up
         assert not (output_dir / "ocean_his.20240101000000.001.nc").exists()
@@ -1873,7 +1874,7 @@ class TestProcessingAndExecution:
         mock_persist,
         stub_romssimulation,
         caplog: pytest.LogCaptureFixture,
-    ):
+    ) -> None:
         """Tests that `post_run` prints a log message and exits early if no output files are
         found.
 
@@ -1903,7 +1904,7 @@ class TestProcessingAndExecution:
     @mock.patch("subprocess.run")  # Mock subprocess.run to simulate a failure
     @mock.patch.object(Path, "glob")  # Mock glob to return fake files
     def test_post_run_raises_error_if_ncjoin_fails(
-        self, mock_glob, mock_subprocess, stub_romssimulation
+        self, mock_glob, mock_subprocess, stub_romssimulation: ROMSSimulation
     ):
         """Tests that `post_run` raises a `RuntimeError` if `ncjoin` fails during file
         merging.
@@ -2023,10 +2024,11 @@ class TestROMSSimulationRestart:
 
         # Mock restart file found
         mock_glob.return_value = []
+        exp_dir_name = JobFileSystemManager._OUTPUT_NAME  # noqa: SLF001
 
         # Call method
         with pytest.raises(
-            FileNotFoundError, match=f"No files in {sim.directory / 'output'} match"
+            FileNotFoundError, match=f"No files in {sim.directory / exp_dir_name} match"
         ):
             sim.restart(new_end_date=new_end_date)
 
@@ -2034,8 +2036,8 @@ class TestROMSSimulationRestart:
 
     @mock.patch.object(Path, "glob")
     def test_restart_raises_if_multiple_restarts_found(
-        self, mock_glob, stub_romssimulation
-    ):
+        self, mock_glob: mock.Mock, stub_romssimulation: ROMSSimulation
+    ) -> None:
         """Test that `restart` raises a `ValueError` if multiple restart files are
         found.
 
@@ -2064,7 +2066,5 @@ class TestROMSSimulationRestart:
             restart_dir / "ocean_rst.20250601000000.nc",
         ]
 
-        with pytest.raises(
-            ValueError, match="Found multiple distinct restart files corresponding to"
-        ):
+        with pytest.raises(ValueError, match="Found multiple distinct restart files"):
             sim.restart(new_end_date=new_end_date)

@@ -1,9 +1,17 @@
-import typing as t
+from collections.abc import Mapping
+from pathlib import Path
+from unittest import mock
 
 import pytest
 import typer
 
-from cstar.cli.workplan.shared import check_and_capture_kvp, check_and_capture_kvps
+from cstar.cli.workplan.shared import (
+    autocomplete_step_list,
+    check_and_capture_kvp,
+    check_and_capture_kvps,
+    list_steps,
+)
+from cstar.orchestration.models import Workplan
 
 
 @pytest.mark.parametrize(
@@ -89,7 +97,7 @@ def test_capture_kvp_invalid_inputs(entry: str, error: str) -> None:
 )
 def test_capture_kvps_happy_path(
     entries: list[str],
-    expected: t.Mapping[str, str],
+    expected: Mapping[str, str],
 ) -> None:
     """Verify that valid inputs produce the expected output.
 
@@ -142,3 +150,127 @@ def test_capture_kvps_duplicate(
     """
     with pytest.raises(typer.BadParameter, match="multiple"):
         _ = check_and_capture_kvps(entries)
+
+
+@pytest.mark.asyncio
+async def test_list_steps_empty_run_id() -> None:
+    """Verify that listing steps with no filter returns all available steps
+    in the results.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    steps = await list_steps(run_id="", incomplete="")
+
+    # confirm that an empty list is returned
+    assert not steps
+
+
+@pytest.mark.asyncio
+async def test_list_steps_unfiltered(
+    executed_workplan: tuple[Path, Workplan, str],
+) -> None:
+    """Verify that listing steps with no filter returns all available steps
+    in the results.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    _, wp, fake_run_id = executed_workplan
+    num_steps = len(wp.steps)
+
+    # confirm that a step is discovered when not using a filter
+    steps = await list_steps(fake_run_id, incomplete="")
+    assert len(steps) == num_steps
+    assert set(steps) == {s.name for s in wp.steps}
+
+
+@pytest.mark.asyncio
+async def test_list_steps_filtered(
+    executed_workplan: tuple[Path, Workplan, str],
+) -> None:
+    """Verify that listing steps with a filter returns a subset of available results.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    _, wp, fake_run_id = executed_workplan
+
+    for step in wp.steps:
+        # confirm that using a step name as the filter returns that single result
+        steps = await list_steps(fake_run_id, step.name)
+        assert len(steps) == 1
+        assert step.name in steps
+
+        # confirm case-insensitivity
+        steps = await list_steps(fake_run_id, step.name.lower())
+        assert len(steps) == 1
+        assert step.name in steps
+
+
+@pytest.mark.asyncio
+async def test_list_steps_filter_all(
+    executed_workplan: tuple[Path, Workplan, str],
+) -> None:
+    """Verify that listing steps with an filter that has no matches results in
+    no results.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    _, _, fake_run_id = executed_workplan
+
+    # confirm a nonsense name is not found
+    steps = await list_steps(fake_run_id, incomplete="xyzpqr")
+    assert not steps
+
+
+@pytest.mark.asyncio
+async def test_autocomplete_step_list_no_run_id() -> None:
+    """Verify that a missing run-id parameter raises a typer exception."""
+    mock_typer_ctx = mock.Mock(params={"no-run-id-param-to-locate": 0})
+
+    with (
+        mock.patch("typer.Context", mock_typer_ctx),
+        pytest.raises(typer.BadParameter, match="run-id is required"),
+    ):
+        autocomplete_step_list(mock_typer_ctx, incomplete="")
+
+
+@pytest.mark.asyncio
+async def test_autocomplete_step_list_empty_run_id() -> None:
+    """Verify that a missing run-id parameter raises a typer exception."""
+    mock_typer_ctx = mock.Mock(params={"run-id": ""})
+
+    with (
+        mock.patch("typer.Context", mock_typer_ctx),
+        pytest.raises(typer.BadParameter, match="run-id is required"),
+    ):
+        autocomplete_step_list(mock_typer_ctx, incomplete="")
+
+
+def test_autocomplete_step_list_happy_path(
+    executed_workplan: tuple[Path, Workplan, str],
+) -> None:
+    """Verify that a valid run-id locates a run.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    _, wp, fake_run_id = executed_workplan
+
+    mock_typer_ctx = mock.Mock(params={"run_id": fake_run_id})
+
+    with mock.patch("typer.Context", mock_typer_ctx):
+        steps = autocomplete_step_list(mock_typer_ctx, incomplete="")
+        assert len(steps) == len(wp.steps)

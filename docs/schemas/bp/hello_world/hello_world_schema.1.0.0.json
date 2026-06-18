@@ -1,0 +1,59 @@
+{
+    "$defs": {
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        }
+    },
+    "additionalProperties": true,
+    "description": "A simple blueprint demonstrating the integration of a Blueprint and it's\nrunner application.",
+    "properties": {
+        "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "hello_world",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset"
+        },
+        "schema_version": {
+            "default": "1.0.0",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "default": ".",
+            "format": "path",
+            "title": "Working Dir",
+            "type": "string"
+        },
+        "target": {
+            "title": "Target",
+            "type": "string"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "target"
+    ],
+    "title": "HelloWorldBlueprint",
+    "type": "object"
+}

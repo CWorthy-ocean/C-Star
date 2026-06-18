@@ -20,6 +20,7 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE, is_feature_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -80,14 +81,14 @@ def _ncjoin_wildcard(
 
     Parameters
     ----------
-    wildcard_pattern: the wildcard pattern to match for files within input_dir
-    input_dir: location of the partitioned netcdfs to be joined
-    output_dir: location to move the joined output to
-    logger: logger object to post log messages to
-
-    Returns
-    -------
-    None
+    wildcard_pattern : str
+        The wildcard pattern to match for files within input_dir.
+    input_dir : Path
+        Location of the partitioned netcdfs to be joined.
+    output_dir : Path
+        Location to move the joined output to.
+    logger : logging.Logger
+        Logger object to post log messages to.
     """
     logger.info(f"Spatial join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
@@ -108,18 +109,18 @@ def _extract_data_join_wildcard(
     wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
 ) -> None:
     """Spatially join netcdfs matching the wildcard pattern using extract_data_join,
-     move the joined output to output_dir, and remove the unjoined outputs.
+    move the joined output to output_dir, and remove the unjoined outputs.
 
     Parameters
     ----------
-    wildcard_pattern: the wildcard pattern to match for files within input_dir
-    input_dir: location of the partitioned netcdfs to be joined
-    output_dir: location to move the joined output to
-    logger: logger object to post log messages to
-
-    Returns
-    -------
-    None
+    wildcard_pattern : str
+        The wildcard pattern to match for files within input_dir.
+    input_dir : Path
+        Location of the partitioned netcdfs to be joined.
+    output_dir : Path
+        Location to move the joined output to.
+    logger : logging.Logger
+        Logger object to post log messages to.
     """
     logger.info(f"Spatial extract/join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
@@ -1158,7 +1159,7 @@ class ROMSSimulation(Simulation):
 
         return cls(
             name=bp.name,
-            directory=bp.runtime_params.output_dir,
+            directory=bp.working_dir,
             discretization=DiscretizationAdapter(bp).adapt(),
             runtime_code=AddtlCodeAdapter(bp, "run_time").adapt(),
             compile_time_code=AddtlCodeAdapter(bp, "compile_time").adapt(),
@@ -1267,7 +1268,7 @@ class ROMSSimulation(Simulation):
         compile_time_code_dir = self.fs_manager.compile_time_code_dir
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
-        work_dir = self.fs_manager.work_dir
+        run_dir = self.fs_manager.run_dir
 
         self._conditionally_clear_root()
 
@@ -1275,7 +1276,7 @@ class ROMSSimulation(Simulation):
             compile_time_code_dir.mkdir(parents=True)
             runtime_code_dir.mkdir(parents=True)
             input_datasets_dir.mkdir(parents=True)
-            work_dir.mkdir(
+            run_dir.mkdir(
                 parents=True, exist_ok=True
             )  # this one gets made by C-Star FSM
         except OSError as e:
@@ -1467,8 +1468,12 @@ class ROMSSimulation(Simulation):
 
         self._ensure_makefile(build_dir)
 
+        mode_clause = ""
+        if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
+            mode_clause = "BUILD_MODE=debug "
+
         _run_cmd(
-            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {mode_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             msg_pre="Compiling UCLA-ROMS configuration...",
             msg_post=f"UCLA-ROMS compiled at {build_dir}",
@@ -1628,7 +1633,7 @@ class ROMSSimulation(Simulation):
                 "and try again"
             )
 
-        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.run_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1637,35 +1642,33 @@ class ROMSSimulation(Simulation):
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
-        # we run ROMS in the work dir
-        run_path = self.fs_manager.work_dir
+        # we run ROMS from the run directory
+        run_path = self.fs_manager.run_dir
         runtime_settings_fname = "cstar_generated_roms.in"
 
         # save modified roms.in in the work directory
-        final_runtime_settings_file = self.fs_manager.work_dir / runtime_settings_fname
+        final_runtime_settings_file = run_path / runtime_settings_fname
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
-        script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
+        script_path = run_path / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
-        # symlink roms exe into work dir for ability to easily rerun from the correct
-        # location if debugging
-
-        roms_symlink_path = self.fs_manager.work_dir / self.exe_path.name
+        # symlink roms exe into run dir to simplify running by hand for troubleshooting.
+        roms_symlink_path = run_path / self.exe_path.name
         roms_symlink_path.symlink_to(self.exe_path)
 
         ## 2: RUN ROMS
 
         roms_exec_cmd = " ".join(
             [
-                f"{cstar_sysmgr.environment.mpi_exec_prefix}",
+                cstar_sysmgr.environment.mpi_exec_prefix,
                 "-n",
                 f"{self.discretization.n_procs_tot}",
                 "./roms",
-                f"{runtime_settings_fname}",
-            ]
+                runtime_settings_fname,
+            ],
         )
 
         self.log.info(f"Running {roms_exec_cmd}")

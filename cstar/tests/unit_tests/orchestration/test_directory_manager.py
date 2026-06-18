@@ -1,5 +1,5 @@
 import os
-import typing as t
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -25,15 +25,15 @@ from cstar.execution.file_system import DirectoryManager as DirMgr
     ],
 )
 def test_directory_mgr_cachedir_no_config(
-    fn_under_test: t.Callable[[], Path], default_value: str
+    fn_under_test: Callable[[], Path], default_value: str
 ) -> None:
     """Verify the default state directory is returned if no environment config is set."""
     expected_path = (Path(default_value) / "cstar").expanduser().resolve()
 
     with mock.patch.dict(os.environ, {}, clear=True):
-        output_dir = fn_under_test()
+        actual_path = fn_under_test()
 
-    assert output_dir == expected_path
+    assert actual_path == expected_path
 
 
 @pytest.mark.parametrize(
@@ -46,7 +46,7 @@ def test_directory_mgr_cachedir_no_config(
     ],
 )
 def test_directory_mgr_cachedir_xdg_config(
-    fn_under_test: t.Callable[[], Path],
+    fn_under_test: Callable[[], Path],
     xdg_var: str,
     xdg_value: str,
 ) -> None:
@@ -56,9 +56,9 @@ def test_directory_mgr_cachedir_xdg_config(
     expected_path = xdg_path.expanduser().resolve()
 
     with mock.patch.dict(os.environ, {xdg_var: xdg_value}, clear=True):
-        output_dir = fn_under_test()
+        actual_path = fn_under_test()
 
-    assert output_dir == expected_path
+    assert actual_path == expected_path
 
 
 @pytest.mark.parametrize(
@@ -95,7 +95,7 @@ def test_directory_mgr_cachedir_xdg_config(
     ],
 )
 def test_directory_mgr_cachedir_cstar_config(
-    fn_under_test: t.Callable[[], Path],
+    fn_under_test: Callable[[], Path],
     xdg_var: str,
     xdg_value: str,
     cstar_var: str,
@@ -110,9 +110,9 @@ def test_directory_mgr_cachedir_cstar_config(
     with mock.patch.dict(
         os.environ, {xdg_var: xdg_value, cstar_var: cstar_val}, clear=True
     ):
-        output_dir = fn_under_test()
+        actual_path = fn_under_test()
 
-    assert output_dir == expected_path
+    assert actual_path == expected_path
 
 
 @pytest.mark.parametrize(
@@ -137,9 +137,9 @@ def test_directory_mgr_datadir_hpc_override(
     with mock.patch.dict(
         os.environ, {xdg_var: xdg_value, scratch_var: scratch_val}, clear=True
     ):
-        output_dir = DirMgr.data_home()
+        actual_path = DirMgr.data_home()
 
-    assert output_dir == expected_path
+    assert actual_path == expected_path
 
 
 def test_directory_mgr_datadir_hpc_override_with_cstar_var(tmp_path: Path) -> None:
@@ -161,6 +161,6 @@ def test_directory_mgr_datadir_hpc_override_with_cstar_var(tmp_path: Path) -> No
         },
         clear=True,
     ):
-        output_dir = DirMgr.data_home()
+        actual_path = DirMgr.data_home()
 
-    assert output_dir == expected_path
+    assert actual_path == expected_path

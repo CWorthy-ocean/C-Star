@@ -121,24 +121,24 @@ def sim_runner(
     with patch_romssimulation_init_sourcedata(from_worker=True):
         runner = RomsMarblRunner(request, service_config, fake_job_config)
 
-    output_path = runner.simulation.fs_manager.output_dir
+    output_dir = runner.simulation.fs_manager.output_dir
 
-    runner.blueprint.runtime_params.output_dir = output_path
-    runner.simulation.directory = output_path
+    runner.blueprint.working_dir = output_dir
+    runner.simulation.directory = output_dir
 
     return runner
 
 
 @pytest.fixture
 def continuance_directive_path(
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
 ) -> Path:
     """Fixture to return a Path pointing to a file containing directive
     configuration that causes the `ContinuanceTransform` to execute.
 
     Parameters
     ----------
-    mock_sim_output_dir : tuple[Path, Path, Path]
+    mocked_simulation_outputs : tuple[Path, Path, Path]
         Used to create the mock run outputs that the directive config file will
         refer to (to locate reset files).
 
@@ -147,7 +147,7 @@ def continuance_directive_path(
     Path
         The path to the directive configuration file.
     """
-    _, step_dir, _ = mock_sim_output_dir
+    _, step_dir, _ = mocked_simulation_outputs
 
     directives = textwrap.dedent(
         f"""\
@@ -440,13 +440,13 @@ def test_runner_directory_prep(
     # an empty output dir should be ok
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    actual_output_dir = sim_runner.blueprint.runtime_params.output_dir
+    actual_working_dir = sim_runner.blueprint.working_dir
     # Confirm the output directory is created...
-    assert actual_output_dir.exists()
-    assert actual_output_dir.is_dir()
+    assert actual_working_dir.exists()
+    assert actual_working_dir.is_dir()
 
     # ...and is empty so no conflicts will occur.
-    output_content = [x for x in actual_output_dir.iterdir() if x.is_file()]
+    output_content = [x for x in actual_working_dir.iterdir() if x.is_file()]
     assert not output_content, "Output directory should be empty after prep."
 
 
@@ -464,11 +464,6 @@ async def test_runner_can_shutdown_as_task(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # Configure the RomsMarblRunner to run as a task
     sim_runner._config.as_service = False
 
@@ -511,11 +506,6 @@ async def test_runner_shutdown_handler_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # Configure the RomsMarblRunner to run as a service
     sim_runner._config.as_service = True
 
@@ -568,11 +558,6 @@ async def test_runner_shutdown_handler_not_complete(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # Configure the RomsMarblRunner to run as a service
     sim_runner._config.as_service = True
 
@@ -617,11 +602,6 @@ async def test_runner_shutdown_side_effects(
     status : ExecutionStatus
         The execution status to test the shutdown criteria with.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=status)
     mock_disposition = mock.Mock()
     mock_simulation = mock.Mock()
@@ -656,11 +636,6 @@ async def test_runner_on_start_without_uri(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     mock_simulation = mock.Mock()
@@ -702,11 +677,6 @@ async def test_runner_on_start_without_simulation(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.Mock()
     # mock_simulation = mock.Mock()
@@ -743,11 +713,6 @@ async def test_runner_on_start_user_unhandled_setup(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     # configure the simulation to raise an exception during SETUP
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_run = mock.Mock(return_value=mock_handler)
@@ -794,11 +759,6 @@ async def test_runner_on_start_user_unhandled_build(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
     mocked_error_msg = "Mock build failure"
@@ -845,11 +805,6 @@ async def test_runner_on_start_user_unhandled_pre_run(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_iter = mock.AsyncMock()
     mocked_error_msg = "Mock pre-run failure"
@@ -896,11 +851,6 @@ async def test_runner_on_iteration(
     sim_runner: RomsMarblRunner
         An instance of RomsMarblRunner to be used for the test.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
@@ -1086,7 +1036,7 @@ def test_worker_main_cstar_error(
 
 
 def test_worker_main_preprocessor_args_parsed(
-    mock_sim_output_dir: tuple[Path, Path, Path],
+    mocked_simulation_outputs: tuple[Path, Path, Path],
     continuance_directive_path: Path,
 ) -> None:
     """Verify that the worker receives directives and they are supplied
@@ -1097,7 +1047,7 @@ def test_worker_main_preprocessor_args_parsed(
     mock_sim_output_dir : tuple[Path, Path, Path]
         Creates files/directories mimicking output of a prior simulation run.
     """
-    *_, step_dir, bp_path = mock_sim_output_dir
+    *_, step_dir, bp_path = mocked_simulation_outputs
 
     reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
 
@@ -1178,11 +1128,6 @@ async def test_bluerintrunner_can_shutdown(
     runner_state : RunnerState
         A runner state that should trigger shutdown.
     """
-    output_dir = sim_runner.simulation.fs_manager.output_dir
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "somefile.txt").touch()
-
     result = RunnerResult[RomsMarblBlueprint](
         mock.MagicMock(),
         state=runner_state,
@@ -1192,3 +1137,71 @@ async def test_bluerintrunner_can_shutdown(
     with mock.patch.object(sim_runner, "_result", result):
         # and confirm it does not say it can exit
         assert sim_runner.can_shutdown
+
+
+@pytest.mark.parametrize(
+    ("handler_status", "expect_errors"),
+    [
+        (ExecutionStatus.FAILED, True),
+        (ExecutionStatus.COMPLETED, False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_records_error_on_failed_handler_status(
+    sim_runner: RomsMarblRunner,
+    handler_status: ExecutionStatus,
+    expect_errors: bool,
+) -> None:
+    """Regression: when the execution handler reports a FAILED status (e.g. ROMS
+    crashed under Slurm but the job ran to completion), `run()` must record the FAILED
+    state *with* an error message rather than silently, so the failure surfaces in
+    `result.errors`. A non-failed status must not gain spurious errors.
+    """
+    mock_handler = mock.Mock(spec=ExecutionHandler)
+    type(mock_handler).status = mock.PropertyMock(return_value=handler_status)
+    mock_handler.updates = mock.AsyncMock()
+
+    with mock.patch.object(sim_runner, "_handler", mock_handler):
+        result = await sim_runner.run()
+
+    assert result.state.status == handler_status
+    assert bool(result.errors) == expect_errors
+
+
+def test_worker_main_returns_nonzero_on_failed_status(
+    blueprint_path: Path,
+) -> None:
+    """Regression: `main()` returns a non-zero exit code when the runner ends in a
+    FAILED state, even if `result.errors` is empty (e.g. a ROMS/Slurm job that runs to
+    completion but reports failure). Previously the exit code keyed only off
+    `result.errors`, so a FAILED-but-error-less run incorrectly exited 0.
+    """
+
+    async def fail_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        # terminal FAILED state with NO errors recorded
+        self.add_state(ExecutionStatus.FAILED)
+        return self.result
+
+    args = [
+        "cstar.applications.roms_marbl",
+        ARG_URI_LONG,
+        str(blueprint_path),
+        ARG_LOGLEVEL_LONG,
+        "DEBUG",
+    ]
+
+    with (
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=fail_runner,
+            autospec=True,
+        ) as mock_execute,
+        mock.patch.object(sys, "argv", args),
+    ):
+        return_code = main()
+
+    assert return_code == 1
+    assert mock_execute.call_count == 1

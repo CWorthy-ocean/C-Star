@@ -1,0 +1,95 @@
+{
+    "$defs": {
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        }
+    },
+    "additionalProperties": true,
+    "description": "A blueprint for an example plotting application.",
+    "properties": {
+        "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "plotter",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset"
+        },
+        "schema_version": {
+            "default": "2.0.0",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "default": ".",
+            "format": "path",
+            "title": "Working Dir",
+            "type": "string"
+        },
+        "input_dir": {
+            "format": "path",
+            "title": "Input Dir",
+            "type": "string"
+        },
+        "variables": {
+            "items": {
+                "type": "string"
+            },
+            "title": "Variables",
+            "type": "array"
+        },
+        "time_indices": {
+            "items": {
+                "type": "integer"
+            },
+            "title": "Time Indices",
+            "type": "array"
+        },
+        "s_indices": {
+            "items": {
+                "type": "integer"
+            },
+            "title": "S Indices",
+            "type": "array"
+        },
+        "grid_file_path": {
+            "format": "path",
+            "title": "Grid File Path",
+            "type": "string"
+        },
+        "file_glob": {
+            "default": "*rst*.nc",
+            "title": "File Glob",
+            "type": "string"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "input_dir",
+        "variables",
+        "time_indices",
+        "s_indices",
+        "grid_file_path"
+    ],
+    "title": "PlotterBlueprint",
+    "type": "object"
+}

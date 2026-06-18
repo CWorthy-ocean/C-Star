@@ -1,17 +1,18 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/plotter/plotter_schema.1.0.0.json
 name: wales_plotter
 description: plot outputs from wales domain
 application: plotter
+schema_version: 1.0.0
+output_dir: "~/cstar/wales_plotter/plotsx"
 state: draft
-
 input_dir: "~/cstar/wales_toy_blueprint/joined_output"
-output_dir: "~/cstar/wales_plotter/plots"
 variables:
   - "ALK"
   - "pH_3D"
 time_indices:
-  - "-1"
+  - -1
 s_indices:
   - 0
-  - "-1"
+  - -1
 grid_file_path: "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc"
 file_glob: "*bgc*.nc"

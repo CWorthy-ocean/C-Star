@@ -2,13 +2,21 @@ import datetime as dt
 import shutil
 import tempfile
 from abc import ABC
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, ClassVar
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import _list_to_concise_str, coerce_datetime, lazy_import
+from cstar.base.utils import (
+    _list_to_concise_str,
+    coerce_datetime,
+    lazy_import,
+    min_padded_index,
+    min_padded_indices,
+)
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
@@ -44,7 +52,9 @@ class ROMSPartitioning:
         Paths to the partitioned files.
     """
 
-    def __init__(self, np_xi: int, np_eta: int, files: list[Path]):
+    SUFFIX_FMT: ClassVar[str] = ".{0}.nc"
+
+    def __init__(self, np_xi: int, np_eta: int, files: list[Path]) -> None:
         self.np_xi = np_xi
         self.np_eta = np_eta
         self.files = files
@@ -52,8 +62,22 @@ class ROMSPartitioning:
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(np_xi={self.np_xi}, np_eta={self.np_eta}, files={_list_to_concise_str(self.files, pad=43)})"
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.files)
+
+    @classmethod
+    def suffix(cls, i: int, num_partitions: int) -> str:
+        """Return a minimally padded suffix."""
+        padded_idx = min_padded_index(i, num_partitions)
+        return cls.SUFFIX_FMT.format(padded_idx)
+
+    @classmethod
+    def suffixes(cls, num_partitions: int) -> Generator[str, None, None]:
+        """Return an iterator producing all minimally padded suffixes
+        for a given partitition size.
+        """
+        for padded_idx in min_padded_indices(num_partitions):
+            yield cls.SUFFIX_FMT.format(padded_idx)
 
 
 @dataclass
@@ -71,20 +95,20 @@ class DatasetLinker(LoggingMixin):
 
     def validate_opt(
         self,
-    ):
+    ) -> None:
         """Validate that the opt file exists in the work directory and that it contains the conventional symlink name."""
         opt_file = self.opt_file_dir / self.opt_file_name
 
         if not opt_file.exists():
-            raise FileNotFoundError(f"Opt file {opt_file} does not exist")
+            msg = f"Opt file {opt_file} does not exist"
+            raise FileNotFoundError(msg)
 
         opt_content = opt_file.read_text()
         if self.symlink_name not in opt_content:
-            raise CstarExpectationFailed(
-                f"{self.opt_file_name} must contain the string {self.symlink_name}."
-            )
+            msg = f"{self.opt_file_name} must contain the string {self.symlink_name}."
+            raise CstarExpectationFailed(msg)
 
-    def link(self, dataset_path: Path):
+    def link(self, dataset_path: Path) -> None:
         """Create symlink to dataset_path in the work directory.
         Parameters
         ----------
@@ -94,21 +118,14 @@ class DatasetLinker(LoggingMixin):
         symlink_path = self.workdir / self.symlink_name
         symlink_path.unlink(missing_ok=True)
         symlink_path.symlink_to(dataset_path)
-        self.log.info(f"🔗 Created symlink: {symlink_path} → {dataset_path}")
+        msg = f"🔗 Created symlink: {symlink_path} → {dataset_path}"
+        self.log.info(msg)
 
 
 class ROMSInputDataset(InputDataset, ABC):
-    (
-        (
-            """
-    ROMS-specific implementation of `InputDataset` (doc below)
-
-    Docstring for InputDataset:
-    ---------------------------
+    """Describes spatiotemporal data needed to run a unique instance of a ROMS model
+    simulation.
     """
-        )
-        + (InputDataset.__doc__ or "")
-    )
 
     partitionable: bool = True
     """Set to False if the input dataset should not be partitioned."""
@@ -122,7 +139,7 @@ class ROMSInputDataset(InputDataset, ABC):
         source_np_xi: int | None = None,
         source_np_eta: int | None = None,
         linker: DatasetLinker | None = None,
-    ):
+    ) -> None:
         self.start_date = coerce_datetime(start_date) if start_date else None
         self.end_date = coerce_datetime(end_date) if end_date else None
 
@@ -134,16 +151,22 @@ class ROMSInputDataset(InputDataset, ABC):
 
         if self.source_partitioning:
             if file_hash:
-                raise NotImplementedError(
-                    "Cannot use hash verification with partitioned source files"
-                )
+                msg = "Cannot use hash verification with partitioned source files"
+                raise NotImplementedError(msg)
+
+            if self.source_np_eta is None or self.source_np_xi is None:
+                rte = RuntimeError("Partitioning requires non-null partition size")
+                rte.add_note(f"{self.source_np_eta=}")
+                rte.add_note(f"{self.source_np_xi=}")
+                raise rte
+
             n_source_partitions = self.source_np_xi * self.source_np_eta  # type: ignore[operator]
-            ndigits = len(str(n_source_partitions - 1))
-            locations = []
-            for i in range(n_source_partitions):
-                old_suffix = f".{0:0{ndigits}d}.nc"
-                new_suffix = f".{i:0{ndigits}d}.nc"
-                locations.append(location.replace(old_suffix, new_suffix))
+
+            suffixes = ROMSPartitioning.suffixes(n_source_partitions)
+            suffix0 = ROMSPartitioning.suffix(0, n_source_partitions)
+
+            locations = [location.replace(suffix0, suffix) for suffix in suffixes]
+
             self.partitioned_source = SourceDataCollection.from_locations(locations)
             # muting the linter because we only enter this block if np_xi and np_eta are not None
             self.partitioning = ROMSPartitioning(
@@ -160,7 +183,7 @@ class ROMSInputDataset(InputDataset, ABC):
             return self.source_np_xi, self.source_np_eta
         return None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         input_dataset_dict = super().to_dict()
         if self.source_partitioning is not None:
             input_dataset_dict["source_np_xi"] = self.source_np_xi
@@ -187,7 +210,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
     def partition(
         self, np_xi: int, np_eta: int, overwrite_existing_files: bool = False
-    ):
+    ) -> None:
         """Partition a netCDF dataset into tiles to run ROMS in parallel.
 
         Takes a local InputDataset and parallelisation parameters and uses
@@ -220,26 +243,28 @@ class ROMSInputDataset(InputDataset, ABC):
         def validate_partitioning_request() -> bool:
             """Helper function to skip, raise, or proceed with partitioning request."""
             if (self.partitioning is not None) and (not overwrite_existing_files):
-                if (self.partitioning.np_xi == np_xi) and (
-                    self.partitioning.np_eta == np_eta
+                if (
+                    self.partitioning.np_xi == np_xi
+                    and self.partitioning.np_eta == np_eta
                 ):
-                    self.log.info(
-                        f"⏭️  {self.__class__.__name__} already partitioned, skipping"
-                    )
+                    msg = f"⏭️  {self.__class__.__name__} already partitioned, skipping"
+                    self.log.info(msg)
                     return False
-                else:
-                    raise FileExistsError(
-                        f"The file has already been partitioned into a different arrangement "
-                        f"({self.partitioning.np_xi},{self.partitioning.np_eta}). "
-                        "To overwrite these files, try again with overwrite_existing_files=True"
-                    )
+
+                msg = (
+                    f"The file has already been partitioned into a different arrangement "
+                    f"({self.partitioning.np_xi},{self.partitioning.np_eta}). "
+                    "To overwrite these files, try again with overwrite_existing_files=True"
+                )
+                raise FileExistsError(msg)
 
             if not self.exists_locally:
-                raise ValueError(
+                msg = (
                     f"local path(s) to InputDataset \n {self._local}, "
-                    + "refers to a non-existent file(s)"
-                    + "\n call InputDataset.get() and try again."
+                    "refers to a non-existent file(s)"
+                    "\n call InputDataset.get() and try again."
                 )
+                raise ValueError(msg)
             return True
 
         def list_files_to_partition() -> list[Path]:
@@ -249,14 +274,11 @@ class ROMSInputDataset(InputDataset, ABC):
             if isinstance(self.working_copy, StagedDataCollection):
                 # if single InputDataset corresponds to many files, check they're colocated
                 if not all(
-                    [
-                        d.parent == self.working_copy.common_parent
-                        for d in self.working_copy.paths
-                    ]
+                    d.parent == self.working_copy.common_parent
+                    for d in self.working_copy.paths
                 ):
-                    raise ValueError(
-                        f"A single input dataset exists in multiple directories: {self.working_copy.paths}."
-                    )
+                    msg = f"A single input dataset exists in multiple directories: {self.working_copy.paths}."
+                    raise ValueError(msg)
 
                 # If they are, we want to partition them all in the same place
                 id_files_to_partition = self.working_copy.paths
@@ -271,12 +293,14 @@ class ROMSInputDataset(InputDataset, ABC):
             """Helper function that wraps the actual roms_tools.partition_netcdf
             call.
             """
-            new_parted_files = []
+            new_parted_files: list[Path] = []
 
             include_coarse_dims = True
 
             for idfile in files:
-                self.log.info(f"Partitioning {idfile} into ({np_xi},{np_eta})")
+                msg = f"Partitioning {idfile} into ({np_xi},{np_eta})"
+                self.log.info(msg)
+
                 try:
                     result = roms_tools.partition_netcdf(
                         idfile,
@@ -286,10 +310,11 @@ class ROMSInputDataset(InputDataset, ABC):
                     )
 
                 except Exception as e:
-                    self.log.warning(
+                    msg = (
                         f"Encountered error partitioning {idfile} with coarse dims; "
                         f"retrying without coarse dims. Exception: {e}"
                     )
+                    self.log.warning(msg)
                     include_coarse_dims = False
                     try:
                         result = roms_tools.partition_netcdf(
@@ -321,7 +346,7 @@ class ROMSInputDataset(InputDataset, ABC):
 
         def restore_existing_partitioned_files(
             backup_dir: Path, restore_paths: list[Path]
-        ):
+        ) -> None:
             """Helper function to restore existing parted files if partitioning
             fails.
             """
@@ -383,9 +408,8 @@ class ROMSInputDataset(InputDataset, ABC):
             self.linker.validate_opt()
             working_copy = self.working_copy
             if not isinstance(working_copy, StagedFile):
-                raise CstarExpectationFailed(
-                    "Cannot use a linker for non-file datasets"
-                )
+                msg = "Cannot use a linker for non-file datasets"
+                raise CstarExpectationFailed(msg)
             self.linker.link(working_copy.path)
 
     def _get_from_partitioned_source(self, local_dir: Path) -> None:
@@ -395,18 +419,18 @@ class ROMSInputDataset(InputDataset, ABC):
             for i, s in enumerate(self.partitioned_source):
                 target_path = local_dir / s.basename
                 if self.working_copy and self.working_copy[i].path == target_path:  # type: ignore[index]
-                    self.log.info(f"⏭️ {target_path} already exists, skipping.")
+                    msg = f"⏭️ {target_path} already exists, skipping."
+                    self.log.info(msg)
                     continue
-                else:
-                    self._working_copy.append(s.stage(local_dir))  # type: ignore[union-attr]
+
+                self._working_copy.append(s.stage(local_dir))  # type: ignore[union-attr]
             return
         # Otherwise stage them all:
-        else:
-            self._working_copy = self.partitioned_source.stage(local_dir)
+        self._working_copy = self.partitioned_source.stage(local_dir)
 
     def _update_partitioning_attribute(
         self, new_np_xi: int, new_np_eta: int, parted_files: list[Path]
-    ):
+    ) -> None:
         self.partitioning = ROMSPartitioning(
             np_xi=new_np_xi, np_eta=new_np_eta, files=parted_files
         )
@@ -427,17 +451,16 @@ class ROMSInputDataset(InputDataset, ABC):
             zero_files = [f for f in self.partitioning.files if zero_str in str(f)]
             return [Path(str(f).replace(zero_str, ".nc")) for f in zero_files]
 
-        raise FileNotFoundError(
+        msg = (
             "ROMS requires files to be partitioned for use. "
             "Call ROMSInputDataset.partition() or ROMSSimulation.pre_run() "
             "and try again"
         )
+        raise FileNotFoundError(msg)
 
 
 class ROMSModelGrid(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model grid files."""
-
-    pass
 
 
 class ROMSInitialConditions(ROMSInputDataset):
@@ -445,13 +468,9 @@ class ROMSInitialConditions(ROMSInputDataset):
     files.
     """
 
-    pass
-
 
 class ROMSTidalForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model tidal forcing files."""
-
-    pass
 
 
 class ROMSBoundaryForcing(ROMSInputDataset):
@@ -459,21 +478,15 @@ class ROMSBoundaryForcing(ROMSInputDataset):
     files.
     """
 
-    pass
-
 
 class ROMSSurfaceForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model surface forcing
     files.
     """
 
-    pass
-
 
 class ROMSRiverForcing(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for river forcing files."""
-
-    pass
 
 
 class ROMSForcingCorrections(ROMSInputDataset):
@@ -485,12 +498,13 @@ class ROMSForcingCorrections(ROMSInputDataset):
     a NetCDF or similar file.
     """
 
-    def validate(self):
-        if self.source._classification.value.file_encoding == FileEncoding.TEXT:
-            raise TypeError(
+    def validate(self) -> None:
+        if self.source.classification.value.file_encoding == FileEncoding.TEXT:
+            msg = (
                 f"{self.__class__.__name__} cannot be initialized with a source YAML file. "
                 "Please provide a direct path or URL to a dataset (e.g., NetCDF)."
             )
+            raise TypeError(msg)
 
 
 class ROMSCdrForcing(ROMSInputDataset):

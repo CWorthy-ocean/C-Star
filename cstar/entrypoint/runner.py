@@ -14,6 +14,7 @@ from cstar.entrypoint.service import Service
 from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
     ARG_DIRECTIVES_URI_SHORT,
+    ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
     ARG_URI_LONG,
@@ -205,7 +206,7 @@ def create_parser() -> argparse.ArgumentParser:
         default=get_env_item(ENV_CSTAR_LOG_LEVEL).value,
         type=str,
         required=False,
-        help="Logging level for the simulation.",
+        help=ARG_LOGLEVEL_HELP,
         choices=list(LogLevelChoices),
     )
     parser.add_argument(

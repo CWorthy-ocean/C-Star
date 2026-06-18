@@ -686,9 +686,8 @@ def test_get_env_item_cstar_override(
     monkeypatch.setenv(xdg_var, xdg_value)
     monkeypatch.setenv(cstar_var, cstar_val)
     env_item = get_env_item(cstar_var)
-    output_dir = env_item.value
 
-    assert output_dir == cstar_val
+    assert env_item.value == cstar_val
 
 
 @pytest.mark.parametrize(
@@ -729,9 +728,9 @@ def test_get_env_item_indirect(
     env_item = get_env_item(cstar_var)
 
     with mock.patch("cstar.base.env.EnvItem.default_factory", None):
-        output_dir = env_item.value
+        actual_value = env_item.value
 
-    assert output_dir == xdg_value
+    assert actual_value == xdg_value
 
 
 @pytest.mark.parametrize(
@@ -766,8 +765,7 @@ def test_get_env_item_default(
 
     env_item = get_env_item(cstar_var)
 
-    output_dir = env_item.value
-    assert output_dir == env_item.default
+    assert env_item.value == env_item.default
 
 
 @pytest.mark.parametrize(
@@ -793,13 +791,13 @@ def test_get_env_item_default_from_factory(
     monkeypatch.setenv(xdg_var, xdg_value)
 
     env_item = get_env_item(cstar_var)
-    output_dir = env_item.value
+    actual_value = env_item.value
 
     if factory_value:
         # ensure that a default factory function is evaluated
-        assert output_dir == factory_value
+        assert actual_value == factory_value
     else:
-        assert output_dir == env_item.default
+        assert actual_value == env_item.default
 
 
 def test_get_env_item_value_set(

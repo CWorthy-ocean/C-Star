@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://c-star.readthedocs.io/en/latest/_downloads/d93c79fe7f8f58b0fa61da8ff8d25e87/workplan_schema.1.0.0.json
 name: example_workplan
 description: Runs a Wales model, then make some plots!
 state: draft
@@ -15,8 +16,8 @@ steps:
     depends_on:
       - wales
     blueprint_overrides:
-      input_dir: "{{path: wales}}/joined_output"
-      grid_file_path: "{{path: wales}}/input/input_datasets/roms_grd.nc"
-      output_dir: "{{path: wales_plotter}}/output"
+      working_dir: "{{work_dir: wales_plotter}}/output"
+      input_dir: "{{work_dir: wales}}/joined_output"
+      grid_file_path: "{{work_dir: wales}}/input/input_datasets/roms_grd.nc"
       time_indices:
         - "{{time_slice}}"

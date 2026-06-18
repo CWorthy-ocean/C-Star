@@ -1,3 +1,4 @@
+import textwrap
 import typing as t
 import uuid
 from collections.abc import Callable
@@ -6,10 +7,18 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from cstar.applications.plotter_app import PlotterBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
-from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
-from cstar.orchestration.state import sentinel_path
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    read_json_to_raw,
+    read_raw,
+    read_yaml_to_raw,
+    serialize,
+)
+from cstar.orchestration.state import StateRepository
 
 
 def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
@@ -259,7 +268,7 @@ def test_serialization_handle(mode: PersistenceMode) -> None:
     pid, job_name = "test-pid", "abc123"
     handle = SlurmHandle(pid=pid, name=job_name)
 
-    persist_as = sentinel_path(handle, mode)
+    persist_as = StateRepository.sentinel_path(handle, mode=mode)
 
     # confirm the parametrized serialization mode is supported
     nbytes = serialize(
@@ -281,3 +290,185 @@ def test_serialization_handle(mode: PersistenceMode) -> None:
 
     assert dhandle.name == handle.name
     assert dhandle.pid == handle.pid
+
+
+def test_serializaton_json_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
+    """Verify a json-serialized file contains a schema reference."""
+    target = tmp_path / "output.json"
+
+    bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
+
+    assert serialize(target, bp, mode=PersistenceMode.auto)
+
+    content = target.read_text()
+    assert '"$schema":"http' in content
+    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
+
+
+def test_serializaton_yaml_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:
+    """Verify a YAML-serialized file contains a schema reference."""
+    target = tmp_path / "output.yaml"
+
+    bp = deserialize(plotter_v2_0_0_bp, PlotterBlueprint)
+
+    assert serialize(target, bp, mode=PersistenceMode.auto)
+
+    content = target.read_text()
+    assert "# yaml-language-server: $schema=" in content
+    assert f"{bp.application}_schema.{bp.schema_version}.json" in content
+
+
+@pytest.fixture
+def person_yaml(tmp_path: Path) -> Path:
+    document = textwrap.dedent("""\
+        person:
+          name: unit test
+          age: 42
+          address:
+            street: "101 main st"
+            city: anywhere
+            state: ND
+          pets:
+          - Waffles
+          - Grits
+    """)
+    document_path = tmp_path / "doc.yaml"
+    document_path.write_text(document)
+    return document_path
+
+
+@pytest.fixture
+def person_yml(person_yaml: Path) -> Path:
+    name = person_yaml.with_suffix(".yml")
+    return person_yaml.rename(name)
+
+
+@pytest.fixture
+def person_json(tmp_path: Path) -> Path:
+    document = textwrap.dedent("""\
+        {
+            "person": {
+                "name": "unit test",
+                "address": {
+                    "street": "101 main st",
+                    "city": "anywhere",
+                    "state": "ND"
+                },
+                "age": 42,
+                "pets": [
+                    "Waffles",
+                    "Grits"
+                ]
+            }
+        }
+    """)
+    document_path = tmp_path / "doc.json"
+    document_path.write_text(document)
+    return document_path
+
+
+@pytest.mark.parametrize(
+    "source_fixture",
+    ["person_yaml", "person_yml"],
+)
+def test_read_yaml_to_raw(request: pytest.FixtureRequest, source_fixture: str) -> None:
+    """Verify yaml parsing results in the expected dictionary."""
+    person_doc = request.getfixturevalue(source_fixture)
+    d = read_yaml_to_raw(person_doc)
+
+    person = d.get("person", {})
+    assert person
+    assert person["name"] == "unit test"
+    assert person["age"] == 42
+
+    address = person.get("address", {})
+    assert address
+    assert address["street"] == "101 main st"
+
+    pets = person.get("pets", [])
+    assert "Waffles" in pets
+    assert "Grits" in pets
+
+
+def test_read_json_to_raw(person_json: Path) -> None:
+    """Verify json parsing results in the expected dictionary."""
+    d = read_json_to_raw(person_json)
+
+    person = d.get("person", {})
+    assert person
+    assert person["name"] == "unit test"
+    assert person["age"] == 42
+
+    address = person.get("address", {})
+    assert address
+    assert address["street"] == "101 main st"
+
+    pets = person.get("pets", [])
+    assert "Waffles" in pets
+    assert "Grits" in pets
+
+
+@pytest.mark.parametrize(
+    ("source_fixture", "mode"),
+    [
+        pytest.param("person_yaml", PersistenceMode.yaml, id="mode:correct:yaml"),
+        pytest.param("person_yaml", PersistenceMode.auto, id="mode:auto:yaml"),
+        pytest.param("person_yaml", PersistenceMode.json, id="mode:fallback:yaml"),
+        pytest.param("person_yml", PersistenceMode.yaml, id="mode:correct:yml"),
+        pytest.param("person_yml", PersistenceMode.auto, id="mode:auto:yml"),
+        pytest.param("person_yml", PersistenceMode.json, id="mode:fallback:yml"),
+        pytest.param("person_json", PersistenceMode.json, id="mode:correct:json"),
+        pytest.param("person_json", PersistenceMode.auto, id="mode:auto:json"),
+        pytest.param("person_json", PersistenceMode.yaml, id="mode:fallback:json"),
+    ],
+)
+def test_read_raw(
+    request: pytest.FixtureRequest, source_fixture: str, mode: PersistenceMode
+) -> None:
+    """Verify the automatic read mode selects the right reader and
+    failures are recovered by falling back to the alternate reader.
+    """
+    path = request.getfixturevalue(source_fixture)
+    d = read_raw(path, mode=mode)
+
+    person = d.get("person", {})
+    assert person
+    assert person["name"] == "unit test"
+    assert person["age"] == 42
+
+    address = person.get("address", {})
+    assert address
+    assert address["street"] == "101 main st"
+
+    pets = person.get("pets", [])
+    assert "Waffles" in pets
+    assert "Grits" in pets
+
+
+def test_read_raw_no_auto(
+    person_yaml: Path,
+    person_json: Path,
+) -> None:
+    """Verify that auto-mode does not take precedence over supplied mode value.
+
+    This test renames the file(s) so auto-mode would fail.
+    """
+    renamed0 = person_yaml.rename(person_yaml.with_suffix(".stuff"))
+    d0 = read_raw(renamed0, mode=PersistenceMode.yaml)
+
+    renamed1 = person_json.rename(person_json.with_suffix(".other"))
+    d1 = read_raw(renamed1, mode=PersistenceMode.json)
+
+    for d in [d0, d1]:
+        person = d.get("person", {})
+        assert person
+        assert person["name"] == "unit test"
+        assert person["age"] == 42
+
+        address = person.get("address", {})
+        assert address
+        assert address["street"] == "101 main st"
+
+        pets = person.get("pets", [])
+        assert "Waffles" in pets
+        assert "Grits" in pets

@@ -2,6 +2,7 @@ import os
 import sys
 import types
 import typing as t
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,7 +35,7 @@ class EnvVar:
     """A group name used to identify the variable use."""
     default: str = ""
     """The default value for the setting."""
-    default_factory: t.Callable[["EnvVar"], str | None] | None = None
+    default_factory: Callable[["EnvVar"], str | None] | None = None
     """A function used at run-time to generate the default value."""
     indirect_var: str = ""
     """An environment variable name to be used when the primary variable is not set."""
@@ -168,7 +169,6 @@ ENV_CSTAR_LOG_LEVEL: t.Annotated[
 ] = "CSTAR_LOG_LEVEL"
 """Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
 
-
 ENV_CSTAR_CLI_DRY_RUN: t.Annotated[
     t.Literal["CSTAR_CLI_DRY_RUN"],
     EnvVar(
@@ -178,7 +178,6 @@ ENV_CSTAR_CLI_DRY_RUN: t.Annotated[
     ),
 ] = "CSTAR_CLI_DRY_RUN"
 """Set to `1` to short-circuit CLI operations after planning steps are completed."""
-
 
 ENV_CSTAR_CLI_VERBOSE: t.Annotated[
     t.Literal["CSTAR_CLI_VERBOSE"],
@@ -307,6 +306,16 @@ ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
     ),
 ] = "CSTAR_SLURM_POST_SUBMIT_DELAY"
 """Delay (in seconds) after a submission to ensure status for a SLURM job can be queried."""
+
+ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
+    t.Literal["CSTAR_ORCH_LOCAL_DELAY"],
+    EnvVar(
+        "Delay (in seconds) between status queries in the local launcher proxy script",
+        GROUP_SIM,
+        default="10.0",
+    ),
+] = "CSTAR_ORCH_LOCAL_DELAY"
+"""Delay (in seconds) between status queries in the local launcher proxy script."""
 
 
 def discover_env_vars(

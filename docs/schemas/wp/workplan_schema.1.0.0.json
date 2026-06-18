@@ -1,0 +1,245 @@
+{
+    "$defs": {
+        "Step": {
+            "description": "An individual unit of execution within a workplan.",
+            "properties": {
+                "name": {
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                },
+                "application": {
+                    "minLength": 1,
+                    "title": "Application",
+                    "type": "string"
+                },
+                "blueprint": {
+                    "anyOf": [
+                        {
+                            "format": "file-path",
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "title": "Blueprint"
+                },
+                "depends_on": {
+                    "items": {
+                        "minLength": 1,
+                        "type": "string"
+                    },
+                    "title": "Depends On",
+                    "type": "array"
+                },
+                "blueprint_overrides": {
+                    "additionalProperties": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "items": {
+                                    "type": "number"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "title": "Blueprint Overrides",
+                    "type": "object"
+                },
+                "compute_overrides": {
+                    "additionalProperties": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "items": {
+                                    "type": "number"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "title": "Compute Overrides",
+                    "type": "object"
+                },
+                "workflow_overrides": {
+                    "additionalProperties": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "items": {
+                                    "type": "number"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "title": "Workflow Overrides",
+                    "type": "object"
+                },
+                "directives": {
+                    "additionalProperties": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "items": {
+                                    "type": "number"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "additionalProperties": true,
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "title": "Directives",
+                    "type": "object"
+                }
+            },
+            "required": [
+                "name",
+                "application",
+                "blueprint"
+            ],
+            "title": "Step",
+            "type": "object"
+        },
+        "WorkplanState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "WorkplanState",
+            "type": "string"
+        }
+    },
+    "description": "A collection of executable steps and the associated configuration to run them.",
+    "properties": {
+        "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "steps": {
+            "items": {
+                "$ref": "#/$defs/Step"
+            },
+            "minItems": 1,
+            "title": "Steps",
+            "type": "array"
+        },
+        "state": {
+            "$ref": "#/$defs/WorkplanState",
+            "default": "notset"
+        },
+        "compute_environment": {
+            "additionalProperties": {
+                "anyOf": [
+                    {
+                        "type": "string"
+                    },
+                    {
+                        "type": "number"
+                    },
+                    {
+                        "items": {
+                            "type": "string"
+                        },
+                        "type": "array"
+                    },
+                    {
+                        "items": {
+                            "type": "number"
+                        },
+                        "type": "array"
+                    },
+                    {
+                        "additionalProperties": true,
+                        "type": "object"
+                    }
+                ]
+            },
+            "title": "Compute Environment",
+            "type": "object"
+        },
+        "runtime_vars": {
+            "items": {
+                "type": "string"
+            },
+            "title": "Runtime Vars",
+            "type": "array"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "steps"
+    ],
+    "title": "Workplan",
+    "type": "object"
+}

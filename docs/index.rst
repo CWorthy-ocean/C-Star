@@ -54,6 +54,7 @@ A key strength of C-Star lies in its ability to run regional ocean simulations u
     api-blueprint
     api-orchestration
     api
+    schemas/index
 
 .. toctree::
     :maxdepth: 1
