@@ -139,7 +139,6 @@ class CStarEnvironment:
         self._system_name = system_name
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
-        self._PACKAGE_ROOT: Path = self._find_package_root()
 
         # Load modules FIRST (if using lmod), then load env file
         # This ensures module-set variables (e.g., CRAY_NETCDF_PREFIX) are available
@@ -270,7 +269,9 @@ class CStarEnvironment:
         ImportError
             If the top-level package cannot be located.
         """
-        return self._PACKAGE_ROOT
+        if self._package_root is None:
+            self._package_root = self._find_package_root()
+        return self._package_root
 
     @property
     def uses_lmod(self) -> bool:
