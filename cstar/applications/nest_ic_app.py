@@ -68,17 +68,31 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         return self.result
 
     @staticmethod
-    def _has_bgc(filepath: Path) -> bool:
-        """Check if the parent restart file has BGC tracers."""
+    def _has_bgc(filepath: Path, bgc_vars: set[str] = {"no3", "dic"}) -> bool:
+        """Check if the parent restart file has BGC tracers.
+
+        Inspects the variables in the file and returns `True` if one or more
+        variable names exist. The default `bgc_vars` are specific to MARBL
+        but should exist in any BGC/mCDR model.
+
+        Parameters
+        ----------
+        filepath : Path
+            The path to a dataset.
+        bgc_vars : set[str]
+            A case-insensitive set of names that identify BGC variables.
+
+        Returns
+        -------
+        bool
+        """
         if not filepath.exists():
             msg = f"Unable to locate tracers, file not found: {filepath}"
             raise ValueError(msg)
 
-        with xr.open_dataset(filepath) as ds:
-            # Example: check if nitrate, DIC exist
-            # These are specific to MARBL but other than capitalization are likely to be in any BGC or mCDR model
-            bgc_vars = ["NO3", "DIC", "no3", "dic"]
-            return any(var in ds.variables for var in bgc_vars)
+        with xr.open_dataset(filepath.as_posix()) as ds:
+            ds_vars = {str(v).lower() for v in ds.variables}
+            return bool(ds_vars.intersection(bgc_vars))
 
     def _create_initial_conditions(
         self,
