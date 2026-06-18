@@ -25,7 +25,7 @@ FLAG_ON: t.Final[str] = "1"
 FLAG_OFF: t.Final[str] = "0"
 """Value indicating a toggle is disabled."""
 
-ENV_PREFIX: t.Final[str] = "CSTAR_"
+ENVVAR_PREFIX: t.Final[str] = "CSTAR_"
 """The common env var prefix that identifies a C-Star configuration setting."""
 CONSTANT_PREFIX: t.Final[str] = "ENV_"
 """The common prefix used to name an annotated environment variable constant."""
@@ -88,7 +88,7 @@ def capture_environment() -> dict[str, str]:
     -------
     dict[str, str]
     """
-    return {k: v for k, v in os.environ.items() if k.startswith(ENV_PREFIX)}
+    return {k: v for k, v in os.environ.items() if k.startswith(ENVVAR_PREFIX)}
 
 
 def indirect_default_factory(env_var: EnvVar) -> str:
