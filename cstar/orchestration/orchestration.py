@@ -279,7 +279,7 @@ class LiveStep(Step):
     @property
     def script_path(self) -> Path:
         """Return the path to the the log file written by this task."""
-        return self.fsm.run_dir / "script.sh"
+        return self.fsm.root_dir / "script.sh"
 
     @property
     def log_path(self) -> Path:
