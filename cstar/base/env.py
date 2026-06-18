@@ -1,9 +1,10 @@
 import os
 import sys
-import types
 import typing as t
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
+from importlib import import_module
 from pathlib import Path
 
 GROUP_FF: t.Final[str] = "Feature Flags"
@@ -22,6 +23,9 @@ FLAG_OFF: t.Final[str] = "0"
 
 ENV_PREFIX: t.Final[str] = "CSTAR_"
 """The common env var prefix that identifies a C-Star configuration setting."""
+
+if t.TYPE_CHECKING:
+    import types
 
 
 @dataclass(slots=True)
@@ -94,12 +98,12 @@ def indirect_default_factory(env_var: EnvVar) -> str:
     return os.environ.get(var_name, "")
 
 
-def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
+def get_env_item(var_name: str) -> EnvItem:
     """Retrieve the metadata for an environment variable constant.
 
     Parameters:
     -----------
-    var_name: str
+    var_name : str
         The string value of the environment variable (e.g. "CSTAR_CACHE_HOME")
 
     Returns:
@@ -107,27 +111,11 @@ def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
     env_item: EnvItem
         The metadata associated with the environment variable
     """
-    constant_mods = [__name__, "cstar.orchestration.utils", "cstar.base.feature"]
-    constant_name = f"{prefix}{var_name}"
+    env_vars = discover_env_vars()
+    if variable := env_vars.get(var_name, None):
+        return variable
 
-    for module_name in constant_mods:
-        hints = t.get_type_hints(sys.modules[module_name], include_extras=True)
-
-        if hint := hints.get(constant_name, None):
-            metadata = getattr(hint, "__metadata__", None)
-            if not metadata:
-                return EnvItem(
-                    description="unknown",
-                    group=GROUP_UNK,
-                    default="unknown",
-                    name=var_name,
-                )
-
-            meta = metadata[0]
-            if isinstance(meta, EnvVar):
-                return EnvItem.from_env_var(meta, var_name)
-
-    msg = f"No environment variable metadata found for: {constant_name}"
+    msg = f"No environment variable metadata found for: {var_name}"
     raise ValueError(msg)
 
 
@@ -309,30 +297,43 @@ ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
 """Delay (in seconds) after a submission to ensure status for a SLURM job can be queried."""
 
 
-def discover_env_vars(
-    modules: list[types.ModuleType],
-    prefix: str = "ENV_",
-) -> list[EnvItem]:
-    """Locate all constants in a module that represent environment variables."""
-    items: list[EnvItem] = []
-    for module in modules:
+@lru_cache
+def discover_env_vars() -> dict[str, EnvItem]:
+    container: dict[str, EnvItem] = {}
+    prefix = "ENV_"
+
+    modules_list = [
+        __name__,
+        "cstar.orchestration.utils",
+        "cstar.base.feature",
+    ]
+    modules: dict[str, types.ModuleType] = {__name__: sys.modules[__name__]}
+
+    for module_name in modules_list[1:]:
+        modules[module_name] = import_module(module_name)
+
+    for module_name, module in modules.items():
         hints = t.get_type_hints(module, include_extras=True)
+        variables = (x for x in dir(module) if x.startswith(prefix))
 
-        for name, hint in hints.items():
-            if name.startswith(prefix):
+        for var_name in variables:
+            # get the actual constant value from the module
+            actual = getattr(module, var_name)
+
+            if hint := hints.get(var_name, None):
                 metadata = getattr(hint, "__metadata__", None)
-                value = getattr(module, name)
-                if metadata and isinstance(metadata[0], EnvVar):
-                    meta = metadata[0]
-                    items.append(EnvItem.from_env_var(meta, value))
-                elif not metadata:
-                    items.append(
-                        EnvItem(
-                            description="unknown",
-                            group=GROUP_UNK,
-                            default="unknown",
-                            name=value,
-                        ),
+                # variable matching naming convention ENV_ is missing annotations
+                if not metadata:
+                    item = EnvItem(
+                        description="unknown",
+                        group=GROUP_UNK,
+                        default="unknown",
+                        name=actual,
                     )
+                    container[actual] = item
+                    continue
 
-    return items
+                meta = metadata[0]
+                if isinstance(meta, EnvVar):
+                    container[actual] = EnvItem.from_env_var(meta, actual)
+    return container

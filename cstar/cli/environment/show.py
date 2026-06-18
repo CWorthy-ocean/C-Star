@@ -6,10 +6,7 @@ from enum import StrEnum, auto
 import typer
 from rich import print  # noqa: A004, ignore shadowing of built-in print
 
-from cstar.base import env, feature
-from cstar.base import utils as base_utils
 from cstar.base.env import discover_env_vars
-from cstar.orchestration import utils as orch_utils
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem
@@ -111,14 +108,14 @@ def show(
     ] = DisplayFormat.INTERACTIVE,
 ) -> None:
     """Display the active environment configuration."""
-    all_items = discover_env_vars([base_utils, env, orch_utils, feature])
+    items = discover_env_vars()
 
     if group != "all":
-        all_items = [item for item in all_items if group.lower() in item.group.lower()]
+        items = {k: v for k, v in items.items() if group.lower() in v.group.lower()}
 
     # Group items by their group name for display
     group_map: dict[str, list[EnvItem]] = defaultdict(list)
-    for item in all_items:
+    for item in items.values():
         group_map[item.group].append(item)
 
     if not group_map:
