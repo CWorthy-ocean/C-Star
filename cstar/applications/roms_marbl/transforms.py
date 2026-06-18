@@ -598,7 +598,7 @@ class ContinuanceTransform(Directive, OverrideTransform):
             raise NotImplementedError(msg)
 
         search_path = Path(self._config["path"])
-        if search_path.suffix == f".{RestartFile.EXT}":
+        if search_path.is_file():
             restart_file = RestartFile(path=search_path)
             return RestartFileTrxAdapter.adapt(restart_file)
 
