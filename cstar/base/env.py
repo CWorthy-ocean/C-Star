@@ -7,6 +7,9 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 
+if t.TYPE_CHECKING:
+    from types import ModuleType
+
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
 GROUP_FS: t.Final[str] = "File System Configuration"
@@ -23,9 +26,8 @@ FLAG_OFF: t.Final[str] = "0"
 
 ENV_PREFIX: t.Final[str] = "CSTAR_"
 """The common env var prefix that identifies a C-Star configuration setting."""
-
-if t.TYPE_CHECKING:
-    import types
+CONSTANT_PREFIX = "ENV_"
+"""The common prefix used to name an annotated environment variable constant."""
 
 
 @dataclass(slots=True)
@@ -300,40 +302,33 @@ ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
 @lru_cache
 def discover_env_vars() -> dict[str, EnvItem]:
     container: dict[str, EnvItem] = {}
-    prefix = "ENV_"
-
-    modules_list = [
-        __name__,
-        "cstar.orchestration.utils",
-        "cstar.base.feature",
+    modules: list[ModuleType] = [
+        sys.modules[__name__],
+        import_module("cstar.orchestration.utils"),
+        import_module("cstar.base.feature"),
     ]
-    modules: dict[str, types.ModuleType] = {__name__: sys.modules[__name__]}
 
-    for module_name in modules_list[1:]:
-        modules[module_name] = import_module(module_name)
-
-    for module_name, module in modules.items():
+    for module in modules:
         hints = t.get_type_hints(module, include_extras=True)
-        variables = (x for x in dir(module) if x.startswith(prefix))
+        variables = (x for x in dir(module) if x.startswith(CONSTANT_PREFIX))
 
         for var_name in variables:
-            # get the actual constant value from the module
             actual = getattr(module, var_name)
+            meta: EnvVar | None = None
+            hint = hints.get(var_name, None)
 
-            if hint := hints.get(var_name, None):
-                metadata = getattr(hint, "__metadata__", None)
-                # variable matching naming convention ENV_ is missing annotations
-                if not metadata:
-                    item = EnvItem(
-                        description="unknown",
-                        group=GROUP_UNK,
-                        default="unknown",
-                        name=actual,
-                    )
-                    container[actual] = item
-                    continue
+            if hint and (metadata := getattr(hint, "__metadata__", None)):
+                meta = next((x for x in metadata if x and isinstance(x, EnvVar)), None)
 
-                meta = metadata[0]
-                if isinstance(meta, EnvVar):
-                    container[actual] = EnvItem.from_env_var(meta, actual)
+            if meta:
+                container[actual] = EnvItem.from_env_var(meta, actual)
+            else:
+                # EnvVar type annotation not found
+                container[actual] = EnvItem(
+                    description="unknown",
+                    group=GROUP_UNK,
+                    default="unknown",
+                    name=actual,
+                )
+
     return container
