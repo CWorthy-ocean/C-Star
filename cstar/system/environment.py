@@ -2,10 +2,90 @@ import importlib.util
 import os
 import platform
 from pathlib import Path
+from typing import ClassVar, Final
 
 from dotenv import dotenv_values
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cstar.base.utils import _run_cmd
+
+
+def _get_envfield_alias(klass: type[BaseSettings], field_name: str) -> str:
+    """Retrieve the environment variable name for a given field.
+
+    Parameters
+    ----------
+    klass : type[BaseSettings]
+        A settings class that contains the field.
+    field_name : str
+        The name of the model field.
+
+    Returns
+    -------
+    str
+    """
+    field = klass.model_fields.get(field_name)
+    if field and isinstance(field.validation_alias, str):
+        return field.validation_alias
+
+    # Fallback logic if validation_alias isn't set: combine prefix and field name
+    prefix = klass.model_config.get("env_prefix", "")
+    return f"{prefix}{field_name}"
+
+
+class CStarEnvSettingsBase(BaseSettings):
+    """Base class configuring C-Star standard configuration management options."""
+
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+        env_prefix="CSTAR_",
+        str_strip_whitespace=True,
+    )
+    """Configuration altering cross-cutting model behaviors."""
+
+
+class LmodEnvSettings(BaseSettings):
+    """Environment configuration used by the LMOD system."""
+
+    CMD: str = Field(default="")
+    """The LMOD executable command."""
+    DIR: str = Field(default="")
+    """The LMOD lib directory."""
+    PKG: str = Field(default="")
+    """The path to the lmod package directory."""
+    ROOT: str = Field(default="")
+    """The path to the lmod install root directory."""
+    SYSHOST: str = Field(default="")
+    """The LMOD system host."""
+    SYSTEM_DEFAULT_MODULES: str = Field(default="")
+    """A colon-delimited list of modules automatically loaded by the system."""
+    SYSTEM_NAME: str = Field(default="")
+    """The LMOD system name."""
+    VERSION: str = Field(default="")
+    """The LMOD version."""
+
+    no_default_modules: ClassVar[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
+
+    @property
+    def lmod_hostname(self) -> str:
+        """Return a hostname using the available configuration with priority order:
+        1. LMOD_SYSHOST
+        2. LMOD_SYSTEM_NAME
+
+        If neither value is set, returns empty-string.
+        """
+        return (self.SYSHOST or self.SYSTEM_NAME).casefold()
+
+    @classmethod
+    def variable(cls, name: str) -> str:
+        """Return an aliased/prefixed variable name."""
+        return _get_envfield_alias(LmodEnvSettings, name)
+
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+        env_prefix="LMOD_",
+        str_strip_whitespace=True,
+    )
+    """Configuration altering cross-cutting model behaviors."""
 
 
 class CStarEnvironment:
@@ -17,31 +97,6 @@ class CStarEnvironment:
     This class also provides utilities for interacting with Linux Environment Modules
     (Lmod) and dynamically setting up the environment based on user and system configurations.
 
-    Attributes
-    ----------
-    system_name : str
-        The name of the system (e.g., "expanse", "perlmutter").
-    mpi_exec_prefix : str
-        The prefix command used for launching MPI jobs.
-    compiler : str
-        The compiler to be used in the environment (e.g., "intel", "gnu").
-    uses_lmod: bool
-        True if this system uses Linux Environment Modules for environment management
-
-    Methods
-    -------
-    load_lmod_modules(lmod_file: str) -> None
-        Loads the necessary Lmod modules for the current system based on a `.lmod` configuration file.
-    _call_lmod(*args) -> None
-        Executes a Linux Environment Modules command with specified arguments.
-
-    Raises
-    ------
-    EnvironmentError
-        Raised when required resources, modules, or configurations are missing or incompatible.
-    RuntimeError
-        Raised when a command or operation fails during execution.
-
     Examples
     --------
     >>> env = CStarEnvironment(
@@ -52,6 +107,17 @@ class CStarEnvironment:
     >>> print(env)
     CStarEnvironment(...)
     """
+
+    _system_name: Final[str]
+    """The name of the system (e.g., "expanse", "perlmutter")."""
+    _mpi_exec_prefix: Final[str]
+    """The command prefix used for launching MPI jobs."""
+    _compiler: Final[str]
+    """The compiler to be used in the environment (e.g., "intel", "gnu")."""
+    _package_root: Path | None = None
+    """The root directory of the installation of the C-Star package."""
+    _lmod_settings: Final[LmodEnvSettings]
+    """Environment variables used by the LMOD system."""
 
     def __init__(
         self,
@@ -78,6 +144,7 @@ class CStarEnvironment:
         # Load modules FIRST (if using lmod), then load env file
         # This ensures module-set variables (e.g., CRAY_NETCDF_PREFIX) are available
         # when env file variables are expanded
+        self._lmod_settings = LmodEnvSettings()
         if self.uses_lmod:
             self.load_lmod_modules(lmod_file=self.lmod_path)
 
@@ -215,7 +282,7 @@ class CStarEnvironment:
         bool
             True if the OS is Linux and `LMOD_DIR` is present in environment variables.
         """
-        return (platform.system() == "Linux") and ("LMOD_CMD" in list(os.environ))
+        return platform.system() == "Linux" and bool(self._lmod_settings.CMD)
 
     @property
     def system_env_path(self) -> Path:
@@ -320,6 +387,11 @@ class CStarEnvironment:
             raise OSError(
                 "Your system does not appear to use Linux Environment Modules"
             )
+
+        if not self._lmod_settings.SYSTEM_DEFAULT_MODULES:
+            var_name = LmodEnvSettings.variable("SYSTEM_DEFAULT_MODULES")
+            os.environ[var_name] = LmodEnvSettings.no_default_modules
+
         self._call_lmod("reset")
 
         with open(self.lmod_path) as fp:

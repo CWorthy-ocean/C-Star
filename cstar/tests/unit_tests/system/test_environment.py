@@ -21,7 +21,7 @@ from cstar.base.env import (
     hpc_data_directory,
 )
 from cstar.base.feature import is_flag_enabled
-from cstar.system.environment import CStarEnvironment
+from cstar.system.environment import CStarEnvironment, LmodEnvSettings
 
 
 class MockEnvironment(CStarEnvironment):
@@ -928,3 +928,94 @@ def test_is_flag_enabled() -> None:
 
     with mock.patch.dict(os.environ, {}, clear=True):
         assert not is_flag_enabled(key)
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "env_empty_lmod",
+        "env_clear_lmod",
+    ],
+)
+def test_lmodenvsettings_notset(
+    request: pytest.FixtureRequest, fixture_name: str
+) -> None:
+    """Verify an environment that contains no LMOD env vars does not result
+    in an exception when creating the settings instance.
+
+    Parameterized with: all keys have empty value, all keys missing
+    """
+    _ = request.getfixturevalue(fixture_name)
+    settings = LmodEnvSettings()
+
+    assert settings.CMD == ""
+    assert settings.DIR == ""
+    assert settings.PKG == ""
+    assert settings.ROOT == ""
+    assert settings.SYSHOST == ""
+    assert settings.SYSTEM_DEFAULT_MODULES == ""
+    assert settings.SYSTEM_NAME == ""
+    assert settings.VERSION == ""
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "env_full_lmod",
+        "env_full_strippable_lmod",
+    ],
+)
+def test_lmodenvsettings(request: pytest.FixtureRequest, fixture_name: str) -> None:
+    """Verify LMOD settings are loaded correctly from the environment."""
+    _ = request.getfixturevalue(fixture_name)
+
+    settings = LmodEnvSettings()
+
+    assert settings.CMD == "CMD-value"
+    assert settings.DIR == "DIR-value"
+    assert settings.PKG == "PKG-value"
+    assert settings.ROOT == "ROOT-value"
+    assert settings.SYSHOST == "SYSHOST-value"
+    assert settings.SYSTEM_DEFAULT_MODULES == "SYSTEM_DEFAULT_MODULES-value"
+    assert settings.SYSTEM_NAME == "SYSTEM_NAME-value"
+    assert settings.VERSION == "VERSION-value"
+
+
+@pytest.mark.usefixtures("env_full_lmod")
+@pytest.mark.parametrize(
+    ("host_value", "name_value", "exp_hostname"),
+    [
+        pytest.param("", "", "", id="empty system and host"),
+        pytest.param("host-value", "", "host-value", id="no system name"),
+        pytest.param("", "system-value", "system-value", id="no host name"),
+        pytest.param("host-value", "system-value", "host-value", id="prioritize host"),
+        pytest.param("HoSt-value", "", "host-value", id="casefold host"),
+        pytest.param("", "SyStEm-VaLuE", "system-value", id="casefold system"),
+        pytest.param(
+            "HoSt-value", "SyStEm-VaLuE", "host-value", id="casefold prioritized host"
+        ),
+    ],
+)
+def test_lmodenvsettings_lmod_hostname_compute(
+    host_value: str | None, name_value: str | None, exp_hostname: str
+) -> None:
+    """Verify LMOD hostname computatons follows expected priority order."""
+    with mock.patch.dict(
+        os.environ,
+        {
+            LmodEnvSettings.variable("SYSHOST"): host_value,
+            LmodEnvSettings.variable("SYSTEM_NAME"): name_value,
+        },
+    ):
+        settings = LmodEnvSettings()
+
+    assert settings.lmod_hostname == exp_hostname
+
+
+def test_lmodenvsettings_variable_resolution(
+    lmod_settings_keys: list[str],
+) -> None:
+    """Verify key resolution given a field name."""
+    for key in lmod_settings_keys:
+        expected_key = f"LMOD_{key}"
+        assert LmodEnvSettings.variable(key) == expected_key

@@ -5,7 +5,10 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Protocol
 
 from cstar.base.exceptions import CstarError
-from cstar.system.environment import CStarEnvironment
+from cstar.system.environment import (
+    CStarEnvironment,
+    LmodEnvSettings,
+)
 from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
@@ -23,53 +26,33 @@ class HostNameEvaluator:
     used by C-Star.
     """
 
-    lmod_syshost: str = field(default="", init=False)
-    """The lmod-specific hostname."""
-    lmod_sysname: str = field(default="", init=False)
-    """The lmod-specific system name."""
-    lmod_hostname: str = field(default="", init=False)
-    """Aggregate of lmod host and lmod name."""
-    platform_name: str = field(default="", init=False)
+    lmod_settings: LmodEnvSettings = field(default_factory=LmodEnvSettings, init=False)
+    """LMOD-specific environment configuration."""
+    platform_name: str = field(default_factory=lambda: platform.system(), init=False)
     """The platform name."""
-    machine_name: str = field(default="", init=False)
+    machine_name: str = field(default_factory=lambda: platform.machine(), init=False)
     """The machine name."""
-    platform_hostname: str = field(default="", init=False)
-    """Aggregate of machine and platform sysname."""
 
-    ENV_LMOD_SYSHOST: ClassVar[str] = "LMOD_SYSHOST"
-    ENV_LMOD_SYSNAME: ClassVar[str] = "LMOD_SYSTEM_NAME"
-
-    def __post_init__(self) -> None:
-        """Initialize the non-init and calculated attributes of an instance.
-
-        NOTE: make use of setattr because attributes are read-only.
-        """
-        # ruff: noqa: B010
-        setattr_ = object.__setattr__
-        setattr_(self, "lmod_syshost", os.environ.get(self.ENV_LMOD_SYSHOST, ""))
-        setattr_(self, "lmod_sysname", os.environ.get(self.ENV_LMOD_SYSNAME, ""))
-        setattr_(
-            self, "lmod_hostname", (self.lmod_syshost or self.lmod_sysname).casefold()
-        )
-        setattr_(self, "platform_name", platform.system())
-        setattr_(self, "machine_name", platform.machine())
-        setattr_(
-            self,
-            "platform_hostname",
-            (
-                f"{self.platform_name}_{self.machine_name}"
-                if self.platform_name and self.machine_name
-                else ""
-            ).casefold(),
-        )
+    @property
+    def platform_hostname(self) -> str:
+        """Aggregate of machine and platform sysname."""
+        value = ""
+        if self.platform_name and self.machine_name:
+            value = f"{self.platform_name}_{self.machine_name}"
+        return value.casefold()
 
     @property
     def _diagnostic(self) -> str:
         """Return a string useful for diagnosing failures to identify the name."""
-        return (
-            f"{self.lmod_syshost=}, {self.lmod_sysname=}, "
-            f"{self.platform_name=}, {self.machine_name=}"
-        )
+        attributes = [
+            self.lmod_settings.SYSHOST,
+            self.lmod_settings.SYSTEM_NAME,
+            self.platform_name,
+            self.machine_name,
+        ]
+
+        return ", ".join(f"{item=}" for item in attributes)
+
 
     @property
     def name(self) -> str:
@@ -83,11 +66,8 @@ class HostNameEvaluator:
         EnvironmentError
             If the name cannot be determined.
         """
-        if self.lmod_hostname:
-            return self.lmod_hostname
-
-        if os.getenv("RCAC_CLUSTER") == "anvil":
-            return "anvil"
+        if self.lmod_settings.lmod_hostname:
+            return self.lmod_settings.lmod_hostname
 
         if self.platform_hostname:
             return self.platform_hostname
