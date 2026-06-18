@@ -61,6 +61,6 @@ roms.in:
   ubind: 0.1  # m/s, OBC binding velocity scale
 
   initial:
-    nrrec: 1
+    nrrec: 2
     initial_file: null  # Set dynamically from generated initial conditions file
 
