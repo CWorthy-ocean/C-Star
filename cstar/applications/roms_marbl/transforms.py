@@ -52,7 +52,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
 
         Returns
         -------
-        Sequence[Step]
+        Sequence[LiveStep]
             Steps for each subtask resulting from the split.
         """
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
@@ -401,7 +401,9 @@ class BoundaryFile(BaseModel):
         Raises
         ------
         ValueError
-            If the search path does not exist or contains no recognizable boundary files.
+            If the search path does not exist.
+        FileNotFoundError
+            If no recognizable boundary files are found in the search path
         """
         search_path = search_path.expanduser().resolve()
 
@@ -415,7 +417,7 @@ class BoundaryFile(BaseModel):
 
         if not notfound_ok:
             msg = f"No boundary files located. Unable to continue from {search_path!r}"
-            raise CstarExpectationFailed(msg)
+            raise FileNotFoundError(msg)
 
         return None
 
@@ -566,7 +568,6 @@ class ContinuanceTransform(Directive, OverrideTransform):
     def __init__(self, config: dict[str, t.Any]) -> None:
         """Initialize the instance.
 
-
         Parameters
         ----------
         config : dict[str, t.Any] | None
@@ -587,6 +588,8 @@ class ContinuanceTransform(Directive, OverrideTransform):
 
         Raises
         ------
+        NotImplementedError
+            If the supplied configuration is not supported.
         ValueError
             If unknown or invalid configuration is supplied.
         """
@@ -634,7 +637,12 @@ class NestingTransform(Directive, OverrideTransform):
         )
 
     def _create_initial_condition_and_bc_overrides(self) -> dict[str, t.Any]:
-        """Create an overrides dictionary that will result in the modified blueprint"""
+        """Create an overrides dictionary that will result in the modified blueprint.
+
+        Returns
+        -------
+        dict[str, t.Any]
+        """
         if "rst_path" not in self._config:
             msg = "Invalid nesting transform configuration. Must include rst_path."
             raise NotImplementedError(msg)
