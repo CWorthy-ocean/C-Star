@@ -74,6 +74,7 @@ New features
 - Added `ExecutiveRunSummary` containing useful metadata about assets and processes created during a run (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Added `try_deserialize` to `cstar.orchestration` to enable loop-based deserialization without exceptions (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Added user-facing display of `ExecutiveRunSummary` after run-scheduling (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
+- `LocalLauncher` now honors dependencies and can exit after scheduling tasks. (`#548 <https://github.com/CWorthy-ocean/C-Star/pull/548>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
