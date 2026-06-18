@@ -1470,10 +1470,10 @@ class ROMSSimulation(Simulation):
 
         mode_clause = ""
         if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
-            mode_clause = "BUILD_MODE=debug"
+            mode_clause = "BUILD_MODE=debug "
 
         _run_cmd(
-            f"make {mode_clause} COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {mode_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             msg_pre="Compiling UCLA-ROMS configuration...",
             msg_post=f"UCLA-ROMS compiled at {build_dir}",
