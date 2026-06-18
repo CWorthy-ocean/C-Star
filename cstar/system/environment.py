@@ -163,6 +163,8 @@ class CStarEnvironment:
 
         self._system_settings_klass = system_settings_klass
 
+        self._system_settings_klass = system_settings_klass
+
         # Load env file AFTER modules so variables can be expanded
         self._env_vars = self._load_env()
 
