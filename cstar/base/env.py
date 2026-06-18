@@ -327,7 +327,7 @@ def discover_env_vars() -> dict[str, EnvItem]:
 
             if meta:
                 container[actual] = EnvItem.from_env_var(meta, actual)
-            else:
+            if not meta and not actual in container:
                 container[actual] = EnvItem.from_env_var(unknown_meta, actual)
 
     return container
