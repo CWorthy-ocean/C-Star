@@ -953,6 +953,10 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
         if self.account_key:  # HACK / TEMP FOR ELJA
             scheduler_script += f"\n#SBATCH --account={self.account_key}"
+        if os.getenv("HOSTNAME", "") == "elja-irhpc":
+            scheduler_script += "\n#SBATCH --hint=nomultithread"
+            scheduler_script += "\n#SBATCH --mem-per-cpu=3900"
+
         scheduler_script += "\n#SBATCH --export=ALL"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
         scheduler_script += f"\n#SBATCH --time={self.walltime}"
@@ -961,6 +965,8 @@ class SlurmJob(SchedulerJob):
             value,
         ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#SBATCH {key} {value}"
+        scheduler_script += "\nexport OMP_NUM_THREADS=1"
+        scheduler_script += "\nexport MKL_NUM_THREADS=1"
 
         scheduler_script += "\n\nset -e"
         # Add roms command to scheduler script

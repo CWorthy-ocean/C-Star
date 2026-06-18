@@ -7,6 +7,7 @@ from cstar.base.exceptions import CstarError
 from cstar.system.manager import (
     _AnvilSystemContext,
     _DerechoSystemContext,
+    _EljaSystemContext,
     _ExpanseSystemContext,
     _get_system_context,
     _LinuxARM64SystemContext,
@@ -33,6 +34,7 @@ def test_unique_context_names() -> None:
         _LinuxARM64SystemContext,
         _LinuxSystemContext,
         _AnvilSystemContext,
+        _EljaSystemContext,
     )
 
     registered_names = set(_registry.keys())
@@ -46,6 +48,7 @@ def test_unique_context_names() -> None:
         _PerlmutterSystemContext,
         _MacOSSystemContext,
         _DerechoSystemContext,
+        _EljaSystemContext,
         _ExpanseSystemContext,
         _LinuxSystemContext,
         _LinuxARM64SystemContext,
@@ -73,6 +76,7 @@ def test_context_registry(wrapped_class: type[_SystemContext]) -> None:
         ("perlmutter", _PerlmutterSystemContext),
         ("darwin_arm64", _MacOSSystemContext),
         ("derecho", _DerechoSystemContext),
+        ("elja", _EljaSystemContext),
         ("expanse", _ExpanseSystemContext),
         ("linux_x86_64", _LinuxSystemContext),
     ],

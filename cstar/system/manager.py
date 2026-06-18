@@ -1,5 +1,4 @@
 import functools
-import os
 import platform as platform
 from dataclasses import dataclass
 from typing import ClassVar, Final, Protocol
@@ -49,6 +48,33 @@ class AnvilEnvSettings(SlurmSettingsBase):
         bool
         """
         return self.RCAC_CLUSTER == AnvilEnvSettings.HOST_IDENTIFIER
+
+
+class EljaEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Elja* system.
+
+    NOTE: Elja does not support SLURM account names.
+    """
+
+    HOST_IDENTIFIER: Final[str] = "elja-irhpc"
+    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
+
+    HOSTNAME: str = Field(default="")
+    """The hostname of the machine.
+
+    Used to identify the system as Elja by matching value: `elja-irhpc`
+    """
+    SLURM_QUEUE: str = Field(default="")
+    """The SLURM queue name."""
+    OMP_NUM_THREADS: str = Field(default="1", alias="OMP_NUM_THREADS")
+    """The number of threads to be used by OpenMPI"""
+    MKL_NUM_THREADS: str = Field(default="1", alias="MKL_NUM_THREADS")
+    """The number of threads used by MKL"""
+
+    @property
+    def is_match(self) -> bool:
+        """Return `True` if the current system is identified as *Elja*."""
+        return self.HOSTNAME == self.HOST_IDENTIFIER
 
 
 class HostNameEvaluator:
@@ -106,8 +132,11 @@ class HostNameEvaluator:
         if self.lmod_hostname:
             return self.lmod_hostname
 
-        if os.getenv("HOSTNAME") == "elja-irhpc":
-            return _EljaSystemContext.name
+        try:
+            if EljaEnvSettings().is_match:
+                return _EljaSystemContext.name
+        except ValidationError:
+            ...  # not elja
 
         try:
             if AnvilEnvSettings().is_match:
@@ -330,6 +359,11 @@ class _EljaSystemContext(_SystemContext):
             query_name="128cpu_256mem",
             max_walltime_method=query_max_walltime_via_sacctmgr,
         )
+        any_cpu = SlurmPartition(
+            name="any_cpu",
+            query_name="any_cpu",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
         shared_q = SlurmPartition(
             name="64cpu_256mem",
             query_name="64cpu_256mem",
@@ -342,13 +376,24 @@ class _EljaSystemContext(_SystemContext):
         )
 
         return SlurmScheduler(
-            queues=[regular_q, shared_q, debug_q],
-            primary_queue_name="128cpu_256mem",
+            queues=[any_cpu, regular_q, shared_q, debug_q],
+            primary_queue_name="any_cpu",  # 128cpu_256mem",
             other_scheduler_directives={},
-            requires_task_distribution=False,
+            requires_task_distribution=True,
             documentation=cls.docs,
             max_cpus_per_node=128,
         )
+
+    @classmethod
+    def settings(cls) -> EnvSettingsBase | None:
+        """Return the settings required by the target system.
+
+        Raises
+        ------
+        ValidationError
+            If required environment variables are not set.
+        """
+        return EljaEnvSettings()
 
 
 @register_sys_context
