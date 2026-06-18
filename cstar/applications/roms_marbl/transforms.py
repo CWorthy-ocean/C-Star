@@ -453,10 +453,8 @@ class BoundaryFile(BaseModel):
         parted_clause = f".{segment}" if segment is not None else ""
         filename = f"{base}{cls.SUFFIX}.{ts}{parted_clause}.{cls.EXT}"
 
-        if directory:
-            return BoundaryFile(path=directory / filename)
-
-        return BoundaryFile(path=Path(filename))
+        path = directory / filename if directory else Path(filename)
+        return BoundaryFile(path=path)
 
     @field_validator("path")
     @classmethod
