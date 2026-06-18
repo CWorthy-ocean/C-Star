@@ -1,9 +1,9 @@
 import functools
 import platform as platform
 from dataclasses import dataclass, field
-from typing import Final, Protocol
+from typing import ClassVar, Final, Protocol
 
-from pydantic import ClassVar, Field, ValidationError
+from pydantic import Field, ValidationError
 
 from cstar.base.exceptions import CstarError
 from cstar.system.environment import (
