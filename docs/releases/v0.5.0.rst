@@ -150,6 +150,8 @@ Bug Fixes
 - ROMS-MARBL app will now exit non-zero if ROMS crashes (`#550 <https://github.com/CWorthy-ocean/C-Star/pull/550>`_)
 - Fix variable name with matching prefix causing erroneous registration (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
 - Fix overwriting existing metadata with secondary import (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
+- Avoid use of fixed port number causing tests to sporadically fail if port `12345` is taken (`#557 <https://github.com/CWorthy-ocean/C-Star/pull/557>`_)
+- Fix `cannot call asyncio.run on running event loop` failure from CLI tests (`#557 <https://github.com/CWorthy-ocean/C-Star/pull/557>`_)
 
 Improvements
 ~~~~~~~~~~~~
