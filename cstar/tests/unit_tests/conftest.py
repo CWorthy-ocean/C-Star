@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import random
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
@@ -1828,27 +1829,32 @@ def prefect_server() -> Generator[str, None, None]:
         yield os.environ["PREFECT_API_URL"]
         return
 
-    prefect_port = "12345"
-    api_url = f"http://127.0.0.1:{prefect_port}/api"
+    process: Popen[str] | None = None
+    for i in range(3):
+        try:
+            prefect_port = random.randint(9000, 20000)
+            process = Popen(
+                [
+                    "prefect",
+                    "server",
+                    "start",
+                    "--port",
+                    str(prefect_port),
+                ],
+                text=True,
+                encoding="utf-8",
+            )
+            if process.returncode:
+                continue
 
-    try:
-        process = Popen(
-            [
-                "prefect",
-                "server",
-                "start",
-                "--port",
-                prefect_port,
-            ],
-            text=True,
-            encoding="utf-8",
-        )
-        yield api_url
-    except Exception as ex:
-        print(f"Failed to start Prefect server: {ex}")
-    finally:
-        if process and process.returncode is None:
-            process.terminate()
+            api_url = f"http://127.0.0.1:{prefect_port}/api"
+            yield api_url
+            break
+        except Exception as ex:
+            print(f"Failed to start Prefect server: {ex}")
+        finally:
+            if process and process.returncode is None:
+                process.terminate()
 
 
 @pytest.fixture(autouse=True)

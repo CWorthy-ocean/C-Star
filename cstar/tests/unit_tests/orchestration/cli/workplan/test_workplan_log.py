@@ -1,14 +1,12 @@
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from cstar.cli.workplan.log import app
 from cstar.orchestration.models import Workplan
 
 
-@pytest.mark.asyncio
-async def test_cli_workplan_log_step_dne(
+def test_cli_workplan_log_step_dne(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
     """Verify that an invalid step name results in an error message.
@@ -29,11 +27,11 @@ async def test_cli_workplan_log_step_dne(
         color=False,
     )
 
-    assert f"No log file found for step {invalid_step_name!r}" in result.stdout
+    assert invalid_step_name in result.stderr
+    assert "Unable to monitor logs for unknown step" in result.stderr
 
 
-@pytest.mark.asyncio
-async def test_cli_workplan_log_step_no_logs(
+def test_cli_workplan_log_step_no_logs(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
     """Verify that a step where no logs have been created results in an error message.
@@ -58,8 +56,7 @@ async def test_cli_workplan_log_step_no_logs(
     assert f"No log file found for step {step_name!r}" in result.stdout
 
 
-@pytest.mark.asyncio
-async def test_cli_workplan_log_step_with_logs(
+def test_cli_workplan_log_step_with_logs(
     executed_workplan_with_sideeffects: tuple[Path, Workplan, str],
 ) -> None:
     """Verify that logs are loaded successfully.
