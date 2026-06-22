@@ -37,11 +37,11 @@ def _get_envfield_alias(klass: type[BaseSettings], field_name: str) -> str:
 class SystemSettingsBase(BaseSettings):
     """Base class configuring C-Star standard configuration management options."""
 
-    SLURM_ACCOUNT: Final[str] = Field(default="")
+    SLURM_ACCOUNT: str = Field(default="xxx", frozen=True)
     """The SLURM account name."""
-    SLURM_QUEUE: Final[str] = Field(default="")
+    SLURM_QUEUE: str = Field(default="xxx", frozen=True)
     """The SLURM queue name."""
-    SLURM_MAX_WALLTIME: Final[str] = Field(default="48:00:00")
+    SLURM_MAX_WALLTIME: str = Field(default="48:00:00", frozen=True)
     """The SLURM queue name."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -61,21 +61,21 @@ class SystemSettingsBase(BaseSettings):
 class LmodEnvSettings(BaseSettings):
     """Environment configuration used by the LMOD system."""
 
-    CMD: str = Field(default="")
+    CMD: str = Field(default="", frozen=True)
     """The LMOD executable command."""
-    DIR: str = Field(default="")
+    DIR: str = Field(default="", frozen=True)
     """The LMOD lib directory."""
-    PKG: str = Field(default="")
+    PKG: str = Field(default="", frozen=True)
     """The path to the lmod package directory."""
-    ROOT: str = Field(default="")
+    ROOT: str = Field(default="", frozen=True)
     """The path to the lmod install root directory."""
-    SYSHOST: str = Field(default="")
+    SYSHOST: str = Field(default="", frozen=True)
     """The LMOD system host."""
-    SYSTEM_DEFAULT_MODULES: str = Field(default="")
+    SYSTEM_DEFAULT_MODULES: str = Field(default="", frozen=True)
     """A colon-delimited list of modules automatically loaded by the system."""
-    SYSTEM_NAME: str = Field(default="")
+    SYSTEM_NAME: str = Field(default="", frozen=True)
     """The LMOD system name."""
-    VERSION: str = Field(default="")
+    VERSION: str = Field(default="", frozen=True)
     """The LMOD version."""
 
     no_default_modules: ClassVar[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
