@@ -443,7 +443,6 @@ def test_launcher_preconditions_slurm(
     """
     mock_launcher = mock.MagicMock()
     mock_scheduler = mock.PropertyMock(return_value=mock_launcher)
-    # mock_settings = mock.PropertyMock(return_value=settings_klass)
 
     with (
         mock.patch.dict(os.environ, mock_env, clear=True),

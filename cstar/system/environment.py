@@ -137,7 +137,7 @@ class CStarEnvironment:
         system_name: str,
         mpi_exec_prefix: str,
         compiler: str,
-        system_settings_fn: type[EnvSettingsBase] | None = None,
+        system_settings_klass: type[EnvSettingsBase] | None = None,
     ):
         """Initialize the instance.
 
@@ -161,7 +161,7 @@ class CStarEnvironment:
         if self.uses_lmod:
             self.load_lmod_modules(lmod_file=self.lmod_path)
 
-        self._system_settings_klass = system_settings_fn
+        self._system_settings_klass = system_settings_klass
 
         # Load env file AFTER modules so variables can be expanded
         self._env_vars = self._load_env()
@@ -249,7 +249,7 @@ class CStarEnvironment:
 
     @property
     def settings_klass(self) -> type[EnvSettingsBase] | None:
-        """Return the function that will load the system settings."""
+        """Return the type that will load and validate the system settings."""
         return self._system_settings_klass
 
     @classmethod

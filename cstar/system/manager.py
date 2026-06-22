@@ -137,7 +137,7 @@ class _SystemContext(Protocol):
 
     @classmethod
     def settings(cls) -> type[EnvSettingsBase] | None:
-        """Return the settings required by the target system."""
+        """Return the type used to load settings required by the target system."""
         return EnvSettingsBase
 
 
@@ -259,13 +259,7 @@ class _AnvilSystemContext(_SystemContext):
 
     @classmethod
     def settings(cls) -> type[SlurmSettingsBase] | None:
-        """Return the settings required by the target system.
-
-        Raises
-        ------
-        ValidationError
-            If required environment variables are not set.
-        """
+        """Return the type used to load settings required by the target system."""
         return AnvilEnvSettings
 
 
@@ -397,7 +391,7 @@ class CStarSystemManager:
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
             compiler=self._context.compiler,
-            system_settings_fn=self._context.settings(),
+            system_settings_klass=self._context.settings(),
         )
 
         self._scheduler = self._context.create_scheduler()
