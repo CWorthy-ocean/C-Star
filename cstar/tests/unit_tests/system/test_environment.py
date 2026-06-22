@@ -983,37 +983,6 @@ def test_lmodenvsettings(request: pytest.FixtureRequest, fixture_name: str) -> N
     assert settings.VERSION == "VERSION-value"
 
 
-@pytest.mark.usefixtures("env_full_lmod")
-@pytest.mark.parametrize(
-    ("host_value", "name_value", "exp_hostname"),
-    [
-        pytest.param("", "", "", id="empty system and host"),
-        pytest.param("host-value", "", "host-value", id="no system name"),
-        pytest.param("", "system-value", "system-value", id="no host name"),
-        pytest.param("host-value", "system-value", "host-value", id="prioritize host"),
-        pytest.param("HoSt-value", "", "host-value", id="casefold host"),
-        pytest.param("", "SyStEm-VaLuE", "system-value", id="casefold system"),
-        pytest.param(
-            "HoSt-value", "SyStEm-VaLuE", "host-value", id="casefold prioritized host"
-        ),
-    ],
-)
-def test_lmodenvsettings_lmod_hostname_compute(
-    host_value: str | None, name_value: str | None, exp_hostname: str
-) -> None:
-    """Verify LMOD hostname computatons follows expected priority order."""
-    with mock.patch.dict(
-        os.environ,
-        {
-            LmodEnvSettings.variable("SYSHOST"): host_value,
-            LmodEnvSettings.variable("SYSTEM_NAME"): name_value,
-        },
-    ):
-        settings = LmodEnvSettings()
-
-    assert settings.lmod_hostname == exp_hostname
-
-
 def test_lmodenvsettings_variable_resolution(
     lmod_settings_keys: list[str],
 ) -> None:

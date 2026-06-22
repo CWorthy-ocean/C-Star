@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cstar.system.environment import LmodEnvSettings
 from cstar.system.manager import HostNameEvaluator
 
 DEFAULT_MOCK_MACHINE_NAME = "mock_machine"
@@ -57,19 +58,37 @@ def test_known_linux_platform() -> None:
 
 
 @pytest.mark.usefixtures("env_full_lmod")
-@patch("platform.machine", mock.Mock(return_value=DEFAULT_MOCK_MACHINE_NAME))
-@patch("platform.system", mock.Mock(return_value=DEFAULT_MOCK_HOST_NAME))
-def test_lmod_prioritizes_syshost() -> None:
-    """Verify that the name resolver prioritizes the lmod-hostname over the
-    platform machine name and system name.
-    """
-    namer = HostNameEvaluator()
-
-    # sanity check platform mocking is correct
-    assert namer.machine_name == DEFAULT_MOCK_MACHINE_NAME
-    assert namer.platform_name == DEFAULT_MOCK_HOST_NAME
-
-    assert namer.name == namer.lmod_settings.lmod_hostname
+@pytest.mark.parametrize(
+    ("host_value", "name_value", "exp_hostname"),
+    [
+        pytest.param("", "", "", id="empty system and host"),
+        pytest.param("host-value", "", "host-value", id="no system name"),
+        pytest.param("", "system-value", "system-value", id="no host name"),
+        pytest.param("host-value", "system-value", "host-value", id="prioritize host"),
+        pytest.param("HoSt-value", "", "host-value", id="casefold host"),
+        pytest.param("", "SyStEm-VaLuE", "system-value", id="casefold system"),
+        pytest.param(
+            "HoSt-value", "SyStEm-VaLuE", "host-value", id="casefold prioritized host"
+        ),
+    ],
+)
+def test_lmod_prioritizes_syshost(
+    host_value: str | None, name_value: str | None, exp_hostname: str
+) -> None:
+    """Verify LMOD hostname computatons follows expected priority order."""
+    with (
+        mock.patch.dict(
+            os.environ,
+            {
+                LmodEnvSettings.variable("SYSHOST"): host_value,
+                LmodEnvSettings.variable("SYSTEM_NAME"): name_value,
+            },
+        ),
+        mock.patch("platform.machine", lambda: name_value),
+        mock.patch("platform.system", lambda: host_value),
+    ):
+        namer = HostNameEvaluator()
+        assert namer.lmod_hostname == exp_hostname
 
 
 @pytest.mark.usefixtures("env_full_lmod")
