@@ -52,7 +52,9 @@ class TestSetupEnvironmentFromFiles:
     - get_expected_lmod_modules: Retrieves expected modules for each environment from system files.
     """
 
-    @pytest.mark.parametrize("lmod_syshost", ["perlmutter", "derecho", "expanse"])
+    @pytest.mark.parametrize(
+        "lmod_syshost", ["perlmutter", "derecho", "expanse", "anvil"]
+    )
     @patch("cstar.base.utils.subprocess.run")
     @patch.object(
         CStarEnvironment,
