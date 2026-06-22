@@ -37,9 +37,9 @@ def _get_envfield_alias(klass: type[BaseSettings], field_name: str) -> str:
 class SystemSettingsBase(BaseSettings):
     """Base class configuring C-Star standard configuration management options."""
 
-    SLURM_ACCOUNT: str = Field(default="xxx", frozen=True)
+    SLURM_ACCOUNT: str = Field(default="", frozen=True)
     """The SLURM account name."""
-    SLURM_QUEUE: str = Field(default="xxx", frozen=True)
+    SLURM_QUEUE: str = Field(default="", frozen=True)
     """The SLURM queue name."""
     SLURM_MAX_WALLTIME: str = Field(default="48:00:00", frozen=True)
     """The SLURM queue name."""
