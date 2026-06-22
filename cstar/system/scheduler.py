@@ -1,12 +1,13 @@
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from typing import Final
 
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import _run_cmd
 
 
-def _parse_walltime(walltime_str) -> str:
+def _parse_walltime(walltime_str: str) -> str:
     """Parse and format a SLURM walltime string into the format "HH:MM:SS".
 
     Parameters
@@ -22,6 +23,7 @@ def _parse_walltime(walltime_str) -> str:
     str
         The formatted walltime string in the "HH:MM:SS" format.
     """
+    mw_h, mw_m, mw_s = 0, 0, 0
     if walltime_str.count("-") == 1:  # D-HH:MM:SS
         mw_d = int(walltime_str.split("-")[0])
         mw_hms = walltime_str.split("-")[1]
@@ -79,22 +81,25 @@ def query_max_walltime_via_sacctmgr(name: str) -> str | None:
 
 
 class Queue(ABC):
-    """Abstract base class for representing a generic scheduler queue.
+    """Abstract base class for representing a generic scheduler queue."""
 
-    Attributes
-    ----------
-    name : str
-        The name of the queue used to submit jobs, e.g. `regular`
-    query_name : str, optional
-        The name of the queue used for system accounting, e.g. `regular_0`.
-        Defaults to the value of `name` (as the two are usually the same).
+    name: Final[str]
+    """The name of the queue used to submit jobs, e.g. `regular`."""
+    query_name: Final[str]
+    """The name of the queue used for system accounting, e.g. `regular_0`.
+
+    Defaults to the value of `name` (as the two are usually the same).
+    """
+    _max_walltime_method: Final[Callable[[str], str | None] | None]
+    """An alternative method for determining the maximum walltime. If not provided,
+    defaults to a method specified by the subclass.
     """
 
     def __init__(
         self,
         name: str,
         query_name: str | None = None,
-        max_walltime_method: Callable | None = None,
+        max_walltime_method: Callable[[str], str | None] | None = None,
     ):
         """Initialize a Queue instance.
 
@@ -105,15 +110,13 @@ class Queue(ABC):
         query_name : str, optional
             An alternative name used for querying the queue. If not provided, it defaults
             to the value of `name`.
-        max_walltime_method : Callable | None, optional
+        max_walltime_method : Callable[[str], str | None] | None, optional
             An alternative method for determining the maximum walltime. If not provided,
             defaults to a method specified by the subclass.
         """
         self.name = name
         self.query_name = query_name if query_name is not None else name
-        self._max_walltime_method = (
-            max_walltime_method or self._default_max_walltime_method
-        )
+        self._max_walltime_method = max_walltime_method
 
     def __repr__(self) -> str:
         """Return a string representation of this queue instance."""
@@ -121,13 +124,15 @@ class Queue(ABC):
 
     @property
     @abstractmethod
-    def _default_max_walltime_method(self) -> Callable:
+    def _default_max_walltime_method(self) -> Callable[[str], str | None]:
+        """Return a method that will calculate a default maximum walltime."""
         pass
 
     @property
-    def max_walltime(self):
+    def max_walltime(self) -> str | None:
         """Return the maximum walltime for the queue."""
-        return self._max_walltime_method(self.query_name)
+        fn = self._max_walltime_method or self._default_max_walltime_method
+        return fn(self.query_name)
 
 
 class SlurmQueue(Queue, ABC):
@@ -179,7 +184,7 @@ class SlurmQOS(SlurmQueue):
     """
 
     @property
-    def _default_max_walltime_method(self) -> Callable:
+    def _default_max_walltime_method(self) -> Callable[[str], str | None]:
         return query_max_walltime_via_sacctmgr
 
 
@@ -201,7 +206,7 @@ class SlurmPartition(SlurmQueue):
     """
 
     @property
-    def _default_max_walltime_method(self) -> Callable:
+    def _default_max_walltime_method(self) -> Callable[[str], str | None]:
         return query_max_walltime_via_sinfo
 
 
@@ -241,7 +246,8 @@ class PBSQueue(Queue):
     def max_walltime(self):
         return self._max_walltime
 
-    def _default_max_walltime_method(self) -> Callable:
+    @property
+    def _default_max_walltime_method(self) -> Callable[[str], str | None]:
         """Irrelevant for PBSQueue."""
         raise NotImplementedError()
 
@@ -346,7 +352,7 @@ class Scheduler(ABC, LoggingMixin):
         """Return True if the current process is running in an active allocation."""
         raise NotImplementedError()
 
-    def get_queue(self, name) -> Queue:
+    def get_queue(self, name: str | None) -> Queue:
         """Retrieve a queue by name.
 
         Searches the list of queues managed by the scheduler for a queue with the given name.
@@ -398,7 +404,7 @@ class Scheduler(ABC, LoggingMixin):
 
     @property
     @abstractmethod
-    def global_max_cpus_per_node(self):
+    def global_max_cpus_per_node(self) -> int | None:
         """Abstract method to retrieve the maximum number of CPUs available per node
         across all queues.
         """
@@ -406,7 +412,7 @@ class Scheduler(ABC, LoggingMixin):
 
     @property
     @abstractmethod
-    def global_max_mem_per_node_gb(self):
+    def global_max_mem_per_node_gb(self) -> float | None:
         """Abstract method to retrieve the maximum memory available per node across all
         queues.
         """

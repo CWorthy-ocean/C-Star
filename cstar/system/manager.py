@@ -178,8 +178,9 @@ def _get_system_context() -> _SystemContext:
     """
     namer = HostNameEvaluator()
 
-    if type_ := _registry.get(namer.name):
-        return type_()
+    if klass := _registry.get(namer.name):
+        instance = klass()
+        return instance
 
     raise CstarError(f"Unknown system requested: {namer.name}")
 
@@ -377,6 +378,13 @@ class _LinuxARM64SystemContext(_SystemContext):
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
 
+    _context: Final[_SystemContext]
+    """A context object configured for the current system."""
+    _environment: Final[CStarEnvironment]
+    """An environment manager configured for the current system."""
+    _scheduler: Final[Scheduler | None]
+    """The scheduler appropriate for this system."""
+
     def __init__(self) -> None:
         """Initialize the CStarSystemManager.
 
@@ -384,16 +392,13 @@ class CStarSystemManager:
         the environment and scheduler based on that name.
         """
         self._context = _get_system_context()
-        """A context object configured for the current system."""
         self._environment = CStarEnvironment(
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
             compiler=self._context.compiler,
         )
-        """An environment manager configured for the current system."""
 
         self._scheduler = self._context.create_scheduler()
-        """The scheduler appropriate for this system."""
 
     @property
     def name(self) -> str:
