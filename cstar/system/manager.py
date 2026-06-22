@@ -94,8 +94,8 @@ class HostNameEvaluator:
         EnvironmentError
             If the name cannot be determined.
         """
-        if self.lmod_settings.lmod_hostname:
-            return self.lmod_settings.lmod_hostname
+        if lmod_hostname := self.lmod_hostname:
+            return lmod_hostname
 
         try:
             if AnvilEnvSettings().is_match:
@@ -108,6 +108,16 @@ class HostNameEvaluator:
         raise OSError(
             f"C-Star cannot determine your system name. Diagnostics: {self._diagnostic}"
         )
+
+    @property
+    def lmod_hostname(self) -> str:
+        """Return a hostname using the available configuration with priority order:
+        1. LMOD_SYSHOST
+        2. LMOD_SYSTEM_NAME
+
+        If neither value is set, returns empty-string.
+        """
+        return (self.lmod_settings.SYSHOST or self.lmod_settings.SYSTEM_NAME).casefold()
 
 
 class _SystemContext(Protocol):

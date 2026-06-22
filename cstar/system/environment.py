@@ -80,16 +80,6 @@ class LmodEnvSettings(BaseSettings):
 
     no_default_modules: ClassVar[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
 
-    @property
-    def lmod_hostname(self) -> str:
-        """Return a hostname using the available configuration with priority order:
-        1. LMOD_SYSHOST
-        2. LMOD_SYSTEM_NAME
-
-        If neither value is set, returns empty-string.
-        """
-        return (self.SYSHOST or self.SYSTEM_NAME).casefold()
-
     @classmethod
     def variable(cls, name: str) -> str:
         """Return an aliased/prefixed variable name."""
@@ -99,7 +89,7 @@ class LmodEnvSettings(BaseSettings):
         env_prefix="LMOD_",
         str_strip_whitespace=True,
     )
-    """Configuration altering cross-cutting model behaviors."""
+    """Configuration altering global model behaviors."""
 
 
 class CStarEnvironment:
