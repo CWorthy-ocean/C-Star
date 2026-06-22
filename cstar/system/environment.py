@@ -34,14 +34,28 @@ def _get_envfield_alias(klass: type[BaseSettings], field_name: str) -> str:
     return f"{prefix}{field_name}"
 
 
-class CStarEnvSettingsBase(BaseSettings):
+class SystemSettingsBase(BaseSettings):
     """Base class configuring C-Star standard configuration management options."""
+
+    SLURM_ACCOUNT: Final[str] = Field(default="")
+    """The SLURM account name."""
+    SLURM_QUEUE: Final[str] = Field(default="")
+    """The SLURM queue name."""
+    SLURM_MAX_WALLTIME: Final[str] = Field(default="48:00:00")
+    """The SLURM queue name."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix="CSTAR_",
         str_strip_whitespace=True,
     )
-    """Configuration altering cross-cutting model behaviors."""
+    """Configuration altering global model behaviors."""
+
+    @property
+    def is_match(self) -> bool:
+        """Return `True` if the current system can be identified as *Anvil* by
+        inspecting non-lmod environment variables.
+        """
+        return False
 
 
 class LmodEnvSettings(BaseSettings):

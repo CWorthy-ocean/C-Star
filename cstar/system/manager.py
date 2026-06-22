@@ -8,8 +8,8 @@ from pydantic import Field, ValidationError
 from cstar.base.exceptions import CstarError
 from cstar.system.environment import (
     CStarEnvironment,
-    CStarEnvSettingsBase,
     LmodEnvSettings,
+    SystemSettingsBase,
 )
 from cstar.system.scheduler import (
     PBSQueue,
@@ -22,25 +22,31 @@ from cstar.system.scheduler import (
 )
 
 
-class AnvilEnvSettings(CStarEnvSettingsBase):
-    """Environment variables required to execute a simulation on the *Anvil* system."""
+class AnvilEnvSettings(SystemSettingsBase):
+    """Environment variables required to execute a simulation on the *Anvil* system.
+
+    `AnvilEnvSettings` overrides behaviors of `DefaultEnvSettings` by implementing a unique
+    hostname matching test in `is_match`.
+    """
 
     HOST_IDENTIFIER: Final[str] = "anvil"
-    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
-    HOSTNAME: str = Field(default="", alias="RCAC_CLUSTER")
+    """Constant value in HOSTNAME env var on Anvil that uniquely identifies the system."""
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
     """The hostname of the machine.
 
     Used to identify the system as `Anvil` by matching value: `anvil`
     """
-    SLURM_ACCOUNT: str = Field(default="")
-    """The SLURM account name."""
-    SLURM_QUEUE: str = Field(default="")
-    """The SLURM queue name."""
 
     @property
     def is_match(self) -> bool:
-        """Return `True` if the current system is identified as *Elja*."""
-        return self.HOSTNAME == self.HOST_IDENTIFIER
+        """Return `True` if the current system can be identified as *Anvil* by
+        inspecting the system hostname.
+
+        Returns
+        -------
+        bool
+        """
+        return self.HOSTNAME == AnvilEnvSettings.HOST_IDENTIFIER
 
 
 @dataclass(frozen=True)
@@ -119,9 +125,9 @@ class _SystemContext(Protocol):
         """Instantiate a scheduler configured for the system."""
 
     @classmethod
-    def settings(cls) -> CStarEnvSettingsBase | None:
+    def settings(cls) -> SystemSettingsBase | None:
         """Return the settings required by the target system."""
-        return None
+        return SystemSettingsBase()
 
 
 _registry: dict[str, type[_SystemContext]] = {}
@@ -240,7 +246,7 @@ class _AnvilSystemContext(_SystemContext):
         )
 
     @classmethod
-    def settings(cls) -> CStarEnvSettingsBase | None:
+    def settings(cls) -> SystemSettingsBase | None:
         """Return the settings required by the target system.
 
         Raises
