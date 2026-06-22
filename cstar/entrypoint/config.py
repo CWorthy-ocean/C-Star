@@ -1,5 +1,4 @@
 import logging
-import os
 import typing as t
 from datetime import datetime, timezone
 
@@ -111,20 +110,3 @@ def get_job_config() -> JobConfig:
     priority: str = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
 
     return JobConfig(account_id=account_id, walltime=walltime, priority=priority)
-
-
-def configure_environment(log: logging.Logger) -> None:
-    """Configure the environment variables required by the worker.
-
-    Parameters
-    ----------
-    log : logging.Logger
-        A logger to log configuration details.
-
-    Returns
-    -------
-    None
-    """
-    # ensure git works on distributed file-system, e.g. lustre
-    os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-    log.debug("Git discovery across file-system enabled.")
