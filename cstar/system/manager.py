@@ -396,6 +396,7 @@ class CStarSystemManager:
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
             compiler=self._context.compiler,
+            system_settings=self._context.settings(),
         )
 
         self._scheduler = self._context.create_scheduler()

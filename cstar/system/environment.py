@@ -122,12 +122,15 @@ class CStarEnvironment:
     """The root directory of the installation of the C-Star package."""
     _lmod_settings: Final[LmodEnvSettings]
     """Environment variables used by the LMOD system."""
+    system_settings: Final[SystemSettingsBase | None]
+    """Environment variables used to configure jobs on the system."""
 
     def __init__(
         self,
         system_name: str,
         mpi_exec_prefix: str,
         compiler: str,
+        system_settings: SystemSettingsBase | None = None,
     ):
         """Initialize the instance.
 
@@ -150,6 +153,8 @@ class CStarEnvironment:
         self._lmod_settings = LmodEnvSettings()
         if self.uses_lmod:
             self.load_lmod_modules(lmod_file=self.lmod_path)
+
+        self.system_settings = system_settings
 
         # Load env file AFTER modules so variables can be expanded
         self._env_vars = self._load_env()

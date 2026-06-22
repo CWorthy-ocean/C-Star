@@ -23,6 +23,7 @@ from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_DELAYS,
+    ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
@@ -328,6 +329,7 @@ def test_heterogeneous_workplan(
     """
     runner = CliRunner()
     custom_env = {
+        ENV_CSTAR_SLURM_ACCOUNT: "abc123",
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",

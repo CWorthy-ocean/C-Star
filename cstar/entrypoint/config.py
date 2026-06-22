@@ -4,13 +4,9 @@ from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
-from cstar.base.env import get_env_item
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import parse_log_level_name
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
-)
+from cstar.system.manager import cstar_sysmgr
 
 JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
 
@@ -105,8 +101,13 @@ def get_job_config() -> JobConfig:
     -------
     JobConfig
     """
-    account_id: str = get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
-    walltime: str = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
-    priority: str = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
+    system_env = cstar_sysmgr.environment.system_settings
+    if system_env is None:
+        msg = "Environment settings for the system were not loaded."
+        raise CstarExpectationFailed(msg)
+
+    account_id: str = system_env.SLURM_ACCOUNT
+    walltime: str = system_env.SLURM_MAX_WALLTIME
+    priority: str = system_env.SLURM_QUEUE
 
     return JobConfig(account_id=account_id, walltime=walltime, priority=priority)
