@@ -11,49 +11,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from cstar.base.utils import _run_cmd
 
 
-def _get_envfield_alias(klass: type[BaseSettings], field_name: str) -> str:
-    """Retrieve the environment variable name for a given field.
-
-    Parameters
-    ----------
-    klass : type[BaseSettings]
-        A settings class that contains the field.
-    field_name : str
-        The name of the model field.
-
-    Returns
-    -------
-    str
-    """
-    field = klass.model_fields.get(field_name)
-    if field and isinstance(field.validation_alias, str):
-        return field.validation_alias
-
-    # Fallback logic if validation_alias isn't set: combine prefix and field name
-    prefix = klass.model_config.get("env_prefix", "")
-    return f"{prefix}{field_name}"
-
-
-class SystemSettingsBase(BaseSettings):
-    """Base class configuring C-Star standard configuration management options."""
-
-    SLURM_ACCOUNT: str = Field(default="", frozen=True)
-    """The SLURM account name."""
-    SLURM_QUEUE: str = Field(default="", frozen=True)
-    """The SLURM queue name."""
-    SLURM_MAX_WALLTIME: str = Field(default="48:00:00", frozen=True)
-    """The SLURM queue name."""
+class EnvSettingsBase(BaseSettings):
+    """Base class for environment settings - requires no settings."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix="CSTAR_",
         str_strip_whitespace=True,
+        validate_default=True,
     )
     """Configuration altering global model behaviors."""
 
     @property
     def is_match(self) -> bool:
-        """Return `True` if the current system can be identified as *Anvil* by
-        inspecting non-lmod environment variables.
+        """Return `True` if the current system is identified after inspecting
+        non-lmod environment variables.
         """
         return False
 
@@ -83,13 +54,49 @@ class LmodEnvSettings(BaseSettings):
     @classmethod
     def variable(cls, name: str) -> str:
         """Return an aliased/prefixed variable name."""
-        return _get_envfield_alias(LmodEnvSettings, name)
+        return get_envfield_alias(LmodEnvSettings, name)
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix="LMOD_",
         str_strip_whitespace=True,
     )
     """Configuration altering global model behaviors."""
+
+
+class SlurmSettingsBase(EnvSettingsBase):
+    """Base class configuring C-Star standard configuration management options."""
+
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=1)
+    """The SLURM account name."""
+    SLURM_QUEUE: str = Field(default="", frozen=True, min_length=1)
+    """The SLURM queue name."""
+    SLURM_MAX_WALLTIME: str = Field(default="48:00:00", frozen=True)
+    """The SLURM queue name."""
+
+
+def get_envfield_alias(
+    klass: type[EnvSettingsBase | LmodEnvSettings], field_name: str
+) -> str:
+    """Retrieve the environment variable name for a given field.
+
+    Parameters
+    ----------
+    klass : type[BaseSettings]
+        A settings class that contains the field.
+    field_name : str
+        The name of the model field.
+
+    Returns
+    -------
+    str
+    """
+    field = klass.model_fields.get(field_name)
+    if field and isinstance(field.validation_alias, str):
+        return field.validation_alias
+
+    # Fallback logic if validation_alias isn't set: combine prefix and field name
+    prefix = klass.model_config.get("env_prefix", "")
+    return f"{prefix}{field_name}"
 
 
 class CStarEnvironment:
@@ -122,7 +129,7 @@ class CStarEnvironment:
     """The root directory of the installation of the C-Star package."""
     _lmod_settings: Final[LmodEnvSettings]
     """Environment variables used by the LMOD system."""
-    system_settings: Final[SystemSettingsBase | None]
+    _system_settings_klass: Final[type[EnvSettingsBase] | None]
     """Environment variables used to configure jobs on the system."""
 
     def __init__(
@@ -130,7 +137,7 @@ class CStarEnvironment:
         system_name: str,
         mpi_exec_prefix: str,
         compiler: str,
-        system_settings: SystemSettingsBase | None = None,
+        system_settings_fn: type[EnvSettingsBase] | None = None,
     ):
         """Initialize the instance.
 
@@ -154,7 +161,7 @@ class CStarEnvironment:
         if self.uses_lmod:
             self.load_lmod_modules(lmod_file=self.lmod_path)
 
-        self.system_settings = system_settings
+        self._system_settings_klass = system_settings_fn
 
         # Load env file AFTER modules so variables can be expanded
         self._env_vars = self._load_env()
@@ -239,6 +246,11 @@ class CStarEnvironment:
             The key-value pairs that have been loaded.
         """
         return self._env_vars.copy()
+
+    @property
+    def settings_klass(self) -> type[EnvSettingsBase] | None:
+        """Return the function that will load the system settings."""
+        return self._system_settings_klass
 
     @classmethod
     def _find_package_root(cls) -> Path:

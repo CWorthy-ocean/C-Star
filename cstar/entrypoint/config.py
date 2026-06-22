@@ -2,10 +2,11 @@ import logging
 import typing as t
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import parse_log_level_name
+from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 from cstar.system.manager import cstar_sysmgr
 
 JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
@@ -101,13 +102,21 @@ def get_job_config() -> JobConfig:
     -------
     JobConfig
     """
-    system_env = cstar_sysmgr.environment.system_settings
-    if system_env is None:
-        msg = "Environment settings for the system were not loaded."
-        raise CstarExpectationFailed(msg)
+    account_id: str = ""
+    walltime: str = ""
+    priority: str = ""
 
-    account_id: str = system_env.SLURM_ACCOUNT
-    walltime: str = system_env.SLURM_MAX_WALLTIME
-    priority: str = system_env.SLURM_QUEUE
+    if cstar_sysmgr.environment.settings_klass:
+        system_env: EnvSettingsBase | None = None
+
+        try:
+            system_env = cstar_sysmgr.environment.settings_klass()
+            if system_env and isinstance(system_env, SlurmSettingsBase):
+                account_id = system_env.SLURM_ACCOUNT
+                walltime = system_env.SLURM_MAX_WALLTIME
+                priority = system_env.SLURM_QUEUE
+        except ValidationError as ex:
+            msg = "Environment settings for the system could not be loaded."
+            raise CstarExpectationFailed(msg) from ex
 
     return JobConfig(account_id=account_id, walltime=walltime, priority=priority)

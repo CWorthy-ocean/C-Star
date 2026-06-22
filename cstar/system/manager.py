@@ -8,8 +8,9 @@ from pydantic import Field, ValidationError
 from cstar.base.exceptions import CstarError
 from cstar.system.environment import (
     CStarEnvironment,
+    EnvSettingsBase,
     LmodEnvSettings,
-    SystemSettingsBase,
+    SlurmSettingsBase,
 )
 from cstar.system.scheduler import (
     PBSQueue,
@@ -22,7 +23,7 @@ from cstar.system.scheduler import (
 )
 
 
-class AnvilEnvSettings(SystemSettingsBase):
+class AnvilEnvSettings(SlurmSettingsBase):
     """Environment variables required to execute a simulation on the *Anvil* system.
 
     `AnvilEnvSettings` overrides behaviors of `DefaultEnvSettings` by implementing a unique
@@ -135,9 +136,9 @@ class _SystemContext(Protocol):
         """Instantiate a scheduler configured for the system."""
 
     @classmethod
-    def settings(cls) -> SystemSettingsBase | None:
+    def settings(cls) -> type[EnvSettingsBase] | None:
         """Return the settings required by the target system."""
-        return SystemSettingsBase()
+        return EnvSettingsBase
 
 
 _registry: dict[str, type[_SystemContext]] = {}
@@ -257,7 +258,7 @@ class _AnvilSystemContext(_SystemContext):
         )
 
     @classmethod
-    def settings(cls) -> SystemSettingsBase | None:
+    def settings(cls) -> type[SlurmSettingsBase] | None:
         """Return the settings required by the target system.
 
         Raises
@@ -265,7 +266,7 @@ class _AnvilSystemContext(_SystemContext):
         ValidationError
             If required environment variables are not set.
         """
-        return AnvilEnvSettings()
+        return AnvilEnvSettings
 
 
 @register_sys_context
@@ -396,7 +397,7 @@ class CStarSystemManager:
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
             compiler=self._context.compiler,
-            system_settings=self._context.settings(),
+            system_settings_fn=self._context.settings(),
         )
 
         self._scheduler = self._context.create_scheduler()
