@@ -26,16 +26,16 @@ from cstar.system.scheduler import (
 class AnvilEnvSettings(SlurmSettingsBase):
     """Environment variables required to execute a simulation on the *Anvil* system.
 
-    `AnvilEnvSettings` overrides behaviors of `DefaultEnvSettings` by implementing a unique
+    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
     hostname matching test in `is_match`.
     """
 
     HOST_IDENTIFIER: Final[str] = "anvil"
-    """Constant value in HOSTNAME env var on Anvil that uniquely identifies the system."""
-    HOSTNAME: str = Field(default="", alias="HOSTNAME")
+    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
+    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
     """The hostname of the machine.
 
-    Used to identify the system as `Anvil` by matching value: `anvil`
+    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
     """
 
     @property
@@ -47,7 +47,7 @@ class AnvilEnvSettings(SlurmSettingsBase):
         -------
         bool
         """
-        return self.HOSTNAME == AnvilEnvSettings.HOST_IDENTIFIER
+        return self.RCAC_CLUSTER == AnvilEnvSettings.HOST_IDENTIFIER
 
 
 @dataclass(frozen=True)
