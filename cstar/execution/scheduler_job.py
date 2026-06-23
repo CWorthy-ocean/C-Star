@@ -951,7 +951,7 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         else:
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
-        if self.account_key:  # HACK / TEMP FOR ELJA
+        if self.account_key:
             scheduler_script += f"\n#SBATCH --account={self.account_key}"
         if os.getenv("HOSTNAME", "") == "elja-irhpc":
             scheduler_script += "\n#SBATCH --hint=nomultithread"
@@ -965,8 +965,6 @@ class SlurmJob(SchedulerJob):
             value,
         ) in self.scheduler.other_scheduler_directives.items():
             scheduler_script += f"\n#SBATCH {key} {value}"
-        scheduler_script += "\nexport OMP_NUM_THREADS=1"
-        scheduler_script += "\nexport MKL_NUM_THREADS=1"
 
         scheduler_script += "\n\nset -e"
         # Add roms command to scheduler script
