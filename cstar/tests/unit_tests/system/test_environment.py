@@ -21,7 +21,10 @@ from cstar.base.env import (
     hpc_data_directory,
 )
 from cstar.base.feature import is_flag_enabled
-from cstar.system.environment import CStarEnvironment
+from cstar.system.environment import (
+    CStarEnvironment,
+    LmodEnvSettings,
+)
 
 
 class MockEnvironment(CStarEnvironment):
@@ -52,7 +55,9 @@ class TestSetupEnvironmentFromFiles:
     - get_expected_lmod_modules: Retrieves expected modules for each environment from system files.
     """
 
-    @pytest.mark.parametrize("lmod_syshost", ["perlmutter", "derecho", "expanse"])
+    @pytest.mark.parametrize(
+        "lmod_syshost", ["perlmutter", "derecho", "expanse", "anvil"]
+    )
     @patch("cstar.base.utils.subprocess.run")
     @patch.object(
         CStarEnvironment,
@@ -100,6 +105,7 @@ class TestSetupEnvironmentFromFiles:
             expected_modules = self.get_expected_lmod_modules(env)
 
             # Define expected subprocess calls
+            modules = " ".join(x.strip() for x in expected_modules)
             expected_calls = [
                 call(
                     "/mock/lmod python reset",
@@ -107,14 +113,12 @@ class TestSetupEnvironmentFromFiles:
                     shell=True,
                     text=True,
                 ),
-            ] + [
                 call(
-                    f"/mock/lmod python load {mod}",
+                    f"/mock/lmod python load {modules}",
                     capture_output=True,
                     shell=True,
                     text=True,
-                )
-                for mod in expected_modules
+                ),
             ]
 
             mock_run.assert_has_calls(expected_calls, any_order=False)
@@ -546,6 +550,8 @@ class TestExceptions:
         with pytest.raises(ImportError, match="Top-level package '.*' not found"):
             MockEnvironment().package_root
 
+    @patch("platform.system", mock.PropertyMock(return_value="NotLinux"))
+    @patch("platform.machine", mock.PropertyMock(return_value="x86_64"))
     def test_load_lmod_modules_raises_environment_error_when_lmod_not_used(self):
         """Tests that load_lmod_modules raises an EnvironmentError if Lmod is not used.
 
@@ -562,7 +568,7 @@ class TestExceptions:
             EnvironmentError, match="does not appear to use Linux Environment Modules"
         ):
             env = MockEnvironment()
-            env.load_lmod_modules(lmod_file="/some/file")
+            env.load_lmod_modules()
 
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
@@ -600,6 +606,8 @@ class TestExceptions:
             "/mock/lmod python reset", shell=True, text=True, capture_output=True
         )
 
+    @patch("platform.system", mock.PropertyMock(return_value="Linux"))
+    @patch("platform.machine", mock.PropertyMock(return_value="x86_64"))
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
@@ -637,7 +645,7 @@ class TestExceptions:
         with pytest.raises(
             RuntimeError,
             match=(
-                "Linux Environment Modules command `/mock/lmod python load module1` "
+                "Linux Environment Modules command `/mock/lmod python load module1 module2` "
                 "failed. Return Code: `1`. STDERR:\nModule load error"
             ),
         ):
@@ -928,3 +936,63 @@ def test_is_flag_enabled() -> None:
 
     with mock.patch.dict(os.environ, {}, clear=True):
         assert not is_flag_enabled(key)
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "env_empty_lmod",
+        "env_clear_lmod",
+    ],
+)
+def test_lmodenvsettings_notset(
+    request: pytest.FixtureRequest, fixture_name: str
+) -> None:
+    """Verify an environment that contains no LMOD env vars does not result
+    in an exception when creating the settings instance.
+
+    Parameterized with: all keys have empty value, all keys missing
+    """
+    _ = request.getfixturevalue(fixture_name)
+    settings = LmodEnvSettings()
+
+    assert settings.CMD == ""
+    assert settings.DIR == ""
+    assert settings.PKG == ""
+    assert settings.ROOT == ""
+    assert settings.SYSHOST == ""
+    assert settings.SYSTEM_DEFAULT_MODULES == ""
+    assert settings.SYSTEM_NAME == ""
+    assert settings.VERSION == ""
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "env_full_lmod",
+        "env_full_strippable_lmod",
+    ],
+)
+def test_lmodenvsettings(request: pytest.FixtureRequest, fixture_name: str) -> None:
+    """Verify LMOD settings are loaded correctly from the environment."""
+    _ = request.getfixturevalue(fixture_name)
+
+    settings = LmodEnvSettings()
+
+    assert settings.CMD == "CMD-value"
+    assert settings.DIR == "DIR-value"
+    assert settings.PKG == "PKG-value"
+    assert settings.ROOT == "ROOT-value"
+    assert settings.SYSHOST == "SYSHOST-value"
+    assert settings.SYSTEM_DEFAULT_MODULES == "SYSTEM_DEFAULT_MODULES-value"
+    assert settings.SYSTEM_NAME == "SYSTEM_NAME-value"
+    assert settings.VERSION == "VERSION-value"
+
+
+def test_lmodenvsettings_variable_resolution(
+    lmod_settings_keys: list[str],
+) -> None:
+    """Verify key resolution given a field name."""
+    for key in lmod_settings_keys:
+        expected_key = f"LMOD_{key}"
+        assert LmodEnvSettings.variable(key) == expected_key

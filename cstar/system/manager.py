@@ -1,11 +1,17 @@
 import functools
-import os
 import platform as platform
-from dataclasses import dataclass, field
-from typing import ClassVar, Protocol
+from dataclasses import dataclass
+from typing import ClassVar, Final, Protocol
+
+from pydantic import Field, ValidationError
 
 from cstar.base.exceptions import CstarError
-from cstar.system.environment import CStarEnvironment
+from cstar.system.environment import (
+    CStarEnvironment,
+    EnvSettingsBase,
+    LmodEnvSettings,
+    SlurmSettingsBase,
+)
 from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
@@ -17,59 +23,72 @@ from cstar.system.scheduler import (
 )
 
 
-@dataclass(frozen=True)
+class AnvilEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Anvil* system.
+
+    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
+    hostname matching test in `is_match`.
+    """
+
+    HOST_IDENTIFIER: Final[str] = "anvil"
+    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
+    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
+    """The hostname of the machine.
+
+    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
+    """
+
+    @property
+    def is_match(self) -> bool:
+        """Return `True` if the current system can be identified as *Anvil* by
+        inspecting the system hostname.
+
+        Returns
+        -------
+        bool
+        """
+        return self.RCAC_CLUSTER == AnvilEnvSettings.HOST_IDENTIFIER
+
+
 class HostNameEvaluator:
     """Container of host-specific names used to determine the system name that will be
     used by C-Star.
     """
 
-    lmod_syshost: str = field(default="", init=False)
-    """The lmod-specific hostname."""
-    lmod_sysname: str = field(default="", init=False)
-    """The lmod-specific system name."""
-    lmod_hostname: str = field(default="", init=False)
-    """Aggregate of lmod host and lmod name."""
-    platform_name: str = field(default="", init=False)
-    """The platform name."""
-    machine_name: str = field(default="", init=False)
-    """The machine name."""
-    platform_hostname: str = field(default="", init=False)
-    """Aggregate of machine and platform sysname."""
+    lmod_settings: Final[LmodEnvSettings]
+    """LMOD-specific environment configuration."""
 
-    ENV_LMOD_SYSHOST: ClassVar[str] = "LMOD_SYSHOST"
-    ENV_LMOD_SYSNAME: ClassVar[str] = "LMOD_SYSTEM_NAME"
+    def __init__(self) -> None:
+        """Initialize the instance."""
+        self.lmod_settings = LmodEnvSettings()
 
-    def __post_init__(self) -> None:
-        """Initialize the non-init and calculated attributes of an instance.
+    @property
+    def platform_name(self) -> str:
+        return platform.system()
 
-        NOTE: make use of setattr because attributes are read-only.
-        """
-        # ruff: noqa: B010
-        setattr_ = object.__setattr__
-        setattr_(self, "lmod_syshost", os.environ.get(self.ENV_LMOD_SYSHOST, ""))
-        setattr_(self, "lmod_sysname", os.environ.get(self.ENV_LMOD_SYSNAME, ""))
-        setattr_(
-            self, "lmod_hostname", (self.lmod_syshost or self.lmod_sysname).casefold()
-        )
-        setattr_(self, "platform_name", platform.system())
-        setattr_(self, "machine_name", platform.machine())
-        setattr_(
-            self,
-            "platform_hostname",
-            (
-                f"{self.platform_name}_{self.machine_name}"
-                if self.platform_name and self.machine_name
-                else ""
-            ).casefold(),
-        )
+    @property
+    def machine_name(self) -> str:
+        return platform.machine()
+
+    @property
+    def platform_hostname(self) -> str:
+        """Aggregate of machine and platform sysname."""
+        value = ""
+        if self.platform_name and self.machine_name:
+            value = f"{self.platform_name}_{self.machine_name}"
+        return value.casefold()
 
     @property
     def _diagnostic(self) -> str:
         """Return a string useful for diagnosing failures to identify the name."""
-        return (
-            f"{self.lmod_syshost=}, {self.lmod_sysname=}, "
-            f"{self.platform_name=}, {self.machine_name=}"
-        )
+        attributes = [
+            self.lmod_settings.SYSHOST,
+            self.lmod_settings.SYSTEM_NAME,
+            self.platform_name,
+            self.machine_name,
+        ]
+
+        return ", ".join(f"{item=}" for item in attributes)
 
     @property
     def name(self) -> str:
@@ -83,18 +102,30 @@ class HostNameEvaluator:
         EnvironmentError
             If the name cannot be determined.
         """
-        if self.lmod_hostname:
-            return self.lmod_hostname
+        if lmod_hostname := self.lmod_hostname:
+            return lmod_hostname
 
-        if os.getenv("RCAC_CLUSTER") == "anvil":
-            return "anvil"
-
+        try:
+            if AnvilEnvSettings().is_match:
+                return _AnvilSystemContext.name
+        except ValidationError:
+            ...  # not anvil
         if self.platform_hostname:
             return self.platform_hostname
 
         raise OSError(
             f"C-Star cannot determine your system name. Diagnostics: {self._diagnostic}"
         )
+
+    @property
+    def lmod_hostname(self) -> str:
+        """Return a hostname using the available configuration with priority order:
+        1. LMOD_SYSHOST
+        2. LMOD_SYSTEM_NAME
+
+        If neither value is set, returns empty-string.
+        """
+        return (self.lmod_settings.SYSHOST or self.lmod_settings.SYSTEM_NAME).casefold()
 
 
 class _SystemContext(Protocol):
@@ -110,6 +141,15 @@ class _SystemContext(Protocol):
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
         """Instantiate a scheduler configured for the system."""
+
+    @classmethod
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        """Return the type used to load settings required by the target system.
+
+        NOTE: The type is returned to avoid validation failures at import time due
+        to the instantation of the global `cstar_sysmgr`.
+        """
+        return EnvSettingsBase
 
 
 _registry: dict[str, type[_SystemContext]] = {}
@@ -150,8 +190,8 @@ def _get_system_context() -> _SystemContext:
     """
     namer = HostNameEvaluator()
 
-    if type_ := _registry.get(namer.name):
-        return type_()
+    if klass := _registry.get(namer.name):
+        return klass()
 
     raise CstarError(f"Unknown system requested: {namer.name}")
 
@@ -226,6 +266,11 @@ class _AnvilSystemContext(_SystemContext):
             documentation=cls.docs,
             max_cpus_per_node=128,
         )
+
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return AnvilEnvSettings
 
 
 @register_sys_context
@@ -338,6 +383,13 @@ class _LinuxARM64SystemContext(_SystemContext):
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
 
+    _context: Final[_SystemContext]
+    """A context object configured for the current system."""
+    _environment: Final[CStarEnvironment]
+    """An environment manager configured for the current system."""
+    _scheduler: Final[Scheduler | None]
+    """The scheduler appropriate for this system."""
+
     def __init__(self) -> None:
         """Initialize the CStarSystemManager.
 
@@ -345,16 +397,14 @@ class CStarSystemManager:
         the environment and scheduler based on that name.
         """
         self._context = _get_system_context()
-        """A context object configured for the current system."""
         self._environment = CStarEnvironment(
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
             compiler=self._context.compiler,
+            system_settings_klass=self._context.settings_klass(),
         )
-        """An environment manager configured for the current system."""
 
         self._scheduler = self._context.create_scheduler()
-        """The scheduler appropriate for this system."""
 
     @property
     def name(self) -> str:

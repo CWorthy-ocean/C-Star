@@ -7,11 +7,13 @@ import typer
 from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.workplan.run import app
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.models import UserDefinedVariables
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
+from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 
 
 def test_workplan_run_file_dne(
@@ -392,25 +394,35 @@ def test_orch_ctx_runtime_vars_none_available() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mock_env", "exp_missing"),
+    ("mock_env", "settings_klass", "exp_missing"),
     [
         pytest.param(
-            {ENV_CSTAR_SLURM_QUEUE: "xxx", ENV_CSTAR_SLURM_ACCOUNT: ""},
+            {
+                ENV_CSTAR_SLURM_QUEUE: "xxx",
+                ENV_CSTAR_SLURM_ACCOUNT: "",
+            },
+            SlurmSettingsBase,
             ENV_CSTAR_SLURM_ACCOUNT,
             id=f"{ENV_CSTAR_SLURM_ACCOUNT}::empty",
         ),
         pytest.param(
-            {ENV_CSTAR_SLURM_QUEUE: "", ENV_CSTAR_SLURM_ACCOUNT: "xxx"},
+            {
+                ENV_CSTAR_SLURM_QUEUE: "",
+                ENV_CSTAR_SLURM_ACCOUNT: "xxx",
+            },
+            SlurmSettingsBase,
             ENV_CSTAR_SLURM_QUEUE,
             id=f"{ENV_CSTAR_SLURM_QUEUE}::empty",
         ),
         pytest.param(
             {ENV_CSTAR_SLURM_QUEUE: "xxx"},
+            SlurmSettingsBase,
             ENV_CSTAR_SLURM_ACCOUNT,
             id=f"{ENV_CSTAR_SLURM_ACCOUNT}::not-provided",
         ),
         pytest.param(
             {ENV_CSTAR_SLURM_ACCOUNT: "xxx"},
+            SlurmSettingsBase,
             ENV_CSTAR_SLURM_QUEUE,
             id=f"{ENV_CSTAR_SLURM_QUEUE}::not-provided",
         ),
@@ -418,6 +430,7 @@ def test_orch_ctx_runtime_vars_none_available() -> None:
 )
 def test_launcher_preconditions_slurm(
     mock_env: dict[str, str],
+    settings_klass: type[EnvSettingsBase],
     exp_missing: str,
 ) -> None:
     """Verify that the SLURM launcher precondition check fails when required env vars
@@ -434,7 +447,11 @@ def test_launcher_preconditions_slurm(
     with (
         mock.patch.dict(os.environ, mock_env, clear=True),
         mock.patch("cstar.system.manager.CStarSystemManager.scheduler", mock_scheduler),
-        pytest.raises(ValueError, match=exp_missing),
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            settings_klass,
+        ),
+        pytest.raises(CstarExpectationFailed, match=exp_missing),
     ):
         _ = get_launcher()
 

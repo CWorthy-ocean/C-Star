@@ -5,10 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from cstar.system.environment import CStarEnvironment
+from cstar.system.environment import CStarEnvironment, LmodEnvSettings
 from cstar.system.manager import (
     CStarSystemManager,
-    HostNameEvaluator,
     _DerechoSystemContext,
     _ExpanseSystemContext,
     _LinuxSystemContext,
@@ -28,8 +27,8 @@ def mock_environment_vars() -> Generator[None, None, None]:
     with patch.dict(
         os.environ,
         {
-            HostNameEvaluator.ENV_LMOD_SYSHOST: "",
-            HostNameEvaluator.ENV_LMOD_SYSNAME: "Perlmutter",
+            LmodEnvSettings.variable("SYSHOST"): "",
+            LmodEnvSettings.variable("SYSTEM_NAME"): "Perlmutter",
         },
         clear=True,
     ) as _:

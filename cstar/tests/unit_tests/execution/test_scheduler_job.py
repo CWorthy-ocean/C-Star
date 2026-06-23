@@ -81,16 +81,16 @@ class MockScheduler(Scheduler):
     def in_active_allocation(self) -> bool:
         return False
 
-    def get_queue(self, name):
+    def get_queue(self, name: str | None):
         # Return a mocked queue with default properties
         return MagicMock(name=name, max_walltime="02:00:00")
 
     @property
-    def global_max_cpus_per_node(self):
+    def global_max_cpus_per_node(self) -> int | None:
         return 64  # Mocked maximum CPUs per node
 
     @property
-    def global_max_mem_per_node_gb(self):
+    def global_max_mem_per_node_gb(self) -> float | None:
         return 128  # Mocked maximum memory in GB
 
 

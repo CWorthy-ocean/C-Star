@@ -27,8 +27,8 @@ def test_cli_workplan_log_step_dne(
         color=False,
     )
 
+    assert "unknown step" in result.stderr
     assert invalid_step_name in result.stderr
-    assert "Unable to monitor logs for unknown step" in result.stderr
 
 
 def test_cli_workplan_log_step_no_logs(

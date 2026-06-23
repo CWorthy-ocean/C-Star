@@ -2,10 +2,101 @@ import importlib.util
 import os
 import platform
 from pathlib import Path
+from typing import ClassVar, Final
 
 from dotenv import dotenv_values
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cstar.base.utils import _run_cmd
+
+
+class EnvSettingsBase(BaseSettings):
+    """Base class for environment settings - requires no settings."""
+
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+        env_prefix="CSTAR_",
+        str_strip_whitespace=True,
+        validate_default=True,
+    )
+    """Configuration altering global model behaviors."""
+
+    @property
+    def is_match(self) -> bool:
+        """Return `True` if the current system is identified after inspecting
+        non-lmod environment variables.
+        """
+        return False
+
+
+class LmodEnvSettings(BaseSettings):
+    """Environment configuration used by the LMOD system."""
+
+    CMD: str = Field(default="", frozen=True)
+    """The LMOD executable command."""
+    DIR: str = Field(default="", frozen=True)
+    """The LMOD lib directory."""
+    PKG: str = Field(default="", frozen=True)
+    """The path to the lmod package directory."""
+    ROOT: str = Field(default="", frozen=True)
+    """The path to the lmod install root directory."""
+    SYSHOST: str = Field(default="", frozen=True)
+    """The LMOD system host."""
+    SYSTEM_DEFAULT_MODULES: str = Field(default="", frozen=True)
+    """A colon-delimited list of modules automatically loaded by the system."""
+    SYSTEM_NAME: str = Field(default="", frozen=True)
+    """The LMOD system name."""
+    VERSION: str = Field(default="", frozen=True)
+    """The LMOD version."""
+
+    no_default_modules: ClassVar[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
+
+    @classmethod
+    def variable(cls, name: str) -> str:
+        """Return an aliased/prefixed variable name."""
+        return get_envfield_alias(LmodEnvSettings, name)
+
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+        env_prefix="LMOD_",
+        str_strip_whitespace=True,
+    )
+    """Configuration altering global model behaviors."""
+
+
+class SlurmSettingsBase(EnvSettingsBase):
+    """Base class configuring C-Star standard configuration management options."""
+
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=1)
+    """The SLURM account name."""
+    SLURM_QUEUE: str = Field(default="", frozen=True, min_length=1)
+    """The SLURM queue name."""
+    SLURM_MAX_WALLTIME: str = Field(default="48:00:00", frozen=True)
+    """The SLURM queue name."""
+
+
+def get_envfield_alias(
+    klass: type[EnvSettingsBase | LmodEnvSettings], field_name: str
+) -> str:
+    """Retrieve the environment variable name for a given field.
+
+    Parameters
+    ----------
+    klass : type[BaseSettings]
+        A settings class that contains the field.
+    field_name : str
+        The name of the model field.
+
+    Returns
+    -------
+    str
+    """
+    field = klass.model_fields.get(field_name)
+    if field and isinstance(field.validation_alias, str):
+        return field.validation_alias
+
+    # Fallback logic if validation_alias isn't set: combine prefix and field name
+    prefix = klass.model_config.get("env_prefix", "")
+    return f"{prefix}{field_name}"
 
 
 class CStarEnvironment:
@@ -16,31 +107,6 @@ class CStarEnvironment:
 
     This class also provides utilities for interacting with Linux Environment Modules
     (Lmod) and dynamically setting up the environment based on user and system configurations.
-
-    Attributes
-    ----------
-    system_name : str
-        The name of the system (e.g., "expanse", "perlmutter").
-    mpi_exec_prefix : str
-        The prefix command used for launching MPI jobs.
-    compiler : str
-        The compiler to be used in the environment (e.g., "intel", "gnu").
-    uses_lmod: bool
-        True if this system uses Linux Environment Modules for environment management
-
-    Methods
-    -------
-    load_lmod_modules(lmod_file: str) -> None
-        Loads the necessary Lmod modules for the current system based on a `.lmod` configuration file.
-    _call_lmod(*args) -> None
-        Executes a Linux Environment Modules command with specified arguments.
-
-    Raises
-    ------
-    EnvironmentError
-        Raised when required resources, modules, or configurations are missing or incompatible.
-    RuntimeError
-        Raised when a command or operation fails during execution.
 
     Examples
     --------
@@ -53,11 +119,25 @@ class CStarEnvironment:
     CStarEnvironment(...)
     """
 
+    _system_name: Final[str]
+    """The name of the system (e.g., "expanse", "perlmutter")."""
+    _mpi_exec_prefix: Final[str]
+    """The command prefix used for launching MPI jobs."""
+    _compiler: Final[str]
+    """The compiler to be used in the environment (e.g., "intel", "gnu")."""
+    _package_root: Path | None = None
+    """The root directory of the installation of the C-Star package."""
+    _lmod_settings: Final[LmodEnvSettings]
+    """Environment variables used by the LMOD system."""
+    _system_settings_klass: Final[type[EnvSettingsBase] | None]
+    """Environment variables used to configure jobs on the system."""
+
     def __init__(
         self,
         system_name: str,
         mpi_exec_prefix: str,
         compiler: str,
+        system_settings_klass: type[EnvSettingsBase] | None = None,
     ):
         """Initialize the instance.
 
@@ -73,13 +153,15 @@ class CStarEnvironment:
         self._system_name = system_name
         self._mpi_exec_prefix = mpi_exec_prefix
         self._compiler = compiler
-        self._PACKAGE_ROOT: Path = self._find_package_root()
 
         # Load modules FIRST (if using lmod), then load env file
         # This ensures module-set variables (e.g., CRAY_NETCDF_PREFIX) are available
         # when env file variables are expanded
+        self._lmod_settings = LmodEnvSettings()
         if self.uses_lmod:
-            self.load_lmod_modules(lmod_file=self.lmod_path)
+            self.load_lmod_modules()
+
+        self._system_settings_klass = system_settings_klass
 
         # Load env file AFTER modules so variables can be expanded
         self._env_vars = self._load_env()
@@ -165,6 +247,11 @@ class CStarEnvironment:
         """
         return self._env_vars.copy()
 
+    @property
+    def settings_klass(self) -> type[EnvSettingsBase] | None:
+        """Return the type that will load and validate the system settings."""
+        return self._system_settings_klass
+
     @classmethod
     def _find_package_root(cls) -> Path:
         """Determine the root directory containing the source for this package.
@@ -203,7 +290,9 @@ class CStarEnvironment:
         ImportError
             If the top-level package cannot be located.
         """
-        return self._PACKAGE_ROOT
+        if self._package_root is None:
+            self._package_root = self._find_package_root()
+        return self._package_root
 
     @property
     def uses_lmod(self) -> bool:
@@ -215,7 +304,7 @@ class CStarEnvironment:
         bool
             True if the OS is Linux and `LMOD_DIR` is present in environment variables.
         """
-        return (platform.system() == "Linux") and ("LMOD_CMD" in list(os.environ))
+        return platform.system() == "Linux" and bool(self._lmod_settings.CMD)
 
     @property
     def system_env_path(self) -> Path:
@@ -252,7 +341,7 @@ class CStarEnvironment:
         pkg_relative_path = f"additional_files/lmod_lists/{self._system_name}.lmod"
         return self.package_root / pkg_relative_path
 
-    def _call_lmod(self, *args) -> None:
+    def _call_lmod(self, *args: str) -> None:
         """Calls Linux Environment Modules with specified arguments in python mode.
 
         This method constructs and executes a command to interface with the Linux Environment
@@ -300,7 +389,7 @@ class CStarEnvironment:
 
         exec(stdout)
 
-    def load_lmod_modules(self, lmod_file) -> None:
+    def load_lmod_modules(self) -> None:
         """Loads necessary modules for this machine using Linux Environment Modules.
 
         This function:
@@ -320,13 +409,18 @@ class CStarEnvironment:
             raise OSError(
                 "Your system does not appear to use Linux Environment Modules"
             )
+
+        if not self._lmod_settings.SYSTEM_DEFAULT_MODULES:
+            var_name = LmodEnvSettings.variable("SYSTEM_DEFAULT_MODULES")
+            os.environ[var_name] = LmodEnvSettings.no_default_modules
+
         self._call_lmod("reset")
 
         with open(self.lmod_path) as fp:
             lmod_list = fp.readlines()
 
-        for mod in lmod_list:
-            self._call_lmod(f"load {mod}")
+        modules = " ".join(x.strip() for x in lmod_list)
+        self._call_lmod(f"load {modules}")
 
     @staticmethod
     def set_env_var(key: str, value: str) -> None:

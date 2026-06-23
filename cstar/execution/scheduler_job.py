@@ -6,7 +6,7 @@ import re
 import typing as t
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -312,8 +312,8 @@ def get_slurm_batch_sync(job_id: str | int) -> SlurmBatch:
 
 
 async def get_slurm_batches(
-    job_ids: t.Iterable[str | int],
-) -> t.Mapping[str, SlurmBatch]:
+    job_ids: Iterable[str | int],
+) -> Mapping[str, SlurmBatch]:
     """Query SLURM for job status.
 
     Parameters
