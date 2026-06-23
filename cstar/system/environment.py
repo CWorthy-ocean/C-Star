@@ -21,13 +21,6 @@ class EnvSettingsBase(BaseSettings):
     )
     """Configuration altering global model behaviors."""
 
-    @property
-    def is_match(self) -> bool:
-        """Return `True` if the current system is identified after inspecting
-        non-lmod environment variables.
-        """
-        return False
-
 
 class LmodEnvSettings(BaseSettings):
     """Environment configuration used by the LMOD system."""
@@ -226,7 +219,7 @@ class CStarEnvironment:
 
         # Expand shell variables (e.g., ${CRAY_NETCDF_PREFIX}) using os.path.expandvars
         # This allows env file to reference variables set by modules (which are loaded first)
-        expanded_vars = {}
+        expanded_vars: dict[str, str] = {}
         for key, value in env_vars.items():
             # Use os.path.expandvars to expand ${VAR} and $VAR syntax
             expanded_value = os.path.expandvars(value) if value else ""

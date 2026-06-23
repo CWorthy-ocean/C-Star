@@ -13,6 +13,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from cstar.base.feature import (
+    ENV_FF_SLURM_DISABLE_MT,
+    is_feature_enabled,
+)
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.system.manager import cstar_sysmgr
@@ -577,19 +581,19 @@ class SchedulerJob(ExecutionHandler, ABC):
         if (walltime is None) and (self.queue.max_walltime is None):
             raise ValueError(
                 "Cannot create scheduler job: walltime parameter not provided "
-                + f"and C-Star cannot default to the max walltime for the queue {queue_name} "
+                + f"and C-Star cannot default to the max walltime for the queue {queue_name!r} "
                 + " as it cannot be determined"
             )
         elif self.queue.max_walltime is None:
             self.log.warning(
-                f"Unable to determine the maximum allowed walltime for chosen queue {queue_name}. "
-                + f"If your chosen walltime {walltime} exceeds the (unknown) limit, this job may be "
-                + "rejected by your system's job scheduler.",
+                f"Unable to determine the maximum allowed walltime for chosen queue {queue_name!r}. "
+                f"If your chosen walltime {walltime!r} exceeds the (unknown) limit, this job may be "
+                "rejected by your system's job scheduler."
             )
         elif walltime is None:
             self.log.warning(
                 "Walltime parameter unspecified. Creating scheduler job with maximum walltime "
-                + f"for queue {queue_name}, {self.queue.max_walltime}"
+                + f"for queue {queue_name!r}, {self.queue.max_walltime!r}"
             )
             self._walltime = self.queue.max_walltime
         else:
@@ -771,6 +775,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         self.script_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.script_path, "w") as f:
             f.write(self.script)
+        self.log.debug(f"Job script written to: {self.script_path}")
 
     @abstractmethod
     def submit(self):
@@ -951,7 +956,13 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         else:
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
-        scheduler_script += f"\n#SBATCH --account={self.account_key}"
+        if self.account_key:
+            scheduler_script += f"\n#SBATCH --account={self.account_key}"
+        if is_feature_enabled(ENV_FF_SLURM_DISABLE_MT):
+            scheduler_script += "\n#SBATCH --hint=nomultithread"
+
+        # scheduler_script += "\n#SBATCH --mem-per-cpu=3900"
+
         scheduler_script += "\n#SBATCH --export=ALL"
         scheduler_script += "\n#SBATCH --mail-type=ALL"
         scheduler_script += f"\n#SBATCH --time={self.walltime}"

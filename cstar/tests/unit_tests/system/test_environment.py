@@ -1,5 +1,6 @@
 import os
 import subprocess
+import typing as t
 from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
@@ -20,11 +21,18 @@ from cstar.base.env import (
     get_env_item,
     hpc_data_directory,
 )
-from cstar.base.feature import is_flag_enabled
+from cstar.base.feature import (
+    ENV_FF_DEBUG_BUILD_MODE,
+    ENV_FF_SLURM_DISABLE_MT,
+    is_flag_enabled,
+)
 from cstar.system.environment import (
     CStarEnvironment,
     LmodEnvSettings,
 )
+
+if t.TYPE_CHECKING:
+    from importlib.machinery import ModuleSpec
 
 
 class MockEnvironment(CStarEnvironment):
@@ -533,8 +541,9 @@ class TestExceptions:
 
     @patch("cstar.system.environment.importlib.util.find_spec", return_value=None)
     def test_package_root_raises_import_error_when_package_not_found(
-        self, mock_find_spec
-    ):
+        self,
+        _mock_find_spec: "ModuleSpec | None",
+    ) -> None:
         """Tests that missing package spec raises an ImportError in package_root
         property.
 
@@ -564,11 +573,61 @@ class TestExceptions:
         - Raises EnvironmentError with a message indicating Lmod modules are not supported on the system.
         """
         self.mock_uses_lmod.return_value = False
-        with pytest.raises(
-            EnvironmentError, match="does not appear to use Linux Environment Modules"
+
+        with (
+            pytest.raises(
+                EnvironmentError,
+                match="does not appear to use Linux Environment Modules",
+            ),
         ):
             env = MockEnvironment()
             env.load_lmod_modules()
+
+    def test_lmod_system_default_modules_is_set(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Verify that LMOD_SYSTEM_DEFAULT_MODULES is set when missing and
+        we attempt to load modules.
+
+        Parameters
+        ----------
+        tmp_path : Path
+            Used to create a mock modules file to be "loaded" by the mocked `_call_lmod`
+
+        Asserts
+        -------
+        - Raises EnvironmentError with a message indicating Lmod modules are not supported on the system.
+        """
+        mock_module_names = ["mock-module-1", "mock-module-2"]
+        modules_file = tmp_path / "mock_modules.lmod"
+        modules_file.write_text("\n".join(mock_module_names))
+        modules_var: t.Final[str] = "LMOD_SYSTEM_DEFAULT_MODULES"
+        modules_exp_value: t.Final[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
+
+        with (
+            # ensure the variable isn't set at the outset by clearing os.environ.
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                MockEnvironment,
+                "lmod_path",
+                modules_file,
+            ),
+            mock.patch.object(MockEnvironment, "_call_lmod") as mock_call_lmod,
+        ):
+            env = MockEnvironment()
+            env.load_lmod_modules()
+
+            # confirm the reset and load fired
+            mock_call_lmod.assert_has_calls(
+                [
+                    mock.call("reset"),
+                    mock.call(f"load {' '.join(mock_module_names)}"),
+                ]
+            )
+
+            # confirm the env var is set after the call completes
+            assert os.environ[modules_var] == modules_exp_value
 
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
@@ -922,12 +981,18 @@ def test_env_show_default(
         show("file")
 
 
-def test_is_flag_enabled() -> None:
+@pytest.mark.parametrize(
+    "key",
+    [
+        ENV_FF_DEBUG_BUILD_MODE,
+        ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ENV_FF_SLURM_DISABLE_MT,
+    ],
+)
+def test_is_flag_enabled(key: str) -> None:
     """Verify the utility `is_flag_enabled` determines the correct value for
     a flag when it is set to on, set to off, and not set at all.
     """
-    key = ENV_CSTAR_CLOBBER_WORKING_DIR
-
     with mock.patch.dict(os.environ, {key: FLAG_ON}, clear=True):
         assert is_flag_enabled(key)
 

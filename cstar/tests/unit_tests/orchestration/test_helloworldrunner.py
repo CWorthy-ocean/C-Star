@@ -298,9 +298,9 @@ def test_hello_world_workplan_dry_run(
             color=False,
         )
 
-    assert result.exit_code == 0
     assert run_id in result.stdout
     assert "completed" in result.stdout
+    assert result.exit_code == 0
 
 
 @pytest.mark.usefixtures("prefect_server_url")
@@ -353,9 +353,9 @@ def test_heterogeneous_workplan(
             color=False,
         )
 
-    assert result.exit_code == 0
     assert run_id in result.stdout
     assert "completed" in result.stdout
+    assert result.exit_code == 0
 
 
 @pytest.mark.usefixtures("prefect_server_url")
@@ -395,5 +395,5 @@ def test_hw_runner_bp_only(
             color=False,
         )
 
-        assert result.exit_code == 0
         assert "Hello," in result.stdout
+        assert result.exit_code == 0

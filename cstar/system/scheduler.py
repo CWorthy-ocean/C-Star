@@ -54,7 +54,7 @@ def query_max_walltime_via_sinfo(name: str) -> str | None:
     RuntimeError
         If the command to query the SLURM scheduler (`sinfo`) fails.
     """
-    sp_cmd = f"sinfo -h -o '%l' -p {name}"
+    sp_cmd = f"sinfo --noheader --format='%l' --partition={name}"
     mw = _run_cmd(sp_cmd)
     return _parse_walltime(mw) if mw else None
 

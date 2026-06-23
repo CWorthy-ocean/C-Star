@@ -147,6 +147,14 @@ def test_partial_platform_fallback(
     with (
         patch("platform.system", return_value=system_name),
         patch("platform.machine", return_value=machine_name),
+        patch(
+            "cstar.system.manager._EljaSystemContext.is_match",
+            mock.MagicMock(return_value=False),
+        ),
+        patch(
+            "cstar.system.manager._AnvilSystemContext.is_match",
+            mock.MagicMock(return_value=False),
+        ),
     ):
         namer = HostNameEvaluator()
 
@@ -157,3 +165,26 @@ def test_partial_platform_fallback(
         # without lmod env vars, falling back on partial platform name should fail.
         with pytest.raises(EnvironmentError):
             _ = namer.name
+
+
+@patch("platform.system", mock.MagicMock(return_value="any-system"))
+@patch("platform.machine", mock.MagicMock(return_value="any-machine"))
+@pytest.mark.parametrize(
+    ("env_vars", "exp_name"),
+    [
+        ({"RCAC_CLUSTER": "anvil"}, "anvil"),
+        ({"HOSTNAME": "elja-irhpc"}, "elja"),
+    ],
+)
+@pytest.mark.usefixtures("env_clear_lmod")
+def test_env_var_matching(
+    env_vars: dict[str, str],
+    exp_name: str,
+) -> None:
+    """Verify that when there is no lmod information, the hostname evaluator locates
+    a match using the "matcher functions"
+    """
+    with patch.dict(os.environ, env_vars, clear=True):
+        namer = HostNameEvaluator()
+
+        assert namer.name == exp_name

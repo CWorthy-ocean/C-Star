@@ -1,11 +1,14 @@
 import functools
+import os
 import platform as platform
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Final, Protocol
+from typing import ClassVar, Final, Protocol, override
 
-from pydantic import Field, ValidationError
+from pydantic import Field
 
 from cstar.base.exceptions import CstarError
+from cstar.base.log import get_logger
 from cstar.system.environment import (
     CStarEnvironment,
     EnvSettingsBase,
@@ -20,7 +23,10 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
     query_max_walltime_via_sacctmgr,
+    query_max_walltime_via_sinfo,
 )
+
+log = get_logger(__name__)
 
 
 class AnvilEnvSettings(SlurmSettingsBase):
@@ -30,7 +36,7 @@ class AnvilEnvSettings(SlurmSettingsBase):
     hostname matching test in `is_match`.
     """
 
-    HOST_IDENTIFIER: Final[str] = "anvil"
+    HOST_IDENTIFIER: ClassVar[str] = "anvil"
     """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
     RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
     """The hostname of the machine.
@@ -38,16 +44,32 @@ class AnvilEnvSettings(SlurmSettingsBase):
     Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
     """
 
-    @property
-    def is_match(self) -> bool:
-        """Return `True` if the current system can be identified as *Anvil* by
-        inspecting the system hostname.
 
-        Returns
-        -------
-        bool
-        """
-        return self.RCAC_CLUSTER == AnvilEnvSettings.HOST_IDENTIFIER
+class EljaEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Elja* system.
+
+    NOTE: Elja does not support SLURM account names.
+    """
+
+    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
+    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
+
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
+    """The hostname of the machine.
+
+    Used to identify the system as Elja by matching value: `elja-irhpc`
+    """
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow empty account.
+    """
+    SLURM_QUEUE: str = Field(default="")
+    """The SLURM queue name."""
+    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
+    """The number of threads to be used by OpenMPI"""
+    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
+    """The number of threads used by MKL"""
 
 
 class HostNameEvaluator:
@@ -64,10 +86,12 @@ class HostNameEvaluator:
 
     @property
     def platform_name(self) -> str:
+        """Return the system name for the current platform."""
         return platform.system()
 
     @property
     def machine_name(self) -> str:
+        """Return the machine name for the current platform."""
         return platform.machine()
 
     @property
@@ -103,14 +127,17 @@ class HostNameEvaluator:
             If the name cannot be determined.
         """
         if lmod_hostname := self.lmod_hostname:
+            log.trace("Using lmod hostname as system name")
             return lmod_hostname
 
-        try:
-            if AnvilEnvSettings().is_match:
-                return _AnvilSystemContext.name
-        except ValidationError:
-            ...  # not anvil
+        for ctx_klass in get_registered_sys_contexts():
+            if ctx_klass.is_match():
+                name = ctx_klass.name
+                log.trace(f"Using {name!r} as system name due to context match")
+                return name
+
         if self.platform_hostname:
+            log.trace("Using platform hostname as system name")
             return self.platform_hostname
 
         raise OSError(
@@ -150,6 +177,11 @@ class _SystemContext(Protocol):
         to the instantation of the global `cstar_sysmgr`.
         """
         return EnvSettingsBase
+
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the context identifies the current system as a match."""
+        return False
 
 
 _registry: dict[str, type[_SystemContext]] = {}
@@ -194,6 +226,16 @@ def _get_system_context() -> _SystemContext:
         return klass()
 
     raise CstarError(f"Unknown system requested: {namer.name}")
+
+
+def get_registered_sys_contexts() -> Sequence[type[_SystemContext]]:
+    """Return a sequence containing all registered context types.
+
+    Returns
+    -------
+    Sequence[type[_SystemContext]]
+    """
+    return list(_registry.values())
 
 
 @register_sys_context
@@ -267,10 +309,19 @@ class _AnvilSystemContext(_SystemContext):
             max_cpus_per_node=128,
         )
 
+    @override
     @classmethod
     def settings_klass(cls) -> type[SlurmSettingsBase] | None:
         """Return the type used to load settings required by the target system."""
         return AnvilEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Anvil* by matching
+        value `anvil` in `RCAC_CLUSTER` env var.
+        """
+        return os.getenv("RCAC_CLUSTER", "") == AnvilEnvSettings.HOST_IDENTIFIER
 
 
 @register_sys_context
@@ -302,6 +353,73 @@ class _DerechoSystemContext(_SystemContext):
             requires_task_distribution=True,
             documentation=cls.docs,
         )
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class _EljaSystemContext(_SystemContext):
+    """The contextual dependencies for the Elja system."""
+
+    name: ClassVar[str] = "elja"
+    """The unique name identifying the Elja system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Elja."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on Eja."""
+    docs: ClassVar[str] = "https://wiki.irei.is"
+    """URI for documentation of the Elja system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        large = SlurmPartition(
+            name="128cpu_256mem",
+            query_name="128cpu_256mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        medium = SlurmPartition(
+            name="64cpu_256mem",
+            query_name="64cpu_256mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        small = SlurmPartition(
+            name="48cpu_192mem",
+            query_name="48cpu_192mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        any_cpu = SlurmPartition(
+            name="any_cpu",
+            query_name="any_cpu",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+
+        return SlurmScheduler(
+            queues=[small, medium, large, any_cpu],
+            primary_queue_name="any_cpu",
+            other_scheduler_directives={},
+            requires_task_distribution=True,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        """Return the type used to load settings required by *Elja* system.
+
+        Raises
+        ------
+        ValidationError
+            If required environment variables are not set.
+        """
+        return EljaEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Elja* by matching
+        value `elja-irhpc` in `HOSTNAME` env var.
+        """
+        return os.getenv("HOSTNAME", "") == EljaEnvSettings.HOST_IDENTIFIER
 
 
 @register_sys_context
