@@ -1,13 +1,14 @@
 import functools
 import os
 import platform as platform
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import ClassVar, Final, Protocol, override
 
-from griffe import get_logger
 from pydantic import Field
 
 from cstar.base.exceptions import CstarError
+from cstar.base.log import get_logger
 from cstar.system.environment import (
     CStarEnvironment,
     EnvSettingsBase,
@@ -43,15 +44,6 @@ class AnvilEnvSettings(SlurmSettingsBase):
     Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
     """
 
-    @override
-    @classmethod
-    def is_match(cls) -> bool:
-        """Return `True` if the current system is identified after inspecting
-        non-lmod environment variables.
-        """
-        actual = os.getenv("RCAC_CLUSTER", "")
-        return actual == AnvilEnvSettings.HOST_IDENTIFIER
-
 
 class EljaEnvSettings(SlurmSettingsBase):
     """Environment variables required to execute a simulation on the *Elja* system.
@@ -79,15 +71,6 @@ class EljaEnvSettings(SlurmSettingsBase):
     MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
     """The number of threads used by MKL"""
 
-    @override
-    @classmethod
-    def is_match(cls) -> bool:
-        """Return `True` if the current system is identified as *Elja* by matching
-        value `elja-irhpc` in `HOSTNAME` env var.
-        """
-        actual = os.getenv("HOSTNAME", "")
-        return actual == cls.HOST_IDENTIFIER
-
 
 class HostNameEvaluator:
     """Container of host-specific names used to determine the system name that will be
@@ -103,10 +86,12 @@ class HostNameEvaluator:
 
     @property
     def platform_name(self) -> str:
+        """Return the system name for the current platform."""
         return platform.system()
 
     @property
     def machine_name(self) -> str:
+        """Return the machine name for the current platform."""
         return platform.machine()
 
     @property
@@ -145,13 +130,11 @@ class HostNameEvaluator:
             log.trace("Using lmod hostname as system name")
             return lmod_hostname
 
-        if EljaEnvSettings.is_match():
-            log.trace("Using `elja` as system name")
-            return _EljaSystemContext.name
-
-        if AnvilEnvSettings.is_match():
-            log.trace("Using `anvil` as system name")
-            return _AnvilSystemContext.name
+        for ctx_klass in get_registered_sys_contexts():
+            if ctx_klass.is_match():
+                name = ctx_klass.name
+                log.trace(f"Using {name!r} as system name due to context match")
+                return name
 
         if self.platform_hostname:
             log.trace("Using platform hostname as system name")
@@ -194,6 +177,11 @@ class _SystemContext(Protocol):
         to the instantation of the global `cstar_sysmgr`.
         """
         return EnvSettingsBase
+
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the context identifies the current system as a match."""
+        return False
 
 
 _registry: dict[str, type[_SystemContext]] = {}
@@ -238,6 +226,16 @@ def _get_system_context() -> _SystemContext:
         return klass()
 
     raise CstarError(f"Unknown system requested: {namer.name}")
+
+
+def get_registered_sys_contexts() -> Sequence[type[_SystemContext]]:
+    """Return a sequence containing all registered context types.
+
+    Returns
+    -------
+    Sequence[type[_SystemContext]]
+    """
+    return list(_registry.values())
 
 
 @register_sys_context
@@ -316,6 +314,14 @@ class _AnvilSystemContext(_SystemContext):
     def settings_klass(cls) -> type[SlurmSettingsBase] | None:
         """Return the type used to load settings required by the target system."""
         return AnvilEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Anvil* by matching
+        value `anvil` in `RCAC_CLUSTER` env var.
+        """
+        return os.getenv("RCAC_CLUSTER", "") == AnvilEnvSettings.HOST_IDENTIFIER
 
 
 @register_sys_context
@@ -406,6 +412,14 @@ class _EljaSystemContext(_SystemContext):
             If required environment variables are not set.
         """
         return EljaEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Elja* by matching
+        value `elja-irhpc` in `HOSTNAME` env var.
+        """
+        return os.getenv("HOSTNAME", "") == EljaEnvSettings.HOST_IDENTIFIER
 
 
 @register_sys_context

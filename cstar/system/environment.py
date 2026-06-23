@@ -21,13 +21,6 @@ class EnvSettingsBase(BaseSettings):
     )
     """Configuration altering global model behaviors."""
 
-    @classmethod
-    def is_match(cls) -> bool:
-        """Return `True` if the current system is identified after inspecting
-        non-lmod environment variables.
-        """
-        return False
-
 
 class LmodEnvSettings(BaseSettings):
     """Environment configuration used by the LMOD system."""
