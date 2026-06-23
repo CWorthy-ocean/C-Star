@@ -5,26 +5,39 @@ This is a **draft / starting point** for the planned refactor that splits
 ``CstarSpecBuilder`` into two phases (see ``docs/spec-config-inventory.md``):
 
 1. **Collection / curation** — assemble every option from its source (constructor
-   args, the ModelSpec, machine config, hardcoded conventions, and the *pure*
-   derived values), validate it, and write one reviewable ``spec_config.yml``.
+   args, the ModelSpec, and the *pure* derived values), validate it, and write one
+   reviewable ``spec_config.yml``.
 2. **Processing** — ingest that file on any machine and run the heavy work
    (``generate_inputs`` + ``configure_build``).
 
-``SpecConfig`` is the contract between the two phases: it is plain, validated data
-with **no** ``rt.Grid`` objects, **no** source downloads, and **no** file I/O.
+``SpecConfig`` is the contract between the two phases: plain, validated data with
+**no** ``rt.Grid`` objects, **no** source downloads, and **no** file I/O.
 
-Design rules (from the inventory doc):
+Single governing principle
+--------------------------
+The config stores ONLY host-independent, single-source-of-truth inputs. Anything
+mechanically derivable is computed at **processing** time, never stored:
 
-* ``SpecConfig`` is **input-only**. Values that can only be known *after* artifacts
-  are materialized — ``s_coord`` (theta_s/theta_b/tcline read from the generated
-  grid file) and all file paths (grid/initial/forcing) — are **outputs** and belong
-  in the resulting blueprint, NOT here.
-* **Pure-derived** values (timestep, ntimes, v_sponge, param dims, obc flags,
-  casename, output root, extract_period) ARE included: they are deterministic
-  functions of the config inputs and are frozen here for review.
-* Hardcoded registries / URLs / ``roms_tools`` defaults are **snapshotted** into the
-  file (``sources.resolved_datasets``, ``conventions``) so a reviewer sees the real
-  values and a different processing host cannot silently drift.
+* **Host/machine** — the machine tag, account, queues, ``pes_per_node``, and every
+  data path (source_data / input_data / scratch / catalog) are resolved at
+  processing time from ``cstar_forge.config`` on the machine that runs the work.
+  ``run_output_dir`` and the namelist ``output_root_name`` (which embed the scratch
+  path) are therefore derived there too.
+* **Naming** — the only atomic identity inputs are ``model_name`` and ``grid_name``
+  (plus ``ensemble_id`` and the run dates). ``name``, ``casename``,
+  the namelist ``title``, ``output_root_name``, and ``run_output_dir`` are
+  deterministic functions of those and are exposed as computed properties /
+  helpers — never stored as independent values.
+* **Artifacts** — ``s_coord`` (theta_s/theta_b/tcline, read from the generated grid
+  file) and all file paths (grid / initial / forcing) are processing outputs and
+  belong in the resulting blueprint, not here.
+
+What IS stored: curated inputs (grid kwargs, partitioning, sources, code/template
+pins) and the model settings — including the *pure-derived* numerics (timestep,
+ntimes, v_sponge, param dims, obc flags) which carry scientific review value and may
+be hand-edited before processing. Fixed implementation details (e.g. the ``cdr.nc`` /
+``nesting.nc`` filenames, ``nrrec``, the tide flags set during generation) are NOT
+stored — they are deterministic and set by the processing step.
 
 NOTE: This module is not yet wired into ``CstarSpecBuilder``. It defines the target
 schema and the ``to_yaml``/``from_yaml`` round-trip so the resolver (Phase 1) and
@@ -40,7 +53,7 @@ from typing import Any, Dict, List, Optional, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-SPEC_CONFIG_VERSION = 1
+SPEC_CONFIG_VERSION = 2
 
 
 class _Section(BaseModel):
@@ -49,17 +62,18 @@ class _Section(BaseModel):
 
 
 # ===========================================================================
-# Identity & run window
+# Identity (atomic naming inputs only) & run window
 # ===========================================================================
 class Identity(_Section):
-    """Names and IDs. ``casename`` is pre-derived (``{name}_{datestr}``)."""
+    """The *atomic* naming inputs. Everything else (``name``, ``casename``,
+    namelist ``title``, ``output_root_name``, ``run_output_dir``) is derived from
+    these + the run dates + ``partitioning`` — see :class:`SpecConfig` properties.
+    """
 
-    model_name: str
-    grid_name: str
-    description: str = "Generated blueprint"
+    model_name: str  # the ModelSpec id, e.g. "cson_roms-marbl_v0.1"
+    grid_name: str  # e.g. "test-tiny"
     ensemble_id: Optional[int] = None
-    name: str  # "{model}_{grid}_{n_procs}procs[_{ensemble:03d}]"
-    casename: str  # "{name}_{start:%Y%m%d}-{end:%Y%m%d}"
+    description: str = "Generated blueprint"
 
 
 class RunWindow(_Section):
@@ -68,7 +82,8 @@ class RunWindow(_Section):
 
 
 # ===========================================================================
-# A. Grid / domain geometry
+# A. Grid / domain geometry (incl. partitioning — a host-independent
+#    decomposition choice that belongs to the domain)
 # ===========================================================================
 class OpenBoundaries(_Section):
     north: bool = False
@@ -77,17 +92,23 @@ class OpenBoundaries(_Section):
     west: bool = False
 
 
+class Partitioning(_Section):
+    n_procs_x: int
+    n_procs_y: int
+
+
 class Domain(_Section):
     """Grid construction inputs (kwargs only — the ``rt.Grid`` is built in Phase 2).
 
-    ``grid_kwargs_parent`` / ``grid_kwargs_child`` are present only for nested
-    domains; ``metadata_child`` holds the child grid's ``metadata`` block (e.g.
-    ``period``).
+    ``grid_kwargs`` is the single source for grid geometry, including ``theta_s`` /
+    ``theta_b`` / ``hc`` when provided; the namelist ``s_coord`` section is filled at
+    processing from the generated grid rather than duplicated here.
     """
 
     grid_kwargs: Dict[str, Any]
     topography_source: str  # e.g. "ETOPO5"
     open_boundaries: OpenBoundaries
+    partitioning: Partitioning
     grid_kwargs_parent: Optional[Dict[str, Any]] = None
     grid_kwargs_child: Optional[Dict[str, Any]] = None
     metadata_child: Optional[Dict[str, Any]] = None
@@ -160,33 +181,7 @@ class Sources(_Section):
 
 
 # ===========================================================================
-# C/D/E. Model settings (the namelist + cppdefs vocabulary)
-# ===========================================================================
-class ModelSettings(_Section):
-    """The settings dicts, fully merged (defaults from the ModelSpec YAMLs, then
-    override files, then user ``configure_build`` overrides).
-
-    These stay as free-form dicts here because the authoritative validation already
-    lives in ``cstar_forge.namelist_model.RunTimeSettings`` /
-    ``cstar.roms.namelist.RomsNamelist``. Phase 2 should validate ``run_time``
-    through ``RunTimeSettings`` before writing the namelist.
-
-    ``run_time`` here holds ONLY config-time-knowable values. The artifact-derived
-    sections (``s_coord`` theta/tcline; ``grid``/``initial``/``forcing`` file paths)
-    are intentionally absent — they are produced by processing and written to the
-    blueprint.
-    """
-
-    compile_time: Dict[str, Any]  # {"cppdefs": {...}}
-    run_time: Dict[str, Any]  # ~25 namelist sections (no artifact paths)
-    properties: Dict[str, Any]  # {"n_tracers": 34, "marbl": True}
-    # Pure-derived values, surfaced explicitly for review (also present inside
-    # run_time, but duplicated here as the audit trail of what Phase 1 computed).
-    derived: Dict[str, Any] = Field(default_factory=dict)
-
-
-# ===========================================================================
-# F. Code, templates, execution
+# C. Code, templates
 # ===========================================================================
 class CodeRepo(_Section):
     location: str
@@ -194,68 +189,25 @@ class CodeRepo(_Section):
     branch: Optional[str] = None
 
 
-class TemplateSpec(_Section):
-    location: str
+class TemplateRepo(CodeRepo):
+    """A template source pulled from a repo — like ``code.roms`` / ``code.marbl``
+    (``location`` + one of ``commit`` / ``branch``) but with a file filter: the
+    ``files`` to pull, optionally under an in-repo ``directory``."""
+
+    directory: Optional[str] = None
     files: List[str] = Field(default_factory=list)
 
 
 class Code(_Section):
     roms: CodeRepo
     marbl: Optional[CodeRepo] = None
-    templates_compile_time: TemplateSpec
-    templates_run_time: TemplateSpec
-
-
-class Partitioning(_Section):
-    n_procs_x: int
-    n_procs_y: int
-
-
-class Machine(_Section):
-    tag: str  # "MacOS" | "RCAC_anvil" | "NERSC_perlmutter" | "unknown"
-    account: str = ""
-    pes_per_node: Optional[int] = None
-    queues: Dict[str, str] = Field(default_factory=dict)
-    cluster_type: Optional[str] = None  # "LOCAL" | "SLURM"
-
-
-class Paths(_Section):
-    """Resolved on the *generating* machine. Phase 2 may re-resolve these from the
-    processing host's environment (``--paths-from-env``) for portability."""
-
-    source_data: str
-    input_data: str
-    scratch: str
-    catalog: str
-
-
-class Execution(_Section):
-    partitioning: Partitioning
-    machine: Machine
-    paths: Paths
-    run_output_dir: str
+    templates_compile_time: TemplateRepo
+    templates_run_time: TemplateRepo
 
 
 # ===========================================================================
-# Conventions & provenance
+# Provenance
 # ===========================================================================
-class Conventions(_Section):
-    """Hardcoded values lifted out of ``input_data.py`` so they are visible and
-    overridable rather than implicit. Defaults mirror today's behavior."""
-
-    nsub_x: int = 1
-    nsub_e: int = 1
-    nrrec: int = 1
-    ndtfast: int = 60
-    ninfo: int = 1
-    cdr_file: str = "cdr.nc"
-    nesting_file: str = "nesting.nc"
-    nesting_period_fallback_seconds: float = 3600.0
-    bry_tides: bool = True
-    pot_tides: bool = True
-    ana_tides: bool = False
-
-
 class Provenance(_Section):
     """Audit trail. Timestamps are passed in (never generated inside a resolver, to
     keep Phase 1 deterministic/reproducible)."""
@@ -274,6 +226,16 @@ class SpecConfig(_Section):
     """The complete, sufficient, reviewable input to processing.
 
     Round-trips to a single ``spec_config.yml`` via :meth:`to_yaml` / :meth:`from_yaml`.
+
+    ``model_settings`` is a FLAT mapping of settings sections: ``cppdefs`` (compile
+    time) sits at the same level as every namelist section (``lateral_visc``,
+    ``bottom_drag``, ``param``, ``ocean_vars``, ``time_stepping``, ``v_sponge``, …).
+    It deliberately OMITS the sections that are filled at processing time:
+    ``title`` and ``output_root_name`` (derived from identity + host scratch path),
+    ``s_coord`` (read from the generated grid), and ``grid`` / ``initial`` /
+    ``forcing`` (artifact file paths). Validate ``model_settings`` through
+    ``cstar_forge.namelist_model.RunTimeSettings`` (after the processing step fills
+    the omitted sections) before writing the namelist.
     """
 
     spec_config_version: int = SPEC_CONFIG_VERSION
@@ -281,18 +243,45 @@ class SpecConfig(_Section):
     run: RunWindow
     domain: Domain
     sources: Sources
-    model_settings: ModelSettings
+    properties: Dict[str, Any] = Field(default_factory=dict)  # {"n_tracers", "marbl"}
+    model_settings: Dict[str, Any] = Field(default_factory=dict)  # flat sections
     code: Code
-    execution: Execution
-    conventions: Conventions = Field(default_factory=Conventions)
     provenance: Provenance = Field(default_factory=Provenance)
+
+    # ---- derived naming (single source of truth: identity + dates + n_procs) ----
+    @property
+    def n_procs(self) -> int:
+        return self.domain.partitioning.n_procs_x * self.domain.partitioning.n_procs_y
+
+    @property
+    def name(self) -> str:
+        base = f"{self.identity.model_name}_{self.identity.grid_name}_{self.n_procs}procs"
+        if self.identity.ensemble_id is not None:
+            base += f"_{self.identity.ensemble_id:03d}"
+        return base
+
+    @property
+    def datestr(self) -> str:
+        return f"{self.run.start_date:%Y%m%d}-{self.run.end_date:%Y%m%d}"
+
+    @property
+    def casename(self) -> str:
+        return f"{self.name}_{self.datestr}"
+
+    def run_output_dir(self, scratch: Union[str, Path]) -> Path:
+        """Derived at processing time from the host scratch path: ``scratch/casename``."""
+        return Path(scratch) / self.casename
+
+    def output_root_name(self, scratch: Union[str, Path]) -> str:
+        """Namelist ``output_root_name``, derived at processing time:
+        ``<run_output_dir>/output/<casename>``."""
+        return str(self.run_output_dir(scratch) / "output" / self.casename)
 
     # ---- serialization ----
     def to_yaml(self, path: Union[str, Path]) -> Path:
         """Write the authoritative config to ``path`` and return it."""
         path = Path(path)
-        data = self.model_dump(mode="json", exclude_none=False)
-        path.write_text(yaml.safe_dump(data, sort_keys=False, default_flow_style=False))
+        path.write_text(self.to_yaml_str())
         return path
 
     def to_yaml_str(self) -> str:
@@ -304,10 +293,3 @@ class SpecConfig(_Section):
         """Load and validate a ``spec_config.yml`` (Phase 2 entry point)."""
         data = yaml.safe_load(Path(path).read_text())
         return cls.model_validate(data)
-
-    def with_paths(self, paths: Paths) -> "SpecConfig":
-        """Return a copy with ``execution.paths`` replaced — for re-resolving paths
-        on a different processing host without re-running Phase 1."""
-        return self.model_copy(
-            update={"execution": self.execution.model_copy(update={"paths": paths})}
-        )

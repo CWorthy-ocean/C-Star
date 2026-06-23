@@ -1,17 +1,23 @@
-# EXAMPLE SpecConfig (see docs/spec-config-inventory.md and cstar_forge/spec_config.py).
+# EXAMPLE SpecConfig (schema v2) — see docs/spec-config-inventory.md and cstar_forge/spec_config.py.
 # Faithfully derived from the demo notebook run for the 'test-tiny' domain.
-# NOTE: this is a forward-looking schema draft; SpecConfig is not yet wired
-# into CstarSpecBuilder. Artifact-derived values (s_coord, file paths) are
-# intentionally omitted here and belong in the generated blueprint.
+# Draft schema; not yet wired into CstarSpecBuilder.
+#
+# DERIVED AT PROCESSING (not stored here):
+#   name             = cson_roms-marbl_v0.1_test-tiny_1procs
+#   casename         = cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
+#   title.casename   = <casename>
+#   run_output_dir   = <host scratch>/<casename>
+#   output_root_name = <run_output_dir>/output/<casename>
+#   machine + data paths (source_data/input_data/scratch/catalog) <- cstar_forge.config on the run host
+#   s_coord (theta_s/theta_b/tcline) <- generated grid;  grid/initial/forcing paths <- generated artifacts
+#   fixed impl details: cdr.nc / nesting.nc filenames, nrrec, tide flags <- set deterministically
 
-spec_config_version: 1
+spec_config_version: 2
 identity:
   model_name: cson_roms-marbl_v0.1
   grid_name: test-tiny
-  description: Test tiny
   ensemble_id: null
-  name: cson_roms-marbl_v0.1_test-tiny_1procs
-  casename: cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
+  description: Test tiny
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -34,6 +40,9 @@ domain:
     south: false
     east: true
     west: false
+  partitioning:
+    n_procs_x: 1
+    n_procs_y: 1
   grid_kwargs_parent: null
   grid_kwargs_child: null
   metadata_child: null
@@ -343,299 +352,272 @@ sources:
       dataset_id: null
       url: null
       streamable: true
+properties:
+  n_tracers: 34
+  marbl: true
 model_settings:
-  compile_time:
-    cppdefs:
-      obc_west: false
-      obc_east: true
-      obc_north: true
-      obc_south: false
-      marbl: true
-      cdr_forcing: true
-      co2_tvarying: false
-  run_time:
-    title:
-      casename: cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
-    time_stepping:
-      ntimes: 12
-      dt: 7200
-      ndtfast: 60
-      ninfo: 1
-    lateral_visc:
-      visc2: 0.0
-      rho0: 1000.0
-    output_root_name:
-      output_root_name: /Users/eilerman/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102/output/cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
-    vertical_mixing:
-      akv: 0.0
-      akt_default: 0.0
-    tracer_diff2:
-      tnu2_default: 0.0
-    bottom_drag:
-      rdrg: 0.0
-      rdrg2: 0.001
-      zob: 0.01
-    v_sponge:
-      v_sponge: 8333.333333333332
-    gamma2: 1.0
-    ubind: 0.1
-    param:
-      llm: 6
-      mmm: 2
-      n: 3
-      np_xi: 1
-      np_eta: 1
-      nsub_x: 1
-      nsub_e: 1
-      nt_passive: 0
-      ntrc_bio: 32
-    bgc:
-      wrt_his: false
-      output_period_his: 86400
-      nrpf_his: 7
-      wrt_avg: false
-      output_period_avg: 86400
-      nrpf_avg: 7
-      wrt_his_dia: false
-      output_period_his_dia: 86400
-      nrpf_his_dia: 7
-      wrt_avg_dia: false
-      output_period_avg_dia: 60
-      nrpf_avg_dia: 1
-      nbgc_flx: 2
-      interp_frc: 1
-    blk_frc:
-      interp_frc: 0
-      check_bulk_frc_units: false
-    cdr_output:
-      do_cdr: false
-      do_avg: true
-      monthly_averages: false
-      output_period: 3600
-      nrpf: 24
-    ocean_vars:
-      wrt_file_rst: true
-      output_period_rst: 86400
-      monthly_restarts: false
-      nrpf_rst: 2
-      wrt_file_his: false
-      output_period_his: 86400
-      nrpf_his: 7
-      wrt_z: true
-      wrt_ub: true
-      wrt_vb: true
-      wrt_u: true
-      wrt_v: true
-      wrt_r: false
-      wrt_o: false
-      wrt_w: true
-      wrt_akv: false
-      wrt_akt: false
-      wrt_aks: false
-      wrt_hbls: false
-      wrt_hbbl: false
-      wrt_file_avg: false
-      output_period_avg: 604800
-      nrpf_avg: 1
-      wrt_avg_z: true
-      wrt_avg_ub: true
-      wrt_avg_vb: true
-      wrt_avg_u: true
-      wrt_avg_v: true
-      wrt_avg_r: true
-      wrt_avg_o: true
-      wrt_avg_w: true
-      wrt_avg_akv: true
-      wrt_avg_akt: true
-      wrt_avg_aks: true
-      wrt_avg_hbls: true
-      wrt_avg_hbbl: true
-    surf_flux:
-      wrt_smflx: false
-      wrt_stflx: false
-      wrt_swflx: false
-      sflx_avg: false
-      output_period: 31536000
-      nrpf: 10
-      sst_vname: sst
-      sst_tname: sst_time
-      sss_vname: sss
-      sss_tname: sss_time
-    tides:
-      ntides: 10
-      bry_tides: true
-      pot_tides: true
-      ana_tides: false
-    river_frc:
-      river_source: false
-      analytical: false
-      nriv: 0
-      rvol_vname: river_volume
-      rvol_tname: river_time
-      rtrc_vname: river_tracer
-      rtrc_tname: river_time
-    diagnostics:
-      diag_avg: false
-      output_period: 86400
-      nrpf: 7
-      diag_uv: false
-      diag_trc: false
-    cdr_frc:
-      cdr_source: false
-      cdr_file: cdr.nc
-      ncdr_parm: 1
-      forcing_depth_profiles: false
-      forcing_3d: false
-      forcing_parameterized: true
-      time_interpolation: false
-      relocate_to_wet_pts: true
-      cdr_volume: false
-      cdrvol_vname: cdr_volume
-      cdrvol_tname: cdr_time
-      cdrtrc_vname: cdr_tracer
-      cdrtrc_tname: cdr_time
-      cdrflx_vname: cdr_trcflx
-      cdrflx_tname: cdr_time
-      cdr_loc_lon: cdr_lon
-      cdr_loc_lat: cdr_lat
-      cdr_loc_dep: cdr_dep
-      cdr_scl_hor: cdr_hsc
-      cdr_scl_vrt: cdr_vsc
-      nz_chd: 50
-    extract_data:
-      do_extract: false
-      extract_file: sample_edata.nc
-      nrpf: 24
-      n_chd: 90
-      theta_s_chd: 5.0
-      theta_b_chd: 2.0
-      hc_chd: 250.0
-      extract_period: 3600.0
-    sponge_tune:
-      pflx_w_vname: up_west
-      pflx_w_tname: bry_time
-      pflx_e_vname: up_east
-      pflx_e_tname: bry_time
-      pflx_s_vname: vp_south
-      pflx_s_tname: bry_time
-      pflx_n_vname: vp_north
-      pflx_n_tname: bry_time
-      ub_tune: false
-      spn_avg: true
-      sp_timscale: 86400
-      wrt_sponge: false
-      nrpf: 7
-      output_period: 86400
-    upscale_output:
-      do_upscale: false
-      nrpf_uscl: 48
-      output_period_uscl: 3600
-    flux_frc:
-      interp_flux_frc: true
-    ts_output:
-      wrt_temp: false
-      wrt_salt: false
-      wrt_temp_dia: false
-      wrt_salt_dia: false
-    frc_output:
-      wrt_frc: false
-      wrt_frc_avg: false
-      output_period: 3600.0
-      nrpf: 4
-    calc_pflx:
-      calc_pflx: true
-      timescale: 86400
-    zslice:
-      do_zslice: false
-      zslice_avg: false
-      wrt_t_zsl: false
-      wrt_u_zsl: false
-      wrt_v_zsl: false
-      output_period: 1200
-      nrpf: 72
-      ndep: 2
-      vecdep:
-      - -2.0
-      - -15.0
-      nt_z: 2
-      trc2zsc:
-      - 1
-      - 2
-    stdout_diag:
-      code_check_mode: false
-    random_output:
-      do_random: false
-      output_period: 3600
-      nrpf: 10
-    pipe_frc:
-      pipe_source: false
-      p_analytical: false
-      npip: 1
-    particles:
-      floats: false
-      np: 50
-      extra_space_fac: 1.5
-      exchange_facx: 0.1
-      exchange_facy: 0.1
-      exchange_facc: 0.01
-      output_period: 400
-      nrpf: 100
-      ppm3: 1.0e-06
-      pmin: 200
-    lin_rho_eos:
-      tcoef: 0.2
-      t0: 1.0
-      scoef: 0.822
-      s0: 1.0
-    sss_correction:
-      dsssdt: 0.0
-    sst_correction:
-      dsstdt: 0.0
-    marbl_bgc:
-      marbl_config_file: marbl_in
-      marbl_tracers_to_write:
-      - PO4
-      - NO3
-      - SiO3
-      - NH4
-      - Fe
-      - O2
-      - DIC
-      - ALK
-      - spChl
-      - diatChl
-      marbl_diagnostics_to_write:
-      - PH
-      - PH_ALT_CO2
-      - pCO2SURF_ALT_CO2
-      - pCO2SURF
-      - FG_CO2
-      - FG_ALT_CO2
-      marbl_timestep_ratio: 1
-  properties:
-    n_tracers: 34
+  cppdefs:
+    obc_west: false
+    obc_east: true
+    obc_north: true
+    obc_south: false
     marbl: true
-  derived:
-    time_stepping:
-      dt: 7200
-      ntimes: 12
-      ndtfast: 60
-      ninfo: 1
+    cdr_forcing: true
+    co2_tvarying: false
+  time_stepping:
+    ntimes: 12
+    dt: 7200
+    ndtfast: 60
+    ninfo: 1
+  lateral_visc:
+    visc2: 0.0
+    rho0: 1000.0
+  vertical_mixing:
+    akv: 0.0
+    akt_default: 0.0
+  tracer_diff2:
+    tnu2_default: 0.0
+  bottom_drag:
+    rdrg: 0.0
+    rdrg2: 0.001
+    zob: 0.01
+  v_sponge:
     v_sponge: 8333.333333333332
-    param:
-      llm: 6
-      mmm: 2
-      n: 3
-      np_xi: 1
-      np_eta: 1
-    obc_flags:
-      obc_west: false
-      obc_east: true
-      obc_north: true
-      obc_south: false
-    casename: cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
-    output_root_name: /Users/eilerman/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102/output/cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
-    extract_period: null
+  gamma2: 1.0
+  ubind: 0.1
+  param:
+    llm: 6
+    mmm: 2
+    n: 3
+    np_xi: 1
+    np_eta: 1
+    nsub_x: 1
+    nsub_e: 1
+    nt_passive: 0
+    ntrc_bio: 32
+  bgc:
+    wrt_his: false
+    output_period_his: 86400
+    nrpf_his: 7
+    wrt_avg: false
+    output_period_avg: 86400
+    nrpf_avg: 7
+    wrt_his_dia: false
+    output_period_his_dia: 86400
+    nrpf_his_dia: 7
+    wrt_avg_dia: false
+    output_period_avg_dia: 60
+    nrpf_avg_dia: 1
+    nbgc_flx: 2
+    interp_frc: 1
+  blk_frc:
+    interp_frc: 0
+    check_bulk_frc_units: false
+  cdr_output:
+    do_cdr: false
+    do_avg: true
+    monthly_averages: false
+    output_period: 3600
+    nrpf: 24
+  ocean_vars:
+    wrt_file_rst: true
+    output_period_rst: 86400
+    monthly_restarts: false
+    nrpf_rst: 2
+    wrt_file_his: false
+    output_period_his: 86400
+    nrpf_his: 7
+    wrt_z: true
+    wrt_ub: true
+    wrt_vb: true
+    wrt_u: true
+    wrt_v: true
+    wrt_r: false
+    wrt_o: false
+    wrt_w: true
+    wrt_akv: false
+    wrt_akt: false
+    wrt_aks: false
+    wrt_hbls: false
+    wrt_hbbl: false
+    wrt_file_avg: false
+    output_period_avg: 604800
+    nrpf_avg: 1
+    wrt_avg_z: true
+    wrt_avg_ub: true
+    wrt_avg_vb: true
+    wrt_avg_u: true
+    wrt_avg_v: true
+    wrt_avg_r: true
+    wrt_avg_o: true
+    wrt_avg_w: true
+    wrt_avg_akv: true
+    wrt_avg_akt: true
+    wrt_avg_aks: true
+    wrt_avg_hbls: true
+    wrt_avg_hbbl: true
+  surf_flux:
+    wrt_smflx: false
+    wrt_stflx: false
+    wrt_swflx: false
+    sflx_avg: false
+    output_period: 31536000
+    nrpf: 10
+    sst_vname: sst
+    sst_tname: sst_time
+    sss_vname: sss
+    sss_tname: sss_time
+  tides:
+    ntides: 10
+    bry_tides: true
+    pot_tides: true
+    ana_tides: false
+  river_frc:
+    river_source: false
+    analytical: false
+    nriv: 0
+    rvol_vname: river_volume
+    rvol_tname: river_time
+    rtrc_vname: river_tracer
+    rtrc_tname: river_time
+  diagnostics:
+    diag_avg: false
+    output_period: 86400
+    nrpf: 7
+    diag_uv: false
+    diag_trc: false
+  cdr_frc:
+    cdr_source: false
+    cdr_file: cdr.nc
+    ncdr_parm: 1
+    forcing_depth_profiles: false
+    forcing_3d: false
+    forcing_parameterized: true
+    time_interpolation: false
+    relocate_to_wet_pts: true
+    cdr_volume: false
+    cdrvol_vname: cdr_volume
+    cdrvol_tname: cdr_time
+    cdrtrc_vname: cdr_tracer
+    cdrtrc_tname: cdr_time
+    cdrflx_vname: cdr_trcflx
+    cdrflx_tname: cdr_time
+    cdr_loc_lon: cdr_lon
+    cdr_loc_lat: cdr_lat
+    cdr_loc_dep: cdr_dep
+    cdr_scl_hor: cdr_hsc
+    cdr_scl_vrt: cdr_vsc
+    nz_chd: 50
+  extract_data:
+    do_extract: false
+    extract_file: sample_edata.nc
+    nrpf: 24
+    n_chd: 90
+    theta_s_chd: 5.0
+    theta_b_chd: 2.0
+    hc_chd: 250.0
+    extract_period: 3600.0
+  sponge_tune:
+    pflx_w_vname: up_west
+    pflx_w_tname: bry_time
+    pflx_e_vname: up_east
+    pflx_e_tname: bry_time
+    pflx_s_vname: vp_south
+    pflx_s_tname: bry_time
+    pflx_n_vname: vp_north
+    pflx_n_tname: bry_time
+    ub_tune: false
+    spn_avg: true
+    sp_timscale: 86400
+    wrt_sponge: false
+    nrpf: 7
+    output_period: 86400
+  upscale_output:
+    do_upscale: false
+    nrpf_uscl: 48
+    output_period_uscl: 3600
+  flux_frc:
+    interp_flux_frc: true
+  ts_output:
+    wrt_temp: false
+    wrt_salt: false
+    wrt_temp_dia: false
+    wrt_salt_dia: false
+  frc_output:
+    wrt_frc: false
+    wrt_frc_avg: false
+    output_period: 3600.0
+    nrpf: 4
+  calc_pflx:
+    calc_pflx: true
+    timescale: 86400
+  zslice:
+    do_zslice: false
+    zslice_avg: false
+    wrt_t_zsl: false
+    wrt_u_zsl: false
+    wrt_v_zsl: false
+    output_period: 1200
+    nrpf: 72
+    ndep: 2
+    vecdep:
+    - -2.0
+    - -15.0
+    nt_z: 2
+    trc2zsc:
+    - 1
+    - 2
+  stdout_diag:
+    code_check_mode: false
+  random_output:
+    do_random: false
+    output_period: 3600
+    nrpf: 10
+  pipe_frc:
+    pipe_source: false
+    p_analytical: false
+    npip: 1
+  particles:
+    floats: false
+    np: 50
+    extra_space_fac: 1.5
+    exchange_facx: 0.1
+    exchange_facy: 0.1
+    exchange_facc: 0.01
+    output_period: 400
+    nrpf: 100
+    ppm3: 1.0e-06
+    pmin: 200
+  lin_rho_eos:
+    tcoef: 0.2
+    t0: 1.0
+    scoef: 0.822
+    s0: 1.0
+  sss_correction:
+    dsssdt: 0.0
+  sst_correction:
+    dsstdt: 0.0
+  marbl_bgc:
+    marbl_config_file: marbl_in
+    marbl_tracers_to_write:
+    - PO4
+    - NO3
+    - SiO3
+    - NH4
+    - Fe
+    - O2
+    - DIC
+    - ALK
+    - spChl
+    - diatChl
+    marbl_diagnostics_to_write:
+    - PH
+    - PH_ALT_CO2
+    - pCO2SURF_ALT_CO2
+    - pCO2SURF
+    - FG_CO2
+    - FG_ALT_CO2
+    marbl_timestep_ratio: 1
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
@@ -646,47 +628,27 @@ code:
     commit: marbl0.45.0
     branch: null
   templates_compile_time:
-    location: templates/compile-time
+    location: https://github.com/CWorthy-ocean/cstar-forge.git
+    commit: null
+    branch: main
+    directory: cstar_forge/catalog/ModelSpec/cson_roms-marbl_v0.1/templates/compile-time
     files:
     - cppdefs.opt.j2
   templates_run_time:
-    location: templates/run-time
+    location: https://github.com/CWorthy-ocean/cstar-forge.git
+    commit: null
+    branch: main
+    directory: cstar_forge/catalog/ModelSpec/cson_roms-marbl_v0.1/templates/run-time
     files:
     - marbl_in
-execution:
-  partitioning:
-    n_procs_x: 1
-    n_procs_y: 1
-  machine:
-    tag: MacOS
-    account: ''
-    pes_per_node: 4
-    queues:
-      default: ''
-    cluster_type: LOCAL
-  paths:
-    source_data: /Users/eilerman/cson-forge-data/source-data
-    input_data: /Users/eilerman/cson-forge-data/input-data
-    scratch: /Users/eilerman/cson-forge-data/cson-forge-run
-    catalog: /Users/eilerman/cson-forge-data/catalog
-  run_output_dir: /Users/eilerman/cson-forge-data/cson-forge-run/cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
-conventions:
-  nsub_x: 1
-  nsub_e: 1
-  nrrec: 1
-  ndtfast: 60
-  ninfo: 1
-  cdr_file: cdr.nc
-  nesting_file: nesting.nc
-  nesting_period_fallback_seconds: 3600.0
-  bry_tides: true
-  pot_tides: true
-  ana_tides: false
 provenance:
   generated_at: '2026-06-23T12:00:00'
   forge_version: null
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
-  notes: "Example generated from the demo notebook (workflows/.../CStarSpecBuilder-demo_MacOS.ipynb).\
-    \ Artifact-derived values (s_coord theta/tcline, grid/initial/forcing file paths)\
-    \ are intentionally absent \u2014 they are processing outputs written to the blueprint."
+  notes: 'Example generated from the demo notebook (workflows/.../CStarSpecBuilder-demo_MacOS.ipynb).
+    Machine/paths and naming (name, casename, title, output_root_name, run_output_dir)
+    are NOT stored: machine + data paths are resolved at processing time from cstar_forge.config,
+    names are derived from identity + dates + partitioning. s_coord and file paths
+    are processing outputs written to the blueprint. Fixed impl details (cdr.nc/nesting.nc
+    names, nrrec, tide flags) are set deterministically at processing.'

@@ -71,32 +71,51 @@ time or must be produced by processing.
 
 ---
 
-## 3. The config / processing boundary (the L5 split)
+## 3. The config / processing boundary
 
-Derived (L5) values fall into two classes, and the split between them **is** the
-boundary between the two refactored phases:
+**Governing principle:** the authoritative `SpecConfig` stores ONLY
+host-independent, single-source-of-truth inputs. Everything mechanically derivable —
+from the host, from identity, or from generated artifacts — is computed at
+**processing** time and never stored. This keeps the file portable (generate on
+machine A, process on machine B) and avoids drift between duplicated values.
 
-**Pure functions of config inputs** — resolvable at config time, frozen into the
-authoritative file:
-- `time_stepping.{dt,ntimes,ndtfast,ninfo}`
-- `v_sponge.v_sponge`
-- `extract_data.extract_period`
-- `param.{llm,mmm,n,np_xi,np_eta,nsub_x,nsub_e}`
-- `cppdefs.obc_{west,east,north,south}`
-- `title.casename`, `output_root_name`
+**Stored in `SpecConfig`** (curated inputs + reviewable settings):
+- atomic identity (`model_name`, `grid_name`, `ensemble_id`, `description`), run dates
+- `domain.grid_kwargs` (the single source for grid geometry, incl. `theta_s`/`theta_b`/`hc`)
+  and `domain.partitioning` (a host-independent decomposition choice)
+- `sources` (resolved datasets) and `code` pins — including `templates_compile_time` /
+  `templates_run_time`, which are repo references (`location` + `commit`/`branch` +
+  `files`) exactly like `code.roms` / `code.marbl`, not local paths
+- `model_settings` — a **flat** mapping: `cppdefs` alongside every namelist section,
+  *including* the pure-derived numerics (`time_stepping.{dt,ntimes}`, `v_sponge`,
+  `param.{llm,mmm,n,np_xi,np_eta}`, `cppdefs.obc_*`). These are computed at config
+  time but kept inline because they carry scientific review value and may be edited.
 
-These need only `grid_kwargs` + dates + partitioning (+ a lightweight `rt.Grid` for
-grid spacing `ds`). No source downloads, no generated NetCDF.
+**Not stored — deterministic implementation details** (set by the processing step,
+no review/override value): the fixed `cdr.nc` / `nesting.nc` filenames, `nrrec`, and
+the tide flags (`bry_tides`/`pot_tides`/`ana_tides`) applied during generation. These
+have no config-level home; where one is genuinely a namelist value (e.g. the tide
+flags) it lives in the relevant `model_settings` section, which processing overwrites.
 
-**Functions of materialized artifacts** — outputs of processing, **must not** be in
-the authoritative input file (they belong in the resulting blueprint):
-- `s_coord.{theta_s,theta_b,tcline}` (read from the generated grid file)
-- `grid.grid_file`, `initial.initial_file`, all `forcing.*_path`
+**Derived at processing — NOT stored:**
 
-> **Design rule:** the authoritative `SpecConfig` is **input-only**. The existing
-> blueprint YAML remains the **output** that captures artifact-derived values. This
-> avoids a chicken-and-egg where the authoritative file would contain values that
-> require running the very thing it configures.
+| Group | Values | Source at processing |
+|---|---|---|
+| **Host / machine** | machine tag, `account`, `queues`, `pes_per_node`; data paths `source_data`/`input_data`/`scratch`/`catalog` | `cstar_forge.config` on the run host |
+| **Host-dependent paths** | `run_output_dir` (= `scratch/casename`), namelist `output_root_name` | derived from host scratch + `casename` |
+| **Naming** | `name`, `casename`, namelist `title.casename` | `f(model_name, grid_name, ensemble_id, dates, n_procs)` — `SpecConfig` properties |
+| **Artifacts** | `s_coord.{theta_s,theta_b,tcline}`; `grid`/`initial`/`forcing` file paths | generated grid file / generated NetCDF |
+
+> **Design rule:** `SpecConfig` is **input-only**. The existing blueprint YAML remains
+> the **output** that captures the host- and artifact-derived values. This avoids a
+> chicken-and-egg where the authoritative file would contain values that require
+> running the very thing it configures.
+
+**Naming is single-source.** Only `model_name` + `grid_name` (+ `ensemble_id`, dates,
+`n_procs`) are stored. `name`, `casename`, `title`, `output_root_name`, and
+`run_output_dir` are deterministic functions exposed as `SpecConfig` properties /
+helpers (`.name`, `.casename`, `.run_output_dir(scratch)`, `.output_root_name(scratch)`),
+so there is exactly one place to change a name and everything else follows.
 
 ---
 
@@ -104,23 +123,26 @@ the authoritative input file (they belong in the resulting blueprint):
 
 ```
    [Phase 1: COLLECTION / CURATION]          [authoritative file]      [Phase 2: PROCESSING]
- user args ─┐
- model.yml ─┤
- defaults  ─┼─► resolve + merge + validate ─► spec_config.yml ─► Engine.run(spec_config)
- machine   ─┤   (+ compute pure-derived L5)    (reviewable)       generate_inputs + configure_build
- hardcoded ─┘                                                     → blueprint + NetCDF + namelist
+ user args ─┐                                                    Phase 2 resolves the
+ model.yml ─┤                                                    HOST (machine + paths)
+ defaults  ─┼─► resolve + merge + validate ─► spec_config.yml ─► from cstar_forge.config,
+ hardcoded ─┘   (+ compute pure-derived)       (reviewable)      then Engine.run(spec_config)
+                                                                 → blueprint + NetCDF + namelist
 ```
 
-Phase 1 is cheap, reviewable, diffable, and portable (no `rt.Grid`, no downloads, no
-file I/O). Phase 2 becomes a near-pure function `(SpecConfig, filesystem) → artifacts`.
+Phase 1 is cheap, reviewable, diffable, and **host-independent** (no `rt.Grid`, no
+downloads, no file I/O, no machine/paths). Phase 2 becomes a near-pure function
+`(SpecConfig, host) → artifacts`, where `host` (machine config + data paths) is
+resolved on the run machine.
 
 Two choices that make "review here, process elsewhere" work:
 1. **Inline resolved values, don't reference them.** Hardcoded registries/URLs (L4)
    and `roms_tools` defaults (L6) are *snapshotted* into the file, so a reviewer sees
    the real GLORYS `dataset_id`/URL and the processing host can't silently drift.
-2. **Make `execution.paths`/`machine` re-resolvable at ingest.** The file is generated
-   on machine A but processed on machine B; a `--paths-from-env` switch lets the same
-   `spec_config.yml` be portable.
+2. **Keep machine/paths OUT of the file entirely.** The same `spec_config.yml` is
+   portable by construction: the processing host resolves its own machine tag, data
+   paths, and output dirs from `cstar_forge.config`, so nothing host-specific is
+   baked in at config time.
 
 ---
 
@@ -163,6 +185,15 @@ Two choices that make "review here, process elsewhere" work:
 | NERSC / RCAC account | `m4632` / `ees250129` | `catalog/Machines/*.yml` |
 | `pes_per_node` (both HPC) | `128` | `catalog/Machines/*.yml` |
 
-These should become module-level named constants the Phase-1 resolver reads and
-writes into `SpecConfig` (`sources.resolved_datasets` / a `conventions` block), so
-they are visible and overridable instead of implicit.
+These split three ways:
+
+* **Snapshot into `SpecConfig`** — the data-source identifiers (GLORYS `dataset_id`,
+  URLs, version pins, alias map) become module-level named constants the Phase-1
+  resolver reads and writes into `sources.resolved_datasets`, so the processing host
+  uses exactly those values.
+* **Land in a `model_settings` section** — `nsub_x`/`nsub_e` (→ `param`),
+  `ndtfast`/`ninfo` (→ `time_stepping`), tide flags (→ `tides`). They are reviewable
+  there; processing may overwrite the generation-specific ones.
+* **Stay as deterministic processing constants (not stored)** — the `cdr.nc` /
+  `nesting.nc` filenames, `nrrec`, the nesting-period fallback (from `roms_tools`),
+  and the machine account / `pes_per_node` (resolved on the run host).
