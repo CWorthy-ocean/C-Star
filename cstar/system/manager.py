@@ -73,7 +73,9 @@ class EljaEnvSettings(SlurmSettingsBase):
 
     @property
     def is_match(self) -> bool:
-        """Return `True` if the current system is identified as *Elja*."""
+        """Return `True` if the current system is identified as *Elja* by matching
+        value `elja-irhpc` in `HOSTNAME` env var.
+        """
         return self.HOSTNAME == self.HOST_IDENTIFIER
 
 
