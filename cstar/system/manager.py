@@ -1,6 +1,6 @@
 import functools
 import platform as platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar, Final, Protocol
 
 from pydantic import Field, ValidationError
@@ -50,18 +50,25 @@ class AnvilEnvSettings(SlurmSettingsBase):
         return self.RCAC_CLUSTER == AnvilEnvSettings.HOST_IDENTIFIER
 
 
-@dataclass(frozen=True)
 class HostNameEvaluator:
     """Container of host-specific names used to determine the system name that will be
     used by C-Star.
     """
 
-    lmod_settings: LmodEnvSettings = field(default_factory=LmodEnvSettings, init=False)
+    lmod_settings: Final[LmodEnvSettings]
     """LMOD-specific environment configuration."""
-    platform_name: str = field(default_factory=lambda: platform.system(), init=False)
-    """The platform name."""
-    machine_name: str = field(default_factory=lambda: platform.machine(), init=False)
-    """The machine name."""
+
+    def __init__(self) -> None:
+        """Initialize the instance."""
+        self.lmod_settings = LmodEnvSettings()
+
+    @property
+    def platform_name(self) -> str:
+        return platform.system()
+
+    @property
+    def machine_name(self) -> str:
+        return platform.machine()
 
     @property
     def platform_hostname(self) -> str:

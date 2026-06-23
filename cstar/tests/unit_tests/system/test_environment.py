@@ -21,7 +21,10 @@ from cstar.base.env import (
     hpc_data_directory,
 )
 from cstar.base.feature import is_flag_enabled
-from cstar.system.environment import CStarEnvironment, LmodEnvSettings
+from cstar.system.environment import (
+    CStarEnvironment,
+    LmodEnvSettings,
+)
 
 
 class MockEnvironment(CStarEnvironment):
@@ -601,6 +604,8 @@ class TestExceptions:
             "/mock/lmod python reset", shell=True, text=True, capture_output=True
         )
 
+    @patch("platform.system", mock.PropertyMock(return_value="Linux"))
+    @patch("platform.machine", mock.PropertyMock(return_value="x86_64"))
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
