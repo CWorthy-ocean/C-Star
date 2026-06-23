@@ -66,9 +66,9 @@ class EljaEnvSettings(SlurmSettingsBase):
     """
     SLURM_QUEUE: str = Field(default="")
     """The SLURM queue name."""
-    OMP_NUM_THREADS: str = Field(default="1", alias="OMP_NUM_THREADS")
+    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
     """The number of threads to be used by OpenMPI"""
-    MKL_NUM_THREADS: str = Field(default="1", alias="MKL_NUM_THREADS")
+    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
     """The number of threads used by MKL"""
 
     @property
