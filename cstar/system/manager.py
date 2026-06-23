@@ -388,7 +388,7 @@ class _EljaSystemContext(_SystemContext):
 
         return SlurmScheduler(
             queues=[small, medium, large, any_cpu],
-            primary_queue_name="large",
+            primary_queue_name="any_cpu",
             other_scheduler_directives={},
             requires_task_distribution=True,
             documentation=cls.docs,
