@@ -184,8 +184,7 @@ def _get_system_context() -> _SystemContext:
     namer = HostNameEvaluator()
 
     if klass := _registry.get(namer.name):
-        instance = klass()
-        return instance
+        return klass()
 
     raise CstarError(f"Unknown system requested: {namer.name}")
 
