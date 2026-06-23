@@ -136,8 +136,12 @@ class _SystemContext(Protocol):
         """Instantiate a scheduler configured for the system."""
 
     @classmethod
-    def settings(cls) -> type[EnvSettingsBase] | None:
-        """Return the type used to load settings required by the target system."""
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        """Return the type used to load settings required by the target system.
+
+        NOTE: The type is returned to avoid validation failures at import time due
+        to the instantation of the global `cstar_sysmgr`.
+        """
         return EnvSettingsBase
 
 
@@ -258,7 +262,7 @@ class _AnvilSystemContext(_SystemContext):
         )
 
     @classmethod
-    def settings(cls) -> type[SlurmSettingsBase] | None:
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
         """Return the type used to load settings required by the target system."""
         return AnvilEnvSettings
 
@@ -391,7 +395,7 @@ class CStarSystemManager:
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
             compiler=self._context.compiler,
-            system_settings_klass=self._context.settings(),
+            system_settings_klass=self._context.settings_klass(),
         )
 
         self._scheduler = self._context.create_scheduler()
