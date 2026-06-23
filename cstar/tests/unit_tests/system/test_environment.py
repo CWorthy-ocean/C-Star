@@ -602,7 +602,7 @@ class TestExceptions:
         modules_exp_value: t.Final[str] = "__NO_SYSTEM_DEFAULT_MODULES__"
 
         with (
-            # ensure the variable isn't set at the outset by clearning os.environ.
+            # ensure the variable isn't set at the outset by clearing os.environ.
             mock.patch.dict(os.environ, {}, clear=True),
             mock.patch.object(
                 MockEnvironment,
