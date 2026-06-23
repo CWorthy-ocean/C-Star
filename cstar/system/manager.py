@@ -141,9 +141,9 @@ class HostNameEvaluator:
         EnvironmentError
             If the name cannot be determined.
         """
-        if self.lmod_hostname:
+        if lmod_hostname := self.lmod_hostname:
             log.trace("Using lmod hostname as system name")
-            return self.lmod_hostname
+            return lmod_hostname
 
         if EljaEnvSettings.is_match():
             log.trace("Using `elja` as system name")
