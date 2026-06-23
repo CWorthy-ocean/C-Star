@@ -1,7 +1,7 @@
 import functools
 import platform as platform
 from dataclasses import dataclass
-from typing import ClassVar, Final, Protocol
+from typing import ClassVar, Final, Protocol, override
 
 from pydantic import Field, ValidationError
 
@@ -304,6 +304,7 @@ class _AnvilSystemContext(_SystemContext):
             max_cpus_per_node=128,
         )
 
+    @override
     @classmethod
     def settings_klass(cls) -> type[SlurmSettingsBase] | None:
         """Return the type used to load settings required by the target system."""
@@ -387,16 +388,17 @@ class _EljaSystemContext(_SystemContext):
             max_cpus_per_node=128,
         )
 
+    @override
     @classmethod
-    def settings(cls) -> EnvSettingsBase | None:
-        """Return the settings required by the target system.
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        """Return the type used to load settings required by *Elja* system.
 
         Raises
         ------
         ValidationError
             If required environment variables are not set.
         """
-        return EljaEnvSettings()
+        return EljaEnvSettings
 
 
 @register_sys_context
