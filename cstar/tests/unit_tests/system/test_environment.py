@@ -21,7 +21,11 @@ from cstar.base.env import (
     get_env_item,
     hpc_data_directory,
 )
-from cstar.base.feature import is_flag_enabled
+from cstar.base.feature import (
+    ENV_FF_DEBUG_BUILD_MODE,
+    ENV_FF_SLURM_DISABLE_MT,
+    is_flag_enabled,
+)
 from cstar.system.environment import (
     CStarEnvironment,
     LmodEnvSettings,
@@ -977,12 +981,18 @@ def test_env_show_default(
         show("file")
 
 
-def test_is_flag_enabled() -> None:
+@pytest.mark.parametrize(
+    "key",
+    [
+        ENV_FF_DEBUG_BUILD_MODE,
+        ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ENV_FF_SLURM_DISABLE_MT,
+    ],
+)
+def test_is_flag_enabled(key: str) -> None:
     """Verify the utility `is_flag_enabled` determines the correct value for
     a flag when it is set to on, set to off, and not set at all.
     """
-    key = ENV_CSTAR_CLOBBER_WORKING_DIR
-
     with mock.patch.dict(os.environ, {key: FLAG_ON}, clear=True):
         assert is_flag_enabled(key)
 
