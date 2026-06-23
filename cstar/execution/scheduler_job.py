@@ -775,6 +775,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         self.script_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.script_path, "w") as f:
             f.write(self.script)
+        self.log.debug(f"Job script written to: {self.script_path}")
 
     @abstractmethod
     def submit(self):
