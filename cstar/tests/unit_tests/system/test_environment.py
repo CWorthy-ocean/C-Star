@@ -618,7 +618,7 @@ class TestExceptions:
             mock_call_lmod.assert_has_calls(
                 [
                     mock.call("reset"),
-                    mock.call("load", *mock_module_names),
+                    mock.call(f"load {' '.join(mock_module_names)}"),
                 ]
             )
 
