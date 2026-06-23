@@ -59,7 +59,7 @@ class EljaEnvSettings(SlurmSettingsBase):
     HOST_IDENTIFIER: Final[str] = "elja-irhpc"
     """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
 
-    HOSTNAME: str = Field(default="")
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
     """The hostname of the machine.
 
     Used to identify the system as Elja by matching value: `elja-irhpc`
