@@ -67,6 +67,11 @@ class EljaEnvSettings(SlurmSettingsBase):
 
     Used to identify the system as Elja by matching value: `elja-irhpc`
     """
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow empty account.
+    """
     SLURM_QUEUE: str = Field(default="")
     """The SLURM queue name."""
     OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
