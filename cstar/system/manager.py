@@ -20,6 +20,7 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
     query_max_walltime_via_sacctmgr,
+    query_max_walltime_via_sinfo,
 )
 
 
@@ -356,30 +357,30 @@ class _EljaSystemContext(_SystemContext):
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        regular_q = SlurmPartition(
+        large = SlurmPartition(
             name="128cpu_256mem",
             query_name="128cpu_256mem",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        medium = SlurmPartition(
+            name="64cpu_256mem",
+            query_name="64cpu_256mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        small = SlurmPartition(
+            name="48cpu_192mem",
+            query_name="48cpu_192mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
         )
         any_cpu = SlurmPartition(
             name="any_cpu",
             query_name="any_cpu",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-        shared_q = SlurmPartition(
-            name="64cpu_256mem",
-            query_name="64cpu_256mem",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
-        )
-        debug_q = SlurmPartition(
-            name="48cpu_192mem",
-            query_name="48cpu_192mem",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
+            max_walltime_method=query_max_walltime_via_sinfo,
         )
 
         return SlurmScheduler(
-            queues=[any_cpu, regular_q, shared_q, debug_q],
-            primary_queue_name="any_cpu",  # 128cpu_256mem",
+            queues=[small, medium, large, any_cpu],
+            primary_queue_name="large",
             other_scheduler_directives={},
             requires_task_distribution=True,
             documentation=cls.docs,
