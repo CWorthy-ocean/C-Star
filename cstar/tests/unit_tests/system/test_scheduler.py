@@ -11,6 +11,8 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
     _parse_walltime,
+    query_max_walltime_via_sacctmgr,
+    query_max_walltime_via_sinfo,
 )
 
 ################################################################################
@@ -109,7 +111,7 @@ class TestQueue:
         assert slurm_ptn.max_walltime == "49:00:00"
 
         mock_subprocess_run.assert_called_once_with(
-            "sinfo -h -o '%l' -p general",
+            "sinfo --noheader --format='%l' --partition=general",
             shell=True,
             text=True,
             capture_output=True,
@@ -619,3 +621,55 @@ def test_parse_walltime(value: str, expected: str) -> None:
     actual = _parse_walltime(value)
 
     assert actual == expected
+
+
+def test_query_max_walltime_via_sinfo() -> None:
+    """Verify the maximum walltime is correctly returned from the query method."""
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="2-00:00:00")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sinfo("mock-partition-name")
+
+        assert result == "48:00:00"
+        mock_sinfo.assert_called_once()
+
+
+def test_query_max_walltime_via_sinfo_partition_not_valid() -> None:
+    """Verify a null max walltime is returned from the query method when
+    the underlying query returns no result.
+
+    e.g `sinfo --noheader --format='%l' --partition=garbage-name`
+    """
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sinfo("mock-partition-name")
+
+        assert result is None
+        mock_sinfo.assert_called_once()
+
+
+def test_query_max_walltime_via_sacctmgr() -> None:
+    """Verify the maximum walltime is correctly returned from the query method."""
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="2-00:00:00")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sacctmgr("mock-partition-name")
+
+        assert result == "48:00:00"
+        mock_sinfo.assert_called_once()
+
+
+def test_query_max_walltime_via_sacctmgr_partition_not_valid() -> None:
+    """Verify a null max walltime is returned from the query method when
+    the underlying query returns no result.
+
+    e.g `sinfo --noheader --format='%l' --partition=garbage-name`
+    """
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sacctmgr("mock-partition-name")
+
+        assert result is None
+        mock_sinfo.assert_called_once()
