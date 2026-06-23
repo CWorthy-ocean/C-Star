@@ -550,6 +550,8 @@ class TestExceptions:
         with pytest.raises(ImportError, match="Top-level package '.*' not found"):
             MockEnvironment().package_root
 
+    @patch("platform.system", mock.PropertyMock(return_value="NotLinux"))
+    @patch("platform.machine", mock.PropertyMock(return_value="x86_64"))
     def test_load_lmod_modules_raises_environment_error_when_lmod_not_used(self):
         """Tests that load_lmod_modules raises an EnvironmentError if Lmod is not used.
 
@@ -566,7 +568,7 @@ class TestExceptions:
             EnvironmentError, match="does not appear to use Linux Environment Modules"
         ):
             env = MockEnvironment()
-            env.load_lmod_modules(lmod_file="/some/file")
+            env.load_lmod_modules()
 
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True

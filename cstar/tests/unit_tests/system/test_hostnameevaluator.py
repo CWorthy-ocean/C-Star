@@ -11,8 +11,14 @@ DEFAULT_MOCK_MACHINE_NAME = "mock_machine"
 DEFAULT_MOCK_HOST_NAME = "mock_system"
 
 
-@patch("platform.machine", return_value=DEFAULT_MOCK_MACHINE_NAME)
-@patch("platform.system", return_value=DEFAULT_MOCK_HOST_NAME)
+@patch(
+    "platform.machine",
+    new_callable=lambda: mock.MagicMock(return_value=DEFAULT_MOCK_MACHINE_NAME),
+)
+@patch(
+    "platform.system",
+    new_callable=lambda: mock.MagicMock(return_value=DEFAULT_MOCK_HOST_NAME),
+)
 @patch.dict(os.environ, {}, clear=True)
 def test_no_lmod_in_env(
     mock_system: mock.MagicMock,
@@ -23,9 +29,12 @@ def test_no_lmod_in_env(
     """
     namer = HostNameEvaluator()
 
-    # confirm the platform values were retrieved during init
-    mock_system.assert_called_once()
-    mock_machine.assert_called_once()
+    # confirm the platform values are retrieved when attributes are accessed.
+    namer.platform_name
+    mock_system.assert_called()
+
+    namer.machine_name
+    mock_machine.assert_called()
 
     actual = namer.platform_hostname
 
@@ -112,12 +121,12 @@ def test_partial_platform_naming(
     ):
         namer = HostNameEvaluator()
 
-    assert namer.platform_name == system_name
-    assert namer.machine_name == machine_name
-    assert namer.platform_hostname == ""
+        assert namer.platform_name == system_name
+        assert namer.machine_name == machine_name
+        assert namer.platform_hostname == ""
 
-    # partial platform info shouldn't affect overall name when lmod is available
-    assert namer.name
+        # partial platform info shouldn't affect overall name when lmod is available
+        assert namer.name
 
 
 @pytest.mark.usefixtures("env_clear_lmod")
@@ -141,10 +150,10 @@ def test_partial_platform_fallback(
     ):
         namer = HostNameEvaluator()
 
-    assert namer.platform_name == system_name
-    assert namer.machine_name == machine_name
-    assert namer.platform_hostname == ""
+        assert namer.platform_name == system_name
+        assert namer.machine_name == machine_name
+        assert namer.platform_hostname == ""
 
-    # without lmod env vars, falling back on partial platform name should fail.
-    with pytest.raises(EnvironmentError):
-        _ = namer.name
+        # without lmod env vars, falling back on partial platform name should fail.
+        with pytest.raises(EnvironmentError):
+            _ = namer.name
