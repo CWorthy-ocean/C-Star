@@ -77,6 +77,7 @@ New features
 - Added user-facing display of `ExecutiveRunSummary` after run-scheduling (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - `LocalLauncher` now honors dependencies and can exit after scheduling tasks. (`#548 <https://github.com/CWorthy-ocean/C-Star/pull/548>`_)
 - Setting `CSTAR_FF_DEBUG_BUILD_MODE=1` results in `ROMS` build in debug mode (`#553 <https://github.com/CWorthy-ocean/C-Star/pull/553>`_)
+- Inject per-system settings class into `CStarEnvironment` for customized behaviors. (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -225,6 +226,9 @@ Improvements
 - Improved discovery speed by caching var metadata (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
 - UX improved by printing 'available step names' hint for user when handling incorrect step name in input (`#549 <https://github.com/CWorthy-ocean/C-Star/pull/549>`_)
 - `workplan log` CLI handler no longer reproduces internal path resolution (`#549 <https://github.com/CWorthy-ocean/C-Star/pull/549>`_)
+- Extract `lmod` environment variable handling into standalone settings class (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
+- Mitigated incomplete typehints and used modern class member declarations in modified classes. (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
+- Moved fixed environment variable configuration into dotenv files, deprecated `configure_environment` (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
