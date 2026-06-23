@@ -102,6 +102,7 @@ class TestSetupEnvironmentFromFiles:
             expected_modules = self.get_expected_lmod_modules(env)
 
             # Define expected subprocess calls
+            modules = " ".join(x.strip() for x in expected_modules)
             expected_calls = [
                 call(
                     "/mock/lmod python reset",
@@ -109,14 +110,12 @@ class TestSetupEnvironmentFromFiles:
                     shell=True,
                     text=True,
                 ),
-            ] + [
                 call(
-                    f"/mock/lmod python load {mod}",
+                    f"/mock/lmod python load {modules}",
                     capture_output=True,
                     shell=True,
                     text=True,
-                )
-                for mod in expected_modules
+                ),
             ]
 
             mock_run.assert_has_calls(expected_calls, any_order=False)
@@ -639,7 +638,7 @@ class TestExceptions:
         with pytest.raises(
             RuntimeError,
             match=(
-                "Linux Environment Modules command `/mock/lmod python load module1` "
+                "Linux Environment Modules command `/mock/lmod python load module1 module2` "
                 "failed. Return Code: `1`. STDERR:\nModule load error"
             ),
         ):

@@ -159,7 +159,7 @@ class CStarEnvironment:
         # when env file variables are expanded
         self._lmod_settings = LmodEnvSettings()
         if self.uses_lmod:
-            self.load_lmod_modules(lmod_file=self.lmod_path)
+            self.load_lmod_modules()
 
         self._system_settings_klass = system_settings_klass
 
@@ -341,7 +341,7 @@ class CStarEnvironment:
         pkg_relative_path = f"additional_files/lmod_lists/{self._system_name}.lmod"
         return self.package_root / pkg_relative_path
 
-    def _call_lmod(self, *args) -> None:
+    def _call_lmod(self, *args: str) -> None:
         """Calls Linux Environment Modules with specified arguments in python mode.
 
         This method constructs and executes a command to interface with the Linux Environment
@@ -389,7 +389,7 @@ class CStarEnvironment:
 
         exec(stdout)
 
-    def load_lmod_modules(self, lmod_file) -> None:
+    def load_lmod_modules(self) -> None:
         """Loads necessary modules for this machine using Linux Environment Modules.
 
         This function:
@@ -419,8 +419,8 @@ class CStarEnvironment:
         with open(self.lmod_path) as fp:
             lmod_list = fp.readlines()
 
-        for mod in lmod_list:
-            self._call_lmod(f"load {mod}")
+        modules = " ".join(x.strip() for x in lmod_list)
+        self._call_lmod(f"load {modules}")
 
     @staticmethod
     def set_env_var(key: str, value: str) -> None:
