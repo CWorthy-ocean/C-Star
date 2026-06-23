@@ -1,9 +1,11 @@
 import functools
+import os
 import platform as platform
 from dataclasses import dataclass
 from typing import ClassVar, Final, Protocol, override
 
-from pydantic import Field, ValidationError
+from griffe import get_logger
+from pydantic import Field
 
 from cstar.base.exceptions import CstarError
 from cstar.system.environment import (
@@ -23,6 +25,8 @@ from cstar.system.scheduler import (
     query_max_walltime_via_sinfo,
 )
 
+log = get_logger(__name__)
+
 
 class AnvilEnvSettings(SlurmSettingsBase):
     """Environment variables required to execute a simulation on the *Anvil* system.
@@ -31,7 +35,7 @@ class AnvilEnvSettings(SlurmSettingsBase):
     hostname matching test in `is_match`.
     """
 
-    HOST_IDENTIFIER: Final[str] = "anvil"
+    HOST_IDENTIFIER: ClassVar[str] = "anvil"
     """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
     RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
     """The hostname of the machine.
@@ -39,16 +43,14 @@ class AnvilEnvSettings(SlurmSettingsBase):
     Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
     """
 
-    @property
-    def is_match(self) -> bool:
-        """Return `True` if the current system can be identified as *Anvil* by
-        inspecting the system hostname.
-
-        Returns
-        -------
-        bool
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified after inspecting
+        non-lmod environment variables.
         """
-        return self.RCAC_CLUSTER == AnvilEnvSettings.HOST_IDENTIFIER
+        actual = os.getenv("RCAC_CLUSTER", "")
+        return actual == AnvilEnvSettings.HOST_IDENTIFIER
 
 
 class EljaEnvSettings(SlurmSettingsBase):
@@ -57,7 +59,7 @@ class EljaEnvSettings(SlurmSettingsBase):
     NOTE: Elja does not support SLURM account names.
     """
 
-    HOST_IDENTIFIER: Final[str] = "elja-irhpc"
+    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
     """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
 
     HOSTNAME: str = Field(default="", alias="HOSTNAME")
@@ -72,12 +74,14 @@ class EljaEnvSettings(SlurmSettingsBase):
     MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
     """The number of threads used by MKL"""
 
-    @property
-    def is_match(self) -> bool:
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
         """Return `True` if the current system is identified as *Elja* by matching
         value `elja-irhpc` in `HOSTNAME` env var.
         """
-        return self.HOSTNAME == self.HOST_IDENTIFIER
+        actual = os.getenv("HOSTNAME", "")
+        return actual == cls.HOST_IDENTIFIER
 
 
 class HostNameEvaluator:
@@ -133,21 +137,19 @@ class HostNameEvaluator:
             If the name cannot be determined.
         """
         if self.lmod_hostname:
+            log.trace("Using lmod hostname as system name")
             return self.lmod_hostname
 
-        try:
-            if EljaEnvSettings().is_match:
-                return _EljaSystemContext.name
-        except ValidationError:
-            ...  # not elja
+        if EljaEnvSettings.is_match():
+            log.trace("Using `elja` as system name")
+            return _EljaSystemContext.name
 
-        try:
-            if AnvilEnvSettings().is_match:
-                return _AnvilSystemContext.name
-        except ValidationError:
-            ...  # not anvil
+        if AnvilEnvSettings.is_match():
+            log.trace("Using `anvil` as system name")
+            return _AnvilSystemContext.name
 
         if self.platform_hostname:
+            log.trace("Using platform hostname as system name")
             return self.platform_hostname
 
         raise OSError(
