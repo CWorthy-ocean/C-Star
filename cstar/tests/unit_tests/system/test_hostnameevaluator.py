@@ -147,6 +147,14 @@ def test_partial_platform_fallback(
     with (
         patch("platform.system", return_value=system_name),
         patch("platform.machine", return_value=machine_name),
+        patch(
+            "cstar.system.manager.EljaEnvSettings.is_match",
+            mock.MagicMock(return_value=False),
+        ),
+        patch(
+            "cstar.system.manager.AnvilEnvSettings.is_match",
+            mock.MagicMock(return_value=False),
+        ),
     ):
         namer = HostNameEvaluator()
 
