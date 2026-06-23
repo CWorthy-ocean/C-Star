@@ -78,6 +78,7 @@ New features
 - `LocalLauncher` now honors dependencies and can exit after scheduling tasks. (`#548 <https://github.com/CWorthy-ocean/C-Star/pull/548>`_)
 - Setting `CSTAR_FF_DEBUG_BUILD_MODE=1` results in `ROMS` build in debug mode (`#553 <https://github.com/CWorthy-ocean/C-Star/pull/553>`_)
 - Inject per-system settings class into `CStarEnvironment` for customized behaviors. (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
+- Add environment support for Elja HPC (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
@@ -153,6 +154,7 @@ Bug Fixes
 - Fix overwriting existing metadata with secondary import (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
 - Avoid use of fixed port number causing tests to sporadically fail if port `12345` is taken (`#557 <https://github.com/CWorthy-ocean/C-Star/pull/557>`_)
 - Fix `cannot call asyncio.run on running event loop` failure from CLI tests (`#557 <https://github.com/CWorthy-ocean/C-Star/pull/557>`_)
+- Ensure `LMOD_SYSTEM_DEFAULT_MODULES` is set before manipulating modules (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -229,6 +231,9 @@ Improvements
 - Extract `lmod` environment variable handling into standalone settings class (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
 - Mitigated incomplete typehints and used modern class member declarations in modified classes. (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
 - Moved fixed environment variable configuration into dotenv files, deprecated `configure_environment` (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
+- Remove unused parameter to `load_lmod_modules` (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
+- Improved type-hinting (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
+- Replaced looping over single module loads with one call loading multiple modules (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
