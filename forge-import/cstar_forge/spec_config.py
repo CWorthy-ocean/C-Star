@@ -206,8 +206,33 @@ class Code(_Section):
 
 
 # ===========================================================================
-# Provenance
+# Composition (which catalog pieces produced this config) & provenance
 # ===========================================================================
+class PieceRef(_Section):
+    """Records where one composable piece (model / domain / forcing) came from.
+
+    Supports the "pick from a catalog or build your own" workflow: a UI can show,
+    for each piece, whether it was a catalog selection (and which one), whether the
+    user edited it, or whether it was authored from scratch.
+    """
+
+    name: Optional[str] = None  # catalog entry name, or None if authored from scratch
+    origin: str = "custom"  # "catalog" | "custom" | "model_default"
+    modified: bool = False  # True if a catalog piece was edited after selection
+
+
+class Composition(_Section):
+    """The composable pieces selected to build this config. The resolved data lives
+    in the sections above; this records provenance for review/UI.
+
+    ``forcing`` corresponds to the ``sources`` section (initial conditions + surface/
+    boundary/tidal/river + CDR)."""
+
+    model: PieceRef = Field(default_factory=PieceRef)
+    domain: PieceRef = Field(default_factory=PieceRef)
+    forcing: PieceRef = Field(default_factory=PieceRef)
+
+
 class Provenance(_Section):
     """Audit trail. Timestamps are passed in (never generated inside a resolver, to
     keep Phase 1 deterministic/reproducible)."""
@@ -246,6 +271,7 @@ class SpecConfig(_Section):
     properties: Dict[str, Any] = Field(default_factory=dict)  # {"n_tracers", "marbl"}
     model_settings: Dict[str, Any] = Field(default_factory=dict)  # flat sections
     code: Code
+    composition: Composition = Field(default_factory=Composition)
     provenance: Provenance = Field(default_factory=Provenance)
 
     # ---- derived naming (single source of truth: identity + dates + n_procs) ----

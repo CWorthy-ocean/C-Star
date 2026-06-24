@@ -1,16 +1,15 @@
-# EXAMPLE SpecConfig (schema v2) — see docs/spec-config-inventory.md and cstar_forge/spec_config.py.
-# Faithfully derived from the demo notebook run for the 'test-tiny' domain.
+# EXAMPLE SpecConfig (schema v2) — produced by cstar_forge.spec_config_resolve.build_spec_config
+# from the demo notebook inputs for the 'test-tiny' domain. See docs/spec-config-inventory.md.
 # Draft schema; not yet wired into CstarSpecBuilder.
 #
 # DERIVED AT PROCESSING (not stored here):
 #   name             = cson_roms-marbl_v0.1_test-tiny_1procs
 #   casename         = cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
-#   title.casename   = <casename>
-#   run_output_dir   = <host scratch>/<casename>
+#   title.casename   = <casename>;  run_output_dir = <host scratch>/<casename>
 #   output_root_name = <run_output_dir>/output/<casename>
 #   machine + data paths (source_data/input_data/scratch/catalog) <- cstar_forge.config on the run host
 #   s_coord (theta_s/theta_b/tcline) <- generated grid;  grid/initial/forcing paths <- generated artifacts
-#   fixed impl details: cdr.nc / nesting.nc filenames, nrrec, tide flags <- set deterministically
+#   fixed impl details: cdr.nc / nesting.nc, nrrec, tide flags <- set deterministically
 
 spec_config_version: 2
 identity:
@@ -352,18 +351,15 @@ sources:
       dataset_id: null
       url: null
       streamable: true
+    ETOPO5:
+      dataset_key: ETOPO5
+      dataset_id: null
+      url: null
+      streamable: false
 properties:
   n_tracers: 34
   marbl: true
 model_settings:
-  cppdefs:
-    obc_west: false
-    obc_east: true
-    obc_north: true
-    obc_south: false
-    marbl: true
-    cdr_forcing: true
-    co2_tvarying: false
   time_stepping:
     ntimes: 12
     dt: 7200
@@ -618,6 +614,14 @@ model_settings:
     - FG_CO2
     - FG_ALT_CO2
     marbl_timestep_ratio: 1
+  cppdefs:
+    obc_west: false
+    obc_east: true
+    obc_north: true
+    obc_south: false
+    marbl: true
+    cdr_forcing: true
+    co2_tvarying: false
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
@@ -631,24 +635,38 @@ code:
     location: https://github.com/CWorthy-ocean/cstar-forge.git
     commit: null
     branch: main
-    directory: cstar_forge/catalog/ModelSpec/cson_roms-marbl_v0.1/templates/compile-time
+    directory: templates/compile-time
     files:
     - cppdefs.opt.j2
   templates_run_time:
     location: https://github.com/CWorthy-ocean/cstar-forge.git
     commit: null
     branch: main
-    directory: cstar_forge/catalog/ModelSpec/cson_roms-marbl_v0.1/templates/run-time
+    directory: templates/run-time
     files:
     - marbl_in
+composition:
+  model:
+    name: cson_roms-marbl_v0.1
+    origin: catalog
+    modified: false
+  domain:
+    name: test-tiny
+    origin: custom
+    modified: false
+  forcing:
+    name: null
+    origin: model_default
+    modified: false
 provenance:
   generated_at: '2026-06-23T12:00:00'
   forge_version: null
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
-  notes: 'Example generated from the demo notebook (workflows/.../CStarSpecBuilder-demo_MacOS.ipynb).
-    Machine/paths and naming (name, casename, title, output_root_name, run_output_dir)
-    are NOT stored: machine + data paths are resolved at processing time from cstar_forge.config,
-    names are derived from identity + dates + partitioning. s_coord and file paths
-    are processing outputs written to the blueprint. Fixed impl details (cdr.nc/nesting.nc
-    names, nrrec, tide flags) are set deterministically at processing.'
+  notes: 'Built by cstar_forge.spec_config_resolve.build_spec_config from the demo
+    notebook inputs (test-tiny). Machine/paths and naming (name, casename, title,
+    output_root_name, run_output_dir) are NOT stored: machine + data paths are resolved
+    at processing from cstar_forge.config; names derive from identity + dates + partitioning.
+    s_coord and file paths are processing outputs written to the blueprint. Fixed
+    impl details (cdr.nc/nesting.nc, nrrec, tide flags) are set deterministically
+    at processing.'

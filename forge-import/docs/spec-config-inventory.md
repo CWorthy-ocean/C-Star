@@ -117,6 +117,25 @@ flags) it lives in the relevant `model_settings` section, which processing overw
 helpers (`.name`, `.casename`, `.run_output_dir(scratch)`, `.output_root_name(scratch)`),
 so there is exactly one place to change a name and everything else follows.
 
+### Composable pieces
+
+The config is assembled from a few independently-selectable pieces — the goal is a
+catalog/UI where a user picks (or authors) each and reviews the assembled result:
+
+| Piece | Catalog home | Contributes to `SpecConfig` |
+|---|---|---|
+| **Model** | `catalog/ModelSpec/<name>/` | `code`, `properties`, `model_settings` defaults |
+| **Domain** | `catalog/DomainSpec/<name>/` | `domain` (grid kwargs, partitioning, boundaries) |
+| **Forcing** | *(future)* `catalog/ForcingSpec/` | `sources` (ICs + surface/boundary/tidal/river + CDR) |
+| **Run** | per-run (not cataloged) | `run` (dates), `identity.ensemble_id` |
+
+A top-level `composition` block records, per piece, its `name`, `origin`
+(`catalog` / `custom` / `model_default`), and whether it was `modified` after
+selection — so a UI/review can show provenance without re-deriving it.
+
+> Deferred ideas (noted, not built): splitting CDR into its own "intervention"
+> piece; tracking per-key default-vs-override provenance inside `model_settings`.
+
 ---
 
 ## 4. Proposed two-phase flow
@@ -148,20 +167,26 @@ Two choices that make "review here, process elsewhere" work:
 
 ## 5. Suggested implementation sequencing (low-risk)
 
-1. Define `SpecConfig` + `to_yaml`/`from_yaml` (done as a draft in
-   `cstar_forge/spec_config.py`); have `model_post_init` populate it *alongside*
-   current behavior. Add a golden-file test that the serialized YAML is stable.
-2. Split `_init_settings_run_time` into `_settings_static()` (defaults ⊕ overrides,
-   no I/O) and `_settings_derived(grid_kwargs, dates, partitioning)` (the CFL /
-   `v_sponge` / `ntimes` / `param` / `obc` math). Prove byte-identical settings via
-   the existing test suite. *(This is the riskiest step — the current logic is
-   entangled with `self.grid` and persistence.)*
-3. Route `generate_inputs` / `configure_build` to read exclusively from `SpecConfig`.
-4. Add a standalone `forge process spec_config.yml` entrypoint; flip path/machine
-   resolution to ingest-time.
+1. **[DONE — draft]** Define `SpecConfig` + `to_yaml`/`from_yaml`
+   (`cstar_forge/spec_config.py`) and a dependency-light Phase-1 resolver
+   `build_spec_config` (`cstar_forge/spec_config_resolve.py`), validated against the
+   `test-tiny` demo (`tests/test_spec_config.py`, `docs/spec-config-example.test-tiny.yml`).
+   The resolver reads the ModelSpec YAML directly and needs no ROMS/C-Star/roms_tools
+   (only `dt` via CFL is optional/lazy), so a UI backend can call it.
+2. Reconcile the resolver with the live code: have `CstarSpecBuilder.model_post_init`
+   either delegate to `build_spec_config` or assert byte-parity with it, so the two
+   paths can't drift. *(Riskiest step — today's derived logic is split between
+   `_init_settings_run_time` and the `input_data` grid handler, and is entangled with
+   `self.grid` + blueprint persistence.)*
+3. Route `generate_inputs` / `configure_build` to read from a `SpecConfig` (the
+   processing/Phase-2 engine), resolving machine + paths from `cstar_forge.config` on
+   the run host and writing host/artifact-derived values to the blueprint.
+4. Add a standalone `forge process spec_config.yml` entrypoint (Phase 2).
 5. Keep `CstarSpecBuilder` as a thin facade for back-compat: `builder.spec_config`
    returns the resolved `SpecConfig`; `builder.generate_inputs()` becomes
-   `SpecEngine.run(self.spec_config)`.
+   `engine.run(self.spec_config, host)`.
+6. Add `ForcingSpec` to the catalog and wire the composable-piece selection (model /
+   domain / forcing) + the planned UI on top of `build_spec_config`.
 
 ---
 
