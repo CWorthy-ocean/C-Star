@@ -48,6 +48,109 @@ def test_naming_is_derived_not_stored():
     assert cfg.output_root_name("/scratch").startswith("/scratch/cson_roms-marbl")
 
 
+def test_spec_config_is_portable_no_forge_or_cstar_imports():
+    """spec_config.py is the C-Star-relocatable blueprint model: it must depend on
+    nothing from cstar_forge / cstar (only stdlib + pydantic + yaml)."""
+    src = Path(cstar_forge.__file__).parent / "spec_config.py"
+    text = src.read_text()
+    import re
+    bad = [ln.strip() for ln in text.splitlines()
+           if re.match(r"\s*(from|import)\s+(cstar_forge|cstar|\.)", ln)]
+    assert not bad, f"spec_config.py must stay forge/cstar-free; found: {bad}"
+
+
+def test_application_discriminator_default():
+    from cstar_forge.spec_config import DEFAULT_APPLICATION
+    cfg = _build()
+    assert cfg.application == DEFAULT_APPLICATION
+
+
+def test_from_yaml_rejects_newer_version(tmp_path):
+    cfg = _build()
+    p = tmp_path / "spec_config.yml"
+    cfg.to_yaml(p)
+    import yaml as _yaml
+    data = _yaml.safe_load(p.read_text())
+    data["spec_config_version"] = 9999
+    p.write_text(_yaml.safe_dump(data))
+    with pytest.raises(ValueError, match="newer than this build"):
+        SpecConfig.from_yaml(p)
+
+
+def test_schema_round_trip_identity(tmp_path):
+    cfg = _build()
+    p = cfg.to_yaml(tmp_path / "spec_config.yml")
+    back = SpecConfig.from_yaml(p)
+    assert back == cfg                      # full structural round-trip
+    assert back.application == cfg.application
+
+
+@pytest.mark.skip(reason="byte-golden deferred to the C-Star migration (see "
+                         "docs/spec-config-inventory.md step 2b): it churns on every "
+                         "schema/default change, so it's only worth pinning as a "
+                         "behavior-preservation snapshot right before moving the engine.")
+def test_golden_namelist_matches_fixture():  # pragma: no cover
+    """At migration time: process the example and assert the generated namelist.nml
+    matches a committed golden fixture, proving the C-Star engine preserves behavior."""
+    raise NotImplementedError
+
+
+def test_resolver_nesting_enables_extract_data():
+    cfg = _build(grid_kwargs_child=dict(nx=30, ny=30, size_x=300, size_y=300,
+                                        center_lon=0, center_lat=55, rot=0, N=20,
+                                        theta_s=6.0, theta_b=3.0, hc=250.0),
+                 metadata_child={"period": 1800.0})
+    ed = cfg.model_settings["extract_data"]
+    assert ed["do_extract"] is True and ed["extract_file"] == "nesting.nc"
+    assert ed["n_chd"] == 20 and ed["theta_s_chd"] == 6.0 and ed["hc_chd"] == 250.0
+    assert ed["extract_period"] == 1800.0
+    assert cfg.domain.grid_kwargs_child["nx"] == 30
+    assert cfg.domain.metadata_child == {"period": 1800.0}
+
+
+def test_resolver_nesting_default_period():
+    cfg = _build(grid_kwargs_child=dict(nx=30, ny=30, size_x=300, size_y=300,
+                                        center_lon=0, center_lat=55, rot=0, N=15))
+    assert cfg.model_settings["extract_data"]["extract_period"] == 3600.0
+    assert cfg.model_settings["extract_data"]["n_chd"] == 15
+
+
+def test_resolver_no_nesting_keeps_defaults():
+    cfg = _build()
+    assert cfg.model_settings["extract_data"]["do_extract"] is False
+    assert cfg.domain.grid_kwargs_child is None
+
+
+def test_resolver_restoring_sets_sal_restore():
+    # the cson model.yml has no restoring source; inject one via run_time? Instead
+    # verify the default (no restoring) leaves sal_restore False.
+    cfg = _build()
+    assert cfg.model_settings["cppdefs"].get("sal_restore") is False
+
+
+def test_catalog_scans_forcingspec():
+    from cstar_forge.domain_catalog import default_catalog as cat
+    assert "glorys-era5-unified" in cat.forcing_names
+    data = cat.forcing_data("glorys-era5-unified")
+    assert "forcing" in data and "initial_conditions" in data
+
+
+def test_resolver_forcing_inputs_override():
+    from cstar_forge.domain_catalog import default_catalog as cat
+    fdata = cat.forcing_data("glorys-era5-unified")
+    cfg = _build(forcing_inputs=fdata)
+    assert cfg.composition.forcing.origin == "custom"
+    assert [i.source.name for i in cfg.sources.forcing.surface] == ["ERA5", "UNIFIED"]
+    # an edited forcing with a restoring SSS source -> sal_restore
+    edited = dict(fdata)
+    edited["forcing"] = dict(fdata["forcing"])
+    edited["forcing"]["surface"] = fdata["forcing"]["surface"] + [
+        {"source": {"name": "WOA", "climatology": True}, "type": "restoring",
+         "restoring_forces": ["sss"]}]
+    cfg2 = _build(forcing_inputs=edited)
+    assert cfg2.model_settings["cppdefs"]["sal_restore"] is True
+
+
 def test_timestepping_and_param_match_known_run():
     cfg = _build()
     assert cfg.model_settings["time_stepping"] == {
@@ -181,6 +284,192 @@ class TestSpecConfigWizard:
         cfg = SpecConfig.from_yaml(tmp_path / "spec_config.yml")
         assert cfg.casename == wiz.config.casename
 
+    def test_load_existing_config_round_trips(self, tmp_path):
+        """Save a config, load it into a fresh wizard, and confirm widgets +
+        resolved config round-trip (the #7 load affordance)."""
+        w1 = self._wizard()
+        if "gulf-guinea-toy" in w1.domain_dd.options:
+            w1.domain_dd.value = "gulf-guinea-toy"
+        w1.ensemble.value = "7"
+        p = tmp_path / "spec_config.yml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        saved = SpecConfig.from_yaml(p)
+
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.grid_name.value == saved.identity.grid_name
+        assert w2.domain_dd.value == "<custom>"        # file authoritative, no prefill
+        assert w2.ensemble.value == "7"
+        assert w2.config is not None
+        assert w2.config.casename == saved.casename
+        assert w2.config.model_settings["time_stepping"] == saved.model_settings["time_stepping"]
+
+    def test_load_from_upload_bytes(self, tmp_path):
+        w1 = self._wizard()
+        p = tmp_path / "spec_config.yml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2._load_bytes(p.read_bytes())
+        assert w2.config is not None and w2.config.casename == w1.config.casename
+
+    def test_validation_indicator_valid_by_default(self):
+        w = self._wizard()
+        assert "settings valid" in w.validation.value
+
+    def test_advanced_editor_includes_all_sections(self):
+        w = self._wizard()
+        assert w.editor is not None
+        sections = set(w.editor._section_fields)
+        # every model_settings section is editable, including the derived ones
+        assert {"ocean_vars", "lateral_visc", "marbl_bgc",
+                "time_stepping", "param", "v_sponge", "cppdefs", "extract_data"} <= sections
+        assert w.config.provenance.overrides == {}
+
+    def test_editing_advanced_setting_reflects_in_config(self):
+        w = self._wizard()
+        wid = w.editor._widgets[("ocean_vars", "wrt_z")][0]
+        wid.value = not wid.value
+        assert w.config.model_settings["ocean_vars"]["wrt_z"] == wid.value
+
+    def test_advanced_edit_persists_across_atomic_change(self):
+        w = self._wizard()
+        w.editor._widgets[("lateral_visc", "visc2")][0].value = 12.5
+        w.grid_w["nx"].value = 8                       # atomic change -> re-derive
+        assert w.config.model_settings["lateral_visc"]["visc2"] == 12.5  # edit kept
+        assert w.config.model_settings["param"]["llm"] == 8             # derived refreshed
+
+    def test_editing_derived_value_records_override_and_wins(self):
+        w = self._wizard()
+        w.editor._widgets[("param", "np_xi")][0].value = 99
+        assert w.config.provenance.overrides == {"param": {"np_xi": 99}}
+        # override persists and wins over the composed value when partitioning changes
+        w.npx.value = 4
+        assert w.config.model_settings["param"]["np_xi"] == 99
+        assert w.config.model_settings["param"]["np_eta"] == 1  # non-overridden refreshes
+
+    def test_override_layer_round_trips_through_load(self, tmp_path):
+        w1 = self._wizard()
+        w1.editor._widgets[("param", "np_xi")][0].value = 99
+        w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
+        p = tmp_path / "spec_config.yml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.config.model_settings["param"]["np_xi"] == 99
+        assert w2.config.provenance.overrides.get("param", {}).get("np_xi") == 99
+        assert w2.config.model_settings["lateral_visc"]["visc2"] == 3.3
+
+    def test_forcing_spec_selection_and_edit(self):
+        w = self._wizard()
+        assert w.forcing_dd.value == "<model default>"
+        assert w.config.composition.forcing.origin == "model_default"
+        if "glorys-era5-unified" not in w.forcing_dd.options:
+            pytest.skip("example ForcingSpec not in catalog")
+        # select cataloged forcing -> origin catalog
+        w.forcing_dd.value = "glorys-era5-unified"
+        assert w.config.composition.forcing.origin == "catalog"
+        assert [i.source.name for i in w.config.sources.forcing.surface] == ["ERA5", "UNIFIED"]
+        # add + edit a restoring surface item -> sal_restore + custom origin
+        fe = w._forcing_editor
+        fe._add("surface")
+        row = fe._rows["surface"][-1]
+        row["name"].value = "WOA"
+        row["type"].value = "restoring"
+        row["restoring_forces"].value = "sss"
+        assert w.config.composition.forcing.origin == "custom"
+        assert w.config.model_settings["cppdefs"]["sal_restore"] is True
+        assert "WOA" in [i.source.name for i in w.config.sources.forcing.surface]
+
+    def test_forcing_remove_item(self):
+        w = self._wizard()
+        fe = w._forcing_editor
+        before = len(w.config.sources.forcing.tidal)
+        if before == 0:
+            pytest.skip("no tidal item to remove")
+        fe._remove("tidal", fe._rows["tidal"][0])
+        assert len(w.config.sources.forcing.tidal) == before - 1
+
+    def test_forcing_round_trips_through_load(self, tmp_path):
+        w1 = self._wizard()
+        fe = w1._forcing_editor
+        fe._add("surface")
+        row = fe._rows["surface"][-1]
+        row["name"].value = "WOA"
+        row["type"].value = "restoring"
+        row["restoring_forces"].value = "sss"
+        p = tmp_path / "spec_config.yml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert "WOA" in [i.source.name for i in w2.config.sources.forcing.surface]
+        assert w2.config.model_settings["cppdefs"]["sal_restore"] is True
+        assert w2.config.composition.forcing.origin == "custom"
+
+    def test_nest_from_domain_dropdown_prefills_child(self):
+        w = self._wizard()
+        if "gulf-guinea-toy" not in w.nest_domain_dd.options:
+            pytest.skip("gulf-guinea-toy domain not in catalog")
+        w.nest_domain_dd.value = "gulf-guinea-toy"   # prefills child + enables nesting
+        assert w.nest_enable.value is True
+        assert w.child_w["nx"].value == 10 and w.child_w["N"].value == 5
+        assert w.config.model_settings["extract_data"]["do_extract"] is True
+        assert w.config.model_settings["extract_data"]["n_chd"] == 5
+
+    def test_nesting_ui_enables_extract_data(self):
+        w = self._wizard()
+        w.nest_enable.value = True
+        w.child_w["N"].value = 25
+        assert w.config.model_settings["extract_data"]["do_extract"] is True
+        assert w.config.model_settings["extract_data"]["n_chd"] == 25
+        assert w.config.domain.grid_kwargs_child is not None
+
+    def test_load_preserves_advanced_edits_and_nesting(self, tmp_path):
+        w1 = self._wizard()
+        w1.editor._widgets[("lateral_visc", "visc2")][0].value = 7.25
+        w1.nest_enable.value = True
+        w1.child_w["N"].value = 18
+        p = tmp_path / "spec_config.yml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.config.model_settings["lateral_visc"]["visc2"] == 7.25
+        assert w2.nest_enable.value is True
+        assert w2.config.model_settings["extract_data"]["n_chd"] == 18
+
+    def test_loading_file_with_bad_settings_is_flagged(self, tmp_path):
+        import yaml
+        w = self._wizard()
+        p = tmp_path / "spec_config.yml"
+        w.save_path.value = str(p)
+        w._on_save(None)
+        data = yaml.safe_load(p.read_text())
+        data["model_settings"]["param"]["np_xi"] = "not-an-int"  # corrupt a value
+        bad = tmp_path / "bad.yml"
+        bad.write_text(yaml.safe_dump(data))
+        w2 = self._wizard()
+        w2.load_path.value = str(bad)
+        w2._on_load_path(None)
+        assert "invalid settings value" in w2.load_status.value
+        # the wizard re-derives valid settings from the inputs, so it ends valid
+        assert "settings valid" in w2.validation.value
+
+    def test_load_bad_input_shows_error_not_crash(self):
+        w = self._wizard()
+        w.load_path.value = "/nonexistent/spec_config.yml"
+        w._on_load_path(None)
+        assert "color:#b00" in w.load_status.value
+        w._load_bytes(b"not: [valid spec config")
+        assert "color:#b00" in w.load_status.value
+
     def test_download_link_encodes_the_config(self):
         """The browser-download link (used by Voilà) carries the resolved YAML."""
         import base64
@@ -201,8 +490,10 @@ class TestSpecConfigWizard:
 # pipeline downloads data + runs roms_tools and is out of scope for unit tests)
 # ---------------------------------------------------------------------------
 class _FakeBuilder:
-    def __init__(self, **kwargs):
-        self.kwargs = kwargs
+    """A SpecConfigExecutor stand-in: records calls instead of doing real work."""
+
+    def __init__(self, cfg=None):
+        self.cfg = cfg
         self.calls = []
 
     def ensure_source_data(self, **k):
@@ -243,7 +534,7 @@ class TestSpecConfigEngine:
     def test_process_orchestration_order_and_overlay(self):
         from cstar_forge.spec_config_engine import process_spec_config
         b = process_spec_config(self._cfg(), clobber=True, use_dask=False,
-                                builder_factory=_FakeBuilder)
+                                executor_factory=_FakeBuilder)
         assert [c[0] for c in b.calls] == ["ensure", "generate", "configure"]
         gen = dict(b.calls[1][1])
         assert gen["clobber"] is True and gen["use_dask"] is False
@@ -255,8 +546,26 @@ class TestSpecConfigEngine:
     def test_process_skip_flags(self):
         from cstar_forge.spec_config_engine import process_spec_config
         b = process_spec_config(self._cfg(), ensure_data=False, generate=False,
-                                builder_factory=_FakeBuilder)
+                                executor_factory=_FakeBuilder)
         assert [c[0] for c in b.calls] == ["configure"]
+
+    def test_executor_must_implement_interface(self):
+        from cstar_forge.spec_config_engine import process_spec_config, SpecConfigExecutor
+        # _FakeBuilder satisfies the runtime-checkable Protocol
+        assert isinstance(_FakeBuilder(), SpecConfigExecutor)
+
+        class _Bad:  # missing the required methods
+            def __init__(self, cfg=None):
+                pass
+        with pytest.raises(TypeError, match="SpecConfigExecutor"):
+            process_spec_config(self._cfg(), executor_factory=_Bad)
+
+    def test_invalid_model_settings_fail_fast(self):
+        from cstar_forge.spec_config_engine import process_spec_config
+        cfg = self._cfg()
+        cfg.model_settings["param"]["np_xi"] = "not-an-int"  # corrupt a value
+        with pytest.raises(ValueError, match="invalid values"):
+            process_spec_config(cfg, executor_factory=_FakeBuilder)  # raises before any call
 
     def test_resolve_host_reads_config_not_file(self):
         from cstar_forge.spec_config_engine import resolve_host

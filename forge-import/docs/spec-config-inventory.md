@@ -182,6 +182,21 @@ Two choices that make "review here, process elsewhere" work:
    `model_settings` via `configure_build(...)` so config edits win over re-derived
    defaults. CLI: `python -m cstar_forge.spec_config_engine spec_config.yml`
    (`--host-only`, `--clobber`, `--no-{data,generate,configure,dask}`).
+2b. **[DONE — schema identity]** ``SpecConfig`` carries an ``application`` discriminator
+   (default ``"roms_marbl"`` — the target C-Star app) and ``spec_config_version``;
+   ``from_yaml`` rejects files declaring a newer version. A portability guard test keeps
+   ``spec_config.py`` free of ``cstar_forge``/``cstar`` imports (so it stays
+   C-Star-relocatable), and a schema round-trip test pins config↔YAML identity. Version
+   is bumped only on *breaking* changes; additive fields (with defaults) stay loadable.
+
+   **[TODO — at the C-Star migration, NOT before]** Add a *byte-exact golden namelist*
+   test: run ``process_spec_config`` on the example and assert the generated
+   ``namelist.nml`` matches a committed fixture. Deferred deliberately — it churns on
+   every schema/default change, so it earns its keep only as a behavior-preservation
+   snapshot right before moving the engine into C-Star. (See the skipped stub in
+   ``tests/test_spec_config.py``.) Until then, behavior is guarded by the resolver↔builder
+   parity test + round-trip/validation invariants (which don't churn on field changes).
+
 3. Reconcile the Phase-1 resolver with the live builder so the two paths can't drift.
    - **[DONE — parity net]** `TestResolverBuilderParity` (`tests/test_spec_config.py`,
      `@pytest.mark.integration`) builds a `SpecConfig` two ways for several domains —

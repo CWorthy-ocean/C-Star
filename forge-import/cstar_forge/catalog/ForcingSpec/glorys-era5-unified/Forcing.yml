@@ -1,0 +1,45 @@
+description: "GLORYS physics + UNIFIED BGC + ERA5 surface + TPXO tides + DAI rivers"
+# A ForcingSpec is a selectable forcing configuration (initial conditions + surface/
+# boundary/tidal/river forcing). It mirrors the `inputs` block of a model.yml and can
+# be chosen in place of a model's default forcing. Topography source lives here too.
+grid:
+  topography_source: ETOPO5
+
+initial_conditions:
+  source:
+    name: GLORYS
+    glorys_layout: regional
+  bgc_source:
+    name: UNIFIED
+    climatology: true
+
+forcing:
+  surface:
+    - source:
+        name: ERA5
+      type: physics
+      correct_radiation: true
+      coarse_grid_mode: "never"
+    - source:
+        name: UNIFIED
+        climatology: true
+      type: bgc
+      coarse_grid_mode: "never"
+  boundary:
+    - source:
+        name: GLORYS
+        glorys_layout: regional
+      type: physics
+    - source:
+        name: UNIFIED
+        climatology: true
+      type: bgc
+  tidal:
+    - source:
+        name: TPXO
+      ntides: 15
+  river:
+    - source:
+        name: DAI
+        climatology: false
+      include_bgc: true

@@ -1,17 +1,15 @@
-# EXAMPLE SpecConfig (schema v2) — produced by cstar_forge.spec_config_resolve.build_spec_config
+# EXAMPLE SpecConfig — produced by cstar_forge.spec_config_resolve.build_spec_config
 # from the demo notebook inputs for the 'test-tiny' domain. See docs/spec-config-inventory.md.
 # Draft schema; not yet wired into CstarSpecBuilder.
 #
-# DERIVED AT PROCESSING (not stored here):
+#   application      = roms_marbl   (target C-Star app)
 #   name             = cson_roms-marbl_v0.1_test-tiny_1procs
-#   casename         = cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102
-#   title.casename   = <casename>;  run_output_dir = <host scratch>/<casename>
-#   output_root_name = <run_output_dir>/output/<casename>
-#   machine + data paths (source_data/input_data/scratch/catalog) <- cstar_forge.config on the run host
-#   s_coord (theta_s/theta_b/tcline) <- generated grid;  grid/initial/forcing paths <- generated artifacts
-#   fixed impl details: cdr.nc / nesting.nc, nrrec, tide flags <- set deterministically
+#   casename         = cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102   (derived, not stored)
+#   machine + data paths + run_output_dir/output_root_name <- resolved at processing
+#   s_coord + grid/initial/forcing paths <- generated artifacts (in the blueprint)
 
 spec_config_version: 2
+application: roms_marbl
 identity:
   model_name: cson_roms-marbl_v0.1
   grid_name: test-tiny
@@ -622,6 +620,7 @@ model_settings:
     marbl: true
     cdr_forcing: true
     co2_tvarying: false
+    sal_restore: false
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
@@ -663,10 +662,8 @@ provenance:
   forge_version: null
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
-  notes: 'Built by cstar_forge.spec_config_resolve.build_spec_config from the demo
-    notebook inputs (test-tiny). Machine/paths and naming (name, casename, title,
-    output_root_name, run_output_dir) are NOT stored: machine + data paths are resolved
-    at processing from cstar_forge.config; names derive from identity + dates + partitioning.
-    s_coord and file paths are processing outputs written to the blueprint. Fixed
-    impl details (cdr.nc/nesting.nc, nrrec, tide flags) are set deterministically
-    at processing.'
+  overrides: {}
+  notes: Built by cstar_forge.spec_config_resolve.build_spec_config from the demo
+    notebook inputs (test-tiny). Machine/paths and naming are NOT stored (resolved
+    at processing / derived). s_coord + file paths are processing outputs. provenance.overrides
+    records manual edits on top of the pieces.

@@ -13,7 +13,11 @@ import yaml
 
 import cstar_forge
 from cstar_forge.settings import write_roms_namelist
-from cstar_forge.namelist_model import RunTimeSettings, build_namelist
+from cstar_forge.namelist_model import (
+    RunTimeSettings,
+    build_namelist,
+    validate_run_time_sections,
+)
 from cstar.roms.namelist import RomsNamelist
 from pydantic import ValidationError
 
@@ -144,3 +148,26 @@ def test_model_reads_production_namelist(tmp_path):
     nml = RomsNamelist.read(tmp_path / "namelist.nml")   # would raise if a group/key is unmodeled
     assert nml.param_settings.nt_bgc == 32
     assert nml.particles_settings.np == 50
+
+
+# ---------------------------------------------------------------------------
+# validate_run_time_sections — partial/per-section validation (fail-fast)
+# ---------------------------------------------------------------------------
+def test_validate_run_time_sections_accepts_good_partial():
+    # only some sections present (as in SpecConfig.model_settings) -> no error
+    assert validate_run_time_sections(
+        {"time_stepping": {"ntimes": 12, "dt": 7200, "ndtfast": 60, "ninfo": 1}}) == []
+    # scalar fields validate too
+    assert validate_run_time_sections({"gamma2": 1.0, "ubind": 0.1}) == []
+
+
+def test_validate_run_time_sections_skips_non_runtime_keys():
+    # cppdefs is a compile-time section, not part of RunTimeSettings -> skipped
+    assert validate_run_time_sections({"cppdefs": {"obc_west": True, "whatever": 9}}) == []
+
+
+def test_validate_run_time_sections_flags_bad_value():
+    errs = validate_run_time_sections({"param": {
+        "np_xi": "not-an-int", "np_eta": 1, "llm": 6, "mmm": 2, "n": 3,
+        "nsub_x": 1, "nsub_e": 1, "nt_passive": 0, "ntrc_bio": 32}})
+    assert errs and any("np_xi" in e for e in errs)

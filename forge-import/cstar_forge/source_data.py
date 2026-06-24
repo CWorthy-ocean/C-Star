@@ -59,76 +59,28 @@ def register_dataset(name: str, requires: Optional[List[str]] = None) -> Callabl
 
 
 # -----------------------------------------
-# Constants (SRTM15 versioning)
+# Source-name registry / metadata constants
+#
+# The alias map, streamable list, dataset ids, and download URLs live in the
+# lightweight ``source_registry`` module (single source of truth, importable
+# without the heavy acquisition deps). Re-exported here for existing consumers.
 # -----------------------------------------
+from .source_registry import (  # noqa: E402,F401  (re-export)
+    SRTM15_VERSION,
+    SRTM15_URL,
+    GLORYS_DATASET_ID,
+    MBL_CO2_URL,
+    WOA_DOWNLOAD_URL,
+    UNIFIED_BGC_URL,
+    SOURCE_ALIAS,
+    STREAMABLE_SOURCES,
+    map_source_to_dataset_key,
+)
 
-SRTM15_VERSION = "V2.7"
-SRTM15_URL = f"https://topex.ucsd.edu/pub/srtm15_plus/SRTM15_{SRTM15_VERSION}.nc"
-
-
-# -----------------------------------------
-# constants: GLORYS
-# -----------------------------------------
-
-glorys_dataset_id: str = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
-
-
-# -----------------------------------------
-# constants: MBL_CO2
-# -----------------------------------------
-
-MBL_CO2_URL = f"https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
-
-# -----------------------------------------
-# Constants (WOA versioning)
-# -----------------------------------------
+# Back-compat alias (handlers reference the lowercase name).
+glorys_dataset_id: str = GLORYS_DATASET_ID
 
 WOA_FILENAMES: List[str] = [f"woa*_decav_s{month:02d}_*.nc" for month in range(1, 13)]
-WOA_DOWNLOAD_URL = f"https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/"
-
-
-# -----------------------------------------
-# Logical source-name → dataset key mapping
-# -----------------------------------------
-
-
-SOURCE_ALIAS: Dict[str, str] = {
-    # ERA5 surface forcing
-    "ERA5": "ERA5",
-    # GLORYS defaults to regional when only the logical name is known (see SourceSpec.glorys_layout)
-    "GLORYS": "GLORYS_REGIONAL",
-    "GLORYS_GLOBAL": "GLORYS_GLOBAL",
-    "GLORYS_REGIONAL": "GLORYS_REGIONAL",
-    # UNIFIED biogeochemistry
-    "UNIFIED": "UNIFIED_BGC",
-    "UNIFIED_BGC": "UNIFIED_BGC",
-    # SRTM15 bathymetry
-    "SRTM15": f"SRTM15_{SRTM15_VERSION}".upper(),
-    # MBL_CO2 xco2
-    "MBL_CO2": f"MBL_CO2".upper(),
-    # TPXO tidal data (user-provided)
-    "TPXO": "TPXO",
-    # WOA salinity data (user-provided)
-    "WOA": "WOA",
-    # Rivers, etc. (placeholder – add real dataset handlers as needed)
-    "DAI": "DAI",  # expected to correspond to a DAI dataset if/when added
-}
-
-# List of source names that are streamable and do not need to be prepared unless explicitly requested.
-STREAMABLE_SOURCES: List[str] = [
-    "ERA5",
-    "DAI",
-]
-
-
-def map_source_to_dataset_key(name: str) -> str:
-    """
-    Map a logical source name (e.g. 'GLORYS', 'UNIFIED') to a dataset key
-    used in DATASET_REGISTRY / SourceData.paths.
-
-    If no alias is defined, the uppercased name is returned as-is.
-    """
-    return SOURCE_ALIAS.get(name.upper(), name.upper())
 
 
 # -----------------------------------------
@@ -236,11 +188,9 @@ class SourceData:
         For logical "GLORYS", pass ``glorys_layout`` from SourceSpec
         (``"global"`` or ``"regional"``). If omitted, defaults to regional.
         """
-        u = logical_name.upper()
-        if u == "GLORYS":
-            layout = (glorys_layout or "regional").lower()
-            return "GLORYS_GLOBAL" if layout == "global" else "GLORYS_REGIONAL"
-        return map_source_to_dataset_key(logical_name)
+        from .source_registry import resolve_dataset_key
+
+        return resolve_dataset_key(logical_name, glorys_layout)
 
     def path_for_source(
         self,
@@ -427,9 +377,7 @@ def _prepare_glorys_global(self: SourceData) -> List[Path]:
 @register_dataset("UNIFIED_BGC")
 def _prepare_unified_bgc_dataset(self: SourceData) -> Path:
     """Ensure the UNIFIED_BGC dataset exists locally."""
-    url_bgc_forcing = (
-        "https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq"
-    )
+    url_bgc_forcing = UNIFIED_BGC_URL
     dataset_dir = config.paths.source_data / "UNIFIED_BGC"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     path = dataset_dir / "BGCdataset.nc"

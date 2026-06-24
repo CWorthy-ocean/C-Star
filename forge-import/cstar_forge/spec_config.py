@@ -53,7 +53,14 @@ from typing import Any, Dict, List, Optional, Union
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+# Bumped only on a BREAKING schema change. Additive fields (with defaults) are
+# backward-compatible — old files still load — so they do NOT bump this. ``from_yaml``
+# rejects files declaring a *newer* version than this build understands.
 SPEC_CONFIG_VERSION = 2
+
+# Identifies which C-Star application this blueprint targets (the planned home of the
+# processing engine). Stable across schema/field iteration; used to route the blueprint.
+DEFAULT_APPLICATION = "roms_marbl"
 
 
 class _Section(BaseModel):
@@ -241,6 +248,10 @@ class Provenance(_Section):
     forge_version: Optional[str] = None
     roms_tools_version: Optional[str] = None
     override_files_applied: List[str] = Field(default_factory=list)
+    # Manual edits applied on top of the composed pieces: a sparse
+    # {section: {field: value}} (or {section: scalar}) layer. ``model_settings`` already
+    # reflects these; this records *which* values were overridden vs. composed/derived.
+    overrides: Dict[str, Any] = Field(default_factory=dict)
     notes: Optional[str] = None
 
 
@@ -264,6 +275,7 @@ class SpecConfig(_Section):
     """
 
     spec_config_version: int = SPEC_CONFIG_VERSION
+    application: str = DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
     identity: Identity
     run: RunWindow
     domain: Domain
@@ -318,4 +330,10 @@ class SpecConfig(_Section):
     def from_yaml(cls, path: Union[str, Path]) -> "SpecConfig":
         """Load and validate a ``spec_config.yml`` (Phase 2 entry point)."""
         data = yaml.safe_load(Path(path).read_text())
+        version = (data or {}).get("spec_config_version")
+        if version is not None and version > SPEC_CONFIG_VERSION:
+            raise ValueError(
+                f"spec_config_version {version} is newer than this build supports "
+                f"({SPEC_CONFIG_VERSION}); upgrade cstar-forge to read this file."
+            )
         return cls.model_validate(data)

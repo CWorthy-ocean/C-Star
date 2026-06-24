@@ -22,7 +22,14 @@ from __future__ import annotations
 import os
 from typing import Annotated, List, Optional, Union
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+)
 
 from cstar.roms.namelist import (
     RomsNamelist,
@@ -496,3 +503,29 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         particles_settings=ParticlesSettings(**grp(rt.particles)),
         v_sponge_settings=VSpongeSettings(**grp(rt.v_sponge)),
     )
+
+
+def validate_run_time_sections(settings: dict) -> List[str]:
+    """Validate the *present* run-time sections of a (possibly partial) settings dict
+    against the ``RunTimeSettings`` schema, returning a list of human-readable errors
+    (empty if all good).
+
+    Unlike ``RunTimeSettings.model_validate``, this does NOT require every section —
+    it checks only the sections that are present, so it works on a ``SpecConfig``'s
+    flat ``model_settings`` (which omits the processing-filled sections). Keys with no
+    ``RunTimeSettings`` counterpart (e.g. ``cppdefs``, a compile-time section) are
+    skipped. Use it for fail-fast feedback on hand-edited / loaded configs, where the
+    inner values are otherwise opaque (``model_settings`` is ``Dict[str, Any]``).
+    """
+    errors: List[str] = []
+    fields = RunTimeSettings.model_fields
+    for key, value in (settings or {}).items():
+        if key not in fields:
+            continue  # not a run-time section (e.g. cppdefs) — nothing to check here
+        try:
+            TypeAdapter(fields[key].annotation).validate_python(value)
+        except ValidationError as exc:
+            for err in exc.errors():
+                loc = ".".join(str(p) for p in (key, *err["loc"]))
+                errors.append(f"{loc}: {err['msg']}")
+    return errors

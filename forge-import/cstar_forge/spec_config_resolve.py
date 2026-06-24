@@ -81,51 +81,27 @@ except ImportError:  # pragma: no cover
         TemplateRepo,
     )
 
+# Source-name resolution (alias map, metadata, streamable) — single source of truth,
+# dependency-free. Dual import to keep the resolver standalone-importable.
+try:  # pragma: no cover - exercised both ways
+    from .source_registry import resolve_dataset_key, resolve_source
+except ImportError:  # pragma: no cover
+    from source_registry import resolve_dataset_key, resolve_source  # type: ignore
+
 # Default repo the bundled ModelSpec templates live in (until model.yml carries
 # explicit template repo coordinates).
 DEFAULT_TEMPLATE_REPO = CodeRepo(
     location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
 )
 
-# --- snapshot of source_data.py logical-name -> dataset resolution -----------
-# (dataset_key, dataset_id, url, streamable). Keep in sync with source_data.py.
-_DATASET_REGISTRY: Dict[str, Dict[str, Any]] = {
-    "GLORYS_REGIONAL": {"dataset_id": "cmems_mod_glo_phy_my_0.083deg_P1D-m"},
-    "GLORYS_GLOBAL": {"dataset_id": "cmems_mod_glo_phy_my_0.083deg_P1D-m"},
-    "UNIFIED_BGC": {"url": "https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq"},
-    "SRTM15_V2.7": {"url": "https://topex.ucsd.edu/pub/srtm15_plus/SRTM15_V2.7.nc"},
-    "MBL_CO2": {"url": "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"},
-    "TPXO": {},
-    "WOA": {"url": "https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/"},
-    "ETOPO5": {},
-    "ERA5": {"streamable": True},
-    "DAI": {"streamable": True},
-}
-
-
+# Source-name resolution is single-sourced in ``source_registry`` (a lightweight,
+# dependency-free module also used by ``source_data``) — no duplicate table here.
 def _resolve_dataset_key(name: str, glorys_layout: Optional[str] = None) -> str:
-    """Map a logical source name to a registry key (mirrors SourceData)."""
-    up = name.upper()
-    if up == "GLORYS":
-        return "GLORYS_GLOBAL" if (glorys_layout or "").lower() == "global" else "GLORYS_REGIONAL"
-    if up == "UNIFIED":
-        return "UNIFIED_BGC"
-    if up == "SRTM15":
-        return "SRTM15_V2.7"
-    if up == "MBL_CO2":
-        return "MBL_CO2"
-    return up if up in _DATASET_REGISTRY else name
+    return resolve_dataset_key(name, glorys_layout)
 
 
 def _resolved_dataset(name: str, glorys_layout: Optional[str] = None) -> ResolvedDataset:
-    key = _resolve_dataset_key(name, glorys_layout)
-    info = _DATASET_REGISTRY.get(key, {})
-    return ResolvedDataset(
-        dataset_key=key,
-        dataset_id=info.get("dataset_id"),
-        url=info.get("url"),
-        streamable=bool(info.get("streamable", False)),
-    )
+    return ResolvedDataset(**resolve_source(name, glorys_layout))
 
 
 def _parse_source(block: Any) -> SourceSpec:
@@ -204,6 +180,10 @@ def build_spec_config(
     ensemble_id: Optional[int] = None,
     description: str = "Generated blueprint",
     cdr_forcing: Optional[Dict[str, Any]] = None,
+    forcing_inputs: Optional[Dict[str, Any]] = None,
+    grid_kwargs_child: Optional[Dict[str, Any]] = None,
+    grid_kwargs_parent: Optional[Dict[str, Any]] = None,
+    metadata_child: Optional[Dict[str, Any]] = None,
     run_time_overrides: Optional[Dict[str, Any]] = None,
     compile_time_overrides: Optional[Dict[str, Any]] = None,
     dt: Optional[float] = None,
@@ -227,7 +207,9 @@ def build_spec_config(
     model_name = spec["model_name"]
     run_defaults = copy.deepcopy(spec["run_defaults"])
     compile_defaults = copy.deepcopy(spec["compile_defaults"])
-    inputs = model.get("inputs", {}) or {}
+    # forcing inputs: an explicit selection (a ForcingSpec or UI-edited dict) overrides
+    # the model's default `inputs`; both share the same shape.
+    inputs = forcing_inputs if forcing_inputs is not None else (model.get("inputs", {}) or {})
 
     nx = grid_kwargs["nx"]
     ny = grid_kwargs["ny"]
@@ -269,7 +251,31 @@ def build_spec_config(
         for it in surface_items
         if isinstance(it, dict)
     )
+    # restoring surface forcing with an SSS component -> sal_restore
+    cppdefs["sal_restore"] = any(
+        it.get("type") == "restoring" and "sss" in (it.get("restoring_forces") or [])
+        for it in surface_items
+        if isinstance(it, dict)
+    )
     settings["cppdefs"] = cppdefs
+
+    # ----- nesting (child domain) -------------------------------------------
+    # A child grid means this domain's parent extracts data for it: enable the
+    # extract_data block. Child s-coord/levels come from grid_kwargs_child; the
+    # extract period from the child metadata (else the roms_tools default).
+    if grid_kwargs_child is not None:
+        extract = dict(settings.get("extract_data", {}))
+        extract["do_extract"] = True
+        extract["extract_file"] = "nesting.nc"  # fixed convention (see input_data)
+        if "N" in grid_kwargs_child:
+            extract["n_chd"] = grid_kwargs_child["N"]
+        for src, dst in (("theta_s", "theta_s_chd"), ("theta_b", "theta_b_chd"),
+                         ("hc", "hc_chd")):
+            if src in grid_kwargs_child:
+                extract[dst] = grid_kwargs_child[src]
+        period = (metadata_child or {}).get("period")
+        extract["extract_period"] = float(period) if period is not None else 3600.0
+        settings["extract_data"] = extract
 
     # overrides win (mirror CstarSpecBuilder.configure_build precedence)
     if compile_time_overrides:
@@ -292,7 +298,10 @@ def build_spec_config(
             topography_source=(inputs.get("grid", {}) or {}).get("topography_source", "ETOPO5"),
             open_boundaries=OpenBoundaries(**{k: bool(open_boundaries.get(k, False))
                                               for k in ("north", "south", "east", "west")}),
-            partitioning=Partitioning(n_procs_x=npx, n_procs_y=npy)),
+            partitioning=Partitioning(n_procs_x=npx, n_procs_y=npy),
+            grid_kwargs_child=grid_kwargs_child,
+            grid_kwargs_parent=grid_kwargs_parent,
+            metadata_child=metadata_child),
         sources=sources,
         properties=dict(model.get("settings", {}).get("properties", {}) or {}),
         model_settings=settings,
@@ -300,7 +309,8 @@ def build_spec_config(
         composition=composition or Composition(
             model=PieceRef(name=model_name, origin="catalog"),
             domain=PieceRef(name=grid_name, origin="custom"),
-            forcing=PieceRef(name=None, origin="model_default")),
+            forcing=PieceRef(name=None,
+                             origin="custom" if forcing_inputs is not None else "model_default")),
         provenance=Provenance(generated_at=generated_at, forge_version=forge_version,
                               roms_tools_version=roms_tools_version,
                               override_files_applied=[], notes=notes),

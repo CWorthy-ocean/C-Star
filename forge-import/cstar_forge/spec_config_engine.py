@@ -33,9 +33,38 @@ import argparse
 import copy
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Protocol, Tuple, Union, runtime_checkable
 
+from .namelist_model import validate_run_time_sections
 from .spec_config import SpecConfig
+
+
+@runtime_checkable
+class SpecConfigExecutor(Protocol):
+    """The execution surface that :func:`process_spec_config` drives.
+
+    This is the seam between the host-independent ``SpecConfig`` and whatever
+    actually generates inputs / configures the build on the run machine. Today
+    ``cstar_forge._core.CstarSpecBuilder`` satisfies it; when the engine moves into
+    C-Star as an application, that app provides its own implementation and the only
+    change here is the default factory.
+
+    (``runtime_checkable`` so ``process_spec_config`` can assert an executor exposes
+    these methods — name presence only; signatures are duck-typed.)
+    """
+
+    def ensure_source_data(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def generate_inputs(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def configure_build(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def path_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+# A factory maps a host-independent SpecConfig to a ready-to-run executor. The
+# forge default builds a CstarSpecBuilder; a C-Star app would provide its own.
+ExecutorFactory = Callable[[SpecConfig], SpecConfigExecutor]
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +80,7 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> Dict[str, Any]:
     Host/machine/path values are intentionally NOT passed — the builder resolves
     those from :mod:`cstar_forge.config` on the run host.
     """
-    return dict(
+    kwargs = dict(
         description=cfg.identity.description,
         model_name=cfg.identity.model_name,
         grid_name=cfg.identity.grid_name,
@@ -63,6 +92,16 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> Dict[str, Any]:
         ensemble_id=cfg.identity.ensemble_id,
         cdr_forcing=cfg.sources.cdr_forcing,
     )
+    # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
+    # block (which the SpecConfig stores separately) — re-embed it.
+    if cfg.domain.grid_kwargs_child is not None:
+        child = dict(cfg.domain.grid_kwargs_child)
+        if cfg.domain.metadata_child is not None:
+            child["metadata"] = cfg.domain.metadata_child
+        kwargs["grid_kwargs_child"] = child
+    if cfg.domain.grid_kwargs_parent is not None:
+        kwargs["grid_kwargs_parent"] = dict(cfg.domain.grid_kwargs_parent)
+    return kwargs
 
 
 def split_model_settings(cfg: SpecConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -119,12 +158,13 @@ def host_summary(cfg: Optional[SpecConfig] = None) -> str:
     return "\n".join(lines)
 
 
-def _default_builder_factory(**kwargs):
-    # Imported lazily so this module (and the dependency-light bits above) can be
-    # imported without the full forge stack.
+def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
+    """Forge's default executor: a ``CstarSpecBuilder`` built from the config's
+    atomic inputs. Imported lazily so the lightweight bits above (host resolution,
+    settings split) stay importable without the full forge stack."""
     from ._core import CstarSpecBuilder
 
-    return CstarSpecBuilder(**kwargs)
+    return CstarSpecBuilder(**spec_config_to_builder_kwargs(cfg))
 
 
 def process_spec_config(
@@ -136,32 +176,59 @@ def process_spec_config(
     clobber: bool = False,
     use_dask: bool = True,
     partition_files: bool = False,
-    builder_factory: Optional[Callable[..., Any]] = None,
-) -> Any:
+    validate: bool = True,
+    executor_factory: Optional[ExecutorFactory] = None,
+) -> SpecConfigExecutor:
     """Run Phase-2 processing for a ``SpecConfig`` (object or path to a YAML file).
 
-    Returns the ``CstarSpecBuilder`` (so callers can reach ``.path_blueprint('build')``,
-    ``.prep_cstar_environment(...)``, ``.run()``, etc.).
+    Resolves the host from :mod:`cstar_forge.config`, then drives a
+    :class:`SpecConfigExecutor` through ``ensure_source_data`` → ``generate_inputs``
+    → ``configure_build`` (the reviewed ``model_settings`` overlaid via the last).
 
-    ``builder_factory`` is injectable for testing; it defaults to ``CstarSpecBuilder``.
+    Returns the executor (``CstarSpecBuilder`` by default), so callers can reach
+    ``.path_blueprint('build')`` / ``.prep_cstar_environment(...)`` / ``.run()``.
+
+    Parameters
+    ----------
+    validate :
+        If True (default), fail fast — validate the config's ``model_settings``
+        against the run-time schema *before* any downloads/generation.
+    executor_factory :
+        Maps the ``SpecConfig`` to an executor; defaults to the forge
+        ``CstarSpecBuilder``. Injectable for tests and for the eventual C-Star app
+        (which supplies its own executor for the same ``SpecConfig`` blueprint).
     """
     cfg = spec if isinstance(spec, SpecConfig) else SpecConfig.from_yaml(spec)
-    factory = builder_factory or _default_builder_factory
+
+    if validate:
+        problems = validate_run_time_sections(cfg.model_settings)
+        if problems:
+            raise ValueError(
+                "spec_config.model_settings has invalid values (fix before "
+                "processing):\n  " + "\n  ".join(problems)
+            )
 
     logger.info("Resolved host:\n%s", host_summary(cfg))
 
-    builder = factory(**spec_config_to_builder_kwargs(cfg))
+    factory = executor_factory or _default_executor_factory
+    executor = factory(cfg)
+    if not isinstance(executor, SpecConfigExecutor):
+        raise TypeError(
+            f"executor_factory returned {type(executor).__name__}, which does not "
+            "implement the SpecConfigExecutor interface (ensure_source_data / "
+            "generate_inputs / configure_build / path_blueprint)."
+        )
 
     if ensure_data:
-        builder.ensure_source_data()
+        executor.ensure_source_data()
     if generate:
-        builder.generate_inputs(clobber=clobber, use_dask=use_dask,
-                                partition_files=partition_files)
+        executor.generate_inputs(clobber=clobber, use_dask=use_dask,
+                                 partition_files=partition_files)
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)
-        builder.configure_build(compile_time_settings=compile_overrides,
-                                run_time_settings=run_overrides)
-    return builder
+        executor.configure_build(compile_time_settings=compile_overrides,
+                                 run_time_settings=run_overrides)
+    return executor
 
 
 def main(argv: Optional[list] = None) -> int:
