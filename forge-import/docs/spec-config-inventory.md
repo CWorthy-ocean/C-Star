@@ -173,20 +173,35 @@ Two choices that make "review here, process elsewhere" work:
    `test-tiny` demo (`tests/test_spec_config.py`, `docs/spec-config-example.test-tiny.yml`).
    The resolver reads the ModelSpec YAML directly and needs no ROMS/C-Star/roms_tools
    (only `dt` via CFL is optional/lazy), so a UI backend can call it.
-2. Reconcile the resolver with the live code: have `CstarSpecBuilder.model_post_init`
-   either delegate to `build_spec_config` or assert byte-parity with it, so the two
-   paths can't drift. *(Riskiest step — today's derived logic is split between
-   `_init_settings_run_time` and the `input_data` grid handler, and is entangled with
-   `self.grid` + blueprint persistence.)*
-3. Route `generate_inputs` / `configure_build` to read from a `SpecConfig` (the
-   processing/Phase-2 engine), resolving machine + paths from `cstar_forge.config` on
-   the run host and writing host/artifact-derived values to the blueprint.
-4. Add a standalone `forge process spec_config.yml` entrypoint (Phase 2).
-5. Keep `CstarSpecBuilder` as a thin facade for back-compat: `builder.spec_config`
-   returns the resolved `SpecConfig`; `builder.generate_inputs()` becomes
-   `engine.run(self.spec_config, host)`.
-6. Add `ForcingSpec` to the catalog and wire the composable-piece selection (model /
-   domain / forcing) + the planned UI on top of `build_spec_config`.
+2. **[DONE — draft]** Phase-2 processing engine
+   (`cstar_forge/spec_config_engine.py`, `tests/test_spec_config.py`): ingest a
+   `SpecConfig`, resolve the **host** (machine + data paths) from `cstar_forge.config`
+   on the run machine (`resolve_host` / `host_summary`), reconstruct a
+   `CstarSpecBuilder` from the config's atomic inputs, run
+   `ensure_source_data` → `generate_inputs`, and **overlay** the reviewed
+   `model_settings` via `configure_build(...)` so config edits win over re-derived
+   defaults. CLI: `python -m cstar_forge.spec_config_engine spec_config.yml`
+   (`--host-only`, `--clobber`, `--no-{data,generate,configure,dask}`).
+3. Reconcile the Phase-1 resolver with the live builder so the two paths can't drift.
+   - **[DONE — parity net]** `TestResolverBuilderParity` (`tests/test_spec_config.py`,
+     `@pytest.mark.integration`) builds a `SpecConfig` two ways for several domains —
+     the resolver vs. a real `CstarSpecBuilder` (no mocks: real ModelSpec defaults +
+     real geometric grid, persistence isolated to a temp catalog) — and asserts the
+     **CFL `dt`/`ntimes`, `v_sponge`, and every shared default section are identical**.
+     Compared at construction; `param`/`cppdefs` obc (set by the builder's grid handler
+     during generation) and the host/artifact sections are excluded there but were
+     confirmed equal by the real test-tiny end-to-end run.
+   - **[TODO — consolidate]** Have `CstarSpecBuilder.model_post_init` *delegate* to
+     `build_spec_config` (one source of truth) rather than re-derive in parallel.
+     *(Riskiest step — the live derived logic is split between `_init_settings_run_time`
+     and the `input_data` grid handler and entangled with `self.grid` + blueprint
+     persistence. Until then, the parity net guards drift and Phase 2 treats the
+     config's `model_settings` as authoritative via the `configure_build` overlay.)*
+4. Keep `CstarSpecBuilder` as a thin facade for back-compat: `builder.spec_config`
+   returns the resolved `SpecConfig`; `builder.generate_inputs()` delegates to
+   `process_spec_config`.
+5. Add `ForcingSpec` to the catalog and wire the composable-piece selection (model /
+   domain / forcing) + the UI on top of `build_spec_config`.
 
 ---
 
