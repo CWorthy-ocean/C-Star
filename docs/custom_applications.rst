@@ -148,7 +148,7 @@ blueprint. First, I configure a `HelloWorldBlueprint` and save it to a file.
 .. code-block:: yaml
    :caption: notify-ankona.yaml
 
-   name: Send Notification
+   name: Send Notification To @ankona
    description: Send a notification to @ankona
    application: hello_world
    target: '@ankona'
@@ -164,7 +164,7 @@ might later create another file `notify-scott.yaml` with:
 .. code-block:: yaml
    :caption: notify-scott.yaml
 
-   name: Send Notification
+   name: Send Notification to @scott
    description: Send a notification to @scott
    application: hello_world
    target: '@scott'
