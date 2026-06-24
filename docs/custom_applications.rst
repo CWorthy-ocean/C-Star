@@ -19,7 +19,8 @@ Creating an application requires three key components
 Creating a `Blueprint`
 ----------------------
 
-A `Blueprint` serves as the _interface_ for users to execute your application. Instead of
+A `Blueprint` (see: :class:`cstar.orchestration.models.Blueprint`) serves
+as the *interface* for users to execute your application. Instead of
 writing code, users will create a file containing a configured `Blueprint`.
 
 Your `Blueprint` may include as many configuration options as needed.
@@ -54,13 +55,14 @@ to send the notification.
 on `pydantic` to handle model serialization and deserialization. Adding additional
 fields to this blueprint can make use of all the power of `pydantic`, like adding
 field constraints (e.g. `min_length=10`) or more complex behaviors with model or field
-validators. See the `pydantic documentation <https://pydantic.dev/docs/>` for more info.
+validators. See the `pydantic documentation <https://pydantic.dev/docs/>`__ for more info.
 
 
 Creating a `BlueprintRunner`
 ----------------------------
 
-A `BlueprintRunner` is used to execute an application. At runtime, the runner receives
+A `BlueprintRunner` (see: :class:`cstar.entrypoint.runner.BlueprintRunner`) is
+used to execute an application. At runtime, the runner receives
 a `Blueprint` instance, configures it's behavior using the blueprint, and performs any
 behaviors desired by the application author.
 
@@ -78,7 +80,7 @@ notification in the console.
 
 When implementing `run`, we can perform any action: call external services, create
 files, etc. C-Star requires the application developer to ensure that the runner
-status is updated whenever it completes or fails. See `cstar.execution.handler.ExecutionStatus`
+status is updated whenever it completes or fails. See :class:`cstar.execution.handler.ExecutionStatus`
 for additional details on the available states.
 
 In this example, we:
@@ -113,7 +115,8 @@ In this example, we:
 Creating the `ApplicationDefinition`
 ------------------------------------
 
-An application definition links our components together. It also let's us configurate additional,
+An application definition (see: :class:`cstar.applications.core.ApplicationDefinition`) links
+our components together. It also let's us configurate additional,
 advanceed behaviors, like:
 
 * Specifying `Transforms` to modify values in the blueprint at runtime
@@ -167,7 +170,7 @@ might later create another file `notify-scott.yaml` with:
    target: '@scott'
 
 Remember - the `Blueprint` only tells us the available configuration. The
-blueprint files specifies how an _execution_ of the application should behave.
+blueprint files specifies how an *execution* of the application should behave.
 
 Executing the `Blueprint`
 -----------------------
