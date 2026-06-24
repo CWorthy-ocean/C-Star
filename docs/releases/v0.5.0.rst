@@ -40,6 +40,7 @@ Breaking Changes
 - The _monitor loop_ has been removed after scheduling a run. `cstar workplan log ...` should be used in it's place (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - `StateRepository` class now comprises functions from `cstar.orchestration.state` (`#546 <https://github.com/CWorthy-ocean/C-Star/pull/546>`_)
 - Env var constants missing correct type annotations are ignored. (`#554 <https://github.com/CWorthy-ocean/C-Star/pull/554>`_)
+- All system contexts have been renamed (`#558 <https://github.com/CWorthy-ocean/C-Star/pull/558>`_)
 
 New features
 ~~~~~~~~~~~~
