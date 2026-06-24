@@ -140,6 +140,9 @@ class ExecutionHandler(ABC, LoggingMixin):
                         self.log.info(line.rstrip())
                         continue
 
+                    if ExecutionStatus.is_terminal(self.status):
+                        break
+
                     # reached EOF; wait before checking for updates
                     await asyncio.sleep(0.1)
         except KeyboardInterrupt:
