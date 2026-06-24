@@ -70,7 +70,7 @@ def _namelist_str_list(
     return str(value)
 
 
-def _as_list(v):
+def _as_list(v: Any) -> list:
     """f90nml collapses single-element arrays to scalars on read; re-wrap."""
     if v is None:
         return []
@@ -90,9 +90,9 @@ class _NmlGroup(BaseModel):
 
 class SimulationNameSettings(_NmlGroup):
     output_root_name: str
-    """output file prefix (e.g. `roms_bgc.20120101120000.nc`)"""
+    """Output file prefix (e.g. `roms_bgc.20120101120000.nc`)"""
     title: str
-    """title used in output metadata"""
+    """Title used in output metadata"""
 
 
 class TimeStepping(_NmlGroup):
@@ -108,7 +108,7 @@ class TimeStepping(_NmlGroup):
 
 class GridSettings(_NmlGroup):
     grdname: str
-    """grid filepath"""
+    """Grid file path"""
 
 
 class SCoord(_NmlGroup):
@@ -154,7 +154,8 @@ class ForcingFiles(_NmlGroup):
 
     @field_validator("frcfile", mode="before")
     @classmethod
-    def _wrap(cls, v):
+    def _wrap(cls, v: Any) -> list:
+        """Re-wrap a scalar `frcfile` value into a list (f90nml read collapse)."""
         return _as_list(v)
 
 
@@ -325,7 +326,7 @@ class CalcPflxSettings(_NmlGroup):
     calc_pflx: bool
     """Enable baroclinic pressure flux calculation"""
     timescale: float
-    """timescale for filtering pressure fluxes (s)"""
+    """Timescale for filtering pressure fluxes (s)"""
 
 
 class ZsliceSettings(_NmlGroup):
@@ -354,7 +355,8 @@ class ZsliceSettings(_NmlGroup):
 
     @field_validator("vecdep", "trc2zsc", mode="before")
     @classmethod
-    def _wrap(cls, v):
+    def _wrap(cls, v: Any) -> list:
+        """Re-wrap scalar `vecdep`/`trc2zsc` values into lists (f90nml read collapse)."""
         return _as_list(v)
 
 
@@ -399,14 +401,16 @@ class MarblBiogeochemistrySettings(_NmlGroup):
 
     @field_validator("marbl_tracers_to_write", mode="before")
     @classmethod
-    def _tracers(cls, v):
+    def _tracers(cls, v: Any) -> str | list[str]:
+        """Normalize `marbl_tracers_to_write` into a namelist string list."""
         return _namelist_str_list(
             v, max_len=MARBL_TRACERS_TO_WRITE_MAX, name="marbl_tracers_to_write"
         )
 
     @field_validator("marbl_diagnostics_to_write", mode="before")
     @classmethod
-    def _diags(cls, v):
+    def _diags(cls, v: Any) -> str | list[str]:
+        """Normalize `marbl_diagnostics_to_write` into a namelist string list."""
         return _namelist_str_list(
             v, max_len=MARBL_DIAGNOSTICS_TO_WRITE_MAX, name="marbl_diagnostics_to_write"
         )
@@ -418,7 +422,7 @@ class CdrFrcSettings(_NmlGroup):
     cdr_file: str
     """File path to CDR perturbation"""
     ncdr_parm: int
-    """number of CDR releases if `3D`/`parameterized`"""
+    """Number of CDR releases if `3D`/`parameterized`"""
     nz_chd: int
     """Number of vertical levels in CDR forcing"""
     forcing_depth_profiles: bool
@@ -484,7 +488,8 @@ class TracerDiff2(_NmlGroup):
 
     @field_validator("tnu2", mode="before")
     @classmethod
-    def _wrap(cls, v):
+    def _wrap(cls, v: Any) -> list:
+        """Re-wrap a scalar `tnu2` value into a list (f90nml read collapse)."""
         return _as_list(v)
 
 
@@ -505,7 +510,8 @@ class VerticalMixingSettings(_NmlGroup):
 
     @field_validator("akt_bak", mode="before")
     @classmethod
-    def _wrap(cls, v):
+    def _wrap(cls, v: Any) -> list:
+        """Re-wrap a scalar `akt_bak` value into a list (f90nml read collapse)."""
         return _as_list(v)
 
 
@@ -551,7 +557,7 @@ class StdoutDiagSettings(_NmlGroup):
     # code_check_mode lives only here (ROMS &STDOUT_DIAG_SETTINGS), not in
     # &DIAGNOSTICS_SETTINGS.
     code_check_mode: bool
-    """diagnostics in stdout formatted for code testing"""
+    """Diagnostics in stdout formatted for code testing"""
 
 
 class RandomOutputSettings(_NmlGroup):
@@ -663,14 +669,53 @@ class RomsNamelist(BaseModel):
 
     # ---- f90nml round-trip ----
     @classmethod
-    def from_f90nml(cls, nml) -> RomsNamelist:
+    def from_f90nml(cls, nml: f90nml.Namelist) -> RomsNamelist:
+        """Build a validated model from a parsed ``f90nml.Namelist``.
+
+        Each ``&group`` in the namelist becomes a nested model; group and key
+        names must match the model exactly, as the schema is strict
+        (``extra="forbid"``).
+
+        Parameters
+        ----------
+        nml : f90nml.Namelist
+            A namelist parsed by ``f90nml`` (e.g. via :func:`f90nml.read`).
+
+        Returns
+        -------
+        RomsNamelist
+            The validated model.
+        """
         return cls.model_validate({k: dict(v) for k, v in nml.items()})
 
     @classmethod
     def read(cls, path: str | Path) -> RomsNamelist:
+        """Read and validate a ``namelist.nml`` file from disk.
+
+        Parameters
+        ----------
+        path : str or Path
+            Path to the ROMS ``namelist.nml`` file.
+
+        Returns
+        -------
+        RomsNamelist
+            The validated model parsed from the file.
+        """
         return cls.from_f90nml(f90nml.read(str(path)))
 
     def to_f90nml_dict(self) -> dict:
+        """Serialize the model to a plain dict suitable for ``f90nml``.
+
+        Mirrors ``write_roms_namelist`` by omitting the ``forcing_files`` group
+        entirely when ``frcfile`` is empty, so no empty ``&forcing_files`` group
+        is written.
+
+        Returns
+        -------
+        dict
+            A nested dict suitable for constructing an ``f90nml.Namelist``.
+        """
         d = self.model_dump()
         # match write_roms_namelist: omit frcfile entirely when empty
         if not d["forcing_files"].get("frcfile"):
@@ -678,4 +723,11 @@ class RomsNamelist(BaseModel):
         return d
 
     def write(self, path: str | Path) -> None:
+        """Write the model to a ``namelist.nml`` file, overwriting if present.
+
+        Parameters
+        ----------
+        path : str or Path
+            Destination path for the written namelist.
+        """
         f90nml.Namelist(self.to_f90nml_dict()).write(str(path), force=True)
