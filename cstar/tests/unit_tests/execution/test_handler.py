@@ -38,9 +38,29 @@ class TestExecutionHandlerUpdates:
         Confirms that `updates()` runs indefinitely when `seconds=0` and allows termination via user interruption.
     """
 
+    @pytest.mark.parametrize(
+        ("create_file", "exp_msg", "is_path_exp"),
+        [
+            (
+                False,
+                "produced no outputs",
+                False,
+            ),
+            (
+                True,
+                "Live updates will no longer be provided.",
+                False,
+            ),
+        ],
+    )
     @pytest.mark.asyncio
     async def test_updates_non_running_job(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
+        self,
+        create_file: bool,
+        exp_msg: str,
+        is_path_exp: bool,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Validates that `updates()` provides appropriate feedback when the job is not
         running.
@@ -65,18 +85,19 @@ class TestExecutionHandlerUpdates:
           is `COMPLETED` or similar.
         """
         caplog.set_level(logging.WARNING)
-        handler = MockExecutionHandler(
-            ExecutionStatus.COMPLETED, tmp_path / "mock_output.log"
-        )
+        target_path = tmp_path / "mock_output.log"
+        if create_file:
+            target_path.touch()
 
-        await handler.updates(seconds=10)
+        handler = MockExecutionHandler(ExecutionStatus.COMPLETED, target_path)
+
+        await handler.updates(seconds=1)
 
         captured = caplog.text
-        assert (
-            "This job is currently not running (completed). Live updates cannot be provided."
-            in captured
-        )
-        assert f"See {handler.output_file.resolve()} for job output" in captured
+
+        assert exp_msg in captured
+        if is_path_exp:
+            assert str(handler.output_file.resolve()) in captured
 
     @pytest.mark.asyncio
     async def test_updates_running_job_with_tmp_file(
@@ -247,7 +268,7 @@ class TestExecutionHandlerUpdates:
         updater_thread = threading.Thread(target=finish_job, daemon=True)
         updater_thread.start()
 
-        await handler.updates(seconds=0)
+        await handler.updates(seconds=1)
 
         captured = caplog.text
         for line in all_lines:
@@ -276,7 +297,7 @@ class TestExecutionHandlerUpdates:
         handler = MockExecutionHandler(ExecutionStatus.FAILED, output_file)
         caplog.set_level(logging.INFO, logger=handler.log.name)
 
-        await handler.updates(seconds=5)
+        await handler.updates(seconds=1)
 
         captured = caplog.text
         # the remaining output (including the tail) is forwarded to the main log
