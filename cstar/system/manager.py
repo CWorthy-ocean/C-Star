@@ -155,7 +155,7 @@ class HostNameEvaluator:
         return (self.lmod_settings.SYSHOST or self.lmod_settings.SYSTEM_NAME).casefold()
 
 
-class _SystemContext(Protocol):
+class SystemContext(Protocol):
     """The contextual dependencies for the system/platform."""
 
     name: ClassVar[str]
@@ -184,17 +184,17 @@ class _SystemContext(Protocol):
         return False
 
 
-_registry: dict[str, type[_SystemContext]] = {}
+CTX_REGISTRY: dict[str, type[SystemContext]] = {}
 
 
 def register_sys_context(
-    wrapped_cls: type[_SystemContext],
-) -> type[_SystemContext]:
+    wrapped_cls: type[SystemContext],
+) -> type[SystemContext]:
     """Register the decorated type as an available _SystemContext."""
-    _registry[wrapped_cls.name] = wrapped_cls
+    CTX_REGISTRY[wrapped_cls.name] = wrapped_cls
 
     @functools.wraps(wrapped_cls)
-    def _inner() -> type[_SystemContext]:
+    def _inner() -> type[SystemContext]:
         """Return the original type after it is registered.
 
         Returns
@@ -207,7 +207,7 @@ def register_sys_context(
     return _inner()
 
 
-def _get_system_context() -> _SystemContext:
+def get_system_context() -> SystemContext:
     """Retrieve a system context from the context registry.
 
     Returns
@@ -222,25 +222,25 @@ def _get_system_context() -> _SystemContext:
     """
     namer = HostNameEvaluator()
 
-    if klass := _registry.get(namer.name):
+    if klass := CTX_REGISTRY.get(namer.name):
         return klass()
 
     raise CstarError(f"Unknown system requested: {namer.name}")
 
 
-def get_registered_sys_contexts() -> Sequence[type[_SystemContext]]:
+def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
     """Return a sequence containing all registered context types.
 
     Returns
     -------
     Sequence[type[_SystemContext]]
     """
-    return list(_registry.values())
+    return list(CTX_REGISTRY.values())
 
 
 @register_sys_context
 @dataclass(frozen=True)
-class _PerlmutterSystemContext(_SystemContext):
+class PerlmutterSystemContext(SystemContext):
     """The contextual dependencies for the Perlmutter system."""
 
     name: ClassVar[str] = "perlmutter"
@@ -270,7 +270,7 @@ class _PerlmutterSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _AnvilSystemContext(_SystemContext):
+class AnvilSystemContext(SystemContext):
     """The contextual dependencies for the Anvil system."""
 
     name: ClassVar[str] = "anvil"
@@ -326,7 +326,7 @@ class _AnvilSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _DerechoSystemContext(_SystemContext):
+class DerechoSystemContext(SystemContext):
     """The contextual dependencies for the Derecho system."""
 
     name: ClassVar[str] = "derecho"
@@ -357,7 +357,7 @@ class _DerechoSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _EljaSystemContext(_SystemContext):
+class EljaSystemContext(SystemContext):
     """The contextual dependencies for the Elja system."""
 
     name: ClassVar[str] = "elja"
@@ -424,7 +424,7 @@ class _EljaSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _ExpanseSystemContext(_SystemContext):
+class ExpanseSystemContext(SystemContext):
     """The contextual dependencies for the Expanse system."""
 
     name: ClassVar[str] = "expanse"
@@ -450,7 +450,7 @@ class _ExpanseSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _LinuxSystemContext(_SystemContext):
+class LinuxSystemContext(SystemContext):
     """The contextual dependencies for the Linux system on the x86_64 platform."""
 
     name: ClassVar[str] = "linux_x86_64"
@@ -468,7 +468,7 @@ class _LinuxSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _MacOSSystemContext(_SystemContext):
+class MacOSSystemContext(SystemContext):
     name: ClassVar[str] = "darwin_arm64"
     """The unique name identifying the MacOS system on an ARM64 platform."""
     compiler: ClassVar[str] = "gnu"
@@ -484,7 +484,7 @@ class _MacOSSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _LinuxARM64SystemContext(_SystemContext):
+class LinuxARM64SystemContext(SystemContext):
     name: ClassVar[str] = "linux_aarch64"
     """The unique name identifying the Linux system on an ARM64 platform."""
     compiler: ClassVar[str] = "gnu"
@@ -501,7 +501,7 @@ class _LinuxARM64SystemContext(_SystemContext):
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
 
-    _context: Final[_SystemContext]
+    _context: Final[SystemContext]
     """A context object configured for the current system."""
     _environment: Final[CStarEnvironment]
     """An environment manager configured for the current system."""
@@ -514,7 +514,7 @@ class CStarSystemManager:
         Initialize the system manager by determining the system name and initializing
         the environment and scheduler based on that name.
         """
-        self._context = _get_system_context()
+        self._context = get_system_context()
         self._environment = CStarEnvironment(
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
