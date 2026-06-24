@@ -28,7 +28,7 @@ For illustration purposes, consider creating an application that will be send
 notifications. We create a `HelloWorldBlueprint` as follows:
 
 .. code-block:: python
-   :caption: Creating `HelloWorldBlueprint`
+   :caption: Creating HelloWorldBlueprint
 
    from cstar.orchestration.models import Blueprint
 
@@ -77,7 +77,7 @@ create a runner for the `HelloWorldBlueprint` that uses `print` to show our
 notification in the console.
 
 When implementing `run`, we can perform any action: call external services, create
-files, etc. C-Star requirs the application developer to ensure that the runner
+files, etc. C-Star requires the application developer to ensure that the runner
 status is updated whenever it completes or fails. See `cstar.execution.handler.ExecutionStatus`
 for additional details on the available states.
 
@@ -88,7 +88,7 @@ In this example, we:
 * return the result to the calling code with `return self.result`
 
 .. code-block:: python
-   :caption: Creating `HelloWorldRunner`
+   :caption: Creating HelloWorldRunner
 
    from cstar.entrypoint.runner import BlueprintRunner
    from cstar.applications.core import RunnerResult
@@ -123,8 +123,10 @@ For our sample application, we create `HelloWorldApplication`, specifying our un
 application identifier and the previously created `HelloWorldBlueprint` and `HelloWorldRunner`:
 
 .. code-block:: python
-   :caption: Creating an `ApplicationDefinition`
+   :caption: Creating an ApplicationDefinition
+
    from cstar.applications.core import ApplicationDefinition, register_application
+
 
    @register_application
    class HelloWorldApplication(
@@ -164,8 +166,8 @@ might later create another file `notify-scott.yaml` with:
    application: hello_world
    target: '@scott'
 
-Remember - the `Blueprint` tells us _what configuration options_ are available. The
-blueprint files specify how a single _execution_ of the application should behave.
+Remember - the `Blueprint` only tells us the available configuration. The
+blueprint files specifies how an _execution_ of the application should behave.
 
 Executing the `Blueprint`
 -----------------------
