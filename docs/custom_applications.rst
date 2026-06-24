@@ -51,7 +51,7 @@ to send the notification.
    Implementing `HelloWorldBlueprint` requires the `application` field to be a unique
    string. It is used by *C-Star* to manage the lifecycle of the application.
 
-`HelloWorldBlueprint` is functionally complete but under the hood, blueprints rely
+`HelloWorldBlueprint` is functionally complete but under the hood blueprints rely
 on `pydantic` to handle model serialization and deserialization. Adding additional
 fields to this blueprint can make use of all the power of `pydantic`, like adding
 field constraints (e.g. `min_length=10`) or more complex behaviors with model or field
@@ -169,8 +169,8 @@ might later create another file `notify-scott.yaml` with:
    application: hello_world
    target: '@scott'
 
-Remember - the `Blueprint` only tells us the available configuration. The
-blueprint files specifies how an *execution* of the application should behave.
+Remember - a `Blueprint` defines the available configuration. The
+blueprint files specify how an *execution* of the application should behave.
 
 Executing the `Blueprint`
 -----------------------
