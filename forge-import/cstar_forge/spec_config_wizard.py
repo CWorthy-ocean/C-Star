@@ -42,6 +42,216 @@ from .spec_config_resolve import (
 )
 
 
+# ===========================================================================
+# Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
+#
+# Automated: namelist fields are looked up live from the cstar.roms.namelist
+# field descriptions (set in the RomsNamelist / group models).
+# Manual: forcing/grid/nesting/run-window knobs listed in HELP_TEXT below.
+# ===========================================================================
+
+# Keyed by (context, field_name). "context" is a category string: a forcing
+# category ("surface","boundary","tidal","river","ic"), a grid section ("grid"),
+# a nesting section ("nesting"), or a run-window field ("run").
+# Falls back to just field_name for unambiguous global names.
+HELP_TEXT: Dict[str, str] = {
+    # ---- identity / run window ------------------------------------------------
+    ("run", "model_ref_date"):
+        "ROMS model t=0 reference date. All time values in the output files are relative "
+        "to this date. Passed to every roms-tools object (InitialConditions, SurfaceForcing, "
+        "BoundaryForcing, TidalForcing, CDRForcing). Default: 2000-01-01.",
+    ("run", "start"):
+        "Start date of the simulation run window.",
+    ("run", "end"):
+        "End date of the simulation run window.",
+    ("run", "dt"):
+        "Barotropic time step in seconds. Leave blank to compute from the CFL criterion "
+        "(click 'Compute dt (CFL)' — requires roms_tools).",
+    ("run", "description"):
+        "Human-readable description of this blueprint.",
+    ("run", "ensemble_id"):
+        "Optional integer ensemble member identifier. Appended to the domain name "
+        "as a zero-padded three-digit suffix (e.g. _003).",
+
+    # ---- grid ------------------------------------------------------------------
+    ("grid", "nx"):
+        "Number of horizontal grid points in the x-direction (longitude).",
+    ("grid", "ny"):
+        "Number of horizontal grid points in the y-direction (latitude).",
+    ("grid", "size_x"):
+        "Domain extent in the x-direction in kilometers.",
+    ("grid", "size_y"):
+        "Domain extent in the y-direction in kilometers.",
+    ("grid", "center_lon"):
+        "Longitude of the domain center in degrees East.",
+    ("grid", "center_lat"):
+        "Latitude of the domain center in degrees North.",
+    ("grid", "rot"):
+        "Rotation of the grid x-axis from lines of constant latitude, in degrees "
+        "(positive = counterclockwise).",
+    ("grid", "N"):
+        "Number of vertical sigma levels.",
+    ("grid", "theta_s"):
+        "S-coordinate surface stretching parameter (0 < θs ≤ 10). "
+        "Larger values concentrate levels near the surface.",
+    ("grid", "theta_b"):
+        "S-coordinate bottom stretching parameter (0 < θb ≤ 4). "
+        "Larger values concentrate levels near the bottom.",
+    ("grid", "hc"):
+        "S-coordinate critical depth in meters. Controls the transition from "
+        "sigma to stretched coordinates near the surface.",
+    ("grid", "hmin"):
+        "Minimum allowable ocean depth in meters (default 5.0). Grid cells shallower "
+        "than hmin are set to exactly hmin during grid generation.",
+    ("grid", "close_narrow_channels"):
+        "If checked, narrow water channels (width < one grid cell) in the land mask "
+        "are closed after the mask is generated from NaturalEarth coastlines.",
+    ("grid", "mask_shapefile"):
+        "Path to a custom shapefile used to determine the land/sea mask instead of the "
+        "default NaturalEarth 10 m coastlines. Leave blank to use the default.",
+
+    # ---- nesting ---------------------------------------------------------------
+    ("nesting", "nest_enable"):
+        "Enable a child (nested) domain. Generates nesting.nc to supply boundary "
+        "conditions for the inner domain from the outer model.",
+    ("nesting", "nest_domain_dd"):
+        "Optionally prefill the child grid kwargs from a cataloged DomainSpec. "
+        "You can still edit any child-grid field after selecting.",
+    ("nesting", "nest_period"):
+        "How often (seconds) boundary values are written to nesting.nc. "
+        "Must divide evenly into the parent model output interval.",
+    ("nesting", "nest_pressure_fluxes"):
+        "Include baroclinic pressure flux variables in nesting.nc. Required when "
+        "the namelist calc_pflx setting is enabled in the child domain.",
+
+    # ---- partitioning ----------------------------------------------------------
+    ("domain", "npx"):
+        "Number of MPI tiles in the x-direction (xi). Total MPI tasks = npx × npy.",
+    ("domain", "npy"):
+        "Number of MPI tiles in the y-direction (eta). Total MPI tasks = npx × npy.",
+
+    # ---- IC --------------------------------------------------------------------
+    ("ic", "ic_name"):
+        "Logical source name for physics initial conditions, e.g. 'GLORYS'. "
+        "The catalog alias map resolves this to the actual dataset registry key.",
+    ("ic", "ic_layout"):
+        "GLORYS spatial layout override: 'regional' (default) or 'global'. "
+        "Leave blank for non-GLORYS sources.",
+    ("ic", "ic_bgc_name"):
+        "Logical source name for BGC initial conditions, e.g. 'UNIFIED'. "
+        "Leave blank to omit BGC initial conditions.",
+    ("ic", "ic_bgc_clim"):
+        "Use the BGC source as a climatology (annual-mean repeated each year) "
+        "rather than a time-varying dataset.",
+    ("ic", "ic_density_interp"):
+        "Interpolate BGC tracer initial conditions in density space rather than depth "
+        "space. Reduces interpolation errors across sloping isopycnals.",
+    ("ic", "ic_flex_time"):
+        "Allow a ±24-hour search window when looking for the requested ini_time in the "
+        "source dataset. Useful when the exact timestamp is absent.",
+
+    # ---- surface forcing -------------------------------------------------------
+    ("surface", "name"):
+        "Logical source name, e.g. 'ERA5' for surface physics or 'UNIFIED' for BGC surface. "
+        "The catalog alias map resolves this to the actual dataset.",
+    ("surface", "type"):
+        "Forcing type: 'physics' (u/v wind, heat, freshwater fluxes), 'bgc' (pCO₂ / "
+        "iron deposition), or 'restoring' (SST or SSS relaxation).",
+    ("surface", "climatology"):
+        "Treat the source as a climatology repeated each year rather than interannual.",
+    ("surface", "glorys_layout"):
+        "GLORYS spatial layout: 'regional' (default) or 'global'. Leave blank for ERA5/UNIFIED.",
+    ("surface", "correct_radiation"):
+        "Apply shortwave and longwave radiation corrections to ERA5 fluxes using an "
+        "observational climatology. Recommended for most physics surface forcing.",
+    ("surface", "wind_dropoff"):
+        "Apply exponential coastal wind-speed reduction with a 12.5 km e-folding "
+        "scale. Reduces spurious upwelling near the coast from gridded wind products.",
+    ("surface", "coarse_grid_mode"):
+        "'auto' — interpolate onto a factor-2 coarsened grid only when roms-tools detects "
+        "the source is coarser than the ROMS grid (default). 'always' — always coarsen. "
+        "'never' — always use the full-resolution source.",
+    ("surface", "restoring_forces"):
+        "Comma-separated list of variables to apply restoring forces to, e.g. 'sss' or "
+        "'sst,sss'. Only relevant for type='restoring'. Enables sal_restore/SST correction.",
+
+    # ---- boundary forcing ------------------------------------------------------
+    ("boundary", "name"):
+        "Logical source name for boundary conditions, e.g. 'GLORYS' (physics) or "
+        "'UNIFIED' (BGC). Resolved via the catalog alias map.",
+    ("boundary", "type"):
+        "Boundary forcing type: 'physics' (T, S, u, v, ζ) or 'bgc' (BGC tracers).",
+    ("boundary", "climatology"):
+        "Treat as an annual climatology rather than interannual time series.",
+    ("boundary", "glorys_layout"):
+        "GLORYS spatial layout: 'regional' or 'global'. Leave blank for non-GLORYS.",
+    ("boundary", "apply_2d_horizontal_fill"):
+        "Perform 2D horizontal fill on the source data before regridding to the ROMS "
+        "open boundaries. Fills land-contaminated grid cells near the coast.",
+    ("boundary", "use_density_interpolation"):
+        "Interpolate BGC boundary conditions in density space rather than depth "
+        "space. Reduces errors across sloping isopycnals at open boundaries.",
+
+    # ---- tidal forcing ---------------------------------------------------------
+    ("tidal", "name"):
+        "Tidal forcing dataset name. Currently 'TPXO' (TPXO10.v2, user-provided). "
+        "Files must exist under source_data/TPXO/TPXO10.v2/.",
+    ("tidal", "ntides"):
+        "Number of tidal constituents to include (max 15). The TPXO atlas provides M2, "
+        "S2, N2, K2, K1, O1, P1, Q1, Mf, Mm, M4, MS4, MN4, Mtm, Mf. Default: 10.",
+
+    # ---- river forcing ---------------------------------------------------------
+    ("river", "name"):
+        "River dataset source name. 'DAI' uses the Dai-Trenberth global river discharge "
+        "climatology (streamable, no download required).",
+    ("river", "climatology"):
+        "Treat river data as an annual climatology repeated each year.",
+    ("river", "include_bgc"):
+        "Include BGC tracer concentrations (e.g. nutrients) in the river forcing. "
+        "Requires a BGC river dataset (bgc_source configured in model.yml).",
+    ("river", "convert_to_climatology"):
+        "When to compute a river climatology from the raw data: "
+        "'if_any_missing' (default) — compute if any requested months are absent, "
+        "'never' — always use raw data, 'always' — always compute a climatology.",
+
+    # ---- output settings -------------------------------------------------------
+    ("output", "output_dd"):
+        "Select an OutputSpec (named output-settings configuration) to seed the output "
+        "sections. Fine-tune any value under Advanced settings → the relevant section.",
+
+    # ---- timestep --------------------------------------------------------------
+    ("timestep", "dt_btn"):
+        "Build the grid from the current grid kwargs and compute the barotropic "
+        "time step from the CFL criterion. Requires roms_tools to be installed.",
+}
+
+
+def _namelist_tooltip(group_name: str, field_name: str) -> str:
+    """Look up the tooltip for a namelist field from the RomsNamelist schema.
+
+    Returns the field's ``description`` string if present, else an empty string.
+    Called when building the Advanced settings accordion so every namelist field
+    gets an automated tooltip from the ROMS namelist model docstrings.
+    """
+    try:
+        from cstar.roms.namelist import RomsNamelist
+        gf = RomsNamelist.model_fields.get(group_name)
+        if gf is None:
+            return ""
+        cls = gf.annotation
+        if not hasattr(cls, "model_fields"):
+            return ""
+        ff = cls.model_fields.get(field_name)
+        return ff.description or "" if ff is not None else ""
+    except Exception:
+        return ""
+
+
+def _tip(context: str, field: str) -> str:
+    """Return the help text for a (context, field) pair, falling back to ''."""
+    return HELP_TEXT.get((context, field), HELP_TEXT.get(field, ""))
+
+
 def _unwrap_type(ann):
     """Reduce ``Optional[X]`` / ``Annotated[X, ...]`` / ``List[X]`` to a base type
     (``bool``/``int``/``float``/``str``/``list``), best-effort."""
@@ -75,25 +285,26 @@ def _base_type(ann, value):
     return str
 
 
-def _make_field_widget(W, name: str, base: type, value: Any):
+def _make_field_widget(W, name: str, base: type, value: Any, tooltip: str = ""):
     style = {"description_width": "170px"}
     wide = W.Layout(width="430px")
     num = W.Layout(width="300px")
+    kw = {"tooltip": tooltip} if tooltip else {}
     if base is bool:
         return W.Checkbox(value=bool(value) if value is not None else False,
-                          description=name, indent=False)
+                          description=name, indent=False, **kw)
     if base is int:
         return W.IntText(value=int(value) if value is not None else 0,
-                         description=name, style=style, layout=num)
+                         description=name, style=style, layout=num, **kw)
     if base is float:
         return W.FloatText(value=float(value) if value is not None else 0.0,
-                           description=name, style=style, layout=num)
+                           description=name, style=style, layout=num, **kw)
     if base is list:
         joined = ", ".join(str(x) for x in (value or []))
         return W.Text(value=joined, description=name, style=style, layout=wide,
-                      placeholder="comma-separated")
+                      placeholder="comma-separated", **kw)
     return W.Text(value="" if value is None else str(value),
-                  description=name, style=style, layout=wide)
+                  description=name, style=style, layout=wide, **kw)
 
 
 def _read_field_widget(widget, base: type, original: Any = None) -> Any:
@@ -222,14 +433,16 @@ class _SettingsEditor:
         sub = _section_submodel(section)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
             base = _base_type(None, value)
-            w = _make_field_widget(W, section, base, value)
+            tip = _namelist_tooltip(section, section)
+            w = _make_field_widget(W, section, base, value, tooltip=tip)
             self._widgets[(section, None)] = (w, base)
             return W.VBox([w]), [None]
         rows, fields = [], []
         for key, val in value.items():
             ann = sub.model_fields[key].annotation if (sub and key in sub.model_fields) else None
             base = _base_type(ann, val)
-            w = _make_field_widget(W, key, base, val)
+            tip = _namelist_tooltip(section, key)
+            w = _make_field_widget(W, key, base, val, tooltip=tip)
             self._widgets[(section, key)] = (w, base)
             rows.append(w)
             fields.append(key)
@@ -257,21 +470,27 @@ class _ForcingEditor:
 
         # initial conditions
         self.ic_name = W.Text(value=str((ic.get("source") or {}).get("name", "GLORYS")),
-                              description="IC source:", style={"description_width": "110px"})
+                              description="IC source:", style={"description_width": "110px"},
+                              tooltip=_tip("ic", "ic_name"))
         self.ic_layout = W.Text(value=str((ic.get("source") or {}).get("glorys_layout") or ""),
                                 description="glorys_layout:", style={"description_width": "110px"},
-                                placeholder="regional/global (opt)")
+                                placeholder="regional/global (opt)",
+                                tooltip=_tip("ic", "ic_layout"))
         bgc = ic.get("bgc_source") or {}
         self.ic_bgc_name = W.Text(value=str(bgc.get("name", "") or ""), description="IC bgc src:",
-                                  style={"description_width": "110px"}, placeholder="(optional)")
+                                  style={"description_width": "110px"}, placeholder="(optional)",
+                                  tooltip=_tip("ic", "ic_bgc_name"))
         self.ic_bgc_clim = W.Checkbox(value=bool(bgc.get("climatology", False)),
-                                      description="bgc climatology", indent=False)
+                                      description="bgc climatology", indent=False,
+                                      tooltip=_tip("ic", "ic_bgc_clim"))
         self.ic_density_interp = W.Checkbox(
             value=bool(ic.get("use_density_interpolation", False)),
-            description="density interp", indent=False)
+            description="density interp", indent=False,
+            tooltip=_tip("ic", "ic_density_interp"))
         self.ic_flex_time = W.Checkbox(
             value=bool(ic.get("allow_flex_time", False)),
-            description="flex time", indent=False)
+            description="flex time", indent=False,
+            tooltip=_tip("ic", "ic_flex_time"))
         for _w in (self.ic_name, self.ic_layout, self.ic_bgc_name,
                    self.ic_bgc_clim, self.ic_density_interp, self.ic_flex_time):
             _w.observe(lambda _ch: on_change(), names="value")
@@ -293,49 +512,63 @@ class _ForcingEditor:
         w: Dict[str, Any] = {}
         small = {"description_width": "70px"}
         w["name"] = W.Text(value=str(src.get("name", "")), description="src:",
-                           style=small, layout=W.Layout(width="160px"))
+                           style=small, layout=W.Layout(width="160px"),
+                           tooltip=_tip(cat, "name"))
         if cat in ("surface", "boundary"):
             w["type"] = W.Dropdown(options=_SURFACE_TYPES if cat == "surface" else _BOUNDARY_TYPES,
                                    value=item.get("type", "physics"), description="type:",
-                                   style=small, layout=W.Layout(width="160px"))
+                                   style=small, layout=W.Layout(width="160px"),
+                                   tooltip=_tip(cat, "type"))
             w["climatology"] = W.Checkbox(value=bool(src.get("climatology", False)),
-                                          description="clim", indent=False)
+                                          description="clim", indent=False,
+                                          tooltip=_tip(cat, "climatology"))
             w["glorys_layout"] = W.Text(value=str(src.get("glorys_layout") or ""),
                                         description="layout:", style=small,
-                                        layout=W.Layout(width="150px"))
+                                        layout=W.Layout(width="150px"),
+                                        tooltip=_tip(cat, "glorys_layout"))
         if cat == "surface":
             w["correct_radiation"] = W.Checkbox(value=bool(item.get("correct_radiation", False)),
-                                                description="corr_rad", indent=False)
+                                                description="corr_rad", indent=False,
+                                                tooltip=_tip("surface", "correct_radiation"))
             w["wind_dropoff"] = W.Checkbox(value=bool(item.get("wind_dropoff", False)),
-                                           description="wind_dropoff", indent=False)
+                                           description="wind_dropoff", indent=False,
+                                           tooltip=_tip("surface", "wind_dropoff"))
             w["coarse_grid_mode"] = W.Dropdown(options=_COARSE_MODES,
                                                value=item.get("coarse_grid_mode", "auto"),
                                                description="coarse:", style=small,
-                                               layout=W.Layout(width="150px"))
+                                               layout=W.Layout(width="150px"),
+                                               tooltip=_tip("surface", "coarse_grid_mode"))
             w["restoring_forces"] = W.Text(value=", ".join(item.get("restoring_forces") or []),
                                            description="restore:", style=small,
-                                           layout=W.Layout(width="150px"), placeholder="sss,sst")
+                                           layout=W.Layout(width="150px"), placeholder="sss,sst",
+                                           tooltip=_tip("surface", "restoring_forces"))
         if cat == "boundary":
             w["apply_2d_horizontal_fill"] = W.Checkbox(
                 value=bool(item.get("apply_2d_horizontal_fill", False)),
-                description="2d_fill", indent=False)
+                description="2d_fill", indent=False,
+                tooltip=_tip("boundary", "apply_2d_horizontal_fill"))
             w["use_density_interpolation"] = W.Checkbox(
                 value=bool(item.get("use_density_interpolation", False)),
-                description="dens_interp", indent=False)
+                description="dens_interp", indent=False,
+                tooltip=_tip("boundary", "use_density_interpolation"))
         if cat == "tidal":
             w["ntides"] = W.IntText(value=int(item.get("ntides") or 0), description="ntides:",
-                                    style=small, layout=W.Layout(width="130px"))
+                                    style=small, layout=W.Layout(width="130px"),
+                                    tooltip=_tip("tidal", "ntides"))
         if cat == "river":
             w["climatology"] = W.Checkbox(value=bool(src.get("climatology", False)),
-                                          description="clim", indent=False)
+                                          description="clim", indent=False,
+                                          tooltip=_tip("river", "climatology"))
             w["include_bgc"] = W.Checkbox(value=bool(item.get("include_bgc", False)),
-                                          description="bgc", indent=False)
+                                          description="bgc", indent=False,
+                                          tooltip=_tip("river", "include_bgc"))
             _ctc_opts = ["if_any_missing", "never", "always"]
             _ctc_val = item.get("convert_to_climatology", "if_any_missing")
             w["convert_to_climatology"] = W.Dropdown(options=_ctc_opts,
                 value=_ctc_val if _ctc_val in _ctc_opts else "if_any_missing",
-                description="clim mode:", style=small, layout=W.Layout(width="180px"))
-        remove = W.Button(description="✕", layout=W.Layout(width="36px"), tooltip="remove")
+                description="clim mode:", style=small, layout=W.Layout(width="180px"),
+                tooltip=_tip("river", "convert_to_climatology"))
+        remove = W.Button(description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item")
         remove.on_click(lambda _b, c=cat, ws=w: self._remove(c, ws))
         for widget in w.values():
             widget.observe(lambda _ch: self.on_change(), names="value")
@@ -466,82 +699,103 @@ class SpecConfigWizard:
         self.domain_dd = W.Dropdown(options=["<custom>"] + domains, description="Domain:",
                                     value="<custom>", style={"description_width": "110px"})
         self.grid_name = W.Text(value="my-grid", description="Grid name:",
-                                style={"description_width": "110px"})
+                                style={"description_width": "110px"},
+                                tooltip="Short name for this grid configuration. Used in the domain name.")
 
         # --- grid kwargs ---
         self.grid_w: Dict[str, Any] = {}
         for k in _GRID_INT:
             self.grid_w[k] = W.IntText(value=int(_DEFAULT_GRID[k]), description=f"{k}:",
-                                       style={"description_width": "90px"}, layout=W.Layout(width="200px"))
+                                       style={"description_width": "90px"}, layout=W.Layout(width="200px"),
+                                       tooltip=_tip("grid", k))
         for k in _GRID_FLOAT + _SCOORD:
             self.grid_w[k] = W.FloatText(value=float(_DEFAULT_GRID[k]), description=f"{k}:",
-                                         style={"description_width": "90px"}, layout=W.Layout(width="200px"))
+                                         style={"description_width": "90px"}, layout=W.Layout(width="200px"),
+                                         tooltip=_tip("grid", k))
         self.scoord_chk = W.Checkbox(value=True, description="specify s-coord (theta_s/theta_b/hc)",
-                                     indent=False)
+                                     indent=False,
+                                     tooltip="When checked, theta_s, theta_b, and hc are passed to roms-tools "
+                                             "to set the vertical stretching. Required for ROMS simulations.")
 
         # --- boundaries / partitioning ---
-        self.bnd = {d: W.Checkbox(value=(d in ("east", "north")), description=d, indent=False)
+        self.bnd = {d: W.Checkbox(value=(d in ("east", "north")), description=d, indent=False,
+                                  tooltip=f"Enable the {d} open boundary for ocean exchange.")
                     for d in ("north", "south", "east", "west")}
         self.npx = W.IntText(value=1, description="n_procs_x:", style={"description_width": "90px"},
-                             layout=W.Layout(width="200px"))
+                             layout=W.Layout(width="200px"), tooltip=_tip("domain", "npx"))
         self.npy = W.IntText(value=1, description="n_procs_y:", style={"description_width": "90px"},
-                             layout=W.Layout(width="200px"))
+                             layout=W.Layout(width="200px"), tooltip=_tip("domain", "npy"))
 
         # --- nesting (optional child grid) ---
         self.nest_enable = W.Checkbox(value=False, description="enable nesting (child grid)",
-                                      indent=False)
+                                      indent=False, tooltip=_tip("nesting", "nest_enable"))
         self.nest_domain_dd = W.Dropdown(options=["<custom>"] + domains,
                                          description="Child from:", value="<custom>",
-                                         style={"description_width": "110px"})
+                                         style={"description_width": "110px"},
+                                         tooltip=_tip("nesting", "nest_domain_dd"))
         self.child_w: Dict[str, Any] = {}
         for k in _GRID_INT:
             self.child_w[k] = W.IntText(value=int(_DEFAULT_GRID[k]), description=f"{k}:",
-                                        style={"description_width": "90px"}, layout=W.Layout(width="200px"))
+                                        style={"description_width": "90px"}, layout=W.Layout(width="200px"),
+                                        tooltip=_tip("grid", k) + " (child/inner grid)")
         for k in _GRID_FLOAT + _SCOORD:
             self.child_w[k] = W.FloatText(value=float(_DEFAULT_GRID[k]), description=f"{k}:",
-                                          style={"description_width": "90px"}, layout=W.Layout(width="200px"))
+                                          style={"description_width": "90px"}, layout=W.Layout(width="200px"),
+                                          tooltip=_tip("grid", k) + " (child/inner grid)")
         self.nest_period = W.FloatText(value=3600.0, description="extract period (s):",
-                                       style={"description_width": "130px"}, layout=W.Layout(width="260px"))
+                                       style={"description_width": "130px"}, layout=W.Layout(width="260px"),
+                                       tooltip=_tip("nesting", "nest_period"))
         self.nest_pressure_fluxes = W.Checkbox(value=False,
                                                description="include pressure fluxes",
-                                               indent=False)
+                                               indent=False,
+                                               tooltip=_tip("nesting", "nest_pressure_fluxes"))
 
         # --- run window ---
         self.start = W.DatePicker(value=date(2012, 1, 1), description="Start:",
-                                  style={"description_width": "110px"})
+                                  style={"description_width": "110px"},
+                                  tooltip=_tip("run", "start"))
         self.end = W.DatePicker(value=date(2012, 1, 2), description="End:",
-                                style={"description_width": "110px"})
+                                style={"description_width": "110px"},
+                                tooltip=_tip("run", "end"))
         self.model_ref_date = W.DatePicker(value=date(2000, 1, 1),
                                            description="Model ref date:",
                                            style={"description_width": "130px"},
-                                           tooltip="ROMS model t=0 (forwarded to all rt objects)")
+                                           tooltip=_tip("run", "model_ref_date"))
         self.description = W.Text(value="Generated blueprint", description="Description:",
-                                  style={"description_width": "110px"}, layout=W.Layout(width="420px"))
+                                  style={"description_width": "110px"}, layout=W.Layout(width="420px"),
+                                  tooltip=_tip("run", "description"))
         self.ensemble = W.Text(value="", description="Ensemble id:", placeholder="(optional int)",
-                               style={"description_width": "110px"}, layout=W.Layout(width="260px"))
+                               style={"description_width": "110px"}, layout=W.Layout(width="260px"),
+                               tooltip=_tip("run", "ensemble_id"))
 
         # --- grid extended options ---
         self.hmin = W.FloatText(value=5.0, description="hmin (m):",
-                                style={"description_width": "90px"}, layout=W.Layout(width="200px"))
+                                style={"description_width": "90px"}, layout=W.Layout(width="200px"),
+                                tooltip=_tip("grid", "hmin"))
         self.close_narrow_chk = W.Checkbox(value=False, description="close narrow channels",
-                                           indent=False)
+                                           indent=False, tooltip=_tip("grid", "close_narrow_channels"))
         self.mask_shapefile = W.Text(value="", description="mask shapefile:",
                                      style={"description_width": "120px"},
                                      layout=W.Layout(width="380px"),
-                                     placeholder="path to custom land-mask shapefile (optional)")
+                                     placeholder="path to custom land-mask shapefile (optional)",
+                                     tooltip=_tip("grid", "mask_shapefile"))
 
         # --- timestep ---
         self.dt = W.FloatText(value=7200.0, description="dt (s):",
-                              style={"description_width": "90px"}, layout=W.Layout(width="220px"))
+                              style={"description_width": "90px"}, layout=W.Layout(width="220px"),
+                              tooltip=_tip("run", "dt"))
         self.dt_btn = W.Button(description="Compute dt (CFL)", icon="calculator",
-                               tooltip="Build the grid and compute dt from the CFL criterion (needs roms_tools)")
+                               tooltip=_tip("timestep", "dt_btn"))
         self.dt_status = W.HTML("")
 
         # --- output / preview ---
         # --- forcing piece (ForcingSpec selection + add/remove/edit editor) ---
         self.forcing_dd = W.Dropdown(options=["<model default>"] + list(self.catalog.forcing_names),
                                      value="<model default>", description="Forcing:",
-                                     style={"description_width": "110px"})
+                                     style={"description_width": "110px"},
+                                     tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
+                                             "fields, or keep '<model default>' to use the model's defaults. "
+                                             "Edit individual items in the Forcing section below.")
         self.forcing_box = W.VBox([])
         self._forcing_editor: Optional[_ForcingEditor] = None
         self._forcing_edited = False
@@ -551,7 +805,8 @@ class SpecConfigWizard:
         # this dropdown selects a named OutputSpec that seeds those sections.
         self.output_dd = W.Dropdown(options=["<model default>"] + list(self.catalog.output_names),
                                     value="<model default>", description="Output:",
-                                    style={"description_width": "110px"})
+                                    style={"description_width": "110px"},
+                                    tooltip=_tip("output", "output_dd"))
 
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: Optional[_SettingsEditor] = None
