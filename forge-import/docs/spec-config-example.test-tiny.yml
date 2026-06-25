@@ -657,12 +657,13 @@ composition:
     name: null
     origin: model_default
     modified: false
+  overrides: {}
 provenance:
   generated_at: '2026-06-23T12:00:00'
   forge_version: null
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
-  overrides: {}
+  content_hash: f9c3482eead9b8a85a25e8c3a7a006668ebf9c700b1c9af354c9ea5eaca87cec
   notes: Built by cstar_forge.spec_config_resolve.build_spec_config from the demo
     notebook inputs (test-tiny). Machine/paths and naming are NOT stored (resolved
     at processing / derived). s_coord + file paths are processing outputs. provenance.overrides

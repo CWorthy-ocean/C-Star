@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import copy
 import logging
+import warnings
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Protocol, Tuple, Union, runtime_checkable
 
@@ -117,6 +118,23 @@ def split_model_settings(cfg: SpecConfig) -> Tuple[Dict[str, Any], Dict[str, Any
     return run_overrides, compile_overrides
 
 
+def verify_content_hash(cfg: SpecConfig) -> Optional[str]:
+    """If the config carries a recorded integrity hash and it no longer matches the
+    recomputed hash of the results-affecting data, return a warning message (the file
+    appears hand-edited since write-out); otherwise None."""
+    recorded = cfg.provenance.content_hash
+    if recorded:
+        actual = cfg.content_hash()
+        if recorded != actual:
+            return (
+                "spec_config integrity check FAILED: the results-affecting data does "
+                "not match the recorded hash — the file appears to have been hand-edited "
+                f"since it was written (recorded {recorded[:12]}…, computed {actual[:12]}…). "
+                "Processing will continue with the data as read."
+            )
+    return None
+
+
 def resolve_host(cfg: Optional[SpecConfig] = None) -> Dict[str, Any]:
     """Resolve the host (machine tag + data paths) from :mod:`cstar_forge.config`.
 
@@ -199,6 +217,11 @@ def process_spec_config(
         (which supplies its own executor for the same ``SpecConfig`` blueprint).
     """
     cfg = spec if isinstance(spec, SpecConfig) else SpecConfig.from_yaml(spec)
+
+    integrity = verify_content_hash(cfg)
+    if integrity:
+        logger.warning(integrity)
+        warnings.warn(integrity, UserWarning, stacklevel=2)
 
     if validate:
         problems = validate_run_time_sections(cfg.model_settings)

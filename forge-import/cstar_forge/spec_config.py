@@ -46,12 +46,20 @@ engine (Phase 2) can be built against a stable contract.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+# Top-level sections EXCLUDED from the integrity hash: provenance (where the hash
+# lives), composition + identity (labels/provenance, not results-affecting), and the
+# schema version. Everything else (application, run, domain, sources, properties,
+# model_settings, code) is hashed.
+_HASH_EXCLUDE = {"spec_config_version", "identity", "composition", "provenance"}
 
 # Bumped only on a BREAKING schema change. Additive fields (with defaults) are
 # backward-compatible — old files still load — so they do NOT bump this. ``from_yaml``
@@ -238,6 +246,10 @@ class Composition(_Section):
     model: PieceRef = Field(default_factory=PieceRef)
     domain: PieceRef = Field(default_factory=PieceRef)
     forcing: PieceRef = Field(default_factory=PieceRef)
+    # Manual edits applied on top of the composed pieces: a sparse
+    # {section: {field: value}} (or {section: scalar}) layer. ``model_settings`` already
+    # reflects these; this records *which* values were overridden vs. composed/derived.
+    overrides: Dict[str, Any] = Field(default_factory=dict)
 
 
 class Provenance(_Section):
@@ -248,10 +260,9 @@ class Provenance(_Section):
     forge_version: Optional[str] = None
     roms_tools_version: Optional[str] = None
     override_files_applied: List[str] = Field(default_factory=list)
-    # Manual edits applied on top of the composed pieces: a sparse
-    # {section: {field: value}} (or {section: scalar}) layer. ``model_settings`` already
-    # reflects these; this records *which* values were overridden vs. composed/derived.
-    overrides: Dict[str, Any] = Field(default_factory=dict)
+    # sha256 of the results-affecting data (set on save by SpecConfig.to_yaml*).
+    # Processing recomputes and compares it to detect hand-edits since write-out.
+    content_hash: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -315,6 +326,17 @@ class SpecConfig(_Section):
         ``<run_output_dir>/output/<casename>``."""
         return str(self.run_output_dir(scratch) / "output" / self.casename)
 
+    # ---- integrity hash ----
+    def content_hash(self) -> str:
+        """sha256 over the *results-affecting* data (everything except the sections in
+        ``_HASH_EXCLUDE``). Deterministic across a YAML round-trip — used to detect
+        hand-edits between write-out and processing."""
+        data = self.model_dump(mode="json")
+        for key in _HASH_EXCLUDE:
+            data.pop(key, None)
+        blob = json.dumps(data, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
     # ---- serialization ----
     def to_yaml(self, path: Union[str, Path]) -> Path:
         """Write the authoritative config to ``path`` and return it."""
@@ -323,7 +345,11 @@ class SpecConfig(_Section):
         return path
 
     def to_yaml_str(self) -> str:
-        data = self.model_dump(mode="json", exclude_none=False)
+        # stamp the integrity hash into provenance on the way out (the hash itself
+        # excludes provenance, so this doesn't perturb it)
+        stamped = self.model_copy(update={
+            "provenance": self.provenance.model_copy(update={"content_hash": self.content_hash()})})
+        data = stamped.model_dump(mode="json", exclude_none=False)
         return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
 
     @classmethod

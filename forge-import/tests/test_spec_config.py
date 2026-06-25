@@ -81,8 +81,66 @@ def test_schema_round_trip_identity(tmp_path):
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "spec_config.yml")
     back = SpecConfig.from_yaml(p)
-    assert back == cfg                      # full structural round-trip
+    # content_hash is stamped on write -> back carries it; otherwise identical
+    assert back.provenance.content_hash == cfg.content_hash()
+    assert back.model_copy(update={"provenance": cfg.provenance}) == cfg
     assert back.application == cfg.application
+
+
+def test_content_hash_ignores_excluded_sections():
+    from cstar_forge.spec_config import _HASH_EXCLUDE, PieceRef
+    cfg = _build()
+    h = cfg.content_hash()
+    # editing identity / composition / provenance does NOT change the hash
+    c2 = cfg.model_copy(update={
+        "identity": cfg.identity.model_copy(update={"description": "totally different"}),
+        "composition": cfg.composition.model_copy(update={"forcing": PieceRef(name="x", origin="custom")}),
+        "provenance": cfg.provenance.model_copy(update={"notes": "edited"}),
+    })
+    assert c2.content_hash() == h
+    assert _HASH_EXCLUDE == {"spec_config_version", "identity", "composition", "provenance"}
+
+
+def test_content_hash_changes_with_results_affecting_data():
+    cfg = _build()
+    h = cfg.content_hash()
+    edited = dict(cfg.model_settings)
+    edited["v_sponge"] = {"v_sponge": 999.0}
+    c2 = cfg.model_copy(update={"model_settings": edited})
+    assert c2.content_hash() != h
+
+
+def test_content_hash_round_trips_through_yaml(tmp_path):
+    cfg = _build()
+    p = cfg.to_yaml(tmp_path / "spec_config.yml")
+    back = SpecConfig.from_yaml(p)
+    # recomputed hash on the loaded config matches the stamped one (no edits)
+    assert back.content_hash() == back.provenance.content_hash
+
+
+def test_engine_warns_on_hash_mismatch(tmp_path):
+    from cstar_forge.spec_config_engine import verify_content_hash, process_spec_config
+    cfg = _build()
+    p = cfg.to_yaml(tmp_path / "spec_config.yml")
+    data = yaml.safe_load(p.read_text())
+    # hand-edit a results-affecting value WITHOUT updating the recorded hash
+    data["model_settings"]["v_sponge"]["v_sponge"] = 12345.0
+    p.write_text(yaml.safe_dump(data))
+    tampered = SpecConfig.from_yaml(p)
+    assert verify_content_hash(tampered) is not None  # mismatch detected
+    # ... and a clean (re-saved) file does not warn
+    assert verify_content_hash(SpecConfig.from_yaml(cfg.to_yaml(tmp_path / "clean.yml"))) is None
+
+    # the engine warns but still processes (uses a fake executor)
+    class _Fake:
+        def __init__(self, cfg=None): self.calls = []
+        def ensure_source_data(self, **k): self.calls.append("e")
+        def generate_inputs(self, **k): self.calls.append("g")
+        def configure_build(self, **k): self.calls.append("c")
+        def path_blueprint(self, stage=None): return "/bp"
+    with pytest.warns(UserWarning, match="integrity check FAILED"):
+        b = process_spec_config(tampered, validate=False, executor_factory=_Fake)
+    assert b.calls == ["e", "g", "c"]  # processing proceeded
 
 
 @pytest.mark.skip(reason="byte-golden deferred to the C-Star migration (see "
@@ -326,7 +384,7 @@ class TestSpecConfigWizard:
         # every model_settings section is editable, including the derived ones
         assert {"ocean_vars", "lateral_visc", "marbl_bgc",
                 "time_stepping", "param", "v_sponge", "cppdefs", "extract_data"} <= sections
-        assert w.config.provenance.overrides == {}
+        assert w.config.composition.overrides == {}
 
     def test_editing_advanced_setting_reflects_in_config(self):
         w = self._wizard()
@@ -344,7 +402,7 @@ class TestSpecConfigWizard:
     def test_editing_derived_value_records_override_and_wins(self):
         w = self._wizard()
         w.editor._widgets[("param", "np_xi")][0].value = 99
-        assert w.config.provenance.overrides == {"param": {"np_xi": 99}}
+        assert w.config.composition.overrides == {"param": {"np_xi": 99}}
         # override persists and wins over the composed value when partitioning changes
         w.npx.value = 4
         assert w.config.model_settings["param"]["np_xi"] == 99
@@ -361,7 +419,7 @@ class TestSpecConfigWizard:
         w2.load_path.value = str(p)
         w2._on_load_path(None)
         assert w2.config.model_settings["param"]["np_xi"] == 99
-        assert w2.config.provenance.overrides.get("param", {}).get("np_xi") == 99
+        assert w2.config.composition.overrides.get("param", {}).get("np_xi") == 99
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 3.3
 
     def test_forcing_spec_selection_and_edit(self):

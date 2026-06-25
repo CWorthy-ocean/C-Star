@@ -138,7 +138,7 @@ def _apply_overrides(composed: Dict[str, Any], overrides: Dict[Any, Any]) -> Dic
 
 def _overrides_nested(overrides: Dict[Any, Any]) -> Dict[str, Any]:
     """Convert the sparse (section, field)->value map to nested {section:{field:value}}
-    (or {section: scalar}) for storage in provenance.overrides."""
+    (or {section: scalar}) for storage in composition.overrides."""
     out: Dict[str, Any] = {}
     for (section, field), value in overrides.items():
         if field is None:
@@ -853,8 +853,8 @@ class SpecConfigWizard:
         finally:
             self._syncing = False
 
-        prov = cfg.provenance.model_copy(update={"overrides": _overrides_nested(self._overrides)})
-        cfg = cfg.model_copy(update={"model_settings": effective, "provenance": prov})
+        comp = cfg.composition.model_copy(update={"overrides": _overrides_nested(self._overrides)})
+        cfg = cfg.model_copy(update={"model_settings": effective, "composition": comp})
 
         self.config = cfg
         self.download_link.value = self._download_html(cfg)
