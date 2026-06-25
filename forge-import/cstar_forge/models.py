@@ -13,6 +13,15 @@ from typing import Any, Dict, List, Literal, Optional
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, PrivateAttr, model_validator
 
+from .spec_config import (
+    BoundaryType,
+    ClimatologyMode,
+    CoarseGridMode,
+    RestoringForce,
+    SurfaceType,
+    TopographySource,
+)
+
 import cstar.applications.roms_marbl.models as models
 from cstar.applications.roms_marbl.models import CodeRepository, ROMSCompositeCodeRepository
 
@@ -61,10 +70,10 @@ class GridInput(BaseModel):
     Any additional keyword arguments are passed directly to the roms-tools
     Grid constructor.
     """
-
-    model_config = ConfigDict(extra="allow")
-
-    topography_source: str
+    
+    model_config = ConfigDict(extra="forbid")
+    
+    topography_source: TopographySource = TopographySource.ETOPO5
 
 
 class InitialConditionsInput(BaseModel):
@@ -119,10 +128,10 @@ class SurfaceForcingItem(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     source: SourceSpec
-    type: str = Field(pattern="^(physics|bgc|restoring)$")
+    type: SurfaceType = Field(default=SurfaceType.PHYSICS)
     correct_radiation: bool = Field(default=False, validate_default=False)
-    coarse_grid_mode: Optional[str] = Field(default="auto", validate_default=False)
-    restoring_forces: Optional[list] = Field(default=None, validate_default=False)
+    coarse_grid_mode: CoarseGridMode = Field(default=CoarseGridMode.AUTO, validate_default=False)
+    restoring_forces: Optional[List[RestoringForce]] = Field(default=None, validate_default=False)
     wind_dropoff: bool = Field(default=False, validate_default=False,
         description="Apply exponential coastal wind-speed reduction (12.5 km e-folding scale).")
     options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
@@ -147,7 +156,7 @@ class BoundaryForcingItem(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     source: SourceSpec
-    type: str = Field(pattern="^(physics|bgc)$")
+    type: BoundaryType = Field(default=BoundaryType.PHYSICS)
     apply_2d_horizontal_fill: bool = Field(default=False, validate_default=False,
         description="Perform 2D horizontal fill on source data before regridding to boundaries.")
     use_density_interpolation: bool = Field(default=False, validate_default=False,
@@ -199,8 +208,9 @@ class RiverForcingItem(BaseModel):
 
     source: SourceSpec
     include_bgc: bool = Field(default=False, validate_default=False)
-    convert_to_climatology: str = Field(default="if_any_missing", validate_default=False,
-        description="When to compute a river climatology: 'never', 'if_any_missing', or 'always'.")
+    convert_to_climatology: ClimatologyMode = Field(default=ClimatologyMode.IF_ANY_MISSING,
+        validate_default=False,
+        description="When to compute a river climatology.")
     bgc_source: Optional[Dict[str, Any]] = Field(default=None, validate_default=False,
         description="Separate river-BGC dataset config (name, optional path, optional fill).")
     options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,

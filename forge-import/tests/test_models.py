@@ -75,18 +75,22 @@ class TestGridInput:
         grid = GridInput(topography_source="ETOPO5")
         assert grid.topography_source == "ETOPO5"
     
-    def test_gridinput_validation_missing_topography_source(self):
-        """Test that GridInput raises error when topography_source is missing."""
+    def test_gridinput_default_topography_source(self):
+        """GridInput now has a default topography_source (TopographySource.ETOPO5)."""
+        from cstar_forge.spec_config import TopographySource
+        assert GridInput().topography_source == TopographySource.ETOPO5
+
+    def test_gridinput_rejects_unknown_topography_source(self):
+        """Unknown topography source strings are rejected by the enum."""
+        with pytest.raises(ValidationError):
+            GridInput(topography_source="NOT_A_REAL_SOURCE")
+
+
+    def test_gridinput_validation_extra_fields(self):
+        """Test that GridInput rejects extra fields."""
         with pytest.raises(ValidationError) as exc_info:
-            GridInput()
-        assert "topography_source" in str(exc_info.value).lower()
-    
-    def test_gridinput_accepts_extra_fields(self):
-        """Test that GridInput passes extra fields through to roms-tools constructors."""
-        item = GridInput(topography_source="ETOPO5", some_roms_kwarg=True)
-        dumped = item.model_dump()
-        assert dumped["topography_source"] == "ETOPO5"
-        assert dumped["some_roms_kwarg"] is True
+            GridInput(topography_source="ETOPO5", extra_field="not allowed")
+        assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
 
 
 class TestInitialConditionsInput:

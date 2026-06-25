@@ -50,10 +50,114 @@ import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
+from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+# ===========================================================================
+# Enums for roms-tools constrained string parameters.
+# Values mirror the validation logic in the installed roms-tools constructors
+# (SurfaceForcing._input_checks, BoundaryForcing._input_checks, etc.).
+# These should eventually move into roms-tools itself.
+# ===========================================================================
+
+
+class SurfaceType(str, Enum):
+    """Accepted values for ``SurfaceForcing.type``."""
+    PHYSICS = "physics"     # wind, heat, freshwater fluxes (ERA5)
+    BGC = "bgc"             # pCO₂ / iron deposition (UNIFIED, CESM_REGRIDDED, MBL_co2)
+    RESTORING = "restoring" # SSS restoring (WOA, UNIFIED)
+
+
+class BoundaryType(str, Enum):
+    """Accepted values for ``BoundaryForcing.type``."""
+    PHYSICS = "physics"     # T, S, u, v, ζ (GLORYS)
+    BGC = "bgc"             # BGC tracers (UNIFIED, CESM_REGRIDDED)
+
+
+class CoarseGridMode(str, Enum):
+    """Accepted values for ``SurfaceForcing.coarse_grid_mode``."""
+    AUTO = "auto"     # coarsen only when source is coarser than ROMS grid (default)
+    ALWAYS = "always" # always interpolate onto a factor-2 coarsened grid
+    NEVER = "never"   # always use the full-resolution source
+
+
+class RestoringForce(str, Enum):
+    """Variables accepted in ``SurfaceForcing.restoring_forces``."""
+    SSS = "sss"       # sea-surface salinity restoring (WOA or UNIFIED)
+
+
+class ClimatologyMode(str, Enum):
+    """Accepted values for ``RiverForcing.convert_to_climatology``."""
+    NEVER = "never"
+    IF_ANY_MISSING = "if_any_missing"  # default: compute if any months absent
+    ALWAYS = "always"
+
+
+class FillValues(str, Enum):
+    """Accepted values for ``VolumeRelease.fill_values``."""
+    AUTO = "auto"  # fill missing tracer concentrations with dataset defaults
+    ZERO = "zero"  # fill missing tracer concentrations with zero
+
+
+# --- Valid source names per object + type -----------------------------------
+# Mirrors the dataset-registry dicts / if-elif chains in the installed roms-tools.
+
+class PhysicsSurfaceSource(str, Enum):
+    """Source names accepted by SurfaceForcing when type='physics'."""
+    ERA5 = "ERA5"
+
+
+class BgcSurfaceSource(str, Enum):
+    """Source names accepted by SurfaceForcing when type='bgc'."""
+    UNIFIED = "UNIFIED"
+    CESM_REGRIDDED = "CESM_REGRIDDED"
+    MBL_CO2 = "MBL_co2"
+
+
+class RestoringSurfaceSource(str, Enum):
+    """Source names accepted by SurfaceForcing when type='restoring'."""
+    WOA = "WOA"
+    UNIFIED = "UNIFIED"
+
+
+class PhysicsBoundarySource(str, Enum):
+    """Source names accepted by BoundaryForcing when type='physics'."""
+    GLORYS = "GLORYS"
+
+
+class BgcBoundarySource(str, Enum):
+    """Source names accepted by BoundaryForcing when type='bgc'."""
+    UNIFIED = "UNIFIED"
+    CESM_REGRIDDED = "CESM_REGRIDDED"
+
+
+class InitialConditionsSource(str, Enum):
+    """Source names accepted by InitialConditions (physics)."""
+    GLORYS = "GLORYS"
+
+
+class BgcInitialConditionsSource(str, Enum):
+    """Source names accepted by InitialConditions (bgc_source)."""
+    UNIFIED = "UNIFIED"
+    CESM_REGRIDDED = "CESM_REGRIDDED"
+
+
+class TidalSource(str, Enum):
+    """Source names accepted by TidalForcing."""
+    TPXO = "TPXO"
+
+
+class RiverSource(str, Enum):
+    """Source names accepted by RiverForcing."""
+    DAI = "DAI"
+
+
+class TopographySource(str, Enum):
+    """Source names accepted by Grid (without a custom path)."""
+    ETOPO5 = "ETOPO5"
 
 # Top-level sections EXCLUDED from the integrity hash: provenance (where the hash
 # lives), composition + identity (labels/provenance, not results-affecting), and the
@@ -127,7 +231,8 @@ class Domain(_Section):
     """
 
     grid_kwargs: Dict[str, Any]
-    topography_source: str  # e.g. "ETOPO5"
+    topography_source: Union[TopographySource, str] = TopographySource.ETOPO5
+    # str fallback allows a custom path dict to be passed through grid_kwargs
     open_boundaries: OpenBoundaries
     partitioning: Partitioning
     grid_kwargs_parent: Optional[Dict[str, Any]] = None
@@ -160,16 +265,16 @@ class SourceSpec(_Section):
 
 class SurfaceForcingItem(_Section):
     source: SourceSpec
-    type: str  # "physics" | "bgc" | "restoring"
+    type: SurfaceType = SurfaceType.PHYSICS
     correct_radiation: bool = False
-    coarse_grid_mode: str = "auto"  # "auto" | "always" | "never"
-    restoring_forces: Optional[List[str]] = None
+    coarse_grid_mode: CoarseGridMode = CoarseGridMode.AUTO
+    restoring_forces: Optional[List[RestoringForce]] = None
     wind_dropoff: bool = False  # coastal wind-speed reduction
 
 
 class BoundaryForcingItem(_Section):
     source: SourceSpec
-    type: str  # "physics" | "bgc"
+    type: BoundaryType = BoundaryType.PHYSICS
     apply_2d_horizontal_fill: bool = False  # 2D horizontal fill before regridding
     use_density_interpolation: bool = False  # BGC density-space interp
 
@@ -182,7 +287,7 @@ class TidalForcingItem(_Section):
 class RiverForcingItem(_Section):
     source: SourceSpec
     include_bgc: bool = False
-    convert_to_climatology: str = "if_any_missing"  # "never"|"if_any_missing"|"always"
+    convert_to_climatology: ClimatologyMode = ClimatologyMode.IF_ANY_MISSING
     bgc_source: Optional[Dict[str, Any]] = None  # separate river-BGC dataset config
 
 

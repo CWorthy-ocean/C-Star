@@ -449,10 +449,48 @@ class _SettingsEditor:
         return W.VBox(rows), fields
 
 
-_SURFACE_TYPES = ["physics", "bgc", "restoring"]
-_BOUNDARY_TYPES = ["physics", "bgc"]
-_COARSE_MODES = ["auto", "always", "never"]
+from .spec_config import (
+    BgcBoundarySource,
+    BgcInitialConditionsSource,
+    BgcSurfaceSource,
+    BoundaryType,
+    ClimatologyMode,
+    CoarseGridMode,
+    InitialConditionsSource,
+    PhysicsBoundarySource,
+    PhysicsSurfaceSource,
+    RestoringForce,
+    RestoringSurfaceSource,
+    RiverSource,
+    SurfaceType,
+    TidalSource,
+    TopographySource,
+)
+
+# Dropdown option lists derived from the enums so the wizard and schema stay in sync
+_SURFACE_TYPES = [e.value for e in SurfaceType]
+_BOUNDARY_TYPES = [e.value for e in BoundaryType]
+_COARSE_MODES = [e.value for e in CoarseGridMode]
 _FORCING_CATEGORIES = ("surface", "boundary", "tidal", "river")
+_GLORYS_LAYOUT_OPTS = ["", "regional", "global"]  # "" = not specified
+
+# Valid source names per (category, type).  Drives name dropdowns in the forcing editor.
+_SOURCE_OPTS: Dict[Any, List[str]] = {
+    ("surface", SurfaceType.PHYSICS.value): [e.value for e in PhysicsSurfaceSource],
+    ("surface", SurfaceType.BGC.value):     [e.value for e in BgcSurfaceSource],
+    ("surface", SurfaceType.RESTORING.value): [e.value for e in RestoringSurfaceSource],
+    ("boundary", BoundaryType.PHYSICS.value): [e.value for e in PhysicsBoundarySource],
+    ("boundary", BoundaryType.BGC.value):     [e.value for e in BgcBoundarySource],
+    ("tidal", None): [e.value for e in TidalSource],
+    ("river", None): [e.value for e in RiverSource],
+}
+_IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource]
+_IC_BGC_SOURCE_OPTS = [""] + [e.value for e in BgcInitialConditionsSource]
+
+
+def _source_opts_for(cat: str, type_val: Optional[str]) -> List[str]:
+    """Return the valid source names for a given forcing category and type."""
+    return _SOURCE_OPTS.get((cat, type_val), _SOURCE_OPTS.get((cat, None), []))
 
 
 class _ForcingEditor:
@@ -469,17 +507,25 @@ class _ForcingEditor:
         forc = fi.get("forcing", {}) or {}
 
         # initial conditions
-        self.ic_name = W.Text(value=str((ic.get("source") or {}).get("name", "GLORYS")),
-                              description="IC source:", style={"description_width": "110px"},
-                              tooltip=_tip("ic", "ic_name"))
-        self.ic_layout = W.Text(value=str((ic.get("source") or {}).get("glorys_layout") or ""),
-                                description="glorys_layout:", style={"description_width": "110px"},
-                                placeholder="regional/global (opt)",
-                                tooltip=_tip("ic", "ic_layout"))
+        _ic_name_val = str((ic.get("source") or {}).get("name", _IC_SOURCE_OPTS[0]))
+        if _ic_name_val not in _IC_SOURCE_OPTS:
+            _ic_name_val = _IC_SOURCE_OPTS[0]
+        self.ic_name = W.Dropdown(options=_IC_SOURCE_OPTS, value=_ic_name_val,
+                                  description="IC source:", style={"description_width": "110px"},
+                                  tooltip=_tip("ic", "ic_name"))
+        _ic_layout_val = str((ic.get("source") or {}).get("glorys_layout") or "")
+        if _ic_layout_val not in _GLORYS_LAYOUT_OPTS:
+            _ic_layout_val = ""
+        self.ic_layout = W.Dropdown(options=_GLORYS_LAYOUT_OPTS, value=_ic_layout_val,
+                                    description="glorys_layout:", style={"description_width": "110px"},
+                                    tooltip=_tip("ic", "ic_layout"))
         bgc = ic.get("bgc_source") or {}
-        self.ic_bgc_name = W.Text(value=str(bgc.get("name", "") or ""), description="IC bgc src:",
-                                  style={"description_width": "110px"}, placeholder="(optional)",
-                                  tooltip=_tip("ic", "ic_bgc_name"))
+        _ic_bgc_val = str(bgc.get("name", "") or "")
+        if _ic_bgc_val not in _IC_BGC_SOURCE_OPTS:
+            _ic_bgc_val = ""
+        self.ic_bgc_name = W.Dropdown(options=_IC_BGC_SOURCE_OPTS, value=_ic_bgc_val,
+                                      description="IC bgc src:", style={"description_width": "110px"},
+                                      tooltip=_tip("ic", "ic_bgc_name"))
         self.ic_bgc_clim = W.Checkbox(value=bool(bgc.get("climatology", False)),
                                       description="bgc climatology", indent=False,
                                       tooltip=_tip("ic", "ic_bgc_clim"))
@@ -511,21 +557,45 @@ class _ForcingEditor:
         src = item.get("source") or {}
         w: Dict[str, Any] = {}
         small = {"description_width": "70px"}
-        w["name"] = W.Text(value=str(src.get("name", "")), description="src:",
-                           style=small, layout=W.Layout(width="160px"),
-                           tooltip=_tip(cat, "name"))
+
+        # Source name: Dropdown driven by category + type (for surface/boundary) or fixed.
+        _cur_type = item.get("type", "physics")
+        _name_opts = _source_opts_for(cat, _cur_type)
+        _name_val = str(src.get("name", ""))
+        if _name_val not in _name_opts and _name_opts:
+            _name_val = _name_opts[0]
+        w["name"] = W.Dropdown(options=_name_opts or [""],
+                               value=_name_val if _name_val in (_name_opts or [""]) else (_name_opts or [""])[0],
+                               description="src:", style=small,
+                               layout=W.Layout(width="160px"),
+                               tooltip=_tip(cat, "name"))
+
         if cat in ("surface", "boundary"):
-            w["type"] = W.Dropdown(options=_SURFACE_TYPES if cat == "surface" else _BOUNDARY_TYPES,
-                                   value=item.get("type", "physics"), description="type:",
+            _type_opts = _SURFACE_TYPES if cat == "surface" else _BOUNDARY_TYPES
+            _type_val = _cur_type if _cur_type in _type_opts else _type_opts[0]
+            w["type"] = W.Dropdown(options=_type_opts, value=_type_val, description="type:",
                                    style=small, layout=W.Layout(width="160px"),
                                    tooltip=_tip(cat, "type"))
+
+            # When type changes → update the source name dropdown to the valid options.
+            def _on_type_change(change, name_dd=w["name"], c=cat):
+                new_opts = _source_opts_for(c, change["new"])
+                name_dd.options = new_opts or [""]
+                if name_dd.value not in name_dd.options:
+                    name_dd.value = name_dd.options[0]
+                self.on_change()
+            w["type"].observe(_on_type_change, names="value")
+
             w["climatology"] = W.Checkbox(value=bool(src.get("climatology", False)),
                                           description="clim", indent=False,
                                           tooltip=_tip(cat, "climatology"))
-            w["glorys_layout"] = W.Text(value=str(src.get("glorys_layout") or ""),
-                                        description="layout:", style=small,
-                                        layout=W.Layout(width="150px"),
-                                        tooltip=_tip(cat, "glorys_layout"))
+            _layout_val = str(src.get("glorys_layout") or "")
+            if _layout_val not in _GLORYS_LAYOUT_OPTS:
+                _layout_val = ""
+            w["glorys_layout"] = W.Dropdown(options=_GLORYS_LAYOUT_OPTS, value=_layout_val,
+                                            description="layout:", style=small,
+                                            layout=W.Layout(width="150px"),
+                                            tooltip=_tip(cat, "glorys_layout"))
         if cat == "surface":
             w["correct_radiation"] = W.Checkbox(value=bool(item.get("correct_radiation", False)),
                                                 description="corr_rad", indent=False,
@@ -562,10 +632,10 @@ class _ForcingEditor:
             w["include_bgc"] = W.Checkbox(value=bool(item.get("include_bgc", False)),
                                           description="bgc", indent=False,
                                           tooltip=_tip("river", "include_bgc"))
-            _ctc_opts = ["if_any_missing", "never", "always"]
-            _ctc_val = item.get("convert_to_climatology", "if_any_missing")
+            _ctc_opts = [e.value for e in ClimatologyMode]
+            _ctc_val = item.get("convert_to_climatology", ClimatologyMode.IF_ANY_MISSING.value)
             w["convert_to_climatology"] = W.Dropdown(options=_ctc_opts,
-                value=_ctc_val if _ctc_val in _ctc_opts else "if_any_missing",
+                value=_ctc_val if _ctc_val in _ctc_opts else ClimatologyMode.IF_ANY_MISSING.value,
                 description="clim mode:", style=small, layout=W.Layout(width="180px"),
                 tooltip=_tip("river", "convert_to_climatology"))
         remove = W.Button(description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item")
@@ -600,8 +670,8 @@ class _ForcingEditor:
         src: Dict[str, Any] = {"name": w["name"].value}
         if "climatology" in w and w["climatology"].value:
             src["climatology"] = True
-        if "glorys_layout" in w and w["glorys_layout"].value.strip():
-            src["glorys_layout"] = w["glorys_layout"].value.strip()
+        if "glorys_layout" in w and w["glorys_layout"].value:  # Dropdown: "" = omit
+            src["glorys_layout"] = w["glorys_layout"].value
         item: Dict[str, Any] = {"source": src}
         if "type" in w:
             item["type"] = w["type"].value
@@ -627,11 +697,11 @@ class _ForcingEditor:
 
     def gather(self) -> Dict[str, Any]:
         ic_source = {"name": self.ic_name.value}
-        if self.ic_layout.value.strip():
-            ic_source["glorys_layout"] = self.ic_layout.value.strip()
+        if self.ic_layout.value:  # Dropdown: "" means not specified
+            ic_source["glorys_layout"] = self.ic_layout.value
         ic: Dict[str, Any] = {"source": ic_source}
-        if self.ic_bgc_name.value.strip():
-            ic["bgc_source"] = {"name": self.ic_bgc_name.value.strip(),
+        if self.ic_bgc_name.value:  # Dropdown: "" means no bgc source
+            ic["bgc_source"] = {"name": self.ic_bgc_name.value,
                                 "climatology": bool(self.ic_bgc_clim.value)}
         if self.ic_density_interp.value:
             ic["use_density_interpolation"] = True
@@ -788,6 +858,18 @@ class SpecConfigWizard:
                                tooltip=_tip("timestep", "dt_btn"))
         self.dt_status = W.HTML("")
 
+        # --- grid plot ---
+        self.plot_btn = W.Button(
+            description="Refresh plot", icon="refresh",
+            tooltip="Build the grid from current settings and render it. Updates "
+                    "automatically when a domain is selected from the catalog.",
+        )
+        self.plot_status = W.HTML("")
+        self.plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px"),
+        )
+
         # --- output / preview ---
         # --- forcing piece (ForcingSpec selection + add/remove/edit editor) ---
         self.forcing_dd = W.Dropdown(options=["<model default>"] + list(self.catalog.forcing_names),
@@ -837,6 +919,7 @@ class SpecConfigWizard:
         self.domain_dd.observe(self._on_domain, names="value")
         self.forcing_dd.observe(self._on_forcing_spec, names="value")
         self.dt_btn.on_click(self._on_compute_dt)
+        self.plot_btn.on_click(self._on_plot)
         self.save_btn.on_click(self._on_save)
         self.load_btn.on_click(self._on_load_path)
         self.upload.observe(self._on_upload, names="value")
@@ -1009,6 +1092,7 @@ class SpecConfigWizard:
             if data.get("model_name") in self.model_dd.options:
                 self.model_dd.value = data["model_name"]
         self._rebuild()
+        self._on_plot(None)
 
     class _Suspender:
         def __init__(self, wiz): self.wiz = wiz
@@ -1260,6 +1344,49 @@ class SpecConfigWizard:
         except Exception as exc:
             self.dt_status.value = f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
 
+    def _on_plot(self, _):
+        """Build a roms_tools.Grid from the current grid kwargs and render it."""
+        self.plot_status.value = "<i>building grid…</i>"
+        try:
+            import io
+
+            import matplotlib.pyplot as plt
+            from roms_tools import Grid
+
+            gk: Dict[str, Any] = {}
+            for k in _GRID_INT:
+                gk[k] = int(self.grid_w[k].value)
+            for k in _GRID_FLOAT:
+                gk[k] = float(self.grid_w[k].value)
+            if self.scoord_chk.value:
+                for k in _SCOORD:
+                    gk[k] = float(self.grid_w[k].value)
+            if self.hmin.value != 5.0:
+                gk["hmin"] = float(self.hmin.value)
+            if self.close_narrow_chk.value:
+                gk["close_narrow_channels"] = True
+            if self.mask_shapefile.value.strip():
+                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+
+            plt.ioff()
+            try:
+                grid = Grid(**gk)
+                grid.plot()
+                fig = plt.gcf()
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+                plt.close(fig)
+            finally:
+                plt.ion()
+
+            buf.seek(0)
+            self.plot_img.value = buf.read()
+            self.plot_status.value = "<span style='color:#080'>✓</span>"
+        except Exception as exc:
+            self.plot_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
     def _on_save(self, _):
         if self.config is None:
             self.save_status.value = "<span style='color:#b00'>Nothing to save — config is invalid.</span>"
@@ -1291,8 +1418,15 @@ class SpecConfigWizard:
             section("Load existing (optional)",
                     W.HBox([self.load_path, self.load_btn]), self.upload, self.load_status),
             section("Pieces", self.model_dd, self.domain_dd, self.grid_name),
-            section("Grid", grid_box, self.scoord_chk,
-                    W.HBox([self.hmin, self.close_narrow_chk]), self.mask_shapefile),
+            section("Grid",
+                    W.HBox([
+                        W.VBox([grid_box, self.scoord_chk,
+                                W.HBox([self.hmin, self.close_narrow_chk]),
+                                self.mask_shapefile]),
+                        W.VBox([W.HBox([self.plot_btn, self.plot_status]),
+                                self.plot_img],
+                               layout=W.Layout(padding="0 0 0 20px")),
+                    ])),
             section("Nesting (optional)", self.nest_enable, self.nest_domain_dd,
                     child_box, W.HBox([self.nest_period, self.nest_pressure_fluxes])),
             section("Open boundaries", W.HBox(list(self.bnd.values()))),

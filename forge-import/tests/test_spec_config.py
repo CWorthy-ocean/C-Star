@@ -538,8 +538,8 @@ class TestSpecConfigWizard:
         fe = w._forcing_editor
         fe._add("surface")
         row = fe._rows["surface"][-1]
-        row["name"].value = "WOA"
         row["type"].value = "restoring"
+        row["name"].value = "WOA"
         row["restoring_forces"].value = "sss"
         assert w.config.composition.forcing.origin == "custom"
         assert w.config.model_settings["cppdefs"]["sal_restore"] is True
@@ -588,8 +588,8 @@ class TestSpecConfigWizard:
         fe = w1._forcing_editor
         fe._add("surface")
         row = fe._rows["surface"][-1]
-        row["name"].value = "WOA"
         row["type"].value = "restoring"
+        row["name"].value = "WOA"
         row["restoring_forces"].value = "sss"
         p = tmp_path / "spec_config.yml"
         w1.save_path.value = str(p)
