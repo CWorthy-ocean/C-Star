@@ -61,7 +61,8 @@ def preload_step(context: typer.Context, step_name: str) -> str:
         raise typer.BadParameter(msg, param_hint="run_id")
 
     wp = get_from_ctxmap(context, "workplan", Workplan)
-    step = next((x for x in wp.steps if x.name == step_name), None)
+    step = next((x for x in wp.steps if step_name in {x.name, x.safe_name}), None)
+
     if step is None:
         valid_steps = ", ".join(f"{s.name!r}" for s in wp.steps)
         raise typer.BadParameter(
