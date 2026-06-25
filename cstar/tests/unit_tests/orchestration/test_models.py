@@ -721,6 +721,46 @@ def test_workplan_steps_validation(invalid_value: list[str | None] | None) -> No
 
 
 @pytest.mark.parametrize(
+    "step_names",
+    [
+        pytest.param(["S1", "S1"], id="duped name"),
+        pytest.param(["S1", "s1"], id="case sensitivity"),
+        pytest.param(["S1", " S1"], id="whitespaced name (pre)"),
+        pytest.param(["S1", "S1 "], id="whitespaced name (post)"),
+        pytest.param(["S1", "S2", "S1 "], id="non-consecutive"),
+        pytest.param(["S1", "S1 ", " s1 "], id="many copies"),
+        pytest.param(["S1", "S2", "s1 ", " s2"], id="multiple collisions"),
+    ],
+)
+def test_workplan_steps_uniqueness_validation(
+    step_names: list[str],
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify step names are unique.
+
+    Parameters
+    ----------
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
+        A generator function to produce minimally valid test steps
+    """
+    name = f"test-plan-{uuid.uuid4()}"
+    description = f"test-desc-{uuid.uuid4()}"
+
+    steps = list(gen_fake_steps(len(step_names)))
+    for i in range(len(step_names)):
+        steps[i].name = step_names[i]
+
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(
+            name=name,
+            description=description,
+            steps=steps,
+        )
+
+    assert "Step names must be unique" in str(error)
+
+
+@pytest.mark.parametrize(
     "compute_env",
     [
         {},
