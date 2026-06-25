@@ -532,7 +532,9 @@ class DomainCatalog:
             )
         path = self._output[output_name] / "Output.yml"
         with self._fs_open(path) as f:
-            return yaml.safe_load(f) or {}
+            data = yaml.safe_load(f) or {}
+        data.pop("description", None)
+        return data
 
     # ------------------------------------------------------------------
     # Sketch-compatible accessor methods (name or index)
