@@ -53,7 +53,6 @@ try:  # pragma: no cover - exercised both ways
         BoundaryForcingItem,
         TidalForcingItem,
         RiverForcingItem,
-        Sources,
         TemplateRepo,
     )
 except ImportError:  # pragma: no cover
@@ -77,7 +76,6 @@ except ImportError:  # pragma: no cover
         BoundaryForcingItem,
         TidalForcingItem,
         RiverForcingItem,
-        Sources,
         TemplateRepo,
     )
 
@@ -115,7 +113,6 @@ def _parse_source(block: Any) -> SourceSpec:
     layout = d.get("glorys_layout")
     return SourceSpec(
         name=name,
-        dataset_key=_resolve_dataset_key(name, layout),
         climatology=bool(d.get("climatology", False)),
         glorys_layout=layout,
     )
@@ -173,6 +170,25 @@ OUTPUT_SECTIONS = ("ocean_vars", "surf_flux", "diagnostics", "stdout_diag",
                    "ts_output", "frc_output", "cdr_output", "upscale_output",
                    "zslice", "random_output")
 OUTPUT_MARBL_FIELDS = ("marbl_tracers_to_write", "marbl_diagnostics_to_write")
+
+
+def n_tracers_from_model_settings(model_settings: Dict[str, Any]) -> int:
+    """Derive the total ROMS tracer count from the flat model_settings dict.
+
+    ROMS total tracers = T + S + BGC (ntrc_bio) + passive (nt_passive).
+    This replaces the former ``SpecConfig.properties["n_tracers"]`` which
+    duplicated a value already present in ``model_settings["param"]``.
+    """
+    param = model_settings.get("param", {}) or {}
+    return 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
+
+
+def marbl_from_model_settings(model_settings: Dict[str, Any]) -> bool:
+    """Return whether MARBL is enabled, read from ``model_settings["cppdefs"]["marbl"]``.
+
+    Replaces reads of ``model_spec.settings.properties.marbl`` in input generation.
+    """
+    return bool((model_settings.get("cppdefs") or {}).get("marbl", False))
 
 
 def extract_output_settings(model_settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -311,8 +327,8 @@ def build_spec_config(
     if run_time_overrides:
         _deep_merge(settings, run_time_overrides)
 
-    # ----- sources (the "forcing" piece) -------------------------------------
-    sources = _build_sources(inputs, cdr_forcing)
+    # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
+    sources = _build_forcing(inputs, cdr_forcing)  # kept as `sources` locally for brevity
 
     # ----- code + templates --------------------------------------------------
     code = _build_code(model, templates_repo or DEFAULT_TEMPLATE_REPO)
@@ -331,8 +347,7 @@ def build_spec_config(
             grid_kwargs_parent=grid_kwargs_parent,
             metadata_child=metadata_child,
             nesting_include_pressure_fluxes=nesting_include_pressure_fluxes),
-        sources=sources,
-        properties=dict(model.get("settings", {}).get("properties", {}) or {}),
+        forcing=sources,
         model_settings=settings,
         code=code,
         composition=composition or Composition(
@@ -348,7 +363,13 @@ def build_spec_config(
     )
 
 
-def _build_sources(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]) -> Sources:
+def _build_forcing(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]) -> Forcing:
+    """Build the flat ``Forcing`` object from model inputs + CDR config.
+
+    The former ``Sources / inner Forcing`` two-level nesting is flattened here:
+    initial_conditions and surface/boundary/tidal/river items all live directly on
+    ``Forcing``.
+    """
     ic_block = inputs.get("initial_conditions", {}) or {}
     forcing_block = inputs.get("forcing", {}) or {}
 
@@ -363,18 +384,16 @@ def _build_sources(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]
             out.append(cls(**kw))
         return out
 
-    forcing = Forcing(
-        surface=_items("surface", SurfaceForcingItem,
-                       ("type", "correct_radiation", "coarse_grid_mode", "restoring_forces")),
-        boundary=_items("boundary", BoundaryForcingItem, ("type",)),
-        tidal=_items("tidal", TidalForcingItem, ("ntides",)),
-        river=_items("river", RiverForcingItem, ("include_bgc",)),
-    )
-
     ic = InitialConditions(
         source=_parse_source(ic_block.get("source")),
         bgc_source=_parse_source(ic_block["bgc_source"]) if ic_block.get("bgc_source") else None,
     )
+
+    surface = _items("surface", SurfaceForcingItem,
+                     ("type", "correct_radiation", "coarse_grid_mode", "restoring_forces"))
+    boundary = _items("boundary", BoundaryForcingItem, ("type",))
+    tidal = _items("tidal", TidalForcingItem, ("ntides",))
+    river = _items("river", RiverForcingItem, ("include_bgc",))
 
     # snapshot every distinct logical source touched
     resolved: Dict[str, ResolvedDataset] = {}
@@ -383,7 +402,7 @@ def _build_sources(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]
             resolved.setdefault(src.name, _resolved_dataset(src.name, src.glorys_layout))
     _note(ic.source)
     _note(ic.bgc_source)
-    for grp in (forcing.surface, forcing.boundary, forcing.tidal, forcing.river):
+    for grp in (surface, boundary, tidal, river):
         for it in grp:
             _note(it.source)
     # topography source
@@ -391,8 +410,13 @@ def _build_sources(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]
     if topo:
         resolved.setdefault(topo, _resolved_dataset(topo))
 
-    return Sources(initial_conditions=ic, forcing=forcing,
+    return Forcing(initial_conditions=ic, surface=surface, boundary=boundary,
+                   tidal=tidal, river=river,
                    cdr_forcing=cdr_forcing, resolved_datasets=resolved)
+
+
+# Back-compat alias used by some internal call sites
+_build_sources = _build_forcing
 
 
 def _build_code(model: Dict[str, Any], templates_repo: CodeRepo) -> Code:

@@ -60,6 +60,8 @@ from pydantic import BaseModel, ConfigDict, Field
 # schema version. Everything else (application, run, domain, sources, properties,
 # model_settings, code) is hashed.
 _HASH_EXCLUDE = {"spec_config_version", "identity", "composition", "provenance"}
+# Note: "properties" is no longer a top-level SpecConfig field (removed); n_tracers
+# and marbl are derived from model_settings at processing time.
 
 # Bumped only on a BREAKING schema change. Additive fields (with defaults) are
 # backward-compatible — old files still load — so they do NOT bump this. ``from_yaml``
@@ -140,11 +142,18 @@ class Domain(_Section):
 # B. Forcing & source data
 # ===========================================================================
 class SourceSpec(_Section):
-    """A resolved data source. ``name`` is the logical name; ``dataset_key`` is the
-    registry key it resolved to (e.g. GLORYS -> GLORYS_REGIONAL)."""
+    """A forcing source item as the user authors it.
+
+    ``name`` is the logical/friendly name (e.g. ``"GLORYS"``, ``"ERA5"``,
+    ``"UNIFIED"``). The resolved registry key (``"GLORYS_REGIONAL"``,
+    ``"UNIFIED_BGC"``, …) is derivable at any time via
+    :func:`cstar_forge.source_registry.resolve_dataset_key(name, glorys_layout)`
+    and is not stored here — the necessary disambiguation is already carried by
+    ``glorys_layout``. The canonical registry snapshot lives in
+    ``Forcing.resolved_datasets`` (keyed by logical name → ``ResolvedDataset``).
+    """
 
     name: str
-    dataset_key: Optional[str] = None
     climatology: bool = False
     glorys_layout: Optional[str] = None  # "regional" | "global"
 
@@ -184,13 +193,6 @@ class InitialConditions(_Section):
     allow_flex_time: bool = False  # ±24h search window around ini_time
 
 
-class Forcing(_Section):
-    surface: List[SurfaceForcingItem] = Field(default_factory=list)
-    boundary: List[BoundaryForcingItem] = Field(default_factory=list)
-    tidal: List[TidalForcingItem] = Field(default_factory=list)
-    river: List[RiverForcingItem] = Field(default_factory=list)
-
-
 class ResolvedDataset(_Section):
     """A snapshot of how a logical source resolves — frozen from the hardcoded
     registry so the processing host uses exactly these IDs/URLs."""
@@ -201,12 +203,26 @@ class ResolvedDataset(_Section):
     streamable: bool = False
 
 
-class Sources(_Section):
+class Forcing(_Section):
+    """All forcing inputs: initial conditions, surface / boundary / tidal / river
+    forcing items, optional CDR, and the resolved dataset registry snapshot.
+
+    The former ``Sources`` / inner ``Forcing`` two-level nesting is gone — the
+    items are flat here under a single ``forcing:`` key in the YAML.
+    """
+
     initial_conditions: InitialConditions
-    forcing: Forcing
+    surface: List[SurfaceForcingItem] = Field(default_factory=list)
+    boundary: List[BoundaryForcingItem] = Field(default_factory=list)
+    tidal: List[TidalForcingItem] = Field(default_factory=list)
+    river: List[RiverForcingItem] = Field(default_factory=list)
     cdr_forcing: Optional[Dict[str, Any]] = None
     # logical-name -> resolved registry entry (snapshot of source_data.py tables)
     resolved_datasets: Dict[str, ResolvedDataset] = Field(default_factory=dict)
+
+
+# Back-compat alias: code that imported Sources can import Forcing instead.
+Sources = Forcing
 
 
 # ===========================================================================
@@ -305,9 +321,11 @@ class SpecConfig(_Section):
     identity: Identity
     run: RunWindow
     domain: Domain
-    sources: Sources
-    properties: Dict[str, Any] = Field(default_factory=dict)  # {"n_tracers", "marbl"}
+    forcing: Forcing
     model_settings: Dict[str, Any] = Field(default_factory=dict)  # flat sections
+    # n_tracers is NOT stored — it is derived at processing time as
+    # model_settings["param"]["ntrc_bio"] + model_settings["param"]["nt_passive"] + 2
+    # (temperature + salinity). marbl is read from model_settings["cppdefs"]["marbl"].
     code: Code
     composition: Composition = Field(default_factory=Composition)
     provenance: Provenance = Field(default_factory=Provenance)

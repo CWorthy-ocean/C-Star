@@ -38,6 +38,7 @@ from typing import Any, Callable, Dict, Optional, Protocol, Tuple, Union, runtim
 
 from .namelist_model import validate_run_time_sections
 from .spec_config import SpecConfig
+from .spec_config_resolve import n_tracers_from_model_settings
 
 
 @runtime_checkable
@@ -76,7 +77,7 @@ PROCESSING_FILLED_SECTIONS = ("grid", "initial", "forcing", "s_coord",
 
 
 def sources_to_forcing_override(cfg: SpecConfig) -> Optional[Dict[str, Any]]:
-    """Convert cfg.sources to the forcing_override dict for RomsMarblInputData.
+    """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
 
     Returns None when sources are model defaults (composition.forcing.origin ==
     "model_default"), so the builder falls back to model_spec.inputs as before.
@@ -97,15 +98,15 @@ def sources_to_forcing_override(cfg: SpecConfig) -> Optional[Dict[str, Any]]:
         d["source"] = _src(item.source)
         return {k: v for k, v in d.items() if v is not None}
 
-    s = cfg.sources
-    ic_spec = s.initial_conditions
+    f = cfg.forcing
+    ic_spec = f.initial_conditions
     ic: Dict[str, Any] = {"source": _src(ic_spec.source)}
     if ic_spec.bgc_source:
         ic["bgc_source"] = _src(ic_spec.bgc_source)
 
     forc: Dict[str, Any] = {}
-    for cat, items in [("surface", s.forcing.surface), ("boundary", s.forcing.boundary),
-                       ("tidal", s.forcing.tidal), ("river", s.forcing.river)]:
+    for cat, items in [("surface", f.surface), ("boundary", f.boundary),
+                       ("tidal", f.tidal), ("river", f.river)]:
         if items:
             forc[cat] = [_item(it) for it in items]
 
@@ -128,7 +129,7 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> Dict[str, Any]:
         start_time=cfg.run.start_date,
         end_time=cfg.run.end_date,
         ensemble_id=cfg.identity.ensemble_id,
-        cdr_forcing=cfg.sources.cdr_forcing,
+        cdr_forcing=cfg.forcing.cdr_forcing,
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
     )
@@ -292,7 +293,8 @@ def process_spec_config(
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)
         executor.configure_build(compile_time_settings=compile_overrides,
-                                 run_time_settings=run_overrides)
+                                 run_time_settings=run_overrides,
+                                 n_tracers=n_tracers_from_model_settings(cfg.model_settings))
     return executor
 
 

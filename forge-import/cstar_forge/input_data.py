@@ -642,9 +642,8 @@ class RomsMarblInputData(InputData):
                 # save the BGC variables.
                 nesting_writer = roms_tools_nesting_writer()
                 nesting_kwargs = dict(self.metadata_child or {})
-                has_marbl = (
-                    self.model_spec.settings.properties is not None
-                    and self.model_spec.settings.properties.marbl
+                has_marbl = bool(
+                    (self._settings_compile_time.get("cppdefs") or {}).get("marbl", False)
                 )
                 if has_marbl and "include_bgc" in inspect.signature(
                     nesting_writer
@@ -834,10 +833,10 @@ class RomsMarblInputData(InputData):
         else:
             interp_frc = self._interp_frc_surface_reuse(input_args, Path(paths[0]))
         
-        # Only touch 'bgc' if the model has MARBL/BGC (from PropertiesSpec).
-        has_bgc_compile = (
-            self.model_spec.settings.properties is not None
-            and self.model_spec.settings.properties.marbl
+        # Only touch 'bgc' if the model has MARBL/BGC — read from cppdefs.marbl
+        # (the compile-time flag), which is the single source of truth.
+        has_bgc_compile = bool(
+            (self._settings_compile_time.get("cppdefs") or {}).get("marbl", False)
         )
         
         # Set interp_frc in the appropriate section based on forcing type

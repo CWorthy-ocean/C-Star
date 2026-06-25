@@ -2423,12 +2423,18 @@ class CstarSpecBuilder(BaseModel):
 
 
             
-        # Render templates and get location and file list
-        # Get n_tracers from model_spec properties
-        if self._model_spec.settings.properties is not None:
+        # Derive n_tracers: if the caller computed it from model_settings (Phase 2
+        # engine path), use that directly; otherwise fall back to model_spec.properties
+        # for back-compat with the legacy builder-only path.
+        if "n_tracers" in kwargs:
+            n_tracers = int(kwargs["n_tracers"])
+        elif self._model_spec.settings.properties is not None:
             n_tracers = self._model_spec.settings.properties.n_tracers
         else:
-            raise ValueError("Model spec must have settings.properties.n_tracers")
+            raise ValueError(
+                "n_tracers could not be determined: neither passed as a kwarg nor "
+                "available from model_spec.settings.properties."
+            )
 
         # Ensure build output directories exist before writing files.
         self.compile_time_code_dir.mkdir(parents=True, exist_ok=True)

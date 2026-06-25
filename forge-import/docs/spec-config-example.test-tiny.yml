@@ -18,6 +18,7 @@ identity:
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
+  model_reference_date: '2000-01-01T00:00:00'
 domain:
   grid_kwargs:
     nx: 6
@@ -43,65 +44,67 @@ domain:
   grid_kwargs_parent: null
   grid_kwargs_child: null
   metadata_child: null
-sources:
+  nesting_include_pressure_fluxes: false
+forcing:
   initial_conditions:
     source:
       name: GLORYS
-      dataset_key: GLORYS_REGIONAL
       climatology: false
       glorys_layout: regional
     bgc_source:
       name: UNIFIED
-      dataset_key: UNIFIED_BGC
       climatology: true
       glorys_layout: null
-  forcing:
-    surface:
-    - source:
-        name: ERA5
-        dataset_key: ERA5
-        climatology: false
-        glorys_layout: null
-      type: physics
-      correct_radiation: true
-      coarse_grid_mode: never
-      restoring_forces: null
-    - source:
-        name: UNIFIED
-        dataset_key: UNIFIED_BGC
-        climatology: true
-        glorys_layout: null
-      type: bgc
-      correct_radiation: false
-      coarse_grid_mode: never
-      restoring_forces: null
-    boundary:
-    - source:
-        name: GLORYS
-        dataset_key: GLORYS_REGIONAL
-        climatology: false
-        glorys_layout: regional
-      type: physics
-    - source:
-        name: UNIFIED
-        dataset_key: UNIFIED_BGC
-        climatology: true
-        glorys_layout: null
-      type: bgc
-    tidal:
-    - source:
-        name: TPXO
-        dataset_key: TPXO
-        climatology: false
-        glorys_layout: null
-      ntides: 15
-    river:
-    - source:
-        name: DAI
-        dataset_key: DAI
-        climatology: false
-        glorys_layout: null
-      include_bgc: true
+    use_density_interpolation: false
+    allow_flex_time: false
+  surface:
+  - source:
+      name: ERA5
+      climatology: false
+      glorys_layout: null
+    type: physics
+    correct_radiation: true
+    coarse_grid_mode: never
+    restoring_forces: null
+    wind_dropoff: false
+  - source:
+      name: UNIFIED
+      climatology: true
+      glorys_layout: null
+    type: bgc
+    correct_radiation: false
+    coarse_grid_mode: never
+    restoring_forces: null
+    wind_dropoff: false
+  boundary:
+  - source:
+      name: GLORYS
+      climatology: false
+      glorys_layout: regional
+    type: physics
+    apply_2d_horizontal_fill: false
+    use_density_interpolation: false
+  - source:
+      name: UNIFIED
+      climatology: true
+      glorys_layout: null
+    type: bgc
+    apply_2d_horizontal_fill: false
+    use_density_interpolation: false
+  tidal:
+  - source:
+      name: TPXO
+      climatology: false
+      glorys_layout: null
+    ntides: 15
+  river:
+  - source:
+      name: DAI
+      climatology: false
+      glorys_layout: null
+    include_bgc: true
+    convert_to_climatology: if_any_missing
+    bgc_source: null
   cdr_forcing:
     start_time: '2012-01-01T00:00:00'
     end_time: '2012-01-02T00:00:00'
@@ -354,9 +357,6 @@ sources:
       dataset_id: null
       url: null
       streamable: false
-properties:
-  n_tracers: 34
-  marbl: true
 model_settings:
   time_stepping:
     ntimes: 12
@@ -667,7 +667,7 @@ provenance:
   forge_version: null
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
-  content_hash: f9c3482eead9b8a85a25e8c3a7a006668ebf9c700b1c9af354c9ea5eaca87cec
+  content_hash: f6250651716e2c18b0b2673326bbc977619a62a98994261ffd55d67061261285
   notes: Built by cstar_forge.spec_config_resolve.build_spec_config from the demo
     notebook inputs (test-tiny). Machine/paths and naming are NOT stored (resolved
     at processing / derived). s_coord + file paths are processing outputs. provenance.overrides

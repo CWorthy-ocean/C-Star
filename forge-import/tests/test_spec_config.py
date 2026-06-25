@@ -233,7 +233,8 @@ def test_forcing_override_used_by_input_data(tmp_path):
     # Minimal mock of what __post_init__ needs beyond the input_list building
     mock_spec = MagicMock()
     mock_spec.inputs.grid = None          # skip grid
-    mock_spec.settings.properties.marbl = False
+    # Note: marbl is now read from _settings_compile_time["cppdefs"]["marbl"],
+    # not from model_spec.settings.properties — no need to set it on mock_spec.
 
     with patch.object(id_mod.RomsMarblInputData, '__post_init__',
                       id_mod.RomsMarblInputData.__post_init__):
@@ -295,7 +296,7 @@ def test_resolver_forcing_inputs_override():
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
     assert cfg.composition.forcing.origin == "custom"
-    assert [i.source.name for i in cfg.sources.forcing.surface] == ["ERA5", "UNIFIED"]
+    assert [i.source.name for i in cfg.forcing.surface] == ["ERA5", "UNIFIED"]
     # an edited forcing with a restoring SSS source -> sal_restore
     edited = dict(fdata)
     edited["forcing"] = dict(fdata["forcing"])
@@ -334,13 +335,17 @@ def test_settings_is_flat_and_omits_processing_filled_sections():
 
 
 def test_sources_resolved_from_modelspec():
+    from cstar_forge.source_registry import resolve_dataset_key
     cfg = _build()
-    s = cfg.sources
-    assert s.initial_conditions.source.dataset_key == "GLORYS_REGIONAL"
-    assert s.initial_conditions.bgc_source.dataset_key == "UNIFIED_BGC"
-    assert [i.source.name for i in s.forcing.surface] == ["ERA5", "UNIFIED"]
-    assert s.forcing.tidal[0].ntides == 15
-    assert s.forcing.river[0].include_bgc is True
+    s = cfg.forcing
+    # dataset_key is no longer stored on SourceSpec — derive it when needed
+    ic_src = s.initial_conditions.source
+    assert resolve_dataset_key(ic_src.name, ic_src.glorys_layout) == "GLORYS_REGIONAL"
+    bgc_src = s.initial_conditions.bgc_source
+    assert resolve_dataset_key(bgc_src.name, bgc_src.glorys_layout) == "UNIFIED_BGC"
+    assert [i.source.name for i in s.surface] == ["ERA5", "UNIFIED"]
+    assert s.tidal[0].ntides == 15
+    assert s.river[0].include_bgc is True
     assert s.resolved_datasets["GLORYS"].dataset_id == "cmems_mod_glo_phy_my_0.083deg_P1D-m"
 
 
@@ -528,7 +533,7 @@ class TestSpecConfigWizard:
         # select cataloged forcing -> origin catalog
         w.forcing_dd.value = "glorys-era5-unified"
         assert w.config.composition.forcing.origin == "catalog"
-        assert [i.source.name for i in w.config.sources.forcing.surface] == ["ERA5", "UNIFIED"]
+        assert [i.source.name for i in w.config.forcing.surface] == ["ERA5", "UNIFIED"]
         # add + edit a restoring surface item -> sal_restore + custom origin
         fe = w._forcing_editor
         fe._add("surface")
@@ -538,7 +543,7 @@ class TestSpecConfigWizard:
         row["restoring_forces"].value = "sss"
         assert w.config.composition.forcing.origin == "custom"
         assert w.config.model_settings["cppdefs"]["sal_restore"] is True
-        assert "WOA" in [i.source.name for i in w.config.sources.forcing.surface]
+        assert "WOA" in [i.source.name for i in w.config.forcing.surface]
 
     def test_output_spec_selection_and_clear_on_select(self):
         w = self._wizard()
@@ -572,11 +577,11 @@ class TestSpecConfigWizard:
     def test_forcing_remove_item(self):
         w = self._wizard()
         fe = w._forcing_editor
-        before = len(w.config.sources.forcing.tidal)
+        before = len(w.config.forcing.tidal)
         if before == 0:
             pytest.skip("no tidal item to remove")
         fe._remove("tidal", fe._rows["tidal"][0])
-        assert len(w.config.sources.forcing.tidal) == before - 1
+        assert len(w.config.forcing.tidal) == before - 1
 
     def test_forcing_round_trips_through_load(self, tmp_path):
         w1 = self._wizard()
@@ -592,7 +597,7 @@ class TestSpecConfigWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert "WOA" in [i.source.name for i in w2.config.sources.forcing.surface]
+        assert "WOA" in [i.source.name for i in w2.config.forcing.surface]
         assert w2.config.model_settings["cppdefs"]["sal_restore"] is True
         assert w2.config.composition.forcing.origin == "custom"
 

@@ -958,13 +958,13 @@ class SpecConfigWizard:
                 d["glorys_layout"] = spec.glorys_layout
             return d
 
-        s = cfg.sources
-        ic = {"source": src(s.initial_conditions.source)}
-        if s.initial_conditions.bgc_source:
-            ic["bgc_source"] = src(s.initial_conditions.bgc_source)
+        f = cfg.forcing
+        ic = {"source": src(f.initial_conditions.source)}
+        if f.initial_conditions.bgc_source:
+            ic["bgc_source"] = src(f.initial_conditions.bgc_source)
         forcing: Dict[str, Any] = {}
-        for cat, items in (("surface", s.forcing.surface), ("boundary", s.forcing.boundary),
-                           ("tidal", s.forcing.tidal), ("river", s.forcing.river)):
+        for cat, items in (("surface", f.surface), ("boundary", f.boundary),
+                           ("tidal", f.tidal), ("river", f.river)):
             out = []
             for it in items:
                 d: Dict[str, Any] = {"source": src(it.source)}
