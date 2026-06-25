@@ -75,6 +75,43 @@ PROCESSING_FILLED_SECTIONS = ("grid", "initial", "forcing", "s_coord",
                               "title", "output_root_name")
 
 
+def sources_to_forcing_override(cfg: SpecConfig) -> Optional[Dict[str, Any]]:
+    """Convert cfg.sources to the forcing_override dict for RomsMarblInputData.
+
+    Returns None when sources are model defaults (composition.forcing.origin ==
+    "model_default"), so the builder falls back to model_spec.inputs as before.
+    When the user has made a ForcingSpec selection or edits, returns a dict with
+    ``initial_conditions`` and ``forcing`` keys mirroring the model.yml inputs block.
+    """
+    if cfg.composition.forcing.origin == "model_default":
+        return None
+
+    def _src(spec) -> Dict[str, Any]:
+        d: Dict[str, Any] = {"name": spec.name, "climatology": spec.climatology}
+        if spec.glorys_layout:
+            d["glorys_layout"] = spec.glorys_layout
+        return d
+
+    def _item(item) -> Dict[str, Any]:
+        d = item.model_dump(exclude={"source"})
+        d["source"] = _src(item.source)
+        return {k: v for k, v in d.items() if v is not None}
+
+    s = cfg.sources
+    ic_spec = s.initial_conditions
+    ic: Dict[str, Any] = {"source": _src(ic_spec.source)}
+    if ic_spec.bgc_source:
+        ic["bgc_source"] = _src(ic_spec.bgc_source)
+
+    forc: Dict[str, Any] = {}
+    for cat, items in [("surface", s.forcing.surface), ("boundary", s.forcing.boundary),
+                       ("tidal", s.forcing.tidal), ("river", s.forcing.river)]:
+        if items:
+            forc[cat] = [_item(it) for it in items]
+
+    return {"initial_conditions": ic, "forcing": forc}
+
+
 def spec_config_to_builder_kwargs(cfg: SpecConfig) -> Dict[str, Any]:
     """Map a ``SpecConfig``'s atomic inputs to ``CstarSpecBuilder`` constructor kwargs.
 
@@ -92,13 +129,18 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> Dict[str, Any]:
         end_time=cfg.run.end_date,
         ensemble_id=cfg.identity.ensemble_id,
         cdr_forcing=cfg.sources.cdr_forcing,
+        forcing_override=sources_to_forcing_override(cfg),
+        model_reference_date=cfg.run.model_reference_date,
     )
     # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
     # block (which the SpecConfig stores separately) — re-embed it.
     if cfg.domain.grid_kwargs_child is not None:
         child = dict(cfg.domain.grid_kwargs_child)
-        if cfg.domain.metadata_child is not None:
-            child["metadata"] = cfg.domain.metadata_child
+        meta = dict(cfg.domain.metadata_child or {})
+        if cfg.domain.nesting_include_pressure_fluxes:
+            meta["include_pressure_fluxes"] = True
+        if meta:
+            child["metadata"] = meta
         kwargs["grid_kwargs_child"] = child
     if cfg.domain.grid_kwargs_parent is not None:
         kwargs["grid_kwargs_parent"] = dict(cfg.domain.grid_kwargs_parent)

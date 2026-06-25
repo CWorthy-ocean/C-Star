@@ -86,6 +86,12 @@ class InitialConditionsInput(BaseModel):
 
     source: SourceSpec
     bgc_source: Optional[SourceSpec] = Field(default=None, validate_default=False)
+    use_density_interpolation: bool = Field(default=False, validate_default=False,
+        description="Interpolate BGC tracers in density space rather than depth space.")
+    allow_flex_time: bool = Field(default=False, validate_default=False,
+        description="Allow a ±24h search window around ini_time when the exact timestamp is absent.")
+    options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
+        description="Extra kwargs forwarded verbatim to the rt.InitialConditions constructor (forward-compat).")
 
 
 class SurfaceForcingItem(BaseModel):
@@ -117,6 +123,10 @@ class SurfaceForcingItem(BaseModel):
     correct_radiation: bool = Field(default=False, validate_default=False)
     coarse_grid_mode: Optional[str] = Field(default="auto", validate_default=False)
     restoring_forces: Optional[list] = Field(default=None, validate_default=False)
+    wind_dropoff: bool = Field(default=False, validate_default=False,
+        description="Apply exponential coastal wind-speed reduction (12.5 km e-folding scale).")
+    options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
+        description="Extra kwargs forwarded verbatim to rt.SurfaceForcing (forward-compat).")
 
 
 class BoundaryForcingItem(BaseModel):
@@ -138,6 +148,12 @@ class BoundaryForcingItem(BaseModel):
 
     source: SourceSpec
     type: str = Field(pattern="^(physics|bgc)$")
+    apply_2d_horizontal_fill: bool = Field(default=False, validate_default=False,
+        description="Perform 2D horizontal fill on source data before regridding to boundaries.")
+    use_density_interpolation: bool = Field(default=False, validate_default=False,
+        description="Interpolate BGC tracers in density space rather than depth space.")
+    options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
+        description="Extra kwargs forwarded verbatim to rt.BoundaryForcing (forward-compat).")
 
 
 class TidalForcingItem(BaseModel):
@@ -159,6 +175,8 @@ class TidalForcingItem(BaseModel):
 
     source: SourceSpec
     ntides: Optional[int] = Field(default=None, validate_default=False)
+    options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
+        description="Extra kwargs forwarded verbatim to rt.TidalForcing (forward-compat).")
 
 
 class RiverForcingItem(BaseModel):
@@ -181,6 +199,12 @@ class RiverForcingItem(BaseModel):
 
     source: SourceSpec
     include_bgc: bool = Field(default=False, validate_default=False)
+    convert_to_climatology: str = Field(default="if_any_missing", validate_default=False,
+        description="When to compute a river climatology: 'never', 'if_any_missing', or 'always'.")
+    bgc_source: Optional[Dict[str, Any]] = Field(default=None, validate_default=False,
+        description="Separate river-BGC dataset config (name, optional path, optional fill).")
+    options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
+        description="Extra kwargs forwarded verbatim to rt.RiverForcing (forward-compat).")
 
 
 class ForcingInput(BaseModel):

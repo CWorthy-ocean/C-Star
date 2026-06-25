@@ -34,7 +34,12 @@ from pydantic import BaseModel
 
 from .namelist_model import RunTimeSettings, validate_run_time_sections
 from .spec_config import Composition, PieceRef, SpecConfig
-from .spec_config_resolve import build_spec_config, load_model_spec_data
+from .spec_config_resolve import (
+    OUTPUT_MARBL_FIELDS,
+    OUTPUT_SECTIONS,
+    build_spec_config,
+    load_model_spec_data,
+)
 
 
 def _unwrap_type(ann):
@@ -261,6 +266,15 @@ class _ForcingEditor:
                                   style={"description_width": "110px"}, placeholder="(optional)")
         self.ic_bgc_clim = W.Checkbox(value=bool(bgc.get("climatology", False)),
                                       description="bgc climatology", indent=False)
+        self.ic_density_interp = W.Checkbox(
+            value=bool(ic.get("use_density_interpolation", False)),
+            description="density interp", indent=False)
+        self.ic_flex_time = W.Checkbox(
+            value=bool(ic.get("allow_flex_time", False)),
+            description="flex time", indent=False)
+        for _w in (self.ic_name, self.ic_layout, self.ic_bgc_name,
+                   self.ic_bgc_clim, self.ic_density_interp, self.ic_flex_time):
+            _w.observe(lambda _ch: on_change(), names="value")
 
         # per-category item rows: list of dicts of widgets
         self._rows: Dict[str, list] = {c: [] for c in _FORCING_CATEGORIES}
@@ -292,6 +306,8 @@ class _ForcingEditor:
         if cat == "surface":
             w["correct_radiation"] = W.Checkbox(value=bool(item.get("correct_radiation", False)),
                                                 description="corr_rad", indent=False)
+            w["wind_dropoff"] = W.Checkbox(value=bool(item.get("wind_dropoff", False)),
+                                           description="wind_dropoff", indent=False)
             w["coarse_grid_mode"] = W.Dropdown(options=_COARSE_MODES,
                                                value=item.get("coarse_grid_mode", "auto"),
                                                description="coarse:", style=small,
@@ -299,6 +315,13 @@ class _ForcingEditor:
             w["restoring_forces"] = W.Text(value=", ".join(item.get("restoring_forces") or []),
                                            description="restore:", style=small,
                                            layout=W.Layout(width="150px"), placeholder="sss,sst")
+        if cat == "boundary":
+            w["apply_2d_horizontal_fill"] = W.Checkbox(
+                value=bool(item.get("apply_2d_horizontal_fill", False)),
+                description="2d_fill", indent=False)
+            w["use_density_interpolation"] = W.Checkbox(
+                value=bool(item.get("use_density_interpolation", False)),
+                description="dens_interp", indent=False)
         if cat == "tidal":
             w["ntides"] = W.IntText(value=int(item.get("ntides") or 0), description="ntides:",
                                     style=small, layout=W.Layout(width="130px"))
@@ -307,6 +330,11 @@ class _ForcingEditor:
                                           description="clim", indent=False)
             w["include_bgc"] = W.Checkbox(value=bool(item.get("include_bgc", False)),
                                           description="bgc", indent=False)
+            _ctc_opts = ["if_any_missing", "never", "always"]
+            _ctc_val = item.get("convert_to_climatology", "if_any_missing")
+            w["convert_to_climatology"] = W.Dropdown(options=_ctc_opts,
+                value=_ctc_val if _ctc_val in _ctc_opts else "if_any_missing",
+                description="clim mode:", style=small, layout=W.Layout(width="180px"))
         remove = W.Button(description="✕", layout=W.Layout(width="36px"), tooltip="remove")
         remove.on_click(lambda _b, c=cat, ws=w: self._remove(c, ws))
         for widget in w.values():
@@ -346,14 +374,22 @@ class _ForcingEditor:
             item["type"] = w["type"].value
         if "correct_radiation" in w and w["correct_radiation"].value:
             item["correct_radiation"] = True
+        if "wind_dropoff" in w and w["wind_dropoff"].value:
+            item["wind_dropoff"] = True
         if "coarse_grid_mode" in w:
             item["coarse_grid_mode"] = w["coarse_grid_mode"].value
         if "restoring_forces" in w and w["restoring_forces"].value.strip():
             item["restoring_forces"] = [p.strip() for p in w["restoring_forces"].value.split(",") if p.strip()]
+        if "apply_2d_horizontal_fill" in w and w["apply_2d_horizontal_fill"].value:
+            item["apply_2d_horizontal_fill"] = True
+        if "use_density_interpolation" in w and w["use_density_interpolation"].value:
+            item["use_density_interpolation"] = True
         if "ntides" in w:
             item["ntides"] = int(w["ntides"].value)
         if "include_bgc" in w and w["include_bgc"].value:
             item["include_bgc"] = True
+        if "convert_to_climatology" in w:
+            item["convert_to_climatology"] = w["convert_to_climatology"].value
         return item
 
     def gather(self) -> Dict[str, Any]:
@@ -364,6 +400,10 @@ class _ForcingEditor:
         if self.ic_bgc_name.value.strip():
             ic["bgc_source"] = {"name": self.ic_bgc_name.value.strip(),
                                 "climatology": bool(self.ic_bgc_clim.value)}
+        if self.ic_density_interp.value:
+            ic["use_density_interpolation"] = True
+        if self.ic_flex_time.value:
+            ic["allow_flex_time"] = True
         forcing = {cat: [self._gather_item(cat, w) for w in self._rows[cat]]
                    for cat in _FORCING_CATEGORIES}
         return {"grid": {"topography_source": self._topo},
@@ -374,7 +414,8 @@ class _ForcingEditor:
         W = self.W
         ic_box = W.VBox([W.HTML("<i>initial conditions</i>"),
                          W.HBox([self.ic_name, self.ic_layout]),
-                         W.HBox([self.ic_bgc_name, self.ic_bgc_clim])])
+                         W.HBox([self.ic_bgc_name, self.ic_bgc_clim]),
+                         W.HBox([self.ic_density_interp, self.ic_flex_time])])
         panes = [ic_box] + [self._containers[c] for c in _FORCING_CATEGORIES]
         acc = W.Accordion(children=panes, selected_index=None)
         for i, title in enumerate(["initial_conditions", *_FORCING_CATEGORIES]):
@@ -461,16 +502,33 @@ class SpecConfigWizard:
                                           style={"description_width": "90px"}, layout=W.Layout(width="200px"))
         self.nest_period = W.FloatText(value=3600.0, description="extract period (s):",
                                        style={"description_width": "130px"}, layout=W.Layout(width="260px"))
+        self.nest_pressure_fluxes = W.Checkbox(value=False,
+                                               description="include pressure fluxes",
+                                               indent=False)
 
         # --- run window ---
         self.start = W.DatePicker(value=date(2012, 1, 1), description="Start:",
                                   style={"description_width": "110px"})
         self.end = W.DatePicker(value=date(2012, 1, 2), description="End:",
                                 style={"description_width": "110px"})
+        self.model_ref_date = W.DatePicker(value=date(2000, 1, 1),
+                                           description="Model ref date:",
+                                           style={"description_width": "130px"},
+                                           tooltip="ROMS model t=0 (forwarded to all rt objects)")
         self.description = W.Text(value="Generated blueprint", description="Description:",
                                   style={"description_width": "110px"}, layout=W.Layout(width="420px"))
         self.ensemble = W.Text(value="", description="Ensemble id:", placeholder="(optional int)",
                                style={"description_width": "110px"}, layout=W.Layout(width="260px"))
+
+        # --- grid extended options ---
+        self.hmin = W.FloatText(value=5.0, description="hmin (m):",
+                                style={"description_width": "90px"}, layout=W.Layout(width="200px"))
+        self.close_narrow_chk = W.Checkbox(value=False, description="close narrow channels",
+                                           indent=False)
+        self.mask_shapefile = W.Text(value="", description="mask shapefile:",
+                                     style={"description_width": "120px"},
+                                     layout=W.Layout(width="380px"),
+                                     placeholder="path to custom land-mask shapefile (optional)")
 
         # --- timestep ---
         self.dt = W.FloatText(value=7200.0, description="dt (s):",
@@ -487,6 +545,13 @@ class SpecConfigWizard:
         self.forcing_box = W.VBox([])
         self._forcing_editor: Optional[_ForcingEditor] = None
         self._forcing_edited = False
+
+        # --- output settings piece (OutputSpec selection) ---
+        # The output sections themselves are edited in the Advanced settings accordion;
+        # this dropdown selects a named OutputSpec that seeds those sections.
+        self.output_dd = W.Dropdown(options=["<model default>"] + list(self.catalog.output_names),
+                                    value="<model default>", description="Output:",
+                                    style={"description_width": "110px"})
 
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: Optional[_SettingsEditor] = None
@@ -522,9 +587,11 @@ class SpecConfigWizard:
         self.upload.observe(self._on_upload, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
+        self.output_dd.observe(self._on_output_spec, names="value")
         watched = [self.grid_name, self.scoord_chk, self.npx, self.npy,
-                   self.start, self.end, self.description, self.ensemble, self.dt,
-                   self.nest_enable, self.nest_period,
+                   self.start, self.end, self.model_ref_date, self.description, self.ensemble, self.dt,
+                   self.hmin, self.close_narrow_chk, self.mask_shapefile,
+                   self.nest_enable, self.nest_period, self.nest_pressure_fluxes,
                    *self.grid_w.values(), *self.bnd.values(), *self.child_w.values()]
         for w in watched:
             w.observe(self._rebuild, names="value")
@@ -589,6 +656,23 @@ class SpecConfigWizard:
         self._forcing_edited = True
         self._rebuild()
 
+    def _on_output_spec(self, _change):
+        """Selecting an OutputSpec seeds the output sections. Clear any manual
+        overrides on those sections/fields so the selection takes effect cleanly."""
+        if getattr(self, "_suspended", False):
+            return
+        self._overrides = {
+            (s, f): v for (s, f), v in self._overrides.items()
+            if not (s in OUTPUT_SECTIONS or (s == "marbl_bgc" and f in OUTPUT_MARBL_FIELDS))
+        }
+        self._rebuild()
+
+    def _output_settings(self) -> Optional[Dict[str, Any]]:
+        """The selected OutputSpec's settings (None = use the model default)."""
+        if self.output_dd.value == "<model default>":
+            return None
+        return self.catalog.output_data(self.output_dd.value)
+
     def _composition(self) -> Composition:
         dom = (PieceRef(name=self.domain_dd.value, origin="catalog")
                if self.domain_dd.value != "<custom>"
@@ -601,8 +685,11 @@ class SpecConfigWizard:
             forcing = PieceRef(name=self.forcing_dd.value, origin="catalog")
         else:
             forcing = PieceRef(name=None, origin="model_default")
+        output = (PieceRef(name=self.output_dd.value, origin="catalog")
+                  if self.output_dd.value != "<model default>"
+                  else PieceRef(name=None, origin="model_default"))
         return Composition(model=PieceRef(name=self.model_dd.value, origin="catalog"),
-                           domain=dom, forcing=forcing)
+                           domain=dom, forcing=forcing, output=output)
 
     @staticmethod
     def _sources_to_inputs(cfg: SpecConfig) -> Dict[str, Any]:
@@ -754,6 +841,10 @@ class SpecConfigWizard:
             self.forcing_dd.value = (fname if forig == "catalog"
                                      and fname in self.forcing_dd.options else "<model default>")
             self._build_forcing_editor(self._sources_to_inputs(cfg))
+            # output piece selection
+            oname = cfg.composition.output.name
+            self.output_dd.value = (oname if cfg.composition.output.origin == "catalog"
+                                    and oname in self.output_dd.options else "<model default>")
         # Reconstruct the overrides layer = diff(loaded model_settings, composed). This
         # captures every manual deviation regardless of the file's recorded provenance,
         # making load fully non-lossy.
@@ -776,6 +867,13 @@ class SpecConfigWizard:
             for k in _SCOORD:
                 gk[k] = float(self.grid_w[k].value)
         ens = self.ensemble.value.strip()
+        # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
+        if self.hmin.value != 5.0:
+            gk["hmin"] = float(self.hmin.value)
+        if self.close_narrow_chk.value:
+            gk["close_narrow_channels"] = True
+        if self.mask_shapefile.value.strip():
+            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
         kw = dict(
             model_dir=self.catalog.model_dir(self.model_dd.value),
             grid_name=self.grid_name.value,
@@ -788,6 +886,9 @@ class SpecConfigWizard:
             ensemble_id=int(ens) if ens else None,
             dt=float(self.dt.value),
         )
+        if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
+            kw["model_reference_date"] = datetime.combine(
+                self.model_ref_date.value, datetime.min.time())
         if self.nest_enable.value:
             ck: Dict[str, Any] = {}
             for k in _GRID_INT:
@@ -796,11 +897,16 @@ class SpecConfigWizard:
                 ck[k] = float(self.child_w[k].value)
             kw["grid_kwargs_child"] = ck
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
+            if self.nest_pressure_fluxes.value:
+                kw["nesting_include_pressure_fluxes"] = True
         # forcing: <model default> & unedited -> None (resolver uses model.yml inputs);
         # otherwise pass the editor's selection/edits.
         if self._forcing_editor is not None and not (
                 self.forcing_dd.value == "<model default>" and not self._forcing_edited):
             kw["forcing_inputs"] = self._forcing_editor.gather()
+        output_settings = self._output_settings()
+        if output_settings is not None:
+            kw["output_settings"] = output_settings
         kw["composition"] = self._composition()
         return kw
 
@@ -930,14 +1036,20 @@ class SpecConfigWizard:
             section("Load existing (optional)",
                     W.HBox([self.load_path, self.load_btn]), self.upload, self.load_status),
             section("Pieces", self.model_dd, self.domain_dd, self.grid_name),
-            section("Grid", grid_box, self.scoord_chk),
+            section("Grid", grid_box, self.scoord_chk,
+                    W.HBox([self.hmin, self.close_narrow_chk]), self.mask_shapefile),
             section("Nesting (optional)", self.nest_enable, self.nest_domain_dd,
-                    child_box, self.nest_period),
+                    child_box, W.HBox([self.nest_period, self.nest_pressure_fluxes])),
             section("Open boundaries", W.HBox(list(self.bnd.values()))),
             section("Forcing", self.forcing_dd, self.forcing_box),
             section("Partitioning", W.HBox([self.npx, self.npy])),
-            section("Run window", self.start, self.end, self.description, self.ensemble),
+            section("Run window", self.start, self.end, self.model_ref_date,
+                    self.description, self.ensemble),
             section("Timestep", W.HBox([self.dt, self.dt_btn]), self.dt_status),
+            section("Output settings",
+                    W.HTML("<i>Select an OutputSpec to seed the output sections; "
+                           "fine-tune them under Advanced settings.</i>"),
+                    self.output_dd),
             section("Advanced settings (model defaults — collapsed; click to edit)",
                     self.editor_box),
             section("Review (resolved SpecConfig)", self.derived, self.validation, self.preview),

@@ -94,6 +94,10 @@ class Identity(_Section):
 class RunWindow(_Section):
     start_date: datetime
     end_date: datetime
+    model_reference_date: datetime = datetime(2000, 1, 1)
+    """The ROMS model reference date (t=0). Passed to every rt object that accepts it
+    (InitialConditions, SurfaceForcing, BoundaryForcing, TidalForcing, CDRForcing).
+    Defaults to 2000-01-01, which is the roms-tools default."""
 
 
 # ===========================================================================
@@ -127,6 +131,9 @@ class Domain(_Section):
     grid_kwargs_parent: Optional[Dict[str, Any]] = None
     grid_kwargs_child: Optional[Dict[str, Any]] = None
     metadata_child: Optional[Dict[str, Any]] = None
+    nesting_include_pressure_fluxes: bool = False
+    """Whether to include baroclinic pressure fluxes in the nesting extraction file
+    (passed to make_nesting_info / make_edata as include_pressure_fluxes)."""
 
 
 # ===========================================================================
@@ -148,11 +155,14 @@ class SurfaceForcingItem(_Section):
     correct_radiation: bool = False
     coarse_grid_mode: str = "auto"  # "auto" | "always" | "never"
     restoring_forces: Optional[List[str]] = None
+    wind_dropoff: bool = False  # coastal wind-speed reduction
 
 
 class BoundaryForcingItem(_Section):
     source: SourceSpec
     type: str  # "physics" | "bgc"
+    apply_2d_horizontal_fill: bool = False  # 2D horizontal fill before regridding
+    use_density_interpolation: bool = False  # BGC density-space interp
 
 
 class TidalForcingItem(_Section):
@@ -163,11 +173,15 @@ class TidalForcingItem(_Section):
 class RiverForcingItem(_Section):
     source: SourceSpec
     include_bgc: bool = False
+    convert_to_climatology: str = "if_any_missing"  # "never"|"if_any_missing"|"always"
+    bgc_source: Optional[Dict[str, Any]] = None  # separate river-BGC dataset config
 
 
 class InitialConditions(_Section):
     source: SourceSpec
     bgc_source: Optional[SourceSpec] = None
+    use_density_interpolation: bool = False  # BGC density-space interp
+    allow_flex_time: bool = False  # ±24h search window around ini_time
 
 
 class Forcing(_Section):
@@ -246,6 +260,7 @@ class Composition(_Section):
     model: PieceRef = Field(default_factory=PieceRef)
     domain: PieceRef = Field(default_factory=PieceRef)
     forcing: PieceRef = Field(default_factory=PieceRef)
+    output: PieceRef = Field(default_factory=PieceRef)  # output-settings piece (OutputSpec)
     # Manual edits applied on top of the composed pieces: a sparse
     # {section: {field: value}} (or {section: scalar}) layer. ``model_settings`` already
     # reflects these; this records *which* values were overridden vs. composed/derived.

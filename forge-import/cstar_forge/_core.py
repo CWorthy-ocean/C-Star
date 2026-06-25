@@ -243,6 +243,23 @@ class CstarSpecBuilder(BaseModel):
         alias="CDR_forcing",
         validate_default=False,
     )
+    forcing_override: Optional[Dict[str, Any]] = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "When provided, overrides model_spec.inputs for initial_conditions and forcing "
+            "categories. Set by process_spec_config when cfg.sources contains an authored "
+            "ForcingSpec selection; ignored when None (model defaults are used)."
+        ),
+    )
+    model_reference_date: Optional[datetime] = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "ROMS model reference date (t=0). Forwarded to every rt object that accepts it. "
+            "None uses the roms-tools default (2000-01-01)."
+        ),
+    )
     override: Optional[List[Union[str, Path]]] = Field(default=None, validate_default=False)
     ensemble_id: Optional[int] = Field(default=None, validate_default=False)
     catalog_root: Optional[Union[str, Path]] = Field(
@@ -1820,6 +1837,8 @@ class CstarSpecBuilder(BaseModel):
                 metadata_child=self.metadata_child,
                 boundaries=self.open_boundaries,
                 source_data=self.src_data,
+                forcing_override=self.forcing_override,
+                model_reference_date=self.model_reference_date,
                 blueprint_dir=self.blueprint_dir,
                 partitioning=self.partitioning,
                 cdr_forcing=self.cdr_forcing,

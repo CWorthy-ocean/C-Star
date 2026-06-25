@@ -167,6 +167,27 @@ def load_model_spec_data(model_dir: Union[str, Path]) -> Dict[str, Any]:
 # therefore omitted from the stored, flat model_settings.
 _PROCESSING_FILLED_SECTIONS = ("grid", "initial", "forcing", "s_coord", "title", "output_root_name")
 
+# The "output settings" piece (OutputSpec): whole model_settings sections that are
+# output controls, plus the MARBL output write-lists (a partial of marbl_bgc).
+OUTPUT_SECTIONS = ("ocean_vars", "surf_flux", "diagnostics", "stdout_diag",
+                   "ts_output", "frc_output", "cdr_output", "upscale_output",
+                   "zslice", "random_output")
+OUTPUT_MARBL_FIELDS = ("marbl_tracers_to_write", "marbl_diagnostics_to_write")
+
+
+def extract_output_settings(model_settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Pull the output-settings subset out of a full model_settings dict (used to
+    seed an OutputSpec catalog entry and to gather the piece for save)."""
+    out: Dict[str, Any] = {}
+    for sec in OUTPUT_SECTIONS:
+        if sec in model_settings:
+            out[sec] = copy.deepcopy(model_settings[sec])
+    marbl = model_settings.get("marbl_bgc", {}) or {}
+    marbl_out = {f: marbl[f] for f in OUTPUT_MARBL_FIELDS if f in marbl}
+    if marbl_out:
+        out["marbl_bgc"] = copy.deepcopy(marbl_out)
+    return out
+
 
 def build_spec_config(
     *,
@@ -181,9 +202,11 @@ def build_spec_config(
     description: str = "Generated blueprint",
     cdr_forcing: Optional[Dict[str, Any]] = None,
     forcing_inputs: Optional[Dict[str, Any]] = None,
+    output_settings: Optional[Dict[str, Any]] = None,
     grid_kwargs_child: Optional[Dict[str, Any]] = None,
     grid_kwargs_parent: Optional[Dict[str, Any]] = None,
     metadata_child: Optional[Dict[str, Any]] = None,
+    nesting_include_pressure_fluxes: bool = False,
     run_time_overrides: Optional[Dict[str, Any]] = None,
     compile_time_overrides: Optional[Dict[str, Any]] = None,
     dt: Optional[float] = None,
@@ -277,6 +300,11 @@ def build_spec_config(
         extract["extract_period"] = float(period) if period is not None else 3600.0
         settings["extract_data"] = extract
 
+    # OutputSpec piece: deep-merge the output-settings selection over the model
+    # defaults (before manual overrides, so a hand override still wins).
+    if output_settings:
+        _deep_merge(settings, output_settings)
+
     # overrides win (mirror CstarSpecBuilder.configure_build precedence)
     if compile_time_overrides:
         _deep_merge(settings["cppdefs"], compile_time_overrides.get("cppdefs", compile_time_overrides))
@@ -301,7 +329,8 @@ def build_spec_config(
             partitioning=Partitioning(n_procs_x=npx, n_procs_y=npy),
             grid_kwargs_child=grid_kwargs_child,
             grid_kwargs_parent=grid_kwargs_parent,
-            metadata_child=metadata_child),
+            metadata_child=metadata_child,
+            nesting_include_pressure_fluxes=nesting_include_pressure_fluxes),
         sources=sources,
         properties=dict(model.get("settings", {}).get("properties", {}) or {}),
         model_settings=settings,
@@ -310,7 +339,9 @@ def build_spec_config(
             model=PieceRef(name=model_name, origin="catalog"),
             domain=PieceRef(name=grid_name, origin="custom"),
             forcing=PieceRef(name=None,
-                             origin="custom" if forcing_inputs is not None else "model_default")),
+                             origin="custom" if forcing_inputs is not None else "model_default"),
+            output=PieceRef(name=None,
+                            origin="custom" if output_settings is not None else "model_default")),
         provenance=Provenance(generated_at=generated_at, forge_version=forge_version,
                               roms_tools_version=roms_tools_version,
                               override_files_applied=[], notes=notes),

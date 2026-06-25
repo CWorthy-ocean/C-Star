@@ -207,6 +207,14 @@ class RomsMarblInputData(InputData):
     blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     cdr_forcing: Optional[dict] = None
+    forcing_override: Optional[Dict[str, Any]] = None
+    """When provided, overrides model_spec.inputs for initial_conditions and forcing
+    categories. Keys mirror the inputs block structure: 'initial_conditions', 'forcing'
+    (with sub-keys 'surface', 'boundary', 'tidal', 'river'). This is how the
+    SpecConfig's authored sources reach input generation instead of the model defaults."""
+    model_reference_date: Optional[datetime] = None
+    """ROMS model reference date (t=0). Forwarded to every rt object that accepts it.
+    If None, roms-tools defaults to 2000-01-01."""
     grid_parent: Optional[rt.Grid] = None
     grid_child: Optional[rt.Grid] = None
     metadata_child: Optional[dict[str, Any]] = None
@@ -230,32 +238,36 @@ class RomsMarblInputData(InputData):
     def __post_init__(self):
         """Initialize paths, storage, and input list."""
         super().__post_init__()
-        
-        # Derive input_list from model_spec.inputs
+
         input_list = []
-        
-        # Get model inputs from model_spec
         model_inputs = self.model_spec.inputs
-        
-        # Process grid
+
+        # Grid always comes from model_spec (it is not part of the forcing override).
         if model_inputs.grid:
             kwargs = model_inputs.grid.model_dump() if hasattr(model_inputs.grid, 'model_dump') else {}
             input_list.append(("grid", kwargs))
 
-        # Process initial_conditions
-        if model_inputs.initial_conditions:
-            kwargs = model_inputs.initial_conditions.model_dump() if hasattr(model_inputs.initial_conditions, 'model_dump') else {}
-            input_list.append(("initial_conditions", kwargs))
-
-        # Process forcing
-        if model_inputs.forcing:
-            # Loop over all keys in forcing (e.g., surface, boundary, tidal, river, etc.)
-            for category in model_inputs.forcing.model_fields.keys():
-                items = getattr(model_inputs.forcing, category, None)
-                if items is not None:
-                    for item in items:
-                        kwargs = item.model_dump() if hasattr(item, 'model_dump') else dict(item)
-                        input_list.append((f"forcing.{category}", kwargs))
+        # Initial conditions and forcing: use forcing_override when provided (authored
+        # via the wizard / ForcingSpec selection), otherwise fall back to model defaults.
+        if self.forcing_override is not None:
+            fo = self.forcing_override
+            if fo.get("initial_conditions"):
+                input_list.append(("initial_conditions", dict(fo["initial_conditions"])))
+            for category, items in (fo.get("forcing") or {}).items():
+                for item in (items or []):
+                    input_list.append((f"forcing.{category}", dict(item)))
+        else:
+            # Default: derive from model_spec.inputs
+            if model_inputs.initial_conditions:
+                kwargs = model_inputs.initial_conditions.model_dump() if hasattr(model_inputs.initial_conditions, 'model_dump') else {}
+                input_list.append(("initial_conditions", kwargs))
+            if model_inputs.forcing:
+                for category in model_inputs.forcing.model_fields.keys():
+                    items = getattr(model_inputs.forcing, category, None)
+                    if items is not None:
+                        for item in items:
+                            kwargs = item.model_dump() if hasattr(item, 'model_dump') else dict(item)
+                            input_list.append((f"forcing.{category}", kwargs))
 
         # Optional user-provided CDR forcing via builder kwarg.
         # Merge with model-specified cdr_list if that input already exists.
@@ -556,20 +568,33 @@ class RomsMarblInputData(InputData):
                     cfg = self.model_spec.inputs.initial_conditions.model_dump()
             # For forcing categories, base_kwargs should always be provided from input_list
         
-        # Resolve source blocks (convert SourceSpec Pydantic models to dicts with paths)
+        # Resolve source blocks (convert SourceSpec Pydantic models to dicts with paths).
+        # Skip None values — optional bgc_source etc. are absent when not configured.
         for field_name in ("source", "bgc_source"):
-            if field_name in cfg:
+            if field_name in cfg and cfg[field_name] is not None:
                 # If it's a Pydantic model (SourceSpec), convert to dict first
                 if hasattr(cfg[field_name], 'model_dump'):
                     cfg[field_name] = cfg[field_name].model_dump()
                 cfg[field_name] = self._resolve_source_block(cfg[field_name])
         
-        # extra overrides defaults
+        # Unpack any `options` passthrough dict from the item config before merging.
+        # These are forwarded verbatim to the rt constructor and win over typed defaults
+        # but lose to `extra` (which contains hardcoded run-time injections like dates).
+        item_options = cfg.pop("options", None) or {}
+
+        # extra overrides defaults; item_options sit between cfg and extra
+        merged = {**cfg, **item_options}
         if extra:
-            return {**cfg, **extra}
-        return cfg
+            return {**merged, **extra}
+        return merged
     
     # These are registered with @register_input decorator
+    def _mrd_extra(self) -> Dict[str, Any]:
+        """Extra kwargs containing model_reference_date when one is configured."""
+        if self.model_reference_date is not None:
+            return {"model_reference_date": self.model_reference_date}
+        return {}
+
     @register_input(name="grid", order=10, label="Writing ROMS grid")
     def _generate_grid(self, key: str = "grid", **kwargs):
         """Generate grid input file."""
@@ -683,6 +708,7 @@ class RomsMarblInputData(InputData):
         extra = dict(
             ini_time=self.start_date,
             use_dask=self.use_dask,
+            **self._mrd_extra(),
         )
         input_args = self._build_input_args(key, extra=extra, base_kwargs=kwargs)
         
@@ -728,6 +754,7 @@ class RomsMarblInputData(InputData):
             start_time=self.start_date,
             end_time=self.end_date,
             use_dask=self.use_dask,
+            **self._mrd_extra(),
         )
         input_args = self._build_input_args(key, extra=extra, base_kwargs=kwargs)
         type = input_args.get("type")
@@ -862,6 +889,7 @@ class RomsMarblInputData(InputData):
             end_time=self.end_date,
             boundaries=self.boundaries.model_dump() if hasattr(self.boundaries, 'model_dump') else self.boundaries,
             use_dask=self.use_dask,
+            **self._mrd_extra(),
         )
         input_args = self._build_input_args(key, extra=extra, base_kwargs=kwargs)
         type = input_args.get("type")
@@ -937,6 +965,7 @@ class RomsMarblInputData(InputData):
         output_path = self._forcing_filename(subkey)
         extra = dict(
             use_dask=self.use_dask,
+            **self._mrd_extra(),
         )
         input_args = self._build_input_args(key, extra=extra, base_kwargs=kwargs)
         existing_paths = self._existing_output_paths(output_path)
@@ -1017,6 +1046,7 @@ class RomsMarblInputData(InputData):
         extra = dict(
             start_time=self.start_date,
             end_time=self.end_date,
+            **self._mrd_extra(),
         )
         input_args = self._build_input_args(key, extra=extra, base_kwargs=kwargs)
         existing_paths = self._existing_output_paths(output_path)

@@ -147,6 +147,7 @@ class DomainCatalog:
         self._machines: Dict[str, Path] = {}
         self._domains: Dict[str, Path] = {}     # domain_name -> DomainSpec/<name>/ dir
         self._forcing: Dict[str, Path] = {}      # forcing_name -> ForcingSpec/<name>/ dir
+        self._output: Dict[str, Path] = {}       # output_name -> OutputSpec/<name>/ dir
         self._blueprints: Dict[str, Path] = {}  # blueprint_name -> blueprints/<machine>/<name>/ dir
 
         self._scan_machines()
@@ -154,6 +155,7 @@ class DomainCatalog:
         self._scan_blueprints()
         self._scan_domains()
         self._scan_forcing()
+        self._scan_output()
 
         # Validate non-default catalogs that weren't just initialized.
         if not _using_default and initialize_catalog_from is None and not suppress_validation:
@@ -271,6 +273,17 @@ class DomainCatalog:
         except Exception:
             pass
 
+    def _scan_output(self) -> None:
+        """Scan OutputSpec/ for directories containing Output.yml (one glob)."""
+        self._output = {}
+        output_spec_dir = self.catalog_root / "OutputSpec"
+        try:
+            for output_yml in sorted(self._fs_glob(output_spec_dir, "*/Output.yml")):
+                output_dir = output_yml.parent
+                self._output[output_dir.name] = output_dir
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Initialization helpers
     # ------------------------------------------------------------------
@@ -301,7 +314,7 @@ class DomainCatalog:
 
         # Collect all source files and map each to its destination path.
         pairs: List[Tuple[Path, Path]] = []
-        for subdir in ("Machines", "ModelSpec", "DomainSpec", "ForcingSpec"):
+        for subdir in ("Machines", "ModelSpec", "DomainSpec", "ForcingSpec", "OutputSpec"):
             src_sub = src_root / subdir
             if not src_sub.exists():
                 continue
@@ -372,6 +385,11 @@ class DomainCatalog:
     def forcing_names(self) -> List[str]:
         """Return a sorted list of available forcing-spec names."""
         return sorted(self._forcing.keys())
+
+    @property
+    def output_names(self) -> List[str]:
+        """Return a sorted list of available output-spec names."""
+        return sorted(self._output.keys())
 
     @property
     def blueprint_names(self) -> List[str]:
@@ -502,6 +520,17 @@ class DomainCatalog:
                 f"Available: {self.forcing_names}"
             )
         path = self._forcing[forcing_name] / "Forcing.yml"
+        with self._fs_open(path) as f:
+            return yaml.safe_load(f) or {}
+
+    def output_data(self, output_name: str) -> dict:
+        """Return the raw YAML data dict for a named output spec (reads Output.yml)."""
+        if output_name not in self._output:
+            raise KeyError(
+                f"OutputSpec '{output_name}' not found in catalog at {self.catalog_root}. "
+                f"Available: {self.output_names}"
+            )
+        path = self._output[output_name] / "Output.yml"
         with self._fs_open(path) as f:
             return yaml.safe_load(f) or {}
 
