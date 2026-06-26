@@ -210,7 +210,7 @@ class RestartFile(BaseModel):
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
-        If `search_path` identifies a directory, the first item matching the `RestarFile`
+        If `search_path` identifies a directory, the first item matching the `RestartFile`
         naming convention is returned.
 
         If `search_path` identifies a file, that `RestartFile` will be returned.
