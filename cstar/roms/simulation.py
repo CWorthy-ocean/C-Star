@@ -718,7 +718,7 @@ class ROMSSimulation(Simulation):
         Calls `ROMSInputDataset.path_for_roms` to strip any partitioning information from the
         local path, in accordance with ROMS' expectations.
 
-        This property is used to populate the namelist's `forcing_files.frcfile`
+        This property is used to populate the namelist's `forcing_files.frcfiles`
 
         Returns
         -------
@@ -817,14 +817,14 @@ class ROMSSimulation(Simulation):
         nml.time_stepping.ntimes = self._n_time_steps
 
         if self.initial_conditions:
-            nml.initial_conditions.ininame = str(
+            nml.initial_conditions.inifile = str(
                 self.initial_conditions.path_for_roms[0]
             )
 
         if self.model_grid:
             nml.grid_settings.grdname = str(self.model_grid.path_for_roms[0])
 
-        nml.forcing_files.frcfile = [str(p) for p in self._forcing_paths]
+        nml.forcing_files.frcfiles = [str(p) for p in self._forcing_paths]
 
         runtime_code_filenames = [f.basename for f in self.runtime_code.source]
         if "marbl_in" in runtime_code_filenames:

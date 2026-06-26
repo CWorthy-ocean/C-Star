@@ -125,48 +125,39 @@ class ParamSettings(_NmlGroup):
     """Number of processors following X"""
     np_eta: int
     """Number of processors following Y"""
-    nsub_x: int
-    """Number of shared-memory subdomains in X"""
-    nsub_e: int
-    """Number of shared-memory subdomains in Y"""
     llm: int
     """Number of grid points in X"""
     mmm: int
     """Number of grid points in Y"""
-    n: int
+    nz: int
     """Number of vertical levels"""
     nt_passive: int
     """Number of passive tracers"""
-    ntrc_bio: int
+    nt_bgc: int
     """Number of BGC tracers"""
 
 
 class InitialConditions(_NmlGroup):
-    ininame: str
+    inifile: str
     """Initial conditions (IC) file path"""
-    nrrec: int
-    """Number of time records in IC file"""
 
 
 class ForcingFiles(_NmlGroup):
-    frcfile: list[str] = Field(default_factory=list)
+    frcfiles: list[str] = Field(default_factory=list)
     """Forcing file paths (e.g. boundary, surface flux, and river forcing)"""
 
-    @field_validator("frcfile", mode="before")
+    @field_validator("frcfiles", mode="before")
     @classmethod
     def _wrap(cls, v: Any) -> list:
-        """Re-wrap a scalar `frcfile` value into a list (f90nml read collapse)."""
+        """Re-wrap a scalar `frcfiles` value into a list (f90nml read collapse)."""
         return _as_list(v)
 
 
-class BulkFrcSettings(_NmlGroup):
+class SurfFrcSettings(_NmlGroup):
     interp_bulk_frc: bool
     """Interpolate forcing from coarser input grid if T"""
     check_bulk_frc_units: bool
     """Check units of input vars if T"""
-
-
-class FluxFrcSettings(_NmlGroup):
     interp_flux_frc: bool
     """Interpolate forcing from coarser input grid if T"""
 
@@ -180,7 +171,7 @@ class RiverFrcSettings(_NmlGroup):
     """Number of rivers"""
 
 
-class TidesSettings(_NmlGroup):
+class TidalFrcSettings(_NmlGroup):
     bry_tides: bool
     """Barotropic tides at domain boundaries"""
     pot_tides: bool
@@ -282,16 +273,16 @@ class FrcOutputSettings(_NmlGroup):
     """Write model forcing to its own output file"""
     wrt_frc_avg: bool
     """Forcing output averaged (T) or instantaneous (F)"""
-    output_period: float
+    output_period_frc: float
     """Frequency/averaging period of forcing output"""
-    nrpf: int
+    nrpf_frc: int
     """Number of time records in forcing files"""
 
 
 class ExtractDataSettings(_NmlGroup):
     do_extract: bool
     """Generate boundary files for a nested domain"""
-    extract_period: float
+    output_period_extract: float
     """How often to output these files"""
     nrpf_extract: int
     """Number of time records per file"""
@@ -310,22 +301,22 @@ class ExtractDataSettings(_NmlGroup):
 class SpongeTuneSettings(_NmlGroup):
     ub_tune: bool
     """Tune boundary "sponge" to match parent bry conditions"""
-    sp_timscale: float
+    sponge_timescale: float
     """Filtering time scale (s)"""
     wrt_sponge: bool
     """Write out sponge tuning values"""
-    spn_avg: bool
+    sponge_avg: bool
     """Sponge tuning output averaged (T) or instantaneous (F)"""
-    nrpf: int
+    nrpf_sponge: int
     """Number of records per sponge file"""
-    output_period: float
+    output_period_sponge: float
     """Output frequency of sponge tuning file"""
 
 
 class CalcPflxSettings(_NmlGroup):
     calc_pflx: bool
     """Enable baroclinic pressure flux calculation"""
-    timescale: float
+    pflx_timescale: float
     """Timescale for filtering pressure fluxes (s)"""
 
 
@@ -334,21 +325,21 @@ class ZsliceSettings(_NmlGroup):
     """Output certain variables on regular z-levels"""
     zslice_avg: bool
     """Averaged output (T) or instantaneous (F)"""
-    wrt_t_zsl: bool
+    wrt_t_zslice: bool
     """Write tracers to z-level output"""
-    wrt_u_zsl: bool
+    wrt_u_zslice: bool
     """Write zonal velocity to z-level output"""
-    wrt_v_zsl: bool
+    wrt_v_zslice: bool
     """Write meridional velocity to z-level output"""
-    output_period: float
+    output_period_zslice: float
     """Frequency of z-level output"""
-    nrpf: int
+    nrpf_zslice: int
     """Number of records per file"""
     ndep: int
     """Number of depth levels on which to write"""
     vecdep: list[float]
     """Depths of levels on which to write"""
-    nt_z: int
+    nt_zslice: int
     """Number of tracers to include"""
     trc2zsc: list[int]
     """Indices of tracers to include"""
@@ -365,27 +356,27 @@ class BgcSettings(_NmlGroup):
     """Interpolate forcing from coarser input grid if T"""
     wrt_bgc_his: bool
     """Write instantaneous BGC tracers to output"""
-    output_period_his: float
+    output_period_bgc_his: float
     """Frequency of instantaneous BGC output (s)"""
-    nrpf_his: int
+    nrpf_bgc_his: int
     """Number of time records per BGC output file"""
     wrt_bgc_avg: bool
     """Write averaged BGC tracers to output"""
-    output_period_avg: float
+    output_period_bgc_avg: float
     """Output frequency/averaging period (s)"""
-    nrpf_avg: int
+    nrpf_bgc_avg: int
     """Number of time records per BGC average file"""
     wrt_bgc_dia_his: bool
     """Write instantaneous BGC diagnostics to output"""
-    output_period_his_dia: float
+    output_period_bgc_his_dia: float
     """Frequency of diagnostics output (s)"""
-    nrpf_his_dia: int
+    nrpf_bgc_his_dia: int
     """Number of time records per BGC diagnostics file"""
     wrt_bgc_dia_avg: bool
     """Write averaged BGC diagnostics to output"""
-    output_period_avg_dia: float
+    output_period_bgc_avg_dia: float
     """Frequency/period of averaged diagnostic output"""
-    nrpf_avg_dia: int
+    nrpf_bgc_avg_dia: int
     """Number of time records per BGC diagnostics file"""
 
 
@@ -396,8 +387,8 @@ class MarblBiogeochemistrySettings(_NmlGroup):
     """MARBL tracers to include in BGC output"""
     marbl_diagnostics_to_write: list[str] | str = ""
     """MARBL diagnostics to include in BGC output"""
-    marbl_timestep_ratio: int = 1
-    """If "N", solve BGC equations every N model steps"""
+    marbl_timestep: float = 3600.0
+    """Desired MARBL timestep (s); ROMS derives the step ratio from `dt`"""
 
     @field_validator("marbl_tracers_to_write", mode="before")
     @classmethod
@@ -421,19 +412,19 @@ class CdrFrcSettings(_NmlGroup):
     """Apply CDR perturbation (T) or not (F)"""
     cdr_file: str
     """File path to CDR perturbation"""
-    ncdr_parm: int
+    cdr_ncdr_parm: int
     """Number of CDR releases if `3D`/`parameterized`"""
-    nz_chd: int
+    cdr_nz_chd: int
     """Number of vertical levels in CDR forcing"""
-    forcing_depth_profiles: bool
+    cdr_forcing_depth_profiles: bool
     """Apply CDR forcing from a depth profile"""
-    forcing_3d: bool
+    cdr_forcing_3d: bool
     """Apply CDR forcing from a fully 3D distribution"""
-    forcing_parameterized: bool
+    cdr_forcing_parameterized: bool
     """Apply CDR forcing from Gaussian parameters"""
-    time_interpolation: bool
+    cdr_time_interpolation: bool
     """Interpolate linearly between forcing records"""
-    relocate_to_wet_pts: bool
+    cdr_relocate_to_wet_pts: bool
     """Relocate CDR perturbation to sea if on land"""
     cdr_volume: bool
     """Read in volume flux/tracer concentration"""
@@ -446,9 +437,9 @@ class CdrOutputSettings(_NmlGroup):
     """Write averaged (T) or instantaneous (F) output"""
     cdr_monthly_averages: bool
     """Write averaged outputs per calendar month"""
-    output_period: float
+    output_period_cdr: float
     """Frequency of CDR-relevant output"""
-    nrpf: int
+    nrpf_cdr: int
     """Time records per output file"""
 
 
@@ -547,9 +538,9 @@ class DiagnosticsSettings(_NmlGroup):
     """Output momentum diagnostics"""
     diag_trc: bool
     """Output tracer diagnostics"""
-    output_period: float
+    output_period_diag: float
     """Output frequency (s)"""
-    nrpf: int
+    nrpf_diag: int
     """Number of records per output file"""
 
 
@@ -563,13 +554,13 @@ class StdoutDiagSettings(_NmlGroup):
 class RandomOutputSettings(_NmlGroup):
     do_random: bool
     """Output user-customized output fields"""
-    output_period: float
+    output_period_random: float
     """Frequency of custom output (s)"""
-    nrpf: int
+    nrpf_random: int
     """Number of records per output file"""
 
 
-class SurfFlxSettings(_NmlGroup):
+class SurfFlxOutputSettings(_NmlGroup):
     wrt_smflx: bool
     """Output surface momentum flux"""
     wrt_stflx: bool
@@ -578,9 +569,9 @@ class SurfFlxSettings(_NmlGroup):
     """Output surface water flux (P-E)"""
     sflx_avg: bool
     """Output average (T) or instantaneous (F) fields"""
-    output_period: float
+    output_period_sflx: float
     """Frequency of surface flux output (s)"""
-    nrpf: int
+    nrpf_sflx: int
     """Number of records per surface flux file"""
 
 
@@ -633,10 +624,9 @@ class RomsNamelist(BaseModel):
     param_settings: ParamSettings
     initial_conditions: InitialConditions
     forcing_files: ForcingFiles = Field(default_factory=ForcingFiles)
-    bulk_frc_settings: BulkFrcSettings
-    flux_frc_settings: FluxFrcSettings
+    surf_frc_settings: SurfFrcSettings
     river_frc_settings: RiverFrcSettings
-    tides_settings: TidesSettings
+    tidal_frc_settings: TidalFrcSettings
     basic_output_settings: BasicOutputSettings
     ts_output_settings: TsOutputSettings
     frc_output_settings: FrcOutputSettings
@@ -663,7 +653,7 @@ class RomsNamelist(BaseModel):
     diagnostics_settings: DiagnosticsSettings
     stdout_diag_settings: StdoutDiagSettings
     random_output_settings: RandomOutputSettings
-    surf_flx_settings: SurfFlxSettings
+    surf_flx_output_settings: SurfFlxOutputSettings
     pipe_frc_settings: PipeFrcSettings
     particles_settings: ParticlesSettings
 
@@ -708,7 +698,7 @@ class RomsNamelist(BaseModel):
         """Serialize the model to a plain dict suitable for ``f90nml``.
 
         Mirrors ``write_roms_namelist`` by omitting the ``forcing_files`` group
-        entirely when ``frcfile`` is empty, so no empty ``&forcing_files`` group
+        entirely when ``frcfiles`` is empty, so no empty ``&forcing_files`` group
         is written.
 
         Returns
@@ -717,8 +707,8 @@ class RomsNamelist(BaseModel):
             A nested dict suitable for constructing an ``f90nml.Namelist``.
         """
         d = self.model_dump()
-        # match write_roms_namelist: omit frcfile entirely when empty
-        if not d["forcing_files"].get("frcfile"):
+        # match write_roms_namelist: omit frcfiles entirely when empty
+        if not d["forcing_files"].get("frcfiles"):
             d["forcing_files"] = {}
         return d
 
