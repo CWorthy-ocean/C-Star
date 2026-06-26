@@ -6,13 +6,11 @@ state: draft
 steps:
   - name: outer
     application: roms_marbl
-    # blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p5_down__8procs/B_cson_roms-marbl_v0.1_P0p5_down__8procs_build.yml
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p5_down__8procs/B_cson_roms-marbl_v0.1_P0p5_down__8procs_build.yml
 
   - name: nest_conversion
     application: nest_ic
-    # blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
     depends_on:
         - outer
     blueprint_overrides:
@@ -23,8 +21,7 @@ steps:
 
   - name: middle
     application: roms_marbl
-    # blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p25_down__8procs/B_cson_roms-marbl_v0.1_P0p25_down__8procs_build.yml
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p25_down__8procs/B_cson_roms-marbl_v0.1_P0p25_down__8procs_build.yml
     depends_on:
       - nest_conversion
     directives:
@@ -34,8 +31,7 @@ steps:
 
   - name: nest_conversion2
     application: nest_ic
-    # blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
     depends_on:
         - middle
     blueprint_overrides:
@@ -45,8 +41,7 @@ steps:
 
   - name: inner
     application: roms_marbl
-    # blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p125__16procs/B_cson_roms-marbl_v0.1_P0p125__16procs_build.yml
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p125__16procs/B_cson_roms-marbl_v0.1_P0p125__16procs_build.yml
     depends_on:
       - nest_conversion2
     directives:
@@ -56,26 +51,34 @@ steps:
 
   - name: upscale_inner_mid
     application: upscaler
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint:
     depends_on:
       - inner
+    directives:
 
   - name: middle_up
     application: roms_marbl
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint:
     blueprint_overrides:
       cdr_forcing:
         - location: "{{output_dir: upscale_inner_mid}}"
+    directives:
+      continue-from:
+        ...
 
   - name: upscale_mid_outer
     application: upscaler
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint:
     depends_on:
       - middle_up
+    directives:
 
   - name: middle_up
     application: roms_marbl
-    blueprint: /anvil/projects/x-ees250129/cstar-forge-data/catalog/blueprints/RCAC_anvil/cson_roms-marbl_v0.1_nesting_Iceland0_256procs/B_cson_roms-marbl_v0.1_nesting_Iceland0_256procs_build.yml
+    blueprint:
     blueprint_overrides:
       cdr_forcing:
         - location: "{{output_dir: upscale_mid_outer}}"
+    directives:
+      continue-from:
+        ...
