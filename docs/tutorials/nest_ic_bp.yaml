@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/nest_ic/nest_ic.1.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/nest_ic/nest_ic_schema.1.0.0.json
 name: create_nested_ic
 description: create IC file from a parent
 application: nest_ic
