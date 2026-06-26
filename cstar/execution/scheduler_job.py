@@ -39,6 +39,7 @@ sacct_status_map = defaultdict(
         "COMPLETED": ExecutionStatus.COMPLETED,
         "CANCELLED": ExecutionStatus.CANCELLED,
         "FAILED": ExecutionStatus.FAILED,
+        "TIMEOUT": ExecutionStatus.TIMEOUT,
     },
 )
 """Map sacct states to ExecutionStatus enum."""
@@ -139,7 +140,11 @@ class SlurmStep(BaseModel):
         ExecutionStatus
         """
         state_base = self.raw_state.split(" ", maxsplit=1)[0]
-        return sacct_status_map[state_base]
+        if mapped := sacct_status_map.get(state_base, None):
+            return mapped
+
+        msg = f"Encountered an unknown status {state_base!r} that cannot be mapped."
+        raise ValueError(msg)
 
     @property
     def job_id(self) -> str:
