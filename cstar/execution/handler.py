@@ -53,6 +53,7 @@ class ExecutionStatus(Enum):
     @classmethod
     def is_terminal(cls, status: "ExecutionStatus") -> bool:
         return status in [
+            ExecutionStatus.TIMEOUT,
             ExecutionStatus.COMPLETED,
             ExecutionStatus.CANCELLED,
             ExecutionStatus.FAILED,
