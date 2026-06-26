@@ -373,26 +373,6 @@ class TestCstarSpecBuilderInitialization:
             "Planned paths must match on-disk NetCDF naming (dots in model name → underscores)"
         )
 
-    def test_canonicalize_stored_input_netcdf_path_matches_generated_names(
-        self,
-        minimal_cstar_spec_builder_args,
-        mock_model_spec,
-    ):
-        """POSTCONFIG missing-file messages use the same paths as generated NetCDF files."""
-        from cstar_forge.input_data import netcdf_filename_component
-
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-        raw = builder.name
-        safe = netcdf_filename_component(raw)
-        expected = builder.input_data_dir / f"{safe}_grid.nc"
-        old_path = builder.input_data_dir.parent / raw / f"{raw}_grid.nc"
-        assert builder._canonicalize_stored_input_netcdf_path(old_path) == expected
-        assert builder._canonicalize_stored_input_netcdf_path(Path(f"{raw}_grid.nc")) == expected
-
     def test_validation_end_date_before_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test that validation raises error when end_date is before start_date."""
         minimal_cstar_spec_builder_args["end_date"] = datetime(2012, 1, 1)
@@ -989,63 +969,6 @@ class TestCstarSpecBuilderGenerateInputs:
                     builder.generate_inputs()
                 assert "Blueprint must be initialized" in str(exc_info.value)
 
-    def test_generate_inputs_uses_existing_blueprint_when_match(
-        self, minimal_cstar_spec_builder_args, mock_model_spec, sample_runtime_params, sample_model_params, tmp_path
-    ):
-        """Test that generate_inputs uses existing blueprint when _file_blueprint_data_match returns True."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cstar_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    # Create existing blueprint - ensure files exist
-                    grid_file = tmp_path / "grid.nc"
-                    grid_file.touch()
-                    ic_file = tmp_path / "ic.nc"
-                    ic_file.touch()
-                    boundary_file = tmp_path / "boundary.nc"
-                    boundary_file.touch()
-                    surface_file = tmp_path / "surface.nc"
-                    surface_file.touch()
-                    
-                    existing_blueprint = cstar_models.RomsMarblBlueprint(
-                        name="existing",
-                        description="Existing",
-                        valid_start_date=datetime(2012, 1, 1),
-                        valid_end_date=datetime(2012, 1, 2),
-                        code=mock_model_spec.code,
-                        grid=cstar_models.Dataset(
-                            data=[Resource(location=str(grid_file), partitioned=False)]
-                        ),
-                        initial_conditions=cstar_models.Dataset(
-                            data=[Resource(location=str(ic_file), partitioned=False)]
-                        ),
-                        forcing=cstar_models.ForcingConfiguration(
-                            boundary=cstar_models.Dataset(
-                            data=[Resource(location=str(boundary_file), partitioned=False)]
-                        ),
-                        surface=cstar_models.Dataset(
-                            data=[Resource(location=str(surface_file), partitioned=False)]
-                        ),
-                        ),
-                        partitioning=minimal_cstar_spec_builder_args["partitioning"],
-                        model_params=sample_model_params,
-                        runtime_params=sample_runtime_params,
-                    )
-                    
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    
-                    # Mock _file_blueprint_data_match to return True
-                    with patch.object(builder, '_file_blueprint_data_match', return_value=True):
-                        with patch.object(builder, '_load_blueprint_file', return_value=existing_blueprint):
-                            with patch('cstar_forge._core.CstarSpecBuilder.get_ds', return_value=None):
-                                result = builder.generate_inputs(clobber=False)
-                            
-                            # generate_inputs returns self.blueprint
-                            assert builder.blueprint == existing_blueprint
-                            assert result == builder.blueprint
-
-
 class TestCstarSpecBuilderBuildAndRun:
     """Tests for build and run methods."""
 
@@ -1219,74 +1142,6 @@ class TestCstarSpecBuilderInitializeBlueprint:
         # _initialize_blueprint expects code to be a ROMSCompositeCodeRepository
         # So we test that it works with proper structure
         pass
-
-
-class TestCstarSpecBuilderCompareBlueprintFields:
-    """Tests for _compare_blueprint_fields method."""
-
-    def test_compare_blueprint_fields_returns_false_when_none(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test that _compare_blueprint_fields returns False when blueprint is None."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                builder.blueprint = None
-                with patch.object(builder, '_load_blueprint_file', return_value=None):
-                    result = builder._file_blueprint_data_match()
-                assert result is False
-
-    def test_compare_blueprint_fields_warns_on_mismatch(self, minimal_cstar_spec_builder_args, mock_model_spec, sample_runtime_params, sample_model_params, tmp_path):
-        """Test that _compare_blueprint_fields warns when fields don't match."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                # Create blueprints with different names (using placeholder resources for empty datasets)
-                builder.blueprint = cstar_models.RomsMarblBlueprint(
-                    name="new",
-                    description="New",
-                    valid_start_date=datetime(2012, 1, 1),
-                    valid_end_date=datetime(2012, 1, 2),
-                    code=mock_model_spec.code,
-                    grid=_create_empty_dataset(tmp_path),
-                    initial_conditions=_create_empty_dataset(tmp_path),
-                    forcing=cstar_models.ForcingConfiguration(
-                        boundary=_create_empty_dataset(tmp_path),
-                        surface=_create_empty_dataset(tmp_path),
-                    ),
-                    partitioning=minimal_cstar_spec_builder_args["partitioning"],
-                    model_params=sample_model_params,
-                    runtime_params=sample_runtime_params,
-                )
-                blueprint_from_file_obj = cstar_models.RomsMarblBlueprint(
-                    name="old",
-                    description="Old",
-                    valid_start_date=datetime(2012, 1, 1),
-                    valid_end_date=datetime(2012, 1, 2),
-                    code=mock_model_spec.code,
-                    grid=_create_empty_dataset(tmp_path),
-                    initial_conditions=_create_empty_dataset(tmp_path),
-                    forcing=cstar_models.ForcingConfiguration(
-                        boundary=_create_empty_dataset(tmp_path),
-                        surface=_create_empty_dataset(tmp_path),
-                    ),
-                    partitioning=minimal_cstar_spec_builder_args["partitioning"],
-                    model_params=sample_model_params,
-                    runtime_params=sample_runtime_params,
-                )
-                with patch.object(builder, '_load_blueprint_file', return_value=blueprint_from_file_obj):
-                    with patch.object(builder, '_compare_dicts_recursive', return_value=False):
-                        with warnings.catch_warnings(record=True) as w:
-                            warnings.simplefilter("always")
-                            result = builder._file_blueprint_data_match()
-                    
-                assert result is False
-                assert len(w) > 0
 
 
 class TestCstarSpecBuilderPathBlueprint:
@@ -1722,234 +1577,6 @@ class TestCstarSpecBuilderRun:
                             builder.run(run_time_settings=custom_params)
                         assert "run_time_settings" in str(exc_info.value) or "runtime_params" in str(exc_info.value)
 
-class TestCstarSpecBuilderSetBlueprintState:
-    """Tests for set_blueprint_state method."""
-    
-    def test_set_blueprint_state(self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path):
-        """Test set_blueprint_state updates blueprint state."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch("cstar_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                    builder.set_blueprint_state("draft")
-                        
-                assert builder.blueprint.state == "draft"
-    
-    def test_set_blueprint_state_raises_when_blueprint_none(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test set_blueprint_state raises error when blueprint is None."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                builder.blueprint = None
-                
-                with pytest.raises(ValueError) as exc_info:
-                    builder.set_blueprint_state("draft")
-                assert "blueprint is not initialized" in str(exc_info.value)
-
-
-class TestCstarSpecBuilderFileBlueprintDataMatch:
-    """Tests for _file_blueprint_data_match method."""
-    
-    def test_file_blueprint_data_match_returns_false_when_none(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test _file_blueprint_data_match returns False when blueprint_from_file is None."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                with patch.object(builder, '_load_blueprint_file', return_value=None):
-                    result = builder._file_blueprint_data_match()
-                assert result is False
-    
-    def test_file_blueprint_data_match_compares_grid(self, minimal_cstar_spec_builder_args, mock_model_spec, sample_model_params, tmp_path):
-        """Test _file_blueprint_data_match compares grid datasets."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                # Create blueprint_from_file with matching grid
-                grid_file = tmp_path / "grid.nc"
-                grid_file.touch()
-                blueprint_from_file = cstar_models.RomsMarblBlueprint(
-                    name=builder.name,
-                    description=builder.description,
-                    valid_start_date=builder.start_date,
-                    valid_end_date=builder.end_date,
-                    code=mock_model_spec.code,
-                    grid=cstar_models.Dataset(
-                        data=[Resource(location=str(grid_file), partitioned=False)]
-                    ),
-                    initial_conditions=_create_empty_dataset(tmp_path),
-                    forcing=cstar_models.ForcingConfiguration(
-                        boundary=_create_empty_dataset(tmp_path),
-                        surface=_create_empty_dataset(tmp_path)
-                    ),
-                    partitioning=minimal_cstar_spec_builder_args["partitioning"],
-                    model_params=sample_model_params,
-                    runtime_params=builder.default_runtime_params,
-                )
-                # Mock _load_blueprint_file to return the blueprint
-                with patch.object(builder, '_load_blueprint_file', return_value=blueprint_from_file):
-                # Mock _compare_blueprint_fields to return True
-                    with patch.object(builder, '_file_blueprint_data_match', return_value=True):
-                        # Mock get_ds to return matching grid
-                        matching_grid_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
-                        with patch('cstar_forge._core.CstarSpecBuilder.get_ds', return_value=[matching_grid_ds]):
-                            result = builder._file_blueprint_data_match()
-                            assert result is True
-    
-class TestCstarSpecBuilderCompareDictsRecursive:
-    """Tests for _compare_dicts_recursive method."""
-    
-    def test_compare_dicts_recursive_identical(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test _compare_dicts_recursive with identical dictionaries."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                dict1 = {"a": 1, "b": 2, "c": {"d": 3}}
-                dict2 = {"a": 1, "b": 2, "c": {"d": 3}}
-                
-                result = builder._compare_dicts_recursive(dict1, dict2)
-                assert result is True
-    
-    def test_compare_dicts_recursive_different_values(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test _compare_dicts_recursive with different values."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                dict1 = {"a": 1, "b": 2}
-                dict2 = {"a": 1, "b": 3}  # Different value
-                
-                with warnings.catch_warnings(record=True) as w:
-                    warnings.simplefilter("always")
-                    result = builder._compare_dicts_recursive(dict1, dict2)
-                    assert result is False
-                    assert len(w) > 0
-    
-    def test_compare_dicts_recursive_skips_data_in_grid(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test _compare_dicts_recursive skips 'data' field in grid."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                dict1 = {"data": [1, 2, 3], "other": "value"}
-                dict2 = {"data": [4, 5, 6], "other": "value"}  # Different data, same other
-                
-                # Should match because 'data' is skipped when path is "grid"
-                result = builder._compare_dicts_recursive(dict1, dict2, path="grid")
-                assert result is True
-    
-    def test_compare_dicts_recursive_handles_datetime(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test _compare_dicts_recursive handles datetime normalization."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                date1 = datetime(2012, 1, 1)
-                date2_str = "2012-01-01T00:00:00"
-                
-                dict1 = {"date": date1}
-                dict2 = {"date": date2_str}
-                
-                # Should match after normalization
-                result = builder._compare_dicts_recursive(dict1, dict2)
-                assert result is True
-    
-    def test_compare_dicts_recursive_handles_lists(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test _compare_dicts_recursive handles list comparison."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                dict1 = {"items": [{"a": 1}, {"b": 2}]}
-                dict2 = {"items": [{"a": 1}, {"b": 2}]}
-                
-                result = builder._compare_dicts_recursive(dict1, dict2)
-                assert result is True
-    
-    def test_compare_dicts_recursive_detects_list_length_mismatch(self, minimal_cstar_spec_builder_args, mock_model_spec):
-        """Test _compare_dicts_recursive detects list length mismatch."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                dict1 = {"items": [1, 2, 3]}
-                dict2 = {"items": [1, 2]}  # Different length
-                
-                with warnings.catch_warnings(record=True) as w:
-                    warnings.simplefilter("always")
-                    result = builder._compare_dicts_recursive(dict1, dict2)
-                    assert result is False
-                    assert any("different list lengths" in str(warning.message) for warning in w)
-
-
-class TestCstarSpecBuilderFileBlueprintDataMatchPartitionedFlags:
-    """Tests for partitioned flags checking in _file_blueprint_data_match."""
-    
-    def test_file_blueprint_data_match_with_no_partitioned_flags(self, minimal_cstar_spec_builder_args, mock_model_spec, sample_model_params, tmp_path):
-        """Test _file_blueprint_data_match when no partitioned flags exist."""
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                
-                # Create blueprint_from_file with no resources (no partitioned flags)
-                # Use placeholder resources with partitioned=False for empty datasets
-                blueprint_from_file = cstar_models.RomsMarblBlueprint(
-                    name=builder.name,
-                    description=builder.description,
-                    valid_start_date=builder.start_date,
-                    valid_end_date=builder.end_date,
-                    code=mock_model_spec.code,
-                    grid=_create_empty_dataset(tmp_path),
-                    initial_conditions=_create_empty_dataset(tmp_path),
-                    forcing=cstar_models.ForcingConfiguration(
-                        boundary=_create_empty_dataset(tmp_path),
-                        surface=_create_empty_dataset(tmp_path)
-                    ),
-                    partitioning=minimal_cstar_spec_builder_args["partitioning"],
-                    model_params=sample_model_params,
-                    runtime_params=builder.default_runtime_params,
-                )
-                # Mock _load_blueprint_file to return the blueprint
-                with patch.object(builder, '_load_blueprint_file', return_value=blueprint_from_file):
-                    with patch.object(builder, '_file_blueprint_data_match', return_value=True):
-                        # Should return True when no partitioned flags exist
-                        result = builder._file_blueprint_data_match(partition_files=False)
-                        assert result is True
-
-
 class TestCstarSpecBuilderGenerateInputsComprehensive:
     """Comprehensive tests for generate_inputs method covering full workflow."""
     
@@ -1994,19 +1621,18 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
-                    with patch.object(CstarSpecBuilder, 'ensure_source_data'):
-                        with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
-                            builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                            builder.generate_inputs(clobber=True, test=True)
-                            
-                            # Check that RomsMarblInputData was called with correct args
-                            mock_input_data_class.assert_called_once()
-                            call_kwargs = mock_input_data_class.call_args[1]
-                            assert call_kwargs["domain_name"] == builder.name
-                            assert call_kwargs["start_date"] == builder.start_date
-                            assert call_kwargs["end_date"] == builder.end_date
-    
+                with patch.object(CstarSpecBuilder, 'ensure_source_data'):
+                    with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
+                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                        builder.generate_inputs(clobber=True, test=True)
+
+                        # Check that RomsMarblInputData was called with correct args
+                        mock_input_data_class.assert_called_once()
+                        call_kwargs = mock_input_data_class.call_args[1]
+                        assert call_kwargs["domain_name"] == builder.name
+                        assert call_kwargs["start_date"] == builder.start_date
+                        assert call_kwargs["end_date"] == builder.end_date
+
     @patch('cstar_forge._core.input_data.RomsMarblInputData')
     def test_generate_inputs_test_mode_does_not_persist(
         self,
@@ -2029,62 +1655,16 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
-                    with patch.object(CstarSpecBuilder, 'ensure_source_data'):
-                        with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
-                            builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                            
-                            with patch('cstar_forge._core.CstarSpecBuilder.persist') as mock_persist:
-                                builder.generate_inputs(clobber=True, test=True)
-                                
-                                # persist should not be called in test mode
-                                mock_persist.assert_not_called()
-    
-    @patch('cstar_forge._core.input_data.RomsMarblInputData')
-    def test_generate_inputs_uses_existing_blueprint(
-        self,
-        mock_input_data_class,
-        minimal_cstar_spec_builder_args,
-        mock_model_spec,
-        sample_runtime_params,
-        sample_model_params,
-        tmp_path
-    ):
-        """Test generate_inputs uses existing blueprint when match is found."""
-        existing_blueprint = cstar_models.RomsMarblBlueprint(
-            name="existing",
-            description="Existing",
-            valid_start_date=datetime(2012, 1, 1),
-            valid_end_date=datetime(2012, 1, 2),
-            code=mock_model_spec.code,
-            grid=_create_empty_dataset(tmp_path),
-            initial_conditions=_create_empty_dataset(tmp_path),
-            forcing=cstar_models.ForcingConfiguration(
-                boundary=_create_empty_dataset(tmp_path),
-                surface=_create_empty_dataset(tmp_path)
-            ),
-            partitioning=minimal_cstar_spec_builder_args["partitioning"],
-            model_params=sample_model_params,
-            runtime_params=sample_runtime_params,
-        )
-        
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=True):
-                    with patch('cstar_forge._core.CstarSpecBuilder.get_ds', return_value=None):
-                        with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
-                            builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                            with patch.object(builder, '_load_blueprint_file', return_value=existing_blueprint):
-                                result = builder.generate_inputs(clobber=False)
-                            
-                                # generate_inputs returns self.blueprint
-                                assert builder.blueprint == existing_blueprint
-                                assert result == builder.blueprint
-                                # Should not call RomsMarblInputData when using existing blueprint
-                                mock_input_data_class.assert_not_called()
-    
+                with patch.object(CstarSpecBuilder, 'ensure_source_data'):
+                    with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
+                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+                        with patch('cstar_forge._core.CstarSpecBuilder.persist') as mock_persist:
+                            builder.generate_inputs(clobber=True, test=True)
+
+                            # persist should not be called in test mode
+                            mock_persist.assert_not_called()
+
     @patch('cstar_forge._core.input_data.RomsMarblInputData')
     def test_generate_inputs_raises_when_blueprint_elements_none(
         self,
@@ -2101,15 +1681,12 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
-                    with patch.object(CstarSpecBuilder, 'ensure_source_data'):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                with patch.object(CstarSpecBuilder, 'ensure_source_data'):
+                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
 
-                        with pytest.raises(RuntimeError) as exc_info:
-                            builder.generate_inputs(clobber=True)
-                        # The error will be about settings not initialized, not blueprint mismatch
-                        # because _file_blueprint_data_match returns False, triggering the settings check
-                        assert "_settings_compile_time" in str(exc_info.value) or "Blueprint mismatch" in str(exc_info.value)
+                    with pytest.raises(RuntimeError) as exc_info:
+                        builder.generate_inputs(clobber=True)
+                    assert "_settings_compile_time" in str(exc_info.value) or "Blueprint mismatch" in str(exc_info.value)
 
     @patch('cstar_forge._core.input_data.RomsMarblInputData')
     def test_generate_inputs_nesting_info_serialized_to_blueprint_dict(
@@ -2144,22 +1721,21 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
-                    with patch.object(CstarSpecBuilder, 'ensure_source_data'):
-                        with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
-                            with patch('cstar_forge._core.CstarSpecBuilder.persist'):
-                                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                                # Manually set settings so the guard passes
-                                builder._settings_compile_time = {"cppdefs": {}}
-                                builder._settings_run_time = {"time_stepping": {}}
+                with patch.object(CstarSpecBuilder, 'ensure_source_data'):
+                    with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
+                        with patch('cstar_forge._core.CstarSpecBuilder.persist'):
+                            builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                            # Manually set settings so the guard passes
+                            builder._settings_compile_time = {"cppdefs": {}}
+                            builder._settings_run_time = {"time_stepping": {}}
 
-                                builder.generate_inputs(clobber=True, test=False)
+                            builder.generate_inputs(clobber=True, test=False)
 
-                            # blueprint is built via model_construct (no validation), so nesting_info
-                            # is the raw dict from model_dump(), not a Dataset instance
-                            nesting_info = builder.blueprint.nesting_info
-                            assert nesting_info is not None
-                            assert nesting_info["data"][0]["location"] == str(nesting_file)
+                        # blueprint is built via model_construct (no validation), so nesting_info
+                        # is the raw dict from model_dump(), not a Dataset instance
+                        nesting_info = builder.blueprint.nesting_info
+                        assert nesting_info is not None
+                        assert nesting_info["data"][0]["location"] == str(nesting_file)
 
     @patch('cstar_forge._core.input_data.RomsMarblInputData')
     def test_generate_inputs_nesting_info_none_in_blueprint_dict(
@@ -2188,17 +1764,16 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                with patch.object(CstarSpecBuilder, '_file_blueprint_data_match', return_value=False):
-                    with patch.object(CstarSpecBuilder, 'ensure_source_data'):
-                        with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
-                            with patch('cstar_forge._core.CstarSpecBuilder.persist'):
-                                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-                                builder._settings_compile_time = {"cppdefs": {}}
-                                builder._settings_run_time = {"time_stepping": {}}
+                with patch.object(CstarSpecBuilder, 'ensure_source_data'):
+                    with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
+                        with patch('cstar_forge._core.CstarSpecBuilder.persist'):
+                            builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                            builder._settings_compile_time = {"cppdefs": {}}
+                            builder._settings_run_time = {"time_stepping": {}}
 
-                                builder.generate_inputs(clobber=True, test=False)
+                            builder.generate_inputs(clobber=True, test=False)
 
-                            assert builder.blueprint.nesting_info is None
+                        assert builder.blueprint.nesting_info is None
 
 
 class TestCstarSpecBuilderGetDsComprehensive:

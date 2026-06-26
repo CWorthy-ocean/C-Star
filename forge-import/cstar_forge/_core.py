@@ -301,33 +301,6 @@ class CstarSpecBuilder(BaseModel):
             "partially populated catalog without raising an error."
         ),
     )
-    initialize_catalog_from: Optional[Union[str, Path]] = Field(
-        default=None,
-        validate_default=False,
-        description=(
-            "Merge Machines/, ModelSpec/, and DomainSpec/ from this source catalog "
-            "into the resolved catalog_root before use. "
-            "Pass ``'local'`` to merge from the built-in package catalog."
-        ),
-    )
-    initialize_catalog_clobber: bool = Field(
-        default=False,
-        validate_default=False,
-        description=(
-            "When merging via ``initialize_catalog_from``, silently overwrite "
-            "files that already exist at the destination. "
-            "If False (default) and conflicts are found, raises ValueError listing them."
-        ),
-    )
-    suppress_catalog_validation: bool = Field(
-        default=True,
-        validate_default=False,
-        description=(
-            "Skip the catalog structure validation check when opening the catalog. "
-            "Defaults to True so that CstarSpecBuilder can operate on an empty or "
-            "partially populated catalog without raising an error."
-        ),
-    )
     # Internal attributes (computed/loaded)
     blueprint: Optional[cstar_models.RomsMarblBlueprint] = Field(
         default=None,
@@ -1001,95 +974,6 @@ class CstarSpecBuilder(BaseModel):
                 return MachineConfig()
         return config.machine_config
 
-    def _prompt_yes_no(self, message: str) -> bool:
-        """Prompt user for a yes/no answer in interactive runs."""
-        while True:
-            try:
-                response = input(f"{message} [yes/no]: ").strip().lower()
-            except EOFError:
-                # Non-interactive environment: default to "no" (reuse existing blueprint).
-                print(f"{message} [yes/no]: no")
-                return False
-            if response in {"yes", "y"}:
-                return True
-            if response in {"no", "n"}:
-                return False
-            print("Please answer 'yes' or 'no'.")
-
-    def _delete_blueprint_and_settings(self, blueprint_path: Path) -> None:
-        """Delete a blueprint file and its settings sidecar if present."""
-        settings_path = self._path_settings_file(blueprint_path)
-        for path in (blueprint_path, settings_path):
-            if path.exists():
-                path.unlink()
-                print(f"🗑️  Deleted existing file: {path}")
-
-    def _canonicalize_stored_input_netcdf_path(self, path: Union[str, Path]) -> Path:
-        """
-        Map NetCDF paths as stored in older blueprints to paths matching current input
-        naming (``netcdf_filename_component(self.name)`` for dirname and file prefix).
-
-        Blueprints may still list directories or basenames containing ``.`` (e.g. ``v0.1``)
-        while generated files use underscores.
-        """
-        p = Path(path).expanduser()
-        if p.suffix.lower() != ".nc":
-            return p
-        safe = input_data.netcdf_filename_component(self.name)
-        raw = self.name
-        if not p.is_absolute():
-            if len(p.parts) == 1:
-                name = p.name
-                if name.startswith(raw + "_"):
-                    name = safe + name[len(raw) :]
-                return (self.input_data_dir / name).resolve()
-            p = (Path.cwd() / p).resolve()
-        else:
-            p = p.resolve()
-        parts = list(p.parts)
-        new_parts = [safe if part == raw else part for part in parts]
-        p2 = Path(*new_parts)
-        nm = p2.name
-        if nm.startswith(raw + "_"):
-            nm = safe + nm[len(raw) :]
-            p2 = p2.parent / nm
-        return p2
-
-    def _required_netcdf_paths_from_blueprint(
-        self, blueprint: cstar_models.RomsMarblBlueprint
-    ) -> List[Path]:
-        """Extract local required NetCDF paths referenced by a blueprint."""
-        bp_dict = blueprint.model_dump(mode="json", exclude_none=True)
-        required_paths: List[Path] = []
-
-        def _append_dataset_locations(dataset_dict: Any) -> None:
-            if not isinstance(dataset_dict, dict):
-                return
-            resources = dataset_dict.get("data")
-            if not isinstance(resources, list):
-                return
-            for resource in resources:
-                if not isinstance(resource, dict):
-                    continue
-                location = resource.get("location")
-                if not isinstance(location, str):
-                    continue
-                if location.startswith("http://") or location.startswith("https://"):
-                    continue
-                path = Path(location)
-                if path.suffix == ".nc" and path not in required_paths:
-                    required_paths.append(path)
-
-        for field_name in ("grid", "initial_conditions", "cdr_forcing", "nesting_info"):
-            _append_dataset_locations(bp_dict.get(field_name))
-
-        forcing = bp_dict.get("forcing")
-        if isinstance(forcing, dict):
-            for forcing_dataset in forcing.values():
-                _append_dataset_locations(forcing_dataset)
-
-        return required_paths
-
     def _initialize_blueprint(self) -> None:
         """
         Initialize blueprint with basic structure and set stage to PRECONFIG.
@@ -1150,311 +1034,6 @@ class CstarSpecBuilder(BaseModel):
         )
         self._stage = BlueprintStage.PRECONFIG
         self.persist()
-    
-    def _compare_dicts_recursive(self, dict1: Dict[str, Any], dict2: Dict[str, Any], path: str = "") -> bool:
-        """
-        Recursively compare two dictionaries, handling nested structures, lists, and datetime normalization.
-        
-        Parameters
-        ----------
-        dict1 : Dict[str, Any]
-            First dictionary to compare.
-        dict2 : Dict[str, Any]
-            Second dictionary to compare.
-        path : str, optional
-            Current path in the dictionary structure (for error messages). Default is "".
-        
-        Returns
-        -------
-        bool
-            True if dictionaries match, False otherwise.
-        """
-        # Handle None cases
-        if dict1 is None and dict2 is None:
-            return True
-        if dict1 is None or dict2 is None:
-            warnings.warn(f"One dict is None at path '{path}': dict1={dict1}, dict2={dict2}", UserWarning, stacklevel=2)
-            return False
-        
-        # Check for missing or extra keys
-        keys1 = set(dict1.keys())
-        keys2 = set(dict2.keys())
-        
-        if keys1 != keys2:
-            missing = keys2 - keys1
-            extra = keys1 - keys2
-            msg_parts = []
-            if missing:
-                msg_parts.append(f"missing keys: {missing}")
-            if extra:
-                msg_parts.append(f"extra keys: {extra}")
-            warnings.warn(f"Key mismatch at path '{path}': {', '.join(msg_parts)}", UserWarning, stacklevel=2)
-            return False
-        
-        # Recursively compare all values
-        for key in keys1:
-            val1 = dict1[key]
-            val2 = dict2[key]
-            current_path = f"{path}.{key}" if path else key
-            
-            # Skip 'data' field when path is "grid"
-            if path == "grid" and key == "data":
-                continue
-            
-            # Handle nested dictionaries
-            if isinstance(val1, dict) and isinstance(val2, dict):
-                if not self._compare_dicts_recursive(val1, val2, current_path):
-                    return False
-                continue
-            
-            # Handle lists
-            if isinstance(val1, list) and isinstance(val2, list):
-                if len(val1) != len(val2):
-                    warnings.warn(
-                        f"different list lengths at path '{current_path}': {len(val1)} vs {len(val2)}",
-                        UserWarning, stacklevel=2
-                    )
-                    return False
-                for idx, (item1, item2) in enumerate(zip(val1, val2)):
-                    item_path = f"{current_path}[{idx}]"
-                    if isinstance(item1, dict) and isinstance(item2, dict):
-                        if not self._compare_dicts_recursive(item1, item2, item_path):
-                            return False
-                    elif item1 != item2:
-                        warnings.warn(
-                            f"List item mismatch at path '{item_path}': {item1} != {item2}",
-                            UserWarning, stacklevel=2
-                        )
-                        return False
-                continue
-            
-            # Handle datetime normalization (datetime objects vs strings)
-            if isinstance(val1, datetime) and isinstance(val2, str):
-                if val1.isoformat() == val2 or val1.strftime("%Y-%m-%dT%H:%M:%S") == val2:
-                    continue
-            elif isinstance(val1, str) and isinstance(val2, datetime):
-                if val1 == val2.isoformat() or val1 == val2.strftime("%Y-%m-%dT%H:%M:%S"):
-                    continue
-            
-            # Direct comparison for other types
-            if val1 != val2:
-                warnings.warn(
-                    f"Value mismatch at path '{current_path}': {val1} != {val2}",
-                    UserWarning, stacklevel=2
-                )
-                return False
-        
-        return True
-
-    def _file_blueprint_data_match(self, partition_files: bool = False) -> bool:
-        """
-        Check if the POSTCONFIG blueprint from file matches the current blueprint configuration.
-        
-        Compares specific blueprint fields, grid dataset, and partitioned flags to determine
-        if the existing POSTCONFIG blueprint from file can be reused.
-        
-        Parameters
-        ----------
-        partition_files : bool, optional
-            Expected value for all partitioned flags. Defaults to False.
-        
-        Returns
-        -------
-        bool
-            True if the POSTCONFIG blueprint from file matches, False otherwise.
-        """
-        # Load POSTCONFIG blueprint from file (skip loading settings file)
-        postconfig_blueprint = self._load_blueprint_file(stage=BlueprintStage.POSTCONFIG, load_settings=False)
-        if postconfig_blueprint is None:
-            return False
-        
-        # Convert both blueprints to dictionaries for comparison
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', category=UserWarning, module='pydantic')
-            warnings.filterwarnings('ignore', message='.*Pydantic.*', category=UserWarning)
-            warnings.filterwarnings('ignore', message='.*serialization.*', category=UserWarning)
-            current_dict = self.blueprint.model_dump(mode='json')
-            file_dict = postconfig_blueprint.model_dump(mode='json')
-        
-        # Compare specific fields: name, description, valid_start_date, valid_end_date, partitioning, code
-        fields_to_compare = ['name', 'description', 'valid_start_date', 'valid_end_date', 'partitioning', 'code']
-        
-        def compare_dict_field(current_val: Any, file_val: Any, field_name: str, path: str = "") -> Tuple[bool, Optional[str]]:
-            """
-            Compare two values, handling dictionaries recursively.
-            
-            Returns (is_match, error_message)
-            """
-            # Handle None cases
-            if current_val is None and file_val is None:
-                return True, None
-            if current_val is None or file_val is None:
-                return False, f"One value is None: current={current_val}, file={file_val}"
-            
-            # For dictionaries, compare recursively
-            if isinstance(current_val, dict) and isinstance(file_val, dict):
-                # Check for missing or extra keys
-                current_keys = set(current_val.keys())
-                file_keys = set(file_val.keys())
-                
-                if current_keys != file_keys:
-                    missing = file_keys - current_keys
-                    extra = current_keys - file_keys
-                    msg_parts = []
-                    if missing:
-                        msg_parts.append(f"missing keys: {missing}")
-                    if extra:
-                        msg_parts.append(f"extra keys: {extra}")
-                    return False, f"Key mismatch: {', '.join(msg_parts)}"
-                
-                # Recursively compare all values
-                for key in current_keys:
-                    current_item = current_val[key]
-                    file_item = file_val[key]
-                    item_path = f"{path}.{key}" if path else key
-                    is_match, error_msg = compare_dict_field(current_item, file_item, field_name, item_path)
-                    if not is_match:
-                        return False, f"At {item_path}: {error_msg}"
-                
-                return True, None
-            
-            # For lists, compare element by element
-            if isinstance(current_val, list) and isinstance(file_val, list):
-                if len(current_val) != len(file_val):
-                    return False, f"List length mismatch: current={len(current_val)}, file={len(file_val)}"
-                for idx, (current_item, file_item) in enumerate(zip(current_val, file_val)):
-                    item_path = f"{path}[{idx}]" if path else f"[{idx}]"
-                    is_match, error_msg = compare_dict_field(current_item, file_item, field_name, item_path)
-                    if not is_match:
-                        return False, f"At {item_path}: {error_msg}"
-                return True, None
-            
-            # For other types, direct comparison
-            if current_val != file_val:
-                return False, f"Value mismatch: current={current_val}, file={file_val}"
-            
-            return True, None
-        
-        for field in fields_to_compare:
-            current_value = current_dict.get(field)
-            file_value = file_dict.get(field)
-            
-            is_match, error_msg = compare_dict_field(current_value, file_value, field)
-            if not is_match:
-                warnings.warn(
-                    f"Blueprint field '{field}' does not match POSTCONFIG blueprint from file. "
-                    f"{error_msg}",
-                    UserWarning,
-                    stacklevel=2
-                )
-                return False
-        
-        # Compare grid datasets (drop xi_coarse dimension from self.grid.ds before comparison)
-        # Extract grid dataset from POSTCONFIG blueprint
-        # Handle both Pydantic model and dict cases (model_construct may leave nested objects as dicts)
-        grid_obj = postconfig_blueprint.grid
-        if grid_obj:
-            # Get grid data - handle both Pydantic model and dict
-            if isinstance(grid_obj, dict):
-                grid_data = grid_obj.get("data")
-            else:
-                grid_data = grid_obj.data if hasattr(grid_obj, 'data') else None
-            
-            if grid_data:
-                # Get the first resource location from the grid data
-                grid_resource = grid_data[0] if isinstance(grid_data, list) and len(grid_data) > 0 else None
-                # Handle both Pydantic model and dict for resource
-                if grid_resource:
-                    if isinstance(grid_resource, dict):
-                        grid_location = grid_resource.get("location")
-                    else:
-                        grid_location = grid_resource.location if hasattr(grid_resource, 'location') else None
-                    
-                    if grid_location:
-                        try:
-                            # Load grid dataset from blueprint
-                            grid_location_str = str(grid_location)
-                            file_blueprint_grid_ds = xr.open_dataset(grid_location_str)
-                            
-                            # Prepare current grid dataset (drop xi_coarse if present)
-                            # This is a hack to get around the fact that the grid file has a 
-                            # xi_coarse dimension that is not supported by the patition_netcdf function.
-                            # https://github.com/CWorthy-ocean/roms-tools/issues/518
-                            current_grid_ds = self.grid.ds.copy()
-                            if "xi_coarse" in current_grid_ds.dims:
-                                current_grid_ds = current_grid_ds.drop_dims("xi_coarse")
-                            
-                            # Prepare blueprint grid dataset (drop xi_coarse if present)
-                            if "xi_coarse" in file_blueprint_grid_ds.dims:
-                                file_blueprint_grid_ds = file_blueprint_grid_ds.drop_dims("xi_coarse")
-                            
-                            # Compare datasets
-                            if not current_grid_ds.equals(file_blueprint_grid_ds):
-                                warnings.warn(
-                                    "Grid dataset does not match POSTCONFIG blueprint grid dataset.",
-                                    UserWarning,
-                                    stacklevel=2
-                                )
-                                file_blueprint_grid_ds.close()
-                                return False
-                            
-                            file_blueprint_grid_ds.close()
-                        except Exception as e:
-                            warnings.warn(
-                                f"Failed to compare grid datasets: {e}",
-                                UserWarning,
-                                stacklevel=2
-                            )
-                            return False
-        
-        # Find all instances of "partitioned" in "data" fields and ensure they all match partition_files
-        def extract_partitioned_flags(obj: Any) -> List[bool]:
-            """Recursively extract all partitioned flags from 'data' fields."""
-            partitioned_flags = []
-            
-            if obj is None:
-                return partitioned_flags
-            
-            # If it's a dict, check for "data" key and recurse
-            if isinstance(obj, dict):
-                # If this dict has a "data" key, extract partitioned flags from it
-                if "data" in obj:
-                    data_value = obj["data"]
-                    if isinstance(data_value, list):
-                        for item in data_value:
-                            if isinstance(item, dict) and "partitioned" in item:
-                                partitioned_flags.append(item["partitioned"])
-                    elif isinstance(data_value, dict) and "partitioned" in data_value:
-                        partitioned_flags.append(data_value["partitioned"])
-                # Recurse into all values to find nested "data" fields
-                for value in obj.values():
-                    partitioned_flags.extend(extract_partitioned_flags(value))
-                return partitioned_flags
-            
-            # If it's a list, recurse into items
-            if isinstance(obj, list):
-                for item in obj:
-                    partitioned_flags.extend(extract_partitioned_flags(item))
-                return partitioned_flags
-            
-            return partitioned_flags
-        
-        # Extract all partitioned flags from the POSTCONFIG blueprint
-        blueprint_partitioned_flags = extract_partitioned_flags(file_dict)
-        
-        # Check if all partitioned flags match partition_files
-        if blueprint_partitioned_flags:
-            mismatched_flags = [flag for flag in blueprint_partitioned_flags if flag != partition_files]
-            if mismatched_flags:
-                warnings.warn(
-                    f"Partitioned flags in POSTCONFIG blueprint do not match partition_files={partition_files}. "
-                    f"Found flags: {set(blueprint_partitioned_flags)}",
-                    UserWarning,
-                    stacklevel=2
-                )
-                return False
-        
-        return True
     
     def _load_blueprint_file(self, stage: Optional[str] = None, load_settings: bool = True) -> Optional[cstar_models.RomsMarblBlueprint]:
         """
@@ -1705,65 +1284,37 @@ class CstarSpecBuilder(BaseModel):
         use_dask: bool = True,
         partition_files: bool = False,
         test: bool = False,
-        prompt_if_files_exist: bool = True,
     ) -> cstar_models.RomsMarblBlueprint:
         """
         Generate ROMS input files and advance blueprint to POSTCONFIG stage.
-        
-        This method generates all required input files (grid, initial conditions,
-        forcing, etc.) and updates the blueprint with actual file locations.
-        
-        **Process:**
-        
-        1. Checks if existing POSTCONFIG blueprint matches current configuration
-        2. If not matching or `clobber=True`:
-           - Prepares source data if needed (calls `ensure_source_data()`)
-           - Generates all input files via `RomsMarblInputData.generate_all()`
-           - Updates settings dictionaries with input-specific values
-           - Updates blueprint with actual data file locations
-           - Sets `_stage` to POSTCONFIG
-           - Persists blueprint to disk
-        3. If matching blueprint exists:
-           - Loads existing blueprint from disk (skips regeneration)
-           
-        **Stage Transition:**
-        
-        - **Input:** Blueprint in PRECONFIG stage (placeholder data)
-        - **Output:** Blueprint in POSTCONFIG stage (actual data files)
-        
-        **Settings:**
-        
-        Settings dictionaries are updated with values generated during input
-        file creation (e.g., grid dimensions, file paths). These updates are
-        merged with existing settings to preserve user overrides.
+
+        Always regenerates the blueprint (and settings sidecar). Existing NetCDF files
+        are preserved and reused per-step when ``clobber=False``; pass ``clobber=True``
+        to delete and re-create them.
 
         Parameters
         ----------
         clobber : bool, optional
-            If True, overwrite existing input files even if blueprint matches.
-            Default is False.
+            If True, delete and regenerate existing NetCDF input files. Default False.
         use_dask : bool, optional
-            If True, use dask for parallel computations. Default is True.
+            Use dask for parallel computations. Default True.
         partition_files : bool, optional
-            If True, partition input files across tiles. Currently not implemented.
-            Default is False.
+            Partition input files across tiles. Currently not implemented.
         test : bool, optional
-            If True, truncate the generation loop after 2 iterations for testing.
-            Default is False.
-            
+            Truncate the generation loop after 2 iterations (for unit tests).
+
         Returns
         -------
         cstar_models.RomsMarblBlueprint
             The blueprint updated with all input file locations (POSTCONFIG stage).
-            
+
         Raises
         ------
         RuntimeError
             If blueprint is not initialized, or if settings are not initialized.
         NotImplementedError
-            If partition_files is True (functionality not yet implemented).
+            If partition_files is True.
         """
-        # Raise error if partition_files is True (functionality under development)
         if partition_files:
             raise NotImplementedError(
                 "File partitioning functionality is not yet fully implemented. "
@@ -1773,120 +1324,64 @@ class CstarSpecBuilder(BaseModel):
         if self.blueprint is None:
             raise RuntimeError("Blueprint must be initialized before generating inputs")
 
-        postconfig_path = self.path_blueprint(stage=BlueprintStage.POSTCONFIG)
-        force_regenerate = False
-        if postconfig_path.exists() and not clobber:
-            make_new_blueprint = self._prompt_yes_no(
-                f"POSTCONFIG blueprint already exists at {postconfig_path}. Create a new blueprint?"
-            ) if prompt_if_files_exist else False
-            if make_new_blueprint:
-                self._delete_blueprint_and_settings(postconfig_path)
-                force_regenerate = True
-            else:
-                existing_postconfig_blueprint = self._load_blueprint_file(
-                    stage=BlueprintStage.POSTCONFIG,
-                    load_settings=False,
-                )
-                if existing_postconfig_blueprint is not None:
-                    seen: set[Path] = set()
-                    missing_required: List[Path] = []
-                    for p in self._required_netcdf_paths_from_blueprint(
-                        existing_postconfig_blueprint
-                    ):
-                        canon = self._canonicalize_stored_input_netcdf_path(p).resolve()
-                        if canon in seen:
-                            continue
-                        seen.add(canon)
-                        if not canon.exists():
-                            missing_required.append(canon)
-                    if missing_required:
-                        print(
-                            "ℹ️  Existing POSTCONFIG blueprint references missing NetCDF files. "
-                            "Missing files will be generated:"
-                        )
-                        for missing_path in missing_required:
-                            print(f"  - {missing_path}")
-                        force_regenerate = True
+        # Ensure settings are initialized before generating inputs.
+        if not hasattr(self, '_settings_compile_time') or not self._settings_compile_time:
+            raise RuntimeError("_settings_compile_time is not initialized or is empty.")
+        if not hasattr(self, '_settings_run_time') or not self._settings_run_time:
+            raise RuntimeError("_settings_run_time is not initialized or is empty.")
 
-        if force_regenerate or not self._file_blueprint_data_match(partition_files=partition_files) or clobber:
-            # Ensure settings are initialized before generating inputs
-            # If settings are not present or empty, something has gone wrong
-            if not hasattr(self, '_settings_compile_time') or not self._settings_compile_time:
-                raise RuntimeError(
-                    "_settings_compile_time is not initialized or is empty. "
-                )
-            if not hasattr(self, '_settings_run_time') or not self._settings_run_time:
-                raise RuntimeError(
-                    "_settings_run_time is not initialized or is empty. "
-                )
-            
-            # Prepare source data if not already done
-            if self.src_data is None:
-                self.ensure_source_data(include_streamable=False)
-            
-            # Create inputs instance
-            blueprint_elements, settings_compile_time, settings_run_time = input_data.RomsMarblInputData(
-                domain_name=self.name,
-                start_date=self.start_date,
-                end_date=self.end_date,
-                input_data_dir_override=self.input_data_dir,
-                model_spec=self._model_spec,
-                grid=self.grid,
-                grid_parent=self.grid_parent,
-                grid_child=self.grid_child,
-                metadata_child=self.metadata_child,
-                boundaries=self.open_boundaries,
-                source_data=self.src_data,
-                forcing_override=self.forcing_override,
-                model_reference_date=self.model_reference_date,
-                blueprint_dir=self.blueprint_dir,
-                partitioning=self.partitioning,
-                cdr_forcing=self.cdr_forcing,
-                use_dask=use_dask,
-            ).generate_all(partition_files=partition_files, clobber=clobber, test=test)
-            
-            if blueprint_elements is None:
-                raise RuntimeError(
-                    "Blueprint mismatch detected, but input files exist. "
-                    "Set clobber=True to overwrite existing input files."
-                )
+        # Prepare source data if not already done.
+        if self.src_data is None:
+            self.ensure_source_data(include_streamable=False)
 
-           # Apply settings from input data generation (deep merge to preserve existing settings)
-            self._update_settings_compile_time(settings_compile_time)
-            self._update_settings_run_time(settings_run_time)
+        blueprint_elements, settings_compile_time, settings_run_time = input_data.RomsMarblInputData(
+            domain_name=self.name,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            input_data_dir_override=self.input_data_dir,
+            model_spec=self._model_spec,
+            grid=self.grid,
+            grid_parent=self.grid_parent,
+            grid_child=self.grid_child,
+            metadata_child=self.metadata_child,
+            boundaries=self.open_boundaries,
+            source_data=self.src_data,
+            forcing_override=self.forcing_override,
+            model_reference_date=self.model_reference_date,
+            blueprint_dir=self.blueprint_dir,
+            partitioning=self.partitioning,
+            cdr_forcing=self.cdr_forcing,
+            use_dask=use_dask,
+        ).generate_all(partition_files=partition_files, clobber=clobber, test=test)
 
-            if test:
-               return
+        if blueprint_elements is None:
+            raise RuntimeError(
+                "Blueprint mismatch detected, but input files exist. "
+                "Set clobber=True to overwrite existing input files."
+            )
 
-            # Map blueprint_elements to self.blueprint
-            # Update the blueprint with the generated input data
-            blueprint_dict = self.blueprint.model_dump()
-            blueprint_dict["grid"] = blueprint_elements.grid.model_dump() if blueprint_elements.grid else None
-            blueprint_dict["initial_conditions"] = blueprint_elements.initial_conditions.model_dump() if blueprint_elements.initial_conditions else None
-            blueprint_dict["forcing"] = blueprint_elements.forcing.model_dump() if blueprint_elements.forcing else None
-            blueprint_dict["cdr_forcing"] = blueprint_elements.cdr_forcing.model_dump() if blueprint_elements.cdr_forcing else None
-            blueprint_dict["nesting_info"] = blueprint_elements.nesting_info.model_dump() if blueprint_elements.nesting_info else None
-                    
-             
-            # TODO: Uncomment this when settings are implemented in the blueprint
-            # At present, we're using a sidecar file to store settings
-            # blueprint_dict["model_params"] = settings_compile_time
-            # blueprint_dict["runtime_params"] = settings_run_time
-            # Set to None since they're stored in sidecar files
-            blueprint_dict["model_params"] = None
-            blueprint_dict["runtime_params"] = None
+        # Apply settings from input data generation (deep merge to preserve existing settings).
+        self._update_settings_compile_time(settings_compile_time)
+        self._update_settings_run_time(settings_run_time)
 
-            self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_dict)
-            self._stage = BlueprintStage.POSTCONFIG
-            
-            # Persist blueprint to YAML file (skip in test mode)
-            self.persist()
-        else:            
-            # Use existing blueprint from file
-            print(f"ℹ️  Using existing blueprint from file: {self.path_blueprint(stage=BlueprintStage.POSTCONFIG).name}")
-            self.blueprint = self._load_blueprint_file(stage=BlueprintStage.POSTCONFIG, load_settings=True)
-            self._stage = BlueprintStage.POSTCONFIG
-        
+        if test:
+            return
+
+        # Update the blueprint with the generated input data.
+        blueprint_dict = self.blueprint.model_dump()
+        blueprint_dict["grid"] = blueprint_elements.grid.model_dump() if blueprint_elements.grid else None
+        blueprint_dict["initial_conditions"] = blueprint_elements.initial_conditions.model_dump() if blueprint_elements.initial_conditions else None
+        blueprint_dict["forcing"] = blueprint_elements.forcing.model_dump() if blueprint_elements.forcing else None
+        blueprint_dict["cdr_forcing"] = blueprint_elements.cdr_forcing.model_dump() if blueprint_elements.cdr_forcing else None
+        blueprint_dict["nesting_info"] = blueprint_elements.nesting_info.model_dump() if blueprint_elements.nesting_info else None
+
+        # Settings are stored in a sidecar YAML, not in the blueprint itself.
+        blueprint_dict["model_params"] = None
+        blueprint_dict["runtime_params"] = None
+
+        self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_dict)
+        self._stage = BlueprintStage.POSTCONFIG
+        self.persist()
         return self.blueprint
 
     def _merge_settings_override_file(self, path: Path, kind: str) -> None:
@@ -2213,22 +1708,6 @@ class CstarSpecBuilder(BaseModel):
             ninfo = 1,
         )
    
-    def register_domain(self) -> None:
-        """Register this builder's domain in the catalog.
-
-        Writes a ``DomainSpec/<grid_name>/Domain.yml`` file (and an empty
-        ``Assets/`` directory) into the catalog pointed to by ``catalog_root``,
-        recording ``grid_name``, ``model_name``, ``grid_kwargs``,
-        ``open_boundaries``, ``partitioning``, and date range from this builder.
-
-        Raises
-        ------
-        ValueError
-            If a valid catalog is not found at the resolved ``catalog_root``
-            (see ``initialize_catalog_from``).
-        """
-        self._get_catalog().register_domain(self)
-
     @classmethod
     def from_domain(
         cls,
@@ -2614,51 +2093,6 @@ class CstarSpecBuilder(BaseModel):
 
 
 
-    def set_blueprint_state(self, state: str) -> None:
-        """
-        Set the state of the blueprint.
-
-        Parameters
-        ----------
-        state : str
-            The new state for the blueprint. Must be a valid BlueprintState value from cstar.applications.roms_marbl.models.
-            Common values include "notset", "draft", "configured", "ready", etc.
-            See cstar_models.BlueprintState for the complete list of valid values.
-        
-        Raises
-        ------
-        ValueError
-            If blueprint is None or if state is not a valid BlueprintState value.
-        """
-        if self.blueprint is None:
-            raise ValueError("Cannot set state: blueprint is not initialized")
-        
-        # Validate state if BlueprintState is available
-        try:
-            from cstar.applications.roms_marbl.models import BlueprintState
-            # Try to validate the state value
-            if hasattr(BlueprintState, '__members__'):
-                valid_states = set(BlueprintState.__members__.values())
-                if state not in valid_states:
-                    raise ValueError(
-                        f"Invalid state '{state}'. Must be one of: {sorted(valid_states)}"
-                    )
-        except (ImportError, AttributeError):
-            # BlueprintState might not be available or might not be an enum
-            # In this case, we'll let Pydantic validation handle it
-            pass
-        
-        # Update blueprint with new state
-        # Use model_dump with exclude_none and mode='json' to handle placeholder values
-        with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', category=UserWarning, module='pydantic')
-            warnings.filterwarnings('ignore', message='.*Pydantic.*', category=UserWarning)
-            warnings.filterwarnings('ignore', message='.*serialization.*', category=UserWarning)
-            blueprint_dict = self.blueprint.model_dump(mode='json', exclude_none=True)
-        blueprint_dict["state"] = state
-        # Use model_construct to bypass validation for placeholder values
-        self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_dict)
-    
     def dump(self, file_path: Union[str, Path]) -> None:
         """
         Dump the exact state of CstarSpecBuilder to a YAML file.
