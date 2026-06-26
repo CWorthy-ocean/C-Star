@@ -352,12 +352,22 @@ class Workplan(BaseModel):
         value : list[Step]
             The steps in the workplan.
         """
-        name_counter = Counter(step.name for step in value)
-        most_common = name_counter.most_common(1)
-        step_name, step_count = most_common[0] if most_common else ("", 0)
+        # use a map to avoid generating safe names repeatedly
+        n2s = {s.name: s.safe_name for s in value}
 
-        if step_count > 1:
-            msg = f"Step names must be unique. Found {step_count} steps with name {step_name}"
+        # identify all steps that resolve to a given safe name
+        safe_name_map = {
+            n2s[s.name]: [x.name for x in value if n2s[x.name] == n2s[s.name]]
+            for s in value
+        }
+
+        if collisions := {k: v for k, v in safe_name_map.items() if len(v) > 1}:
+            line_errors: list[str] = []
+            for v in collisions.values():
+                names = ", ".join(f"{x!r}" for x in v)
+                line_errors.append(f"Name collision among: {names}.")
+
+            msg = f"Step names must be unique. {' '.join(line_errors)}"
             raise ValueError(msg)
 
         return value
