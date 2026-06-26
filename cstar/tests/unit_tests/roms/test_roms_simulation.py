@@ -432,11 +432,10 @@ class TestROMSSimulationInitialization:
         assert tested_settings.grid_settings.grdname == str(
             sim.model_grid.path_for_roms[0]
         )
-        assert tested_settings.initial_conditions.nrrec == 2
-        assert tested_settings.initial_conditions.ininame == str(
+        assert tested_settings.initial_conditions.inifile == str(
             sim.initial_conditions.path_for_roms[0]
         )
-        assert tested_settings.forcing_files.frcfile == [
+        assert tested_settings.forcing_files.frcfiles == [
             str(p) for p in sim._forcing_paths
         ]
 
