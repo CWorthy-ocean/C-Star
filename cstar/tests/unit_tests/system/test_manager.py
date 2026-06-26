@@ -5,16 +5,15 @@ from unittest.mock import patch
 
 import pytest
 
-from cstar.system.environment import CStarEnvironment
+from cstar.system.environment import CStarEnvironment, LmodEnvSettings
 from cstar.system.manager import (
     CStarSystemManager,
-    HostNameEvaluator,
-    _DerechoSystemContext,
-    _ExpanseSystemContext,
-    _LinuxSystemContext,
-    _MacOSSystemContext,
-    _PerlmutterSystemContext,
-    _SystemContext,
+    DerechoSystemContext,
+    ExpanseSystemContext,
+    LinuxSystemContext,
+    MacOSSystemContext,
+    PerlmutterSystemContext,
+    SystemContext,
 )
 
 
@@ -28,8 +27,8 @@ def mock_environment_vars() -> Generator[None, None, None]:
     with patch.dict(
         os.environ,
         {
-            HostNameEvaluator.ENV_LMOD_SYSHOST: "",
-            HostNameEvaluator.ENV_LMOD_SYSNAME: "Perlmutter",
+            LmodEnvSettings.variable("SYSHOST"): "",
+            LmodEnvSettings.variable("SYSTEM_NAME"): "Perlmutter",
         },
         clear=True,
     ) as _:
@@ -51,35 +50,35 @@ class TestEnvironmentProperty:
         ("system_ctx", "expected_attributes"),
         [
             (
-                _ExpanseSystemContext,
+                ExpanseSystemContext,
                 {
                     "mpi_exec_prefix": "srun --mpi=pmi2",
                     "compiler": "intel",
                 },
             ),
             (
-                _PerlmutterSystemContext,
+                PerlmutterSystemContext,
                 {
                     "mpi_exec_prefix": "srun",
                     "compiler": "gnu",
                 },
             ),
             (
-                _DerechoSystemContext,
+                DerechoSystemContext,
                 {
                     "mpi_exec_prefix": "mpirun",
                     "compiler": "intel",
                 },
             ),
             (
-                _MacOSSystemContext,
+                MacOSSystemContext,
                 {
                     "mpi_exec_prefix": "mpirun",
                     "compiler": "gnu",
                 },
             ),
             (
-                _LinuxSystemContext,
+                LinuxSystemContext,
                 {
                     "mpi_exec_prefix": "mpirun",
                     "compiler": "gnu",
@@ -89,13 +88,13 @@ class TestEnvironmentProperty:
     )
     def test_environment_initialization(
         self,
-        system_ctx: type[_SystemContext],
+        system_ctx: type[SystemContext],
         expected_attributes: dict[str, str],
     ) -> None:
         """Verify that environment attributes are correctly initialized."""
         mock_get_sys_ctx = mock.MagicMock(return_value=system_ctx())
 
-        with mock.patch("cstar.system.manager._get_system_context", mock_get_sys_ctx):
+        with mock.patch("cstar.system.manager.get_system_context", mock_get_sys_ctx):
             system = CStarSystemManager()
 
         environment = system.environment

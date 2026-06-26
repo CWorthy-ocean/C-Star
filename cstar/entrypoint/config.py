@@ -1,17 +1,13 @@
 import logging
-import os
 import typing as t
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
-from cstar.base.env import get_env_item
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import parse_log_level_name
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
-)
+from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.system.manager import cstar_sysmgr
 
 JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
 
@@ -106,25 +102,21 @@ def get_job_config() -> JobConfig:
     -------
     JobConfig
     """
-    account_id: str = get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
-    walltime: str = get_env_item(ENV_CSTAR_SLURM_MAX_WALLTIME).value
-    priority: str = get_env_item(ENV_CSTAR_SLURM_QUEUE).value
+    account_id: str = ""
+    walltime: str = ""
+    priority: str = ""
+
+    if cstar_sysmgr.environment.settings_klass:
+        system_env: EnvSettingsBase | None = None
+
+        try:
+            system_env = cstar_sysmgr.environment.settings_klass()
+            if system_env and isinstance(system_env, SlurmSettingsBase):
+                account_id = system_env.SLURM_ACCOUNT
+                walltime = system_env.SLURM_MAX_WALLTIME
+                priority = system_env.SLURM_QUEUE
+        except ValidationError as ex:
+            msg = "Environment settings for the system could not be loaded."
+            raise CstarExpectationFailed(msg) from ex
 
     return JobConfig(account_id=account_id, walltime=walltime, priority=priority)
-
-
-def configure_environment(log: logging.Logger) -> None:
-    """Configure the environment variables required by the worker.
-
-    Parameters
-    ----------
-    log : logging.Logger
-        A logger to log configuration details.
-
-    Returns
-    -------
-    None
-    """
-    # ensure git works on distributed file-system, e.g. lustre
-    os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] = "1"
-    log.debug("Git discovery across file-system enabled.")

@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.env import (
@@ -26,6 +26,8 @@ from cstar.orchestration.serialization import (
     intenum_representer,
     register_representer,
 )
+from cstar.system.environment import get_envfield_alias
+from cstar.system.manager import cstar_sysmgr
 
 nx = lazy_import("networkx")
 
@@ -550,8 +552,22 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
     @classmethod
     def check_preconditions(cls) -> None:
-        """Perform launcher-specific startup validation."""
-        ...
+        """Perform launcher-specific startup validation.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If an environment variable required by the launcher cannot be found.
+        """
+        if klass := cstar_sysmgr.environment.settings_klass:
+            try:
+                _ = klass()
+            except ValidationError as ex:
+                prefixed = ", ".join(
+                    get_envfield_alias(klass, str(x["loc"][0])) for x in ex.errors()
+                )
+                msg = f"Unable to load environment variables required by the system: {prefixed}"
+                raise CstarExpectationFailed(msg) from ex
 
     @classmethod
     async def launch(

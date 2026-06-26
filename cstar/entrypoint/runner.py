@@ -153,7 +153,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         """Handle a request to cancel the service."""
         self.add_state(
             ExecutionStatus.CANCELLED,
-            ["The service was terminated on demand"],
+            ["The service was terminated on demand. Shutting down..."],
         )
         super()._cancel()
 

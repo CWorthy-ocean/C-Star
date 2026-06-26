@@ -19,7 +19,6 @@ from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFa
 from cstar.entrypoint.config import (
     JobConfig,
     ServiceConfiguration,
-    configure_environment,
     get_job_config,
     get_service_config,
 )
@@ -328,44 +327,6 @@ def test_get_request(
     )
 
     assert config.blueprint_uri == blueprint_uri
-
-
-def test_configure_environment() -> None:
-    """Verify the environment side-effects are as expected."""
-    log = logging.getLogger()
-    logging.basicConfig(level=logging.DEBUG)
-
-    with mock.patch.dict(
-        os.environ,
-        {},
-        clear=True,
-    ):
-        configure_environment(log)
-
-        assert "GIT_DISCOVERY_ACROSS_FILESYSTEM" in os.environ
-        assert os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] == "1"
-
-
-def test_configure_environment_prebuilt() -> None:
-    """Verify the environment side-effects when in a prebuilt environment.
-
-    There shouldn't be behavioral changes compared to non-prebuilt environment.
-    """
-    log = logging.getLogger()
-    logging.basicConfig(level=logging.DEBUG)
-
-    with mock.patch.dict(
-        os.environ,
-        {
-            "CSTAR_ROMS_PREBUILT": "1",
-            "CSTAR_MARBL_PREBUILT": "1",
-        },
-        clear=True,
-    ):
-        configure_environment(log)
-
-        assert "GIT_DISCOVERY_ACROSS_FILESYSTEM" in os.environ
-        assert os.environ["GIT_DISCOVERY_ACROSS_FILESYSTEM"] == "1"
 
 
 def test_start_runner(

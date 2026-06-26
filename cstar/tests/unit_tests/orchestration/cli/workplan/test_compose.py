@@ -8,6 +8,7 @@ import pytest
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import SplitFrequency
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
@@ -24,6 +25,8 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
     get_run_id,
 )
+from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.system.manager import AnvilEnvSettings
 
 
 @pytest.mark.asyncio
@@ -146,16 +149,19 @@ async def test_compose_host_run_parameter(
 
 
 @pytest.mark.parametrize(
-    ("drop_var", "key"),
+    ("drop_var", "key", "settings_klass"),
     [
-        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT"),
-        (ENV_CSTAR_SLURM_QUEUE, "QUEUE"),
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", AnvilEnvSettings),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", AnvilEnvSettings),
     ],
 )
 @pytest.mark.asyncio
 async def test_build_and_run_dag_env(
     drop_var: str,
     key: str,
+    settings_klass: type[EnvSettingsBase],
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
@@ -209,7 +215,11 @@ async def test_build_and_run_dag_env(
         mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process),
         mock.patch("cstar.orchestration.dag_runner.cstar_sysmgr", mock_sys_manager),
         mock.patch.dict(os.environ, mock_env, clear=True),
-        pytest.raises(ValueError) as ex,
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            settings_klass,
+        ),
+        pytest.raises(CstarExpectationFailed) as ex,
     ):
         generated_wp_path = compose(
             wp_template_path.as_posix(),

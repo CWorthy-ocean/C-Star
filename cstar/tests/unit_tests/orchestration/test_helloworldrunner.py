@@ -23,6 +23,7 @@ from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_DELAYS,
+    ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
@@ -297,9 +298,9 @@ def test_hello_world_workplan_dry_run(
             color=False,
         )
 
-    assert result.exit_code == 0
     assert run_id in result.stdout
     assert "completed" in result.stdout
+    assert result.exit_code == 0
 
 
 @pytest.mark.usefixtures("prefect_server_url")
@@ -328,6 +329,7 @@ def test_heterogeneous_workplan(
     """
     runner = CliRunner()
     custom_env = {
+        ENV_CSTAR_SLURM_ACCOUNT: "abc123",
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
@@ -351,9 +353,9 @@ def test_heterogeneous_workplan(
             color=False,
         )
 
-    assert result.exit_code == 0
     assert run_id in result.stdout
     assert "completed" in result.stdout
+    assert result.exit_code == 0
 
 
 @pytest.mark.usefixtures("prefect_server_url")
@@ -393,5 +395,5 @@ def test_hw_runner_bp_only(
             color=False,
         )
 
-        assert result.exit_code == 0
         assert "Hello," in result.stdout
+        assert result.exit_code == 0
