@@ -157,6 +157,7 @@ Bug Fixes
 - Fix `cannot call asyncio.run on running event loop` failure from CLI tests (`#557 <https://github.com/CWorthy-ocean/C-Star/pull/557>`_)
 - Ensure `LMOD_SYSTEM_DEFAULT_MODULES` is set before manipulating modules (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
 - Fix bug in `Workplan._check_steps` that allows multiple steps to resolve to the same safe name. (`#561 <https://github.com/CWorthy-ocean/C-Star/pull/561>`_)
+- Fix regression in test mocks after entities were renamed. (`#564 <https://github.com/CWorthy-ocean/C-Star/pull/564>`_)
 
 Improvements
 ~~~~~~~~~~~~
