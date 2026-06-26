@@ -94,7 +94,7 @@ class TestEnvironmentProperty:
         """Verify that environment attributes are correctly initialized."""
         mock_get_sys_ctx = mock.MagicMock(return_value=system_ctx())
 
-        with mock.patch("cstar.system.manager._get_system_context", mock_get_sys_ctx):
+        with mock.patch("cstar.system.manager.get_system_context", mock_get_sys_ctx):
             system = CStarSystemManager()
 
         environment = system.environment

@@ -148,11 +148,11 @@ def test_partial_platform_fallback(
         patch("platform.system", return_value=system_name),
         patch("platform.machine", return_value=machine_name),
         patch(
-            "cstar.system.manager._EljaSystemContext.is_match",
+            "cstar.system.manager.EljaSystemContext.is_match",
             mock.MagicMock(return_value=False),
         ),
         patch(
-            "cstar.system.manager._AnvilSystemContext.is_match",
+            "cstar.system.manager.AnvilSystemContext.is_match",
             mock.MagicMock(return_value=False),
         ),
     ):
