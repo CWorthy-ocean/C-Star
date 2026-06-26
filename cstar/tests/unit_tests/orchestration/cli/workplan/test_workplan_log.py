@@ -79,3 +79,29 @@ def test_cli_workplan_log_step_with_logs(
         )
 
         assert f"{step.name} message" in result.stdout
+
+
+def test_cli_workplan_log_step_with_logs_via_slug(
+    executed_workplan_with_sideeffects: tuple[Path, Workplan, str],
+) -> None:
+    """Verify that logs are loaded successfully when a user passes the slugified
+    step name instead of the actual step name.
+
+    Parameters
+    ----------
+    executed_workplan_with_sideeffects : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    _, wp, fake_run_id = executed_workplan_with_sideeffects
+
+    runner = CliRunner()
+
+    for step in wp.steps:
+        result = runner.invoke(
+            app,
+            [fake_run_id, step.safe_name],
+            color=False,
+            catch_exceptions=False,
+        )
+
+        assert f"{step.name} message" in result.stdout
