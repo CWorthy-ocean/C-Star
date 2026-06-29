@@ -40,7 +40,7 @@ from cstar.entrypoint.utils import (
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import Blueprint, BlueprintMeta
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
 from cstar.system.migration import CStarMigrationNotRegisteredError
@@ -94,9 +94,9 @@ def path_callback(
                 except CStarMigrationNotRegisteredError:
                     log.info("Skipping schema migration; no registered adapters")
 
-            base_bp = deserialize(bp_path, Blueprint)
+            base_bp = deserialize(bp_path, BlueprintMeta)
             app = get_application(base_bp.application)
-            ctx.obj = app.blueprint(**base_bp.model_dump())
+            ctx.obj = deserialize(bp_path, app.blueprint)
             return str(bp_path)
 
     except FileNotFoundError as ex:

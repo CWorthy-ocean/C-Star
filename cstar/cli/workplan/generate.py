@@ -12,6 +12,7 @@ from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.utils import slugify
 from cstar.orchestration.models import (
     Blueprint,
+    BlueprintMeta,
     Step,
     Workplan,
     WorkplanState,
@@ -56,7 +57,7 @@ def _locate_blueprints(
 
     try:
         for file in files:
-            base_bp = deserialize(file, Blueprint)
+            base_bp = deserialize(file, BlueprintMeta)
 
             app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
                 get_application(base_bp.application)

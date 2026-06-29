@@ -60,7 +60,7 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(extra="allow", from_attributes=True)
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
     """Pydantic ConfigDict with options we want changed."""
 
 
@@ -151,6 +151,22 @@ class Application(StrEnum):
     """Application performing an upscaled simulation run."""
 
 
+class BlueprintMeta(BaseModel):
+    """Model used for metadata-only loading of blueprints"""
+
+    name: RequiredString
+    """A unique, user-friendly name for this blueprint."""
+
+    application: str
+    """The process type to be executed by the blueprint."""
+
+    schema_version: str = "1.0.0"
+    """The schema version for the document."""
+
+    model_config = ConfigDict(extra="allow", from_attributes=True)
+    """Configuration allowing extra field data."""
+
+
 class Blueprint(ConfiguredBaseModel, ABC):
     """Common elements of all blueprints."""
 
@@ -166,7 +182,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
-    schema_version: str = Field("1.0.0", frozen=True)
+    schema_version: str = "1.0.0"
     """The schema version for the document."""
 
     working_dir: TargetDirectoryPath = Path()
@@ -196,13 +212,15 @@ class Blueprint(ConfiguredBaseModel, ABC):
         info: "SerializationInfo",
     ) -> dict[str, t.Any]:
         data = handler(self)
-        return {
-            "$schema": generate_schema_ref(
-                self.application,
-                self.schema_version,
-            ),
-            **data,
-        }
+        if not info.exclude or "$schema" not in info.exclude:
+            return {
+                "$schema": generate_schema_ref(
+                    self.application,
+                    self.schema_version,
+                ),
+                **data,
+            }
+        return data
 
 
 class WorkplanState(StrEnum):
