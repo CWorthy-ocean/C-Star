@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import os
 import subprocess
 import textwrap
 import typing as t
@@ -10,7 +11,7 @@ from psutil import NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import PrivateAttr
 
-from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, get_env_item
+from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.orchestration.orchestration import (
@@ -213,6 +214,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 handle = LocalHandle(
                     pid=str(pid),
                     name=step.name,
+                    run_id=str(os.getenv(ENV_CSTAR_RUNID, "")),
                     start_at=create_time,
                     status=Status.Submitted,
                 )

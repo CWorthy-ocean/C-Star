@@ -99,6 +99,7 @@ async def layered_workplan(
             handle = LocalHandle(
                 pid=f"100{idx}",
                 name=step.name,
+                run_id=fake_run_id,
                 start_at=datetime.now(),
             )
             handles[step.name] = handle

@@ -202,7 +202,7 @@ class ProcessHandle(BaseModel):
     """The process identifier."""
     name: str
     """The name of the process."""
-    run_id: str = Field(default_factory=lambda: str(os.getenv(ENV_CSTAR_RUNID, "")))
+    run_id: str
     """The run-id the process was run under."""
     launcher_name: str = ""
     """The launcher used to launch the process."""
