@@ -20,7 +20,7 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
 )
 from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Blueprint, Step, Workplan
+from cstar.orchestration.models import Blueprint, BlueprintMeta, Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
     intenum_representer,
@@ -260,7 +260,7 @@ class LiveStep(Step):
     @property
     def blueprint(self) -> Blueprint:
         """Load and return the blueprint associated with this step."""
-        base_bp = deserialize(self.blueprint_path, Blueprint)
+        base_bp = deserialize(self.blueprint_path, BlueprintMeta)
         app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
             get_application(base_bp.application)
         )
