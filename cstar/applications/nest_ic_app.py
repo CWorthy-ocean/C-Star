@@ -38,7 +38,6 @@ class NestIcBlueprint(Blueprint):
     """Path to a netCDF file defining the parent grid attributes."""
     child_grid: Path
     """Path to a netCDF file defining the child grid attributes."""
-    output_dir: Path
 
 
 class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
@@ -129,7 +128,7 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             }
 
         fname = f"ic_from_parent_rst.{rst.formatted_timestamp}.nc"
-        path = Path(self.blueprint.output_dir).expanduser() / fname
+        path = Path(self.blueprint.working_dir).expanduser() / "output" / fname
         path.parent.mkdir(parents=True, exist_ok=True)
 
         ic = roms_tools.InitialConditions(**ic_kwargs)
