@@ -38,9 +38,29 @@ class TestExecutionHandlerUpdates:
         Confirms that `updates()` runs indefinitely when `seconds=0` and allows termination via user interruption.
     """
 
+    @pytest.mark.parametrize(
+        ("create_file", "exp_msg", "is_path_exp"),
+        [
+            (
+                False,
+                "produced no outputs",
+                False,
+            ),
+            (
+                True,
+                "Live updates will no longer be provided.",
+                False,
+            ),
+        ],
+    )
     @pytest.mark.asyncio
     async def test_updates_non_running_job(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
+        self,
+        create_file: bool,
+        exp_msg: str,
+        is_path_exp: bool,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ):
         """Validates that `updates()` provides appropriate feedback when the job is not
         running.
@@ -65,18 +85,19 @@ class TestExecutionHandlerUpdates:
           is `COMPLETED` or similar.
         """
         caplog.set_level(logging.WARNING)
-        handler = MockExecutionHandler(
-            ExecutionStatus.COMPLETED, tmp_path / "mock_output.log"
-        )
+        target_path = tmp_path / "mock_output.log"
+        if create_file:
+            target_path.touch()
 
-        await handler.updates(seconds=10)
+        handler = MockExecutionHandler(ExecutionStatus.COMPLETED, target_path)
+
+        await handler.updates(seconds=1)
 
         captured = caplog.text
-        assert (
-            "This job is currently not running (completed). Live updates cannot be provided."
-            in captured
-        )
-        assert f"See {handler.output_file.resolve()} for job output" in captured
+
+        assert exp_msg in captured
+        if is_path_exp:
+            assert str(handler.output_file.resolve()) in captured
 
     @pytest.mark.asyncio
     async def test_updates_running_job_with_tmp_file(
@@ -207,67 +228,105 @@ class TestExecutionHandlerUpdates:
                 assert "Live status updates stopped by user." in caplog.text
 
     @pytest.mark.asyncio
-    async def test_updates_stops_when_status_changes(
+    async def test_updates_forwards_tail_when_status_becomes_terminal(
         self, tmp_path, caplog: pytest.LogCaptureFixture
     ):
-        """Verifies that `updates()` stops execution when `status` changes to non-
-        RUNNING.
+        """Regression: when the job reaches a terminal state mid-stream, `updates()`
+        must forward the remaining output (the tail) before stopping, and must return
+        rather than loop forever.
 
-        This test ensures:
-        - The conditional block exits `updates` when `status` is not `RUNNING`.
-        - Only lines added while the job is `RUNNING` are streamed.
+        Previously the loop checked the status *before* logging the line it had just
+        read and returned immediately on a terminal status, dropping the final lines
+        of the ROMS log on exit.
 
         Fixtures
         --------
         caplog (pytest.LogCaptureFixture)
             Builtin fixture to capture log outputs
         """
-        # Create a temporary output file
         output_file = tmp_path / "output.log"
-        initial_content = ["First line\n"]
-        running_updates = ["Second line\n", "Third line\n"]
-        completed_updates = ["Fourth line\n", "Fifth line\n"]
-        # Write initial content to the file
+        # The process writes all of its output (including the final tail), then dies.
+        all_lines = [
+            "First line\n",
+            "Second line\n",
+            "Third line\n",
+            "Final crash message\n",
+        ]
         with output_file.open("w") as f:
-            f.writelines(initial_content)
+            f.writelines(all_lines)
 
-        # Initialize the handler with status `RUNNING`
         handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
         caplog.set_level(logging.INFO, logger=handler.log.name)
 
-        # Function to simulate appending live updates and changing status
-        def append_updates_and_change_status():
-            with output_file.open("a") as f:
-                for line in running_updates:
-                    time.sleep(0.1)  # Ensure updates() is actively reading
-                    f.write(line)
-                    f.flush()
+        # Flip to a terminal status shortly after `updates()` starts so the loop
+        # observes the transition. With seconds=0 the call would loop forever if the
+        # terminal transition were ignored, so returning on its own is part of the test.
+        def finish_job():
+            time.sleep(0.2)
+            handler._status = ExecutionStatus.FAILED
 
-                # Change the status to `COMPLETED` after writing running updates
-                time.sleep(0.2)
-                handler._status = ExecutionStatus.COMPLETED
-                for line in completed_updates:
-                    time.sleep(0.1)
-                    f.write(line)
-                    f.flush()
-
-        # Start the background thread to append updates and change status
-        updater_thread = threading.Thread(
-            target=append_updates_and_change_status, daemon=True
-        )
+        updater_thread = threading.Thread(target=finish_job, daemon=True)
         updater_thread.start()
 
-        await handler.updates(seconds=0)
+        await handler.updates(seconds=1)
 
-        # Verify that only lines from `running_updates` were printed
-        printed_calls = caplog.text
+        captured = caplog.text
+        for line in all_lines:
+            assert line.rstrip() in captured
 
-        for line in running_updates:
-            assert line in printed_calls
-
-        # Verify that lines from `completed_updates` were not printed
-        for line in completed_updates:
-            assert line not in printed_calls
-
-        # Ensure the thread finishes before the test ends
         updater_thread.join()
+
+    @pytest.mark.asyncio
+    async def test_updates_forwards_output_when_already_terminal(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ):
+        """Regression: if the job finished between polls (already terminal when
+        `updates()` is called), output not yet forwarded must still be logged rather
+        than replaced by only a 'see the file' message.
+
+        Fixtures
+        --------
+        caplog (pytest.LogCaptureFixture)
+            Builtin fixture to capture log outputs
+        """
+        output_file = tmp_path / "output.log"
+        lines = ["line A\n", "line B\n", "final line\n"]
+        with output_file.open("w") as f:
+            f.writelines(lines)
+
+        handler = MockExecutionHandler(ExecutionStatus.FAILED, output_file)
+        caplog.set_level(logging.INFO, logger=handler.log.name)
+
+        await handler.updates(seconds=1)
+
+        captured = caplog.text
+        # the remaining output (including the tail) is forwarded to the main log
+        for line in lines:
+            assert line.rstrip() in captured
+        # and the user is still pointed at the full output file
+        assert f"See {output_file.resolve()} for job output" in captured
+
+    @pytest.mark.asyncio
+    async def test_updates_does_not_duplicate_across_calls(
+        self, tmp_path, caplog: pytest.LogCaptureFixture
+    ):
+        """Verify that the tracked read position prevents the same lines from being
+        forwarded twice across successive `updates()` calls.
+        """
+        output_file = tmp_path / "output.log"
+        with output_file.open("w") as f:
+            f.writelines(["alpha\n", "beta\n"])
+
+        handler = MockExecutionHandler(ExecutionStatus.RUNNING, output_file)
+        caplog.set_level(logging.INFO, logger=handler.log.name)
+
+        # First poll forwards the two existing lines.
+        await handler.updates(seconds=0.2)
+        # Append one new line, then poll again.
+        with output_file.open("a") as f:
+            f.write("gamma\n")
+        await handler.updates(seconds=0.2)
+
+        assert caplog.text.count("alpha") == 1
+        assert caplog.text.count("beta") == 1
+        assert caplog.text.count("gamma") == 1
