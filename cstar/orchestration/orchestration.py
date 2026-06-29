@@ -425,7 +425,9 @@ class Planner(LoggingMixin):
     def store(self, n: str, key: t.Literal["step"], value: LiveStep) -> None: ...
 
     @t.overload
-    def store(self, n: str, key: t.Literal["task"], value: Task) -> None: ...
+    def store(
+        self, n: str, key: t.Literal["task"], value: Task[ProcessHandle]
+    ) -> None: ...
 
     def store(self, n: str, key: str, value: object) -> None:
         """Store an arbitrary attribute on a node in the plan.
@@ -467,8 +469,8 @@ class Planner(LoggingMixin):
         self,
         n: str,
         key: t.Literal["task"],
-        default: Task | None = None,
-    ) -> Task | None: ...
+        default: Task[ProcessHandle] | None = None,
+    ) -> Task[ProcessHandle] | None: ...
 
     def retrieve(
         self,
@@ -515,9 +517,9 @@ class Planner(LoggingMixin):
     def retrieve_all(
         self,
         key: t.Literal["task"],
-        default: Task[t.Any] | None = None,
-        filter_fn: Callable[[Task[t.Any]], bool] | None = None,
-    ) -> Mapping[str, Task[t.Any]]: ...
+        default: Task[ProcessHandle] | None = None,
+        filter_fn: Callable[[Task[ProcessHandle]], bool] | None = None,
+    ) -> Mapping[str, Task[ProcessHandle]]: ...
 
     def retrieve_all(
         self,
@@ -772,7 +774,7 @@ class Orchestrator(LoggingMixin):
 
         return [d.handle for d in running_deps]
 
-    async def process_node(self, node: str) -> Task | None:
+    async def process_node(self, node: str) -> Task[ProcessHandle] | None:
         """Execute a task.
 
         Parameters
@@ -814,7 +816,9 @@ class Orchestrator(LoggingMixin):
         self.planner.store(node, KEY_STATUS, task.status)
         return task
 
-    async def update_planner_state(self, n: str, task: Task | None) -> None:
+    async def update_planner_state(
+        self, n: str, task: Task[ProcessHandle] | None
+    ) -> None:
         """Update tracking information for the plan after starting a task or
         fetching an update.
 
@@ -870,7 +874,7 @@ class Orchestrator(LoggingMixin):
         postproc_tasks = [
             asyncio.Task(self.update_planner_state(n, t)) for n, t in kvp.items()
         ]
-        cancellations: list[Task] = list()
+        cancellations: list[Task[ProcessHandle]] = list()
 
         try:
             await asyncio.gather(*postproc_tasks)
@@ -884,7 +888,7 @@ class Orchestrator(LoggingMixin):
 
         return {k: v.status if v else Status.Unsubmitted for k, v in kvp.items()}
 
-    async def _cancel(self, cancellations: Iterable[Task]) -> None:
+    async def _cancel(self, cancellations: Iterable[Task[ProcessHandle]]) -> None:
         """Request the cancellation of running tasks.
 
         Parameters

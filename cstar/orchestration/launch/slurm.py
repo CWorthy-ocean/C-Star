@@ -262,7 +262,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             await state_repo.get_sentinel(step.name, SlurmHandle),
         )
         submit_fn = SlurmLauncher._submit
-        current_status = Status.Unsubmitted
 
         if prior_handle:
             # use persisted task as sentinel only; query SLURM for up-to-date status
@@ -285,8 +284,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                     # only keep dependencies that are not old/re-usable
                     active = set(x.pid for x in dependencies).difference(successes)
                     dependencies = list(filter(lambda x: x.pid in active, dependencies))
-            else:
-                current_status = last_status
 
         submitted = await submit_fn(step, dependencies)
         handle = t.cast("SlurmHandle", await SlurmLauncher.update_status(submitted))
@@ -294,7 +291,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return Task(
             step=step,
             handle=handle,
-            status=current_status,
         )
 
     @staticmethod
