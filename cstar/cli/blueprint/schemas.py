@@ -63,7 +63,9 @@ def generate_schema(
     app_name = schema["properties"]["application"]["default"]
     version = schema["properties"]["schema_version"]["default"] or "1.0.0"
     file_name = f"{app_name}_schema.{version}.json"
-    schema_path = output_dir / app_name / file_name
+    schema_dir = output_dir / app_name
+    schema_dir.mkdir(parents=True, exist_ok=True)
+    schema_path = schema_dir / file_name
 
     nbytes = schema_path.write_text(f"{content}\n")
     if not nbytes:
