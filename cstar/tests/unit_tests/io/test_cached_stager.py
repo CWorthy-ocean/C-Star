@@ -1,4 +1,5 @@
 import typing as t
+from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
 
@@ -11,7 +12,7 @@ if t.TYPE_CHECKING:
 
 
 @pytest.fixture
-def mock_home_dir(tmp_path: Path) -> t.Generator[t.Callable[[], Path], None, None]:
+def mock_home_dir(tmp_path: Path) -> Generator[Callable[[], Path], None, None]:
     """Fixture that replaces the default home directory with a temporary
     home directory.
     """

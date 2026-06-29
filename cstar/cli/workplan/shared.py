@@ -277,7 +277,7 @@ def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
 
     Returns
     -------
-    t.Mapping[str, str]
+    Mapping[str, str]
         The key-value pairs from the list converted into a mapping containing
         all unique key-value pairs
 

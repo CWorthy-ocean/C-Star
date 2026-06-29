@@ -105,7 +105,7 @@ def test_capture_kvps_happy_path(
     ----------
     entries : list[str]
         The list of items to parse
-    expected : t.Mapping[str, str]
+    expected : Mapping[str, str]
         The expected output
     """
     actual = check_and_capture_kvps(entries)
@@ -145,7 +145,7 @@ def test_capture_kvps_duplicate(
     ----------
     entries : list[str]
         The list of items to parse
-    expected : t.Mapping[str, str]
+    expected : Mapping[str, str]
         The expected output
     """
     with pytest.raises(typer.BadParameter, match="multiple"):
