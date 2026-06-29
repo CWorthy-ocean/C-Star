@@ -265,8 +265,8 @@ def test_serialization_workplan_steps_with_directives(
 )
 def test_serialization_handle(mode: PersistenceMode) -> None:
     """Verify that a task can be properly serialized to disk and reloaded."""
-    pid, job_name = "test-pid", "abc123"
-    handle = SlurmHandle(pid=pid, name=job_name)
+    pid, job_name, run_id = "test-pid", "abc123", "fake-run-id"
+    handle = SlurmHandle(pid=pid, name=job_name, run_id=run_id)
 
     persist_as = StateRepository.sentinel_path(handle, mode=mode)
 
@@ -290,6 +290,7 @@ def test_serialization_handle(mode: PersistenceMode) -> None:
 
     assert dhandle.name == handle.name
     assert dhandle.pid == handle.pid
+    assert dhandle.run_id == run_id
 
 
 def test_serializaton_json_schema(plotter_v2_0_0_bp: Path, tmp_path: Path) -> None:

@@ -653,6 +653,7 @@ async def executed_workplan_with_sideeffects(
         handle = LocalHandle(
             pid=f"100{i}",
             name=step.name,
+            run_id=fake_run_id,
             start_at=datetime.now(),
         )
 
