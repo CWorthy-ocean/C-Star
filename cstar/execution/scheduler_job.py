@@ -40,6 +40,7 @@ sacct_status_map = defaultdict(
         "CANCELLED": ExecutionStatus.CANCELLED,
         "FAILED": ExecutionStatus.FAILED,
         "TIMEOUT": ExecutionStatus.TIMEOUT,
+        "OUT_OF_MEMORY": ExecutionStatus.FAILED,
     },
 )
 """Map sacct states to ExecutionStatus enum."""

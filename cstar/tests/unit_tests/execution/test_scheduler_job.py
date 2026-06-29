@@ -892,6 +892,7 @@ async def test_get_slurm_batches() -> None:
         (ExecutionStatus.CANCELLED, "CANCELLED"),
         (ExecutionStatus.FAILED, "FAILED"),
         (ExecutionStatus.TIMEOUT, "TIMEOUT"),
+        (ExecutionStatus.FAILED, "OUT_OF_MEMORY"),
     ],
 )
 def test_get_slurm_batch_sync(exp_status: ExecutionStatus, raw_status: str) -> None:
