@@ -241,6 +241,7 @@ Improvements
 - Improved type-hinting (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
 - Replaced looping over single module loads with one call loading multiple modules (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
 - Workplan run summary includes paths to Workplan YAML files for review. (`#567 <https://github.com/CWorthy-ocean/C-Star/pull/567>`_)
+- Mitigate linter warnings in `orchestration.py` (`#565 <https://github.com/CWorthy-ocean/C-Star/pull/565>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
