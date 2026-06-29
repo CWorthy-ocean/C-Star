@@ -161,6 +161,7 @@ Bug Fixes
 - Fix missing raw status mapping to SLURM `TIMEOUT` (`#563 <https://github.com/CWorthy-ocean/C-Star/pull/563>`_)
 - Fix incorrect test harness data formatting resulting in unknown statuses in tests (`#563 <https://github.com/CWorthy-ocean/C-Star/pull/563>`_)
 - Fix failure to generate schemas for new applications with `cstar blueprint schemas` (`#566 <https://github.com/CWorthy-ocean/C-Star/pull/566>`_)
+- C-Star log stream should now more fully capture ROMS log stream (`#551 <https://github.com/CWorthy-ocean/C-Star/pull/551>`_)
 
 Improvements
 ~~~~~~~~~~~~
