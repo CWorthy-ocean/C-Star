@@ -162,6 +162,7 @@ Bug Fixes
 - Fix incorrect test harness data formatting resulting in unknown statuses in tests (`#563 <https://github.com/CWorthy-ocean/C-Star/pull/563>`_)
 - Fix failure to generate schemas for new applications with `cstar blueprint schemas` (`#566 <https://github.com/CWorthy-ocean/C-Star/pull/566>`_)
 - C-Star log stream should now more fully capture ROMS log stream (`#551 <https://github.com/CWorthy-ocean/C-Star/pull/551>`_)
+- Fix `SlurmHandle has no attribute run_id` bug (`#571 <https://github.com/CWorthy-ocean/C-Star/pull/571>`_)
 
 Improvements
 ~~~~~~~~~~~~
