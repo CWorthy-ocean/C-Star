@@ -622,9 +622,7 @@ def get_system_overrides(step: LiveStep) -> dict[str, t.Any]:
     LiveStep
         The transformed step.
     """
-    if step.application == "roms_marbl":
-        return {"working_dir": step.fsm.root_dir}
-    return {}
+    return {"working_dir": step.fsm.root_dir}
 
 
 def apply_automatic_overrides(step: LiveStep) -> LiveStep:

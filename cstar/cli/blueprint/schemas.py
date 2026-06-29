@@ -86,6 +86,8 @@ def all_applications() -> list[str]:
         "plotter",
         "roms_marbl",
         "hello_world",
+        "nest_ic",
+        "upscaler",
     ]
 
 

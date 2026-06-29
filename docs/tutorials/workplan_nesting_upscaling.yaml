@@ -1,0 +1,84 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
+name: example_workplan
+description: POC of nesting applications/directives
+state: draft
+
+steps:
+  - name: outer
+    application: roms_marbl
+    blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p5_down__8procs/B_cson_roms-marbl_v0.1_P0p5_down__8procs_build.yml
+
+  - name: nest_conversion
+    application: nest_ic
+    blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
+    depends_on:
+        - outer
+    blueprint_overrides:
+      parent_grid: "{{input_dir: outer}}/input_datasets/cson_roms-marbl_v0.1_P0p5_down__8procs_grid.nc"
+      parent_rst: "{{root_dir: outer}}/joined_output/output_rst.20100103000000.nc"
+      child_grid: "/Users/eilerman/cson-forge-data/input-data/cson_roms-marbl_v0.1_P0p25_down__8procs/cson_roms-marbl_v0.1_P0p25_down__8procs_grid.nc"
+
+
+  - name: middle
+    application: roms_marbl
+    blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p25_down__8procs/B_cson_roms-marbl_v0.1_P0p25_down__8procs_build.yml
+    depends_on:
+      - nest_conversion
+    directives:
+      nest-from:
+        rst_path: "{{root_dir: nest_conversion}}"
+        bry_path: "{{root_dir: outer}}/joined_output"
+
+  - name: nest_conversion2
+    application: nest_ic
+    blueprint: /Users/eilerman/git/C-Star/docs/tutorials/nest_ic_bp.yaml
+    depends_on:
+        - middle
+    blueprint_overrides:
+      parent_grid: "{{input_dir: middle}}/input_datasets/cson_roms-marbl_v0.1_P0p25_down__8procs_grid.nc"
+      parent_rst: "{{root_dir: middle}}/joined_output/output_rst.20100104000000.nc"
+      child_grid: "/Users/eilerman/cson-forge-data/input-data/cson_roms-marbl_v0.1_P0p125__16procs/cson_roms-marbl_v0.1_P0p125__16procs_grid.nc"
+
+  - name: inner
+    application: roms_marbl
+    blueprint: /Users/eilerman/cson-forge-data/catalog/blueprints/MacOS/cson_roms-marbl_v0.1_P0p125__16procs/B_cson_roms-marbl_v0.1_P0p125__16procs_build.yml
+    depends_on:
+      - nest_conversion2
+    directives:
+      nest-from:
+        rst_path: "{{root_dir: nest_conversion2}}"
+        bry_path: "{{root_dir: middle}}/joined_output"
+
+  - name: upscale_inner_mid
+    application: upscaler
+    blueprint:
+    depends_on:
+      - inner
+    directives:
+
+  - name: middle_up
+    application: roms_marbl
+    blueprint:
+    blueprint_overrides:
+      cdr_forcing:
+        - location: "{{output_dir: upscale_inner_mid}}"
+    directives:
+      continue-from:
+        ...
+
+  - name: upscale_mid_outer
+    application: upscaler
+    blueprint:
+    depends_on:
+      - middle_up
+    directives:
+
+  - name: middle_up
+    application: roms_marbl
+    blueprint:
+    blueprint_overrides:
+      cdr_forcing:
+        - location: "{{output_dir: upscale_mid_outer}}"
+    directives:
+      continue-from:
+        ...

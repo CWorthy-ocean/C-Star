@@ -359,6 +359,8 @@ async def prepare_workplan(
             wp_path, run_root_dir, suffix="", extension=".vars"
         )
         file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
+    else:
+        fill_transform = TemplateFillTransform(variable_resolver=None)
 
     transformer = WorkplanTransformer(
         wp_orig,

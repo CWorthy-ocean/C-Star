@@ -145,6 +145,10 @@ class Application(StrEnum):
     """Sample custom application."""
     PLOTTER = "plotter"
     """Demo plotting application."""
+    NEST_IC = "nest_ic"
+    """Application performing a nested simulation run."""
+    UPSCALER = "upscaler"
+    """Application performing an upscaled simulation run."""
 
 
 class Blueprint(ConfiguredBaseModel, ABC):

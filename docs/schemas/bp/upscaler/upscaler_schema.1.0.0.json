@@ -1,0 +1,65 @@
+{
+    "$defs": {
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        }
+    },
+    "additionalProperties": true,
+    "description": "A blueprint used to perform upscaling of a high resolution nested grid to a lower resolution parent grid.",
+    "properties": {
+        "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "upscaler",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset"
+        },
+        "schema_version": {
+            "default": "1.0.0",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "default": ".",
+            "format": "path",
+            "title": "Working Dir",
+            "type": "string"
+        },
+        "uscl_file_location": {
+            "title": "Uscl File Location",
+            "type": "string"
+        },
+        "output_dir": {
+            "format": "path",
+            "title": "Output Dir",
+            "type": "string"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "uscl_file_location",
+        "output_dir"
+    ],
+    "title": "UpscalerBlueprint",
+    "type": "object"
+}

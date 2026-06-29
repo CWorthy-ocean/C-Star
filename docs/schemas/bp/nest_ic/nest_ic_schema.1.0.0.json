@@ -1,0 +1,78 @@
+{
+    "$defs": {
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        }
+    },
+    "additionalProperties": true,
+    "description": "A blueprint for triggering a nested child simulation using the parent\nsimulation's outputs to generate initial conditions.",
+    "properties": {
+        "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "nest_ic",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset"
+        },
+        "schema_version": {
+            "default": "1.0.0",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "default": ".",
+            "format": "path",
+            "title": "Working Dir",
+            "type": "string"
+        },
+        "parent_rst": {
+            "format": "path",
+            "title": "Parent Rst",
+            "type": "string"
+        },
+        "parent_grid": {
+            "format": "path",
+            "title": "Parent Grid",
+            "type": "string"
+        },
+        "child_grid": {
+            "format": "path",
+            "title": "Child Grid",
+            "type": "string"
+        },
+        "output_dir": {
+            "format": "path",
+            "title": "Output Dir",
+            "type": "string"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "parent_rst",
+        "parent_grid",
+        "child_grid",
+        "output_dir"
+    ],
+    "title": "NestIcBlueprint",
+    "type": "object"
+}
