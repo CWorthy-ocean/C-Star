@@ -35,7 +35,7 @@ def _base_settings():
     rt["output_root_name"] = {"output_root_name": "/run/out"}
     rt["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
     rt["grid"] = {"grid_file": "/in/grid.nc"}
-    rt["initial"] = {"nrrec": 1, "initial_file": "/in/init.nc"}
+    rt["initial"] = {"initial_file": "/in/init.nc"}
     return rt
 
 
@@ -75,10 +75,10 @@ def test_core_groups_present(nml):
 def test_key_renames(nml):
     assert nml["s_coord"]["hc"] == 250.0                       # tcline -> hc
     assert nml["grid_settings"]["grdname"] == "/in/grid.nc"    # grid_file -> grdname
-    assert nml["initial_conditions"]["ininame"] == "/in/init.nc"  # initial_file -> ininame
+    assert nml["initial_conditions"]["inifile"] == "/in/init.nc"  # initial_file -> inifile
     assert nml["simulation_name_settings"]["title"] == "test_case"  # casename -> title
-    # blk_frc.interp_frc (0) -> interp_bulk_frc (logical False)
-    assert nml["bulk_frc_settings"]["interp_bulk_frc"] is False
+    # blk_frc.interp_frc (0) -> interp_bulk_frc (logical False) in merged surf_frc_settings
+    assert nml["surf_frc_settings"]["interp_bulk_frc"] is False
     # bgc.interp_frc (1) -> interp_bgc_frc (logical True); wrt_his -> wrt_bgc_his
     assert nml["bgc_settings"]["interp_bgc_frc"] is True
     assert nml["bgc_settings"]["wrt_bgc_his"] is False
@@ -104,7 +104,7 @@ def test_code_check_mode_in_stdout_diag_not_diagnostics(tmp_path):
 
 def test_calc_pflx_from_section(nml):
     assert nml["calc_pflx_settings"]["calc_pflx"] is True
-    assert nml["calc_pflx_settings"]["timescale"] == 86400.0
+    assert nml["calc_pflx_settings"]["pflx_timescale"] == 86400.0
 
 
 # ---------------------------------------------------------------------------
@@ -126,14 +126,14 @@ def test_per_tracer_arrays_expand_to_n_tracers(tmp_path):
 # ---------------------------------------------------------------------------
 def test_frcfile_canonical_order_non_none(nml):
     # surface, boundary, river set (surface_bgc/boundary_bgc/tidal left None)
-    assert nml["forcing_files"]["frcfile"] == [
+    assert nml["forcing_files"]["frcfiles"] == [
         "/in/surf.nc", "/in/bry.nc", "/in/river.nc"]
 
 
 def test_frcfile_omitted_when_all_none(tmp_path):
     rt = _base_settings()  # all forcing paths default to null
     nml = _write_and_read(tmp_path, rt)
-    assert "frcfile" not in nml["forcing_files"]
+    assert "frcfiles" not in nml["forcing_files"]
 
 
 # ---------------------------------------------------------------------------

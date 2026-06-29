@@ -9,7 +9,7 @@ namelist transform (``build_namelist``).
   IC file, s-coord, forcing paths, casename, output root) are ``Optional``.
 * :func:`build_namelist` transforms a validated ``RunTimeSettings`` into a
   :class:`cstar.roms.namelist.RomsNamelist` (renames via ``serialization_alias``,
-  cross-section regrouping, scalar → per-tracer-array expansion, ``frcfile``
+  cross-section regrouping, scalar → per-tracer-array expansion, ``frcfiles``
   assembly), reading typed fields — no ``bool()/int()/float()/str()`` coercion.
 
 The namelist schema itself — ``RomsNamelist`` and its 40 ``&group`` models —
@@ -27,15 +27,15 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from cstar.roms.namelist import (
     RomsNamelist,
     SimulationNameSettings, TimeStepping, GridSettings, SCoord, ParamSettings,
-    InitialConditions, ForcingFiles, BulkFrcSettings, FluxFrcSettings,
-    RiverFrcSettings, TidesSettings, BasicOutputSettings, TsOutputSettings,
+    InitialConditions, ForcingFiles, SurfFrcSettings,
+    RiverFrcSettings, TidalFrcSettings, BasicOutputSettings, TsOutputSettings,
     FrcOutputSettings, ExtractDataSettings, SpongeTuneSettings, CalcPflxSettings,
     ZsliceSettings, BgcSettings, MarblBiogeochemistrySettings, CdrFrcSettings,
     CdrOutputSettings, UpscaleSettings, LinRhoEosSettings, Rho0Settings,
     Gamma2Settings, TracerDiff2, BottomDragSettings, VerticalMixingSettings,
     LateralViscSettings, UbindSettings, VSpongeSettings, SssCorrection,
     SstCorrection, DiagnosticsSettings, StdoutDiagSettings, RandomOutputSettings,
-    SurfFlxSettings, PipeFrcSettings, ParticlesSettings,
+    SurfFlxOutputSettings, PipeFrcSettings, ParticlesSettings,
 )
 
 def _coerce_pathlike(v):
@@ -97,18 +97,15 @@ class SCoordCfg(_SettingsSection):
 class ParamCfg(_SettingsSection):
     llm: int
     mmm: int
-    n: int
+    n: int = Field(serialization_alias="nz")
     np_xi: int
     np_eta: int
-    nsub_x: int
-    nsub_e: int
     nt_passive: int
-    ntrc_bio: int
+    ntrc_bio: int = Field(serialization_alias="nt_bgc")
 
 
 class InitialCfg(_SettingsSection):
-    nrrec: int
-    initial_file: PathStr = Field(default=None, serialization_alias="ininame")  # set from generated IC
+    initial_file: PathStr = Field(default=None, serialization_alias="inifile")  # set from generated IC
 
 
 class ForcingCfg(_SettingsSection):
@@ -191,8 +188,8 @@ class TsOutputCfg(_SettingsSection):
 class FrcOutputCfg(_SettingsSection):
     wrt_frc: bool
     wrt_frc_avg: bool
-    output_period: float
-    nrpf: int
+    output_period: float = Field(serialization_alias="output_period_frc")
+    nrpf: int = Field(serialization_alias="nrpf_frc")
 
 
 class ExtractDataCfg(_SettingsSection):
@@ -203,63 +200,63 @@ class ExtractDataCfg(_SettingsSection):
     theta_s_chd: float
     theta_b_chd: float
     hc_chd: float
-    extract_period: float
+    extract_period: float = Field(serialization_alias="output_period_extract")
 
 
 class SpongeTuneCfg(_SettingsSection):
     ub_tune: bool
-    spn_avg: bool
-    sp_timscale: float
+    spn_avg: bool = Field(serialization_alias="sponge_avg")
+    sp_timscale: float = Field(serialization_alias="sponge_timescale")
     wrt_sponge: bool
-    nrpf: int
-    output_period: float
+    nrpf: int = Field(serialization_alias="nrpf_sponge")
+    output_period: float = Field(serialization_alias="output_period_sponge")
 
 
 class CalcPflxCfg(_SettingsSection):
     calc_pflx: bool
-    timescale: float
+    timescale: float = Field(serialization_alias="pflx_timescale")
 
 
 class ZsliceCfg(_SettingsSection):
     do_zslice: bool
     zslice_avg: bool
-    wrt_t_zsl: bool
-    wrt_u_zsl: bool
-    wrt_v_zsl: bool
-    output_period: float
-    nrpf: int
+    wrt_t_zsl: bool = Field(serialization_alias="wrt_t_zslice")
+    wrt_u_zsl: bool = Field(serialization_alias="wrt_u_zslice")
+    wrt_v_zsl: bool = Field(serialization_alias="wrt_v_zslice")
+    output_period: float = Field(serialization_alias="output_period_zslice")
+    nrpf: int = Field(serialization_alias="nrpf_zslice")
     ndep: int
     vecdep: List[float]
-    nt_z: int
+    nt_z: int = Field(serialization_alias="nt_zslice")
     trc2zsc: List[int]
 
 
 class BgcCfg(_SettingsSection):
     interp_frc: bool = Field(serialization_alias="interp_bgc_frc")
     wrt_his: bool = Field(serialization_alias="wrt_bgc_his")
-    output_period_his: float
-    nrpf_his: int
+    output_period_his: float = Field(serialization_alias="output_period_bgc_his")
+    nrpf_his: int = Field(serialization_alias="nrpf_bgc_his")
     wrt_avg: bool = Field(serialization_alias="wrt_bgc_avg")
-    output_period_avg: float
-    nrpf_avg: int
+    output_period_avg: float = Field(serialization_alias="output_period_bgc_avg")
+    nrpf_avg: int = Field(serialization_alias="nrpf_bgc_avg")
     wrt_his_dia: bool = Field(serialization_alias="wrt_bgc_dia_his")
-    output_period_his_dia: float
-    nrpf_his_dia: int
+    output_period_his_dia: float = Field(serialization_alias="output_period_bgc_his_dia")
+    nrpf_his_dia: int = Field(serialization_alias="nrpf_bgc_his_dia")
     wrt_avg_dia: bool = Field(serialization_alias="wrt_bgc_dia_avg")
-    output_period_avg_dia: float
-    nrpf_avg_dia: int
+    output_period_avg_dia: float = Field(serialization_alias="output_period_bgc_avg_dia")
+    nrpf_avg_dia: int = Field(serialization_alias="nrpf_bgc_avg_dia")
 
 
 class CdrFrcCfg(_SettingsSection):
     cdr_source: bool
     cdr_file: str
-    ncdr_parm: int
-    nz_chd: int
-    forcing_depth_profiles: bool
-    forcing_3d: bool
-    forcing_parameterized: bool
-    time_interpolation: bool
-    relocate_to_wet_pts: bool
+    ncdr_parm: int = Field(serialization_alias="cdr_ncdr_parm")
+    nz_chd: int = Field(serialization_alias="cdr_nz_chd")
+    forcing_depth_profiles: bool = Field(serialization_alias="cdr_forcing_depth_profiles")
+    forcing_3d: bool = Field(serialization_alias="cdr_forcing_3d")
+    forcing_parameterized: bool = Field(serialization_alias="cdr_forcing_parameterized")
+    time_interpolation: bool = Field(serialization_alias="cdr_time_interpolation")
+    relocate_to_wet_pts: bool = Field(serialization_alias="cdr_relocate_to_wet_pts")
     cdr_volume: bool
 
 
@@ -267,8 +264,8 @@ class CdrOutputCfg(_SettingsSection):
     do_cdr: bool = Field(serialization_alias="do_cdr_output")
     do_avg: bool = Field(serialization_alias="wrt_cdr_avg")
     monthly_averages: bool = Field(serialization_alias="cdr_monthly_averages")
-    output_period: float
-    nrpf: int
+    output_period: float = Field(serialization_alias="output_period_cdr")
+    nrpf: int = Field(serialization_alias="nrpf_cdr")
 
 
 class UpscaleOutputCfg(_SettingsSection):
@@ -294,8 +291,8 @@ class SstCorrectionCfg(_SettingsSection):
 
 class DiagnosticsCfg(_SettingsSection):
     diag_avg: bool
-    output_period: float
-    nrpf: int
+    output_period: float = Field(serialization_alias="output_period_diag")
+    nrpf: int = Field(serialization_alias="nrpf_diag")
     diag_uv: bool
     diag_trc: bool
 
@@ -306,8 +303,8 @@ class StdoutDiagCfg(_SettingsSection):
 
 class RandomOutputCfg(_SettingsSection):
     do_random: bool
-    output_period: float
-    nrpf: int
+    output_period: float = Field(serialization_alias="output_period_random")
+    nrpf: int = Field(serialization_alias="nrpf_random")
 
 
 class SurfFluxCfg(_SettingsSection):
@@ -315,8 +312,8 @@ class SurfFluxCfg(_SettingsSection):
     wrt_stflx: bool
     wrt_swflx: bool
     sflx_avg: bool
-    output_period: float
-    nrpf: int
+    output_period: float = Field(serialization_alias="output_period_sflx")
+    nrpf: int = Field(serialization_alias="nrpf_sflx")
 
 
 class PipeFrcCfg(_SettingsSection):
@@ -366,7 +363,7 @@ class MarblBgcCfg(_SettingsSection):
     marbl_config_file: str
     marbl_tracers_to_write: Union[List[str], str]
     marbl_diagnostics_to_write: Union[List[str], str]
-    marbl_timestep_ratio: int
+    marbl_timestep: float
 
 
 class RunTimeSettings(_SettingsSection):
@@ -417,7 +414,7 @@ class RunTimeSettings(_SettingsSection):
     marbl_bgc: MarblBgcCfg
 
 
-# Canonical forcing order -> frcfile (matches write_roms_namelist).
+# Canonical forcing order -> frcfiles (matches write_roms_namelist).
 _FORCING_ORDER = (
     "surface_forcing_path", "surface_forcing_bgc_path",
     "boundary_forcing_path", "boundary_forcing_bgc_path",
@@ -432,7 +429,7 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
     — the ``serialization_alias`` on each renamed settings field supplies the
     namelist name, and case-only keys were lowercased in both vocabularies. The
     only explicit logic left is genuinely structural: the title/output-root
-    regroup, the frcfile assembly, the scalar -> per-tracer-array expansion, and
+    regroup, the frcfiles assembly, the scalar -> per-tracer-array expansion, and
     the cross-section read of ``rho0`` from ``lateral_visc``. ``exclude=`` drops
     the settings-only fields with no namelist counterpart.
     """
@@ -447,7 +444,7 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         simulation_name_settings=SimulationNameSettings(
             output_root_name=rt.output_root_name.output_root_name,
             title=rt.title.casename),                              # regroup; casename -> title
-        forcing_files=ForcingFiles(frcfile=frc),                  # 6 *_path -> frcfile list
+        forcing_files=ForcingFiles(frcfiles=frc),                  # 6 *_path -> frcfiles list
         tracer_diff2=TracerDiff2(tnu2=[rt.tracer_diff2.tnu2_default] * n_tracers),
         vertical_mixing_settings=VerticalMixingSettings(
             akv_bak=rt.vertical_mixing.akv,                       # akv -> akv_bak
@@ -460,16 +457,15 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
             **rt.ocean_vars.model_dump(by_alias=True)),
         lateral_visc_settings=LateralViscSettings(
             **rt.lateral_visc.model_dump(by_alias=True, exclude={"rho0"})),
+        surf_frc_settings=SurfFrcSettings(**{**grp(rt.blk_frc), **grp(rt.flux_frc)}),
         # ---- 1:1 groups (aliases handle the renames) ----
         time_stepping=TimeStepping(**grp(rt.time_stepping)),
         grid_settings=GridSettings(**grp(rt.grid)),
         s_coord=SCoord(**grp(rt.s_coord)),
         param_settings=ParamSettings(**grp(rt.param)),
         initial_conditions=InitialConditions(**grp(rt.initial)),
-        bulk_frc_settings=BulkFrcSettings(**grp(rt.blk_frc)),
-        flux_frc_settings=FluxFrcSettings(**grp(rt.flux_frc)),
         river_frc_settings=RiverFrcSettings(**grp(rt.river_frc)),
-        tides_settings=TidesSettings(**grp(rt.tides)),
+        tidal_frc_settings=TidalFrcSettings(**grp(rt.tides)),
         ts_output_settings=TsOutputSettings(**grp(rt.ts_output)),
         frc_output_settings=FrcOutputSettings(**grp(rt.frc_output)),
         extract_data_settings=ExtractDataSettings(**grp(rt.extract_data)),
@@ -487,7 +483,7 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         sst_correction=SstCorrection(**grp(rt.sst_correction)),
         stdout_diag_settings=StdoutDiagSettings(**grp(rt.stdout_diag)),
         random_output_settings=RandomOutputSettings(**grp(rt.random_output)),
-        surf_flx_settings=SurfFlxSettings(**grp(rt.surf_flux)),
+        surf_flx_output_settings=SurfFlxOutputSettings(**grp(rt.surf_flux)),
         pipe_frc_settings=PipeFrcSettings(**grp(rt.pipe_frc)),
         particles_settings=ParticlesSettings(**grp(rt.particles)),
         v_sponge_settings=VSpongeSettings(**grp(rt.v_sponge)),

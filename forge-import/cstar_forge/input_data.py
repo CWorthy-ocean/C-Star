@@ -658,8 +658,6 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["param"]["n"] = self.grid.N
         self._settings_run_time["param"]["np_xi"] = self.partitioning.n_procs_x
         self._settings_run_time["param"]["np_eta"] = self.partitioning.n_procs_y
-        self._settings_run_time["param"]["nsub_x"] = 1
-        self._settings_run_time["param"]["nsub_e"] = 1
 
         if out_path_nesting is not None:
             if "extract_data" not in self._settings_run_time:
@@ -717,7 +715,6 @@ class RomsMarblInputData(InputData):
             self.blueprint_elements.initial_conditions.data.append(resource)
 
         self._settings_run_time["initial"] = dict(
-            nrrec = 1,
             initial_file = paths[0],
         )
     

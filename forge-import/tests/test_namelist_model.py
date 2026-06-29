@@ -27,7 +27,7 @@ def _populated_rt_dict():
     rt["output_root_name"] = {"output_root_name": "/run/out"}
     rt["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
     rt["grid"] = {"grid_file": "/in/grid.nc"}
-    rt["initial"] = {"nrrec": 1, "initial_file": "/in/init.nc"}
+    rt["initial"] = {"initial_file": "/in/init.nc"}
     rt["forcing"]["surface_forcing_path"] = "/in/surf.nc"
     rt["forcing"]["boundary_forcing_path"] = "/in/bry.nc"
     rt["forcing"]["river_path"] = "/in/river.nc"
@@ -65,7 +65,7 @@ def test_path_objects_coerced_to_str():
     assert rt.forcing.surface_forcing_path == "/in/surf.nc"
     nml = build_namelist(rt, n_tracers=34)
     assert nml.grid_settings.grdname == "/in/grid.nc"
-    assert "/in/surf.nc" in nml.forcing_files.frcfile
+    assert "/in/surf.nc" in nml.forcing_files.frcfiles
 
 
 def test_incomplete_modelspec_fails_loudly():
@@ -97,7 +97,7 @@ def test_transform_correctness():
     assert nml.param_settings.np_xi == 16                       # lowercased in YAML + model
     assert nml.river_frc_settings.river_analytical is False     # analytical -> river_analytical
     assert nml.tracer_diff2.tnu2 == [0.0] * 5                   # scalar -> array
-    assert nml.forcing_files.frcfile == ["/in/surf.nc", "/in/bry.nc", "/in/river.nc"]
+    assert nml.forcing_files.frcfiles == ["/in/surf.nc", "/in/bry.nc", "/in/river.nc"]
 
 
 def test_read_edit_write(tmp_path):
@@ -142,5 +142,5 @@ def test_model_reads_production_namelist(tmp_path):
     write_roms_namelist(settings_run_time=_populated_rt_dict(),
                         output_dir=tmp_path, n_tracers=34)
     nml = RomsNamelist.read(tmp_path / "namelist.nml")   # would raise if a group/key is unmodeled
-    assert nml.param_settings.ntrc_bio == 32
+    assert nml.param_settings.nt_bgc == 32
     assert nml.particles_settings.np == 50

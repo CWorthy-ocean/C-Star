@@ -57,7 +57,6 @@ gamma2: 1.0  # Slipperiness parameter
 ubind: 0.1  # m/s, OBC binding velocity scale
 
 initial:
-  nrrec: 2
   initial_file: null  # Set dynamically from generated initial conditions file
 
 # ---------------------------------------------------------------------------
@@ -70,8 +69,6 @@ param:
   n: 60
   np_xi: 16
   np_eta: 16
-  nsub_x: 1
-  nsub_e: 1
   nt_passive: 0
   ntrc_bio: 32
 
@@ -322,4 +319,4 @@ marbl_bgc:
     - pCO2SURF
     - FG_CO2
     - FG_ALT_CO2
-  marbl_timestep_ratio: 1
+  marbl_timestep: 3600.0

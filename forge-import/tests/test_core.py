@@ -238,7 +238,7 @@ def mock_model_spec():
     # grid/initial/forcing paths are pathlib.Path objects in practice (input
     # generation fills them with Path, not str) — mirror that here.
     _rt_defaults["grid"] = {"grid_file": Path("/tmp/test_grid.nc")}
-    _rt_defaults["initial"] = {"nrrec": 1, "initial_file": Path("/tmp/test_init.nc")}
+    _rt_defaults["initial"] = {"initial_file": Path("/tmp/test_init.nc")}
     _rt_defaults["forcing"]["surface_forcing_path"] = Path("/tmp/test_surface.nc")
     _rt_defaults["forcing"]["river_path"] = Path("/tmp/test_river.nc")
     _rt_defaults["output_root_name"] = {"output_root_name": "/tmp/test_out"}
