@@ -160,6 +160,7 @@ Bug Fixes
 - Fix regression in test mocks after entities were renamed. (`#564 <https://github.com/CWorthy-ocean/C-Star/pull/564>`_)
 - Fix missing raw status mapping to SLURM `TIMEOUT` (`#563 <https://github.com/CWorthy-ocean/C-Star/pull/563>`_)
 - Fix incorrect test harness data formatting resulting in unknown statuses in tests (`#563 <https://github.com/CWorthy-ocean/C-Star/pull/563>`_)
+- Fix failure to generate schemas for new applications with `cstar blueprint schemas` (`#566 <https://github.com/CWorthy-ocean/C-Star/pull/566>`_)
 
 Improvements
 ~~~~~~~~~~~~
