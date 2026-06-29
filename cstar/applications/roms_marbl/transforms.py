@@ -235,6 +235,9 @@ class RestartFile(BaseModel):
         """
         search_path = search_path.expanduser().resolve()
 
+        if search_path.is_file():
+            return RestartFile(path=search_path)
+
         if not search_path.exists():
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
