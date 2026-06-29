@@ -80,6 +80,9 @@ New features
 - Setting `CSTAR_FF_DEBUG_BUILD_MODE=1` results in `ROMS` build in debug mode (`#553 <https://github.com/CWorthy-ocean/C-Star/pull/553>`_)
 - Inject per-system settings class into `CStarEnvironment` for customized behaviors. (`#555 <https://github.com/CWorthy-ocean/C-Star/pull/555>`_)
 - Add environment support for Elja HPC (`#545 <https://github.com/CWorthy-ocean/C-Star/pull/545>`_)
+- Add new `nest_ic` application for creating initial conditions of a child domain based on a restart file of the parent domain (`#528 <https://github.com/CWorthy-ocean/C-Star/pull/528>`_)
+- Add new `upscaler` application for generating CDR forcing based on .uscl outputs from an inner domain (`#528 <https://github.com/CWorthy-ocean/C-Star/pull/528>`_)
+- Add `nest_from` directive for modifying blueprints to receive IC and boundary files from previous steps (`#528 <https://github.com/CWorthy-ocean/C-Star/pull/528>`_)
 
 Security Fixes
 ~~~~~~~~~~~~~~
