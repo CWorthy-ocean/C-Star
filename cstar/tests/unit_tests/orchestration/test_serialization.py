@@ -266,7 +266,7 @@ def test_serialization_workplan_steps_with_directives(
 def test_serialization_handle(mode: PersistenceMode) -> None:
     """Verify that a task can be properly serialized to disk and reloaded."""
     pid, job_name = "test-pid", "abc123"
-    handle = SlurmHandle(pid=pid, name=job_name)
+    handle = SlurmHandle(pid=pid, name=job_name, run_id="test-run-id")
 
     persist_as = StateRepository.sentinel_path(handle, mode=mode)
 
