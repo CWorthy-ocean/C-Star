@@ -223,6 +223,8 @@ def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
                 {prefix}{run_header}
                 {prefix}{run_underline}
                 {prefix}{INDENT}- {_runft("run_id")}: {colored(summary.run_id, ATTR_COLOR)}
+                {prefix}{INDENT}- {_runft("source_workplan")}: {summary.source_workplan}
+                {prefix}{INDENT}- {_runft("final_workplan")}: {summary.final_workplan}
                 {prefix}{INDENT}- {_runft("state_dir")}: {summary.state_dir}
                 {prefix}
                 {prefix}{section_header_steps}
@@ -469,7 +471,7 @@ def run(
         raise typer.Exit(3) from ex
 
     console.print(
-        f"{summary.workplan_name!r} {'dry-run' if dry_run else 'run'} scheduling has completed"
+        f"{summary.workplan_name!r} {'dry-run' if dry_run else 'run scheduling'} has completed"
     )
 
 

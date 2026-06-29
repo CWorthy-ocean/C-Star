@@ -446,6 +446,16 @@ class ExecutiveRunSummary(BaseModel):
         title="Workplan name",
     )
     """The run-id associated with the run being summarized."""
+    source_workplan: str = Field(
+        description="The path to the original, unmodified workplan.",
+        title="Original workplan",
+    )
+    """The path to the original, unmodified workplan."""
+    final_workplan: str = Field(
+        description="The path to the transformed, ready-to-run workplan.",
+        title="Runnable workplan",
+    )
+    """The path to the transformed, ready-to-run workplan."""
     steps: list[ExecutiveStepSummary] = Field(
         default_factory=list[ExecutiveStepSummary],
         description="An executive summary for each step in the run.",
@@ -503,6 +513,8 @@ class ExecutiveRunSummary(BaseModel):
         return ExecutiveRunSummary(
             run_id=run.run_id,
             workplan_name=workplan.name,
+            source_workplan=str(run.workplan_path),
+            final_workplan=str(run.trx_workplan_path),
             steps=step_summaries,
             dry_run=is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN),
         )
