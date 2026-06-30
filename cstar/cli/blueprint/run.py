@@ -6,9 +6,8 @@ import typer
 from pydantic import ValidationError
 
 from cstar.applications.core import (
-    ApplicationDefinition,
     RunnerRequest,
-    get_application,
+    get_app_for_blueprint,
 )
 from cstar.base.env import (
     ENV_CSTAR_CLI_VERBOSE,
@@ -40,13 +39,12 @@ from cstar.entrypoint.utils import (
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.models import Blueprint, BlueprintMeta
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
 from cstar.orchestration.transforms import DirectiveConfig
 from cstar.system.migration import CStarMigrationNotRegisteredError
 
 if t.TYPE_CHECKING:
-    from cstar.entrypoint.runner import BlueprintRunner
+    ...
 
 
 CMD_NAME: t.Final[str] = "run"
@@ -93,10 +91,6 @@ def path_callback(
                     bp_path = Path(persist_result.target)
                 except CStarMigrationNotRegisteredError:
                     log.info("Skipping schema migration; no registered adapters")
-
-            base_bp = deserialize(bp_path, BlueprintMeta)
-            app = get_application(base_bp.application)
-            ctx.obj = deserialize(bp_path, app.blueprint)
             return str(bp_path)
 
     except FileNotFoundError as ex:
@@ -193,16 +187,17 @@ def run(
     ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
-    bp = t.cast("Blueprint", ctx.obj)
-    name = f"{bp.application}_runner"
+    bp_path = Path(uri)
+    app_config = get_app_for_blueprint(bp_path)
 
+    name = f"{app_config.name}_runner"
     job_cfg = get_job_config()
     service_cfg = get_service_config(get_env_item(ENV_CSTAR_LOG_LEVEL).value, name=name)
 
-    msg = f"Executing {bp.application!r} blueprint in a {type(bp)} service"
+    msg = f"Executing {app_config.name!r} blueprint in a {type(app_config.runner).__name__} service"
     log.debug(msg)
 
-    result = validate_serialized_entity(uri, type(bp))
+    result = validate_serialized_entity(bp_path, app_config.blueprint)
     if not result.is_valid:
         print(result.error_msg)
         return
@@ -210,11 +205,8 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    request = RunnerRequest(uri, type(bp))
+    request = RunnerRequest(uri, app_config.blueprint)
 
-    app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
-        get_application(bp.application)
-    )
     runner = app_config.runner(request, service_cfg, job_cfg)
     asyncio.run(runner.execute())
 
