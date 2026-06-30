@@ -21,16 +21,10 @@
 <!-- List any non-code-related changes, such as CI, packaging, or documentation -->
 - N/A
 
-## Security Fixes
-<!-- List any changes resulting in a change of security posture -->
-- N/A
 
 ## Code Review Checklist
 <!-- Feel free to remove check-list items irrelevant to this PR -->
 - [ ] Closes #xxxx
-- [ ] Tests added
-- [ ] Tests passing
-- [ ] Full type hint coverage
-- [ ] Changes are documented in `docs/releases.rst`
-- [ ] New functions/methods are listed in `api.rst`
-- [ ] New functionality has documentation
+- [ ] New functionality has documentation, type hint coverage, and tests
+- [ ] Tests and `pre-commit run --all-files` are passing
+
