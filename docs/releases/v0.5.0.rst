@@ -166,6 +166,7 @@ Bug Fixes
 - Fix failure to generate schemas for new applications with `cstar blueprint schemas` (`#566 <https://github.com/CWorthy-ocean/C-Star/pull/566>`_)
 - C-Star log stream should now more fully capture ROMS log stream (`#551 <https://github.com/CWorthy-ocean/C-Star/pull/551>`_)
 - Fix `SlurmHandle has no attribute run_id` bug (`#571 <https://github.com/CWorthy-ocean/C-Star/pull/571>`_)
+- Fix unmapped `OUT_OF_MEMORY` status returned by SLURM resulting in run failure. (`#569 <https://github.com/CWorthy-ocean/C-Star/pull/569>`_)
 
 Improvements
 ~~~~~~~~~~~~
