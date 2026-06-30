@@ -276,7 +276,8 @@ class LiveStep(Step):
         str
         """
         step_converter = get_command_mapping(self.application)
-        return step_converter(self)
+        request = step_converter(self)
+        return request.as_command().strip()
 
     @property
     def script_path(self) -> Path:
