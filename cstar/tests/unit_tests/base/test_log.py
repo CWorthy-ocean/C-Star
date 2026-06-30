@@ -1,8 +1,6 @@
 import logging
-import logging.handlers
 import pathlib
 import re
-import typing as t
 import uuid
 from collections.abc import Callable
 from time import strftime
@@ -30,12 +28,12 @@ def all_levels() -> list[int]:
 @pytest.fixture
 def levels_fn(
     all_levels: list[int],
-) -> t.Callable[[int], tuple[list[int], list[int]]]:
+) -> Callable[[int], tuple[list[int], list[int]]]:
     """Return a function that returns a tuple of lists containing all log levels below
     and above the specified log level.
 
     Returns:
-        t.Callable[list[int], list[int]]: the function
+        Callable[list[int], list[int]]: the function
     """
 
     def _inner(level: int) -> tuple[list[int], list[int]]:
@@ -49,7 +47,8 @@ def levels_fn(
         Returns:
             tuple[list[int], list[int]]: the lists of log levels
         """
-        lt, gte = [], []
+        lt: list[int] = []
+        gte: list[int] = []
 
         for level_ in all_levels:
             if level_ < level:
@@ -76,7 +75,7 @@ def levels_fn(
 def test_loglevel_fh(
     request: pytest.FixtureRequest,
     level: int,
-    levels_fn: t.Callable[[int], tuple[list[int], list[int]]],
+    levels_fn: Callable[[int], tuple[list[int], list[int]]],
     all_levels: list[int],
     tmp_path: pathlib.Path,
 ) -> None:

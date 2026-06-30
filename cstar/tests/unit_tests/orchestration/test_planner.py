@@ -1,6 +1,7 @@
 # ruff: noqa: S101
 
 import typing as t
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from cstar.orchestration.serialization import deserialize
 @pytest.fixture
 def the_workplan(
     tmp_path: Path,
-    fill_workplan_template: t.Callable[[dict[str, t.Any]], str],
+    fill_workplan_template: Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
 ) -> Workplan:
     """Create a valid workplan.
@@ -86,8 +87,8 @@ def get_monitored_graph_plan_size(plan: Workplan) -> int:
 def test_planner_with_tasks(
     planner_type: type[Planner],
     num_steps: int,
-    node_fn: t.Callable[[Workplan], int],
-    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
+    node_fn: Callable[[Workplan], int],
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
     # the_workplan: Workplan,
 ) -> None:
     """Verify that the planner produces a plan with the expected number of steps.
@@ -100,7 +101,7 @@ def test_planner_with_tasks(
         The number of steps to add to the workplan
     node_fn : Callable[[Workplan], int]
         A function that takes a workplan as input and returns the size of the plan
-    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """
@@ -144,22 +145,19 @@ def test_planner_with_tasks(
     ],
 )
 def test_planner_bfs_breaker(
-    tmp_path: Path,
     num_steps: int,
     deps: list[tuple[int, int]],
-    gen_fake_steps: t.Callable[[int], t.Generator[Step, None, None]],
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
 ) -> None:
     """Verify that a dependency that breaks BFS ordering is honored.
 
     Parameters
     ----------
-    tmp_path : Path
-        A temporary path to store test outputs
     num_steps : int
         The number of steps to add to the workplan
     deps : list[tuple[int, int]]
         Tuples containing indices of tasks to create dependencies between
-    gen_fake_steps : t.Callable[[int], t.Generator[Step, None, None]]
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
         A generator function to produce minimally valid test steps
 
     """

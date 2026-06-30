@@ -325,7 +325,7 @@ async def prepare_workplan(
         The directory where workplan outputs will be written.
     run_id : str
         The unique ID for the current run.
-    user_variables : t.Mapping | None
+    user_variables : Mapping | None
         User-defined variables specified at runtime
 
     Returns

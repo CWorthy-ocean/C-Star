@@ -6,7 +6,7 @@ import re
 import typing as t
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -166,7 +166,7 @@ class SlurmStep(BaseModel):
 
         Returns
         -------
-        t.Iterable[SlurmJobDetail]
+        tuple[SlurmStep, ...]
         """
         return tuple(
             cls.from_sacct(line) for line in sacct_stdout.split("\n") if line.strip()
@@ -176,18 +176,18 @@ class SlurmStep(BaseModel):
 class SlurmBatch:
     """Metadata for all steps in a SLURM batch."""
 
-    steps: t.Iterable[SlurmStep]
+    steps: Iterable[SlurmStep]
     """The collection of steps running in a batch."""
 
     _job: SlurmStep | None = None
     """The parent step for the batch."""
 
-    def __init__(self, steps: t.Iterable[SlurmStep]) -> None:
+    def __init__(self, steps: Iterable[SlurmStep]) -> None:
         """Initialize the instance.
 
         Parameters
         ----------
-        steps: t.Iterable[SlurmStep]
+        steps: Iterable[SlurmStep]
             The steps belonging to the batch.
         """
         job_ids = {x.job_id for x in steps}
@@ -225,13 +225,13 @@ class SlurmBatch:
         return self._job.job_id
 
     @classmethod
-    def from_multi_query(cls, steps: t.Iterable[SlurmStep]) -> dict[str, "SlurmBatch"]:
+    def from_multi_query(cls, steps: Iterable[SlurmStep]) -> dict[str, "SlurmBatch"]:
         """Create a mapping of job-id to Batch for all discovered job-ids
         resulting from a multi-job query.
 
         Parameters
         ----------
-        steps: t.Iterable[SlurmStep]
+        steps: Iterable[SlurmStep]
             The steps belonging to 1-to-many batches.
 
         Returns
@@ -244,12 +244,12 @@ class SlurmBatch:
 
         return {k: SlurmBatch(multi_map[k]) for k in multi_map}
 
-    def __iter__(self) -> t.Iterator["SlurmStep"]:
+    def __iter__(self) -> Iterator["SlurmStep"]:
         """Iterate through the steps associated with the batch.
 
         Returns
         -------
-        t.Iterator[SlurmStep]
+        Iterator[SlurmStep]
         """
         yield from self.steps
 
@@ -328,7 +328,7 @@ async def get_slurm_batches(
 
     Parameters
     ----------
-    job_ids: t.Iterable[str | int]
+    job_ids: Iterable[str | int]
         A collection containing batch job ID's
 
     Returns
