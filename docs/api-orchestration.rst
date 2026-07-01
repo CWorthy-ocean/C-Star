@@ -30,3 +30,14 @@ Execution
    cstar.orchestration.launch.local.LocalLauncher
    cstar.orchestration.launch.slurm.SlurmLauncher
    cstar.orchestration.orchestration.Orchestrator
+
+Custom Application Building
+---------------------------
+
+.. autosummary::
+   :toctree: generated/
+
+   cstar.applications.core.ApplicationDefinition
+   cstar.orchestration.models.Blueprint
+   cstar.entrypoint.runner.BlueprintRunner
+   cstar.execution.handler.ExecutionStatus
