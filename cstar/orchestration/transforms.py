@@ -556,7 +556,9 @@ class OverrideTransform(Transform[LiveStep]):
         overrides = overrides or {}
         overrides = overrides.copy()
 
-        model = bp.model_dump(exclude_defaults=True, exclude_unset=True)
+        model = bp.model_dump(
+            exclude_defaults=True, exclude_unset=True, exclude={"$schema"}
+        )
 
         # system-level overrides take precedence over step-level overrides
         changeset = deep_merge(overrides, self._system_overrides)
