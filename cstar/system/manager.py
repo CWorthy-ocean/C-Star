@@ -129,17 +129,17 @@ class HostNameEvaluator:
             If the name cannot be determined.
         """
         if lmod_hostname := self.lmod_hostname:
-            log.trace("Using lmod hostname as system name")
+            log.debug("Using lmod hostname as system name")
             return lmod_hostname
 
         for ctx_klass in get_registered_sys_contexts():
             if ctx_klass.is_match():
                 name = ctx_klass.name
-                log.trace(f"Using {name!r} as system name due to context match")
+                log.debug(f"Using {name!r} as system name due to context match")
                 return name
 
         if self.platform_hostname:
-            log.trace("Using platform hostname as system name")
+            log.debug("Using platform hostname as system name")
             return self.platform_hostname
 
         raise OSError(

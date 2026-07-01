@@ -1322,6 +1322,7 @@ class ROMSSimulation(Simulation):
                 or (inp.start_date <= self.end_date)
                 and (self.end_date >= self.start_date)
             ):
+                self.log.debug(f"Fetching {inp.source.location}")
                 inp.get(local_dir=input_datasets_dir)
 
     @property
