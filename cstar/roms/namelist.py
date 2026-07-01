@@ -565,6 +565,8 @@ class SurfFlxOutputSettings(_NmlGroup):
     """Output surface momentum flux"""
     wrt_stflx: bool
     """Output surface tracer flux"""
+    wrt_rstflx: bool
+    """Output surface restoring flux (already accounted in stflx)"""
     wrt_swflx: bool
     """Output surface water flux (P-E)"""
     sflx_avg: bool

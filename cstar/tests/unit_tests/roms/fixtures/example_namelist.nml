@@ -229,6 +229,7 @@
     sflx_avg = .false.
     wrt_smflx = .false.
     wrt_stflx = .false.
+    wrt_rstflx = .false.
     wrt_swflx = .false.
 /
 
