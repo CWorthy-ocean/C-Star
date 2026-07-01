@@ -169,6 +169,7 @@ Bug Fixes
 - Fix unmapped `OUT_OF_MEMORY` status returned by SLURM resulting in run failure. (`#569 <https://github.com/CWorthy-ocean/C-Star/pull/569>`_)
 - Fix index error when formatting validation error messages (`#574 <https://github.com/CWorthy-ocean/C-Star/pull/574>`_)
 - Add missing import causing test failures (`#574 <https://github.com/CWorthy-ocean/C-Star/pull/574>`_)
+- Use alternative method for identifying cluster on Elja compute nodes (`#573 <https://github.com/CWorthy-ocean/C-Star/pull/573>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -272,3 +273,4 @@ For more details, please refer to the `commit history`_.
 - Add blueprint schema reference to the documentation. (`#529 <https://github.com/CWorthy-ocean/C-Star/pull/529>`_)
 - Updated string values in integer fields failing schema validation in plotting sample (`#531 <https://github.com/CWorthy-ocean/C-Star/pull/531>`_)
 - Added shared functions for storing data in the typer context (`#549 <https://github.com/CWorthy-ocean/C-Star/pull/549>`_)
+- Revert prior change resulting in less control of lmod module loading (`#573 <https://github.com/CWorthy-ocean/C-Star/pull/573>`_)
