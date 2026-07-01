@@ -88,8 +88,7 @@ class TestFetchData:
         )
 
         expected_files = [
-            "additional_code/ROMS/runtime_code/roms.in",
-            "additional_code/ROMS/compile_time_code/Makefile",
+            "additional_code/ROMS/runtime_code/namelist.nml",
             "input_datasets/ROMS/roms_bry.nc",
             "input_datasets/ROMS/roms_frc.nc",
         ]
