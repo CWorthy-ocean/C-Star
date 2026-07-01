@@ -23,7 +23,7 @@ settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: "9f535b60d32637e98db433257f175a78cf31e333"
+    commit: "69c00cdfc8baa403c31616fffee4678f3bbf0273"
 
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
@@ -53,18 +53,17 @@ inputs:
           climatology: true
         type: bgc
         coarse_grid_mode: "never"
-      # - source:
-      #     name: MBL_co2
-      #   type: bgc
-      #   coarse_grid_mode: "never"
+      - source:
+          name: MBL_co2
+        type: bgc
+        coarse_grid_mode: "never"
 
-
-      # - source:
-      #     name: WOA
-      #     climatology: true
-      #   restoring_forces: ['sss']
-      #   type: restoring
-      #   coarse_grid_mode: "never"
+      - source:
+           name: WOA
+           climatology: true
+        restoring_forces: ['sss']
+        type: restoring
+        coarse_grid_mode: "never"
 
     boundary:
       - source:
