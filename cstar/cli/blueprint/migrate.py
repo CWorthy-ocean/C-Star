@@ -15,7 +15,7 @@ from cstar.cli.common import (
     MigrationRequest,
     cb_pipeline,
     execute_migration,
-    print_validation_errors,
+    format_validation_errors,
     set_env,
     set_flag,
     update_loggers,
@@ -236,8 +236,8 @@ def migrate(
             output=Path(output) if output else None,
         )
     except ValidationError as ex:
-        print_validation_errors(ex)
-        raise typer.Exit(1) from ex
+        errors = format_validation_errors(ex)
+        raise typer.BadParameter(errors)
 
     try:
         result = execute_migration(request)

@@ -379,17 +379,22 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     return PersistedMigrateResult(migration_result, persisted_to)
 
 
-def print_validation_errors(ex: ValidationError) -> None:
+def format_validation_errors(ex: ValidationError) -> str:
     """Display the contents of a validation error in a user-friendly format."""
-    error_format: t.Final[str] = "Invalid {0} value ({1}): {2}"
+    messages: list[str] = []
 
     for error in ex.errors():
-        msg = error_format.format(
-            f"{error['loc'][0]!r}",
-            f"{error['input']!r}",
-            f"{error['msg']}",
-        )
-        print(msg)
+        msg = f"{error['msg']!r}"
+
+        if "loc" in error and error["loc"]:
+            msg = "`Invalid {} value ({}): {}`".format(
+                error["loc"][0],
+                error["input"],
+                error["msg"],
+            )
+        messages.append(msg)
+
+    return ", ".join(messages)
 
 
 _TValue = t.TypeVar("_TValue")
