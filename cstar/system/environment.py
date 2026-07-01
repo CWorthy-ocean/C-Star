@@ -412,8 +412,8 @@ class CStarEnvironment:
         with open(self.lmod_path) as fp:
             lmod_list = fp.readlines()
 
-        modules = " ".join(x.strip() for x in lmod_list)
-        self._call_lmod(f"load {modules}")
+        for module in (x.strip() for x in lmod_list):
+            self._call_lmod(f"load {module}")
 
     @staticmethod
     def set_env_var(key: str, value: str) -> None:
