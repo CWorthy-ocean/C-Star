@@ -310,6 +310,7 @@ class RandomOutputCfg(_SettingsSection):
 class SurfFluxCfg(_SettingsSection):
     wrt_smflx: bool
     wrt_stflx: bool
+    wrt_rstflx: bool
     wrt_swflx: bool
     sflx_avg: bool
     output_period: float = Field(serialization_alias="output_period_sflx")

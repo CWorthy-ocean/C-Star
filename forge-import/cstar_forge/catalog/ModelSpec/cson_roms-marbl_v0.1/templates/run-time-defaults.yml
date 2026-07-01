@@ -140,6 +140,7 @@ ocean_vars:
 surf_flux:
   wrt_smflx: false
   wrt_stflx: false
+  wrt_rstflx: false  # Output surface restoring flux (already accounted in stflx)
   wrt_swflx: false
   sflx_avg: false
   output_period: 31536000  # seconds
