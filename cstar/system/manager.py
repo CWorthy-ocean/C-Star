@@ -53,6 +53,8 @@ class EljaEnvSettings(SlurmSettingsBase):
 
     HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
     """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
+    CLUSTER_IDENTIFIER: ClassVar[str] = "elja"
+    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
 
     HOSTNAME: str = Field(default="", alias="HOSTNAME")
     """The hostname of the machine.
@@ -419,7 +421,10 @@ class EljaSystemContext(SystemContext):
         """Return `True` if the current system is identified as *Elja* by matching
         value `elja-irhpc` in `HOSTNAME` env var.
         """
-        return os.getenv("HOSTNAME", "") == EljaEnvSettings.HOST_IDENTIFIER
+        if host_match := os.getenv("HOSTNAME", "") == EljaEnvSettings.HOST_IDENTIFIER:
+            return host_match
+
+        return os.getenv("SLURM_CLUSTER_NAME", "") == EljaEnvSettings.CLUSTER_IDENTIFIER
 
 
 @register_sys_context
