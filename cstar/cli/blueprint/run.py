@@ -22,7 +22,7 @@ from cstar.cli.common import (
     MigrationRequest,
     cb_pipeline,
     execute_migration,
-    print_validation_errors,
+    format_validation_errors,
     set_env,
     set_flag,
     update_loggers,
@@ -103,8 +103,8 @@ def path_callback(
         msg = f"Blueprint file not found: {ex.filename}"
         raise typer.BadParameter(msg) from ex
     except ValidationError as ex:
-        print_validation_errors(ex)
-        msg = f"Blueprint file is malformed: {path}"
+        errors = format_validation_errors(ex)
+        msg = f"Blueprint {path!r} is invalid. Details: {errors}"
         raise typer.BadParameter(msg) from ex
 
     return path
