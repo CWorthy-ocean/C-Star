@@ -45,7 +45,6 @@ SECTION_MAP: dict[str, str] = {
     "Bug Fixes": "Bug Fixes",
     "Improvements": "Improvements",
     "Miscellaneous": "Miscellaneous",
-    "Security Fixes": "Security Fixes",
 }
 
 # PR template sections to skip entirely.
@@ -203,17 +202,15 @@ def get_merged_prs_since(session: requests.Session, since: str) -> list[dict]:
     results: list[dict] = []
     page = 1
     while True:
-        resp = session.get(
-            f"{GITHUB_API}/repos/{REPO}/pulls",
-            params={
-                "state": "closed",
-                "sort": "updated",
-                "direction": "desc",
-                "base": "main",
-                "per_page": 100,
-                "page": page,
-            },
-        )
+        params: dict[str, str | int] = {
+            "state": "closed",
+            "sort": "updated",
+            "direction": "desc",
+            "base": "main",
+            "per_page": 100,
+            "page": page,
+        }
+        resp = session.get(f"{GITHUB_API}/repos/{REPO}/pulls", params=params)
         resp.raise_for_status()
         batch: list[dict] = resp.json()
         if not batch:
@@ -544,6 +541,16 @@ def insert_bullets_into_section(
     for block in new_bullets:
         new_lines.extend(_bullet_block_to_lines(block))
 
+    # If the content immediately following our insertion point is non-blank
+    # (e.g. the next section heading, reached because a "- N/A" placeholder was
+    # removed), RST needs a blank line to separate the new bullet from it.
+    if (
+        insert_at < len(cleaned)
+        and cleaned[insert_at].strip()
+        and new_lines[-1].strip()
+    ):
+        new_lines.append("\n")
+
     return cleaned[:insert_at] + new_lines + cleaned[insert_at:]
 
 
@@ -568,11 +575,6 @@ Breaking Changes
 
 New features
 ~~~~~~~~~~~~
-
-- N/A
-
-Security Fixes
-~~~~~~~~~~~~~~
 
 - N/A
 
