@@ -10,40 +10,26 @@ valid_end_date: 2012-01-02
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    branch: a338198af93a7b4cfa8f320a23f0f5623bc18152
+    branch: 0.2.0
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
     branch: marbl0.45.0
 
   run_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
-    branch: 9c92011c10400b3f39f59247c41de7d67e3c220c
+    branch: main
     filter:
-      directory: wio-toy-domain/runtime_code
+      directory: wio-toy-domain-namelist
       files:
-        - cson_roms-marbl_v0.1_wio-toy_10procs.in
+        - namelist.nml
         - marbl_in
-        - marbl_tracer_output_list
-        - marbl_diagnostic_output_list
   compile_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
-    branch: 9c92011c10400b3f39f59247c41de7d67e3c220c
+    branch: main
     filter:
-      directory: wio-toy-domain/compile_time_code
+      directory: wio-toy-domain-namelist
       files:
-        - bgc.opt
-        - bulk_frc.opt
-        - cdr_frc.opt
         - cppdefs.opt
-        - diagnostics.opt
-        - ocean_vars.opt
-        - param.opt
-        - river_frc.opt
-        - sponge_tune.opt
-        - surf_flux.opt
-        - tides.opt
-        - tracers.opt
-        - Makefile
 grid:
   data:
     - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wio-toy-domain/netcdf_inputs/cson_roms-marbl_v0.1_wio-toy_10procs_grid.nc

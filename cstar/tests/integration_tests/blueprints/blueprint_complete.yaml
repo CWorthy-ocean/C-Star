@@ -23,10 +23,8 @@ code:
     branch: main
     filter:
       files:
-        - roms.in
+        - namelist.nml
         - marbl_in
-        - marbl_tracer_output_list
-        - marbl_diagnostic_output_list
       directory: wales-toy-domain/roms_runtime_code
   compile_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git

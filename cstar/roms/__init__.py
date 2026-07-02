@@ -11,14 +11,12 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.runtime_settings import ROMSRuntimeSettings
 from cstar.roms.simulation import ROMSSimulation
 
 __all__ = [
     "ROMSExternalCodeBase",
     "ROMSSimulation",
     "ROMSDiscretization",
-    "ROMSRuntimeSettings",
     "ROMSInputDataset",
     "ROMSPartitioning",
     "ROMSModelGrid",

@@ -1,0 +1,307 @@
+&basic_output_settings
+    monthly_restarts = .false.
+    nrpf_avg = 1
+    nrpf_his = 7
+    nrpf_rst = 2
+    output_period_avg = 604800.0
+    output_period_his = 86400.0
+    output_period_rst = 86400.0
+    wrt_aks = .false.
+    wrt_akt = .false.
+    wrt_akv = .false.
+    wrt_avg_aks = .true.
+    wrt_avg_akt = .true.
+    wrt_avg_akv = .true.
+    wrt_avg_hbbl = .true.
+    wrt_avg_hbls = .true.
+    wrt_avg_o = .true.
+    wrt_avg_r = .true.
+    wrt_avg_u = .true.
+    wrt_avg_ub = .true.
+    wrt_avg_v = .true.
+    wrt_avg_vb = .true.
+    wrt_avg_w = .true.
+    wrt_avg_z = .true.
+    wrt_file_avg = .false.
+    wrt_file_his = .false.
+    wrt_file_rst = .true.
+    wrt_hbbl = .false.
+    wrt_hbls = .false.
+    wrt_o = .false.
+    wrt_r = .false.
+    wrt_u = .true.
+    wrt_ub = .true.
+    wrt_v = .true.
+    wrt_vb = .true.
+    wrt_w = .true.
+    wrt_z = .true.
+/
+
+&bgc_settings
+    interp_bgc_frc = .true.
+    nrpf_bgc_avg = 7
+    nrpf_bgc_avg_dia = 1
+    nrpf_bgc_his = 7
+    nrpf_bgc_his_dia = 7
+    output_period_bgc_avg = 86400.0
+    output_period_bgc_avg_dia = 60.0
+    output_period_bgc_his = 86400.0
+    output_period_bgc_his_dia = 86400.0
+    wrt_bgc_avg = .false.
+    wrt_bgc_dia_avg = .false.
+    wrt_bgc_dia_his = .false.
+    wrt_bgc_his = .false.
+    xco2air_default = 284.7
+/
+
+&bottom_drag_settings
+    rdrg = 0.0
+    rdrg2 = 0.001
+    zob = 0.01
+/
+
+&calc_pflx_settings
+    calc_pflx = .true.
+    pflx_timescale = 86400.0
+/
+
+&cdr_frc_settings
+    cdr_file = 'cdr.nc'
+    cdr_forcing_3d = .false.
+    cdr_forcing_depth_profiles = .false.
+    cdr_forcing_parameterized = .true.
+    cdr_ncdr_parm = 1
+    cdr_nz_chd = 50
+    cdr_relocate_to_wet_pts = .true.
+    cdr_source = .false.
+    cdr_time_interpolation = .false.
+    cdr_volume = .false.
+/
+
+&cdr_output_settings
+    cdr_monthly_averages = .false.
+    do_cdr_output = .false.
+    nrpf_cdr = 24
+    output_period_cdr = 3600.0
+    wrt_cdr_avg = .true.
+/
+
+&diagnostics_settings
+    diag_avg = .false.
+    diag_trc = .false.
+    diag_uv = .false.
+    nrpf_diag = 7
+    output_period_diag = 86400.0
+/
+
+&extract_data_settings
+    do_extract = .false.
+    extract_file = 'sample_edata.nc'
+    hc_chd = 250.0
+    n_chd = 90
+    nrpf_extract = 24
+    output_period_extract = 3600.0
+    theta_b_chd = 2.0
+    theta_s_chd = 5.0
+/
+
+&forcing_files
+/
+
+&frc_output_settings
+    nrpf_frc = 4
+    output_period_frc = 3600.0
+    wrt_frc = .false.
+    wrt_frc_avg = .false.
+/
+
+&gamma2_settings
+    gamma2 = 1.0
+/
+
+&grid_settings
+    grdname = ''
+/
+
+&initial_conditions
+    inifile = ''
+/
+
+&lateral_visc_settings
+    visc2 = 0.0
+/
+
+&lin_rho_eos_settings
+    s0 = 1.0
+    scoef = 0.822
+    t0 = 1.0
+    tcoef = 0.2
+/
+
+&marbl_biogeochemistry_settings
+    marbl_config_file = 'marbl_in'
+    marbl_diagnostics_to_write = 'PH', 'PH_ALT_CO2', 'pCO2SURF_ALT_CO2',
+                                 'pCO2SURF', 'FG_CO2', 'FG_ALT_CO2'
+    marbl_timestep = 3600.0
+    marbl_tracers_to_write = 'PO4', 'NO3', 'SiO3', 'NH4', 'Fe', 'O2', 'DIC',
+                             'ALK', 'spChl', 'diatChl'
+/
+
+&param_settings
+    llm = 512
+    mmm = 512
+    np_eta = 16
+    np_xi = 16
+    nt_bgc = 32
+    nt_passive = 0
+    nz = 60
+/
+
+&particles_settings
+    exchange_facc = 0.01
+    exchange_facx = 0.1
+    exchange_facy = 0.1
+    extra_space_fac = 1.5
+    floats = .false.
+    np = 50
+    nrpf = 100
+    output_period = 400.0
+    pmin = 200
+    ppm3 = 1e-06
+/
+
+&pipe_frc_settings
+    npip = 1
+    p_analytical = .false.
+    pipe_source = .false.
+/
+
+&random_output_settings
+    do_random = .false.
+    nrpf_random = 10
+    output_period_random = 3600.0
+/
+
+&rho0_settings
+    rho0 = 1000.0
+/
+
+&river_frc_settings
+    nriv = 0
+    river_analytical = .false.
+    river_source = .false.
+/
+
+&s_coord
+    hc = 250.0
+    theta_b = 2.0
+    theta_s = 5.0
+/
+
+&simulation_name_settings
+    output_root_name = 'roms'
+    title = 'test_settings'
+/
+
+&sponge_tune_settings
+    nrpf_sponge = 7
+    output_period_sponge = 86400.0
+    sponge_avg = .true.
+    sponge_timescale = 86400.0
+    ub_tune = .false.
+    wrt_sponge = .false.
+/
+
+&sss_correction
+    dsssdt = 7.777
+/
+
+&sst_correction
+    dsstdt = 7.777
+/
+
+&dic_alk_correction
+    dcdt = 7.777
+/
+
+&stdout_diag_settings
+    code_check_mode = .false.
+/
+
+&surf_flx_output_settings
+    nrpf_sflx = 10
+    output_period_sflx = 31536000.0
+    sflx_avg = .false.
+    wrt_smflx = .false.
+    wrt_stflx = .false.
+    wrt_rstflx = .false.
+    wrt_swflx = .false.
+/
+
+&surf_frc_settings
+    check_bulk_frc_units = .false.
+    interp_bulk_frc = .false.
+    interp_flux_frc = .true.
+/
+
+&tidal_frc_settings
+    ana_tides = .false.
+    bry_tides = .true.
+    ntides = 10
+    pot_tides = .true.
+/
+
+&time_stepping
+    dt = 2160.0
+    ndtfast = 60
+    ninfo = 1
+    ntimes = 1200
+/
+
+&tracer_diff2
+    tnu2 = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+           0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+           0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+/
+
+&ts_output_settings
+    wrt_salt = .false.
+    wrt_salt_dia = .false.
+    wrt_temp = .false.
+    wrt_temp_dia = .false.
+/
+
+&ubind_settings
+    ubind = 0.1
+/
+
+&upscale_settings
+    do_upscale = .false.
+    nrpf_uscl = 48
+    output_period_uscl = 3600.0
+/
+
+&v_sponge_settings
+    v_sponge = 0.0
+/
+
+&vertical_mixing_settings
+    akt_bak = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+              0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+              0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    akv_bak = 0.0
+/
+
+&zslice_settings
+    do_zslice = .false.
+    ndep = 2
+    nrpf_zslice = 72
+    nt_zslice = 2
+    output_period_zslice = 1200.0
+    trc2zsc = 1, 2
+    vecdep = -2.0, -15.0
+    wrt_t_zslice = .false.
+    wrt_u_zslice = .false.
+    wrt_v_zslice = .false.
+    zslice_avg = .false.
+/
