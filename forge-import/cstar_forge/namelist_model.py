@@ -245,6 +245,7 @@ class BgcCfg(_SettingsSection):
     wrt_avg_dia: bool = Field(serialization_alias="wrt_bgc_dia_avg")
     output_period_avg_dia: float = Field(serialization_alias="output_period_bgc_avg_dia")
     nrpf_avg_dia: int = Field(serialization_alias="nrpf_bgc_avg_dia")
+    xco2air_default: float
 
 
 class CdrFrcCfg(_SettingsSection):

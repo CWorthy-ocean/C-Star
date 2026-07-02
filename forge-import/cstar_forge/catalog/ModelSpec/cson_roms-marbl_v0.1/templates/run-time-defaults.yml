@@ -87,6 +87,7 @@ bgc:
   nrpf_avg_dia: 1
   nbgc_flx: 2
   interp_frc: 1
+  xco2air_default: 284.7  # Atmospheric xCO2 (ppm) when PCO2AIR_FORCING is off
 
 blk_frc:
   interp_frc: 0
