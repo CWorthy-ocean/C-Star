@@ -295,10 +295,13 @@ lin_rho_eos:
   s0: 1.0       # Reference salinity (psu)
 
 sss_correction:
-  dsssdt: 0.0  # SSS correction piston velocity (cm/day); requires SFLX_CORR + SALINITY
+  dsssdt: 7.777  # SSS correction piston velocity (cm/day); requires SFLX_CORR + SALINITY
 
 sst_correction:
-  dsstdt: 0.0  # SST correction piston velocity (cm/day); requires QCORRECTION
+  dsstdt: 7.777  # SST correction piston velocity (cm/day); requires QCORRECTION
+
+dic_alk_correction:
+  dcdt: 7.777  # DIC/ALK correction piston velocity (cm/day); requires CFLX_CORR + MARBL
 
 marbl_bgc:
   marbl_config_file: "marbl_in"

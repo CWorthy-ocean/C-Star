@@ -34,8 +34,8 @@ from cstar.roms.namelist import (
     CdrOutputSettings, UpscaleSettings, LinRhoEosSettings, Rho0Settings,
     Gamma2Settings, TracerDiff2, BottomDragSettings, VerticalMixingSettings,
     LateralViscSettings, UbindSettings, VSpongeSettings, SssCorrection,
-    SstCorrection, DiagnosticsSettings, StdoutDiagSettings, RandomOutputSettings,
-    SurfFlxOutputSettings, PipeFrcSettings, ParticlesSettings,
+    SstCorrection, DicAlkCorrection, DiagnosticsSettings, StdoutDiagSettings,
+    RandomOutputSettings, SurfFlxOutputSettings, PipeFrcSettings, ParticlesSettings,
 )
 
 def _coerce_pathlike(v):
@@ -289,6 +289,10 @@ class SstCorrectionCfg(_SettingsSection):
     dsstdt: float
 
 
+class DicAlkCorrectionCfg(_SettingsSection):
+    dcdt: float
+
+
 class DiagnosticsCfg(_SettingsSection):
     diag_avg: bool
     output_period: float = Field(serialization_alias="output_period_diag")
@@ -412,6 +416,7 @@ class RunTimeSettings(_SettingsSection):
     lin_rho_eos: LinRhoEosCfg
     sss_correction: SssCorrectionCfg
     sst_correction: SstCorrectionCfg
+    dic_alk_correction: DicAlkCorrectionCfg
     marbl_bgc: MarblBgcCfg
 
 
@@ -482,6 +487,7 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         bottom_drag_settings=BottomDragSettings(**grp(rt.bottom_drag)),
         sss_correction=SssCorrection(**grp(rt.sss_correction)),
         sst_correction=SstCorrection(**grp(rt.sst_correction)),
+        dic_alk_correction=DicAlkCorrection(**grp(rt.dic_alk_correction)),
         stdout_diag_settings=StdoutDiagSettings(**grp(rt.stdout_diag)),
         random_output_settings=RandomOutputSettings(**grp(rt.random_output)),
         surf_flx_output_settings=SurfFlxOutputSettings(**grp(rt.surf_flux)),
