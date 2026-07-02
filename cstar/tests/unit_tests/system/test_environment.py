@@ -66,7 +66,10 @@ class TestSetupEnvironmentFromFiles:
     @pytest.mark.parametrize(
         "lmod_syshost", ["perlmutter", "derecho", "expanse", "anvil"]
     )
-    @patch("cstar.base.utils.subprocess.run")
+    @patch(
+        "cstar.base.utils.subprocess.run",
+        autospec=True,
+    )
     @patch.object(
         CStarEnvironment,
         "uses_lmod",
@@ -76,7 +79,12 @@ class TestSetupEnvironmentFromFiles:
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
-    def test_load_lmod_modules(self, mock_uses_lmod, mock_run, lmod_syshost):
+    def test_load_lmod_modules(
+        self,
+        mock_uses_lmod: bool,
+        mock_run: Mock,
+        lmod_syshost: t.Literal["anvil", "derecho", "elja", "expanse", "perlmutter"],
+    ):
         """Tests that the load_lmod_modules function correctly interacts with Linux
         Envionment Modules.
 
@@ -113,7 +121,15 @@ class TestSetupEnvironmentFromFiles:
             expected_modules = self.get_expected_lmod_modules(env)
 
             # Define expected subprocess calls
-            modules = " ".join(x.strip() for x in expected_modules)
+            modules = [
+                call(
+                    f"/mock/lmod python load {module.strip()}",
+                    capture_output=True,
+                    shell=True,
+                    text=True,
+                )
+                for module in expected_modules
+            ]
             expected_calls = [
                 call(
                     "/mock/lmod python reset",
@@ -121,12 +137,7 @@ class TestSetupEnvironmentFromFiles:
                     shell=True,
                     text=True,
                 ),
-                call(
-                    f"/mock/lmod python load {modules}",
-                    capture_output=True,
-                    shell=True,
-                    text=True,
-                ),
+                *modules,
             ]
 
             mock_run.assert_has_calls(expected_calls, any_order=False)
@@ -622,7 +633,7 @@ class TestExceptions:
             mock_call_lmod.assert_has_calls(
                 [
                     mock.call("reset"),
-                    mock.call(f"load {' '.join(mock_module_names)}"),
+                    *[mock.call(f"load {m}") for m in mock_module_names],
                 ]
             )
 
@@ -670,7 +681,7 @@ class TestExceptions:
     @patch.dict(
         "cstar.system.environment.os.environ", {"LMOD_CMD": "/mock/lmod"}, clear=True
     )
-    @patch("builtins.open", new_callable=mock_open, read_data="module1\nmodule2\n")
+    @patch("builtins.open", new_callable=mock_open, read_data="module1 module2\n")
     def test_load_lmod_modules_raises_runtime_error_on_module_load_failure(
         self, mock_open_file
     ):
