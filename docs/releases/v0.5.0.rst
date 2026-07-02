@@ -170,6 +170,8 @@ Bug Fixes
 - Fix index error when formatting validation error messages (`#574 <https://github.com/CWorthy-ocean/C-Star/pull/574>`_)
 - Add missing import causing test failures (`#574 <https://github.com/CWorthy-ocean/C-Star/pull/574>`_)
 - Use alternative method for identifying cluster on Elja compute nodes (`#573 <https://github.com/CWorthy-ocean/C-Star/pull/573>`_)
+- Fix bug when merging dictionaries during application of blueprint overrides
+- Fix bug where `SimulationRunner` fails to display errors when parsing bad CLI arguments
 
 Improvements
 ~~~~~~~~~~~~
@@ -252,6 +254,7 @@ Improvements
 - Workplan run summary includes paths to Workplan YAML files for review. (`#567 <https://github.com/CWorthy-ocean/C-Star/pull/567>`_)
 - Mitigate linter warnings in `orchestration.py` (`#565 <https://github.com/CWorthy-ocean/C-Star/pull/565>`_)
 - Reduce warnings produced by linter (`#568 <https://github.com/CWorthy-ocean/C-Star/pull/568>`_)
+- Reduce usage of hardcoded strings in CLI and tests
 
 Miscellaneous
 ~~~~~~~~~~~~~

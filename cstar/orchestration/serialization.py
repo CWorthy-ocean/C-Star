@@ -1,10 +1,11 @@
 import enum
 import typing as t
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
 
 import yaml
-from yaml import safe_load
+from pydantic_core import from_json
 from yaml.scanner import ScannerError
 
 from cstar.base.log import get_logger
@@ -28,21 +29,21 @@ class SerializableModel(t.Protocol):
     with metacalases in a protocol.
     """
 
-    def model_dump_json(self, *args: t.Any, **kwargs: t.Any) -> str:
+    def model_dump_json(self, *args, **kwargs) -> str:  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a JSON string representation of the object."""
         ...
 
-    def model_dump(self, *args: t.Any, **kwargs: t.Any) -> dict[str, t.Any]:
+    def model_dump(self, *args, **kwargs) -> dict[str, t.Any]:  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a dictionary representation of the object."""
         ...
 
     @classmethod
-    def model_validate_json(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
+    def model_validate_json(cls, *args, **kwargs) -> "t.Self":  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a dictionary representation of the object."""
         ...
 
     @classmethod
-    def model_validate(cls, *args: t.Any, **kwargs: t.Any) -> t.Any:
+    def model_validate(cls, *args, **kwargs) -> "t.Self":  # type: ignore  # noqa: ANN002, ANN003, PGH003
         """Return a dictionary representation of the object."""
         ...
 
@@ -54,7 +55,7 @@ _T = t.TypeVar("_T", bound=SerializableModel)
 class ValidationResult(t.Generic[_T]):
     """Disposition and reason for a validation failure."""
 
-    error_msg: str | None = None
+    error_msg: str = ""
     """An error message that is populated if validation fails."""
     item: _T | None = None
     """The deserialized workplan if validation succeeds."""
@@ -68,6 +69,83 @@ class ValidationResult(t.Generic[_T]):
         bool
         """
         return self.item is not None
+
+
+def read_json_to_raw(path: Path) -> dict[str, t.Any]:
+    """Read and process content as a JSON file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing JSON.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    with path.open("r", encoding="utf-8") as fp:
+        json_data = fp.read()
+        return from_json(json_data)
+
+
+def read_yaml_to_raw(path: Path) -> dict[str, t.Any]:
+    """Read and process content as a YAML file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing YAML.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    with path.open("r", encoding="utf-8") as fp:
+        return yaml.safe_load(fp)
+
+
+def read_raw(
+    path: Path,
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> dict[str, t.Any]:
+    """Given a path to a persisted model, use the file extension to identify
+    the data format and load the model data into a raw dictionary.
+
+    Parameters
+    ----------
+    path : Path
+        The path to the persisted entity.
+
+    Returns
+    -------
+    dict[str, t.Any]
+    """
+    if not path.exists():
+        msg = f"Unable to read raw model from path: {path}"
+        raise FileNotFoundError(msg)
+
+    if mode == PersistenceMode.auto:
+        mode = _mode_detect(path)
+
+    readers = [read_json_to_raw]
+    if mode == PersistenceMode.json:
+        readers.append(read_yaml_to_raw)
+    else:
+        readers.insert(0, read_yaml_to_raw)
+
+    for reader_fn in readers:
+        try:
+            return reader_fn(path)
+        except (ScannerError, ValueError):
+            msg = f"Deserialization failed with {mode!r} for {str(path)!r}"
+            log.debug(msg)
+
+    msg = (
+        f"Failed to deserialize {str(path)!r}. If are loading a remote document, your URL "
+        "may point to an HTML page instead of the raw YAML content."
+    )
+    raise RuntimeError(msg)
+    # log.warning(msg)
 
 
 def _read_json(path: Path, klass: type[_T]) -> _T:
@@ -84,8 +162,8 @@ def _read_json(path: Path, klass: type[_T]) -> _T:
     -------
     _T
     """
-    with path.open("r", encoding="utf-8") as fp:
-        return klass.model_validate_json(json_data=fp.read())
+    model_dict = read_json_to_raw(path)
+    return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
 def _read_yaml(path: Path, klass: type[_T]) -> _T:
@@ -102,16 +180,8 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
     -------
     _T
     """
-    with path.open("r", encoding="utf-8") as fp:
-        try:
-            model_dict = safe_load(fp)
-        except ScannerError as e:
-            msg = (
-                f"Failed to load yaml from {path}. If are loading a remote YAML, your URL "
-                f"may point to a HTML page instead of the raw YAML content."
-            )
-            raise RuntimeError(msg) from e
-        return klass.model_validate(model_dict)
+    model_dict = read_yaml_to_raw(path)
+    return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
 def path_representer(
@@ -151,14 +221,14 @@ _RT = t.TypeVar("_RT", enum.IntEnum, enum.StrEnum, PosixPath)
 
 def register_representer(
     model_type: type[_RT],
-    conversion_fn: t.Callable[[yaml.Dumper, _RT], yaml.ScalarNode],
+    conversion_fn: Callable[[yaml.Dumper, _RT], yaml.ScalarNode],
 ) -> None:
     """Register a yaml representer for the serialization of a specific entity type."""
     dumper = yaml.Dumper
     dumper.add_representer(model_type, conversion_fn)
 
 
-def model_to_yaml(model: _T) -> str:
+def model_to_yaml(model: SerializableModel) -> str:
     """Serialize a model to yaml.
 
     Parameters
@@ -173,13 +243,24 @@ def model_to_yaml(model: _T) -> str:
     """
     dumped = model.model_dump(exclude_defaults=True, by_alias=True)
 
+    # 'application' is required by the base Blueprint type for deserialization
+    # routing; always include it even when it equals the subclass default.
+    if hasattr(model, "application"):
+        dumped["application"] = str(getattr(model, "application"))  # noqa: B009
+
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
     dumper.add_representer(set, set_representer)
 
     register_representer(PosixPath, path_representer)
 
-    return yaml.dump(dumped, sort_keys=False)
+    if schema_url := str(dumped.pop("$schema", "")):
+        content = yaml.dump(dumped, sort_keys=False)
+        content = f"# yaml-language-server: $schema={schema_url}\n{content}"
+    else:
+        content = yaml.dump(dumped, sort_keys=False)
+
+    return content
 
 
 def _mode_detect(path: Path) -> PersistenceMode:
@@ -240,23 +321,33 @@ def deserialize(
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
 
-    handlers = {
-        PersistenceMode.json: _read_json,
-        PersistenceMode.yaml: _read_yaml,
-    }
+    if mode == PersistenceMode.json:
+        model = _read_json(path, klass)
+    else:
+        model = _read_yaml(path, klass)
 
-    model = handlers[mode](path, klass)
-
-    if model is None:
-        msg = f"Unable to deserialize a `{klass.__name__}` at `{path}` as `{mode}` from: \n{path.read_text()}"
-        raise ValueError(msg)
+    msg = f"Deserialized {str(path)!r} into: {model}"
+    log.trace(msg)
 
     return model
 
 
+def try_deserialize(
+    path: Path | str,
+    klass: type[_T],
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> _T | None:
+    try:
+        return deserialize(path, klass, mode=mode)
+    except Exception:
+        msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
+        log.debug(msg)
+        return None
+
+
 def serialize(
     path: Path,
-    model: _T,
+    model: SerializableModel,
     mode: PersistenceMode = PersistenceMode.yaml,
 ) -> int:
     """Serialize a model into a file.
@@ -282,12 +373,12 @@ def serialize(
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
 
-    handlers = {
-        PersistenceMode.json: lambda model: model.model_dump_json(by_alias=True),
-        PersistenceMode.yaml: model_to_yaml,
-    }
-
-    content = handlers[mode](model)
+    if mode == PersistenceMode.json:
+        content = model.model_dump_json(  # type: ignore[reportUnknownMemberType]
+            by_alias=True
+        )
+    else:
+        content = model_to_yaml(model)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:

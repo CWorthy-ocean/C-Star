@@ -16,15 +16,6 @@ ENV_FF_DEVELOPER_MODE: t.Annotated[
 ] = "CSTAR_FF_DEVELOPER_MODE"
 """Enable developer mode to enable all feature flags (not recommended)."""
 
-ENV_FF_CLI_ENV_SHOW: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_ENV_SHOW"],
-    EnvVar(
-        "Enable CLI for displaying environment configuration.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_ENV_SHOW"
-"""Enable CLI for displaying environment configuration."""
 
 ENV_FF_CLI_TEMPLATE_CREATE: t.Annotated[
     t.Literal["CSTAR_FF_CLI_TEMPLATE_CREATE"],
@@ -66,16 +57,6 @@ ENV_FF_CLI_WORKPLAN_PLAN: t.Annotated[
 ] = "CSTAR_FF_CLI_WORKPLAN_PLAN"
 """Enable CLI for generating the execution plan of a workplan."""
 
-ENV_FF_CLI_WORKPLAN_STATUS: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_WORKPLAN_STATUS"],
-    EnvVar(
-        "Enable CLI for retrieving status about a workplan run.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_WORKPLAN_STATUS"
-"""Enable CLI for retrieving status about a workplan run."""
-
 ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
     t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT"],
     EnvVar(
@@ -85,6 +66,73 @@ ENV_FF_ORCH_TRX_TIMESPLIT: t.Annotated[
     ),
 ] = "CSTAR_FF_ORCH_TRX_TIMESPLIT"
 """Enable automatic time-splitting of simulations."""
+
+ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
+    t.Literal["CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"],
+    EnvVar(
+        "Enable long name generation during time-splitting.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"
+"""Enable long name generation during time-splitting."""
+
+ENV_FF_CLI_BP_MIGRATE_AUTO: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_AUTO"],
+    EnvVar(
+        "Enable automatic blueprint migration to the latest schema during execution.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_CLI_BP_MIGRATE_AUTO"
+"""Enable automatic blueprint migration to the latest schema during execution."""
+
+ENV_FF_CLI_BP_MIGRATE_SHOW: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_SHOW"],
+    EnvVar(
+        "Enable CLI for migrating blueprints to the latest schema.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_CLI_BP_MIGRATE_SHOW"
+"""Enable CLI for migrating blueprints to the latest schema."""
+
+
+ENV_FF_DEBUG_BUILD_MODE: t.Annotated[
+    t.Literal["CSTAR_FF_DEBUG_BUILD_MODE"],
+    EnvVar(
+        "Enable building dependent packages in developer/debug mode.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_DEBUG_BUILD_MODE"
+"""Enable building dependent packages in developer/debug mode."""
+
+
+ENV_FF_SLURM_DISABLE_MT: t.Annotated[
+    t.Literal["CSTAR_FF_SLURM_DISABLE_MT"],
+    EnvVar(
+        "Enable passing a hint to SLURM to disable multi-threading",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_SLURM_DISABLE_MT"
+"""Enable passing a hint to SLURM to disable multi-threading."""
+
+
+def is_flag_enabled(flag: str) -> bool:
+    """Determine if a boolean environment varible is enabled.
+
+    Parameters
+    ----------
+    flag : str
+        The name of an environment variable to check.
+
+    Returns
+    -------
+    bool
+    """
+    return os.getenv(flag, FLAG_OFF) == FLAG_ON
 
 
 def is_feature_enabled(flag: str) -> bool:
@@ -101,7 +149,7 @@ def is_feature_enabled(flag: str) -> bool:
         pass only the <FLAG_NAME> and exclude the `CSTAR_FF_` prefix.
     """
     # developer mode enables all feature flags
-    if os.getenv(ENV_FF_DEVELOPER_MODE, FLAG_OFF) == FLAG_ON:
+    if is_flag_enabled(ENV_FF_DEVELOPER_MODE):
         return True
 
     # enable omitting the CSTAR_FF_ prefix at the call-site
@@ -119,7 +167,7 @@ def is_feature_enabled(flag: str) -> bool:
         for i in range(2, len(flag_parts)):
             segment_id = "_".join(flag_parts[:i])
 
-            if os.getenv(segment_id, FLAG_OFF) == FLAG_ON:
+            if is_flag_enabled(segment_id):
                 return True
 
-    return os.getenv(flag, FLAG_OFF) == FLAG_ON
+    return is_flag_enabled(flag)

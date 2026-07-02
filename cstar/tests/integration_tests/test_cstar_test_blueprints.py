@@ -1,5 +1,6 @@
 import logging
 import typing as t
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -20,11 +21,11 @@ class TestCStar:
     async def test_cstar(
         self,
         tmp_path: Path,
-        modify_template_blueprint: t.Callable[
+        modify_template_blueprint: Callable[
             [Path | str, dict[str, str], Path | str], str
         ],
         mock_lmod_path: Path,
-        fetch_remote_test_case_data: t.Callable[[], None],
+        fetch_remote_test_case_data: Callable[[], None],
         test_config_key: str,
         log: logging.Logger,
         integration_test_configuration: dict[str, dict[str, str | dict[str, str]]],

@@ -1,18 +1,25 @@
 import os
+import shutil
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import ContinuanceTransform
+from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.converter.converter import (
+    app_to_cmd_map,
     get_command_mapping,
-    launcher_aware_app_to_cmd_map,
     register_command_mapping,
 )
-from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.launch.slurm import SlurmLauncher
-from cstar.orchestration.models import Application, Step
-from cstar.orchestration.orchestration import Launcher, LiveStep
+from cstar.orchestration.models import (
+    Application,
+    Step,
+)
+from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 
@@ -22,18 +29,16 @@ def custom_map_function(step: Step) -> str:
 
 
 @pytest.mark.parametrize(
-    ("target_application", "launcher_type"),
+    ("target_application"),
     [
-        (Application.ROMS_MARBL, LocalLauncher),
-        (Application.ROMS_MARBL, SlurmLauncher),
-        (Application.SLEEP, LocalLauncher),
-        (Application.SLEEP, SlurmLauncher),
+        Application.ROMS_MARBL,
+        Application.SLEEP,
+        Application.HELLO_WORLD,
     ],
 )
 def test_converter_defaults(
     tmp_path: Path,
     target_application: Application,
-    launcher_type: type[Launcher],
 ) -> None:
     """Verify that the registration of a converter is not required for the default apps.
 
@@ -43,38 +48,30 @@ def test_converter_defaults(
         Temporary path fixture for writing per-test outputs.
     target_application: Application
         The application type to locate a mapping for
-    launcher_type: type[Launcher]
-        The type of launcher that will consume the command
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
     step = LiveStep(
         name="test step",
-        application=target_application.value,
+        application=target_application,
         blueprint=bp_path,
-        work_dir=tmp_path / "unit-test-work-dir",
+        working_dir=tmp_path / "unit-test-work-dir",
     )
 
-    mapped_fn = get_command_mapping(target_application, launcher_type)
+    mapped_fn = get_command_mapping(target_application)
 
     # confirm a mapping function was returned
     assert mapped_fn(step)
 
 
 @pytest.mark.parametrize(
-    ("target_application", "launcher_type"),
-    [
-        (Application.ROMS_MARBL, LocalLauncher),
-        (Application.ROMS_MARBL, SlurmLauncher),
-        (Application.SLEEP, LocalLauncher),
-        (Application.SLEEP, SlurmLauncher),
-    ],
+    ("target_application"),
+    [Application.ROMS_MARBL, Application.SLEEP],
 )
 def test_converter_registration(
     tmp_path: Path,
     target_application: Application,
-    launcher_type: type[Launcher],
 ) -> None:
     """Verify that the registration of a converter is not required for the default apps.
 
@@ -84,26 +81,24 @@ def test_converter_registration(
         Temporary path fixture for writing per-test outputs
     target_application: Application
         The application type to locate a mapping for
-    launcher_type: type[Launcher]
-        The type of launcher that will consume the command
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
     step = LiveStep(
         name="test step",
-        application=target_application.value,
+        application=target_application,
         blueprint=bp_path,
-        work_dir=tmp_path / "unit-test-work-dir",
+        working_dir=tmp_path / "unit-test-work-dir",
     )
 
     # ensure registration doesn't persist after test completes.
-    with mock.patch.dict(launcher_aware_app_to_cmd_map[launcher_type], {}):
-        original_fn = get_command_mapping(target_application, launcher_type)
+    with mock.patch.dict(app_to_cmd_map, {}):
+        original_fn = get_command_mapping(target_application)
 
-        register_command_mapping(target_application, launcher_type, custom_map_function)
+        register_command_mapping(target_application, custom_map_function)
 
-        mapped_fn = get_command_mapping(target_application, launcher_type)
+        mapped_fn = get_command_mapping(target_application)
 
     # confirm the function is a mapping function
     assert mapped_fn(step)
@@ -114,18 +109,12 @@ def test_converter_registration(
 
 
 @pytest.mark.parametrize(
-    ("target_application", "launcher_type"),
-    [
-        (Application.ROMS_MARBL, LocalLauncher),
-        (Application.ROMS_MARBL, SlurmLauncher),
-        (Application.SLEEP, LocalLauncher),
-        (Application.SLEEP, SlurmLauncher),
-    ],
+    ("target_application"),
+    [Application.ROMS_MARBL, Application.SLEEP],
 )
 def test_converter_override_invalid(
     tmp_path: Path,
     target_application: Application,
-    launcher_type: type[Launcher],
 ) -> None:
     """Verify that an invalid converter override results in an error.
 
@@ -135,8 +124,6 @@ def test_converter_override_invalid(
         Temporary path fixture for writing per-test outputs
     target_application: Application
         The application type to locate a mapping for
-    launcher_type: type[Launcher]
-        The type of launcher that will consume the command
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
@@ -145,25 +132,22 @@ def test_converter_override_invalid(
         mock.patch.dict(os.environ, {ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "DNE-key"}),
         pytest.raises(ValueError) as error,
     ):
-        _ = get_command_mapping(target_application, launcher_type)
+        _ = get_command_mapping(target_application)
 
     assert ENV_CSTAR_CMD_CONVERTER_OVERRIDE in str(error)
 
 
 @pytest.mark.parametrize(
-    ("target_application", "overridden_target", "launcher_type"),
+    ("target_application", "overridden_target"),
     [
-        (Application.ROMS_MARBL, Application.SLEEP, LocalLauncher),
-        (Application.ROMS_MARBL, Application.SLEEP, SlurmLauncher),
-        (Application.SLEEP, Application.ROMS_MARBL, LocalLauncher),
-        (Application.SLEEP, Application.ROMS_MARBL, SlurmLauncher),
+        (Application.ROMS_MARBL, Application.SLEEP),
+        (Application.SLEEP, Application.ROMS_MARBL),
     ],
 )
 def test_converter_override_capability(
     tmp_path: Path,
-    target_application: Application,
-    overridden_target: Application,
-    launcher_type: type[Launcher],
+    target_application: str,
+    overridden_target: str,
 ) -> None:
     """Verify that the the override specified in an environment variable takes precedence
     over defaults.
@@ -174,20 +158,158 @@ def test_converter_override_capability(
         Temporary path fixture for writing per-test outputs
     target_application: Application
         The application type to locate a mapping for
-    target_application: Application
-        The application type to locate a mapping for
-    launcher_type: type[Launcher]
-        The type of launcher that will consume the command
+    overridden_target: Application
+        The key to use to locate the override
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
 
-    original_fn = get_command_mapping(target_application, launcher_type)
+    original_fn = get_command_mapping(target_application)
 
     with mock.patch.dict(
         os.environ,
-        {ENV_CSTAR_CMD_CONVERTER_OVERRIDE: overridden_target.value},
+        {ENV_CSTAR_CMD_CONVERTER_OVERRIDE: overridden_target},
     ):
-        overridden_fn = get_command_mapping(target_application, launcher_type)
+        overridden_fn = get_command_mapping(target_application)
 
     assert original_fn != overridden_fn
+
+
+@pytest.mark.asyncio
+async def test_converter_hello_world(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify that the command converter produces a working CLI
+    command.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary output location for writing the test blueprint.
+    hello_world_bp_path : Path
+        Path to the hello world blueprint.
+    """
+    working_dir = tmp_path / "work"
+
+    step = LiveStep(
+        name=f"{__name__}",
+        application=Application.HELLO_WORLD,
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=working_dir,
+    )
+
+    # find the registered command converter for this application and launcher type
+    cmd_converter = get_command_mapping(Application.HELLO_WORLD)
+    assert cmd_converter is not None, "Command converter not found"
+
+    # use the converter function to generate the command
+    command = cmd_converter(step)
+
+    # confirm the retrieved converter produces the output expected
+    # from the function: convert_step_to_blueprint_run_command
+    assert "cstar blueprint run" in command
+    assert str(hello_world_bp_path) in command
+
+
+def test_convert_step_with_directives(
+    preprocessable_roms_livestep: LiveStep,
+) -> None:
+    """Verify that a Step containing directives in it's configuration results in
+    the directive file being created and passed as an argument in the command.
+
+    Parameters
+    ----------
+    preprocessable_roms_livestep: LiveStep
+        A `LiveStep` preconfigured with a continue-from preprocessing directive.
+    """
+    step = preprocessable_roms_livestep
+    bp_path = str(step.blueprint_path)
+
+    cmd_converter = get_command_mapping(Application.ROMS_MARBL)
+    result = cmd_converter(step)
+
+    # confirm the parameter is sent
+    assert ARG_DIRECTIVES_URI_LONG in result
+
+    # confirm the directive path exists
+    dir_path = result.split(ARG_DIRECTIVES_URI_LONG)[1].split(" ", maxsplit=1)[0]
+    assert bp_path in result, "The blueprint path should be unchanged"
+    assert Path(dir_path).exists()
+
+
+def test_convert_step_to_preprocessed_roms_sim_no_reset_files(
+    preprocessable_roms_livestep: LiveStep,
+) -> None:
+    """Verify that a Step containing directives in it's configuration specifying
+    a directory that does not include any reset files results in an exception.
+
+    Parameters
+    ----------
+    preprocessable_roms_livestep: LiveStep
+        A `LiveStep` preconfigured with a continue-from preprocessing directive.
+    """
+    step = preprocessable_roms_livestep
+
+    # delete any mocked reset files to trigger validation failure
+    assert step.working_dir, "Fixture failed to set `working_dir` on step"
+    fsm = RomsFileSystemManager(step.working_dir)
+    shutil.rmtree(fsm.joined_output_dir, ignore_errors=True)
+    fsm.joined_output_dir.mkdir(parents=True)
+
+    assert not step.blueprint_overrides, "Empty overrides expected"
+    assert step.working_dir, "Ensure fixture sets workdir"
+
+    config = {"path": fsm.joined_output_dir}
+
+    with pytest.raises(FileNotFoundError, match="No restart files"):
+        _ = ContinuanceTransform(config)
+
+
+def test_continuance_transform(
+    preprocessable_roms_livestep: LiveStep,
+) -> None:
+    """Verify that the `ContinuanceTransform` materially modifies blueprint content
+    to include a path to an initial conditions file located in the directory
+    passed to the transform.
+
+    Parameters
+    ----------
+    preprocessable_roms_livestep: LiveStep
+        A `LiveStep` preconfigured with a continue-from preprocessing directive.
+    """
+    step = preprocessable_roms_livestep
+    assert not step.blueprint_overrides, "Empty overrides expected"
+    assert step.working_dir, "Ensure fixture sets workdir"
+
+    bp_path_before = step.blueprint_path
+    fsm = RomsFileSystemManager(step.working_dir)
+
+    original_bp = deserialize(bp_path_before, RomsMarblBlueprint)
+    assert original_bp.initial_conditions.data, "data list is unexpectedly empty"
+    original_ic = original_bp.initial_conditions.data[0].location
+
+    trx = ContinuanceTransform(config={"path": str(fsm.joined_output_dir)})
+
+    transformed_step = next(iter(trx(step)), None)
+    assert transformed_step, "Transform didn't return a transformed step"
+
+    # confirm overrides aren empty after the transformation is applied
+    assert not transformed_step.blueprint_overrides
+
+    # confirm the blueprint path is changed
+    bp_path_after = transformed_step.blueprint_path
+    assert bp_path_after != bp_path_before, "New step must reference a new blueprint"
+
+    # confirm the path includes a suffix specified by the transform
+    assert ContinuanceTransform.suffix() in str(bp_path_after)
+
+    bp = deserialize(bp_path_after, RomsMarblBlueprint)
+    assert bp.initial_conditions.data, "data list is unexpectedly empty"
+
+    # confirm the location has been swapped to match the fixture
+    transformed_ic = Path(str(bp.initial_conditions.data[0].location))
+    assert str(original_ic) != str(transformed_ic)
+
+    # confirm the path has been expanded and resolved
+    assert transformed_ic.expanduser().resolve() == transformed_ic

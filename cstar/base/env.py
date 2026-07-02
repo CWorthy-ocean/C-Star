@@ -1,10 +1,16 @@
 import os
 import sys
-import types
 import typing as t
+from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
+from importlib import import_module
 from pathlib import Path
+
+if t.TYPE_CHECKING:
+    from types import ModuleType
 
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
@@ -20,8 +26,12 @@ FLAG_ON: t.Final[str] = "1"
 FLAG_OFF: t.Final[str] = "0"
 """Value indicating a toggle is disabled."""
 
-ENV_PREFIX: t.Final[str] = "CSTAR_"
+ENVVAR_PREFIX: t.Final[str] = "CSTAR_"
 """The common env var prefix that identifies a C-Star configuration setting."""
+CONSTANT_PREFIX: t.Final[str] = "ENV_"
+"""The common prefix used to name an annotated environment variable constant."""
+NOT_SET: t.Final[str] = "<not-set>"
+"""Default description and default for variables missing annotations."""
 
 
 @dataclass(slots=True)
@@ -34,7 +44,7 @@ class EnvVar:
     """A group name used to identify the variable use."""
     default: str = ""
     """The default value for the setting."""
-    default_factory: t.Callable[["EnvVar"], str | None] | None = None
+    default_factory: Callable[["EnvVar"], str | None] | None = None
     """A function used at run-time to generate the default value."""
     indirect_var: str = ""
     """An environment variable name to be used when the primary variable is not set."""
@@ -79,7 +89,7 @@ def capture_environment() -> dict[str, str]:
     -------
     dict[str, str]
     """
-    return {k: v for k, v in os.environ.items() if k.startswith(ENV_PREFIX)}
+    return {k: v for k, v in os.environ.items() if k.startswith(ENVVAR_PREFIX)}
 
 
 def indirect_default_factory(env_var: EnvVar) -> str:
@@ -94,12 +104,12 @@ def indirect_default_factory(env_var: EnvVar) -> str:
     return os.environ.get(var_name, "")
 
 
-def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
+def get_env_item(var_name: str) -> EnvItem:
     """Retrieve the metadata for an environment variable constant.
 
     Parameters:
     -----------
-    var_name: str
+    var_name : str
         The string value of the environment variable (e.g. "CSTAR_CACHE_HOME")
 
     Returns:
@@ -107,27 +117,11 @@ def get_env_item(var_name: str, prefix: str = "ENV_") -> EnvItem:
     env_item: EnvItem
         The metadata associated with the environment variable
     """
-    constant_mods = [__name__, "cstar.orchestration.utils", "cstar.base.feature"]
-    constant_name = f"{prefix}{var_name}"
+    env_vars = discover_env_vars()
+    if variable := env_vars.get(var_name, None):
+        return variable
 
-    for module_name in constant_mods:
-        hints = t.get_type_hints(sys.modules[module_name], include_extras=True)
-
-        if hint := hints.get(constant_name, None):
-            metadata = getattr(hint, "__metadata__", None)
-            if not metadata:
-                return EnvItem(
-                    description="unknown",
-                    group=GROUP_UNK,
-                    default="unknown",
-                    name=var_name,
-                )
-
-            meta = metadata[0]
-            if isinstance(meta, EnvVar):
-                return EnvItem.from_env_var(meta, var_name)
-
-    msg = f"No environment variable metadata found for: {constant_name}"
+    msg = f"No environment variable metadata found for: {var_name}"
     raise ValueError(msg)
 
 
@@ -168,6 +162,25 @@ ENV_CSTAR_LOG_LEVEL: t.Annotated[
 ] = "CSTAR_LOG_LEVEL"
 """Specify the logging level for terminal messages. Options: DEBUG, INFO, WARNING, ERROR, CRITICAL."""
 
+ENV_CSTAR_CLI_DRY_RUN: t.Annotated[
+    t.Literal["CSTAR_CLI_DRY_RUN"],
+    EnvVar(
+        "Set to `1` to short-circuit CLI operations after planning steps are completed",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_CLI_DRY_RUN"
+"""Set to `1` to short-circuit CLI operations after planning steps are completed."""
+
+ENV_CSTAR_CLI_VERBOSE: t.Annotated[
+    t.Literal["CSTAR_CLI_VERBOSE"],
+    EnvVar(
+        "Set to `1` to produce verbose CLI outputs.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_CLI_VERBOSE"
+"""Set to `1` to produce verbose CLI outputs."""
 
 ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
     t.Literal["CSTAR_CLOBBER_WORKING_DIR"],
@@ -177,7 +190,7 @@ ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
         default=FLAG_OFF,
     ),
 ] = "CSTAR_CLOBBER_WORKING_DIR"
-""""Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
+"""Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
 
 ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
     t.Literal["CSTAR_FRESH_CODEBASES"],
@@ -197,7 +210,7 @@ ENV_CSTAR_IN_ACTIVE_ALLOCATION: t.Annotated[
         default="",
     ),
 ] = "CSTAR_IN_ACTIVE_ALLOCATION"
-"""""Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation."""
+"""Override behavior for launching new jobs via SLURM or simply executing via mpirun. Only set this to 0 if you need to launch new jobs from within an existing allocation."""
 
 ENV_CSTAR_NPROCS_POST: t.Annotated[
     t.Literal["CSTAR_NPROCS_POST"],
@@ -287,31 +300,47 @@ ENV_CSTAR_SLURM_POST_SUBMIT_DELAY: t.Annotated[
 ] = "CSTAR_SLURM_POST_SUBMIT_DELAY"
 """Delay (in seconds) after a submission to ensure status for a SLURM job can be queried."""
 
+ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
+    t.Literal["CSTAR_ORCH_LOCAL_DELAY"],
+    EnvVar(
+        "Delay (in seconds) between status queries in the local launcher proxy script",
+        GROUP_SIM,
+        default="10.0",
+    ),
+] = "CSTAR_ORCH_LOCAL_DELAY"
+"""Delay (in seconds) between status queries in the local launcher proxy script."""
 
-def discover_env_vars(
-    modules: list[types.ModuleType],
-    prefix: str = "ENV_",
-) -> list[EnvItem]:
-    """Locate all constants in a module that represent environment variables."""
-    items: list[EnvItem] = []
+
+@lru_cache
+def discover_env_vars() -> dict[str, EnvItem]:
+    """Return a mapping from env-var constant to the associated metadata."""
+    container: dict[str, EnvItem] = {}
+    modules: list[ModuleType] = [
+        sys.modules[__name__],
+        import_module("cstar.orchestration.utils"),
+        import_module("cstar.base.feature"),
+    ]
+
     for module in modules:
         hints = t.get_type_hints(module, include_extras=True)
+        matches = {k: v for k, v in hints.items() if k.startswith(CONSTANT_PREFIX)}
+        for var_name, hint in matches.items():
+            actual = getattr(module, var_name)
 
-        for name, hint in hints.items():
-            if name.startswith(prefix):
-                metadata = getattr(hint, "__metadata__", None)
-                value = getattr(module, name)
-                if metadata and isinstance(metadata[0], EnvVar):
-                    meta = metadata[0]
-                    items.append(EnvItem.from_env_var(meta, value))
-                elif not metadata:
-                    items.append(
-                        EnvItem(
-                            description="unknown",
-                            group=GROUP_UNK,
-                            default="unknown",
-                            name=value,
-                        ),
-                    )
+            if not (meta := getattr(hint, "__metadata__", None)):
+                continue
 
-    return items
+            if annotation := next((x for x in meta if isinstance(x, EnvVar)), None):
+                container[actual] = EnvItem.from_env_var(annotation, actual)
+
+    return container
+
+
+def env_var_groups() -> dict[str, list[EnvItem]]:
+    """Return a mapping from group-name to the associated list of env variables."""
+    groups: dict[str, list[EnvItem]] = defaultdict(list)
+
+    for item in discover_env_vars().values():
+        groups[item.group].append(item)
+
+    return groups

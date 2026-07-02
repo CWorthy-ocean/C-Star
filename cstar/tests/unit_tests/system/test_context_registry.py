@@ -5,16 +5,17 @@ import pytest
 
 from cstar.base.exceptions import CstarError
 from cstar.system.manager import (
-    _AnvilSystemContext,
-    _DerechoSystemContext,
-    _ExpanseSystemContext,
-    _get_system_context,
-    _LinuxARM64SystemContext,
-    _LinuxSystemContext,
-    _MacOSSystemContext,
-    _PerlmutterSystemContext,
-    _registry,
-    _SystemContext,
+    CTX_REGISTRY,
+    AnvilSystemContext,
+    DerechoSystemContext,
+    EljaSystemContext,
+    ExpanseSystemContext,
+    LinuxARM64SystemContext,
+    LinuxSystemContext,
+    MacOSSystemContext,
+    PerlmutterSystemContext,
+    SystemContext,
+    get_system_context,
     register_sys_context,
 )
 from cstar.system.scheduler import Scheduler
@@ -26,16 +27,17 @@ DEFAULT_MOCK_HOST_NAME = "mock_system"
 def test_unique_context_names() -> None:
     """Verify that known contexts have a unique key."""
     context_types = (
-        _PerlmutterSystemContext,
-        _MacOSSystemContext,
-        _DerechoSystemContext,
-        _ExpanseSystemContext,
-        _LinuxARM64SystemContext,
-        _LinuxSystemContext,
-        _AnvilSystemContext,
+        PerlmutterSystemContext,
+        MacOSSystemContext,
+        DerechoSystemContext,
+        ExpanseSystemContext,
+        LinuxARM64SystemContext,
+        LinuxSystemContext,
+        AnvilSystemContext,
+        EljaSystemContext,
     )
 
-    registered_names = set(_registry.keys())
+    registered_names = set(CTX_REGISTRY.keys())
 
     assert len({ctx.name for ctx in context_types}) == len(registered_names)
 
@@ -43,22 +45,23 @@ def test_unique_context_names() -> None:
 @pytest.mark.parametrize(
     "wrapped_class",
     [
-        _PerlmutterSystemContext,
-        _MacOSSystemContext,
-        _DerechoSystemContext,
-        _ExpanseSystemContext,
-        _LinuxSystemContext,
-        _LinuxARM64SystemContext,
+        PerlmutterSystemContext,
+        MacOSSystemContext,
+        DerechoSystemContext,
+        EljaSystemContext,
+        ExpanseSystemContext,
+        LinuxSystemContext,
+        LinuxARM64SystemContext,
     ],
 )
-def test_context_registry(wrapped_class: type[_SystemContext]) -> None:
+def test_context_registry(wrapped_class: type[SystemContext]) -> None:
     """Verify that all known system contexts are registered."""
     with patch(
         "cstar.system.manager.HostNameEvaluator.name",
         new_callable=PropertyMock,
         return_value=wrapped_class.name,
     ):
-        ctx = _get_system_context()
+        ctx = get_system_context()
 
     # confirm all properties of the factory produced context match
     assert ctx.name == wrapped_class.name
@@ -70,14 +73,15 @@ def test_context_registry(wrapped_class: type[_SystemContext]) -> None:
 @pytest.mark.parametrize(
     ("expected_name", "wrapped_class"),
     [
-        ("perlmutter", _PerlmutterSystemContext),
-        ("darwin_arm64", _MacOSSystemContext),
-        ("derecho", _DerechoSystemContext),
-        ("expanse", _ExpanseSystemContext),
-        ("linux_x86_64", _LinuxSystemContext),
+        ("perlmutter", PerlmutterSystemContext),
+        ("darwin_arm64", MacOSSystemContext),
+        ("derecho", DerechoSystemContext),
+        ("elja", EljaSystemContext),
+        ("expanse", ExpanseSystemContext),
+        ("linux_x86_64", LinuxSystemContext),
     ],
 )
-def test_registry_keys(expected_name: str, wrapped_class: type[_SystemContext]) -> None:
+def test_registry_keys(expected_name: str, wrapped_class: type[SystemContext]) -> None:
     """Verify that the system contexts have the names expected from using
     HostNameEvaluator for all known systems.
     """
@@ -88,7 +92,7 @@ def test_new_registration() -> None:
     """Verify that registrations of new context types are immediately available."""
 
     @register_sys_context
-    class MockSystemContext(_SystemContext):
+    class MockSystemContext(SystemContext):
         """Mock system context to test the context registry."""
 
         name: ClassVar[str] = "mock-system-name"
@@ -105,7 +109,7 @@ def test_new_registration() -> None:
         new_callable=PropertyMock,
         return_value=MockSystemContext.name,
     ):
-        ctx = _get_system_context()
+        ctx = get_system_context()
 
     assert ctx
     assert ctx.name == MockSystemContext.name
@@ -121,4 +125,4 @@ def test_unknown_context_name() -> None:
             return_value="invalid-name",
         ),
     ):
-        _ = _get_system_context()
+        _ = get_system_context()

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
 name: example_workplan
 description: Runs a Wales model, then a WIO model, all on your laptop!
 state: draft

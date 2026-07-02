@@ -1,7 +1,7 @@
 import typing as t
 
-from pydantic import BaseModel
-
+from cstar.applications.roms_marbl.models import CodeRepository, RomsMarblBlueprint
+from cstar.base.adapter import ModelAdapter
 from cstar.base.additional_code import AdditionalCode
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -21,32 +21,8 @@ from cstar.roms.input_dataset import (
     ROMSTidalForcing,
 )
 
-_Tin = t.TypeVar("_Tin", bound=BaseModel)
-_Tout_co = t.TypeVar("_Tout_co", covariant=True)
 
-
-class ModelAdapter(t.Generic[_Tin, _Tout_co], t.Protocol):
-    """Contract exposing a mechanism to adapt a source model to a target type."""
-
-    model: _Tin
-
-    def __init__(self, model: _Tin) -> None:
-        self.model = model
-
-    def adapt(self) -> _Tout_co | None:
-        """Adapt the source model to the target output type.
-
-        Returns
-        -------
-        _Tout
-            The instance converted from the source model
-        """
-        ...
-
-
-class DiscretizationAdapter(
-    ModelAdapter[models.RomsMarblBlueprint, ROMSDiscretization]
-):
+class DiscretizationAdapter(ModelAdapter[RomsMarblBlueprint, ROMSDiscretization]):
     """Create a ROMSDiscretization from a blueprint model."""
 
     @t.override
@@ -58,16 +34,16 @@ class DiscretizationAdapter(
         )
 
 
-class AddtlCodeAdapter(ModelAdapter[models.RomsMarblBlueprint, AdditionalCode]):
+class AddtlCodeAdapter(ModelAdapter[RomsMarblBlueprint, AdditionalCode]):
     """Create a AdditionalCode from a blueprint model."""
 
-    def __init__(self, model: models.RomsMarblBlueprint, key: str) -> None:
+    def __init__(self, model: RomsMarblBlueprint, key: str) -> None:
         super().__init__(model)
         self.key = key
 
     @t.override
     def adapt(self) -> AdditionalCode:
-        code_attr: models.CodeRepository = getattr(self.model.code, self.key)
+        code_attr: CodeRepository = getattr(self.model.code, self.key)
 
         return AdditionalCode(
             location=str(code_attr.location),
@@ -77,7 +53,7 @@ class AddtlCodeAdapter(ModelAdapter[models.RomsMarblBlueprint, AdditionalCode]):
         )
 
 
-class CodebaseAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSExternalCodeBase]):
+class CodebaseAdapter(ModelAdapter[RomsMarblBlueprint, ROMSExternalCodeBase]):
     """Create a ROMSExternalCodeBase from a blueprint model."""
 
     @t.override
@@ -88,7 +64,7 @@ class CodebaseAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSExternalCodeBa
         )
 
 
-class MARBLAdapter(ModelAdapter[models.RomsMarblBlueprint, MARBLExternalCodeBase]):
+class MARBLAdapter(ModelAdapter[RomsMarblBlueprint, MARBLExternalCodeBase]):
     """Create a MARBLExternalCodeBase from a blueprint model."""
 
     @t.override
@@ -104,7 +80,7 @@ class MARBLAdapter(ModelAdapter[models.RomsMarblBlueprint, MARBLExternalCodeBase
         )
 
 
-class GridAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSModelGrid]):
+class GridAdapter(ModelAdapter[RomsMarblBlueprint, ROMSModelGrid]):
     """Create a ROMSModelGrid from a blueprint model."""
 
     @t.override
@@ -127,9 +103,7 @@ class GridAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSModelGrid]):
         )
 
 
-class InitialConditionAdapter(
-    ModelAdapter[models.RomsMarblBlueprint, ROMSInitialConditions]
-):
+class InitialConditionAdapter(ModelAdapter[RomsMarblBlueprint, ROMSInitialConditions]):
     """Create a ROMSInitialCondition from a blueprint model."""
 
     @t.override
@@ -154,7 +128,7 @@ class InitialConditionAdapter(
         )
 
 
-class TidalForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSTidalForcing]):
+class TidalForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSTidalForcing]):
     """Create a ROMSTidalForcing from a blueprint model."""
 
     @t.override
@@ -181,7 +155,7 @@ class TidalForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSTidalForci
         )
 
 
-class RiverForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSRiverForcing]):
+class RiverForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSRiverForcing]):
     """Create a ROMSRiverForcing from a blueprint model."""
 
     @t.override
@@ -210,7 +184,7 @@ class RiverForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSRiverForci
 
 
 class BoundaryForcingAdapter(
-    ModelAdapter[models.RomsMarblBlueprint, list[ROMSBoundaryForcing]]
+    ModelAdapter[RomsMarblBlueprint, list[ROMSBoundaryForcing]]
 ):
     """Create a ROMSBoundaryForcing from a blueprint model."""
 
@@ -233,9 +207,7 @@ class BoundaryForcingAdapter(
         ]
 
 
-class SurfaceForcingAdapter(
-    ModelAdapter[models.RomsMarblBlueprint, list[ROMSSurfaceForcing]]
-):
+class SurfaceForcingAdapter(ModelAdapter[RomsMarblBlueprint, list[ROMSSurfaceForcing]]):
     """Create a ROMSSurfaceForcing from a blueprint model."""
 
     @t.override
@@ -257,7 +229,7 @@ class SurfaceForcingAdapter(
         ]
 
 
-class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing]):
+class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
     """Create a ROMSCdrForcing from a blueprint model."""
 
     @t.override
@@ -265,25 +237,27 @@ class CdrForcingAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSCdrForcing])
         if self.model.cdr_forcing is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.runtime_params.output_dir)
+        fs_manager = RomsFileSystemManager(self.model.working_dir)
 
         return ROMSCdrForcing(
             location=str(self.model.cdr_forcing.data[0].location),
-            file_hash=self.model.cdr_forcing.data[0].hash
-            if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
-            else None,
+            file_hash=(
+                self.model.cdr_forcing.data[0].hash
+                if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
+                else None
+            ),
             start_date=None,
             end_date=None,
             linker=DatasetLinker(
                 opt_file_name="cdr_frc.opt",
                 symlink_name="cdr.nc",
-                workdir=fs_manager.work_dir,
+                workdir=fs_manager.run_dir,
                 opt_file_dir=fs_manager.compile_time_code_dir,
             ),
         )
 
 
-class NestingInfoAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSNestingInfo]):
+class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
     """Create a ROMSNestingInfo from a blueprint model."""
 
     @t.override
@@ -291,26 +265,28 @@ class NestingInfoAdapter(ModelAdapter[models.RomsMarblBlueprint, ROMSNestingInfo
         if self.model.nesting_info is None:
             return None
 
-        fs_manager = RomsFileSystemManager(self.model.runtime_params.output_dir)
+        fs_manager = RomsFileSystemManager(self.model.working_dir)
 
         return ROMSNestingInfo(
             location=str(self.model.nesting_info.data[0].location),
-            file_hash=self.model.nesting_info.data[0].hash
-            if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
-            else None,
+            file_hash=(
+                self.model.nesting_info.data[0].hash
+                if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
+                else None
+            ),
             start_date=None,
             end_date=None,
             linker=DatasetLinker(
                 opt_file_name="extract_data.opt",
                 symlink_name="nesting.nc",
-                workdir=fs_manager.work_dir,
+                workdir=fs_manager.run_dir,
                 opt_file_dir=fs_manager.compile_time_code_dir,
             ),
         )
 
 
 class ForcingCorrectionAdapter(
-    ModelAdapter[models.RomsMarblBlueprint, list[ROMSForcingCorrections]]
+    ModelAdapter[RomsMarblBlueprint, list[ROMSForcingCorrections]]
 ):
     """Create a ROMSForcingCorrections from a blueprint model."""
 

@@ -1,18 +1,19 @@
 import asyncio
 import datetime
+import os
+import subprocess
+import textwrap
 import typing as t
-from multiprocessing import Process as MpProcess
+from pathlib import Path
 from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import PrivateAttr
 
+from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import slugify
-from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -20,7 +21,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.state import put_sentinel
+from cstar.orchestration.state import StateRepository
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
@@ -29,8 +30,9 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-def run_as_process(step: "Step", cmd: list[str]) -> dict[str, int]:
-    p = sprun(args=cmd, text=True, check=False)
+def run_as_process(step: "Step", cmd: list[str], log_file: Path) -> dict[str, int]:
+    with log_file.open("w+") as log:
+        p = sprun(args=cmd, text=True, check=True, stdout=log, stderr=log)
     return {step.name: p.returncode}
 
 
@@ -40,11 +42,14 @@ class LocalHandle(ProcessHandle):
     start_at: datetime.datetime | float
     """The process creation time as a posix timestamp (in seconds)."""
 
-    _process: MpProcess = PrivateAttr()
+    _process: subprocess.Popen[bytes] = PrivateAttr()
     """The process handle (used only for simulating local processes)."""
 
     status: Status = Status.Unsubmitted
     """The current status of the task."""
+
+    launcher_name: str = "local"
+    """The launcher used to launch the process."""
 
     @property
     def start_ts(self) -> float:
@@ -64,29 +69,92 @@ class LocalHandle(ProcessHandle):
         return now - self.start_ts
 
     @property
-    def process(self) -> MpProcess:
+    def process(self) -> subprocess.Popen[bytes]:
         return self._process
 
     @process.setter
-    def process(self, value: MpProcess) -> None:
+    def process(self, value: subprocess.Popen[bytes]) -> None:
         self.status = Status.Submitted
         self._process = value
 
     @property
-    def safe_name(self) -> str:
-        return slugify(self.name)
+    def is_expired(self) -> bool:
+        return not hasattr(self, "_process")
 
 
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
+
+    tasks: t.ClassVar[dict[str, str]] = {}
+    use_proxy: t.ClassVar[bool] = False
 
     @classmethod
     def check_preconditions(cls) -> None:
         """Perform launcher-specific startup validation."""
 
     @staticmethod
+    def _create_dep_aware_script(
+        step: "LiveStep", dependencies: list[LocalHandle]
+    ) -> str:
+        """Create a script that will execute the desired command for a
+        `Step` while also waiting for any dependencies to complete.
+
+        Returns
+        -------
+        str
+        """
+        blueprint_path = str(step.blueprint_path)
+        command = step.command.replace(blueprint_path, '"$BLUEPRINT_PATH"')
+        pids = " ".join([f'"{h.pid}"' for h in dependencies])
+        local_dep_delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
+
+        return textwrap.dedent(f"""\
+            #!/bin/bash
+            SENTINEL_PATH="{StateRepository.sentinel_path(step.name)}"
+            BLUEPRINT_PATH="{step.blueprint_path}"
+            DEP_PIDS=({pids})
+
+            # values from `Status` enum
+            RUNNING={Status.Running.value}
+            DONE={Status.Done.value}
+            FAILED={Status.Failed.value}
+
+            update_status() {{
+                local status=$1
+                if [ "$(uname)" = "Darwin" ]; then
+                    sed -i '' "s/^status:.*$/status: $status/" "$2"
+                else
+                    sed -i "s/^status:.*$/status: $status/" "$2"
+                fi
+            }}
+
+            # wait for dependencies to complete.
+            for DEP_PID in "${{DEP_PIDS[@]}}"; do
+                while kill -0 "$DEP_PID" 2>/dev/null; do
+                    echo "Awaiting process $DEP_PID"
+                    sleep {local_dep_delay}
+                done
+            done
+
+            # update status to running
+            update_status $RUNNING $SENTINEL_PATH
+
+            # run the target command
+            {command}
+
+            # update the status to `Done` if target command is successful, otherwise `Failed`
+            RC=$?
+            STATUS=$FAILED
+            if [ $RC -eq 0 ]; then
+                STATUS=$DONE
+            fi
+            update_status $STATUS $SENTINEL_PATH
+            exit $RC
+        """)
+
+    @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
-        """Submit a step to SLURM as a new batch allocation.
+        """Submit a step to a local process.
 
         Parameters
         ----------
@@ -100,27 +168,38 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        step_converter = get_command_mapping(
-            Application(step.application),
-            LocalLauncher,
-        )
-        cmd = step_converter(step)
+        if LocalLauncher.use_proxy:
+            script = LocalLauncher._create_dep_aware_script(step, dependencies)
+        else:
+            script = step.command
+
+        step.fsm.prepare()
+        step.script_path.write_text(script)
+        log.debug(f"Created run script at path: {step.script_path}")
+        log_file = step.log_path
 
         try:
-            if not step.fsm.root.exists():
+            if not step.fsm.root_dir.exists():
                 step.fsm.prepare()
 
-            mp_process = MpProcess(
-                target=run_as_process,
-                name=step.safe_name,
-                args=(step, cmd.split()),
-                daemon=True,
+            cmd = ["sh", str(step.script_path)]
+
+            local_process = subprocess.Popen(
+                cmd,
+                cwd=step.fsm.run_dir,
+                stdin=subprocess.PIPE,
+                stdout=step.log_path.open("w"),
+                stderr=subprocess.STDOUT,
             )
-            mp_process.start()
+
             create_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
-            if pid := mp_process.pid:
-                print(f"Local run of `{step.application}` created pid: {pid}")
+            if pid := local_process.pid:
+                msg = f"Local run of {step.application!r} created pid: {pid}"
+                log.debug(msg)
+                msg = f"Logs for step {step.safe_name!r} can be found at: {log_file}"
+                log.info(msg)
+                LocalLauncher.tasks[step.name] = str(pid)
 
                 try:
                     ps_process = PsProcess(pid)
@@ -129,15 +208,18 @@ class LocalLauncher(Launcher[LocalHandle]):
                         create_timestamp, tz=datetime.timezone.utc
                     )
                 except NoSuchProcess:
-                    print(f"Unable to retrieve exact start time for pid: {pid}")
+                    msg = f"Unable to retrieve exact start time for pid: {pid}"
+                    log.debug(msg)
 
                 handle = LocalHandle(
                     pid=str(pid),
-                    name=step.safe_name,
+                    name=step.name,
+                    run_id=str(os.getenv(ENV_CSTAR_RUNID, "")),
                     start_at=create_time,
                     status=Status.Submitted,
                 )
-                handle.process = mp_process
+
+                handle.process = local_process
                 return handle
 
         finally:
@@ -160,21 +242,32 @@ class LocalLauncher(Launcher[LocalHandle]):
         str
             The current status of the step.
         """
-        rc = handle.process.exitcode
+        if handle.is_expired:
+            if not Status.is_terminal(handle.status):
+                return "RUNNING"
+            return "COMPLETED"
+
+        rc = handle.process.returncode
 
         if rc is None:
             status = "RUNNING"
         elif rc == 0:
             status = "COMPLETED"
-            log.debug(f"Return code for handle `{handle}` is `{rc}`.")
+            msg = f"Return code for handle {handle!r} is `{rc}`."
+            log.debug(msg)
         else:
             status = "FAILED"
-            log.warning(f"Failure code for handle `{handle}` is `{rc}`.")
+            msg = f"Failure code for handle {handle!r} is `{rc}`."
+            log.warning(msg)
 
         return status
 
     @classmethod
-    async def launch(cls, step: "LiveStep", dependencies: list[LocalHandle]) -> Task:
+    async def launch(
+        cls,
+        step: "LiveStep",
+        dependencies: list[LocalHandle],
+    ) -> Task[LocalHandle]:
         """Launch a step in local process.
 
         Parameters
@@ -191,17 +284,20 @@ class LocalLauncher(Launcher[LocalHandle]):
         """
         tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
-        active_found = any(map(Status.is_in_progress, statuses))
+
         failure_found = any(map(Status.is_failure, statuses))
 
-        # wait for the dependencies to complete before launching
-        while active_found and not failure_found:
-            await asyncio.sleep(1)
-
-            tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
-            statuses = await asyncio.gather(*tasks)
+        if not LocalLauncher.use_proxy:
             active_found = any(map(Status.is_in_progress, statuses))
-            failure_found = any(map(Status.is_failure, statuses))
+
+            # wait for the dependencies to complete before launching
+            while active_found and not failure_found:
+                await asyncio.sleep(1)
+
+                tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
+                statuses = await asyncio.gather(*tasks)
+                active_found = any(map(Status.is_in_progress, statuses))
+                failure_found = any(map(Status.is_failure, statuses))
 
         if failure_found:
             msg = f"Dependency of step {step.name} failed. Unable to continue."
@@ -209,8 +305,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         live_step = LiveStep.from_step(step)
         handle = await LocalLauncher._submit(live_step, dependencies)
-        return Task(
-            status=Status.Submitted,
+        return Task[LocalHandle](
             step=live_step,
             handle=handle,
         )
@@ -237,7 +332,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 return Status.Submitted
             case "RUNNING" | "ENDING":
                 return Status.Running
-            case "COMPLETED" | "FAILED":
+            case "COMPLETED":
                 return Status.Done
             case "CANCELLED":
                 return Status.Cancelled
@@ -268,7 +363,6 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if prior != current:
             handle.status = current
-            await put_sentinel(handle)
 
         return item
 
@@ -288,12 +382,16 @@ class LocalLauncher(Launcher[LocalHandle]):
         """
         process = item.handle.process
 
-        if process is not None:
-            if process.exitcode is not None:
-                # can't cancel a completed process
-                print(f"Unable to cancel a completed task `{process.pid}")
+        if not item.handle.is_expired:  # wonky is-null check...
+            if process.returncode is not None:
+                msg = f"Unable to cancel a completed task `{process.pid}"
+                log.debug(msg)
             else:
                 process.kill()
                 item.status = Status.Cancelled
 
         return item
+
+    @classmethod
+    def handle_klass(cls) -> type[LocalHandle]:
+        return LocalHandle

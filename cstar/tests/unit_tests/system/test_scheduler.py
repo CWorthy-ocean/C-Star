@@ -10,6 +10,9 @@ from cstar.system.scheduler import (
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
+    _parse_walltime,
+    query_max_walltime_via_sacctmgr,
+    query_max_walltime_via_sinfo,
 )
 
 ################################################################################
@@ -108,7 +111,7 @@ class TestQueue:
         assert slurm_ptn.max_walltime == "49:00:00"
 
         mock_subprocess_run.assert_called_once_with(
-            "sinfo -h -o '%l' -p general",
+            "sinfo --noheader --format='%l' --partition=general",
             shell=True,
             text=True,
             capture_output=True,
@@ -588,3 +591,85 @@ class TestStrAndRepr:
             "documentation='https://mockscheduler.readthemocks.io')"
         )
         assert repr(scheduler) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("00:00:00", "00:00:00", id="no time"),
+        pytest.param("00:00:01", "00:00:01", id="one second"),
+        pytest.param("00:01:00", "00:01:00", id="one minute"),
+        pytest.param("01:00:00", "01:00:00", id="one hour"),
+        pytest.param("99:00:00", "99:00:00", id="NINE NINE!"),
+        pytest.param("00:00:90", "00:00:90", id="overflow seconds"),
+        pytest.param("00:90:00", "00:90:00", id="overflow minutes"),
+        pytest.param("42:00:00", "42:00:00", id="overflow hours"),
+        pytest.param("2-00:00:00", "48:00:00", id="dashed days only"),
+        pytest.param("2-4:00:00", "52:00:00", id="add to dashed days"),
+        pytest.param("1-24:00:00", "48:00:00", id="dashed plus exact day hours"),
+        pytest.param("00:00", "00:00:00", id="mm:ss to hh:mm:ss w/no time"),
+        pytest.param("42:00", "00:42:00", id="mm:ss to hh:mm:ss"),
+        pytest.param("99:00", "00:99:00", id="mm:ss to hh:mm:ss w/overflow"),
+    ],
+)
+def test_parse_walltime(value: str, expected: str) -> None:
+    """Verify `_parse_walltime` correctly parses all three available formats:
+    - hh:mm:ss
+    - N-hh:mm:ss
+    - mm:ss
+    """
+    actual = _parse_walltime(value)
+
+    assert actual == expected
+
+
+def test_query_max_walltime_via_sinfo() -> None:
+    """Verify the maximum walltime is correctly returned from the query method."""
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="2-00:00:00")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sinfo("mock-partition-name")
+
+        assert result == "48:00:00"
+        mock_sinfo.assert_called_once()
+
+
+def test_query_max_walltime_via_sinfo_partition_not_valid() -> None:
+    """Verify a null max walltime is returned from the query method when
+    the underlying query returns no result.
+
+    e.g `sinfo --noheader --format='%l' --partition=garbage-name`
+    """
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sinfo("mock-partition-name")
+
+        assert result is None
+        mock_sinfo.assert_called_once()
+
+
+def test_query_max_walltime_via_sacctmgr() -> None:
+    """Verify the maximum walltime is correctly returned from the query method."""
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="2-00:00:00")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sacctmgr("mock-partition-name")
+
+        assert result == "48:00:00"
+        mock_sinfo.assert_called_once()
+
+
+def test_query_max_walltime_via_sacctmgr_partition_not_valid() -> None:
+    """Verify a null max walltime is returned from the query method when
+    the underlying query returns no result.
+
+    e.g `sinfo --noheader --format='%l' --partition=garbage-name`
+    """
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sacctmgr("mock-partition-name")
+
+        assert result is None
+        mock_sinfo.assert_called_once()

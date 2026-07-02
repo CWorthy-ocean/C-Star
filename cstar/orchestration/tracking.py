@@ -1,5 +1,6 @@
 import asyncio
 import typing as t
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -36,8 +37,11 @@ class WorkplanRun(BaseModel):
     environment: dict[str, str] = Field(default_factory=dict)
     """The environment variables at the time of the run."""
 
-    user_variables: t.Mapping[str, str] = Field(default_factory=dict)
+    user_variables: Mapping[str, str] = Field(default_factory=dict)
     """User-supplied runtime variable overrides."""
+
+    sentinels: set[Path] = Field(default_factory=set[Path])
+    """State files expected to be created during execution of the run."""
 
     @staticmethod
     def get_default_run_id(uri: str) -> str:
@@ -57,12 +61,19 @@ class WorkplanRun(BaseModel):
 
         return slugify(wp.name)
 
+    @property
+    def state_dir(self) -> Path:
+        """The path to the directory containing state files for the run.
+
+        Returns
+        -------
+        Path
+        """
+        return StateDirectoryManager.run_state_dir(run_id=self.run_id)
+
 
 class TrackingRepository(LoggingMixin):
     """The API for persisting tracking data."""
-
-    _root: t.Final[Path]
-    """The root directory where tracking files are stored."""
 
     _LATEST_DIR: t.Final[str] = "latest"
     """The directory containing a mapping to the last run using a given run-id."""
@@ -73,9 +84,10 @@ class TrackingRepository(LoggingMixin):
     _MODE: PersistenceMode = PersistenceMode.yaml
     """The serialization mode to use."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
-        self._root = StateDirectoryManager.tracking_dir()
+    @property
+    def _root(self) -> Path:
+        """Return the root directory where tracking files are stored."""
+        return StateDirectoryManager.tracking_dir()
 
     @property
     def latest_dir(self) -> Path:
@@ -187,9 +199,16 @@ class TrackingRepository(LoggingMixin):
         if run_date:
             path = self._history_path(run_id, run_date)
             if path.exists():
+                msg = f"Located workplan run in history for {run_id!r} at: {path}"
+                self.log.trace(msg)
                 return path
 
-        return self._latest_path(run_id)
+        path = self._latest_path(run_id)
+        if path.exists():
+            msg = f"Located latest run of {run_id!r} at: {path}"
+            self.log.trace(msg)
+
+        return path
 
     async def get_workplan_run(
         self, run_id: str, run_date: datetime | None = None
@@ -208,6 +227,10 @@ class TrackingRepository(LoggingMixin):
         WorkplanRun | None
             The record when it can be located in history or latest runs, otherwise `None`.
         """
+        if not run_id:
+            msg = "A valid run-id was not provided; unable to retrieve run"
+            raise ValueError(msg)
+
         run_path = self._find_run_path(run_id, run_date)
 
         if not run_path.exists():
@@ -242,8 +265,9 @@ class TrackingRepository(LoggingMixin):
         if not latest_path.parent.exists():
             latest_path.parent.mkdir(parents=True)
 
-        await asyncio.to_thread(latest_path.unlink, missing_ok=True)
-        await asyncio.to_thread(latest_path.symlink_to, run_path)
+        if latest_path.resolve() != run_path:
+            await asyncio.to_thread(latest_path.unlink, missing_ok=True)
+            await asyncio.to_thread(latest_path.symlink_to, run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import typing as t
+from collections.abc import Mapping
 
 from prefect import State, task
 from prefect import Task as PrefectTask
@@ -11,28 +12,24 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd, slugify
+from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     create_scheduler_job,
     get_slurm_batch,
     get_slurm_batches,
 )
-from cstar.orchestration.converter.converter import get_command_mapping
-from cstar.orchestration.models import Application, RomsMarblBlueprint
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
     Status,
     Task,
 )
-from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import (
-    get_sentinel,
+    StateRepository,
     load_sentinels,
-    put_sentinel,
-    sentinel_path,
 )
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
@@ -86,14 +83,10 @@ class SlurmHandle(ProcessHandle):
     """Handle enabling reference to a task running in SLURM."""
 
     status: Status = Status.Unsubmitted
+    """The current status of the task."""
 
-    @property
-    def safe_name(self) -> str:
-        """Return the path-safe name for the handle.
-
-        Implements the `StateProxy` protocol.
-        """
-        return slugify(self.name)
+    launcher_name: str = "slurm"
+    """The launcher used to launch the process."""
 
 
 class SlurmLauncher(Launcher[SlurmHandle]):
@@ -103,23 +96,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         get_env_item(ENV_CSTAR_SLURM_POST_SUBMIT_DELAY).value
     )
     """Delay after a submission to ensure status for a SLURM job can be queried."""
-
-    @classmethod
-    def check_preconditions(cls) -> None:
-        """Perform launcher-specific startup validation.
-
-        Raises
-        ------
-        CstarExpectationFailed
-            If an environment variable required by the launcher cannot be found.
-        """
-        keys = [ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE]
-        config = {key: get_env_item(key).value for key in keys}
-
-        for key, value in config.items():
-            if not value:
-                msg = f"Missing required environment variable: {key}"
-                raise ValueError(msg)
 
     @staticmethod
     def configured_queue() -> str:
@@ -181,30 +157,27 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
+        if not step.blueprint:
+            msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
+            raise CstarError(msg)
+
         job_name = step.safe_name
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
         job_dep_ids = [d.pid for d in dependencies]
 
-        step_converter = get_command_mapping(
-            Application(step.application),
-            SlurmLauncher,
-        )
+        script_path = step.script_path
+        output_file = step.log_path
 
-        script_path = step.fsm.work_dir / "script.sh"
-        output_file = step.fsm.logs_dir / f"{job_name}.out"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        if not script_path.parent.exists():
-            script_path.parent.mkdir(parents=True)
+        run_id = os.getenv(ENV_CSTAR_RUNID)
+        step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
-        if not output_file.parent.exists():
-            output_file.parent.mkdir(parents=True)
-            output_file.write_text("ready\n")
-
-        command = step_converter(step)
+        command = step.command
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),
-            cpus=bp.cpus_needed,
+            cpus=step.blueprint.cpus_needed,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
             script_path=script_path,
@@ -227,7 +200,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             await asyncio.sleep(SlurmLauncher.POST_SUBMIT_DELAY)
 
             log.debug("Submission of `%s` created Job ID `%s`", step.name, job.id)
-            return SlurmHandle(pid=str(job.id), name=job_name)
+            return SlurmHandle(
+                pid=str(job.id),
+                name=step.name,
+                run_id=str(os.getenv(ENV_CSTAR_RUNID, "")),
+            )
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
         raise RuntimeError(msg)
@@ -250,7 +227,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return batch.status
 
     @staticmethod
-    async def _locate_priors() -> t.Mapping[str, SlurmHandle]:
+    async def _locate_priors() -> Mapping[str, SlurmHandle]:
         """Retrieve all task sentinels discovered in the output path.
 
 
@@ -282,9 +259,13 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         Task[SlurmHandle]
             A Task containing information about the newly submitted job.
         """
-        prior_handle = await get_sentinel(sentinel_path(step), SlurmHandle)
+        state_repo = StateRepository()
+
+        prior_handle = t.cast(
+            "SlurmHandle",
+            await state_repo.get_sentinel(step.name, SlurmHandle),
+        )
         submit_fn = SlurmLauncher._submit
-        current_status = Status.Unsubmitted
 
         if prior_handle:
             # use persisted task as sentinel only; query SLURM for up-to-date status
@@ -307,8 +288,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                     # only keep dependencies that are not old/re-usable
                     active = set(x.pid for x in dependencies).difference(successes)
                     dependencies = list(filter(lambda x: x.pid in active, dependencies))
-            else:
-                current_status = last_status
 
         submitted = await submit_fn(step, dependencies)
         handle = t.cast("SlurmHandle", await SlurmLauncher.update_status(submitted))
@@ -316,7 +295,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return Task(
             step=step,
             handle=handle,
-            status=current_status,
         )
 
     @staticmethod
@@ -342,12 +320,12 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 return Status.Running
             case ExecutionStatus.COMPLETED:
                 return Status.Done
-            case ExecutionStatus.CANCELLED:
+            case ExecutionStatus.CANCELLED | ExecutionStatus.TIMEOUT:
                 return Status.Cancelled
             case ExecutionStatus.FAILED:
                 return Status.Failed
-
-        return Status.Unsubmitted
+            case _:
+                return Status.Unsubmitted
 
     @classmethod
     async def query_status(
@@ -396,7 +374,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         if prior != current:
             handle.status = current
-            await put_sentinel(handle)
 
         return item
 
@@ -429,3 +406,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             log.exception("Unable to cancel the task `%s`", handle.pid)
 
         return item
+
+    @classmethod
+    def handle_klass(cls) -> type[SlurmHandle]:
+        return SlurmHandle

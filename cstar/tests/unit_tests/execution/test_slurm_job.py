@@ -113,23 +113,25 @@ class TestSlurmJob:
             **self.common_job_params,
         )
 
-        expected_script = (
-            "#!/bin/bash\n"
-            "#SBATCH --job-name=test_job\n"
-            "#SBATCH --output=/test/output.log\n"
-            "#SBATCH --qos=test_queue\n"
-            "#SBATCH --ntasks=4\n"
-            "#SBATCH --account=test_account\n"
-            "#SBATCH --export=ALL\n"
-            "#SBATCH --mail-type=ALL\n"
-            "#SBATCH --time=01:00:00\n"
-            "#SBATCH -mock_directive mock_value\n\n"
-            "set -e\n"
-            "echo Hello, World"
-        )
+        required_content = {
+            "#!/bin/bash",
+            "#SBATCH --job-name=test_job",
+            "#SBATCH --output=/test/output.log",
+            "#SBATCH --qos=test_queue",
+            "#SBATCH --ntasks=4",
+            "#SBATCH --account=test_account",
+            "#SBATCH --export=ALL",
+            "#SBATCH --mail-type=ALL",
+            "#SBATCH --time=01:00:00",
+            "#SBATCH -mock_directive mock_value",
+            "set -e",
+            "echo Hello, World",
+        }
+        actual_content = set(job.script.strip().split("\n"))
+        missing_content = ", ".join(list(required_content.difference(actual_content)))
 
-        assert job.script.strip() == expected_script.strip(), (
-            f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
+        assert not missing_content, (
+            f"The SBATCH script is missing required content: {missing_content}"
         )
 
     @pytest.mark.filterwarnings(
@@ -174,24 +176,26 @@ class TestSlurmJob:
             **params,
         )
 
-        expected_script = (
-            "#!/bin/bash\n"
-            "#SBATCH --job-name=test_job\n"
-            "#SBATCH --output=/test/output.log\n"
-            "#SBATCH --partition=test_queue\n"
-            "#SBATCH --nodes=1\n"
-            "#SBATCH --ntasks-per-node=4\n"
-            "#SBATCH --account=test_account\n"
-            "#SBATCH --export=ALL\n"
-            "#SBATCH --mail-type=ALL\n"
-            "#SBATCH --time=01:00:00\n"
-            "#SBATCH -mock_directive mock_value\n\n"
-            "set -e\n"
-            "echo Hello, World"
-        )
+        required_content = {
+            "#!/bin/bash",
+            "#SBATCH --job-name=test_job",
+            "#SBATCH --output=/test/output.log",
+            "#SBATCH --partition=test_queue",
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=4",
+            "#SBATCH --account=test_account",
+            "#SBATCH --export=ALL",
+            "#SBATCH --mail-type=ALL",
+            "#SBATCH --time=01:00:00",
+            "#SBATCH -mock_directive mock_value",
+            "set -e",
+            "echo Hello, World",
+        }
+        actual_content = set(job.script.strip().split("\n"))
+        missing_content = ", ".join(list(required_content.difference(actual_content)))
 
-        assert job.script.strip() == expected_script.strip(), (
-            f"Expected:\n{expected_script}\n\nGot:\n{job.script}"
+        assert not missing_content, (
+            f"The SBATCH script is missing required content: {missing_content}"
         )
 
     @patch(

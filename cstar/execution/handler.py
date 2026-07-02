@@ -3,6 +3,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import Enum, auto
 from pathlib import Path
+from typing import TextIO
 
 from cstar.base.log import LoggingMixin
 
@@ -22,6 +23,8 @@ class ExecutionStatus(Enum):
         The task is currently executing.
     COMPLETED : ExecutionStatus
         The task finished successfully.
+    TIMEOUT : ExecutionStatus
+        The task was cancelled by the system for exceeding it's walltime allotment.
     CANCELLED : ExecutionStatus
         The task was cancelled before completion.
     FAILED : ExecutionStatus
@@ -38,6 +41,7 @@ class ExecutionStatus(Enum):
     PENDING = auto()
     RUNNING = auto()
     COMPLETED = auto()
+    TIMEOUT = auto()
     CANCELLED = auto()
     FAILED = auto()
     HELD = auto()
@@ -50,6 +54,7 @@ class ExecutionStatus(Enum):
     @classmethod
     def is_terminal(cls, status: "ExecutionStatus") -> bool:
         return status in [
+            ExecutionStatus.TIMEOUT,
             ExecutionStatus.COMPLETED,
             ExecutionStatus.CANCELLED,
             ExecutionStatus.FAILED,
@@ -74,6 +79,15 @@ class ExecutionHandler(ABC, LoggingMixin):
     updates(seconds=10)
         Stream live updates from the task's output file for a specified duration.
     """
+
+    _log_position: int = 0
+    """The current position in the log file.
+
+    Log position is updated after each successful read. It enables resuming reads
+    after relinquishing control to the calling process.
+    """
+    _enabled: bool = True
+    """Flag used to disable processing update requests after the task has terminated."""
 
     @property
     @abstractmethod
@@ -109,7 +123,46 @@ class ExecutionHandler(ABC, LoggingMixin):
         """
         pass
 
-    async def updates(self, seconds: float = 10) -> None:
+    async def on_ready(self) -> None:
+        msg = "This job is still pending. Updates will be available after it starts running."
+        self.log.info(msg)
+
+    async def on_running(self, seconds: float) -> None:
+        """Forward logs from the process until time budget elapses."""
+        try:
+            with open(self.output_file) as f:
+                f.seek(self._log_position)
+                start_time = time.time()
+                while seconds == 0 or (time.time() - start_time < seconds):
+                    line = f.readline()
+                    self._log_position = f.tell()
+
+                    if line:
+                        self.log.info(line.rstrip())
+                        continue
+
+                    if ExecutionStatus.is_terminal(self.status):
+                        break
+
+                    # reached EOF; wait before checking for updates
+                    await asyncio.sleep(0.1)
+        except KeyboardInterrupt:
+            self.log.info("Live status updates stopped by user.")
+
+    async def on_shutdown(self) -> None:
+        """Handle a normal shutdown."""
+        msg = (
+            f"This job has ended ({self.status}). Live updates will no longer be provided."
+            f" See {self.output_file.resolve()} for job output"
+        )
+        self.log.warning(msg)
+
+    async def on_exceptional_shutdown(self) -> None:
+        """Handle a shutdown where no logs were forwarded."""
+        msg = f"This job has ended ({self.status}) and produced no outputs."
+        self.log.warning(msg)
+
+    async def updates(self, seconds: float = 1) -> None:
         """Stream live updates from the task's output file.
 
         This method streams updates from the task's output file for the
@@ -132,65 +185,42 @@ class ExecutionHandler(ABC, LoggingMixin):
         - When streaming indefinitely (`seconds=0`), user confirmation is
           required before proceeding.
         """
-        _status = self.status
-        if _status not in [ExecutionStatus.RUNNING, ExecutionStatus.PENDING]:
-            error_msg = f"This job is currently not running ({_status}). Live updates cannot be provided."
-            is_complete = _status in {
-                ExecutionStatus.FAILED,
-                ExecutionStatus.COMPLETED,
-            }
-            is_cancelled = (
-                _status == ExecutionStatus.CANCELLED and self.output_file.exists()
-            )
-
-            if is_complete or is_cancelled:
-                error_msg += f" See {self.output_file.resolve()} for job output"
-
-            self.log.warning(error_msg)
+        if not self._enabled:
             return
 
-        if _status == ExecutionStatus.PENDING:
-            start_time = time.time()
-            msg = "This job is still pending. Updates will be available after it starts running."
-            while seconds == 0 or (time.time() - start_time < seconds):
-                self.log.info(msg)
-                await asyncio.sleep(STATUS_RECHECK_SECONDS)
-                _status = self.status
-                if _status != ExecutionStatus.PENDING:
-                    msg = f"Job status is now {_status}"
-                    self.log.info(msg)
-                    break
+        match (ExecutionStatus.is_terminal(self.status), self.output_file.exists()):
+            case [False, False]:
+                # ready state - process is running but hasn't produced output, yet.
+                await self.on_ready()
+            case [False, True]:
+                # running state - process is running with logs to forward
+                await self.on_running(seconds)
+            case [True, True]:
+                # shutdown state - process has completed with logs to finalize
+                await self.on_running(seconds=1)
+                await self.on_shutdown()
+                self._enabled = False
+            case [True, False]:
+                # exception state - the process has terminated, but no logs were produced.
+                await self.on_exceptional_shutdown()
+                self._enabled = False
 
-            if not self.output_file.exists():
-                msg = f"Log `{self.output_file}` does not exist. Skipping update check."
-                self.log.info(msg)
-                return
+    def _forward_available(self, file_handle: TextIO) -> None:
+        """Forward all currently-available lines from ``file_handle`` to the log.
 
-        if _status == ExecutionStatus.PENDING:
-            start_time = time.time()
-            msg = "This job is still pending. Updates will be available after it starts running."
-            while seconds == 0 or (time.time() - start_time < seconds):
-                self.log.info(msg)
-                time.sleep(STATUS_RECHECK_SECONDS)
-                _status = self.status
-                if _status != ExecutionStatus.PENDING:
-                    msg = f"Job status is now {_status}"
-                    self.log.info(msg)
-                    break
+        Reads from the handle's current position to end-of-file, logging each line,
+        and records the new read position so subsequent calls resume without gaps or
+        duplication.
 
-        try:
-            with open(self.output_file) as f:
-                f.seek(0, 2)  # Move to the end of the file
-                start_time = time.time()
-                while seconds == 0 or (time.time() - start_time < seconds):
-                    if self.output_file.exists():
-                        line = f.readline()
-
-                    if self.status != ExecutionStatus.RUNNING:
-                        return
-                    elif line:
-                        self.log.info(line.rstrip())
-                    else:
-                        await asyncio.sleep(0.1)  # 100ms delay between updates
-        except KeyboardInterrupt:
-            self.log.info("Live status updates stopped by user.")
+        Parameters
+        ----------
+        file_handle : TextIO
+            An open text handle for the task's output file, positioned at the point
+            from which to begin reading.
+        """
+        while True:
+            line = file_handle.readline()
+            if not line:
+                break
+            self.log.info(line.rstrip())
+        self._log_position = file_handle.tell()

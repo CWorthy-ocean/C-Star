@@ -1,11 +1,13 @@
 import asyncio
 import os
 import typing as t
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from cstar.applications.core import ApplicationDefinition, get_application
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
@@ -17,11 +19,15 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
-from cstar.orchestration.models import Step, Workplan
+from cstar.orchestration.converter.converter import get_command_mapping
+from cstar.orchestration.models import Blueprint, Step, Workplan
 from cstar.orchestration.serialization import (
+    deserialize,
     intenum_representer,
     register_representer,
 )
+from cstar.system.environment import get_envfield_alias
+from cstar.system.manager import cstar_sysmgr
 
 nx = lazy_import("networkx")
 
@@ -32,6 +38,8 @@ KEY_TASK: t.Literal["task"] = "task"
 if t.TYPE_CHECKING:
     from networkx import DiGraph
 
+    from cstar.entrypoint.runner import BlueprintRunner
+
 
 class RunMode(StrEnum):
     """Specify the blocking behavior during plan execution."""
@@ -41,19 +49,6 @@ class RunMode(StrEnum):
 
     Schedule = auto()
     """Block until tasks are scheduled."""
-
-
-class ProcessHandle(BaseModel):
-    """Contract used to identify processes created by any launcher."""
-
-    pid: str
-    """The process identifier."""
-
-    name: str
-    """The name of the process."""
-
-
-_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 
 
 class Status(IntEnum):
@@ -200,19 +195,44 @@ class Status(IntEnum):
         return status in cls.in_progress_states()
 
 
+class ProcessHandle(BaseModel):
+    """Contract used to identify processes created by any launcher."""
+
+    pid: str
+    """The process identifier."""
+    name: str
+    """The name of the process."""
+    run_id: str
+    """The run-id the process was run under."""
+    launcher_name: str = ""
+    """The launcher used to launch the process."""
+    status: Status = Status.Unsubmitted
+    """The current status of the task."""
+
+    @property
+    def safe_name(self) -> str:
+        """Return a path-safe version of the name."""
+        return slugify(self.name)
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(extra="allow")
+
+
+_THandle = t.TypeVar("_THandle", bound=ProcessHandle)
+
+
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
-    parent: t.Self | None = None
+    parent: t.Self | None = Field(default=None, exclude=True)
     """The step for which this step is a sub-task."""
-    work_dir: Path | None = None
+    working_dir: Path | None = Field(default=None)
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
 
     @property
     def get_working_dir(self) -> Path:
-        if self.work_dir is None:
+        if self.working_dir is None:
             if self.parent:
                 root_fsm = self.parent.fsm
             else:
@@ -221,9 +241,9 @@ class LiveStep(Step):
                     root_dir = root_dir.joinpath(run_id)
                 root_fsm = JobFileSystemManager(root_dir)
 
-            self.work_dir = root_fsm.tasks_dir / self.safe_name
+            self.working_dir = root_fsm.tasks_dir / self.safe_name
 
-        return self.work_dir
+        return self.working_dir
 
     @property
     def fsm(self) -> JobFileSystemManager:
@@ -237,12 +257,43 @@ class LiveStep(Step):
             self._fsm = JobFileSystemManager(self.get_working_dir)
         return self._fsm
 
+    @property
+    def blueprint(self) -> Blueprint:
+        """Load and return the blueprint associated with this step."""
+        base_bp = deserialize(self.blueprint_path, Blueprint)
+        app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+            get_application(base_bp.application)
+        )
+        bp_type = app.blueprint
+        return bp_type(**base_bp.model_dump())
+
+    @property
+    def command(self) -> str:
+        """Generate the shell command that will execute the underlying application.
+
+        Returns
+        -------
+        str
+        """
+        step_converter = get_command_mapping(self.application)
+        return step_converter(self)
+
+    @property
+    def script_path(self) -> Path:
+        """Return the path to the the log file written by this task."""
+        return self.fsm.root_dir / "script.sh"
+
+    @property
+    def log_path(self) -> Path:
+        """Return the path to the the log file written by this task."""
+        return self.fsm.logs_dir / f"{self.safe_name}.out"
+
     @classmethod
     def from_step(
         cls,
         step: Step,
         parent: "LiveStep | Step | None" = None,
-        update: t.Mapping[str, t.Any] | None = None,
+        update: Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
         """Convert a step from orchestration planning into a LiveStep.
 
@@ -260,9 +311,18 @@ class LiveStep(Step):
         if update:
             step_attrs.update(update)
 
-        if parent:
-            step_attrs.pop("work_dir", None)
-            step_attrs["parent"] = LiveStep.from_step(parent).model_dump(by_alias=True)
+        effective_parent: LiveStep | None = (
+            parent
+            if isinstance(parent, LiveStep)
+            else (LiveStep.from_step(parent) if parent else None)
+        )
+        # when no parent is given, inherit the parent from the source step (if it has one)
+        if effective_parent is None and isinstance(step, LiveStep):
+            effective_parent = step.parent
+
+        if effective_parent is not None:
+            step_attrs.pop("working_dir", None)
+            step_attrs["parent"] = effective_parent
 
         return LiveStep(**step_attrs)
 
@@ -276,8 +336,15 @@ class Task(BaseModel, t.Generic[_THandle]):
     handle: _THandle
     """The unique process identifier for the task."""
 
-    status: Status = Status.Unsubmitted
-    """Current task status."""
+    @property
+    def status(self) -> Status:
+        """Return the current status of the task."""
+        return self.handle.status
+
+    @status.setter
+    def status(self, value: Status) -> None:
+        """Update the status of the task."""
+        self.handle.status = value
 
 
 class Planner(LoggingMixin):
@@ -317,7 +384,7 @@ class Planner(LoggingMixin):
         DiGraph
             A graph of the execution plan.
         """
-        data: t.Mapping[str, list[str]] = {s.name: [] for s in workplan.steps}
+        data: Mapping[str, list[str]] = {s.name: [] for s in workplan.steps}
         for step in workplan.steps:
             for prereq in step.depends_on:
                 data[prereq].append(step.name)
@@ -334,7 +401,7 @@ class Planner(LoggingMixin):
         nx.set_node_attributes(g, values=defaults)
         return g
 
-    def flatten(self) -> t.Iterable[Step]:
+    def flatten(self) -> Iterable[Step]:
         """Return the planned steps in execution order.
 
         Returns
@@ -358,7 +425,9 @@ class Planner(LoggingMixin):
     def store(self, n: str, key: t.Literal["step"], value: LiveStep) -> None: ...
 
     @t.overload
-    def store(self, n: str, key: t.Literal["task"], value: Task) -> None: ...
+    def store(
+        self, n: str, key: t.Literal["task"], value: Task[ProcessHandle]
+    ) -> None: ...
 
     def store(self, n: str, key: str, value: object) -> None:
         """Store an arbitrary attribute on a node in the plan.
@@ -400,8 +469,8 @@ class Planner(LoggingMixin):
         self,
         n: str,
         key: t.Literal["task"],
-        default: Task | None = None,
-    ) -> Task | None: ...
+        default: Task[ProcessHandle] | None = None,
+    ) -> Task[ProcessHandle] | None: ...
 
     def retrieve(
         self,
@@ -433,31 +502,31 @@ class Planner(LoggingMixin):
         self,
         key: t.Literal["status"],
         default: Status | None = None,
-        filter_fn: t.Callable[[Status], bool] | None = None,
-    ) -> t.Mapping[str, Status]: ...
+        filter_fn: Callable[[Status], bool] | None = None,
+    ) -> Mapping[str, Status]: ...
 
     @t.overload
     def retrieve_all(
         self,
         key: t.Literal["step"],
         default: Step | None = None,
-        filter_fn: t.Callable[[Step], bool] | None = None,
-    ) -> t.Mapping[str, Step]: ...
+        filter_fn: Callable[[Step], bool] | None = None,
+    ) -> Mapping[str, Step]: ...
 
     @t.overload
     def retrieve_all(
         self,
         key: t.Literal["task"],
-        default: Task | None = None,
-        filter_fn: t.Callable[[Task], bool] | None = None,
-    ) -> t.Mapping[str, Task]: ...
+        default: Task[ProcessHandle] | None = None,
+        filter_fn: Callable[[Task[ProcessHandle]], bool] | None = None,
+    ) -> Mapping[str, Task[ProcessHandle]]: ...
 
     def retrieve_all(
         self,
         key: str,
         default: t.Any | None = None,
-        filter_fn: t.Callable[[t.Any], bool] | None = None,
-    ) -> t.Mapping[str, t.Any]:
+        filter_fn: Callable[[t.Any], bool] | None = None,
+    ) -> Mapping[str, t.Any]:
         """Retrieve a user-defined value for every node in the plan.
 
         Parameters
@@ -485,8 +554,22 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
 
     @classmethod
     def check_preconditions(cls) -> None:
-        """Perform launcher-specific startup validation."""
-        ...
+        """Perform launcher-specific startup validation.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If an environment variable required by the launcher cannot be found.
+        """
+        if klass := cstar_sysmgr.environment.settings_klass:
+            try:
+                _ = klass()
+            except ValidationError as ex:
+                prefixed = ", ".join(
+                    get_envfield_alias(klass, str(x["loc"][0])) for x in ex.errors()
+                )
+                msg = f"Unable to load environment variables required by the system: {prefixed}"
+                raise CstarExpectationFailed(msg) from ex
 
     @classmethod
     async def launch(
@@ -562,6 +645,11 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         """
         ...
 
+    @classmethod
+    def handle_klass(cls) -> type[_THandle]:
+        """Return the type used by the launcher instance for managing tasks."""
+        ...
+
 
 class Orchestrator(LoggingMixin):
     """Manage the execution of a `Workplan`."""
@@ -569,10 +657,16 @@ class Orchestrator(LoggingMixin):
     planner: Planner
     """The planner used by the orchestrator to prioritize tasks."""
 
-    launcher: Launcher
+    launcher: Launcher[t.Any]
     """The launcher used by the orchestrator to manage task execution."""
 
-    def __init__(self, planner: Planner, launcher: Launcher) -> None:
+    _on_status_changed: Callable[[ProcessHandle], Awaitable[None]] | None = None
+    """A callback to be executed when the orchestrator detects a status change."""
+
+    _on_launched: Callable[[ProcessHandle], Awaitable[None]] | None = None
+    """A callback to be executed when the orchestrator launches a task."""
+
+    def __init__(self, planner: Planner, launcher: Launcher[t.Any]) -> None:
         """Initialize the orchestrator.
 
         Parameters
@@ -585,13 +679,13 @@ class Orchestrator(LoggingMixin):
         self.planner = planner
         self.launcher = launcher
 
-    def get_open_nodes(self, *, mode: RunMode) -> t.Mapping[str, Status] | None:
+    def get_open_nodes(self, *, mode: RunMode) -> Mapping[str, Status] | None:
         """Retrieve the set of task nodes with a non-terminal state that are
         executing or ready to execute.
 
         Returns
         -------
-        set[str] | None
+        dict[str] | None
             - Set of open nodes ready for some processing actions.
             - An empty set indicates no actions are currently possible.
             - Null indicates all nodes are closed (traversal is complete).
@@ -636,7 +730,7 @@ class Orchestrator(LoggingMixin):
 
         return None
 
-    def get_closed_nodes(self, *, mode: RunMode) -> t.Mapping[str, Status]:
+    def get_closed_nodes(self, *, mode: RunMode) -> Mapping[str, Status]:
         """Retrieve the set of task nodes with a terminal state.
 
         Returns
@@ -680,7 +774,7 @@ class Orchestrator(LoggingMixin):
 
         return [d.handle for d in running_deps]
 
-    async def process_node(self, node: str) -> Task | None:
+    async def process_node(self, node: str) -> Task[ProcessHandle] | None:
         """Execute a task.
 
         Parameters
@@ -704,17 +798,27 @@ class Orchestrator(LoggingMixin):
             return None
 
         if task := self.planner.retrieve(node, KEY_TASK):
-            if updated := await self.launcher.update_status(task.handle):
-                task.status = updated.status
+            old_status = task.status
+            new_status = await self.launcher.query_status(task)
+            if old_status != new_status:
+                task.status = new_status
+
+                if self._on_status_changed:
+                    await self._on_status_changed(task.handle)
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
             self.log.info(f"Launched step: {step.name}")
 
+            if self._on_launched:
+                await self._on_launched(task.handle)
+
         self.planner.store(node, KEY_STATUS, task.status)
         return task
 
-    async def update_planner_state(self, n: str, task: Task | None) -> None:
+    async def update_planner_state(
+        self, n: str, task: Task[ProcessHandle] | None
+    ) -> None:
         """Update tracking information for the plan after starting a task or
         fetching an update.
 
@@ -738,7 +842,7 @@ class Orchestrator(LoggingMixin):
             self.planner.store(n, KEY_STATUS, Status.Failed)
             raise CstarExpectationFailed(f"Node {n} task failed.")
 
-    async def run(self, mode: RunMode) -> t.Mapping[str, Status]:
+    async def run(self, mode: RunMode) -> Mapping[str, Status]:
         """Execute tasks that are ready and query status on running tasks.
 
         Parameters
@@ -770,21 +874,21 @@ class Orchestrator(LoggingMixin):
         postproc_tasks = [
             asyncio.Task(self.update_planner_state(n, t)) for n, t in kvp.items()
         ]
-        cancellations: set[Task] = set()
+        cancellations: list[Task[ProcessHandle]] = list()
 
         try:
             await asyncio.gather(*postproc_tasks)
         except CstarExpectationFailed:
-            cancellations = {
+            cancellations = [
                 v for v in kvp.values() if v and Status.is_in_progress(v.status)
-            }
+            ]
             self.log.exception("A task has failed unexpectedly")
 
         await self._cancel(cancellations)
 
         return {k: v.status if v else Status.Unsubmitted for k, v in kvp.items()}
 
-    async def _cancel(self, cancellations: t.Iterable[Task]) -> None:
+    async def _cancel(self, cancellations: Iterable[Task[ProcessHandle]]) -> None:
         """Request the cancellation of running tasks.
 
         Parameters
@@ -807,6 +911,22 @@ class Orchestrator(LoggingMixin):
                 self.log.warning(msg)
                 self.planner.store(task.step.name, KEY_STATUS, task.status)
 
+    def set_callback(
+        self,
+        event: t.Literal["status_changed", "launched"],
+        func: Callable[[_THandle], Awaitable[None]],
+    ) -> None:
+        match event:
+            case "status_changed":
+                attr_name = "_on_status_changed"
+            case "launched":
+                attr_name = "_on_launched"
+            case _:
+                msg = f"Invalid launcher callback event specified: {event}"
+                raise ValueError(msg)
+
+        setattr(self, attr_name, func)
+
 
 def check_environment() -> None:
     """Verify the environment is configured correctly.
@@ -827,7 +947,7 @@ def check_environment() -> None:
 def configure_environment(
     output_dir: Path | None = None,
     run_id: str | None = None,
-    updates: t.Mapping[str, str] | None = None,
+    updates: Mapping[str, str] | None = None,
 ) -> None:
     """Configure environment variables required by the runner.
 
@@ -837,7 +957,7 @@ def configure_environment(
         The directory where outputs will be written.
     run_id : str | None
         The unique identifier for an execution of the workplan.
-    updates : t.Mapping[str, str] | None
+    updates : Mapping[str, str] | None
         Additional environment variable updates.
     """
     if output_dir:

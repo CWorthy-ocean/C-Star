@@ -1,3 +1,4 @@
+import copy
 import datetime as dt
 import functools
 import hashlib
@@ -6,6 +7,8 @@ import re
 import subprocess
 import sys
 import typing as t
+from collections.abc import Generator
+from itertools import zip_longest
 from pathlib import Path
 from types import ModuleType
 
@@ -341,20 +344,32 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
     dict[str, t.Any]
         The merged dictionaries.
     """
-    for k, v in d2.items():
-        if isinstance(v, dict):
-            d1[k] = deep_merge(d1.get(k, {}), v)
-        elif isinstance(v, list):
-            list_items = []
-            for i, item in enumerate(v):
-                if isinstance(item, dict):
-                    list_items.append(deep_merge(d1.get(k, {})[i], item))
+    result: dict[str, t.Any] = copy.deepcopy(d1)
+
+    for k, target in d2.items():
+        source = result.get(k)
+
+        if isinstance(source, dict) and isinstance(target, dict):
+            result[k] = deep_merge(source, target)
+        elif isinstance(target, dict):
+            result[k] = {**target}
+        elif isinstance(source, list) and isinstance(target, list):
+            items = []
+            for x0, x1 in zip_longest(source, target, fillvalue=None):
+                if x0 is None:
+                    items.append(copy.deepcopy(x1))
+                elif x1 is None:
+                    items.append(copy.deepcopy(x0))
+                elif isinstance(x0, dict) and isinstance(x1, dict):
+                    items.append(deep_merge(x0, x1))
                 else:
-                    list_items.append(item)
-            d1[k] = list_items
+                    items.append(copy.deepcopy(x1))
+            result[k] = items
+        elif isinstance(target, list):
+            result[k] = copy.deepcopy(target)
         else:
-            d1[k] = v
-    return d1
+            result[k] = target
+    return result
 
 
 def additional_files_dir() -> Path:
@@ -407,3 +422,46 @@ def utc_now() -> dt.datetime:
     datetime
     """
     return dt.datetime.now(tz=dt.timezone.utc)
+
+
+def generate_schema_ref(app_name: str, vtarget: str) -> str:
+    """Generate a schema reference header for a built-in blueprint.
+
+    Parameters
+    ----------
+    app_name : str
+        The application name
+
+    Returns
+    -------
+    str
+    """
+    filename = f"{app_name}_schema.{vtarget}.json"
+    repo_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star"
+    resource_path = f"refs/heads/main/docs/schemas/bp/{app_name}/{filename}"
+
+    return f"{repo_uri}/{resource_path}"
+
+
+def min_padded_index(i: int, n: int) -> str:
+    """Generate the min-length zero padded string for a 0-based index.
+
+    E.g. With 1000 segments & indices [0, 999] return strings such that
+    no padding is required for the maximum value: ["000", "001", "002", ..., "999"].
+    """
+    pad_size = len(str(n - 1))
+    return str(i).zfill(pad_size)
+
+
+def min_padded_indices(n: int) -> Generator[str]:
+    """Enumerate `n` min-padded indices.
+
+    See: min_padded_index
+
+    Returns
+    -------
+    Generator[str]
+    """
+    pad_size = len(str(n - 1))
+    for i in range(n):
+        yield str(i).zfill(pad_size)

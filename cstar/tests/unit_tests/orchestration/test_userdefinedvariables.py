@@ -1,4 +1,4 @@
-import typing as t
+from collections.abc import Mapping
 
 import pytest
 
@@ -15,7 +15,7 @@ from cstar.orchestration.models import UserDefinedVariables
 )
 def test_userdefinedvariables_valid_inputs(
     keys: set[str],
-    mapping: t.Mapping[str, str],
+    mapping: Mapping[str, str],
 ) -> None:
     """Verify that a valid input does not result in an error.
 
@@ -23,7 +23,7 @@ def test_userdefinedvariables_valid_inputs(
     ----------
     keys : set[str]
         A valid set of "declared keys"
-    mapping : t.Mapping[str, str]
+    mapping : Mapping[str, str]
         A valid mapping of key-value pairs
     """
     replacements = UserDefinedVariables(
@@ -67,7 +67,7 @@ def test_userdefinedvariables_valid_inputs(
 )
 def test_userdefinedvariables_coverage_fail(
     keys: set[str],
-    mapping: t.Mapping[str, str],
+    mapping: Mapping[str, str],
     matches: set[str],
 ) -> None:
     """Verify that mappings that do not cover all declared keys result in an error
@@ -77,7 +77,7 @@ def test_userdefinedvariables_coverage_fail(
     ----------
     keys : set[str]
         A valid set of "declared keys"
-    mapping : t.Mapping[str, str]
+    mapping : Mapping[str, str]
         A valid mapping of key-value pairs
     matches : set[str]
         Strings that must be found in the error output
@@ -170,7 +170,7 @@ def test_userdefinedvariables_no_declarations() -> None:
 )
 def test_userdefinedvariables_declaration_fail(
     keys: set[str],
-    mapping: t.Mapping[str, str],
+    mapping: Mapping[str, str],
     matches: set[str],
 ) -> None:
     """Verify that mappings including undeclared keys result in an error
@@ -180,7 +180,7 @@ def test_userdefinedvariables_declaration_fail(
     ----------
     keys : set[str]
         A valid set of "declared keys"
-    mapping : t.Mapping[str, str]
+    mapping : Mapping[str, str]
         A valid mapping of key-value pairs
     matches : set[str]
         Strings that must be found in the error output

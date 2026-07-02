@@ -1,64 +1,39 @@
+import functools
 import itertools
-import os
+import re
 import typing as t
 from collections import defaultdict
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
-from cstar.base.feature import (
-    ENV_FF_ORCH_TRX_TIMESPLIT,
-    is_feature_enabled,
+from pydantic import (
+    BaseModel,
 )
+
+from cstar.applications.core import ApplicationDefinition, Transform, get_application
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
-from cstar.base.utils import (
-    DEFAULT_OUTPUT_ROOT_NAME,
-    deep_merge,
-    slugify,
-)
+from cstar.base.utils import deep_merge
+from cstar.execution.file_system import JobFileSystemManager, local_copy
 from cstar.orchestration.models import (
     Application,
-    RomsMarblBlueprint,
+    Blueprint,
+    KeyValueStore,
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
+if t.TYPE_CHECKING:
+    from cstar.entrypoint.runner import BlueprintRunner
 
-class Transform(t.Protocol):
-    """Protocol for a class that transforms a step into one or more
-    new steps.
-    """
-
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
-        """Apply the transform to a step.
-
-        Parameters
-        ----------
-        step : Step
-            The step to be transformed
-
-        Returns
-        -------
-        Iterable[Step]
-            Zero-to-many steps resulting from applying the transform.
-        """
-        ...
-
-    @staticmethod
-    def suffix() -> str:
-        """Return the standard prefix to be used when persisting
-        a resource modified by this transform.
-        """
-        ...
-
-
-TRANSFORMS: dict[str, list[Transform]] = defaultdict(list)
+TRANSFORMS: dict[str, list[Transform[LiveStep]]] = defaultdict(list)
 """Storage for transform registrations."""
 
 
-def register_transform(application: str, transform: Transform) -> None:
+def register_transform(application: str, transform: Transform[t.Any]) -> None:
     """Register a transform for an application.
 
     Parameters
@@ -71,7 +46,7 @@ def register_transform(application: str, transform: Transform) -> None:
     TRANSFORMS[application].append(transform)
 
 
-def get_transforms(application: str) -> list[Transform]:
+def get_transforms(application: str) -> list[Transform[t.Any]]:
     """Retrieve a list of transforms to be applied for an application.
 
     Parameters
@@ -87,9 +62,25 @@ def get_transforms(application: str) -> list[Transform]:
     return TRANSFORMS.get(application, [])
 
 
+PLACEHOLDER_RE = re.compile(r"\{\{([^}]+)\}\}")
+"""Pattern matching double-brace template placeholders.
+
+Captures the full content between braces so dispatch logic can distinguish
+plain variable references (``{{my_var}}``) from scope references
+(``{{<scope>: step_name}}``).
+"""
+
+
+class SplitFrequency(StrEnum):
+    Daily = "daily"
+    Weekly = "weekly"
+    Monthly = "monthly"
+
+
 def _dailies(
-    start_date: datetime, end_date: datetime
-) -> t.Iterable[tuple[datetime, datetime]]:
+    start_date: datetime,
+    end_date: datetime,
+) -> Iterable[tuple[datetime, datetime]]:
     """Get daily time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, start_date.day)
     while current_date < end_date:
@@ -100,8 +91,9 @@ def _dailies(
 
 
 def _weeklies(
-    start_date: datetime, end_date: datetime
-) -> t.Iterable[tuple[datetime, datetime]]:
+    start_date: datetime,
+    end_date: datetime,
+) -> Iterable[tuple[datetime, datetime]]:
     """Get weekly time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, start_date.day)
     while current_date < end_date:
@@ -112,8 +104,9 @@ def _weeklies(
 
 
 def _monthlies(
-    start_date: datetime, end_date: datetime
-) -> t.Iterable[tuple[datetime, datetime]]:
+    start_date: datetime,
+    end_date: datetime,
+) -> Iterable[tuple[datetime, datetime]]:
     """Get monthly time slices for the given start and end dates."""
     current_date = datetime(start_date.year, start_date.month, 1)
     while current_date < end_date:
@@ -126,12 +119,6 @@ def _monthlies(
 
         yield (month_start, month_end)
         current_date = month_end
-
-
-class SplitFrequency(StrEnum):
-    Daily = "daily"
-    Weekly = "weekly"
-    Monthly = "monthly"
 
 
 SLICE_FUNCTIONS = defaultdict(
@@ -148,7 +135,7 @@ def get_time_slices(
     start_date: datetime,
     end_date: datetime,
     frequency: str = SplitFrequency.Monthly.value,
-) -> t.Iterable[tuple[datetime, datetime]]:
+) -> Iterable[tuple[datetime, datetime]]:
     """Get the time slices for the given start and end dates.
 
     Parameters
@@ -179,6 +166,195 @@ def get_time_slices(
     return time_slices
 
 
+def mustache(s: str) -> str:
+    """Return the string formatted with enclosing double-curly-brackets
+    in the mustache template style.
+    """
+    return f"{{{{{s}}}}}"
+
+
+def fsm_resolver(
+    fsm_map: Mapping[str, JobFileSystemManager],
+    step_name: str,
+    scope: str,
+) -> str:
+    """A resolver for attributes available on a file-system manager.
+
+    Parameters
+    ----------
+    fsm_map: Mapping[str, JobFileSystemManager]
+        Mapping from the step safe name to the related file-system manager
+    step_name: str
+        The step name to retrieve an FSM for
+    scope : str
+        The scope to be resolved (which attribute on the FSM instance).
+    """
+    fsm_attrs = [
+        p
+        for p in dir(next(iter(fsm_map.values())))
+        if not p.startswith("_") and p.endswith("_dir")
+    ]
+    fsm = fsm_map.get(step_name, None)
+    if not fsm:
+        msg = f"Unable to resolve {scope!r} for unknown step {step_name!r}"
+        raise ValueError(msg)
+
+    fsm_attrs.append("root")
+    if value := str(getattr(fsm, scope, None)):
+        return value
+
+    ph = mustache(f"{scope}: {step_name}")
+    msg = f"Unable to resolve {scope!r} for placeholder {ph!r}"
+    raise ValueError(msg)
+
+
+def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:
+    """Create a resolver function for file-system manager attributes.
+
+    Parameters
+    ----------
+    steps : Sequence[LiveStep]
+        The steps to be used in the creation of the resolver.
+
+    Returns
+    -------
+    Callable[[str, str], str]
+        Callable accepting the step name and scope as parameters and returning
+        the resolved value.
+    """
+    fsm_map: dict[str, JobFileSystemManager] = {s.name: s.fsm for s in steps}
+    return functools.partial(fsm_resolver, fsm_map)
+
+
+class TemplateFillTransform:
+    """Fill ``{{<scope>: <placeholder>}}`` template strings in a step's blueprint_overrides.
+
+    Recursively traverses the nested blueprint_overrides structure and
+    dispatches each placeholder to one of two resolvers:
+
+    - **variable resolver** — handles plain ``{{name}}`` tokens by looking up
+      *name* in the caller-supplied mapping (e.g. user-defined runtime variables).
+    - **scope resolver** — handles ``{{<scope>: step_name}}`` tokens by returning
+      the resolved value for the named step.  Must be bound via
+      :meth:`with_scoped_resolver` before any step that uses this syntax is
+      processed.
+
+    The transform yields a single updated step; the original step's
+    ``blueprint_overrides`` is not mutated.
+    """
+
+    _variable_resolver: Callable[[str], str] | None = None
+    _scoped_resolver: Callable[[str, str], str] | None = None
+
+    def __init__(
+        self,
+        variable_resolver: Callable[[str], str] | None = None,
+        scoped_resolver: Callable[[str, str], str] | None = None,
+    ) -> None:
+        """Initialize the transform.
+
+        Parameters
+        ----------
+        variable_resolver : Callable[[str], str] | None
+            Maps a plain placeholder name to its replacement string.
+        scoped_resolver : Callable[[str, str], Path] | None
+            Maps a step name to a resolver handling job paths.  Required only
+            when ``blueprint_overrides`` contains ``{{<scope>: <step>}}`` tokens.
+        """
+        self._variable_resolver = variable_resolver
+        self._scoped_resolver = scoped_resolver
+
+    def with_scoped_resolver(
+        self,
+        resolver: Callable[[str, str], str],
+    ) -> "TemplateFillTransform":
+        """Return a new instance with the given resolver bound.
+
+        Parameters
+        ----------
+        resolver : Callable[[str, str], str]
+            Use this resolver to resolve values with a specific scope.
+
+        Returns
+        -------
+        TemplateFillTransform
+        """
+        return TemplateFillTransform(
+            self._variable_resolver,
+            resolver,
+        )
+
+    @staticmethod
+    def suffix() -> str:
+        """Return the suffix used when persisting a resource modified by this transform."""
+        return "tmpl"
+
+    def _resolve(self, content: str) -> str:
+        """Dispatch a single placeholder's inner content to the correct resolver.
+
+        Parameters
+        ----------
+        content : str
+            The text captured between ``{{`` and ``}}``, stripped of
+            surrounding whitespace.
+
+        Returns
+        -------
+        str
+            The resolved replacement string.
+
+        Raises
+        ------
+        ValueError
+            If the appropriate resolver has not been provided.
+        """
+        parts = content.split(":", maxsplit=1)
+        if len(parts) > 1:
+            scope, ph = [x.strip() for x in parts]
+            if not self._scoped_resolver:
+                msg = f"No {scope!r} resolver provided for placeholder {ph!r}"
+                raise ValueError(msg)
+
+            return self._scoped_resolver(ph, scope)
+
+        if self._variable_resolver is None:
+            msg = f"No variable resolver provided for placeholder '{mustache(content)}'"
+            raise ValueError(msg)
+        return self._variable_resolver(content)
+
+    def _fill(self, step: LiveStep) -> LiveStep:
+        content = step.model_dump_json(by_alias=True)
+        matches = PLACEHOLDER_RE.findall(content)
+        if not matches:
+            return step
+
+        # use set to replace all occurrences at once
+        for match in set(matches):
+            content = content.replace(mustache(match), self._resolve(match))
+
+        if PLACEHOLDER_RE.findall(content):
+            raise CstarExpectationFailed(
+                "Some templated values were not filled or placeholders were malformed."
+            )
+
+        return step.model_validate_json(content)
+
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
+        """Apply template filling to a step's blueprint_overrides.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step whose blueprint_overrides will be traversed.
+
+        Returns
+        -------
+        Iterable[LiveStep]
+            A single-element iterable containing the updated step.
+        """
+        return (LiveStep.from_step(self._fill(step)),)
+
+
 class WorkplanTransformer(LoggingMixin):
     """Transform a workplan by applying transforms to its steps."""
 
@@ -191,10 +367,14 @@ class WorkplanTransformer(LoggingMixin):
     DERIVED_PATH_SUFFIX: t.Literal["_trx"] = "_trx"
     """Suffix appended to the original workplan path when generating a derived path."""
 
-    def __init__(self, wp: Workplan, transform: Transform) -> None:
+    def __init__(
+        self,
+        wp: Workplan,
+        fill_transform: TemplateFillTransform | None = None,
+    ) -> None:
         """Initialize the instance."""
         self.original = Workplan(**wp.model_dump(by_alias=True))
-        self.transform_fn = transform
+        self.fill_transform = fill_transform
         self._transformed: Workplan | None = None
 
     @property
@@ -275,38 +455,59 @@ class WorkplanTransformer(LoggingMixin):
 
         # ensure consistent output targets for all steps in the workplan
         live_steps = [LiveStep.from_step(s) for s in self.original.steps]
-        steps: t.Iterable[LiveStep] = list(
-            map(override_output_directory, live_steps),
-        )
 
-        if is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
-            split_steps: list[LiveStep] = []
-            named_dep_map: dict[str, str] = {}
+        # fill template placeholders before any other transform operates on overrides
+        if self.fill_transform is not None:
+            resolver = get_fsm_resolver(live_steps)
+            fill = self.fill_transform.with_scoped_resolver(resolver)
 
-            for step in steps:
-                transformed_steps = list(self.transform_fn(step))
-                named_dep_map[step.name] = transformed_steps[-1].name
-                split_steps.extend(transformed_steps)
+            live_steps = [filled for step in live_steps for filled in fill(step)]
 
-            for step in split_steps:
-                depends_on = {str(d) for d in step.depends_on}
+        # apply user blueprint_overrides and ensure consistent output targets;
+        # must happen before time-splitting so the splitter reads correct blueprint values
+        steps = [apply_automatic_overrides(step) for step in live_steps]
 
-                if to_update := depends_on.intersection(named_dep_map):
-                    depends_on.update(named_dep_map[x] for x in to_update)
-                    depends_on.difference_update(to_update)
+        transformed_steps: list[LiveStep] = []
+        named_dep_map: dict[str, str] = {}
 
-                    step.depends_on.clear()
-                    step.depends_on.extend(depends_on)
-
-            steps = split_steps
-
-        # apply any overrides produced in the transform function
+        app_names = {step.application for step in steps}
+        app_transforms: dict[str, Sequence[type[Transform[LiveStep]]]] = {
+            app_name: get_application(app_name).applicable_transforms
+            for app_name in app_names
+        }
         override_transform = OverrideTransform()
-        steps = list(itertools.chain.from_iterable(map(override_transform, steps)))
+
+        for step in steps:
+            if transforms := app_transforms[step.application]:
+                for trx_klass in transforms:
+                    trx = trx_klass()
+                    transform_result = trx(step)
+
+                    # apply overrides generated by the transformation
+                    overridden_steps = list(
+                        itertools.chain.from_iterable(
+                            map(override_transform, transform_result),
+                        ),
+                    )
+                    final_step_name = overridden_steps[-1].name
+                    if final_step_name != step.name:
+                        named_dep_map[step.name] = final_step_name
+                    transformed_steps.extend(overridden_steps)
+            else:
+                transformed_steps.append(next(iter(override_transform(step))))
+
+        # remap dependency references to point to the last child of each split parent
+        for trx_step in transformed_steps:
+            depends_on = {str(d) for d in trx_step.depends_on}
+            if to_update := depends_on.intersection(named_dep_map):
+                depends_on.update(named_dep_map[x] for x in to_update)
+                depends_on.difference_update(to_update)
+                trx_step.depends_on.clear()
+                trx_step.depends_on.extend(depends_on)
 
         self._transformed = self.original.model_copy(
             update={
-                "steps": steps,
+                "steps": transformed_steps,
                 "name": f"{self.original.name} (transformed)",
             },
         )
@@ -314,129 +515,17 @@ class WorkplanTransformer(LoggingMixin):
         return self._transformed
 
 
-class RomsMarblTimeSplitter(Transform):
-    """A step tranformation that splits a ROMS-MARBL simulation into
-    multiple sub-steps based on the timespan covered by the simulation.
-    """
-
-    frequency: str
-    """The step splitting frequency used to generate new time steps."""
-
-    def __init__(self, frequency: str = SplitFrequency.Monthly.value) -> None:
-        """Initialize the transform instance."""
-        freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
-        self.frequency = freq_config.lower()
-
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
-        """Split a step into multiple sub-steps.
-
-        Parameters
-        ----------
-        step : Step
-            The step to split.
-
-        Returns
-        -------
-        Iterable[Step]
-            Steps for each subtask resulting from the split.
-        """
-        blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        start_date = blueprint.runtime_params.start_date
-        end_date = blueprint.runtime_params.end_date
-
-        bp_path = step.fsm.work_dir / Path(step.blueprint_path).name
-        serialize(bp_path, blueprint)
-
-        time_slices = list(get_time_slices(start_date, end_date, self.frequency))
-        n_slices = len(time_slices)
-
-        if end_date <= start_date:
-            msg = "end_date must be after start_date"
-            raise ValueError(msg)
-
-        depends_on = step.depends_on
-        last_restart_file: Path | None = None
-        output_root_name = DEFAULT_OUTPUT_ROOT_NAME
-
-        for i, (sd, ed) in enumerate(time_slices):
-            bp_copy = RomsMarblBlueprint(
-                **blueprint.model_dump(
-                    exclude_unset=True,
-                    exclude_defaults=True,
-                    exclude_computed_fields=True,
-                ),
-            )
-
-            compact_sd = sd.strftime("%Y%m%d%H%M%S")
-            compact_ed = ed.strftime("%Y%m%d%H%M%S")
-
-            dynamic_name = f"{i + 1:03d}_{step.safe_name}_{compact_sd}_{compact_ed}"
-            child_step_name = slugify(dynamic_name)
-
-            child_fs = step.fsm.get_subtask_manager(child_step_name)
-
-            description = f"Subtask {i + 1} of {n_slices}; Timespan: {sd} to {ed}; {bp_copy.description}"
-            overrides = {
-                "name": dynamic_name,
-                "description": description,
-                "runtime_params": {
-                    "start_date": sd,
-                    "end_date": ed,
-                    "output_dir": child_fs.root.as_posix(),  # child_fs.output_dir,
-                },
-            }
-
-            if last_restart_file:
-                rst_path = last_restart_file.as_posix()
-                overrides["initial_conditions"] = {"data": [{"location": rst_path}]}
-
-            child_bp_path = child_fs.work_dir / f"{child_step_name}_bp.yaml"
-            serialize(child_bp_path, bp_copy)
-
-            updates = {
-                "blueprint": child_bp_path.as_posix(),
-                "blueprint_overrides": overrides,
-                "depends_on": depends_on,
-                "name": child_step_name,
-            }
-            child_step = LiveStep.from_step(step, parent=step, update=updates)
-
-            yield child_step
-            if i == len(time_slices) - 1:
-                break
-
-            # use dependency on the prior substep to chain all the dynamic steps
-            depends_on = [child_step.name]
-
-            # Use the last restart file as initial conditions for the follow-up step
-            # - reset file names are formatted as: <stem>_rst.YYYYMMDDHHMMSS.{partition}.nc
-            reset_file_name = f"{output_root_name}_rst.{compact_ed}.000.nc"
-
-            step_output_dir = child_fs.output_dir
-            restart_file_path = step_output_dir / reset_file_name
-
-            # use output dir of the last step as the input for the next step
-            last_restart_file = restart_file_path
-
-    @staticmethod
-    def suffix() -> str:
-        """Return the standard prefix to be used when persisting
-        a resource modified by this transform.
-        """
-        return "split"
-
-
-class OverrideTransform(Transform):
+class OverrideTransform(Transform[LiveStep]):
     """Transform that overrides a step by returning a blueprint with all overridden attributes applied."""
 
-    _system_overrides: dict[str, t.Any] = {}
+    _system_overrides: dict[str, t.Any]
 
-    def __init__(self, sys_overrides: dict[str, t.Any] = None) -> None:  # type: ignore[assignment]
+    def __init__(self, sys_overrides: dict[str, t.Any] | None = None) -> None:
         """Initialize the instance.
 
         Parameters
         ----------
-        sys_overrides : dict[str, t.Any]
+        sys_overrides : dict[str, t.Any] | None
             System-level blueprint overrides that will be applied after
             the user-supplied values.
         """
@@ -444,9 +533,9 @@ class OverrideTransform(Transform):
 
     def apply(
         self,
-        bp: RomsMarblBlueprint,
-        overrides: dict[str, t.Any] = None,  # type: ignore[assignment]
-    ) -> RomsMarblBlueprint:
+        bp: Blueprint,
+        overrides: dict[str, t.Any] | None = None,
+    ) -> Blueprint:
         """Apply all overrides from a blueprint.
 
         Generate a new blueprint with overrides applied and an empty set of overrides.
@@ -454,14 +543,14 @@ class OverrideTransform(Transform):
 
         Parameters
         ----------
-        bp : RomsMarblBlueprint
+        bp : Blueprint
             The blueprint to apply overrides to
-        overrides : dict[str, t.Any]
+        overrides : dict[str, t.Any] | None
             A dictionary containing overrides for attributes of a blueprint.
 
         Returns
         -------
-        RomsMarblBlueprint
+        Blueprint
             The blueprint with all overrides applied.
         """
         overrides = overrides or {}
@@ -477,10 +566,10 @@ class OverrideTransform(Transform):
             f"{bp.description}; overridden keys [{', '.join(changeset.keys())}]"
         )
         merged.update(description=description)
+        bp_type = type(bp)
+        return bp_type(**merged)
 
-        return RomsMarblBlueprint(**merged)
-
-    def __call__(self, step: LiveStep) -> t.Iterable[LiveStep]:
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply the transform to a step.
 
         Parameters
@@ -490,53 +579,145 @@ class OverrideTransform(Transform):
 
         Returns
         -------
-        Iterable[Step]
+        Sequence[Step]
             Zero-to-many steps resulting from applying the transform.
         """
         bp_path = Path(step.blueprint_path)
-        blueprint = deserialize(bp_path, RomsMarblBlueprint)
+
+        app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+            get_application(step.application)
+        )
+        bp_type = app.blueprint
+
+        blueprint: Blueprint = deserialize(bp_path, bp_type)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
+        update: dict[str, t.Any] = {"blueprint_overrides": {}}
 
-        live_step = LiveStep.from_step(
-            step,
-            update={
-                "blueprint_overrides": {},
-                "work_dir": updated_bp.runtime_params.output_dir,
-            },
-        )
+        live_step = LiveStep.from_step(step, update=update)
 
         bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
-        live_step.blueprint_path = live_step.fsm.work_dir / bp_renamed
+        live_step.blueprint_path = live_step.fsm.run_dir / bp_renamed
 
         serialize(live_step.blueprint_path, updated_bp)
-        return [live_step]
+        return (live_step,)
 
     @staticmethod
     def suffix() -> str:
-        """Return the standard prefix to be used when persisting
-        a resource modified by this transform.
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
         """
         return "ovrd"
 
 
-def override_output_directory(step: LiveStep) -> LiveStep:
+def get_system_overrides(step: LiveStep) -> dict[str, t.Any]:
+    """Create a step-specific mapping of system-level overrides
+    that will be applied to orchestrated steps.
+
+    Returns
+    -------
+    LiveStep
+        The transformed step.
+    """
+    return {"working_dir": step.fsm.root_dir}
+
+
+def apply_automatic_overrides(step: LiveStep) -> LiveStep:
     """Automatically override the output directory specified in a blueprint
     to write to the C-Star home directories.
 
-    See `cstar.execution.file_system.DirectoryManager` for more detail
+    See `cstar.execution.file_system.JobFileSystemManager` for more detail
     on the available set of home directories.
 
     Returns
     -------
-    list[Step]
-        The transformed steps.
+    LiveStep
+        The transformed step.
     """
-    sys_overrides = {"runtime_params": {"output_dir": step.fsm.root}}
-    override_transform = OverrideTransform(sys_overrides)
-    overridden_step_result = iter(override_transform(step))
+    sys_overrides = get_system_overrides(step)
+    if not sys_overrides:
+        return step
 
-    return next(overridden_step_result)
+    override_transform = OverrideTransform(sys_overrides=sys_overrides)
+    overridden_step_result = override_transform(step)
+
+    return overridden_step_result[0]
 
 
-register_transform(Application.ROMS_MARBL.value, RomsMarblTimeSplitter())
+class Directive(Transform[LiveStep], t.Protocol):
+    _config: Mapping[str, t.Any]
+    """Contract of a transform that can be used as a directive."""
+
+    def __init__(self, config: dict[str, t.Any]) -> None:
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        config : dict[str, t.Any] | None
+            A dictionary containing configuration for the directive.
+        """
+        if not config:
+            msg = "Configuration must be provided"
+            raise ValueError(msg)
+
+        self._config = config
+
+
+class DirectiveConfig(BaseModel):
+    directive_map: t.ClassVar[dict[str, type[Directive]]] = {}
+    """Lookup for all registered directives."""
+
+    directives: KeyValueStore
+    """Generic configuration container for an instance of a directive."""
+
+    @classmethod
+    def apply_directives(
+        cls,
+        directive_uri: str,
+        blueprint_uri: str,
+    ) -> str:
+        """Apply the specified directives to the blueprint and
+        return the path to the final, transformed blueprint.
+
+        Parameters
+        ----------
+        directive_uri : str
+            The URI to configuration for directives the runner must execute.
+        blueprint_uri : str
+            The user-supplied blueprint URI specifying the blueprint to preprocess.
+
+        Returns
+        -------
+        str
+        """
+        with (
+            local_copy(directive_uri) as local_path,
+            local_copy(blueprint_uri) as local_bp,
+        ):
+            model = deserialize(local_path, DirectiveConfig)
+
+            directives = model.directives
+            if not directives:
+                return blueprint_uri
+
+            step = LiveStep(
+                name="directive-step",
+                application=Application.ROMS_MARBL,
+                blueprint=local_bp,
+            )
+            directive_map = DirectiveConfig.directive_map
+            transforms = {
+                directive_map[key](config=t.cast("dict[str, dict[str, t.Any]]", config))
+                for key, config in directives.items()
+            }
+            for transform in transforms:
+                step = transform(step)[0]
+
+        return str(step.blueprint_path)
+
+    @classmethod
+    def register(cls, key: str, directive: type[Directive]) -> None:
+        DirectiveConfig.directive_map[key] = directive

@@ -1,14 +1,23 @@
-# ruff: noqa: S101
-
 import json
+import os
 import textwrap
 import typing as t
+import uuid
+from collections.abc import AsyncGenerator, Callable, Generator
+from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
-from cstar.base.utils import additional_files_dir
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Step, Workplan
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
+from cstar.orchestration.launch.local import LocalHandle
+from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.state import StateRepository
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 
 @pytest.fixture
@@ -26,53 +35,7 @@ def fake_blueprint_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def templates_dir() -> Path:
-    """Return the path to the templates directory contained in the package
-    "additional files."
-
-    Returns
-    -------
-    Path
-    """
-    return additional_files_dir() / "templates"
-
-
-@pytest.fixture
-def wp_templates_dir(templates_dir: Path) -> Path:
-    """Return the path to the `Workplan` templates directory contained in the package
-    "additional files."
-
-    Parameters
-    ----------
-    templates_dir : Path
-        Fixture returning the path to the templates root directory.
-
-    Returns
-    -------
-    Path
-    """
-    return templates_dir / "wp"
-
-
-@pytest.fixture
-def bp_templates_dir(templates_dir: Path) -> Path:
-    """Return the path to the `Blueprint` templates directory contained in the package
-    "additional files."
-
-    Parameters
-    ----------
-    templates_dir : Path
-        Fixture returning the path to the templates root directory.
-
-    Returns
-    -------
-    Path
-    """
-    return templates_dir / "bp"
-
-
-@pytest.fixture
-def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, None]]:
+def gen_fake_steps(tmp_path: Path) -> Callable[[int], Generator[Step, None, None]]:
     """Create fake steps for testing purposes.
 
     Parameters
@@ -81,7 +44,7 @@ def gen_fake_steps(tmp_path: Path) -> t.Callable[[int], t.Generator[Step, None, 
         Unique path for test-specific files
     """
 
-    def _gen_fake_steps(num_steps: int) -> t.Generator[Step, None, None]:
+    def _gen_fake_steps(num_steps: int) -> Generator[Step, None, None]:
         """Create `num_steps` fake steps."""
         for i in range(num_steps):
             step_name = f"step-{i:03d}"
@@ -188,7 +151,7 @@ def blueprint_schema_path(tmp_path: Path) -> Path:
 def fill_workplan_template(
     empty_workplan_template_input: dict[str, t.Any],
     workplan_schema_path: Path,
-) -> t.Callable[[dict[str, t.Any]], str]:
+) -> Callable[[dict[str, t.Any]], str]:
     """Create a function to populate a raw workplan yaml document template."""
 
     def _get_workplan_template(
@@ -196,7 +159,7 @@ def fill_workplan_template(
         list_form: int = 0,
     ) -> str:
         """Populate the template with the supplied data."""
-        dedent = "            "  # depth of populated dedent below...
+        dedent = "                "  # depth of populated dedent below...
         l1_indent = " " * 4
         # l2_indent = l1_indent * 2
 
@@ -231,17 +194,8 @@ def fill_workplan_template(
             )
 
         # NOTE: using __file__ for blueprint path to give an existing path to pass validator
-        populated = textwrap.dedent(
+        steps_str = textwrap.dedent(
             f"""\
-            # yaml-language-server: $schema={workplan_schema_path.as_posix()}
-            name: {fill_vals["name"]}
-            description: {fill_vals["description"]}
-            state: {fill_vals["state"]}
-            compute_environment: {fill_vals["compute_environment"]}
-                # num_nodes: 4
-                # num_cpus_per_process: 16
-
-            runtime_vars: {fill_vals.get("runtime_vars", "")}
             steps:
                 - name: Test Step
                   application: sleep
@@ -261,9 +215,38 @@ def fill_workplan_template(
                   workflow_overrides:
                       segment_length: 16
                   compute_overrides:
-                      walltime: 00:10:00
-                      num_nodes: 4
+                      walltime: 00:05:00
+                      num_nodes: 2
             """,
+        )
+
+        if input_data.get("steps", ""):
+            steps: list[dict[str, t.Any]] = input_data["steps"]
+            steps_str = "steps:\n" if steps else "steps: []\n"
+
+            for step in steps:
+                steps_str += textwrap.dedent(f"""\
+                    - name: {step["name"]}
+                      application: {step["application"]}
+                      depends_on: []
+                      blueprint: {step["blueprint"]}
+                      blueprint_overrides: {{}}
+                """)
+
+        populated = (
+            textwrap.dedent(
+                f"""\
+                # yaml-language-server: $schema={workplan_schema_path.as_posix()}
+                name: {fill_vals["name"]}
+                description: {fill_vals["description"]}
+                state: {fill_vals["state"]}
+                compute_environment: {fill_vals["compute_environment"]}
+                    # num_nodes: 4
+                    # num_cpus_per_process: 16
+                runtime_vars: {fill_vals.get("runtime_vars", "")}
+                """,
+            )
+            + steps_str
         )
 
         print(f"populated workplan template:\n{populated}\n")
@@ -277,7 +260,7 @@ def fill_workplan_template(
 def fill_blueprint_template(
     empty_workplan_template_input: dict[str, t.Any],
     blueprint_schema_path: Path,
-) -> t.Callable[[dict[str, t.Any]], str]:
+) -> Callable[[dict[str, t.Any]], str]:
     """Create a function to populate a raw workplan yaml document template."""
 
     def _get_blueprint_template(
@@ -329,6 +312,8 @@ def fill_blueprint_template(
             state: draft
             valid_start_date: 2020-01-01 00:00:00
             valid_end_date: 2020-02-01 00:00:00
+            schema_version: 2.0.0
+            working_dir: .
             code:
               roms:
                 location: http://github.com/ankona/ucla-roms
@@ -393,7 +378,6 @@ def fill_blueprint_template(
               start_date: 2020-01-01 00:00:00
               end_date: 2020-01-02 00:00:00
               checkpoint_frequency: 1d
-              output_dir: .
             grid:
               documentation: http://mockdoc.com/model-params
               data:
@@ -443,14 +427,14 @@ def single_step_workplan(
     Workplan
     """
     bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    default_output_dir = "output_dir: ."
+    default_working_dir = "working_dir: ."
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
-        default_output_dir, f"output_dir: {tmp_path.as_posix()}"
+        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
     )
-    bp_content.replace(Application.SLEEP.value, Application.ROMS_MARBL.value)
+    bp_content.replace(Application.SLEEP, Application.ROMS_MARBL)
     bp_path.write_text(bp_content)
 
     return Workplan(
@@ -459,7 +443,7 @@ def single_step_workplan(
         steps=[
             Step(
                 name="s-00",
-                application=Application.SLEEP.value,
+                application=Application.SLEEP,
                 blueprint=bp_path.as_posix(),
             ),
         ],
@@ -470,3 +454,210 @@ def single_step_workplan(
 def remote_workplan_uri() -> str:
     """Fixture for returning a URL to a valid remote workplan for testing."""
     return "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+
+@pytest.fixture
+def hello_world_default_target() -> str:
+    """Return the default target for the hello world blueprint."""
+    return "@ankona"
+
+
+@pytest.fixture
+def hello_world_bp_content(hello_world_default_target: str) -> str:
+    """Return the minimal content for a HW blueprint.
+
+    Parameters
+    ----------
+    hello_world_default_target : str
+        The default target for the hello world blueprint.
+    """
+    return textwrap.dedent(f"""\
+        name: Say hello to my little friend!
+        description: This blueprint says hello to a very nice guy
+        application: hello_world
+        state: draft
+        target: '{hello_world_default_target}'
+        version: '1.0.0'
+        """)
+
+
+@pytest.fixture
+def hello_world_bp_path(tmp_path: Path, hello_world_bp_content: str) -> Path:
+    """Return a fresh copy of the HW blueprint in the current test's temp dir."""
+    path = tmp_path / "helloworld.yaml"
+    path.write_text(hello_world_bp_content)
+    return path
+
+
+@pytest.fixture
+def plotter_v1_0_0_model() -> dict[str, t.Any]:
+    return {
+        "name": "Plotter Unit Test Blueprint",
+        "schema_version": "1.0.0",
+        "application": "plotter",
+        "description": "plot outputs",
+        "output_dir": "~/cstar/wales_plotter/plots-test",
+        "state": "draft",
+        "input_dir": "~/cstar/wales_toy_blueprint/joined_output",
+        "variables": ["ALK", "pH_3D"],
+        "time_indices": [-1],
+        "s_indices": [0, -1],
+        "grid_file_path": "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc",
+        "file_glob": "*bgc*.nc",
+    }
+
+
+@pytest.fixture
+def plotter_v2_0_0_model() -> dict[str, t.Any]:
+    return {
+        "name": "Plotter Unit Test Blueprint",
+        "schema_version": "2.0.0",
+        "application": "plotter",
+        "description": "plot outputs",
+        "working_dir": "~/cstar/wales_plotter/plots-test",
+        "state": "draft",
+        "input_dir": "~/cstar/wales_toy_blueprint/joined_output",
+        "variables": ["ALK", "pH_3D"],
+        "time_indices": [-1],
+        "s_indices": [0, -1],
+        "grid_file_path": "~/cstar/wales_toy_blueprint/input/input_datasets/roms_grd.nc",
+        "file_glob": "*bgc*.nc",
+    }
+
+
+@pytest.fixture
+def plotter_v1_0_0_bp(tmp_path: Path, plotter_v1_0_0_model: dict[str, t.Any]) -> Path:
+    content = json.dumps(plotter_v1_0_0_model)
+
+    bp_path = tmp_path / "test-blueprints" / "plotter_1.0.0.json"
+    bp_path.parent.mkdir(parents=True, exist_ok=True)
+    bp_path.write_text(content)
+    return bp_path
+
+
+@pytest.fixture
+def plotter_v2_0_0_bp(tmp_path: Path, plotter_v2_0_0_model: dict[str, t.Any]) -> Path:
+    content = json.dumps(plotter_v2_0_0_model)
+
+    bp_path = tmp_path / "test-blueprints" / "plotter_2.0.0.json"
+    bp_path.parent.mkdir(parents=True, exist_ok=True)
+    bp_path.write_text(content)
+    return bp_path
+
+
+@pytest.fixture
+def mock_run_id() -> Generator[str]:
+    """Configure the CSTAR_RUNID environment variable."""
+    run_id = str(uuid.uuid4())
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: run_id}):
+        yield run_id
+
+
+@pytest.fixture(autouse=True)
+def mock_env(
+    mock_xdg_dirs: dict[str, Path],
+    mock_run_id: str,
+) -> Generator[tuple[dict[str, Path], str]]:
+    """Aggregate all env manipulation fixtures."""
+    yield mock_xdg_dirs, mock_run_id
+
+
+@pytest.fixture(params=["fanout", "linear", "parallel", "single_step"])
+def prepared_workplan(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    default_blueprint_path: str,
+    bp_templates_dir: Path,
+) -> tuple[Path, Workplan]:
+    """Verify that CLI plan action generates an output image from a workplan.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    workplan_name : str
+        The name of a workplan fixture to use for workplan creation
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
+    default_blueprint_path : str
+        Fixture returning the default blueprint path contained in template workplans
+    """
+    workplan_name = request.param
+    template_file = f"{workplan_name}.yaml"  # "single_step.yaml"
+    template_path = wp_templates_dir / template_file
+
+    bp_template_path = bp_templates_dir / "blueprint.yaml"
+    bp_content = bp_template_path.read_text()
+
+    test_bp_path = tmp_path / "blueprint.yaml"
+    test_bp_path.write_text(bp_content)
+
+    content = template_path.read_text()
+    content = content.replace(default_blueprint_path, test_bp_path.as_posix())
+
+    wp_path = tmp_path / template_file
+    wp_path.write_text(content)
+
+    wp = deserialize(wp_path, Workplan)
+
+    return wp_path, wp
+
+
+@pytest.fixture
+async def executed_workplan(
+    tmp_path: Path,
+    prepared_workplan: tuple[Path, Workplan],
+) -> AsyncGenerator[tuple[Path, Workplan, str]]:
+    """Create a WorkplanRun record for the prepared workplan."""
+    wp_path, wp = prepared_workplan
+    fake_run_id = "fake-run-id"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
+        repo = TrackingRepository()
+        wp_run = WorkplanRun(
+            workplan_path=wp_path,
+            trx_workplan_path=wp_path,
+            output_path=tmp_path / "mock-output",
+            run_id=fake_run_id,
+        )
+        await repo.put_workplan_run(wp_run)
+
+        mock_get_wp = mock.AsyncMock(return_value=wp_run)
+
+        with (
+            mock.patch(
+                "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+                mock_get_wp,
+            ),
+        ):
+            yield wp_path, wp, fake_run_id
+
+
+@pytest.fixture
+async def executed_workplan_with_sideeffects(
+    executed_workplan: tuple[Path, Workplan, str],
+) -> AsyncGenerator[tuple[Path, Workplan, str]]:
+    """Create a WorkplanRun record for the prepared workplan and populate
+    the run directories with logs.
+    """
+    wp_path, wp, fake_run_id = executed_workplan
+    root_fsm = JobFileSystemManager(DirectoryManager.data_home() / fake_run_id)
+
+    for i, step in enumerate(wp.steps):
+        step_fsm = root_fsm.get_subtask_manager(step.safe_name)
+        step_fsm.prepare()
+        log_path = step_fsm.logs_dir / f"{step.safe_name}.out"
+        log_path.write_text(f"{step.name} message {i}")
+
+        handle = LocalHandle(
+            pid=f"100{i}",
+            name=step.name,
+            run_id=fake_run_id,
+            start_at=datetime.now(),
+        )
+
+        run_repo = StateRepository()
+        await run_repo.put_sentinel(handle)
+
+    yield wp_path, wp, fake_run_id

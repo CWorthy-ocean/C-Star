@@ -36,7 +36,7 @@ parameters that are user-facing.
 Custom Blueprint Example: ``RomsMarblBlueprint``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:class:`cstar.orchestration.models.RomsMarblBlueprint` contains all information
+:class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` contains all information
 necessary to execute a coupled simulation using **UCLA-ROMS** with biogeochemistry
 handled by **MARBL**. It adds the following attributes:
 
@@ -44,18 +44,18 @@ handled by **MARBL**. It adds the following attributes:
 
 .. autosummary::
 
-  ~cstar.orchestration.models.RomsMarblBlueprint.valid_start_date
-  ~cstar.orchestration.models.RomsMarblBlueprint.valid_end_date
-  ~cstar.orchestration.models.RomsMarblBlueprint.code
-  ~cstar.orchestration.models.RomsMarblBlueprint.initial_conditions
-  ~cstar.orchestration.models.RomsMarblBlueprint.grid
-  ~cstar.orchestration.models.RomsMarblBlueprint.forcing
-  ~cstar.orchestration.models.RomsMarblBlueprint.partitioning
-  ~cstar.orchestration.models.RomsMarblBlueprint.model_params
-  ~cstar.orchestration.models.RomsMarblBlueprint.runtime_params
-  ~cstar.orchestration.models.RomsMarblBlueprint.cdr_forcing
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_start_date
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.valid_end_date
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.code
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.initial_conditions
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.grid
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.forcing
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.partitioning
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.model_params
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.runtime_params
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.cdr_forcing
 
-Explore the API reference of :class:`cstar.orchestration.models.RomsMarblBlueprint` 
+Explore the API reference of :class:`cstar.applications.roms_marbl.app.RomsMarblBlueprint` 
 for more detail on each item.
 
 
@@ -84,6 +84,8 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
     name: 2node_1wk_example
     description: this is mainly to test infra like containers and workplans. it should run on 256 processors (2 nodes)
     application: roms_marbl
+    schema_version: 2.0.0
+    working_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
     state: draft
     valid_start_date: 2000-01-15 0:00:00
     valid_end_date: 2000-01-23 0:00:00
@@ -155,7 +157,6 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
     runtime_params:
       start_date: "2000-01-15 00:00:00"
       end_date: "2000-01-22 00:00:00"
-      output_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
 
 
 Checking validity
@@ -214,19 +215,21 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
    .. tab-item:: Programmatic Execution
 
-    Use a ``SimulationRunner`` to execute the blueprint.
+    Use a ``RomsMarblRunner`` to execute the blueprint.
 
     .. code-block:: python
       :caption: Executing a blueprint YAML file in python.
 
-        from cstar.entrypoint.service import ServiceConfiguration
-        from cstar.entrypoint.worker.worker import BlueprintRequest, JobConfig, SimulationRunner
+        from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+        from cstar.applications.roms_marbl.app import RomsMarblBlueprint, RomsMarblRunner
+        from cstar.applications.core import RunnerRequest
 
         account_id = "your-account-id"
         queue_id = "wholenode"
         
-        request = BlueprintRequest("my_blueprint.yaml")
+        request = RunnerRequest("my_blueprint.yaml", RomsMarblBlueprint)
         service_cfg = ServiceConfiguration()
-        job_cfg = JobConfig(account_id, priority=queue_id)
+        job_cfg = JobConfig(account_id=account_id, walltime="00:90:00", priority=queue_id)
 
-        SimulationRunner(request, service_cfg, job_cfg)
+        runner = RomsMarblRunner(request, service_cfg, job_cfg)
+        await runner.execute()

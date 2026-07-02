@@ -81,16 +81,16 @@ class MockScheduler(Scheduler):
     def in_active_allocation(self) -> bool:
         return False
 
-    def get_queue(self, name):
+    def get_queue(self, name: str | None):
         # Return a mocked queue with default properties
         return MagicMock(name=name, max_walltime="02:00:00")
 
     @property
-    def global_max_cpus_per_node(self):
+    def global_max_cpus_per_node(self) -> int | None:
         return 64  # Mocked maximum CPUs per node
 
     @property
-    def global_max_mem_per_node_gb(self):
+    def global_max_mem_per_node_gb(self) -> float | None:
         return 128  # Mocked maximum memory in GB
 
 
@@ -707,7 +707,7 @@ async def test_get_slurm_steps_job_id_type(job_id: int | str) -> None:
     """Verify both integer and string job ID values are accepted."""
     job_id = "15527988"
     slurm_output = textwrap.dedent(
-        """15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+"""
+        """15527988      cstar_wor+ 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED"""
     )
 
     with patch("cstar.execution.scheduler_job._run_cmd", return_value=slurm_output):
@@ -721,19 +721,19 @@ async def test_get_slurm_steps_job_id_type(job_id: int | str) -> None:
     ("sacct_output", "exp_num_steps"),
     [
         (
-            "15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+",
+            "15527988      cstar_wor+ 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED",
             1,
         ),
         (
-            "15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+\n",
+            "15527988      cstar_wor+ 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED\n",
             1,
         ),
         (
             """\
-            15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+
-            15527988.ba+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09      batch
-            15527988.ex+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09     extern
-            15527988.0    COMPLETED 2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09       roms
+            15527988      cstar_wor+  2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED
+            15527988.ba+       batch  2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED
+            15527988.ex+      extern  2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED
+            15527988.0          roms  2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09 COMPLETED
             """,
             4,
         ),
@@ -757,13 +757,13 @@ async def test_get_slurm_steps_multi_job_id() -> None:
     """Verify multiple jobs are parsed correctly from sacct std output"""
     job_id = "1552798,15527988"
     sacct_output = textwrap.dedent("""\
-        15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
-        15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
-        15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
-        15527988      COMPLETED 2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 cstar_wor+
-        15527988.ba+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09      batch
-        15527988.ex+  COMPLETED 2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09     extern
-        15527988.0    COMPLETED 2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09       roms
+        15514059     001_1-wee+  2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07    FAILED
+        15514059.ba+      batch  2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07    FAILED
+        15514059.ex+     extern  2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08 COMPLETED
+        15527988     cstar_wor+  2026-03-06T15:03:24 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED
+        15527988.ba+      batch  2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED
+        15527988.ex+     extern  2026-03-06T15:04:46 2026-03-06T15:04:46 2026-03-06T15:05:09 COMPLETED
+        15527988.0         roms  2026-03-06T15:04:48 2026-03-06T15:04:48 2026-03-06T15:05:09 COMPLETED
         """)
 
     exp_num_steps = 7
@@ -793,9 +793,9 @@ async def test_get_slurm_batch(job_id: int | str) -> None:
     both a string and integer job-id.
     """
     sacct_output = textwrap.dedent("""\
-        15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
-        15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
-        15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
+        15514059     001_1-wee+ 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 FAILED
+        15514059.ba+      batch 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07 FAILED
+        15514059.ex+     extern 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08 COMPLETED
         """)
 
     exp_num_steps = 2
@@ -812,6 +812,42 @@ async def test_get_slurm_batch(job_id: int | str) -> None:
     assert len(job_ids) == exp_num_jobs
 
     assert result.job_id == str(job_id)
+    assert result.status == ExecutionStatus.FAILED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        15514059,
+        "15514059",
+    ],
+)
+async def test_get_slurm_batch_timeout(job_id: int | str) -> None:
+    """Verify that a SLURM batch that times out is considered terminal"""
+    sacct_output = textwrap.dedent("""\
+        15514059        001_1-wee+ 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07    TIMEOUT
+        15514059.ba+         batch 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07  CANCELLED
+        15514059.ex+        extern 2026-03-05T14:45:05 2026-03-05T14:44:05 2026-03-05T14:44:08  COMPLETED
+        15514059.0            roms 2026-03-05T14:46:05 2026-03-05T14:44:05 2026-03-05T14:44:08  COMPLETED
+        """)
+
+    exp_num_steps = 3
+    exp_num_jobs = 1
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        result = await get_slurm_batch(job_id)
+
+    step_ids = {x.step_id for x in result}
+    assert len(step_ids) == exp_num_steps
+
+    # confirm each step correctly parses it's job ID from the step ID
+    job_ids = {x.job_id for x in result}
+    assert len(job_ids) == exp_num_jobs
+
+    assert result.job_id == str(job_id)
+    assert result.status == ExecutionStatus.TIMEOUT
+    assert ExecutionStatus.is_terminal(result.status)
 
 
 @pytest.mark.asyncio
@@ -848,43 +884,41 @@ async def test_get_slurm_batches() -> None:
 
 
 @pytest.mark.parametrize(
-    "job_id",
+    ("exp_status", "raw_status"),
     [
-        15514059,
-        "15514059",
+        (ExecutionStatus.PENDING, "PENDING"),
+        (ExecutionStatus.RUNNING, "RUNNING"),
+        (ExecutionStatus.COMPLETED, "COMPLETED"),
+        (ExecutionStatus.CANCELLED, "CANCELLED"),
+        (ExecutionStatus.FAILED, "FAILED"),
+        (ExecutionStatus.TIMEOUT, "TIMEOUT"),
+        (ExecutionStatus.FAILED, "OUT_OF_MEMORY"),
     ],
 )
-def test_get_slurm_batch_sync(job_id: str | int) -> None:
-    """Verify multiple steps are parsed correctly from sacct std output with
-    both a string and integer job-id when using the synchronous batch API
+def test_get_slurm_batch_sync(exp_status: ExecutionStatus, raw_status: str) -> None:
+    """Verify all known slurm statuses are mapped to an ExecutionStatus and the batch status
+    is correctly set after retrieving sacct output.
 
     Parameters
     ----------
     job_id : str | int
         Parameterized job ID to verify correct handling of [int|str] Union type
     """
-    sacct_output = textwrap.dedent(
-        """\
-        15514059         FAILED 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07 001_1-wee+
-        15514059.ba+     FAILED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07      batch
-        15514059.ex+  COMPLETED 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:08     extern
-        """
-    )
+    sacct_output = textwrap.dedent(f"""\
+        15514059        001_1-wee+ 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07  {raw_status}
+        15514059.ba+         batch 2026-03-05T14:44:05 2026-03-05T14:44:05 2026-03-05T14:44:07  FAILED
+        15514059.ex+        extern 2026-03-05T14:45:05 2026-03-05T14:44:05 2026-03-05T14:44:08  CANCELLED
+        15514059.0            roms 2026-03-05T14:46:05 2026-03-05T14:44:05 2026-03-05T14:44:08  COMPLETED
+        """)
 
-    exp_num_steps = 2
-    exp_num_jobs = 1
+    job_id = "15514059"
 
     with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
         result = get_slurm_batch_sync(job_id)
 
-    step_ids = {x.step_id for x in result}
-    assert len(step_ids) == exp_num_steps
-
-    # confirm each step correctly parses it's job ID from the step ID
-    job_ids = {x.job_id for x in result}
-    assert len(job_ids) == exp_num_jobs
-
+    # confirm each step correctly parses it's job ID and status from the step ID,
     assert result.job_id == str(job_id)
+    assert result.status == exp_status
 
 
 def test_get_slurm_batch_sync_no_steps() -> None:
@@ -904,3 +938,16 @@ def test_get_slurm_batch_sync_no_steps() -> None:
 
     # confirm that status is reported as unsubmitted
     assert result.status == ExecutionStatus.UNSUBMITTED
+
+
+def test_get_slurm_batch_sync_unknown_status() -> None:
+    """Verify retrieving a batch with an unmapped raw status results in an error."""
+    sacct_output = "15514059        001_1-wee+ 2026-03-05T14:43:39 2026-03-05T14:44:05 2026-03-05T14:44:07  unknown-raw-status"
+    job_id = 15514059
+
+    with patch("cstar.execution.scheduler_job._run_cmd", return_value=sacct_output):
+        result = get_slurm_batch_sync(job_id)
+
+    with pytest.raises(ValueError, match="unknown status"):
+        # confirm that trying to map the status blows up
+        result.status

@@ -5,15 +5,18 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.applications.roms_marbl.transforms import SplitFrequency
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME, FLAG_ON
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
-from cstar.orchestration.models import Application, RomsMarblBlueprint, Workplan
+from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.transforms import SplitFrequency, WorkplanTransformer
+from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_TRX_FREQ,
@@ -22,6 +25,8 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_QUEUE,
     get_run_id,
 )
+from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+from cstar.system.manager import AnvilEnvSettings
 
 
 @pytest.mark.asyncio
@@ -37,10 +42,10 @@ async def test_compose_host_creation(
     ----------
     tmp_path : Path
         Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
     wp_templates_dir: Path
         Fixture returning the path to the directory containing workplan template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "linear"
 
@@ -51,14 +56,14 @@ async def test_compose_host_creation(
     bp_template_path = bp_templates_dir / bp_template_file
 
     mock_process = mock.AsyncMock()
-    output_dir = tmp_path / "test-outputs"
+    working_dir = tmp_path / "test-outputs"
     run_id = "my-run"
 
     with mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process):
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            output_dir.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
             execute=False,
@@ -74,10 +79,10 @@ async def test_compose_host_creation(
     step = steps[0]
     bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
 
-    assert bp.runtime_params.output_dir == output_dir
+    assert bp.working_dir == working_dir
 
-    expected_bp = output_dir / run_id / "blueprint.yaml"
-    expected_host_wp = output_dir / run_id / f"{workplan_name}-host.yaml"
+    expected_bp = working_dir / run_id / "blueprint.yaml"
+    expected_host_wp = working_dir / run_id / f"{workplan_name}-host.yaml"
 
     # confirm a copy of the blueprint was made
     assert expected_bp.exists()
@@ -102,10 +107,10 @@ async def test_compose_host_run_parameter(
         String containing "0" or "1" indicating if the generated workplan should execute.
     tmp_path : Path
         Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
     wp_templates_dir: Path
         Fixture returning the path to the directory containing workplan template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "single_step"
 
@@ -116,12 +121,12 @@ async def test_compose_host_run_parameter(
     bp_template_path = bp_templates_dir / bp_template_file
 
     mock_process = mock.AsyncMock()
-    output_dir = tmp_path / "default-assets"
-    output_override_dir = tmp_path / "overridden-assets"
+    working_dir = tmp_path / "default-assets"
+    working_dir_override = tmp_path / "overridden-assets"
 
     mock_run = mock.Mock()
     run_id = "my-run"
-    mock_env = {ENV_CSTAR_STATE_HOME: output_override_dir.as_posix()}
+    mock_env = {ENV_CSTAR_STATE_HOME: working_dir_override.as_posix()}
 
     with (
         mock.patch("cstar.cli.workplan.compose._run", mock_run),
@@ -131,7 +136,7 @@ async def test_compose_host_run_parameter(
         _ = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            output_dir.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
             execute=do_run,
@@ -144,16 +149,19 @@ async def test_compose_host_run_parameter(
 
 
 @pytest.mark.parametrize(
-    ("drop_var", "key"),
+    ("drop_var", "key", "settings_klass"),
     [
-        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT"),
-        (ENV_CSTAR_SLURM_QUEUE, "QUEUE"),
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", SlurmSettingsBase),
+        (ENV_CSTAR_SLURM_ACCOUNT, "ACCOUNT", AnvilEnvSettings),
+        (ENV_CSTAR_SLURM_QUEUE, "QUEUE", AnvilEnvSettings),
     ],
 )
 @pytest.mark.asyncio
 async def test_build_and_run_dag_env(
     drop_var: str,
     key: str,
+    settings_klass: type[EnvSettingsBase],
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
@@ -169,10 +177,10 @@ async def test_build_and_run_dag_env(
         A unique string verifying the correct exception was caught.
     tmp_path : Path
         Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
     wp_templates_dir: Path
         Fixture returning the path to the directory containing workplan template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "single_step"
 
@@ -182,8 +190,8 @@ async def test_build_and_run_dag_env(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    output_dir = tmp_path / "original-output-dir"
-    output_override_dir = tmp_path / "overridden-output-dir"
+    working_dir = tmp_path / "original-output-dir"
+    working_dir_override = tmp_path / "overridden-output-dir"
     run_id = "my-run"
 
     mock_process = mock.AsyncMock()
@@ -193,7 +201,7 @@ async def test_build_and_run_dag_env(
     mock_sys_manager.scheduler = mock.Mock()
 
     mock_env = {
-        ENV_CSTAR_STATE_HOME: output_override_dir.as_posix(),
+        ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -207,17 +215,21 @@ async def test_build_and_run_dag_env(
         mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process),
         mock.patch("cstar.orchestration.dag_runner.cstar_sysmgr", mock_sys_manager),
         mock.patch.dict(os.environ, mock_env, clear=True),
-        pytest.raises(ValueError) as ex,
+        mock.patch(
+            "cstar.system.environment.CStarEnvironment.settings_klass",
+            settings_klass,
+        ),
+        pytest.raises(CstarExpectationFailed) as ex,
     ):
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            output_dir.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        await build_and_run_dag(generated_wp_path, run_id, output_dir)
+        await build_and_run_dag(generated_wp_path, run_id, working_dir)
 
     assert key in str(ex)
 
@@ -234,10 +246,10 @@ async def test_prepare_composed_dag(
     ----------
     tmp_path : Path
         Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
     wp_templates_dir: Path
         Fixture returning the path to the directory containing workplan template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "single_step"
 
@@ -247,12 +259,12 @@ async def test_prepare_composed_dag(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    output_dir = tmp_path / "original-output-dir"
-    output_override_dir = tmp_path / "overridden-output-dir"
+    working_dir = tmp_path / "original-output-dir"
+    working_dir_override = tmp_path / "overridden-output-dir"
     run_id = "my-run"
 
     mock_env = {
-        ENV_CSTAR_STATE_HOME: output_override_dir.as_posix(),
+        ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -260,8 +272,9 @@ async def test_prepare_composed_dag(
         ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
     }
 
-    def _raise_ex(*args, **kwargs):
-        raise RuntimeError("on-purpose-fail")
+    def _raise_ex(*args, **kwargs) -> None:
+        msg = "on-purpose-fail"
+        raise RuntimeError(msg)
 
     with (
         mock.patch("cstar.orchestration.orchestration.Planner.__init__", _raise_ex),
@@ -270,16 +283,16 @@ async def test_prepare_composed_dag(
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            output_dir.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        configure_environment(output_dir, run_id)
+        configure_environment(working_dir, run_id)
         run_id = get_run_id()
-        output_dir = DirectoryManager.data_home()
+        working_dir = DirectoryManager.data_home()
         check_environment()
-        wp, wp_path = await prepare_workplan(generated_wp_path, output_dir, run_id)
+        wp, wp_path = await prepare_workplan(generated_wp_path, working_dir, run_id)
 
     wp = deserialize(wp_path, Workplan)
     steps = list(wp.steps)
@@ -288,12 +301,12 @@ async def test_prepare_composed_dag(
     num_timeslices = 12
     assert len(steps) == num_timeslices
 
-    paths = set()
+    paths: set[Path] = set()
     for step in steps:
         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        paths.add(bp.runtime_params.output_dir)
+        paths.add(bp.working_dir)
 
-        assert bp.runtime_params.output_dir.exists()
+        assert bp.working_dir.exists()
 
     # confirm that every step has a unique output path
     assert len(steps) == num_timeslices
@@ -312,10 +325,10 @@ async def test_run_composed_dag(
     ----------
     tmp_path : Path
         Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
     wp_templates_dir: Path
         Fixture returning the path to the directory containing workplan template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name: str = "single_step"
 
@@ -325,7 +338,7 @@ async def test_run_composed_dag(
     bp_template_file = "blueprint.yaml"
     bp_template_path = bp_templates_dir / bp_template_file
 
-    output_dir = Path("/home/x-cmcbride/dag/jan12001")
+    working_dir = Path("/home/x-cmcbride/dag/jan12001")
     run_id = f"test-run-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
 
     print(f"Composing workplan in: {tmp_path}")
@@ -340,10 +353,6 @@ async def test_run_composed_dag(
 
     mock_run_cmd = mock.Mock(return_code=0, stderr="", stdout="mock-run-output")
 
-    def no_delay():
-        while True:
-            yield 1
-
     with (
         mock.patch.dict(os.environ, mock_env, clear=True),
         mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
@@ -351,7 +360,7 @@ async def test_run_composed_dag(
         generated_wp_path = compose(
             wp_template_path.as_posix(),
             bp_template_path.as_posix(),
-            output_dir.as_posix(),
+            working_dir.as_posix(),
             run_id=run_id,
             template=WorkplanTemplate[workplan_name.upper()],
         )
@@ -365,14 +374,14 @@ async def test_run_composed_dag(
         )
         serialize(tweak_path, wp)
 
-        wp_path = await build_and_run_dag(tweak_path, run_id, output_dir)
+        wp_path = await build_and_run_dag(tweak_path, run_id, working_dir)
 
     wp = deserialize(wp_path, Workplan)
     steps = list(wp.steps)
 
-    paths = set()
+    paths: set[Path] = set()
     for step in steps:
         bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
-        paths.add(bp.runtime_params.output_dir)
+        paths.add(bp.working_dir)
 
-        assert bp.runtime_params.output_dir.exists()
+        assert bp.working_dir.exists()

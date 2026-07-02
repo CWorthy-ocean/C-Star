@@ -1,8 +1,9 @@
 import itertools
 import typing as t
 from abc import ABC
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from datetime import datetime
 from enum import StrEnum, auto
 from pathlib import Path
 
@@ -13,21 +14,19 @@ from pydantic import (
     FilePath,
     HttpUrl,
     PlainSerializer,
-    PositiveInt,
     PrivateAttr,
+    SerializationInfo,
     SerializeAsAny,
     StringConstraints,
+    ValidationInfo,
     WithJsonSchema,
     field_validator,
+    model_serializer,
     model_validator,
 )
-from pytimeparse import parse
 
-from cstar.base.utils import slugify
+from cstar.base.utils import generate_schema_ref, slugify
 from cstar.orchestration.serialization import register_representer, strenum_representer
-
-if t.TYPE_CHECKING:
-    from pydantic import ValidationInfo
 
 RequiredString: t.TypeAlias = t.Annotated[
     str,
@@ -61,7 +60,7 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(extra="forbid", from_attributes=True)
+    model_config = ConfigDict(extra="allow", from_attributes=True)
     """Pydantic ConfigDict with options we want changed."""
 
 
@@ -122,80 +121,6 @@ class PathFilter(ConfiguredBaseModel):
     is provided."""
 
 
-class ForcingConfiguration(ConfiguredBaseModel):
-    """Configuration of the forcing parameters of the model."""
-
-    boundary: Dataset
-    """Boundary forcing."""
-
-    surface: Dataset
-    """Surface forcing"""
-
-    tidal: Dataset | None = Field(default=None, validate_default=False)
-    """Tidal forcing."""
-
-    river: Dataset | None = Field(default=None, validate_default=False)
-    """River forcing."""
-
-    corrections: Dataset | None = Field(default=None, validate_default=False)
-    """Wind or other forcing corrections."""
-
-
-class CodeRepository(DocLocMixin, ConfiguredBaseModel):
-    """Reference to a remote code repository with optional path filtering
-    and point-in-time specification.
-    """
-
-    location: HttpUrl | str
-    """Location of the remote code repository."""
-
-    commit: str = Field(default="", validate_default=False)
-    """A specific commit to be used."""
-
-    branch: str = Field(default="", validate_default=False)
-    """A specific branch to be used."""
-
-    filter: PathFilter | None = Field(default=None, validate_default=False)
-    """A filter specifying the files to be retrieved and persisted from the repository."""
-
-    @property
-    def checkout_target(self) -> str:
-        """Return the commit if specified, else the branch"""
-        return self.commit or self.branch
-
-    @model_validator(mode="after")
-    def _model_validator(self) -> "CodeRepository":
-        """Perform validation on the model after field-level validation is complete.
-
-        - Ensure that one of commit or branch checkout target is supplied
-        """
-        if self.commit and self.branch:
-            msg = "Supply only one of commit hash or branch."
-            raise ValueError(msg)
-
-        if not self.commit and not self.branch:
-            msg = "Either the commit hash or branch must be supplied."
-            raise ValueError(msg)
-
-        return self
-
-
-class ROMSCompositeCodeRepository(ConfiguredBaseModel):
-    """Collection of repositories used to build, configure, and execute ROMS."""
-
-    roms: CodeRepository
-    """The baseline ROMS repository."""
-
-    run_time: CodeRepository
-    """Codebase used to modify the runtime behavior of ROMS."""
-
-    compile_time: CodeRepository
-    """Codebase used to modify base ROMS compilation."""
-
-    marbl: CodeRepository | None = Field(default=None, validate_default=False)
-    """Codebase used to add MARBL to the simulation."""
-
-
 class BlueprintState(StrEnum):
     """The allowed states for a work plan."""
 
@@ -212,121 +137,18 @@ class BlueprintState(StrEnum):
 class Application(StrEnum):
     """The supported application types."""
 
-    ROMS_MARBL = auto()
+    ROMS_MARBL = "roms_marbl"
     """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
-    SLEEP = auto()
+    SLEEP = "sleep"
     """A call to the hostname executable to simplify testing."""
-
-
-class ParameterSet(DocLocMixin, ConfiguredBaseModel):
-    """A base class for parameter sets exposed on a blueprint."""
-
-    hash: str | None = Field(default=None, init=False, validate_default=False)
-    """Hash used to verify the parameters are unchanged."""
-
-    @model_validator(mode="after")
-    def _model_validator(self) -> "ParameterSet":
-        """Perform validation on the model after field-level validation is complete.
-
-        Ensure the dynamically added parameters meet the minimum naming standard.
-        """
-        if self.locked and not self.hash:
-            msg = "A locked parameter set must include a hash"
-            raise ValueError(msg)
-
-        return self
-
-
-class RuntimeParameterSet(ParameterSet):
-    """Parameters for the execution of the model.
-
-    These parameters can be varied (within bounds defined elsewhere in the blueprint, e.g. valid_start/end_date),
-    without changing the validity of the model solution.
-    """
-
-    start_date: datetime
-    """Start of data time range to be used in the simulation."""
-
-    end_date: datetime
-    """End of data time range to be used in the simulation."""
-
-    checkpoint_frequency: str = Field(
-        default="1d",
-        min_length=2,
-        pattern="(?P<scalar>[1-9][0-9]*)(?P<unit>[hdwmy])",
-    )
-    """Time period between creation of checkpoint files.
-
-    Supply a string representing the desired time period, such as:
-    - every day: "1d"
-    - every week: "1w"
-    - every month: "1m" or "4w" or "31d"
-    - every 2.5 days: "2d 12h" or "60h"
-
-    A short time period will reduce data re-processing upon restart at the cost
-    of additional disk usage and compute used for checkpointing.
-    """
-
-    output_dir: TargetDirectoryPath = Path()
-    """Directory where runtime outputs will be stored."""
-
-    @field_validator("checkpoint_frequency", mode="after")
-    @classmethod
-    def _validate_checkpoint_frequency(
-        cls,
-        value: str,
-        _info: "ValidationInfo",
-    ) -> str:
-        """Verify a valid range string for the checkpoint frequency was supplied.
-
-        Parameters:
-            value : str
-                The value of the checkpoint frequency property
-            _info : ValidationInfo
-                Metadata for the current validation context
-        """
-        if not parse(value):
-            msg = "Invalid checkpoint frequency supplied."
-            raise ValueError(msg)
-        return value
-
-    @model_validator(mode="after")
-    def _model_validator(self) -> "RuntimeParameterSet":
-        """Perform validation on the model after field-level validation is complete."""
-        if self.end_date <= self.start_date:
-            msg = "start_date must precede end_date"
-            raise ValueError(msg)
-
-        return self
-
-    @field_validator("output_dir", mode="after")
-    @classmethod
-    def _resolve_out_dir(
-        cls,
-        value: Path,
-        _info: "ValidationInfo",
-    ) -> Path:
-        return value.expanduser().resolve()
-
-
-class PartitioningParameterSet(ParameterSet):
-    """Parameters for the partitioning of the model."""
-
-    n_procs_x: PositiveInt
-    """Number of processes used to subdivide the domain on the x-axis."""
-
-    n_procs_y: PositiveInt
-    """Number of processes used to subdivide the domain on the y-axis."""
-
-
-class ModelParameterSet(ParameterSet):
-    """
-    Parameters that can override ROMS.in values. Unlike RuntimeParameters, these affect the validity of the
-    model solution, and should be locked for validated blueprints.
-    """
-
-    time_step: PositiveInt
-    """The time step the model integrates over."""
+    HELLO_WORLD = "hello_world"
+    """Sample custom application."""
+    PLOTTER = "plotter"
+    """Demo plotting application."""
+    NEST_IC = "nest_ic"
+    """Application performing a nested simulation run."""
+    UPSCALER = "upscaler"
+    """Application performing an upscaled simulation run."""
 
 
 class Blueprint(ConfiguredBaseModel, ABC):
@@ -338,11 +160,17 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: Application = Application.ROMS_MARBL
+    application: str
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
+
+    schema_version: str = Field("1.0.0", frozen=True)
+    """The schema version for the document."""
+
+    working_dir: TargetDirectoryPath = Path()
+    """Path to a directory where assets are stored when executing the blueprint."""
 
     @property
     def cpus_needed(self) -> int:
@@ -352,64 +180,29 @@ class Blueprint(ConfiguredBaseModel, ABC):
         """
         return 1
 
+    @field_validator("working_dir", mode="after")
+    @classmethod
+    def _resolve_out_dir(
+        cls,
+        value: Path,
+        _info: "ValidationInfo",
+    ) -> Path:
+        return value.expanduser().resolve()
 
-class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
-    """Blueprint schema for running a ROMS-MARBL simulation."""
-
-    valid_start_date: datetime
-    """Beginning of the time range for the available data."""
-
-    valid_end_date: datetime
-    """End of the time range for the available data."""
-
-    code: ROMSCompositeCodeRepository
-    """Code repositories used to build, configure, and execute the ROMS simulation."""
-
-    initial_conditions: Dataset = Field(min_length=1, max_length=1)
-    """File containing the starting conditions of the simulation."""
-
-    grid: Dataset = Field(min_length=1, max_length=1)
-    """File defining the grid geometry."""
-
-    forcing: ForcingConfiguration
-    """Forcing configuration."""
-
-    partitioning: PartitioningParameterSet
-    """User-defined partitioning parameters."""
-
-    model_params: ModelParameterSet
-    """User-defined model parameters."""
-
-    runtime_params: RuntimeParameterSet
-    """User-defined runtime parameters."""
-
-    cdr_forcing: Dataset | None = Field(default=None)
-    """Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."""
-
-    nesting_info: Dataset | None = Field(default=None)
-    """Location of nesting info input file for this run. Optional."""
-
-    @model_validator(mode="after")
-    def _model_validator(self) -> "RomsMarblBlueprint":
-        """Perform validation on the model after field-level validation is complete."""
-        if self.valid_end_date <= self.valid_start_date:
-            msg = "valid_start_date must precede valid_end_date"
-            raise ValueError(msg)
-
-        if self.runtime_params.end_date > self.valid_end_date:
-            msg = "end_date is outside the valid range"
-            raise ValueError(msg)
-
-        if self.runtime_params.start_date < self.valid_start_date:
-            msg = "start_date is outside the valid range"
-            raise ValueError(msg)
-
-        return self
-
-    @property
-    def cpus_needed(self) -> int:
-        """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
-        return self.partitioning.n_procs_x * self.partitioning.n_procs_y
+    @model_serializer(mode="wrap")
+    def serialize_with_schema_ref(
+        self,
+        handler: Callable[[BaseModel], dict[str, t.Any]],
+        info: "SerializationInfo",
+    ) -> dict[str, t.Any]:
+        data = handler(self)
+        return {
+            "$schema": generate_schema_ref(
+                self.application,
+                self.schema_version,
+            ),
+            **data,
+        }
 
 
 class WorkplanState(StrEnum):
@@ -422,19 +215,6 @@ class WorkplanState(StrEnum):
 
     Validated = auto()
     """A workflow that has been validated."""
-
-
-class ComputePlatform(StrEnum):
-    """Supported execution platforms."""
-
-    Local = auto()
-    """Indicate that execution should take place locally."""
-
-    AWS = auto()
-    """Indicate that execution should take place on AWS resources."""
-
-    Perlmutter = auto()
-    """Indicate that execution should take place on Perlmutter."""
 
 
 class Step(BaseModel):
@@ -479,6 +259,13 @@ class Step(BaseModel):
     )
     """A collection of key-value pairs specifying overrides for workflow attributes."""
 
+    directives: KeyValueStore = Field(
+        default_factory=dict,
+        validate_default=False,
+        frozen=True,
+    )
+    """A collection of key-value pairs specifying configuration for runtime directives."""
+
     @property
     def safe_name(self) -> str:
         """Return a URL-safe version of the step name.
@@ -499,7 +286,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: t.Sequence[SerializeAsAny[Step]] = Field(
+    steps: Sequence[SerializeAsAny[Step]] = Field(
         min_length=1,
         frozen=True,
     )
@@ -549,7 +336,7 @@ class Workplan(BaseModel):
         value : list[str]
             Variable names used at runtime
         """
-        var_counter = t.Counter(value)
+        var_counter = Counter(value)
         most_common = var_counter.most_common(1)
         var_name, var_count = most_common[0] if most_common else ("", 0)
 
@@ -569,12 +356,22 @@ class Workplan(BaseModel):
         value : list[Step]
             The steps in the workplan.
         """
-        name_counter = t.Counter(step.name for step in value)
-        most_common = name_counter.most_common(1)
-        step_name, step_count = most_common[0] if most_common else ("", 0)
+        # use a map to avoid generating safe names repeatedly
+        n2s = {s.name: s.safe_name for s in value}
 
-        if step_count > 1:
-            msg = f"Step names must be unique. Found {step_count} steps with name {step_name}"
+        # identify all steps that resolve to a given safe name
+        safe_name_map = {
+            n2s[s.name]: [x.name for x in value if n2s[x.name] == n2s[s.name]]
+            for s in value
+        }
+
+        if collisions := {k: v for k, v in safe_name_map.items() if len(v) > 1}:
+            line_errors: list[str] = []
+            for v in collisions.values():
+                names = ", ".join(f"{x!r}" for x in v)
+                line_errors.append(f"Name collision among: {names}.")
+
+            msg = f"Step names must be unique. {' '.join(line_errors)}"
             raise ValueError(msg)
 
         return value
@@ -614,7 +411,7 @@ class UserDefinedVariables(BaseModel):
 
     keys: set[str] = Field(default_factory=set)
     """The set of valid keys available for runtime replacement."""
-    mapping: t.Mapping[str, str] = Field(default_factory=dict)
+    mapping: Mapping[str, str] = Field(default_factory=dict)
     """Key-value pairs specifying the value to be used for a key replacement."""
 
     require_coverage: bool = Field(default=False, frozen=True)
@@ -714,5 +511,4 @@ class UserDefinedVariables(BaseModel):
 
 
 register_representer(WorkplanState, strenum_representer)
-register_representer(Application, strenum_representer)
 register_representer(BlueprintState, strenum_representer)

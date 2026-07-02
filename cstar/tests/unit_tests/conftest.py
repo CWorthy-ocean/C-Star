@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import random
 from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
@@ -15,10 +16,19 @@ import pytest
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
+from cstar.base.env import (
+    ENV_CSTAR_CACHE_HOME,
+    ENV_CSTAR_CONFIG_HOME,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_ORCH_LOCAL_DELAY,
+    ENV_CSTAR_STATE_HOME,
+)
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import get_logger
+from cstar.base.utils import additional_files_dir
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
@@ -30,6 +40,9 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.orchestration.launch.local import LocalLauncher
+from cstar.orchestration.models import Step
+from cstar.orchestration.orchestration import LiveStep
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -38,15 +51,52 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (
 
 
 @pytest.fixture(scope="module")
-def blueprint_path(tests_path: Path) -> Path:
+def complete_blueprint_path(tests_path: Path) -> Path:
     """Fixture that returns the path to a valid, fully-populated blueprint.
 
     Returns
     -------
     Path
     """
-    relative_path = Path("integration_tests") / "blueprints" / "blueprint_complete.yaml"
-    return tests_path / relative_path
+    filename = "blueprint_complete.yaml"
+    relative_path = Path("integration_tests") / "blueprints" / filename
+    return (tests_path / relative_path).expanduser().resolve()
+
+
+@pytest.fixture
+def copies_dir(tmp_path: Path) -> Path:
+    """Fixture to return a re-usable directory path for copying modified templates."""
+    bp_copies_dir = (tmp_path / "input-copies").expanduser().resolve()
+    bp_copies_dir.mkdir(parents=True, exist_ok=True)
+    return bp_copies_dir
+
+
+@pytest.fixture
+def working_dir(tmp_path: Path) -> Path:
+    """Fixture to return a re-usable directory path for copying modified templates."""
+    bp_working_dir = (tmp_path / "bp-workdir").expanduser().resolve()
+    bp_working_dir.mkdir(parents=True, exist_ok=True)
+    return bp_working_dir
+
+
+@pytest.fixture
+def blueprint_path(
+    complete_blueprint_path: Path, copies_dir: Path, working_dir: Path
+) -> Path:
+    """Fixture that returns the path to a valid, fully-populated blueprint.
+
+    Returns
+    -------
+    Path
+    """
+    # replace workdir that can result in writing to the working directory
+    bp_content = complete_blueprint_path.read_text()
+    bp_content = bp_content.replace("temp_out_dir", str(working_dir))
+
+    # write a copy of the modified template and return that path
+    bp_copy_path = copies_dir / complete_blueprint_path.name
+    bp_copy_path.write_text(bp_content)
+    return bp_copy_path
 
 
 ################################################################################
@@ -1771,7 +1821,7 @@ def mock_placeholder_delay() -> Generator[None, None, None]:
         yield
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def prefect_server() -> Generator[str, None, None]:
     """Starts a Prefect server and stops it when the tests are done."""
     if "PREFECT_API_URL" in os.environ:
@@ -1779,27 +1829,32 @@ def prefect_server() -> Generator[str, None, None]:
         yield os.environ["PREFECT_API_URL"]
         return
 
-    prefect_port = "12345"
-    api_url = f"http://127.0.0.1:{prefect_port}/api"
+    process: Popen[str] | None = None
+    for i in range(3):
+        try:
+            prefect_port = random.randint(9000, 20000)
+            process = Popen(
+                [
+                    "prefect",
+                    "server",
+                    "start",
+                    "--port",
+                    str(prefect_port),
+                ],
+                text=True,
+                encoding="utf-8",
+            )
+            if process.returncode:
+                continue
 
-    try:
-        process = Popen(
-            [
-                "prefect",
-                "server",
-                "start",
-                "--port",
-                prefect_port,
-            ],
-            text=True,
-            encoding="utf-8",
-        )
-        yield api_url
-    except Exception as ex:
-        print(f"Failed to start Prefect server: {ex}")
-    finally:
-        if process and process.returncode is None:
-            process.terminate()
+            api_url = f"http://127.0.0.1:{prefect_port}/api"
+            yield api_url
+            break
+        except Exception as ex:
+            print(f"Failed to start Prefect server: {ex}")
+        finally:
+            if process and process.returncode is None:
+                process.terminate()
 
 
 @pytest.fixture(autouse=True)
@@ -1807,3 +1862,229 @@ def prefect_server_url(prefect_server: str) -> Generator[str, None, None]:
     """Configure the Prefect API URL for the duration of the tests."""
     os.environ["PREFECT_API_URL"] = prefect_server
     yield prefect_server
+
+
+@pytest.fixture
+def templates_dir() -> Path:
+    """Return the path to the templates directory contained in the package
+    "additional files."
+
+    Returns
+    -------
+    Path
+    """
+    return additional_files_dir() / "templates"
+
+
+@pytest.fixture
+def wp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Workplan` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "wp"
+
+
+@pytest.fixture
+def bp_templates_dir(templates_dir: Path) -> Path:
+    """Return the path to the `Blueprint` templates directory contained in the package
+    "additional files."
+
+    Parameters
+    ----------
+    templates_dir : Path
+        Fixture returning the path to the templates root directory.
+
+    Returns
+    -------
+    Path
+    """
+    return templates_dir / "bp"
+
+
+@pytest.fixture
+def mocked_simulation_outputs(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> tuple[Path, Path, Path]:
+    """This fixture creates a directory structure mocking a completed simulation.
+
+    It includes directoriess matching the expected convention for:
+    - work
+    - logs
+    - output
+    - joined output
+    - etc.
+
+    > See RomsFileSystemManager for the more information.
+
+    It includes mocked files for:
+    - a blueprint (yaml) file
+    - reset files matching glob pattern `*_rst*.nc`
+
+    Returns
+    -------
+    tuple[Path, Path, Path]
+        The tuple contains:
+        - mock user data directory (e.g. a fake "source" where user information can originate)
+        - step working directory
+        - blueprint path (path to a blueprint in user data directory)
+    """
+    info_msg = f"This file was created by the {__name__} fixture\n"
+
+    container_dir = tmp_path / "mock_sim_output_dir"
+    user_data_dir = container_dir / "userdata"
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+
+    tpl_path = bp_templates_dir / "blueprint.yaml"
+    tpl_content = tpl_path.read_text()
+
+    bp_path = user_data_dir / "blueprint.yaml"
+    bp_path.write_text(tpl_content)
+
+    step_dir = container_dir / "step"
+    fsm = RomsFileSystemManager(step_dir)
+    fsm.prepare()
+
+    log_path = fsm.logs_dir / "cstar.out"
+    log_path.write_text(info_msg)
+    log_path.write_text("Simulation completed successfully\n")
+
+    joined_dir = fsm.joined_output_dir
+
+    reset_files = [
+        joined_dir / "output_rst.20120101000000.000.nc",
+        joined_dir / "output_rst.20120110000000.001.nc",
+        joined_dir / "output_rst.20120120000000.002.nc",
+    ]
+    for file in reset_files:
+        file.write_text(info_msg)
+
+    return user_data_dir, step_dir, bp_path
+
+
+@pytest.fixture
+def preprocessable_roms_step(
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+) -> Step:
+    """Create a valid step with an underlying RomsMarblBlueprint.
+
+    Parameters
+    ----------
+    mocked_simulation_outputs: tuple[Path, Path, Path]
+        Paths to directories created to mock output of a ROMS simulation.
+    """
+    *_, step_dir, bp_path = mocked_simulation_outputs
+    joined_dir = step_dir / "joined_output"
+
+    return Step(
+        name="test step",
+        application="roms_marbl",
+        blueprint=bp_path,
+        directives={
+            "continue-from": {
+                "path": joined_dir.as_posix(),
+            },
+        },
+    )
+
+
+@pytest.fixture
+def preprocessable_roms_livestep(
+    preprocessable_roms_step: Step,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+) -> LiveStep:
+    """Create a valid step with an underlying RomsMarblBlueprint.
+
+    Parameters
+    ----------
+    mocked_simulation_outputs: tuple[Path, Path, Path]
+        Paths to directories created to mock output of a ROMS simulation.
+
+    Returns
+    -------
+    LiveStep
+    """
+    *_, step_dir, _ = mocked_simulation_outputs
+    return LiveStep.from_step(
+        preprocessable_roms_step,
+        update={"working_dir": step_dir},
+    )
+
+
+@pytest.fixture
+def preprocessable_workplan_path(
+    tmp_path: Path,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    wp_templates_dir: Path,
+) -> Path:
+    """Modify a basic workplan template to include directives in the last step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Used to write some temporary workplans to disk
+    mocked_simulation_outputs : Path
+        Used to identify a directory containing mocked restart files
+    wp_templates_dir : Path
+        Used to load a workplan template that can be modified to include directives
+    """
+    wp_template = wp_templates_dir / "workplan.yaml"
+
+    # add directives to the last step in the workplan file
+    _, continue_from_dir, _ = mocked_simulation_outputs
+    content = wp_template.read_text()
+    base_indent = 6  # indentation of the "directives" element
+    directives = ["directives:", "continue-from:", f"path: {continue_from_dir}"]
+    for i in range(len(directives)):
+        line_indent_sz = base_indent + (i * 4)
+        indent = " " * line_indent_sz
+        directives[i] = f"{indent}{directives[i]}"
+    content += "\n".join(directives)
+    write_to = tmp_path / "wp_with_directives.yaml"
+    nbytes = write_to.write_text(content)
+    assert nbytes
+
+    return write_to
+
+
+@pytest.fixture(autouse=True)
+def mock_xdg_dirs(tmp_path: Path) -> Generator[dict[str, Path]]:
+    """Configure the XDG_* environment variables to write to temporary files."""
+    xdg_dir = "xdg"
+
+    xdg_vars = {
+        ENV_CSTAR_CACHE_HOME: tmp_path / xdg_dir / "cache",
+        ENV_CSTAR_CONFIG_HOME: tmp_path / xdg_dir / "config",
+        ENV_CSTAR_DATA_HOME: tmp_path / xdg_dir / "data",
+        ENV_CSTAR_STATE_HOME: tmp_path / xdg_dir / "state",
+    }
+
+    for p in xdg_vars.values():
+        p.mkdir(parents=True, exist_ok=True)
+
+    variables = {k: p.expanduser().resolve().as_posix() for k, p in xdg_vars.items()}
+
+    with mock.patch.dict(os.environ, variables):
+        yield xdg_vars
+
+
+@pytest.fixture(autouse=True)
+def mock_local_delay() -> float:
+    """Set a tiny delay between status queries made by the local launcher during unit tests.
+
+    NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
+    """
+    LocalLauncher.use_proxy = False
+
+    delay = 0.1
+    os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
+    return delay

@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=file://workplan-schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/wp/workplan_schema.1.0.0.json
 name: Overriding Workplan
 description: A workplan containing a step that overrides attributes of the original blueprint.
 state: draft
@@ -12,8 +12,8 @@ steps:
     application: sleep
     blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
     blueprint_overrides:
+      working_dir: /other_dir
       runtime_params:
-        output_dir: /other_dir
         start_date: 2010-01-15 00:00:00
         end_date: 2010-06-25 00:00:00
       initial_conditions:

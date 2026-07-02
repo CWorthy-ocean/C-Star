@@ -1,37 +1,40 @@
 import logging
-import logging.handlers
 import pathlib
 import re
 import typing as t
 import uuid
+from collections.abc import Callable
 from time import strftime
 from unittest import mock
 
 import pytest
 
-from cstar.base.log import get_logger, register_file_handler
+from cstar.base.log import TRACE_LOG_LEVEL, get_logger, register_file_handler
+
+LoggingFn: t.TypeAlias = Callable[[str], None]
 
 
 @pytest.fixture
 def all_levels() -> list[int]:
     return [
+        TRACE_LOG_LEVEL,
         logging.DEBUG,
         logging.INFO,
         logging.WARNING,
-        logging.ERROR,
         logging.CRITICAL,
+        logging.ERROR,
     ]
 
 
 @pytest.fixture
 def levels_fn(
     all_levels: list[int],
-) -> t.Callable[[int], tuple[list[int], list[int]]]:
+) -> Callable[[int], tuple[list[int], list[int]]]:
     """Return a function that returns a tuple of lists containing all log levels below
     and above the specified log level.
 
     Returns:
-        t.Callable[list[int], list[int]]: the function
+        Callable[list[int], list[int]]: the function
     """
 
     def _inner(level: int) -> tuple[list[int], list[int]]:
@@ -45,7 +48,8 @@ def levels_fn(
         Returns:
             tuple[list[int], list[int]]: the lists of log levels
         """
-        lt, gte = [], []
+        lt: list[int] = []
+        gte: list[int] = []
 
         for level_ in all_levels:
             if level_ < level:
@@ -61,51 +65,59 @@ def levels_fn(
 @pytest.mark.parametrize(
     "level",
     [
+        TRACE_LOG_LEVEL,
         logging.DEBUG,
         logging.INFO,
         logging.WARNING,
-        logging.ERROR,
         logging.CRITICAL,
+        logging.ERROR,
     ],
 )
 def test_loglevel_fh(
     request: pytest.FixtureRequest,
     level: int,
-    levels_fn: t.Callable[[int], tuple[list[int], list[int]]],
+    levels_fn: Callable[[int], tuple[list[int], list[int]]],
     all_levels: list[int],
     tmp_path: pathlib.Path,
 ) -> None:
     """Verify the loggers are configured properly to output the desired log levels when
     the optional file handler is requested.
     """
-    for level_ in all_levels:
-        logger_name = f"{request.function.__name__}-{level_}"
-        filename = tmp_path / f"{logger_name}.log"
+    logger_name = f"{request.function.__name__}-{level}"
+    filename = tmp_path / f"{logger_name}.log"
 
-        log = get_logger(logger_name, level_, filename=str(filename))
+    log = get_logger(logger_name, level, filename=str(filename))
+    lt_levels, gt_eq_levels = levels_fn(level)
 
-        lt_levels, gt_eq_levels = levels_fn(level_)
+    funcs: list[LoggingFn] = [
+        log.trace,
+        log.debug,
+        log.info,
+        log.warning,
+        log.critical,
+        log.error,
+    ]
+    names = {ll: logging.getLevelName(ll) for ll in all_levels}
 
-        msg = str(uuid.uuid4()).replace("-", "")
-        funcs = [log.debug, log.info, log.warning, log.error, log.critical]
-        today = strftime("%Y\\-%m\\-%d")
+    for actual, log_fn in zip(all_levels, funcs):
+        msg = f"This is a {names[actual]} message"
+        log_fn(msg)
 
-        for msg_level, log_fn in zip(all_levels, funcs):
-            log_fn(msg)
-            log_content = filename.read_text()
+    today = strftime("%Y\\-%m\\-%d")
+    log_content = filename.read_text()
+    log_fmt_pattern = r"{0} \d*:\d*:\d*,\d* \[{1}\] - .*\.py:\d* - This is a .*"
 
-            # confirm all messages >= level are in the file
-            if msg_level in list(gt_eq_levels):
-                level_name = logging.getLevelName(msg_level)
-                pattern = (
-                    rf"{today} \d*:\d*:\d*,\d* \[{level_name}\] - .*\.py:\d* - {msg}"
-                )
-                matches = re.findall(pattern, log_content)
-                assert matches
+    for actual in gt_eq_levels:
+        # confirm all messages >= level are in the file
+        pattern = log_fmt_pattern.format(today, names[actual])
+        matches = re.findall(pattern, log_content)
+        assert matches, f"Did not find a match for pattern: {pattern}"
 
-            # confirm messages < level are not in file
-            if msg_level in list(lt_levels):
-                assert msg not in log_content
+    for actual in lt_levels:
+        # confirm messages < level are not in file
+        pattern = log_fmt_pattern.format(today, names[actual])
+        matches = re.findall(pattern, log_content)
+        assert not matches, f"Unexpected match for pattern: {pattern}"
 
 
 def test_filehandler_no_dupes(

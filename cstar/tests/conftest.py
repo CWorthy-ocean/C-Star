@@ -4,6 +4,18 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from cstar.applications.core import register_application
+from cstar.applications.roms_marbl.app import RomsMarblApplication
+
+
+@register_application
+class SleepApplication(RomsMarblApplication):
+    """For the sake of test suites, the 'sleep' app sometimes replaces roms-marbl and
+    can use the RomsMarblBlueprint
+    """
+
+    name = "sleep"
+
 
 @pytest.fixture(scope="session")
 def package_path() -> Path:

@@ -1,11 +1,20 @@
 import functools
 import os
 import platform as platform
-from dataclasses import dataclass, field
-from typing import ClassVar, Protocol
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import ClassVar, Final, Protocol, override
+
+from pydantic import Field
 
 from cstar.base.exceptions import CstarError
-from cstar.system.environment import CStarEnvironment
+from cstar.base.log import get_logger
+from cstar.system.environment import (
+    CStarEnvironment,
+    EnvSettingsBase,
+    LmodEnvSettings,
+    SlurmSettingsBase,
+)
 from cstar.system.scheduler import (
     PBSQueue,
     PBSScheduler,
@@ -14,62 +23,98 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
     query_max_walltime_via_sacctmgr,
+    query_max_walltime_via_sinfo,
 )
 
+log = get_logger(__name__)
 
-@dataclass(frozen=True)
+
+class AnvilEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Anvil* system.
+
+    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
+    hostname matching test in `is_match`.
+    """
+
+    HOST_IDENTIFIER: ClassVar[str] = "anvil"
+    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
+    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
+    """The hostname of the machine.
+
+    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
+    """
+
+
+class EljaEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Elja* system.
+
+    NOTE: Elja does not support SLURM account names.
+    """
+
+    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
+    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
+    CLUSTER_IDENTIFIER: ClassVar[str] = "elja"
+    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
+
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
+    """The hostname of the machine.
+
+    Used to identify the system as Elja by matching value: `elja-irhpc`
+    """
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow empty account.
+    """
+    SLURM_QUEUE: str = Field(default="")
+    """The SLURM queue name."""
+    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
+    """The number of threads to be used by OpenMPI"""
+    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
+    """The number of threads used by MKL"""
+
+
 class HostNameEvaluator:
     """Container of host-specific names used to determine the system name that will be
     used by C-Star.
     """
 
-    lmod_syshost: str = field(default="", init=False)
-    """The lmod-specific hostname."""
-    lmod_sysname: str = field(default="", init=False)
-    """The lmod-specific system name."""
-    lmod_hostname: str = field(default="", init=False)
-    """Aggregate of lmod host and lmod name."""
-    platform_name: str = field(default="", init=False)
-    """The platform name."""
-    machine_name: str = field(default="", init=False)
-    """The machine name."""
-    platform_hostname: str = field(default="", init=False)
-    """Aggregate of machine and platform sysname."""
+    lmod_settings: Final[LmodEnvSettings]
+    """LMOD-specific environment configuration."""
 
-    ENV_LMOD_SYSHOST: ClassVar[str] = "LMOD_SYSHOST"
-    ENV_LMOD_SYSNAME: ClassVar[str] = "LMOD_SYSTEM_NAME"
+    def __init__(self) -> None:
+        """Initialize the instance."""
+        self.lmod_settings = LmodEnvSettings()
 
-    def __post_init__(self) -> None:
-        """Initialize the non-init and calculated attributes of an instance.
+    @property
+    def platform_name(self) -> str:
+        """Return the system name for the current platform."""
+        return platform.system()
 
-        NOTE: make use of setattr because attributes are read-only.
-        """
-        # ruff: noqa: B010
-        setattr_ = object.__setattr__
-        setattr_(self, "lmod_syshost", os.environ.get(self.ENV_LMOD_SYSHOST, ""))
-        setattr_(self, "lmod_sysname", os.environ.get(self.ENV_LMOD_SYSNAME, ""))
-        setattr_(
-            self, "lmod_hostname", (self.lmod_syshost or self.lmod_sysname).casefold()
-        )
-        setattr_(self, "platform_name", platform.system())
-        setattr_(self, "machine_name", platform.machine())
-        setattr_(
-            self,
-            "platform_hostname",
-            (
-                f"{self.platform_name}_{self.machine_name}"
-                if self.platform_name and self.machine_name
-                else ""
-            ).casefold(),
-        )
+    @property
+    def machine_name(self) -> str:
+        """Return the machine name for the current platform."""
+        return platform.machine()
+
+    @property
+    def platform_hostname(self) -> str:
+        """Aggregate of machine and platform sysname."""
+        value = ""
+        if self.platform_name and self.machine_name:
+            value = f"{self.platform_name}_{self.machine_name}"
+        return value.casefold()
 
     @property
     def _diagnostic(self) -> str:
         """Return a string useful for diagnosing failures to identify the name."""
-        return (
-            f"{self.lmod_syshost=}, {self.lmod_sysname=}, "
-            f"{self.platform_name=}, {self.machine_name=}"
-        )
+        attributes = [
+            self.lmod_settings.SYSHOST,
+            self.lmod_settings.SYSTEM_NAME,
+            self.platform_name,
+            self.machine_name,
+        ]
+
+        return ", ".join(f"{item=}" for item in attributes)
 
     @property
     def name(self) -> str:
@@ -83,21 +128,36 @@ class HostNameEvaluator:
         EnvironmentError
             If the name cannot be determined.
         """
-        if self.lmod_hostname:
-            return self.lmod_hostname
+        if lmod_hostname := self.lmod_hostname:
+            log.trace("Using lmod hostname as system name")
+            return lmod_hostname
 
-        if os.getenv("RCAC_CLUSTER") == "anvil":
-            return "anvil"
+        for ctx_klass in get_registered_sys_contexts():
+            if ctx_klass.is_match():
+                name = ctx_klass.name
+                log.trace(f"Using {name!r} as system name due to context match")
+                return name
 
         if self.platform_hostname:
+            log.trace("Using platform hostname as system name")
             return self.platform_hostname
 
         raise OSError(
             f"C-Star cannot determine your system name. Diagnostics: {self._diagnostic}"
         )
 
+    @property
+    def lmod_hostname(self) -> str:
+        """Return a hostname using the available configuration with priority order:
+        1. LMOD_SYSHOST
+        2. LMOD_SYSTEM_NAME
 
-class _SystemContext(Protocol):
+        If neither value is set, returns empty-string.
+        """
+        return (self.lmod_settings.SYSHOST or self.lmod_settings.SYSTEM_NAME).casefold()
+
+
+class SystemContext(Protocol):
     """The contextual dependencies for the system/platform."""
 
     name: ClassVar[str]
@@ -111,18 +171,32 @@ class _SystemContext(Protocol):
     def create_scheduler(cls) -> Scheduler | None:
         """Instantiate a scheduler configured for the system."""
 
+    @classmethod
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        """Return the type used to load settings required by the target system.
 
-_registry: dict[str, type[_SystemContext]] = {}
+        NOTE: The type is returned to avoid validation failures at import time due
+        to the instantation of the global `cstar_sysmgr`.
+        """
+        return EnvSettingsBase
+
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the context identifies the current system as a match."""
+        return False
+
+
+CTX_REGISTRY: dict[str, type[SystemContext]] = {}
 
 
 def register_sys_context(
-    wrapped_cls: type[_SystemContext],
-) -> type[_SystemContext]:
+    wrapped_cls: type[SystemContext],
+) -> type[SystemContext]:
     """Register the decorated type as an available _SystemContext."""
-    _registry[wrapped_cls.name] = wrapped_cls
+    CTX_REGISTRY[wrapped_cls.name] = wrapped_cls
 
     @functools.wraps(wrapped_cls)
-    def _inner() -> type[_SystemContext]:
+    def _inner() -> type[SystemContext]:
         """Return the original type after it is registered.
 
         Returns
@@ -135,7 +209,7 @@ def register_sys_context(
     return _inner()
 
 
-def _get_system_context() -> _SystemContext:
+def get_system_context() -> SystemContext:
     """Retrieve a system context from the context registry.
 
     Returns
@@ -150,15 +224,25 @@ def _get_system_context() -> _SystemContext:
     """
     namer = HostNameEvaluator()
 
-    if type_ := _registry.get(namer.name):
-        return type_()
+    if klass := CTX_REGISTRY.get(namer.name):
+        return klass()
 
     raise CstarError(f"Unknown system requested: {namer.name}")
 
 
+def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
+    """Return a sequence containing all registered context types.
+
+    Returns
+    -------
+    Sequence[type[_SystemContext]]
+    """
+    return list(CTX_REGISTRY.values())
+
+
 @register_sys_context
 @dataclass(frozen=True)
-class _PerlmutterSystemContext(_SystemContext):
+class PerlmutterSystemContext(SystemContext):
     """The contextual dependencies for the Perlmutter system."""
 
     name: ClassVar[str] = "perlmutter"
@@ -188,7 +272,7 @@ class _PerlmutterSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _AnvilSystemContext(_SystemContext):
+class AnvilSystemContext(SystemContext):
     """The contextual dependencies for the Anvil system."""
 
     name: ClassVar[str] = "anvil"
@@ -227,10 +311,24 @@ class _AnvilSystemContext(_SystemContext):
             max_cpus_per_node=128,
         )
 
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return AnvilEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Anvil* by matching
+        value `anvil` in `RCAC_CLUSTER` env var.
+        """
+        return os.getenv("RCAC_CLUSTER", "") == AnvilEnvSettings.HOST_IDENTIFIER
+
 
 @register_sys_context
 @dataclass(frozen=True)
-class _DerechoSystemContext(_SystemContext):
+class DerechoSystemContext(SystemContext):
     """The contextual dependencies for the Derecho system."""
 
     name: ClassVar[str] = "derecho"
@@ -261,7 +359,77 @@ class _DerechoSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _ExpanseSystemContext(_SystemContext):
+class EljaSystemContext(SystemContext):
+    """The contextual dependencies for the Elja system."""
+
+    name: ClassVar[str] = "elja"
+    """The unique name identifying the Elja system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Elja."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on Eja."""
+    docs: ClassVar[str] = "https://wiki.irei.is"
+    """URI for documentation of the Elja system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        large = SlurmPartition(
+            name="128cpu_256mem",
+            query_name="128cpu_256mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        medium = SlurmPartition(
+            name="64cpu_256mem",
+            query_name="64cpu_256mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        small = SlurmPartition(
+            name="48cpu_192mem",
+            query_name="48cpu_192mem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        any_cpu = SlurmPartition(
+            name="any_cpu",
+            query_name="any_cpu",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+
+        return SlurmScheduler(
+            queues=[small, medium, large, any_cpu],
+            primary_queue_name="any_cpu",
+            other_scheduler_directives={},
+            requires_task_distribution=True,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[EnvSettingsBase] | None:
+        """Return the type used to load settings required by *Elja* system.
+
+        Raises
+        ------
+        ValidationError
+            If required environment variables are not set.
+        """
+        return EljaEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Elja* by matching
+        value `elja-irhpc` in `HOSTNAME` env var.
+        """
+        if host_match := os.getenv("HOSTNAME", "") == EljaEnvSettings.HOST_IDENTIFIER:
+            return host_match
+
+        return os.getenv("SLURM_CLUSTER_NAME", "") == EljaEnvSettings.CLUSTER_IDENTIFIER
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class ExpanseSystemContext(SystemContext):
     """The contextual dependencies for the Expanse system."""
 
     name: ClassVar[str] = "expanse"
@@ -287,7 +455,7 @@ class _ExpanseSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _LinuxSystemContext(_SystemContext):
+class LinuxSystemContext(SystemContext):
     """The contextual dependencies for the Linux system on the x86_64 platform."""
 
     name: ClassVar[str] = "linux_x86_64"
@@ -305,7 +473,7 @@ class _LinuxSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _MacOSSystemContext(_SystemContext):
+class MacOSSystemContext(SystemContext):
     name: ClassVar[str] = "darwin_arm64"
     """The unique name identifying the MacOS system on an ARM64 platform."""
     compiler: ClassVar[str] = "gnu"
@@ -321,7 +489,7 @@ class _MacOSSystemContext(_SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class _LinuxARM64SystemContext(_SystemContext):
+class LinuxARM64SystemContext(SystemContext):
     name: ClassVar[str] = "linux_aarch64"
     """The unique name identifying the Linux system on an ARM64 platform."""
     compiler: ClassVar[str] = "gnu"
@@ -338,23 +506,28 @@ class _LinuxARM64SystemContext(_SystemContext):
 class CStarSystemManager:
     """Manage system-specific configuration and resources."""
 
+    _context: Final[SystemContext]
+    """A context object configured for the current system."""
+    _environment: Final[CStarEnvironment]
+    """An environment manager configured for the current system."""
+    _scheduler: Final[Scheduler | None]
+    """The scheduler appropriate for this system."""
+
     def __init__(self) -> None:
         """Initialize the CStarSystemManager.
 
         Initialize the system manager by determining the system name and initializing
         the environment and scheduler based on that name.
         """
-        self._context = _get_system_context()
-        """A context object configured for the current system."""
+        self._context = get_system_context()
         self._environment = CStarEnvironment(
             system_name=self._context.name,
             mpi_exec_prefix=self._context.mpi_prefix,
             compiler=self._context.compiler,
+            system_settings_klass=self._context.settings_klass(),
         )
-        """An environment manager configured for the current system."""
 
         self._scheduler = self._context.create_scheduler()
-        """The scheduler appropriate for this system."""
 
     @property
     def name(self) -> str:

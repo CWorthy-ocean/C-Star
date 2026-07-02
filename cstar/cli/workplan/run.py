@@ -1,21 +1,59 @@
 import asyncio
 import os
+import textwrap
 import typing as t
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel
 
+from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_LOG_LEVEL,
+    ENV_CSTAR_RUNID,
+)
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.log import get_logger
+from cstar.base.log import LogLevelChoices, get_logger
+from cstar.cli.common import (
+    cb_pipeline,
+    set_env,
+    set_flag,
+    update_loggers,
+)
 from cstar.cli.workplan.shared import (
     check_and_capture_kvps,
+    colored,
+    console,
     list_runs,
+    present,
+)
+from cstar.entrypoint.utils import (
+    ARG_CLOBBER,
+    ARG_CLOBBER_HELP,
+    ARG_DRY_RUN,
+    ARG_LOGLEVEL_HELP,
+    ARG_LOGLEVEL_LONG,
+    ARG_LOGLEVEL_SHORT,
 )
 from cstar.execution.file_system import local_copy
-from cstar.orchestration.dag_runner import build_and_run_dag
+from cstar.orchestration.dag_runner import (
+    ExecutiveRunSummary,
+    ExecutiveStepSummary,
+    build_and_run_dag,
+)
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.serialization import validate_serialized_entity
+from cstar.orchestration.orchestration import ProcessHandle
+from cstar.orchestration.serialization import (
+    try_deserialize,
+    validate_serialized_entity,
+)
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+
+if t.TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from pydantic.fields import ComputedFieldInfo, FieldInfo
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -26,6 +64,11 @@ HELP_LONG = f"""\
 
 Specify a previously used `run_id` to re-start a prior run.
 """
+
+CATEGORY_HEADER_COLOR: t.Final[str] = "white"
+SECTION_HEADER_COLOR: t.Final[str] = "yellow"
+ATTR_COLOR: t.Final[str] = "cyan"
+INDENT = " "
 
 
 def preprocess_vars(
@@ -99,6 +142,126 @@ def preprocess_varfile(
     return user_varfile_path
 
 
+def _ft(model_type: type[BaseModel], field_name: str) -> str:
+    """Retrieve the field title from a type for a field."""
+    field: FieldInfo | ComputedFieldInfo | None = None
+    if field_name in model_type.model_fields:
+        field = model_type.model_fields[field_name]
+    if field_name in model_type.model_computed_fields:
+        field = model_type.model_computed_fields[field_name]
+    return str(field.title) if field else "INVALID-FIELD-NAME"
+
+
+def _stepft(field_name: str) -> str:
+    """Retrieve the field title from the step summary model."""
+    return _ft(ExecutiveStepSummary, field_name)
+
+
+def _runft(field_name: str) -> str:
+    """Retrieve the field title from the run summary model."""
+    return _ft(ExecutiveRunSummary, field_name)
+
+
+def _hdr(header: str, color: str = "green") -> tuple[str, str]:
+    """Generate header content and delimiter."""
+    underline_char = "-"
+    content = colored(header, color)
+    delimiter = underline_char * len(header)
+    return content, delimiter
+
+
+def get_step_summary_display(summary: ExecutiveStepSummary) -> str:
+    """Generate the executive summary display for a step from a workplan run."""
+    step_header, step_underline = _hdr(f"{summary.name!r}", "green")
+    assets_header, assets_underline = _hdr("Asset Paths", SECTION_HEADER_COLOR)
+    job_header, job_underline = _hdr("Job Details", SECTION_HEADER_COLOR)
+
+    handle = try_deserialize(summary.sentinel_path, ProcessHandle)
+    task_prompt = _stepft("task_id")
+
+    if handle is None:
+        pid = "N/A"
+    else:
+        pid = handle.pid if handle else "N/A"
+        if handle.launcher_name == "slurm":
+            task_prompt = "SLURM Job ID"
+
+    return textwrap.dedent(f"""\
+        {step_header}
+        {step_underline}
+        {INDENT}{assets_header}
+        {INDENT}{assets_underline}
+        {INDENT * 2}- {_stepft("log_path")}: {summary.log_path}
+        {INDENT * 2}- {_stepft("blueprint_path")}: {summary.blueprint_path}
+        {INDENT * 2}- {_stepft("working_dir")}: {summary.working_dir}
+        {INDENT * 2}- {_stepft("script_path")}: {summary.script_path}
+        {INDENT}{job_header}
+        {INDENT}{job_underline}
+        {INDENT * 2}- {task_prompt}: {colored(pid, ATTR_COLOR)}
+        {INDENT * 2}- {_stepft("status")}: {colored(summary.status, ATTR_COLOR)}
+        """)
+
+
+def get_run_summary_display(summary: ExecutiveRunSummary) -> str:
+    """Generate a print-friendly summary for a workplan run."""
+    prefix = "# "
+    content_delimiter = "#" * 78
+
+    header = f"{summary.workplan_name!r} Run Summary"
+    if summary.dry_run:
+        header = f"{header} - DRY-RUN ONLY"
+    run_header, run_underline = _hdr(header, CATEGORY_HEADER_COLOR)
+    section_header_steps, section_del_steps = _hdr(
+        _runft("steps"), CATEGORY_HEADER_COLOR
+    )
+    section_header_actions, section_del_actions = _hdr(
+        "Further Actions", CATEGORY_HEADER_COLOR
+    )
+
+    content = textwrap.dedent(f"""\
+                {prefix}{content_delimiter}
+                {prefix}{run_header}
+                {prefix}{run_underline}
+                {prefix}{INDENT}- {_runft("run_id")}: {colored(summary.run_id, ATTR_COLOR)}
+                {prefix}{INDENT}- {_runft("source_workplan")}: {summary.source_workplan}
+                {prefix}{INDENT}- {_runft("final_workplan")}: {summary.final_workplan}
+                {prefix}{INDENT}- {_runft("state_dir")}: {summary.state_dir}
+                {prefix}
+                {prefix}{section_header_steps}
+                {prefix}{section_del_steps}
+                <steps>
+                {prefix}{section_header_actions}
+                {prefix}{section_del_actions}
+                <actions>
+                {prefix}
+                {prefix}{content_delimiter}
+                """)
+
+    step_content = [get_step_summary_display(s) for s in summary.steps]
+    step_summaries = [
+        f"{prefix}{INDENT}{line}" for item in step_content for line in item.split("\n")
+    ]
+    steps_section = (
+        "\n".join(step_summaries)
+        if step_summaries
+        else f"{prefix}{INDENT}- No steps found"
+    )
+
+    prompts = [
+        ("For run status details", f"cstar workplan status {summary.run_id}"),
+        ("To review logs", f"cstar workplan log {summary.run_id} <step-name>"),
+    ]
+
+    actions_content = [f"{prefix}{INDENT}- {present(*prompt)}" for prompt in prompts]
+    actions_section = "\n".join(actions_content)
+
+    value_map = {"<steps>": steps_section, "<actions>": actions_section}
+    for tpl, value in value_map.items():
+        content = content.replace(tpl, value)
+
+    return content + "\n"
+
+
 def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     """Perform validation and formatting of the run-id argument.
 
@@ -158,6 +321,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
 
                 validation_result = validate_serialized_entity(local_path, Workplan)
                 if not validation_result.item:
+                    log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
@@ -201,7 +365,7 @@ def run(
         typer.Option(
             help="The unique identifier for an execution of the workplan.",
             autocompletion=list_runs,
-            callback=preprocess_runid,
+            callback=cb_pipeline(preprocess_runid, set_env(ENV_CSTAR_RUNID)),
         ),
     ] = "",
     user_variables: t.Annotated[
@@ -243,9 +407,29 @@ def run(
     dry_run: t.Annotated[
         bool,
         typer.Option(
-            "--dry-run",
-            "-d",
-            help="Generate the execution plan without executing the workplan.",
+            ARG_DRY_RUN,
+            help="Set this flag to generate an execution plan without executing the workplan.",
+            envvar=ENV_CSTAR_CLI_DRY_RUN,
+            callback=set_flag(ENV_CSTAR_CLI_DRY_RUN),
+        ),
+    ] = False,
+    log_level: t.Annotated[
+        LogLevelChoices,
+        typer.Option(
+            ARG_LOGLEVEL_LONG,
+            ARG_LOGLEVEL_SHORT,
+            callback=cb_pipeline(set_env(ENV_CSTAR_LOG_LEVEL), update_loggers),
+            help=ARG_LOGLEVEL_HELP,
+            envvar=ENV_CSTAR_LOG_LEVEL,
+        ),
+    ] = LogLevelChoices.INFO,
+    clobber: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_CLOBBER,
+            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
+            help=ARG_CLOBBER_HELP,
+            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
     ] = False,
 ) -> None:
@@ -262,26 +446,33 @@ def run(
 
     try:
         with local_copy(path) as wp_path:
-            asyncio.run(
+            summary = asyncio.run(
                 build_and_run_dag(
                     wp_path,
                     run_id,
-                    user_variables=t.cast("t.Mapping[str, str]", ctx.obj),
+                    user_variables=t.cast("Mapping[str, str]", ctx.obj),
                     dry_run=dry_run,
                 ),
             )
+            console.print(get_run_summary_display(summary))
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
+        log.exception(msg)
         print(msg)
         raise typer.Exit(1) from ex
     except ValueError as ex:
+        msg = "Invalid inputs encountered while running the dag"
+        log.exception(msg)
         raise typer.BadParameter(ex.args[0]) from ex
     except Exception as ex:
-        msg = f"Workplan run `{run_id}` has completed unsuccessfully: {ex}"
+        msg = f"Workplan run {run_id!r} has failed: {ex}"
+        log.exception(msg)
         print(msg)
         raise typer.Exit(3) from ex
-    else:
-        print(f"Workplan run `{run_id}` has completed")
+
+    console.print(
+        f"{summary.workplan_name!r} {'dry-run' if dry_run else 'run scheduling'} has completed"
+    )
 
 
 if __name__ == "__main__":

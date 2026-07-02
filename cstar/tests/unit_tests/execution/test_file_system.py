@@ -13,7 +13,7 @@ from cstar.orchestration.orchestration import LiveStep
 
 @pytest.fixture
 def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
-    """Create a populated output directory."""
+    """Create a populated asset directory."""
     asset_root = tmp_path / "my_output_dir"
     fs = RomsFileSystemManager(asset_root)
     fs.prepare()
@@ -35,8 +35,8 @@ def test_file_system_root() -> None:
     user_path = Path("~/cstar-directory")
     fsm = JobFileSystemManager(user_path)
 
-    assert fsm.root.is_absolute()
-    assert "~" not in str(fsm.root)
+    assert fsm.root_dir.is_absolute()
+    assert "~" not in str(fsm.root_dir)
 
 
 def test_file_system_prepare(
@@ -50,15 +50,15 @@ def test_file_system_prepare(
     tmp_path : Path
         The path to temporary test outputs.
     """
-    asset_root = tmp_path / "my_output_dir"
-    fs = RomsFileSystemManager(asset_root)
+    output_dir = tmp_path / "my_output_dir"
+    fs = RomsFileSystemManager(output_dir)
     fs.prepare()
 
     assert fs.output_dir.exists()
     assert fs.input_dir.exists()
     assert fs.joined_output_dir.exists()
     assert fs._codebases_dir.exists()
-    assert fs.root.exists()
+    assert fs.root_dir.exists()
 
 
 def test_file_system_clear(
@@ -71,14 +71,31 @@ def test_file_system_clear(
     ----------
     populated_output_dir : Path
         Fixture providing tmp_path and fake files
-
     """
-    output_dir, output_files = populated_output_dir
+    working_dir, _ = populated_output_dir
 
-    fs = RomsFileSystemManager(output_dir)
+    fs = RomsFileSystemManager(working_dir)
+    fs.prepare()
+
+    (fs.compile_time_code_dir / "a.txt").touch()
+    (fs.runtime_code_dir / "b.txt").touch()
+    (fs.input_datasets_dir / "c.txt").touch()
+    (fs.joined_output_dir / "d.txt").touch()
+    (fs.run_dir / "e.txt").touch()
+    (fs.run_dir / "f.yaml").touch()
+    (fs.run_dir / "g.yml").touch()
+
     fs.clear()
 
-    assert all(not f.exists() for f in output_files)
+    assert not fs.compile_time_code_dir.exists()
+    assert not fs.runtime_code_dir.exists()
+    assert not fs.input_datasets_dir.exists()
+    assert not fs.joined_output_dir.exists()
+
+    # confirm yaml in work_dir is not removed.
+    assert not (fs.run_dir / "e.txt").exists()
+    assert (fs.run_dir / "f.yaml").exists()
+    assert (fs.run_dir / "g.yml").exists()
 
 
 def test_file_system_pickle_job_fs(tmp_path: Path) -> None:

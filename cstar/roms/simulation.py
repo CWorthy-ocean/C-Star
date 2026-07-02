@@ -3,7 +3,6 @@ import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from functools import partial
 from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 import yaml
 
 import cstar.roms.runtime_settings
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -20,13 +20,14 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE, is_feature_enabled
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager
+from cstar.execution.file_system import RomsFileSystemManager, remove_files
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -48,7 +49,6 @@ from cstar.orchestration.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
-from cstar.orchestration.models import RomsMarblBlueprint
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -76,31 +76,73 @@ if TYPE_CHECKING:
 def _ncjoin_wildcard(
     wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
 ) -> None:
-    """Spatially join netcdfs matching the wildcard pattern using ncjoin, and move the joined output to output_dir.
+    """Spatially join netcdfs matching the wildcard pattern using ncjoin, move the joined output to output_dir, and
+    remove the unjoined outputs (except for rst files, which would need to be repartitioned later).
 
     Parameters
     ----------
-    wildcard_pattern: the wildcard pattern to match for files within input_dir
-    input_dir: location of the partitioned netcdfs to be joined
-    output_dir: location to move the joined output to
-    logger: logger object to post log messages to
-
-    Returns
-    -------
-    None
+    wildcard_pattern : str
+        The wildcard pattern to match for files within input_dir.
+    input_dir : Path
+        Location of the partitioned netcdfs to be joined.
+    output_dir : Path
+        Location to move the joined output to.
+    logger : logging.Logger
+        Logger object to post log messages to.
     """
-    logger.info(f"Joining netCDF files {wildcard_pattern}...")
-
+    logger.info(f"Spatial join of netCDF files {wildcard_pattern!r} starting")
     _run_cmd(
         f"ncjoin {wildcard_pattern}",
         cwd=input_dir,
         raise_on_error=True,
     )
+    joined_file = input_dir / wildcard_pattern.replace(".*.nc", ".nc")
+    out_file = joined_file.rename(output_dir / joined_file.name)
 
-    out_file = input_dir / wildcard_pattern.replace("*.", "")
-    out_file.rename(output_dir / out_file.name)
+    logger.info(f"Spatial join of {str(out_file)!r} is complete")
 
-    logger.info(f"done spatially joining {out_file}")
+    if "rst" not in wildcard_pattern:
+        remove_files(input_dir, wildcard_pattern)
+
+
+def _extract_data_join_wildcard(
+    wildcard_pattern: str, input_dir: Path, output_dir: Path, logger: logging.Logger
+) -> None:
+    """Spatially join netcdfs matching the wildcard pattern using extract_data_join,
+    move the joined output to output_dir, and remove the unjoined outputs.
+
+    Parameters
+    ----------
+    wildcard_pattern : str
+        The wildcard pattern to match for files within input_dir.
+    input_dir : Path
+        Location of the partitioned netcdfs to be joined.
+    output_dir : Path
+        Location to move the joined output to.
+    logger : logging.Logger
+        Logger object to post log messages to.
+    """
+    logger.info(f"Spatial extract/join of netCDF files {wildcard_pattern!r} starting")
+    _run_cmd(
+        f"extract_data_join {wildcard_pattern}",
+        cwd=input_dir,
+        raise_on_error=True,
+    )
+
+    out_file_name = wildcard_pattern.replace(".*.nc", ".nc")
+    _, out_file_timestamp_dot_nc = out_file_name.split(".", maxsplit=1)
+
+    out_file_name = f"child_bry.{out_file_timestamp_dot_nc}"
+    joined_file = input_dir / out_file_name
+    out_file = joined_file.rename(output_dir / out_file_name)
+
+    ocean_file_name = f"ocean.{out_file_timestamp_dot_nc}"
+    ocean_file = input_dir / ocean_file_name
+    ocean_file.unlink(missing_ok=True)
+
+    remove_files(input_dir, wildcard_pattern)
+
+    logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
 
 
 class ROMSSimulation(Simulation):
@@ -1117,7 +1159,7 @@ class ROMSSimulation(Simulation):
 
         return cls(
             name=bp.name,
-            directory=bp.runtime_params.output_dir,
+            directory=bp.working_dir,
             discretization=DiscretizationAdapter(bp).adapt(),
             runtime_code=AddtlCodeAdapter(bp, "run_time").adapt(),
             compile_time_code=AddtlCodeAdapter(bp, "compile_time").adapt(),
@@ -1226,6 +1268,7 @@ class ROMSSimulation(Simulation):
         compile_time_code_dir = self.fs_manager.compile_time_code_dir
         runtime_code_dir = self.fs_manager.runtime_code_dir
         input_datasets_dir = self.fs_manager.input_datasets_dir
+        run_dir = self.fs_manager.run_dir
 
         self._conditionally_clear_root()
 
@@ -1233,6 +1276,9 @@ class ROMSSimulation(Simulation):
             compile_time_code_dir.mkdir(parents=True)
             runtime_code_dir.mkdir(parents=True)
             input_datasets_dir.mkdir(parents=True)
+            run_dir.mkdir(
+                parents=True, exist_ok=True
+            )  # this one gets made by C-Star FSM
         except OSError as e:
             msg = (
                 f"The input directory is not empty. Re-run with {ENV_CSTAR_CLOBBER_WORKING_DIR}={FLAG_ON} "
@@ -1276,6 +1322,7 @@ class ROMSSimulation(Simulation):
                 or (inp.start_date <= self.end_date)
                 and (self.end_date >= self.start_date)
             ):
+                self.log.debug(f"Fetching {inp.source.location}")
                 inp.get(local_dir=input_datasets_dir)
 
     @property
@@ -1422,8 +1469,12 @@ class ROMSSimulation(Simulation):
 
         self._ensure_makefile(build_dir)
 
+        mode_clause = ""
+        if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
+            mode_clause = "BUILD_MODE=debug "
+
         _run_cmd(
-            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {mode_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             msg_pre="Compiling UCLA-ROMS configuration...",
             msg_post=f"UCLA-ROMS compiled at {build_dir}",
@@ -1453,7 +1504,7 @@ class ROMSSimulation(Simulation):
             makefile_repo = self.codebase.working_copy.path / "Work" / "Makefile"
             shutil.copyfile(makefile_repo, makefile_target)
 
-    def pre_run(self, overwrite_existing_files=False) -> None:
+    def pre_run(self, overwrite_existing_files: bool = False) -> None:
         """Perform pre-processing steps needed to run the ROMS simulation.
 
         This method partitions any required input datasets according to
@@ -1583,7 +1634,7 @@ class ROMSSimulation(Simulation):
                 "and try again"
             )
 
-        self.fs_manager.work_dir.mkdir(parents=True, exist_ok=True)
+        self.fs_manager.run_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1592,36 +1643,33 @@ class ROMSSimulation(Simulation):
         if (walltime is None) and (cstar_sysmgr.scheduler is not None):
             walltime = cstar_sysmgr.scheduler.get_queue(queue_name).max_walltime
 
-        # we run ROMS in the work dir
-        run_path = self.fs_manager.work_dir
+        # we run ROMS from the run directory
+        run_path = self.fs_manager.run_dir
+        runtime_settings_fname = "cstar_generated_roms.in"
 
-        # save modified roms.in and rename original for clarity
-        old_runtime_settings_path = self.fs_manager.runtime_code_dir / self._in_file
-        final_runtime_settings_file = (
-            old_runtime_settings_path.parent / f"{self.name}_PATCHED.in"
-        )
+        # save modified roms.in in the work directory
+        final_runtime_settings_file = run_path / runtime_settings_fname
         self.roms_runtime_settings.to_file(final_runtime_settings_file)
-
-        old_runtime_settings_path.rename(
-            old_runtime_settings_path.parent
-            / f"{old_runtime_settings_path.stem}_ORIGINAL.in"
-        )
 
         script_name = job_name or self.name
         safe_name = slugify(script_name)
-        script_path = self.fs_manager.work_dir / f"{safe_name}.sh"
+        script_path = run_path / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
+
+        # symlink roms exe into run dir to simplify running by hand for troubleshooting.
+        roms_symlink_path = run_path / self.exe_path.name
+        roms_symlink_path.symlink_to(self.exe_path)
 
         ## 2: RUN ROMS
 
         roms_exec_cmd = " ".join(
             [
-                f"{cstar_sysmgr.environment.mpi_exec_prefix}",
+                cstar_sysmgr.environment.mpi_exec_prefix,
                 "-n",
                 f"{self.discretization.n_procs_tot}",
-                f"{self.exe_path}",
-                f"{final_runtime_settings_file}",
-            ]
+                "./roms",
+                runtime_settings_fname,
+            ],
         )
 
         self.log.info(f"Running {roms_exec_cmd}")
@@ -1708,27 +1756,36 @@ class ROMSSimulation(Simulation):
 
         output_dir = self.fs_manager.output_dir
         files = list(output_dir.glob("*.??????????????.*.nc"))
-        unique_wildcards = {
-            Path(fname.stem).stem + ".*.nc"
-            for fname in files
-            if "_ext." not in fname.name
-        }
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
-        else:
-            self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
+            self.persist()
+            return
 
-            spatial_joiner = partial(
-                _ncjoin_wildcard,
-                logger=self.log,
+        self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
+
+        def _spatial_join(wildcard_pattern: str) -> None:
+            """Choose and execute correct joining function for the file type."""
+            joiner = (
+                _extract_data_join_wildcard
+                if "ext" in wildcard_pattern
+                else _ncjoin_wildcard
+            )
+            joiner(
+                wildcard_pattern,
                 input_dir=self.fs_manager.output_dir,
                 output_dir=self.fs_manager.joined_output_dir,
+                logger=self.log,
             )
 
-            nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
-            with ThreadPoolExecutor(max_workers=nprocs) as executor:
-                results = executor.map(spatial_joiner, unique_wildcards)
-                _ = [r for r in results]  # exhaust iterator
+        nprocs = int(get_env_item(ENV_CSTAR_NPROCS_POST).value)
+        unique_wildcards = {
+            str(Path(fname.stem).with_suffix(".*.nc")) for fname in files
+        }
+
+        with ThreadPoolExecutor(max_workers=nprocs) as executor:
+            # list() exhausts the returned iterator, which is needed to surface any errors
+            # that were raised in the threaded join operations
+            list(executor.map(_spatial_join, unique_wildcards))
 
         self.persist()
 
