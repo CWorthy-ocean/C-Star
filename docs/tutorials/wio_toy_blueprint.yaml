@@ -10,14 +10,14 @@ valid_end_date: 2012-01-02
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    branch: dev-sje-compilation
+    branch: 0.2.0
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
     branch: marbl0.45.0
 
   run_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
-    branch: 580d039c41b9921e2ab0105909abeccf8a0fddbf
+    branch: main
     filter:
       directory: wio-toy-domain-namelist
       files:
@@ -25,7 +25,7 @@ code:
         - marbl_in
   compile_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
-    branch: 580d039c41b9921e2ab0105909abeccf8a0fddbf
+    branch: main
     filter:
       directory: wio-toy-domain-namelist
       files:

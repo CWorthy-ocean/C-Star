@@ -36,7 +36,7 @@ dependencies = [
     "python-dotenv",
     "PyYAML==6.0.2",
     "f90nml>=1.4",
-    "roms_tools[dask]>=3.4.0,<4",
+    "roms_tools[dask]>=3.6.0",
     "typer<=0.25",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
