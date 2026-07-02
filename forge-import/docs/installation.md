@@ -120,7 +120,6 @@ Hostname   : your-hostname
 
 Paths:
   here         -> /path/to/cstar-forge/cstar_forge
-  model_configs -> /path/to/cstar-forge/cstar_forge/model-configs
   source_data  -> /path/to/source-data
   input_data   -> /path/to/input-data
   scratch      -> /path/to/scratch-directory

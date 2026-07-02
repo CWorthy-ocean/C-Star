@@ -181,14 +181,14 @@ def _layout_unknown(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 # Path factory
 # --------------------------------------------------------
 
-def default_catalog_inner_dir(source_data: Path) -> Path:
+def default_catalog_inner_dir(input_data: Path) -> Path:
     """
     Default inner *catalog* directory: the folder that directly contains ``blueprints/``.
 
-    The catalog lives alongside ``source-data`` inside the base data directory, e.g.
+    The catalog lives alongside ``input-data`` inside the base data directory, e.g.
     ``~/cstar-forge-data/catalog/blueprints/``.
     """
-    return source_data.parent.resolve() / "catalog"
+    return input_data.parent.resolve() / "catalog"
 
 
 def get_data_paths() -> DataPaths:
@@ -207,7 +207,7 @@ def get_data_paths() -> DataPaths:
 
     here = Path(__file__).resolve().parent
     # Inner catalog dir: .../cstar_forge_data/catalog/blueprints/
-    catalog = default_catalog_inner_dir(source_data)
+    catalog = default_catalog_inner_dir(input_data)
     blueprints_dir = catalog / "blueprints"
     models_yaml = here / "models.yml"
     builds_yaml = here / "builds.yml"

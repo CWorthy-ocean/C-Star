@@ -4,7 +4,6 @@ Pytest configuration and shared fixtures for cstar-forge tests.
 from pathlib import Path
 import sys
 import tempfile
-import yaml
 
 # Add project root to path so we can import cstar_forge package
 project_root = Path(__file__).parent.parent
@@ -22,59 +21,6 @@ def pytest_configure(config):
 def test_data_dir():
     """Path to test data directory."""
     return Path(__file__).parent / "data"
-
-
-@pytest.fixture
-def sample_models_yaml():
-    """Sample models.yml content for testing."""
-    return {
-        "roms-marbl": {
-            "opt_base_dir": "opt_base/opt_base_roms-marbl-csforge-default",
-            "conda_env": "roms_env",
-            "repos": {
-                "roms": {
-                    "url": "https://github.com/CWorthy-ocean/ucla-roms.git",
-                    "default_dirname": "ucla-roms",
-                },
-                "marbl": {
-                    "url": "https://github.com/marbl-ecosys/MARBL.git",
-                    "default_dirname": "MARBL",
-                    "checkout": "marbl0.45.0",
-                },
-            },
-            "master_settings_file": "roms.in",
-            "settings_input_files": ["roms.in", "marbl_in"],
-            "inputs": {
-                "grid": {
-                    "topography_source": "ETOPO5",
-                },
-                "initial_conditions": {
-                    "source": {
-                        "name": "GLORYS",
-                    },
-                    "bgc_source": {
-                        "name": "UNIFIED",
-                        "climatology": True,
-                    },
-                },
-                "surface_forcing": {
-                    "source": {
-                        "name": "ERA5",
-                    },
-                    "type": "physics",
-                },
-            },
-        }
-    }
-
-
-@pytest.fixture
-def temp_models_yaml(tmp_path, sample_models_yaml):
-    """Create a temporary models.yml file for testing."""
-    yaml_path = tmp_path / "models.yml"
-    with yaml_path.open("w") as f:
-        yaml.safe_dump(sample_models_yaml, f)
-    return yaml_path
 
 
 @pytest.fixture

@@ -557,9 +557,9 @@ def _prepare_tpxo(self: SourceData) -> Path:
 
     This is a USER_DATASET that must be downloaded by the user.
     The handler checks that all required files exist at the expected location:
-    - config.paths.source_data / "TPXO/TPXO10.v2/grid_tpxo10v2.nc"
-    - config.paths.source_data / "TPXO/TPXO10.v2/h_tpxo10.v2.nc"
-    - config.paths.source_data / "TPXO/TPXO10.v2/u_tpxo10.v2.nc"
+    - config.paths.source_data / "TPXO/TPXO10.v2a/grid_tpxo10v2a.nc"
+    - config.paths.source_data / "TPXO/TPXO10.v2a/h_tpxo10.v2a.nc"
+    - config.paths.source_data / "TPXO/TPXO10.v2a/u_tpxo10.v2a.nc"
 
     Returns
     -------
@@ -571,12 +571,12 @@ def _prepare_tpxo(self: SourceData) -> Path:
     FileNotFoundError
         If the TPXO directory or any required files are missing.
     """
-    tpxo_path = config.paths.source_data / "TPXO" / "TPXO10.v2"
+    tpxo_path = config.paths.source_data / "TPXO" / "TPXO10.v2a"
 
     tpxo_dict = {
-        "grid": tpxo_path / "grid_tpxo10v2.nc",
-        "h": tpxo_path / "h_tpxo10.v2.nc",
-        "u": tpxo_path / "u_tpxo10.v2.nc",
+        "grid": tpxo_path / "grid_tpxo10v2a.nc",
+        "h": tpxo_path / "h_tpxo10.v2a.nc",
+        "u": tpxo_path / "u_tpxo10.v2a.nc",
     }
 
     # Check that the base directory exists

@@ -165,6 +165,23 @@ def compute_timestep_from_cfl(
     return dt
 
 
+def compute_grid_spacing_m(grid_size_x: float, grid_nx: int) -> float:
+    """
+    Horizontal grid spacing in meters from domain size and point count.
+
+    ``grid_spacing`` is ``size_x / nx`` with ``size_x`` in kilometers, converted
+    to meters.
+    """
+    if grid_nx <= 0:
+        raise ValueError(f"grid_nx must be positive, got {grid_nx!r}")
+    return (grid_size_x / grid_nx) * 1000.0
+
+
+def compute_v_sponge_from_grid(grid_size_x: float, grid_nx: int) -> float:
+    """Default sponge viscosity: grid spacing (m) divided by 10."""
+    return compute_grid_spacing_m(grid_size_x, grid_nx) / 10.0
+
+
 def roms_tools_nesting_writer():
     """
     Return the roms_tools API that writes parent/child nesting metadata to disk.

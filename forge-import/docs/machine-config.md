@@ -18,10 +18,9 @@ Data paths are automatically configured based on the detected system. The `confi
 - **Source data** (`config.paths.source_data`): External datasets (GLORYS, UNIFIED_BGC, SRTM15, etc.)
 - **Input data** (`config.paths.input_data`): Generated ROMS-MARBL input files
 - **Scratch directory** (`config.paths.scratch`): Model execution directories
-- **Model configs** (`config.paths.model_configs`): Model configuration templates and defaults
-    - **Catalog root** (`config.paths.catalog`): Inner directory that directly contains ``blueprints/`` and ``builds/`` (default: ``<cson-forge-data base>/cson_forge_data/catalog`` when ``source-data`` lives under the usual layout; avoids ``cson_forge_data/cson_forge_data`` if ``source_data`` is already under ``cson_forge_data``)
+- **Catalog root** (`config.paths.catalog`): Inner directory that directly contains ``blueprints/`` and ``builds/`` (default: ``<cson-forge-data base>/cson_forge_data/catalog`` when ``source-data`` lives under the usual layout; avoids ``cson_forge_data/cson_forge_data`` if ``source_data`` is already under ``cson_forge_data``)
 - **Blueprints** (`config.paths.blueprints`): Generated blueprint YAML files (default: `config.paths.catalog / "blueprints"`)
-- **Builds** (`config.paths.builds`): Rendered compile-time and run-time code directories (default: `config.paths.catalog / "builds"`)
+- **Builds**: Rendered compile-time and run-time code directories (under `config.paths.catalog / "builds"`)
 - **YAML files** (`config.paths.models_yaml`, `config.paths.builds_yaml`, `config.paths.machines_yaml`): Configuration files
 
 ### Relocating the catalog
@@ -71,7 +70,7 @@ python -m cstar_forge.config show-paths
 This will display:
 - The detected system tag (e.g., `MacOS`, `RCAC_anvil`, `NERSC_perlmutter`)
 - The hostname
-- All configured data paths (source_data, input_data, scratch, model_configs, blueprints, etc.)
+- All configured data paths (source_data, input_data, scratch, catalog, blueprints, etc.)
 
 To output the paths in JSON format:
 

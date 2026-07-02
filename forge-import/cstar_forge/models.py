@@ -236,7 +236,7 @@ class RunTime(BaseModel):
     ----------
     filter : Filter
         Filter specification for run-time files to copy from the rendered opt directory
-        to the run directory before executing the model (e.g., ["roms.in", "marbl_in"]).
+        to the run directory before executing the model (e.g., ["namelist.nml", "marbl_in"]).
         The first file is typically the master settings file.
     """
     
