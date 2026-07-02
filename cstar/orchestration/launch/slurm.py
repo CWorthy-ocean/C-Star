@@ -170,7 +170,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         script_path.parent.mkdir(parents=True, exist_ok=True)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        run_id = os.getenv(ENV_CSTAR_RUNID)
+        run_id = os.getenv(ENV_CSTAR_RUNID, "")
         step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
         command = step.command
@@ -203,7 +203,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             return SlurmHandle(
                 pid=str(job.id),
                 name=step.name,
-                run_id=str(os.getenv(ENV_CSTAR_RUNID, "")),
+                run_id=run_id,
             )
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
