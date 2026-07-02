@@ -39,9 +39,6 @@ cstar-forge/
 │   ├── input_data.py           # Input file generation
 │   ├── settings.py             # Template rendering
 │   ├── config.py               # Path management and system detection
-│   ├── models.yml              # Model configuration specifications
-│   ├── domains.yml             # Established domain configurations
-│   ├── machines.yml            # Machine-specific settings
 │   ├── catalog/                # Package: blueprint catalog API + on-disk catalog layout
 │   │   ├── __init__.py         # BlueprintCatalog API (see also ``cstar_forge.catalog``)
 │   │   ├── blueprints/         # Generated blueprint YAML files
@@ -53,19 +50,18 @@ cstar-forge/
 │   │   └── builds/             # Model compilation directories
 │   │       └── {model}_{grid}/
 │   │           ├── compile-time/   # Rendered configuration files
-│   │           │   └── *.opt       # Compile-time options (cppdefs, param, etc.)
+│   │           │   └── cppdefs.opt  # Compile-time CPP defines (Jinja2-rendered)
 │   │           └── run-time/       # ROMS-MARBL runtime files
-│   │               ├── roms.in     # Run-time configuration
+│   │               ├── namelist.nml # Run-time configuration (written via f90nml)
 │   │               └── marbl_*     # MARBL input files
-│   └── model-configs/          # Model templates and defaults
+│   └── catalog/ModelSpec/      # Model templates and defaults (per-model)
 │       └── {model}/
+│           ├── model.yml            # Code repos, templates, default input sources
 │           └── templates/
-│               ├── compile-time/       # Jinja2 templates for compile-time configs
-│               │   └── *.j2
+│               ├── compile-time/        # Jinja2 templates (cppdefs.opt.j2)
 │               ├── compile-time-defaults.yml
-│               ├── run-time/           # Jinja2 templates for run-time configs
-│               │   └── *.j2
-│               └── run-time-defaults.yaml
+│               ├── run-time/            # Static run-time files (marbl_in)
+│               └── run-time-defaults.yml
 ├── workflows/                 # Example notebooks and workflows
 │   ├── computing-benchmarks/
 │   ├── generate-models/       # Domain generation notebooks

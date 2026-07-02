@@ -71,10 +71,7 @@ class DomainCatalog:
         │   ├── NERSC_perlmutter.yml
         │   └── RCAC_anvil.yml
         ├── ModelSpec/
-        │   ├── cson_roms-marbl_v0.1/
-        │   │   ├── model.yml
-        │   │   └── templates/
-        │   └── cson_roms-no-bgc_v0.1/
+        │   └── cson_roms-marbl_v0.1/
         │       ├── model.yml
         │       └── templates/
         ├── DomainSpec/

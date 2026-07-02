@@ -66,7 +66,7 @@ Creates `RomsMarblBlueprintInputData` instance with empty datasets:
 ### Settings Initialization
 
 - `_settings_compile_time`: Empty dictionary `{}`
-- `_settings_run_time`: Dictionary with `{"roms.in": {}}`
+- `_settings_run_time`: Empty dictionary `{}`, populated per-section (a flat dict of sections: `grid`, `param`, `s_coord`, `initial`, `forcing`, `extract_data`, `bgc`, `blk_frc`, ...)
 
 ## Registry Framework
 
@@ -195,9 +195,9 @@ def _generate_input(self, key: str = "input_key", **kwargs):
   self._settings_compile_time["param"]["NP_XI"] = self.partitioning.n_procs_x
   self._settings_compile_time["param"]["NP_ETA"] = self.partitioning.n_procs_y
   ```
-- **Run-time (`roms.in.grid`)**: Grid file path
+- **Run-time (`grid`)**: Grid file path
   ```python
-  self._settings_run_time["roms.in"]["grid"] = {"grid_file": out_path}
+  self._settings_run_time["grid"] = {"grid_file": out_path}
   ```
 
 ### Initial Conditions (`initial_conditions`, order=20)
@@ -216,9 +216,9 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Appends `Resource(s)` to `blueprint_elements.initial_conditions.data`
 
 **Populates Settings:**
-- **Run-time (`roms.in.initial`)**: Initial conditions file path
+- **Run-time (`initial`)**: Initial conditions file path
   ```python
-  self._settings_run_time["roms.in"]["initial"] = {
+  self._settings_run_time["initial"] = {
       "nrrec": 1,
       "initial_file": paths[0]  # First file in list
   }
@@ -245,12 +245,12 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Appends `Resource(s)` to `blueprint_elements.forcing.surface.data`
 
 **Populates Settings:**
-- **Run-time (`roms.in.forcing`)**: Surface forcing file paths
+- **Run-time (`forcing`)**: Surface forcing file paths
   ```python
   if type == "bgc":
-      self._settings_run_time["roms.in"]["forcing"]["surface_forcing_bgc_path"] = paths[0]
+      self._settings_run_time["forcing"]["surface_forcing_bgc_path"] = paths[0]
   else:  # physics
-      self._settings_run_time["roms.in"]["forcing"]["surface_forcing_path"] = paths[0]
+      self._settings_run_time["forcing"]["surface_forcing_path"] = paths[0]
   ```
 
 **Note**: Compile-time settings for surface forcing are not yet populated (TODO in code).
@@ -277,12 +277,12 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Appends `Resource(s)` to `blueprint_elements.forcing.boundary.data`
 
 **Populates Settings:**
-- **Run-time (`roms.in.forcing`)**: Boundary forcing file paths
+- **Run-time (`forcing`)**: Boundary forcing file paths
   ```python
   if type == "bgc":
-      self._settings_run_time["roms.in"]["forcing"]["boundary_forcing_bgc_path"] = paths[0]
+      self._settings_run_time["forcing"]["boundary_forcing_bgc_path"] = paths[0]
   else:  # physics
-      self._settings_run_time["roms.in"]["forcing"]["boundary_forcing_path"] = paths[0]
+      self._settings_run_time["forcing"]["boundary_forcing_path"] = paths[0]
   ```
 
 **Note**: Compile-time settings for boundary forcing are not yet populated (TODO in code).
@@ -351,9 +351,9 @@ def _generate_input(self, key: str = "input_key", **kwargs):
       "rtrc_tname": "river_time",
   }
   ```
-- **Run-time (`roms.in.forcing`)**: River forcing file path
+- **Run-time (`forcing`)**: River forcing file path
   ```python
-  self._settings_run_time["roms.in"]["forcing"]["river_path"] = paths[0]
+  self._settings_run_time["forcing"]["river_path"] = paths[0]
   ```
 
 ### CDR Forcing (`cdr_forcing`, order=80)
@@ -471,15 +471,15 @@ def _build_input_args(
 ### Run-Time Settings
 
 **Surface Forcing:**
-- `roms.in.forcing.surface_forcing_path`: Path to physics surface forcing file
-- `roms.in.forcing.surface_forcing_bgc_path`: Path to bgc surface forcing file
+- `forcing.surface_forcing_path`: Path to physics surface forcing file
+- `forcing.surface_forcing_bgc_path`: Path to bgc surface forcing file
 
 **Boundary Forcing:**
-- `roms.in.forcing.boundary_forcing_path`: Path to physics boundary forcing file
-- `roms.in.forcing.boundary_forcing_bgc_path`: Path to bgc boundary forcing file
+- `forcing.boundary_forcing_path`: Path to physics boundary forcing file
+- `forcing.boundary_forcing_bgc_path`: Path to bgc boundary forcing file
 
 **River Forcing:**
-- `roms.in.forcing.river_path`: Path to river forcing file
+- `forcing.river_path`: Path to river forcing file
 
 **Tidal Forcing:**
 - Run-time settings for tidal forcing are not yet populated (TODO in code).
@@ -558,8 +558,8 @@ input_args = {
 
 **Usage:**
 - `blueprint_elements`: Merged into main blueprint during POSTCONFIG stage
-- `compile_time_settings`: Merged with template defaults, used to render `*.opt` files
-- `run_time_settings`: Merged with template defaults, used to render `roms.in`
+- `compile_time_settings`: Merged with template defaults, used to render `cppdefs.opt`
+- `run_time_settings`: Merged with template defaults, used to write `namelist.nml` (via `write_roms_namelist`)
 
 These are used by `CstarSpecBuilder.generate_inputs()` to update the blueprint and settings before persisting.
 

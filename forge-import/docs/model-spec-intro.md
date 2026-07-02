@@ -2,7 +2,7 @@
 
 The `ModelSpec` abstraction is designed to formalize and preserve a notion of a trusted model configuration by aggregrating the information required to build and configure a particular model as a named entity. 
 
-Model specifications are defined in `cstar_forge/models.yml` (see [here](reference-models-yml.md)). 
+Model specifications are defined per-model in `cstar_forge/catalog/ModelSpec/<model>/model.yml` (see [here](reference-models-yml.md)). Models are discovered by scanning `catalog/ModelSpec/*/model.yml`. 
 
 Each model includes:
 
@@ -12,80 +12,76 @@ Each model includes:
 - Input dataset defaults (a list of required source datasets is derived from inputs)
 
 
-## `models.yml` Schema
+## `model.yml` Schema
 
 Here's a view of the schema:
 ```yaml
-model_name:
-  templates:
-    compile_time:
-      location: "{{ config.path.model_configs }}/{{ model.name }}/templates/compile-time"
-      filter:
-        files:
-          - cppdefs.opt.j2
-          - param.opt.j2
-          - tracers.opt.j2
-    run_time:
-      location: "{{ config.path.model_configs }}/{{ model.name }}/templates/run-time"
-      filter:
-        files:
-          - roms.in.j2
-          - marbl_in
+templates:
+  compile_time:
+    location: "templates/compile-time"
+    filter:
+      files:
+        - cppdefs.opt.j2
+  run_time:
+    location: "templates/run-time"
+    filter:
+      files:
+        - marbl_in
 
-  settings:
-    properties:
-      n_tracers: 34
-    compile_time:
-      _default_config_yaml: "{{ config.path.model_configs }}/{{ model.name }}/templates/compile-time-defaults.yml"
-    run_time:
-      _default_config_yaml: "{{ config.path.model_configs }}/{{ model.name }}/templates/run-time-defaults.yml"
+settings:
+  properties:
+    n_tracers: 34
+  compile_time:
+    _default_config_yaml: "templates/compile-time-defaults.yml"
+  run_time:
+    _default_config_yaml: "templates/run-time-defaults.yml"
 
-  code:
-    roms:
-      location: https://github.com/org/repo.git
-      branch: main  # or use 'commit: <hash>' instead
-    marbl:  # optional
-      location: https://github.com/org/marbl.git
-      commit: v1.0.0
+code:
+  roms:
+    location: https://github.com/org/repo.git
+    branch: main  # or use 'commit: <hash>' instead
+  marbl:  # optional
+    location: https://github.com/org/marbl.git
+    commit: v1.0.0
 
-  inputs: # default keyword arguments to input generation functions
-    grid:
-      topography_source: ETOPO5  # or SRTM15
+inputs: # default keyword arguments to input generation functions
+  grid:
+    topography_source: ETOPO5  # or SRTM15
 
-    initial_conditions:
-      source:
-        name: GLORYS
-      bgc_source:  # optional
-        name: UNIFIED
-        climatology: true
+  initial_conditions:
+    source:
+      name: GLORYS
+    bgc_source:  # optional
+      name: UNIFIED
+      climatology: true
 
-    forcing:
-      surface:
-        - source:
-            name: ERA5
-          type: physics
-          correct_radiation: true
-        - source:
-            name: UNIFIED
-            climatology: true
-          type: bgc
-      boundary:
-        - source:
-            name: GLORYS
-          type: physics
-        - source:
-            name: UNIFIED
-            climatology: true
-          type: bgc
-      tidal:  # optional
-        - source:
-            name: TPXO
-          ntides: 15
-      river:  # optional
-        - source:
-            name: DAI
-            climatology: false
-          include_bgc: true
+  forcing:
+    surface:
+      - source:
+          name: ERA5
+        type: physics
+        correct_radiation: true
+      - source:
+          name: UNIFIED
+          climatology: true
+        type: bgc
+    boundary:
+      - source:
+          name: GLORYS
+        type: physics
+      - source:
+          name: UNIFIED
+          climatology: true
+        type: bgc
+    tidal:  # optional
+      - source:
+          name: TPXO
+        ntides: 15
+    river:  # optional
+      - source:
+          name: DAI
+          climatology: false
+        include_bgc: true
 ```
 
 
@@ -129,6 +125,6 @@ Each `source` in the inputs can be:
   - `name`: Source name (e.g., "GLORYS", "ERA5", "UNIFIED", "TPXO", "DAI")
   - `climatology`: Boolean indicating whether to use climatology data (default: `false`)
 
-You can add new models by creating a new top-level key in the YAML file with the same schema as above.
+You can add new models by creating a new directory under `cstar_forge/catalog/ModelSpec/<model>/` containing a `model.yml` with the schema above.
 
 

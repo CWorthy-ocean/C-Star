@@ -3,30 +3,13 @@ templates:
     location: "templates/compile-time"
     filter:
       files:
-      - bgc.opt.j2
-      - blk_frc.opt.j2
-      - cdr_frc.opt.j2
-      - cdr_output.opt.j2
       - cppdefs.opt.j2
-      - diagnostics.opt.j2
-      - extract_data.opt.j2
-      - ocean_vars.opt.j2
-      - param.opt.j2
-      - river_frc.opt.j2
-      - sponge_tune.opt.j2
-      - surf_flux.opt.j2
-      - tides.opt.j2
-      - tracers.opt.j2
-      - upscale_output.opt.j2
 
   run_time:
     location: "templates/run-time"
     filter:
       files:
-      - roms.in.j2
       - marbl_in
-      - marbl_tracer_output_list
-      - marbl_diagnostic_output_list
 
 settings:
   properties:
@@ -40,7 +23,7 @@ settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit:  "8167645bdcb3c6ada951e0c6d69d384e985382b0"
+    commit: "0.2.0"
 
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
@@ -74,12 +57,13 @@ inputs:
           name: MBL_co2
         type: bgc
         coarse_grid_mode: "never"
-      # - source:  # salinity restoring disabled until ROMS main supports it
-      #     name: WOA
-      #     climatology: true
-      #   restoring_forces: ['sss']
-      #   type: restoring
-      #   coarse_grid_mode: "never"
+
+      - source:
+           name: WOA
+           climatology: true
+        restoring_forces: ['sss']
+        type: restoring
+        coarse_grid_mode: "never"
 
     boundary:
       - source:

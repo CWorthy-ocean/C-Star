@@ -110,7 +110,7 @@ def sample_model_spec(tmp_path):
         run_time=cstar_models.CodeRepository(
             location="placeholder://run_time",
             branch="main",
-            filter=cstar_models.PathFilter(files=["roms.in"])
+            filter=cstar_models.PathFilter(files=["namelist.nml"])
         ),
         compile_time=cstar_models.CodeRepository(
             location="placeholder://compile_time",
@@ -502,7 +502,7 @@ class TestRomsMarblInputDataInitialization:
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time",
                 branch="main",
-                filter=cstar_models.PathFilter(files=["roms.in"])
+                filter=cstar_models.PathFilter(files=["namelist.nml"])
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time",
@@ -946,7 +946,7 @@ class TestRomsMarblInputDataGeneration:
 
         mock_rf_class.assert_not_called()
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
-        assert sample_roms_marbl_input_data._settings_compile_time["river_frc"]["nriv"] == nriver
+        assert sample_roms_marbl_input_data._settings_run_time["river_frc"]["nriv"] == nriver
     
     @patch('cstar_forge.input_data.rt.CDRForcing')
     def test_generate_cdr_forcing(self, mock_cdr_class, sample_roms_marbl_input_data, tmp_path):
@@ -1034,9 +1034,9 @@ class TestRomsMarblInputDataGeneration:
             assert str(out_path_nesting) in nesting_resources[0].location
 
             # extract_data settings should be set
-            extract_data = sample_roms_marbl_input_data._settings_compile_time["extract_data"]
+            extract_data = sample_roms_marbl_input_data._settings_run_time["extract_data"]
             assert extract_data["do_extract"] is True
-            assert extract_data["N_chd"] == mock_child.N
+            assert extract_data["n_chd"] == mock_child.N
             assert extract_data["theta_s_chd"] == mock_child.theta_s
             assert extract_data["theta_b_chd"] == mock_child.theta_b
             assert extract_data["hc_chd"] == mock_child.hc
@@ -1074,7 +1074,7 @@ class TestRomsMarblInputDataGeneration:
             with patch('xarray.open_dataset', return_value=mock_ds):
                 sample_roms_marbl_input_data._generate_grid()
 
-            extract_file = sample_roms_marbl_input_data._settings_compile_time["extract_data"]["extract_file"]
+            extract_file = sample_roms_marbl_input_data._settings_run_time["extract_data"]["extract_file"]
             # Should be just the filename, not an absolute path
             assert extract_file == "nesting.nc"
             assert "/" not in str(extract_file)
@@ -1099,7 +1099,7 @@ class TestRomsMarblInputDataGeneration:
                 sample_roms_marbl_input_data._generate_grid()
 
         assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is None
-        assert "extract_data" not in sample_roms_marbl_input_data._settings_compile_time
+        assert not sample_roms_marbl_input_data._settings_run_time.get("extract_data", {}).get("do_extract", False)
 
 
 class TestRomsMarblInputDataGenerateAll:

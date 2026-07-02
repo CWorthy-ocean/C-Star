@@ -207,7 +207,7 @@ def mock_model_spec():
         run_time=cstar_models.CodeRepository(
             location="https://github.com/test/run_time.git",
             branch="main",
-            filter=cstar_models.PathFilter(files=["roms.in"])
+            filter=cstar_models.PathFilter(files=["namelist.nml"])
         ),
         compile_time=cstar_models.CodeRepository(
             location="https://github.com/test/compile_time.git",
@@ -221,12 +221,28 @@ def mock_model_spec():
     mock_settings.compile_time = MagicMock()
     mock_settings.compile_time.settings_dict = {"cppdefs": {"test": True}}  # Non-empty dict
     mock_settings.run_time = MagicMock()
-    mock_settings.run_time.settings_dict = {
-        "roms.in": {
-            "title": {"casename": "test"},
-            "time_stepping": {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1},
-        }
-    }
+    # write_roms_namelist requires a fully-populated run-time settings dict (the
+    # real flow loads run-time-defaults.yml then has generate_inputs() fill the
+    # dynamic fields). Load the actual marbl defaults and overlay concrete
+    # values for the fields normally set during input generation.
+    _rt_defaults_path = (
+        Path(forge_models.__file__).parent
+        / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
+        / "templates" / "run-time-defaults.yml"
+    )
+    with open(_rt_defaults_path) as _f:
+        _rt_defaults = yaml.safe_load(_f)
+    _rt_defaults["title"] = {"casename": "test"}
+    _rt_defaults["time_stepping"] = {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1}
+    _rt_defaults["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
+    # grid/initial/forcing paths are pathlib.Path objects in practice (input
+    # generation fills them with Path, not str) — mirror that here.
+    _rt_defaults["grid"] = {"grid_file": Path("/tmp/test_grid.nc")}
+    _rt_defaults["initial"] = {"initial_file": Path("/tmp/test_init.nc")}
+    _rt_defaults["forcing"]["surface_forcing_path"] = Path("/tmp/test_surface.nc")
+    _rt_defaults["forcing"]["river_path"] = Path("/tmp/test_river.nc")
+    _rt_defaults["output_root_name"] = {"output_root_name": "/tmp/test_out"}
+    mock_settings.run_time.settings_dict = _rt_defaults
     mock_settings.properties = MagicMock()
     mock_settings.properties.n_tracers = 34
     mock_spec.settings = mock_settings
@@ -241,7 +257,7 @@ def mock_model_spec():
         run_time=cstar_models.CodeRepository(
             location="/tmp/templates/run-time",
             branch="na",
-            filter=cstar_models.PathFilter(files=["roms.in.j2"])
+            filter=cstar_models.PathFilter(files=["namelist.nml.j2"])
         )
     )
     # Add inputs attribute for datasets property
@@ -377,43 +393,6 @@ class TestCstarSpecBuilderInitialization:
         assert builder._canonicalize_stored_input_netcdf_path(old_path) == expected
         assert builder._canonicalize_stored_input_netcdf_path(Path(f"{raw}_grid.nc")) == expected
 
-    def test_rewrite_roms_input_paths_to_staged_runtime_paths(
-        self,
-        minimal_cstar_spec_builder_args,
-        mock_model_spec,
-    ):
-        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
-            mock_load.return_value = mock_model_spec
-            with patch("cstar_forge._core.rt.Grid") as mock_grid:
-                mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-
-        source_root = builder.input_data_dir.resolve()
-        builder._settings_run_time = {
-            "roms.in": {
-                "grid": {"grid_file": str(source_root / "case_grid.nc")},
-                "initial": {"initial_file": str(source_root / "case_initial.nc")},
-                "forcing": {
-                    "surface_forcing_path": str(source_root / "case_surface.nc"),
-                    "boundary_forcing_path": str(source_root / "case_boundary.nc"),
-                    "tidal_forcing_path": str(source_root / "case_tidal.nc"),
-                    "river_path": "/tmp/custom_river.nc",
-                },
-            }
-        }
-
-        builder._rewrite_roms_input_paths_to_staged_runtime_paths()
-
-        staged_root = builder.run_output_dir / "input" / "input_datasets"
-        roms_settings = builder._settings_run_time["roms.in"]
-        assert roms_settings["grid"]["grid_file"] == str(staged_root / "case_grid.nc")
-        assert roms_settings["initial"]["initial_file"] == str(staged_root / "case_initial.nc")
-        assert roms_settings["forcing"]["surface_forcing_path"] == str(staged_root / "case_surface.nc")
-        assert roms_settings["forcing"]["boundary_forcing_path"] == str(staged_root / "case_boundary.nc")
-        assert roms_settings["forcing"]["tidal_forcing_path"] == str(staged_root / "case_tidal.nc")
-        assert roms_settings["forcing"]["river_path"] == "/tmp/custom_river.nc"
-
-
     def test_validation_end_date_before_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
         """Test that validation raises error when end_date is before start_date."""
         minimal_cstar_spec_builder_args["end_date"] = datetime(2012, 1, 1)
@@ -489,19 +468,67 @@ class TestOverrideSettings:
         self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path
     ):
         mock_model_spec.settings.run_time.settings_dict = {
-            "roms.in": {
-                "title": {"casename": "test"},
-                "time_stepping": {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1},
-                "foo_section": {"bar": 0},
-            }
+            "title": {"casename": "test"},
+            "time_stepping": {"ntimes": 100, "dt": 1800, "ndtfast": 60, "ninfo": 1},
+            "foo_section": {"bar": 0},
         }
         override_file = tmp_path / "run-time-overrides.yml"
         override_file.write_text(
             yaml.dump(
                 {
-                    "roms.in": {
-                        "foo_section": {"bar": 99},
-                        "time_stepping": {"ndtfast": 12},
+                    "foo_section": {"bar": 99},
+                    "time_stepping": {"ndtfast": 12},
+                }
+            ),
+            encoding="utf-8",
+        )
+        minimal_cstar_spec_builder_args["override"] = [str(override_file)]
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+        assert builder._settings_run_time["foo_section"]["bar"] == 99
+        assert builder._settings_run_time["time_stepping"]["ndtfast"] == 12
+        assert "ntimes" in builder._settings_run_time["time_stepping"]
+
+
+class TestVSpongeDefault:
+    """Tests for default v_sponge from grid spacing."""
+
+    def test_v_sponge_default_from_grid_on_init(
+        self, minimal_cstar_spec_builder_args, mock_model_spec
+    ):
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        # grid mock: size_x=100 km, nx=100 -> spacing 1 km -> v_sponge = 100 m^2/s
+        assert builder._settings_run_time["v_sponge"]["v_sponge"] == 100.0
+
+    def test_v_sponge_explicit_run_time_settings_override(
+        self, minimal_cstar_spec_builder_args, mock_model_spec
+    ):
+        with patch("cstar_forge._core.forge_models.load_models_yaml") as mock_load:
+            mock_load.return_value = mock_model_spec
+            with patch("cstar_forge._core.rt.Grid") as mock_grid:
+                mock_grid.return_value = _create_grid_mock()
+                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+
+        builder._update_settings_run_time({"v_sponge": {"v_sponge": 42.0}})
+        assert builder._settings_run_time["v_sponge"]["v_sponge"] == 42.0
+
+    def test_v_sponge_override_file_takes_priority(
+        self, minimal_cstar_spec_builder_args, mock_model_spec, tmp_path
+    ):
+        override_file = tmp_path / "run-time-overrides.yml"
+        override_file.write_text(
+            yaml.dump(
+                {
+                    "run_time": {
+                        "v_sponge": {"v_sponge": 7.5},
                     }
                 }
             ),
@@ -513,9 +540,8 @@ class TestOverrideSettings:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
-        assert builder._settings_run_time["roms.in"]["foo_section"]["bar"] == 99
-        assert builder._settings_run_time["roms.in"]["time_stepping"]["ndtfast"] == 12
-        assert "ntimes" in builder._settings_run_time["roms.in"]["time_stepping"]
+
+        assert builder._settings_run_time["v_sponge"]["v_sponge"] == 7.5
 
 
 class TestCstarSpecBuilderProperties:
@@ -2125,7 +2151,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                                 # Manually set settings so the guard passes
                                 builder._settings_compile_time = {"cppdefs": {}}
-                                builder._settings_run_time = {"roms.in": {}}
+                                builder._settings_run_time = {"time_stepping": {}}
 
                                 builder.generate_inputs(clobber=True, test=False)
 
@@ -2168,7 +2194,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                             with patch('cstar_forge._core.CstarSpecBuilder.persist'):
                                 builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
                                 builder._settings_compile_time = {"cppdefs": {}}
-                                builder._settings_run_time = {"roms.in": {}}
+                                builder._settings_run_time = {"time_stepping": {}}
 
                                 builder.generate_inputs(clobber=True, test=False)
 
@@ -2340,18 +2366,16 @@ class TestDeepMergeSettingsDict:
     def test_preserves_sibling_keys_under_time_stepping(self):
         """"Verify that merging dictionaries does not remove/not copy any upstream dict entries"""
         target = {
-            "roms.in": {
-                "time_stepping": {
-                    "ntimes": 100,
-                    "dt": 60,
-                    "ndtfast": 30,
-                    "ninfo": 1,
-                },
-            }
+            "time_stepping": {
+                "ntimes": 100,
+                "dt": 60,
+                "ndtfast": 30,
+                "ninfo": 1,
+            },
         }
-        update = {"roms.in": {"time_stepping": {"dt": 1800}}}
+        update = {"time_stepping": {"dt": 1800}}
         _deep_merge_settings_dict(target, update)
-        ts = target["roms.in"]["time_stepping"]
+        ts = target["time_stepping"]
         assert ts["dt"] == 1800
         assert ts["ntimes"] == 100
         assert ts["ndtfast"] == 30
@@ -2360,16 +2384,14 @@ class TestDeepMergeSettingsDict:
     def test_preserves_sibling_keys_under_forcing(self):
         """"Verify that merging dictionaries does not replace the shared ancestor"""
         target = {
-            "roms.in": {
-                "forcing": {
-                    "surface_forcing_path": "/a",
-                    "boundary_forcing_path": "/b",
-                },
-            }
+            "forcing": {
+                "surface_forcing_path": "/a",
+                "boundary_forcing_path": "/b",
+            },
         }
-        update = {"roms.in": {"forcing": {"surface_forcing_path": "/c"}}}
+        update = {"forcing": {"surface_forcing_path": "/c"}}
         _deep_merge_settings_dict(target, update)
-        f = target["roms.in"]["forcing"]
+        f = target["forcing"]
         assert f["surface_forcing_path"] == "/c"
         assert f["boundary_forcing_path"] == "/b"
 

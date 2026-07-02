@@ -68,7 +68,7 @@ Steps are executed in order (lowest `order` value first):
 The `RomsMarblInputData` class provides ROMS-MARBL specific input generation:
 
 **Key Attributes:**
-- `model_spec`: Model specification from `models.yml`
+- `model_spec`: Model specification from the model's `model.yml` (under `catalog/ModelSpec/<model>/`)
 - `grid`: ROMS grid object
 - `boundaries`: Open boundary configuration
 - `source_data`: Prepared source datasets
@@ -113,7 +113,7 @@ Source blocks (e.g., `{"name": "GLORYS"}`) are resolved:
 
 Handlers populate settings dictionaries:
 - **Compile-time**: `cppdefs`, `param`, `tides`, `river_frc`, etc.
-- **Run-time**: `roms.in` sections (`grid`, `initial`, `forcing`, etc.)
+- **Run-time**: flat sections (`grid`, `initial`, `forcing`, etc.)
 
 These settings are used later to render configuration templates.
 
@@ -127,17 +127,17 @@ These settings are used later to render configuration templates.
 ### Initial Conditions (`initial_conditions`)
 - **Handler**: `_generate_initial_conditions()`
 - **Output**: Initial conditions NetCDF file(s)
-- **Settings**: Updates `roms.in.initial` (initial file path)
+- **Settings**: Updates the run-time `initial` settings (initial file path)
 
 ### Surface Forcing (`forcing.surface`)
 - **Handler**: `_generate_surface_forcing()`
 - **Output**: Surface forcing NetCDF file(s) (physics or bgc)
-- **Settings**: Updates `roms.in.forcing` (surface forcing paths)
+- **Settings**: Updates the run-time `forcing` settings (surface forcing paths)
 
 ### Boundary Forcing (`forcing.boundary`)
 - **Handler**: `_generate_boundary_forcing()`
 - **Output**: Boundary forcing NetCDF file(s) (physics or bgc)
-- **Settings**: Updates `roms.in.forcing` (boundary forcing paths)
+- **Settings**: Updates the run-time `forcing` settings (boundary forcing paths)
 
 ### Tidal Forcing (`forcing.tidal`)
 - **Handler**: `_generate_tidal_forcing()`
@@ -178,9 +178,9 @@ Handlers populate two settings dictionaries:
 - **river_frc**: River forcing configuration (`nriv`, variable names)
 
 ### Run-Time Settings (`_settings_run_time`)
-- **roms.in.grid**: Grid file path
-- **roms.in.initial**: Initial conditions file path
-- **roms.in.forcing**: Forcing file paths (surface, boundary, river)
+- **grid**: Grid file path
+- **initial**: Initial conditions file path
+- **forcing**: Forcing file paths (surface, boundary, river)
 
 These settings are later merged with template defaults and used to render configuration files.
 

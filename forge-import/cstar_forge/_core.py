@@ -37,8 +37,8 @@ from . import config
 from . import source_data
 from . import models as forge_models
 from . import input_data
-from .settings import render_roms_settings
-from .util import compute_timestep_from_cfl, roms_tools_default_nesting_period_seconds
+from .settings import render_roms_settings, write_roms_namelist
+from .util import compute_timestep_from_cfl, compute_v_sponge_from_grid, roms_tools_default_nesting_period_seconds
 import roms_tools as rt
 
 
@@ -757,75 +757,6 @@ class CstarSpecBuilder(BaseModel):
             return obj
 
 
-
-    def _rewrite_roms_input_paths_to_staged_runtime_paths(self) -> None:
-        """
-        Point ``roms.in`` input paths at C-Star staged runtime datasets.
-
-        Generated inputs are first written under ``self.input_data_dir``. During setup,
-        C-Star stages/symlinks these files under
-        ``<run_output_dir>/input/input_datasets``. ROMS reads from this staged
-        directory at run time, so we rewrite relevant ``roms.in`` path fields to
-        match that location.
-        """
-        rt_cfg = self._settings_run_time.get("roms.in")
-        if not isinstance(rt_cfg, dict):
-            return
-
-        source_root = self.input_data_dir.resolve()
-        staged_root = (self.run_output_dir / "input" / "input_datasets").resolve()
-        sections = ("grid", "initial", "forcing")
-
-        for section_name in sections:
-            section = rt_cfg.get(section_name)
-            if not isinstance(section, dict):
-                continue
-
-            for key, value in list(section.items()):
-                if not isinstance(value, str) or not value.strip():
-                    continue
-                if key not in {"grid_file", "initial_file"} and not key.endswith("_path"):
-                    continue
-
-                candidate = Path(value).expanduser()
-                if not candidate.is_absolute():
-                    continue
-
-                try:
-                    candidate.resolve().relative_to(source_root)
-                except ValueError:
-                    continue
-
-                section[key] = str(staged_root / candidate.name)
-
-
-    def _rewrite_staged_runtime_roms_in_paths(self) -> None:
-        """
-        Rewrite staged ``input/runtime_code/roms.in`` to use staged dataset paths.
-
-        This is a final safety pass after C-Star setup has staged runtime files.
-        """
-        roms_in = self.run_output_dir / "input" / "runtime_code" / "roms.in"
-        if not roms_in.is_file():
-            return
-
-        source_prefix = str(self.input_data_dir.resolve())
-        staged_prefix = str((self.run_output_dir / "input" / "input_datasets").resolve())
-
-        try:
-            text = roms_in.read_text()
-        except OSError:
-            return
-
-        if source_prefix not in text:
-            return
-
-        updated = text.replace(source_prefix, staged_prefix)
-        if updated == text:
-            return
-
-        roms_in.write_text(updated)
-    
     def _persist_settings(self, blueprint_path: Path) -> None:
         """
         Persist settings dictionaries to a sidecar file.
@@ -1884,6 +1815,7 @@ class CstarSpecBuilder(BaseModel):
                 input_data_dir_override=self.input_data_dir,
                 model_spec=self._model_spec,
                 grid=self.grid,
+                grid_parent=self.grid_parent,
                 grid_child=self.grid_child,
                 metadata_child=self.metadata_child,
                 boundaries=self.open_boundaries,
@@ -2046,15 +1978,6 @@ class CstarSpecBuilder(BaseModel):
         """
         # Initialize from defaults (deep copy to avoid modifying the original)
         self._settings_compile_time = copy.deepcopy(self._model_spec.settings.compile_time.settings_dict)
-        if self.grid_child is not None:
-            period_default = roms_tools_default_nesting_period_seconds()
-            if "metadata" in self.grid_kwargs_child:
-               if "period" in self.grid_kwargs_child["metadata"]:
-                  self._settings_compile_time["extract_data"]["extract_period"] = self.grid_kwargs_child["metadata"]["period"]
-               else:
-                  self._settings_compile_time["extract_data"]["extract_period"] = period_default
-            else:
-               self._settings_compile_time["extract_data"]["extract_period"] = period_default
 
         self._merge_settings_override_files("compile")
 
@@ -2072,6 +1995,7 @@ class CstarSpecBuilder(BaseModel):
         - `title.casename`: Set from `self.casename`
         - `output_root_name.output_root_name`: Set from `self.run_output_dir`
         - `time_stepping`: Calculated based on simulation dates and timestep
+        - `v_sponge.v_sponge`: Set from grid spacing (``size_x / nx`` in meters) / 10
         
         Settings are deep-copied from the model spec to avoid modifying the
         original defaults. User overrides can be applied via `_update_settings_run_time()`
@@ -2087,19 +2011,43 @@ class CstarSpecBuilder(BaseModel):
         """
         # Initialize from defaults (deep copy to avoid modifying the original)
         self._settings_run_time = copy.deepcopy(self._model_spec.settings.run_time.settings_dict)
-        
+
         # Set dynamic values that depend on instance properties
-        self._settings_run_time["roms.in"]["title"] = dict( 
-            casename = self.casename,   
+        self._settings_run_time["title"] = dict(
+            casename = self.casename,
         )
-        self._settings_run_time["roms.in"]["output_root_name"] = dict( 
+        self._settings_run_time["output_root_name"] = dict(
             output_root_name = str(self.run_output_dir / "output" / self.casename),
         )
-        
+
         # Set timestepping defaults (will compute dt from CFL if dt is None)
         self._set_run_time_settings_timestepping_defaults(dt=dt)
 
+        # Set extract_data.extract_period from child grid metadata (nesting case)
+        if self.grid_child is not None:
+            period_default = roms_tools_default_nesting_period_seconds()
+            if "metadata" in self.grid_kwargs_child:
+               if "period" in self.grid_kwargs_child["metadata"]:
+                  self._settings_run_time["extract_data"]["extract_period"] = self.grid_kwargs_child["metadata"]["period"]
+               else:
+                  self._settings_run_time["extract_data"]["extract_period"] = period_default
+            else:
+               self._settings_run_time["extract_data"]["extract_period"] = period_default
+
+        self._apply_v_sponge_default_from_grid()
+
         self._merge_settings_override_files("run")
+
+    def _apply_v_sponge_default_from_grid(self) -> None:
+        """
+        Set ``v_sponge.v_sponge`` from grid spacing.
+
+        Default: ``(size_x / nx)`` in meters, divided by 10. Values merged later
+        (override files or ``configure_build(run_time_settings=...)``) take
+        priority.
+        """
+        v_sponge = compute_v_sponge_from_grid(self.grid.size_x, self.grid.nx)
+        self._settings_run_time.setdefault("v_sponge", {})["v_sponge"] = v_sponge
 
     def _update_settings_compile_time(self, settings_compile_time: Dict[str, Any]) -> None:
         """
@@ -2183,10 +2131,8 @@ class CstarSpecBuilder(BaseModel):
                     value_copy = copy.deepcopy(value)
                     # TODO: Evaluate whether corrective logic for passed-in values should live here
                     # Do we need to correct anything else?
-                    if key == "roms.in" and "time_stepping" in value_copy:
-                        ts = value_copy["time_stepping"]
-                        if isinstance(ts, dict) and "ntimes" in ts:
-                            ts["ntimes"] = int(round(ts["ntimes"]))
+                    if key == "time_stepping" and "ntimes" in value_copy:
+                        value_copy["ntimes"] = int(round(value_copy["ntimes"]))
                     _deep_merge_settings_dict(self._settings_run_time[key], value_copy)
                 else:
                     self._settings_run_time[key] = (
@@ -2205,7 +2151,7 @@ class CstarSpecBuilder(BaseModel):
         """
         Update run-time timestepping settings in the settings dictionary.
         
-        Sets the `time_stepping` section of `_settings_run_time["roms.in"]` with
+        Sets the `time_stepping` section of `_settings_run_time` with
         calculated values based on simulation dates and timestep.
         
         **Timestep Calculation:**
@@ -2241,7 +2187,7 @@ class CstarSpecBuilder(BaseModel):
             )
             
         ntimes = int(round((self.end_date - self.start_date).days * 24 * 3600 / dt))
-        self._settings_run_time["roms.in"]["time_stepping"] = dict(
+        self._settings_run_time["time_stepping"] = dict(
             ntimes = ntimes,
             dt = dt,
             ndtfast = 60, # TODO: Think about if how to better NDTFAST based on this dt
@@ -2363,9 +2309,10 @@ class CstarSpecBuilder(BaseModel):
         1. Validates blueprint is initialized and template configuration exists
         2. Merges user-provided settings overrides with existing settings
         3. Clears compile-time and run-time code output directories
-        4. Renders Jinja2 templates:
-           - Compile-time templates (e.g., bgc.opt, cppdefs.opt, param.opt)
-           - Run-time templates (e.g., roms.in)
+        4. Produces configuration files:
+           - Compile-time: renders cppdefs.opt from its Jinja2 template
+           - Run-time: writes namelist.nml (write_roms_namelist) and copies
+             static run-time files (e.g., marbl_in)
         5. Updates blueprint with rendered code locations and file lists
         6. Sets blueprint model_params and runtime_params
         7. Sets `_stage` to BUILD
@@ -2448,12 +2395,12 @@ class CstarSpecBuilder(BaseModel):
 
 
         # Ensure ntimes is an integer (don't recalculate, just ensure type is correct)
-        if "roms.in" in self._settings_run_time and "time_stepping" in self._settings_run_time["roms.in"]:
-            if "ntimes" in self._settings_run_time["roms.in"]["time_stepping"]:
-                ntimes = self._settings_run_time["roms.in"]["time_stepping"]["ntimes"]
+        if "time_stepping" in self._settings_run_time:
+            if "ntimes" in self._settings_run_time["time_stepping"]:
+                ntimes = self._settings_run_time["time_stepping"]["ntimes"]
                 # Convert to integer if it's a float
                 if isinstance(ntimes, float):
-                    self._settings_run_time["roms.in"]["time_stepping"]["ntimes"] = int(round(ntimes))
+                    self._settings_run_time["time_stepping"]["ntimes"] = int(round(ntimes))
 
 
             
@@ -2464,38 +2411,80 @@ class CstarSpecBuilder(BaseModel):
         else:
             raise ValueError("Model spec must have settings.properties.n_tracers")
 
-        # Ensure build output directories exist before rendering templates.
+        # Ensure build output directories exist before writing files.
         self.compile_time_code_dir.mkdir(parents=True, exist_ok=True)
         self.run_time_code_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        # ------------------------------------------------------------------
+        # 1. Compile-time: render cppdefs.opt from its Jinja2 template.
+        #    All other former *.opt outputs are now handled by the namelist.
+        #    The template may reference run-time namelist sections (e.g.
+        #    cdr_frc, upscale_output) to gate CPP flags, so we merge the
+        #    run-time settings into the render context alongside the
+        #    compile-time settings. Extra keys are ignored by the template.
+        # ------------------------------------------------------------------
+        cppdefs_render_dict = {
+            **self._settings_compile_time,
+            **self._settings_run_time,
+        }
         compile_time_code = render_roms_settings(
-            template_files=self._model_spec.templates.compile_time.filter.files,
+            template_files=["cppdefs.opt.j2"],
             template_dir=self._model_spec.templates.compile_time.location,
-            settings_dict=self._settings_compile_time,
+            settings_dict=cppdefs_render_dict,
             code_output_dir=self.compile_time_code_dir,
             n_tracers=n_tracers,
         )
-        run_time_code = render_roms_settings(
-            template_files=self._model_spec.templates.run_time.filter.files,
-            template_dir=self._model_spec.templates.run_time.location,
-            settings_dict=self._settings_run_time,
-            code_output_dir=self.run_time_code_dir,
+
+        # ------------------------------------------------------------------
+        # 2. Run-time static files: copy any non-template files listed in the
+        #    run_time filter (e.g. marbl_in).
+        #    These are model-specific support files that aren't templated.
+        # ------------------------------------------------------------------
+        run_time_static_files = [
+            f for f in self._model_spec.templates.run_time.filter.files
+            if not f.endswith(".j2")
+        ]
+        copied_run_time_files: list[str] = []
+        if run_time_static_files:
+            _copied = render_roms_settings(
+                template_files=run_time_static_files,
+                template_dir=self._model_spec.templates.run_time.location,
+                settings_dict={},   # plain copy — no template variables needed
+                code_output_dir=self.run_time_code_dir,
+            )
+            copied_run_time_files = _copied["filter"]["files"]
+
+        # ------------------------------------------------------------------
+        # 3. Run-time namelist: write namelist.nml from merged settings.
+        #    This replaces the former roms.in template output and absorbs
+        #    all former *.opt parameters (except cppdefs.opt).
+        # ------------------------------------------------------------------
+        write_roms_namelist(
+            settings_run_time=self._settings_run_time,
+            output_dir=self.run_time_code_dir,
             n_tracers=n_tracers,
         )
+
+        # Build the run-time code descriptor: namelist + any copied static files.
+        run_time_code = {
+            "location": str(self.run_time_code_dir.resolve()),
+            "branch": "na",
+            "filter": {"files": sorted(["namelist.nml"] + copied_run_time_files)},
+        }
 
         # Suppress Pydantic serialization warnings when using model_dump(mode='json') and model_construct
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            
+
             blueprint_dict = self.blueprint.model_dump(mode='json')
             code_dict = blueprint_dict["code"]
-            # Convert dicts from render_roms_settings to CodeRepository objects
+            # Convert dicts from render_roms_settings / write_roms_namelist to CodeRepository objects
             code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(**compile_time_code)
             code_dict["run_time"] = cstar_models.CodeRepository.model_construct(**run_time_code)
             blueprint_dict["code"] = cstar_models.ROMSCompositeCodeRepository.model_construct(**code_dict)
 
             blueprint_dict["model_params"] = {
-                "time_step": self._settings_run_time["roms.in"]["time_stepping"]["dt"],
+                "time_step": self._settings_run_time["time_stepping"]["dt"],
             }
             blueprint_dict["runtime_params"] = {
                 "start_date": self.start_date,
