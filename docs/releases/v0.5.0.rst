@@ -274,3 +274,4 @@ For more details, please refer to the `commit history`_.
 - Updated string values in integer fields failing schema validation in plotting sample (`#531 <https://github.com/CWorthy-ocean/C-Star/pull/531>`_)
 - Added shared functions for storing data in the typer context (`#549 <https://github.com/CWorthy-ocean/C-Star/pull/549>`_)
 - Revert prior change resulting in less control of lmod module loading (`#573 <https://github.com/CWorthy-ocean/C-Star/pull/573>`_)
+- Add tutorial to documentation for creating custom applications. (`#560 <https://github.com/CWorthy-ocean/C-Star/pull/560>`_)
