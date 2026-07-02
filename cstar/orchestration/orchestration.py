@@ -832,12 +832,12 @@ class Orchestrator(LoggingMixin):
         if task is None:
             return
 
+        self.planner.store(n, KEY_STATUS, Status.Done)
+
         if task.status == Status.Done:
             self.log.info(f"Closed node: {n}")
-            self.planner.store(n, KEY_STATUS, Status.Done)
         elif Status.is_failure(task.status):
             self.log.warning(f"Failed node: {n!r}, status: {task.status.name!r}")
-            self.planner.store(n, KEY_STATUS, Status.Failed)
             raise CstarExpectationFailed(f"Node {n} task failed.")
 
     async def run(self, mode: RunMode) -> Mapping[str, Status]:
