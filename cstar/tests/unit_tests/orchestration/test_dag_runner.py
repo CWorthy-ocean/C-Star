@@ -252,11 +252,13 @@ async def test_dag_runner_get_status_detail_map(
 
         await state_repo.put_sentinel(handle)
 
+    update_sideeffects = [(k in open_names, h) for k, h in handles.items()]
+
     # mock out update_status - with LocalLauncher, it  _starts_
     # anything marked as "submitted", resulting in a status change.
     with mock.patch(
         "cstar.orchestration.dag_runner.LocalLauncher.update_status",
-        return_value=mock.AsyncMock(),
+        mock.AsyncMock(side_effect=update_sideeffects),
     ):
         launcher = LocalLauncher()
 

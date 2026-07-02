@@ -289,8 +289,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                     active = set(x.pid for x in dependencies).difference(successes)
                     dependencies = list(filter(lambda x: x.pid in active, dependencies))
 
-        submitted = await submit_fn(step, dependencies)
-        handle = t.cast("SlurmHandle", await SlurmLauncher.update_status(submitted))
+        handle = await submit_fn(step, dependencies)
+        await SlurmLauncher.update_status(handle)
 
         return Task(
             step=step,
@@ -356,7 +356,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     async def update_status(
         cls,
         item: Task[SlurmHandle] | SlurmHandle,
-    ) -> Task[SlurmHandle] | SlurmHandle:
+    ) -> tuple[bool, SlurmHandle]:
         """Query and update the status for a running task.
 
         Parameters
@@ -372,10 +372,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         prior = handle.status
         current = await SlurmLauncher.query_status(item)
 
-        if prior != current:
+        if changed := (prior != current):
             handle.status = current
 
-        return item
+        return changed, handle
 
     @classmethod
     async def cancel(cls, item: Task[SlurmHandle]) -> Task[SlurmHandle]:

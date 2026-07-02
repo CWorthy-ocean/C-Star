@@ -228,8 +228,9 @@ async def load_run_state(
     closed_set: dict[str, Status] = {}
 
     # ensure most recent status is retrieved in case of crash or system failure
-    updates = [launcher.update_status(sentinel) for sentinel in sentinels]
-    await asyncio.gather(*updates)
+    updates = await asyncio.gather(*map(launcher.update_status, sentinels))
+    changes = [h for (is_updated, h) in updates if is_updated]
+    await asyncio.gather(*map(on_status_changed, changes))
 
     for sentinel in sentinels:
         if Status.is_terminal(sentinel.status):

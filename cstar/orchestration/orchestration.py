@@ -614,7 +614,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     async def update_status(
         cls,
         item: Task[_THandle] | _THandle,
-    ) -> Task[_THandle] | _THandle:
+    ) -> tuple[bool, _THandle]:
         """Query and update the status for a running task.
 
         Parameters
