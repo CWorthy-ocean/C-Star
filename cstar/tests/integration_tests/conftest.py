@@ -57,7 +57,7 @@ def fetch_remote_test_case_data(cstar_test_data_directory: Path) -> Callable[[],
         # Download the zip with pooch
         zip_path = pooch.retrieve(
             url=archive_url,
-            known_hash="e4dd50e451eb314aee200319fec56cb5c6697e65ca990c70a41019f5c815d5a1",
+            known_hash="db36e139218c4681cab6a4d13399ee198b85518b9dfe3dda12fc405ac3854cbd",
             fname=f"{checkout_target}.zip",  # Name of the cached file
             path=cstar_test_data_directory,  # Set the cache directory (customize as needed)
         )

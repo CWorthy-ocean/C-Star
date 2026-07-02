@@ -378,6 +378,8 @@ class BgcSettings(_NmlGroup):
     """Frequency/period of averaged diagnostic output"""
     nrpf_bgc_avg_dia: int
     """Number of time records per BGC diagnostics file"""
+    xco2air_default: float
+    """Atmospheric xCO2 (ppm) when PCO2AIR_FORCING is off"""
 
 
 class MarblBiogeochemistrySettings(_NmlGroup):

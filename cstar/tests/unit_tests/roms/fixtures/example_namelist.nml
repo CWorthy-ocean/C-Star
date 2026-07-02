@@ -51,6 +51,7 @@
     wrt_bgc_dia_avg = .false.
     wrt_bgc_dia_his = .false.
     wrt_bgc_his = .false.
+    xco2air_default = 284.7
 /
 
 &bottom_drag_settings
