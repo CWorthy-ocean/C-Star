@@ -212,11 +212,15 @@
 /
 
 &sss_correction
-    dsssdt = 0.0
+    dsssdt = 7.777
 /
 
 &sst_correction
-    dsstdt = 0.0
+    dsstdt = 7.777
+/
+
+&dic_alk_correction
+    dcdt = 7.777
 /
 
 &stdout_diag_settings

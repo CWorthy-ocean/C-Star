@@ -531,6 +531,11 @@ class SstCorrection(_NmlGroup):
     """SST correction co-efficient as piston velocity (cm/day)"""
 
 
+class DicAlkCorrection(_NmlGroup):
+    dcdt: float
+    """DIC/ALK correction co-efficient as piston velocity (cm/day)"""
+
+
 class DiagnosticsSettings(_NmlGroup):
     diag_avg: bool
     """Output physics diags as avgs (T) or snapshots (F)"""
@@ -652,6 +657,7 @@ class RomsNamelist(BaseModel):
     v_sponge_settings: VSpongeSettings
     sss_correction: SssCorrection
     sst_correction: SstCorrection
+    dic_alk_correction: DicAlkCorrection
     diagnostics_settings: DiagnosticsSettings
     stdout_diag_settings: StdoutDiagSettings
     random_output_settings: RandomOutputSettings
