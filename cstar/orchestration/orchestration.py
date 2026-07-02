@@ -835,10 +835,8 @@ class Orchestrator(LoggingMixin):
         if task.status == Status.Done:
             self.log.info(f"Closed node: {n}")
             self.planner.store(n, KEY_STATUS, Status.Done)
-        elif task.status == Status.Failed:
-            self.log.warning(f"Failed node: {n}")
-            # TODO: on failure, cancel all jobs if anything depends on it
-            # - NOTE: this may occur naturally with SLURM but not local launch
+        elif Status.is_failure(task.status):
+            self.log.warning(f"Failed node: {n!r}, status: {task.status.name!r}")
             self.planner.store(n, KEY_STATUS, Status.Failed)
             raise CstarExpectationFailed(f"Node {n} task failed.")
 
