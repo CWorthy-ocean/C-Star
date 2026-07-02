@@ -3,10 +3,6 @@
 v0.5.0
 ------
 
-.. note:: 
-    This release is currently in development
-
-
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
@@ -103,11 +99,9 @@ Improvements
 - Ensure env var display consistency in `cstar env show` output (`#462 <https://github.com/CWorthy-ocean/C-Star/pull/462>`_)
 - The original runtime settings file and the one that is written and used by C-Star are now appended with `_ORIGINAL` and `_PATCHED` to reduce confusion. (`#465 <https://github.com/CWorthy-ocean/C-Star/pull/465>`_)
 - Use computed attributes to in place of duplicating keys found in `DagStatus.details` (`#467 <https://github.com/CWorthy-ocean/C-Star/pull/467>`_)
-- Mitigate un (`#469 <https://github.com/CWorthy-ocean/C-Star/pull/469>`_)
 - Improve error message when failing to load a remote YAML file. (`#473 <https://github.com/CWorthy-ocean/C-Star/pull/473>`_)
 - Loosen Pydantic type validation for override dictionaries to mitigate pydantic warnings (`#474 <https://github.com/CWorthy-ocean/C-Star/pull/474>`_)
 - Update unit tests that fail under specific user conditions on Anvil (`#483 <https://github.com/CWorthy-ocean/C-Star/pull/483>`_)
-
 - Fix unexpected linting warnings about missing required parameters to `ServiceConfiguration`
 - Improve naming of module containing shared CLI callbacks
 - Add callbacks for automatic export of pertinent environment variables from CLI parameters
