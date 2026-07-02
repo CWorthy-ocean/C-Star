@@ -31,7 +31,7 @@ _RT_DATA_INPUTS = {
 # These are the typed fields added to models.py for each item type.
 _FORGE_FIELDS = {
     "InitialConditions": {
-        "use_density_interpolation", "allow_flex_time",
+        "bgc_interpolation_method", "allow_flex_time",
         # model_reference_date is handled run-level; options dict is passthrough
         "model_reference_date", "options",
     },
@@ -41,7 +41,8 @@ _FORGE_FIELDS = {
         "model_reference_date", "options",
     },
     "BoundaryForcing": {
-        "type", "apply_2d_horizontal_fill", "use_density_interpolation",
+        "type", "bgc_interpolation_method",
+        "prefill", "prefill_kwargs", "regrid_method", "extrap_method", "extrap_kwargs",
         "model_reference_date", "options",
     },
     "TidalForcing": {
@@ -49,6 +50,7 @@ _FORGE_FIELDS = {
     },
     "RiverForcing": {
         "include_bgc", "convert_to_climatology", "bgc_source",
+        "coast_snap_buffer_km", "domain_edge_buffer",
         "model_reference_date", "options",
     },
     "Grid": {
@@ -77,7 +79,8 @@ _SKIP = {
         "chunks",
         "initial_slice_bounds",
         "bypass_validation",
-        "physics_forcing",     # internal object for density interp wiring
+        "physics_forcing",     # internal object for density interp wiring (set by Forge, not user)
+        "apply_2d_horizontal_fill",  # deprecated in rt>=4 in favor of `prefill`; Forge exposes prefill instead
     },
     "TidalForcing": {
         "bypass_validation",

@@ -30,7 +30,6 @@ BoundaryForcing:
     climatology: true
     path: /pscratch/sd/m/mattlong/cson-forge-data/source-data/UNIFIED_BGC/BGCdataset.nc
   type: bgc
-  apply_2d_horizontal_fill: false
   adjust_depth_for_sea_surface_height: false
   model_reference_date: '2000-01-01T00:00:00'
   bypass_validation: false

@@ -36,7 +36,6 @@ BoundaryForcing:
     - /Users/eilerman/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_test-tiny_20120102.nc
     - /Users/eilerman/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_test-tiny_20120103.nc
   type: physics
-  apply_2d_horizontal_fill: false
   model_reference_date: '2000-01-01T00:00:00'
   chunks: null
   initial_slice_bounds: null

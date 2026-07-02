@@ -872,6 +872,33 @@ class RomsMarblInputData(InputData):
         else:
             self._settings_run_time["forcing"]["surface_forcing_path"] = paths[0] if isinstance(paths, (list, tuple)) else paths
     
+    def _build_physics_boundary_companion(self, key: str, extra: Dict[str, Any]):
+        """Build a physics ``rt.BoundaryForcing`` to anchor density-space BGC
+        boundary interpolation (roms-tools >=4 ``physics_forcing=``).
+
+        Locates the physics boundary item registered under ``key`` in
+        ``self.input_list`` and constructs a BoundaryForcing from it, reusing the
+        same run-time ``extra`` (dates, boundaries, dask). Returns ``None`` (with a
+        warning) when no physics boundary item exists, in which case roms-tools
+        falls back to depth-space interpolation.
+        """
+        physics_kwargs = next(
+            (dict(kw) for k, kw in self.input_list
+             if k == key and str(kw.get("type") or "physics") == "physics"),
+            None,
+        )
+        if physics_kwargs is None:
+            warnings.warn(
+                "Density-space BGC boundary interpolation was requested but no physics "
+                "boundary item was found to anchor it; roms-tools will fall back to "
+                "depth-space interpolation.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return None
+        physics_args = self._build_input_args(key, extra=extra, base_kwargs=physics_kwargs)
+        return rt.BoundaryForcing(grid=self.grid, **physics_args)
+
     @register_input(name="forcing.boundary", order=40, label="Generating boundary forcing")
     def _generate_boundary_forcing(self, key: str = "forcing.boundary", **kwargs):
         """Generate boundary forcing input files."""
@@ -902,7 +929,15 @@ class RomsMarblInputData(InputData):
                 f"Invalid 'type' value '{type}' in input_args for '{key}'. "
                 f"Expected 'type' to be 'physics' or 'bgc'."
             )
-        
+
+        # Density-space BGC boundary interpolation (roms-tools >=4) needs a physics
+        # BoundaryForcing companion to supply the target T/S density coordinate. Build
+        # one from this key's physics item and pass it as `physics_forcing`. Without it,
+        # roms-tools silently falls back to depth interpolation.
+        bgc_interp = str(input_args.get("bgc_interpolation_method") or "depth")
+        if type == "bgc" and bgc_interp in {"density", "density_mld"}:
+            input_args["physics_forcing"] = self._build_physics_boundary_companion(key, extra)
+
         yaml_path = self._yaml_filename(f"{key}-{type}")
         output_path = self._forcing_filename(input_name=f"boundary-{type}")
        

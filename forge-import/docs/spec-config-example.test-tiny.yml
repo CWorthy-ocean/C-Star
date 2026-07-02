@@ -55,7 +55,6 @@ forcing:
       name: UNIFIED
       climatology: true
       glorys_layout: null
-    use_density_interpolation: false
     allow_flex_time: false
   surface:
   - source:
@@ -82,15 +81,11 @@ forcing:
       climatology: false
       glorys_layout: regional
     type: physics
-    apply_2d_horizontal_fill: false
-    use_density_interpolation: false
   - source:
       name: UNIFIED
       climatology: true
       glorys_layout: null
     type: bgc
-    apply_2d_horizontal_fill: false
-    use_density_interpolation: false
   tidal:
   - source:
       name: TPXO

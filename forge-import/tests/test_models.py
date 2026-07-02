@@ -505,20 +505,20 @@ class TestModelInputs:
         item = BoundaryForcingItem(
             source=SourceSpec(name="GLORYS"),
             type="physics",
-            apply_2d_horizontal_fill=True,
+            bypass_validation=True,
         )
         dumped = item.model_dump()
-        assert dumped["apply_2d_horizontal_fill"] is True
+        assert dumped["bypass_validation"] is True
         assert dumped["type"] == "physics"
 
     def test_initialconditionsinput_accepts_extra_fields(self):
         """Test that InitialConditionsInput passes extra fields through to roms-tools constructors."""
         item = InitialConditionsInput(
             source=SourceSpec(name="GLORYS"),
-            apply_2d_horizontal_fill=True,
+            bypass_validation=True,
         )
         dumped = item.model_dump()
-        assert dumped["apply_2d_horizontal_fill"] is True
+        assert dumped["bypass_validation"] is True
 
 
 class TestModelInputsFromDict:

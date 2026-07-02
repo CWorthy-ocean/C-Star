@@ -32,7 +32,6 @@ BoundaryForcing:
     - /pscratch/sd/m/mattlong/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_ccs-12km_20240101.nc
     - /pscratch/sd/m/mattlong/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_ccs-12km_20240102.nc
   type: physics
-  apply_2d_horizontal_fill: false
   adjust_depth_for_sea_surface_height: false
   model_reference_date: '2000-01-01T00:00:00'
   bypass_validation: false

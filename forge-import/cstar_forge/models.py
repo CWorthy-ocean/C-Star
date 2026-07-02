@@ -14,9 +14,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, PrivateAttr, model_validator
 
 from .spec_config import (
+    BgcInterpMethod,
     BoundaryType,
     ClimatologyMode,
     CoarseGridMode,
+    ExtrapMethod,
+    Prefill,
+    RegridMethod,
     RestoringForce,
     SurfaceType,
     TopographySource,
@@ -88,15 +92,15 @@ class InitialConditionsInput(BaseModel):
         Source specification for biogeochemical initial conditions.
 
     Any additional keyword arguments are passed directly to the roms-tools
-    InitialConditions constructor (e.g. ``apply_2d_horizontal_fill=True``).
+    InitialConditions constructor (e.g. ``bgc_interpolation_method="density"``).
     """
 
     model_config = ConfigDict(extra="allow")
 
     source: SourceSpec
     bgc_source: Optional[SourceSpec] = Field(default=None, validate_default=False)
-    use_density_interpolation: bool = Field(default=False, validate_default=False,
-        description="Interpolate BGC tracers in density space rather than depth space.")
+    bgc_interpolation_method: BgcInterpMethod = Field(default=BgcInterpMethod.DEPTH, validate_default=False,
+        description="Vertical interpolation for BGC tracers: 'depth', 'density', or 'density_mld'.")
     allow_flex_time: bool = Field(default=False, validate_default=False,
         description="Allow a ±24h search window around ini_time when the exact timestamp is absent.")
     options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
@@ -150,17 +154,25 @@ class BoundaryForcingItem(BaseModel):
         Type of forcing: "physics" or "bgc".
 
     Any additional keyword arguments are passed directly to the roms-tools
-    BoundaryForcing constructor (e.g. ``apply_2d_horizontal_fill=True``).
+    BoundaryForcing constructor (e.g. ``prefill="2d_lateral_fill"``).
     """
 
     model_config = ConfigDict(extra="allow")
 
     source: SourceSpec
     type: BoundaryType = Field(default=BoundaryType.PHYSICS)
-    apply_2d_horizontal_fill: bool = Field(default=False, validate_default=False,
-        description="Perform 2D horizontal fill on source data before regridding to boundaries.")
-    use_density_interpolation: bool = Field(default=False, validate_default=False,
-        description="Interpolate BGC tracers in density space rather than depth space.")
+    bgc_interpolation_method: BgcInterpMethod = Field(default=BgcInterpMethod.DEPTH, validate_default=False,
+        description="Vertical interpolation for BGC tracers (type='bgc'): 'depth', 'density', or 'density_mld'.")
+    prefill: Optional[Prefill] = Field(default=None, validate_default=False,
+        description="Fill NaN source cells before regridding; None applies no source prefill.")
+    prefill_kwargs: Optional[Dict[str, Any]] = Field(default=None, validate_default=False,
+        description="Method-specific options for the selected prefill.")
+    regrid_method: Optional[RegridMethod] = Field(default=None, validate_default=False,
+        description="Horizontal regrid engine ('auto'/'xesmf'/'scipy'); None -> auto.")
+    extrap_method: Optional[ExtrapMethod] = Field(default=None, validate_default=False,
+        description="Destination extrapolation on the default (prefill=None) path.")
+    extrap_kwargs: Optional[Dict[str, Any]] = Field(default=None, validate_default=False,
+        description="Method-specific options for extrap_method (e.g. num_src_pnts, dist_exponent).")
     options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
         description="Extra kwargs forwarded verbatim to rt.BoundaryForcing (forward-compat).")
 
@@ -213,6 +225,10 @@ class RiverForcingItem(BaseModel):
         description="When to compute a river climatology.")
     bgc_source: Optional[Dict[str, Any]] = Field(default=None, validate_default=False,
         description="Separate river-BGC dataset config (name, optional path, optional fill).")
+    coast_snap_buffer_km: Optional[float] = Field(default=None, validate_default=False,
+        description="Override the coastal snap buffer (km); None uses the dataset default.")
+    domain_edge_buffer: int = Field(default=20, validate_default=False,
+        description="Grid cells beyond the domain edge kept in the bounding-box pre-filter.")
     options: Dict[str, Any] = Field(default_factory=dict, validate_default=False,
         description="Extra kwargs forwarded verbatim to rt.RiverForcing (forward-compat).")
 

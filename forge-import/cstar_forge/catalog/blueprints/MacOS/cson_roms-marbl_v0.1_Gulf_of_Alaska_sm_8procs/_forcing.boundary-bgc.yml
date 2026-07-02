@@ -33,7 +33,6 @@ BoundaryForcing:
     glorys_layout: null
     path: /Users/blsaenz/cson-forge-data/source-data/UNIFIED_BGC/BGCdataset.nc
   type: bgc
-  apply_2d_horizontal_fill: false
   model_reference_date: '2000-01-01T00:00:00'
   chunks: null
   initial_slice_bounds: null

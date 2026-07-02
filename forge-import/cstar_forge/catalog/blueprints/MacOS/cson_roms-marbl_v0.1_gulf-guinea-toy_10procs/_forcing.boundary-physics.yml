@@ -32,6 +32,5 @@ BoundaryForcing:
     - /Users/mclong/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_gulf-guinea-toy_20120101.nc
     - /Users/mclong/cson-forge-data/source-data/GLORYS_REGIONAL/cmems_mod_glo_phy_my_0.083deg_P1D-m_REGIONAL_gulf-guinea-toy_20120102.nc
   type: physics
-  apply_2d_horizontal_fill: false
   model_reference_date: '2000-01-01T00:00:00'
   bypass_validation: false

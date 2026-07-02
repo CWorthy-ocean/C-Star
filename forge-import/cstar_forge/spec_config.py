@@ -96,6 +96,41 @@ class ClimatologyMode(str, Enum):
     ALWAYS = "always"
 
 
+class BgcInterpMethod(str, Enum):
+    """Accepted values for ``bgc_interpolation_method`` on ``InitialConditions``
+    and ``BoundaryForcing`` (roms-tools >=4). Selects the vertical interpolation
+    used for BGC tracers."""
+    DEPTH = "depth"              # default: linear interpolation in depth
+    DENSITY = "density"          # linear interpolation in potential-density (isopycnal) space
+    DENSITY_MLD = "density_mld"  # mixed-layer-depth-anchored density interpolation
+
+
+class Prefill(str, Enum):
+    """Accepted values for ``BoundaryForcing.prefill`` (roms-tools >=4): how to
+    fill NaN (land/void) cells in the *source* before regridding. ``None`` (the
+    default, expressed as an absent field) applies no source prefill."""
+    LATERAL_FILL_2D = "2d_lateral_fill"    # legacy AMG Poisson fill (smoothest, slow)
+    INVERSE_DIST = "inverse_dist"          # xESMF inverse-distance source fill
+    NEAREST_S2D = "nearest_s2d"            # xESMF nearest-source fill
+    NEAREST_NEIGHBOR = "nearest_neighbor"  # cheap scipy distance-transform fill (no xESMF)
+
+
+class RegridMethod(str, Enum):
+    """Accepted values for ``BoundaryForcing.regrid_method`` (roms-tools >=4):
+    the horizontal regrid engine, chosen independently of ``prefill``."""
+    AUTO = "auto"    # xESMF if installed, else scipy (default when unset)
+    XESMF = "xesmf"  # force xESMF (raises if absent)
+    SCIPY = "scipy"  # force scipy interp (byte-reproducible with prefill)
+
+
+class ExtrapMethod(str, Enum):
+    """Accepted values for ``BoundaryForcing.extrap_method`` (roms-tools >=4):
+    xESMF destination extrapolation on the default (prefill=None) path. Ignored
+    when ``prefill`` is set."""
+    INVERSE_DIST = "inverse_dist"  # inverse-distance-weighted (effective default)
+    NEAREST_S2D = "nearest_s2d"    # single nearest source point
+
+
 class FillValues(str, Enum):
     """Accepted values for ``VolumeRelease.fill_values``."""
     AUTO = "auto"  # fill missing tracer concentrations with dataset defaults
@@ -275,8 +310,12 @@ class SurfaceForcingItem(_Section):
 class BoundaryForcingItem(_Section):
     source: SourceSpec
     type: BoundaryType = BoundaryType.PHYSICS
-    apply_2d_horizontal_fill: bool = False  # 2D horizontal fill before regridding
-    use_density_interpolation: bool = False  # BGC density-space interp
+    bgc_interpolation_method: BgcInterpMethod = BgcInterpMethod.DEPTH  # BGC vertical interp (type='bgc')
+    prefill: Optional[Prefill] = None            # source NaN prefill before regridding
+    prefill_kwargs: Optional[Dict[str, Any]] = None
+    regrid_method: Optional[RegridMethod] = None  # horizontal regrid engine (None -> auto)
+    extrap_method: Optional[ExtrapMethod] = None  # destination extrapolation (default path)
+    extrap_kwargs: Optional[Dict[str, Any]] = None
 
 
 class TidalForcingItem(_Section):
@@ -289,12 +328,14 @@ class RiverForcingItem(_Section):
     include_bgc: bool = False
     convert_to_climatology: ClimatologyMode = ClimatologyMode.IF_ANY_MISSING
     bgc_source: Optional[Dict[str, Any]] = None  # separate river-BGC dataset config
+    coast_snap_buffer_km: Optional[float] = None  # override coastal snap buffer (km); None -> dataset default
+    domain_edge_buffer: int = 20  # grid cells beyond domain edge kept in the bounding-box pre-filter
 
 
 class InitialConditions(_Section):
     source: SourceSpec
     bgc_source: Optional[SourceSpec] = None
-    use_density_interpolation: bool = False  # BGC density-space interp
+    bgc_interpolation_method: BgcInterpMethod = BgcInterpMethod.DEPTH  # BGC vertical interp
     allow_flex_time: bool = False  # ±24h search window around ini_time
 
 

@@ -384,16 +384,23 @@ def _build_forcing(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]
             out.append(cls(**kw))
         return out
 
-    ic = InitialConditions(
-        source=_parse_source(ic_block.get("source")),
-        bgc_source=_parse_source(ic_block["bgc_source"]) if ic_block.get("bgc_source") else None,
-    )
+    ic_kw = {
+        "source": _parse_source(ic_block.get("source")),
+        "bgc_source": _parse_source(ic_block["bgc_source"]) if ic_block.get("bgc_source") else None,
+    }
+    for f in ("bgc_interpolation_method", "allow_flex_time"):
+        if f in ic_block:
+            ic_kw[f] = ic_block[f]
+    ic = InitialConditions(**ic_kw)
 
     surface = _items("surface", SurfaceForcingItem,
                      ("type", "correct_radiation", "coarse_grid_mode", "restoring_forces"))
-    boundary = _items("boundary", BoundaryForcingItem, ("type",))
+    boundary = _items("boundary", BoundaryForcingItem,
+                      ("type", "bgc_interpolation_method", "prefill", "prefill_kwargs",
+                       "regrid_method", "extrap_method", "extrap_kwargs"))
     tidal = _items("tidal", TidalForcingItem, ("ntides",))
-    river = _items("river", RiverForcingItem, ("include_bgc",))
+    river = _items("river", RiverForcingItem,
+                   ("include_bgc", "coast_snap_buffer_km", "domain_edge_buffer"))
 
     # snapshot every distinct logical source touched
     resolved: Dict[str, ResolvedDataset] = {}

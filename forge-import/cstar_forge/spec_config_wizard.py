@@ -143,9 +143,11 @@ HELP_TEXT: Dict[str, str] = {
     ("ic", "ic_bgc_clim"):
         "Use the BGC source as a climatology (annual-mean repeated each year) "
         "rather than a time-varying dataset.",
-    ("ic", "ic_density_interp"):
-        "Interpolate BGC tracer initial conditions in density space rather than depth "
-        "space. Reduces interpolation errors across sloping isopycnals.",
+    ("ic", "ic_bgc_interp"):
+        "Vertical interpolation for BGC tracer initial conditions. 'depth' — linear in "
+        "depth (default). 'density' — linear in potential-density (isopycnal) space, "
+        "reducing errors across sloping isopycnals. 'density_mld' — density interpolation "
+        "anchored to the mixed-layer depth, preserving sub-mixed-layer feature depths.",
     ("ic", "ic_flex_time"):
         "Allow a ±24-hour search window when looking for the requested ini_time in the "
         "source dataset. Useful when the exact timestamp is absent.",
@@ -185,12 +187,22 @@ HELP_TEXT: Dict[str, str] = {
         "Treat as an annual climatology rather than interannual time series.",
     ("boundary", "glorys_layout"):
         "GLORYS spatial layout: 'regional' or 'global'. Leave blank for non-GLORYS.",
-    ("boundary", "apply_2d_horizontal_fill"):
-        "Perform 2D horizontal fill on the source data before regridding to the ROMS "
-        "open boundaries. Fills land-contaminated grid cells near the coast.",
-    ("boundary", "use_density_interpolation"):
-        "Interpolate BGC boundary conditions in density space rather than depth "
-        "space. Reduces errors across sloping isopycnals at open boundaries.",
+    ("boundary", "bgc_interpolation_method"):
+        "Vertical interpolation for BGC boundary tracers (type='bgc'). 'depth' (default), "
+        "'density' (isopycnal space), or 'density_mld' (mixed-layer-depth anchored). "
+        "Density methods build a physics BoundaryForcing companion to supply the target T/S.",
+    ("boundary", "prefill"):
+        "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+        "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+        "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+        "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    ("boundary", "regrid_method"):
+        "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+        "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    ("boundary", "extrap_method"):
+        "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+        "boundaries. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+        "nearest source point. Ignored when a prefill is set.",
 
     # ---- tidal forcing ---------------------------------------------------------
     ("tidal", "name"):
@@ -213,6 +225,12 @@ HELP_TEXT: Dict[str, str] = {
         "When to compute a river climatology from the raw data: "
         "'if_any_missing' (default) — compute if any requested months are absent, "
         "'never' — always use raw data, 'always' — always compute a climatology.",
+    ("river", "coast_snap_buffer_km"):
+        "Override the coastal snap buffer (km) used to move river mouths onto the coast. "
+        "Blank uses the dataset default (200 km for Dai, 50 km for GloFAS).",
+    ("river", "domain_edge_buffer"):
+        "Number of grid cells beyond the domain edge kept in the bounding-box pre-filter "
+        "when selecting rivers. Default: 20.",
 
     # ---- output settings -------------------------------------------------------
     ("output", "output_dd"):
@@ -452,13 +470,17 @@ class _SettingsEditor:
 from .spec_config import (
     BgcBoundarySource,
     BgcInitialConditionsSource,
+    BgcInterpMethod,
     BgcSurfaceSource,
     BoundaryType,
     ClimatologyMode,
     CoarseGridMode,
+    ExtrapMethod,
     InitialConditionsSource,
     PhysicsBoundarySource,
     PhysicsSurfaceSource,
+    Prefill,
+    RegridMethod,
     RestoringForce,
     RestoringSurfaceSource,
     RiverSource,
@@ -471,6 +493,11 @@ from .spec_config import (
 _SURFACE_TYPES = [e.value for e in SurfaceType]
 _BOUNDARY_TYPES = [e.value for e in BoundaryType]
 _COARSE_MODES = [e.value for e in CoarseGridMode]
+_BGC_INTERP_METHODS = [e.value for e in BgcInterpMethod]
+# Optional dropdowns include a blank sentinel meaning "leave unset (roms-tools default)"
+_PREFILL_OPTS = [""] + [e.value for e in Prefill]
+_REGRID_OPTS = [""] + [e.value for e in RegridMethod]
+_EXTRAP_OPTS = [""] + [e.value for e in ExtrapMethod]
 _FORCING_CATEGORIES = ("surface", "boundary", "tidal", "river")
 _GLORYS_LAYOUT_OPTS = ["", "regional", "global"]  # "" = not specified
 
@@ -529,16 +556,19 @@ class _ForcingEditor:
         self.ic_bgc_clim = W.Checkbox(value=bool(bgc.get("climatology", False)),
                                       description="bgc climatology", indent=False,
                                       tooltip=_tip("ic", "ic_bgc_clim"))
-        self.ic_density_interp = W.Checkbox(
-            value=bool(ic.get("use_density_interpolation", False)),
-            description="density interp", indent=False,
-            tooltip=_tip("ic", "ic_density_interp"))
+        _ic_bgc_interp = str(ic.get("bgc_interpolation_method", BgcInterpMethod.DEPTH.value))
+        if _ic_bgc_interp not in _BGC_INTERP_METHODS:
+            _ic_bgc_interp = BgcInterpMethod.DEPTH.value
+        self.ic_bgc_interp = W.Dropdown(
+            options=_BGC_INTERP_METHODS, value=_ic_bgc_interp,
+            description="bgc interp:", style={"description_width": "110px"},
+            tooltip=_tip("ic", "ic_bgc_interp"))
         self.ic_flex_time = W.Checkbox(
             value=bool(ic.get("allow_flex_time", False)),
             description="flex time", indent=False,
             tooltip=_tip("ic", "ic_flex_time"))
         for _w in (self.ic_name, self.ic_layout, self.ic_bgc_name,
-                   self.ic_bgc_clim, self.ic_density_interp, self.ic_flex_time):
+                   self.ic_bgc_clim, self.ic_bgc_interp, self.ic_flex_time):
             _w.observe(lambda _ch: on_change(), names="value")
 
         # per-category item rows: list of dicts of widgets
@@ -613,14 +643,34 @@ class _ForcingEditor:
                                            layout=W.Layout(width="150px"), placeholder="sss,sst",
                                            tooltip=_tip("surface", "restoring_forces"))
         if cat == "boundary":
-            w["apply_2d_horizontal_fill"] = W.Checkbox(
-                value=bool(item.get("apply_2d_horizontal_fill", False)),
-                description="2d_fill", indent=False,
-                tooltip=_tip("boundary", "apply_2d_horizontal_fill"))
-            w["use_density_interpolation"] = W.Checkbox(
-                value=bool(item.get("use_density_interpolation", False)),
-                description="dens_interp", indent=False,
-                tooltip=_tip("boundary", "use_density_interpolation"))
+            _b_interp = str(item.get("bgc_interpolation_method", BgcInterpMethod.DEPTH.value))
+            if _b_interp not in _BGC_INTERP_METHODS:
+                _b_interp = BgcInterpMethod.DEPTH.value
+            w["bgc_interpolation_method"] = W.Dropdown(
+                options=_BGC_INTERP_METHODS, value=_b_interp,
+                description="bgc interp:", style=small, layout=W.Layout(width="180px"),
+                tooltip=_tip("boundary", "bgc_interpolation_method"))
+            _prefill_val = str(item.get("prefill") or "")
+            if _prefill_val not in _PREFILL_OPTS:
+                _prefill_val = ""
+            w["prefill"] = W.Dropdown(
+                options=_PREFILL_OPTS, value=_prefill_val,
+                description="prefill:", style=small, layout=W.Layout(width="200px"),
+                tooltip=_tip("boundary", "prefill"))
+            _regrid_val = str(item.get("regrid_method") or "")
+            if _regrid_val not in _REGRID_OPTS:
+                _regrid_val = ""
+            w["regrid_method"] = W.Dropdown(
+                options=_REGRID_OPTS, value=_regrid_val,
+                description="regrid:", style=small, layout=W.Layout(width="150px"),
+                tooltip=_tip("boundary", "regrid_method"))
+            _extrap_val = str(item.get("extrap_method") or "")
+            if _extrap_val not in _EXTRAP_OPTS:
+                _extrap_val = ""
+            w["extrap_method"] = W.Dropdown(
+                options=_EXTRAP_OPTS, value=_extrap_val,
+                description="extrap:", style=small, layout=W.Layout(width="170px"),
+                tooltip=_tip("boundary", "extrap_method"))
         if cat == "tidal":
             w["ntides"] = W.IntText(value=int(item.get("ntides") or 0), description="ntides:",
                                     style=small, layout=W.Layout(width="130px"),
@@ -638,6 +688,14 @@ class _ForcingEditor:
                 value=_ctc_val if _ctc_val in _ctc_opts else ClimatologyMode.IF_ANY_MISSING.value,
                 description="clim mode:", style=small, layout=W.Layout(width="180px"),
                 tooltip=_tip("river", "convert_to_climatology"))
+            w["coast_snap_buffer_km"] = W.FloatText(
+                value=float(item.get("coast_snap_buffer_km") or 0.0),
+                description="coast snap km:", style=small, layout=W.Layout(width="180px"),
+                tooltip=_tip("river", "coast_snap_buffer_km"))
+            w["domain_edge_buffer"] = W.IntText(
+                value=int(item.get("domain_edge_buffer", 20)),
+                description="edge buffer:", style=small, layout=W.Layout(width="160px"),
+                tooltip=_tip("river", "domain_edge_buffer"))
         remove = W.Button(description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item")
         remove.on_click(lambda _b, c=cat, ws=w: self._remove(c, ws))
         for widget in w.values():
@@ -683,16 +741,25 @@ class _ForcingEditor:
             item["coarse_grid_mode"] = w["coarse_grid_mode"].value
         if "restoring_forces" in w and w["restoring_forces"].value.strip():
             item["restoring_forces"] = [p.strip() for p in w["restoring_forces"].value.split(",") if p.strip()]
-        if "apply_2d_horizontal_fill" in w and w["apply_2d_horizontal_fill"].value:
-            item["apply_2d_horizontal_fill"] = True
-        if "use_density_interpolation" in w and w["use_density_interpolation"].value:
-            item["use_density_interpolation"] = True
+        # Boundary regrid/interp knobs: only emit non-default values to keep specs clean.
+        if "bgc_interpolation_method" in w and w["bgc_interpolation_method"].value != BgcInterpMethod.DEPTH.value:
+            item["bgc_interpolation_method"] = w["bgc_interpolation_method"].value
+        if "prefill" in w and w["prefill"].value:  # Dropdown: "" = leave unset
+            item["prefill"] = w["prefill"].value
+        if "regrid_method" in w and w["regrid_method"].value:
+            item["regrid_method"] = w["regrid_method"].value
+        if "extrap_method" in w and w["extrap_method"].value:
+            item["extrap_method"] = w["extrap_method"].value
         if "ntides" in w:
             item["ntides"] = int(w["ntides"].value)
         if "include_bgc" in w and w["include_bgc"].value:
             item["include_bgc"] = True
         if "convert_to_climatology" in w:
             item["convert_to_climatology"] = w["convert_to_climatology"].value
+        if "coast_snap_buffer_km" in w and w["coast_snap_buffer_km"].value:  # 0.0 = leave unset
+            item["coast_snap_buffer_km"] = float(w["coast_snap_buffer_km"].value)
+        if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != 20:
+            item["domain_edge_buffer"] = int(w["domain_edge_buffer"].value)
         return item
 
     def gather(self) -> Dict[str, Any]:
@@ -703,8 +770,8 @@ class _ForcingEditor:
         if self.ic_bgc_name.value:  # Dropdown: "" means no bgc source
             ic["bgc_source"] = {"name": self.ic_bgc_name.value,
                                 "climatology": bool(self.ic_bgc_clim.value)}
-        if self.ic_density_interp.value:
-            ic["use_density_interpolation"] = True
+        if self.ic_bgc_interp.value and self.ic_bgc_interp.value != BgcInterpMethod.DEPTH.value:
+            ic["bgc_interpolation_method"] = self.ic_bgc_interp.value
         if self.ic_flex_time.value:
             ic["allow_flex_time"] = True
         forcing = {cat: [self._gather_item(cat, w) for w in self._rows[cat]]
@@ -718,7 +785,7 @@ class _ForcingEditor:
         ic_box = W.VBox([W.HTML("<i>initial conditions</i>"),
                          W.HBox([self.ic_name, self.ic_layout]),
                          W.HBox([self.ic_bgc_name, self.ic_bgc_clim]),
-                         W.HBox([self.ic_density_interp, self.ic_flex_time])])
+                         W.HBox([self.ic_bgc_interp, self.ic_flex_time])])
         panes = [ic_box] + [self._containers[c] for c in _FORCING_CATEGORIES]
         acc = W.Accordion(children=panes, selected_index=None)
         for i, title in enumerate(["initial_conditions", *_FORCING_CATEGORIES]):
@@ -1045,6 +1112,9 @@ class SpecConfigWizard:
         ic = {"source": src(f.initial_conditions.source)}
         if f.initial_conditions.bgc_source:
             ic["bgc_source"] = src(f.initial_conditions.bgc_source)
+        _ic_interp = getattr(f.initial_conditions, "bgc_interpolation_method", None)
+        if _ic_interp is not None and getattr(_ic_interp, "value", _ic_interp) != BgcInterpMethod.DEPTH.value:
+            ic["bgc_interpolation_method"] = getattr(_ic_interp, "value", _ic_interp)
         forcing: Dict[str, Any] = {}
         for cat, items in (("surface", f.surface), ("boundary", f.boundary),
                            ("tidal", f.tidal), ("river", f.river)):
@@ -1063,6 +1133,20 @@ class SpecConfigWizard:
                     d["ntides"] = it.ntides
                 if getattr(it, "include_bgc", False):
                     d["include_bgc"] = True
+                # roms-tools >=4 boundary regrid/interp knobs. getattr(v, "value", v)
+                # normalizes (str, Enum) members to their plain string value.
+                _b_interp = getattr(it, "bgc_interpolation_method", None)
+                if _b_interp is not None and getattr(_b_interp, "value", _b_interp) != BgcInterpMethod.DEPTH.value:
+                    d["bgc_interpolation_method"] = getattr(_b_interp, "value", _b_interp)
+                for f2 in ("prefill", "regrid_method", "extrap_method"):
+                    v2 = getattr(it, f2, None)
+                    if v2 is not None:
+                        d[f2] = getattr(v2, "value", v2)
+                # river coastal/edge buffers
+                if getattr(it, "coast_snap_buffer_km", None) is not None:
+                    d["coast_snap_buffer_km"] = it.coast_snap_buffer_km
+                if getattr(it, "domain_edge_buffer", 20) != 20:
+                    d["domain_edge_buffer"] = it.domain_edge_buffer
                 out.append(d)
             forcing[cat] = out
         return {"grid": {"topography_source": cfg.domain.topography_source},
