@@ -285,7 +285,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                     if v.status == ExecutionStatus.COMPLETED
                 }
                 if dependencies and successes:
-                    # only keep dependencies that are not old/re-usable
+                    reusable = set(x.pid for x in dependencies).intersection(successes)
+                    msg = f"Dependencies previously satisfied: {', '.join(reusable)}"
+                    log.info(msg)
+
+                    # only keep dependencies that are not re-usable
                     active = set(x.pid for x in dependencies).difference(successes)
                     dependencies = list(filter(lambda x: x.pid in active, dependencies))
 
