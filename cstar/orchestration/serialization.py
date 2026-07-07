@@ -383,6 +383,7 @@ def serialize(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open(mode="w") as fp:
         nbytes = fp.write(content)
+        fp.flush()
 
     return nbytes
 

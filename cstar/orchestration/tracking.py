@@ -239,7 +239,7 @@ class TrackingRepository(LoggingMixin):
             self.log.warning(msg)
             return None
 
-        return await asyncio.to_thread(deserialize, run_path, WorkplanRun)
+        return deserialize(run_path, WorkplanRun)
 
     async def put_workplan_run(self, run: WorkplanRun) -> Path:
         """Persist a run record to disk.
@@ -259,15 +259,14 @@ class TrackingRepository(LoggingMixin):
         run_path = self._history_path(run.run_id, run.start_at)
         latest_path = self._latest_path(run.run_id)
 
-        if not await asyncio.to_thread(serialize, run_path, run):
+        if not serialize(run_path, run):
             self.log.warning("Run could not be persisted")
 
         if not latest_path.parent.exists():
             latest_path.parent.mkdir(parents=True)
 
-        if latest_path.resolve() != run_path:
-            await asyncio.to_thread(latest_path.unlink, missing_ok=True)
-            await asyncio.to_thread(latest_path.symlink_to, run_path)
+        latest_path.unlink(missing_ok=True)
+        latest_path.symlink_to(run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)
