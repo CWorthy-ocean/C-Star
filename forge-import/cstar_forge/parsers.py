@@ -3,28 +3,27 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
 
 try:
     import cartopy.crs as ccrs
+
     CARTOPY_AVAILABLE = True
 except ImportError:
     CARTOPY_AVAILABLE = False
     ccrs = None
 
 
-
 class NotebookConfig(BaseModel):
     """Schema for a notebook configuration."""
 
-    parameters: Dict[str, Any]
-    output_path: Union[Path, str]
+    parameters: dict[str, Any]
+    output_path: Path | str
 
 
 class NotebookEntry(BaseModel):
@@ -38,12 +37,12 @@ class NotebookSection(BaseModel):
     """Schema for a titled notebook section."""
 
     title: str
-    name: Optional[str] = None
-    description: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
     children: list[NotebookEntry]
     use_dask_cluster: bool = False
 
-    def to_toc_entry(self, base_dir: Optional[Path] = None) -> Dict[str, Any]:
+    def to_toc_entry(self, base_dir: Path | None = None) -> dict[str, Any]:
         children = []
         for entry in self.children:
             output_path = Path(entry.config.output_path)
@@ -63,29 +62,32 @@ class NotebookList(BaseModel):
 
     def iter_entries(self):
         for section in self.sections:
-            for entry in section.children:
-                yield entry
+            yield from section.children
 
-    def to_toc_entries(self, base_dir: Optional[Path] = None) -> list[Dict[str, Any]]:
+    def to_toc_entries(self, base_dir: Path | None = None) -> list[dict[str, Any]]:
         return [section.to_toc_entry(base_dir=base_dir) for section in self.sections]
+
 
 class DaskClusterKwargs(BaseModel):
     """Schema for dask_cluster_kwargs configuration."""
 
-    account: Optional[str] = None
-    queue_name: Optional[str] = None
-    n_nodes: Optional[int] = None
-    n_tasks_per_node: Optional[int] = None
-    wallclock: Optional[str] = None
-    scheduler_file: Optional[str] = None
+    account: str | None = None
+    queue_name: str | None = None
+    n_nodes: int | None = None
+    n_tasks_per_node: int | None = None
+    wallclock: str | None = None
+    scheduler_file: str | None = None
 
 
 class ProjectionConfig(BaseModel):
     """Schema for cartopy projection configuration."""
 
     type: str = Field(..., description="Projection type (e.g., 'LambertConformal')")
-    kwargs: Dict[str, Any] = Field(default_factory=dict, description="Keyword arguments for the projection constructor")
-    
+    kwargs: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Keyword arguments for the projection constructor",
+    )
+
     @classmethod
     def model_validate(cls, obj: Any):
         """Override to ensure kwargs is properly handled."""
@@ -101,23 +103,27 @@ class ProjectionConfig(BaseModel):
 class DomainVisualizationSettings(BaseModel):
     """Schema for domain-specific visualization settings."""
 
-    projection: ProjectionConfig = Field(..., description="Cartopy projection configuration")
-    
+    projection: ProjectionConfig = Field(
+        ..., description="Cartopy projection configuration"
+    )
+
     @property
-    def projection_kwargs(self) -> Dict[str, Any]:
+    def projection_kwargs(self) -> dict[str, Any]:
         """Return projection keyword arguments as a dictionary for use with cartopy."""
         return self.projection.kwargs
-    
+
     @property
     def projection_object(self) -> Any:
         """Return instantiated cartopy projection object."""
         if not CARTOPY_AVAILABLE:
             raise ImportError("cartopy is required to instantiate projection objects")
-        
+
         projection_type = self.projection.type
         if not hasattr(ccrs, projection_type):
-            raise ValueError(f"Unknown projection type: {projection_type}. Available types: {[attr for attr in dir(ccrs) if not attr.startswith('_') and isinstance(getattr(ccrs, attr), type)]}")
-        
+            raise ValueError(
+                f"Unknown projection type: {projection_type}. Available types: {[attr for attr in dir(ccrs) if not attr.startswith('_') and isinstance(getattr(ccrs, attr), type)]}"
+            )
+
         ccrs_proj_func = getattr(ccrs, projection_type)
         return ccrs_proj_func(**self.projection.kwargs)
 
@@ -134,28 +140,34 @@ class VariableVisualizationSettings(BaseModel):
 class VisualizationSettings(BaseModel):
     """Schema for visualization settings configuration."""
 
-    domains: Dict[str, DomainVisualizationSettings] = Field(
-        ..., description="Dictionary mapping domain names to their visualization settings"
+    domains: dict[str, DomainVisualizationSettings] = Field(
+        ...,
+        description="Dictionary mapping domain names to their visualization settings",
     )
-    variables: Dict[str, VariableVisualizationSettings] = Field(
-        ..., description="Dictionary mapping variable names to their visualization settings"
+    variables: dict[str, VariableVisualizationSettings] = Field(
+        ...,
+        description="Dictionary mapping variable names to their visualization settings",
     )
-    
+
     def get_domain_settings(self, domain_name: str) -> DomainVisualizationSettings:
         """Get visualization settings for a specific domain."""
         if domain_name not in self.domains:
-            raise ValueError(f"Domain '{domain_name}' not found in settings. Available domains: {list(self.domains.keys())}")
+            raise ValueError(
+                f"Domain '{domain_name}' not found in settings. Available domains: {list(self.domains.keys())}"
+            )
         return self.domains[domain_name]
 
 
 class AppConfig(BaseModel):
     """Top-level API schema for parameters.yml."""
 
-    dask_cluster_kwargs: Optional[DaskClusterKwargs] = None
+    dask_cluster_kwargs: DaskClusterKwargs | None = None
     notebook_list: NotebookList
 
 
-def _parse_notebook_entry_list(raw_entries: list[Any], base_dir: Path) -> list[NotebookEntry]:
+def _parse_notebook_entry_list(
+    raw_entries: list[Any], base_dir: Path
+) -> list[NotebookEntry]:
     entries = []
     for item in raw_entries:
         if not isinstance(item, dict):
@@ -165,7 +177,11 @@ def _parse_notebook_entry_list(raw_entries: list[Any], base_dir: Path) -> list[N
             if not isinstance(payload, dict):
                 raise ValueError("Notebook entry payload must be a mapping.")
         else:
-            notebook_keys = [key for key in item.keys() if isinstance(key, str) and key.endswith(".ipynb")]
+            notebook_keys = [
+                key
+                for key in item.keys()
+                if isinstance(key, str) and key.endswith(".ipynb")
+            ]
             if len(notebook_keys) != 1:
                 raise ValueError("Each notebook entry must be a single-key mapping.")
             notebook_name = notebook_keys[0]
@@ -198,11 +214,17 @@ def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
         children = raw_entries.get("children") or raw_entries.get("notebooks")
         if not isinstance(children, list):
             raise ValueError("children must be a list of entries.")
-        sections = [NotebookSection(title=title, children=_parse_notebook_entry_list(children, base_dir))]
+        sections = [
+            NotebookSection(
+                title=title, children=_parse_notebook_entry_list(children, base_dir)
+            )
+        ]
         return NotebookList(sections=sections)
 
     if isinstance(raw_entries, list):
-        if raw_entries and all(isinstance(item, dict) and "children" in item for item in raw_entries):
+        if raw_entries and all(
+            isinstance(item, dict) and "children" in item for item in raw_entries
+        ):
             sections = []
             for section in raw_entries:
                 title = section.get("title", "Untitled")
@@ -235,14 +257,14 @@ def _parse_notebook_entries(raw_entries: Any, base_dir: Path) -> NotebookList:
     raise ValueError("notebooks must be a list of sections.")
 
 
-def load_yaml_params(path: Optional[Union[Path, str]]) -> Dict[str, Any]:
+def load_yaml_params(path: Path | str | None) -> dict[str, Any]:
     """Load parameters from one or more YAML documents."""
     if path is None:
         return {}
     path_obj = Path(path)
     with path_obj.open("r", encoding="utf-8") as handle:
         docs = [doc for doc in yaml.safe_load_all(handle) if doc]
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for doc in docs:
         if not isinstance(doc, dict):
             raise ValueError("YAML documents must be mappings.")
@@ -250,17 +272,19 @@ def load_yaml_params(path: Optional[Union[Path, str]]) -> Dict[str, Any]:
     return merged
 
 
-def normalize_file_type(file_type: Optional[str]) -> Optional[str]:
+def normalize_file_type(file_type: str | None) -> str | None:
     """Normalize a file type string."""
     if file_type is None:
         return None
     normalized = file_type.replace("_", "-").lower()
     if normalized not in {"roms-tools", "app-config"}:
-        raise ValueError("Supported file types are 'roms-tools', 'roms_tools', or 'app-config'.")
+        raise ValueError(
+            "Supported file types are 'roms-tools', 'roms_tools', or 'app-config'."
+        )
     return normalized
 
 
-def _select_roms_tools_class_name(yaml_params: Dict[str, Any]) -> str:
+def _select_roms_tools_class_name(yaml_params: dict[str, Any]) -> str:
     """Determine the roms_tools class name to use based on YAML keys."""
     if "Grid" not in yaml_params:
         raise ValueError("ROMS-Tools YAML must include a 'Grid' section.")
@@ -274,8 +298,7 @@ def _select_roms_tools_class_name(yaml_params: Dict[str, Any]) -> str:
     return other_keys[0]
 
 
-
-def load_app_config(path: Union[Path, str]) -> AppConfig:
+def load_app_config(path: Path | str) -> AppConfig:
     """Load parameters.yml into an AppConfig object."""
     path_obj = Path(path)
     raw = load_yaml_params(path_obj)
@@ -294,7 +317,7 @@ def load_app_config(path: Union[Path, str]) -> AppConfig:
 
 
 def load_roms_tools_object(
-    yaml_path: Union[Path, str],
+    yaml_path: Path | str,
     roms_tools_module: Any = None,
 ) -> Any:
     """Load a roms_tools object via its from_yaml method."""
@@ -302,8 +325,12 @@ def load_roms_tools_object(
     if module is None:
         try:
             import roms_tools  # type: ignore
-        except ImportError as exc:  # pragma: no cover - exercised via explicit error path
-            raise RuntimeError("roms_tools is required to load this YAML file.") from exc
+        except (
+            ImportError
+        ) as exc:  # pragma: no cover - exercised via explicit error path
+            raise RuntimeError(
+                "roms_tools is required to load this YAML file."
+            ) from exc
         module = roms_tools
 
     yaml_path_obj = Path(yaml_path)
@@ -320,15 +347,15 @@ def load_roms_tools_object(
     return cls.from_yaml(str(yaml_path_obj))
 
 
-def load_visualization_settings(path: Union[Path, str]) -> VisualizationSettings:
+def load_visualization_settings(path: Path | str) -> VisualizationSettings:
     """
     Load visualization settings from a YAML file.
-    
+
     Parameters
     ----------
     path : Path or str
         Path to the visualization settings YAML file.
-        
+
     Returns
     -------
     VisualizationSettings
@@ -336,19 +363,23 @@ def load_visualization_settings(path: Union[Path, str]) -> VisualizationSettings
     """
     path_obj = Path(path)
     raw = load_yaml_params(path_obj)
-    
+
     if not isinstance(raw, dict):
         raise ValueError("Visualization settings must be a dictionary.")
-    
+
     # Parse domains
     domains_raw = raw.get("domains", {})
     if not isinstance(domains_raw, dict):
-        raise ValueError("'domains' must be a dictionary mapping domain names to settings.")
-    
-    domains: Dict[str, DomainVisualizationSettings] = {}
+        raise ValueError(
+            "'domains' must be a dictionary mapping domain names to settings."
+        )
+
+    domains: dict[str, DomainVisualizationSettings] = {}
     for domain_name, domain_config in domains_raw.items():
         if not isinstance(domain_config, dict):
-            raise ValueError(f"Settings for domain '{domain_name}' must be a dictionary.")
+            raise ValueError(
+                f"Settings for domain '{domain_name}' must be a dictionary."
+            )
         # Debug: Check if projection kwargs are in the raw data
         if "projection" in domain_config:
             projection_raw = domain_config["projection"]
@@ -357,25 +388,30 @@ def load_visualization_settings(path: Union[Path, str]) -> VisualizationSettings
                 if projection_raw["kwargs"] is None:
                     projection_raw["kwargs"] = {}
         domains[domain_name] = DomainVisualizationSettings.model_validate(domain_config)
-    
+
     # Parse variables
     variables_raw = raw.get("variables", {})
     if not isinstance(variables_raw, dict):
-        raise ValueError("'variables' must be a dictionary mapping variable names to settings.")
-    
-    variables: Dict[str, VariableVisualizationSettings] = {}
+        raise ValueError(
+            "'variables' must be a dictionary mapping variable names to settings."
+        )
+
+    variables: dict[str, VariableVisualizationSettings] = {}
     for variable_name, variable_config in variables_raw.items():
         if not isinstance(variable_config, dict):
-            raise ValueError(f"Settings for variable '{variable_name}' must be a dictionary.")
-        variables[variable_name] = VariableVisualizationSettings.model_validate(variable_config)
-    
+            raise ValueError(
+                f"Settings for variable '{variable_name}' must be a dictionary."
+            )
+        variables[variable_name] = VariableVisualizationSettings.model_validate(
+            variable_config
+        )
+
     return VisualizationSettings(domains=domains, variables=variables)
 
 
-
-def _tres_count(tres_list: list[dict[str, Any]] | None, tres_type: str) -> Optional[int]:
+def _tres_count(tres_list: list[dict[str, Any]] | None, tres_type: str) -> int | None:
     """Return integer count for a given TRES type (e.g., 'cpu', 'mem') from a Slurm TRES list."""
-    for item in (tres_list or []):
+    for item in tres_list or []:
         if item.get("type") == tres_type:
             try:
                 return int(item.get("count"))
@@ -384,14 +420,14 @@ def _tres_count(tres_list: list[dict[str, Any]] | None, tres_type: str) -> Optio
     return None
 
 
-def _job_is_completed(job: Dict[str, Any]) -> bool:
+def _job_is_completed(job: dict[str, Any]) -> bool:
     state = job.get("state") or {}
     current = state.get("current") or []
     # current is typically a list like ["COMPLETED"]
     return "COMPLETED" in current
 
 
-def sacct_summary(jobid: int | str, *, model_step_name: str = "roms") -> Dict[str, Any]:
+def sacct_summary(jobid: int | str, *, model_step_name: str = "roms") -> dict[str, Any]:
     """
     Return a minimal, extensible summary of a Slurm job from `sacct --json`.
 
@@ -410,7 +446,7 @@ def sacct_summary(jobid: int | str, *, model_step_name: str = "roms") -> Dict[st
     """
     jobid = str(jobid)
     cmd = ["sacct", "--json", "-j", jobid]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise RuntimeError(
             f"sacct --json failed (rc={proc.returncode}) for jobid={jobid}\nSTDERR:\n{proc.stderr.strip()}"
@@ -422,25 +458,34 @@ def sacct_summary(jobid: int | str, *, model_step_name: str = "roms") -> Dict[st
         raise RuntimeError(f"No jobs returned by sacct for jobid={jobid}")
 
     # Prefer exact job_id match; otherwise first entry.
-    job: Dict[str, Any] = next((j for j in jobs if str(j.get("job_id")) == jobid), jobs[0])
+    job: dict[str, Any] = next(
+        (j for j in jobs if str(j.get("job_id")) == jobid), jobs[0]
+    )
 
     completed = _job_is_completed(job)
 
     # Identify the model step.
     steps = job.get("steps") or []
-    model_step: Optional[Dict[str, Any]] = next(
+    model_step: dict[str, Any] | None = next(
         (s for s in steps if (s.get("step") or {}).get("name") == model_step_name),
         None,
     )
     # Fallback: pick ".0" if present
     if model_step is None:
         model_step = next(
-            (s for s in steps if isinstance((s.get("step") or {}).get("id"), str) and (s.get("step") or {}).get("id", "").endswith(".0")),
+            (
+                s
+                for s in steps
+                if isinstance((s.get("step") or {}).get("id"), str)
+                and (s.get("step") or {}).get("id", "").endswith(".0")
+            ),
             None,
         )
 
     if model_step is None:
-        raise RuntimeError(f"Could not find model step {model_step_name!r} (or a .0 fallback) for jobid={jobid}")
+        raise RuntimeError(
+            f"Could not find model step {model_step_name!r} (or a .0 fallback) for jobid={jobid}"
+        )
 
     # Extract core accounting from the model step.
     step_time = model_step.get("time") or {}
@@ -458,9 +503,21 @@ def sacct_summary(jobid: int | str, *, model_step_name: str = "roms") -> Dict[st
     # - requested max/avg mem: from tres.requested.average/max where type == "mem"
     # - max/avg observed memory sometimes appears under "tres.requested.max/min" (already in your sample).
     allocated_mem = _tres_count(tres.get("allocated"), "mem")
-    requested_mem_avg = _tres_count((tres.get("requested") or {}).get("average"), "mem") if isinstance(tres.get("requested"), dict) else None
-    requested_mem_max = _tres_count((tres.get("requested") or {}).get("max"), "mem") if isinstance(tres.get("requested"), dict) else None
-    requested_mem_min = _tres_count((tres.get("requested") or {}).get("min"), "mem") if isinstance(tres.get("requested"), dict) else None
+    requested_mem_avg = (
+        _tres_count((tres.get("requested") or {}).get("average"), "mem")
+        if isinstance(tres.get("requested"), dict)
+        else None
+    )
+    requested_mem_max = (
+        _tres_count((tres.get("requested") or {}).get("max"), "mem")
+        if isinstance(tres.get("requested"), dict)
+        else None
+    )
+    requested_mem_min = (
+        _tres_count((tres.get("requested") or {}).get("min"), "mem")
+        if isinstance(tres.get("requested"), dict)
+        else None
+    )
 
     # Compute core-hours only if job is COMPLETED.
     allocated_core_hours = None
@@ -471,7 +528,7 @@ def sacct_summary(jobid: int | str, *, model_step_name: str = "roms") -> Dict[st
         if ntasks is not None:
             ntasks_core_hours = (ntasks * elapsed_seconds) / 3600.0
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "jobid": jobid,
         "status": (job.get("state") or {}).get("current"),
         "elapsed_time": elapsed_seconds,

@@ -8,10 +8,12 @@ Fortran namelist file (namelist.nml) used by the new ROMS input system.
 
 import shutil
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader, select_autoescape, meta
-from typing import Dict, Any, Union, Optional
+from typing import Any
+
+from jinja2 import Environment, FileSystemLoader, meta, select_autoescape
 
 from .namelist_model import RunTimeSettings, build_namelist
+
 
 def _fortran_cdr_file_decl(path: Any, max_line_len: int = 72) -> str:
     """
@@ -65,57 +67,49 @@ def _fortran_cdr_file_decl(path: Any, max_line_len: int = 72) -> str:
 
 def render_roms_settings(
     template_files: list[str],
-    template_dir: Union[str, Path],
+    template_dir: str | Path,
     settings_dict: dict[str, Any],
-    code_output_dir: Union[str, Path],
-    n_tracers: Optional[int] = None,
-) -> Dict[str, Any]:
+    code_output_dir: str | Path,
+    n_tracers: int | None = None,
+) -> dict[str, Any]:
     """
     Render ROMS configuration files from Jinja2 templates.
-    
+
     Accepts a list of template files, a settings dictionary, and an output directory.
     Loops over the template files, applies templating with the settings context,
     and writes the resulting files to the output directory.
-    
+
     Args:
         template_files: List of template file names (with .j2 extension)
         template_dir: Directory containing Jinja2 template files
         settings_dict: Final merged settings dictionary for template rendering
         code_output_dir: Directory where rendered files will be saved
-    
+
     Returns:
-        Dictionary with "location" (absolute path to code_output_dir) and "filter" 
+        Dictionary with "location" (absolute path to code_output_dir) and "filter"
         (dict with "files" list of rendered/copied file names)
     """
     # Convert paths to Path objects
     template_dir = Path(template_dir)
     code_output_dir = Path(code_output_dir)
-    
+
     # Validate template directory exists
     if not template_dir.exists():
-        raise FileNotFoundError(
-            f"Template directory does not exist: {template_dir}"
-        )
+        raise FileNotFoundError(f"Template directory does not exist: {template_dir}")
     if not template_dir.is_dir():
-        raise ValueError(
-            f"Template path is not a directory: {template_dir}"
-        )
-    
+        raise ValueError(f"Template path is not a directory: {template_dir}")
+
     # Ensure output directory is empty or doesn't exist
     if not code_output_dir.exists():
-        raise FileNotFoundError(
-            f"Output directory does not exist: {code_output_dir}"
-        )
+        raise FileNotFoundError(f"Output directory does not exist: {code_output_dir}")
     if not code_output_dir.is_dir():
-        raise ValueError(
-            f"Output path is not a directory: {code_output_dir}"
-        )
-        
+        raise ValueError(f"Output path is not a directory: {code_output_dir}")
+
     # Validate that every .j2 template has a corresponding settings_dict entry
     # and that every settings_dict entry has a corresponding .j2 template
     template_keys = set()
     for template_file in template_files:
-        if template_file.endswith('.j2'):
+        if template_file.endswith(".j2"):
             # Extract the key from template filename
             # First try the entire base name (e.g., "<name>.j2" -> "<name>")
             # If that doesn't exist in settings_dict, try the part before the last dot (e.g., "cppdefs.opt.j2" -> "cppdefs")
@@ -125,12 +119,12 @@ def render_roms_settings(
                 key = base_name
             else:
                 # Fall back to the part before the last dot
-                key = base_name.rsplit('.', 1)[0] if '.' in base_name else base_name
+                key = base_name.rsplit(".", 1)[0] if "." in base_name else base_name
             template_keys.add(key)
-    
+
     # Get settings_dict keys (top-level keys)
     settings_keys = set(settings_dict.keys()) if settings_dict else set()
-    
+
     # Check for templates without settings_dict entries
     missing_settings = template_keys - settings_keys
     if missing_settings:
@@ -139,17 +133,17 @@ def render_roms_settings(
             f"Template files: {sorted([f for f in template_files if f.endswith('.j2')])}, "
             f"Settings keys: {sorted(settings_keys)}"
         )
-    
+
     # Validate nested structure: check that template variables match settings_dict structure
     # Create a temporary environment for parsing templates (must register the same filters as
     # ROMSTemplateRenderer or parse() raises TemplateAssertionError for custom filters).
     temp_env = Environment(loader=FileSystemLoader(str(template_dir)))
     _attach_roms_jinja_filters(temp_env)
-    
+
     for template_file in template_files:
-        if not template_file.endswith('.j2'):
+        if not template_file.endswith(".j2"):
             continue  # Skip non-template files
-        
+
         # Extract the key from template filename
         # First try the entire base name (e.g., "<name>.j2" -> "<name>")
         # If that doesn't exist in settings_dict, try the part before the last dot (e.g., "cppdefs.opt.j2" -> "cppdefs")
@@ -159,26 +153,24 @@ def render_roms_settings(
             key = base_name
         else:
             # Fall back to the part before the last dot
-            key = base_name.rsplit('.', 1)[0] if '.' in base_name else base_name
+            key = base_name.rsplit(".", 1)[0] if "." in base_name else base_name
 
         if key not in settings_dict:
             continue  # Already caught by earlier validation
-        
+
         # Read template file and parse it
         template_path = template_dir / template_file
         if not template_path.exists():
             continue  # Already caught by earlier validation
-        
+
         try:
             # Parse template and find undeclared variables using Jinja2's meta API
             template_source = temp_env.loader.get_source(temp_env, template_file)[0]
             parsed_ast = temp_env.parse(template_source)
             template_vars = meta.find_undeclared_variables(parsed_ast)
         except Exception as e:
-            raise ValueError(
-                f"Failed to parse template '{template_file}': {e}"
-            )
-        
+            raise ValueError(f"Failed to parse template '{template_file}': {e}")
+
         # Get nested keys from settings_dict
         settings_value = settings_dict[key]
         if not isinstance(settings_value, dict):
@@ -186,13 +178,13 @@ def render_roms_settings(
                 f"Settings_dict['{key}'] must be a dictionary, but got {type(settings_value).__name__}. "
                 f"Template file: {template_file}"
             )
-        
+
         settings_nested_keys = set(settings_value.keys())
-        
+
         # Exclude 'nt' from template_vars since it's added dynamically during rendering
         # 'nt' is a special variable for number of tracers, not part of settings_dict
-        template_vars_to_check = template_vars - {'nt'}
-        
+        template_vars_to_check = template_vars - {"nt"}
+
         # If key matches base_name (full match case), template_vars should match settings_nested_keys directly
         # Otherwise (partial match case), template_vars should contain the key itself
         if key == base_name:
@@ -206,7 +198,7 @@ def render_roms_settings(
                     f"Template variables: {sorted(template_vars_to_check)}, "
                     f"Settings_dict['{key}'] keys: {sorted(settings_nested_keys)}"
                 )
-            
+
             # Check for settings_dict entries without template variables
             missing_nested_template_vars = settings_nested_keys - template_vars_to_check
             if missing_nested_template_vars:
@@ -217,7 +209,7 @@ def render_roms_settings(
                     f"Settings_dict['{key}'] keys: {sorted(settings_nested_keys)}"
                 )
         else:
-            # Partial match case: template variables like {{ bgc.wrt_his }} -> 'bgc' 
+            # Partial match case: template variables like {{ bgc.wrt_his }} -> 'bgc'
             # We expect 'bgc' to be in template_vars, and settings_dict['bgc'] should exist
             # The nested structure validation is less strict here since we can't easily extract
             # nested attribute names (e.g., 'wrt_his') without AST walking
@@ -226,27 +218,25 @@ def render_roms_settings(
                     f"Template '{template_file}' does not reference '{key}' but settings_dict expects it. "
                     f"Template variables: {sorted(template_vars)}"
                 )
-    
+
     # Initialize renderer
     renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
-    
+
     # Track rendered/copied files
     rendered_files = []
-    
+
     # Loop over template files and render each one
     for template_file in template_files:
         # Check if template file exists
         template_path = template_dir / template_file
         if not template_path.exists():
-            raise FileNotFoundError(
-                f"Template file not found: {template_path}"
-            )
-        
-        if template_file.endswith('.j2'):
+            raise FileNotFoundError(f"Template file not found: {template_path}")
+
+        if template_file.endswith(".j2"):
             # Render template file (remove .j2 extension for output filename)
-            output_name = template_file.replace('.j2', '')
+            output_name = template_file.replace(".j2", "")
             output_path = code_output_dir / output_name
-            
+
             # Extract the key from template filename for context
             base_name = template_file[:-3]  # Remove .j2
             # Check if the entire base name exists as a key in settings_dict
@@ -254,8 +244,8 @@ def render_roms_settings(
                 key = base_name
             else:
                 # Fall back to the part before the last dot
-                key = base_name.rsplit('.', 1)[0] if '.' in base_name else base_name
-            
+                key = base_name.rsplit(".", 1)[0] if "." in base_name else base_name
+
             # Get the context for this template
             # - Full match case (key == base_name): use nested dict (e.g., "<name>.j2" -> settings_dict["<name>"])
             # - Partial match case (key != base_name): use full settings_dict (e.g., cppdefs.opt.j2 uses {{ cppdefs.obc_west }})
@@ -265,71 +255,71 @@ def render_roms_settings(
             else:
                 # Partial match: template uses variables like {{ bgc.wrt_his }}, context needs bgc at top level
                 context = settings_dict.copy()
-            
+
             # Add n_tracers to context if provided
             if n_tracers is not None:
-                context['nt'] = n_tracers
+                context["nt"] = n_tracers
             content = renderer.render_template(template_file, context)
-            
-            with open(output_path, 'w') as f:
+
+            with open(output_path, "w") as f:
                 f.write(content)
-            
+
             rendered_files.append(output_name)
         else:
             # Copy non-template file directly
             output_path = code_output_dir / template_file
             shutil.copy2(template_path, output_path)
-            
+
             rendered_files.append(template_file)
-    
+
     # Return dictionary with location and filter
     return {
         "location": str(code_output_dir.resolve()),
         "branch": "na",
-        "filter": {"files": sorted(rendered_files)}
+        "filter": {"files": sorted(rendered_files)},
     }
-    
+
 
 class ROMSTemplateRenderer:
     """Renderer for ROMS configuration files from Jinja2 templates."""
-    
-    def __init__(self, template_dir: Union[str, Path]):
+
+    def __init__(self, template_dir: str | Path):
         """
         Initialize the template renderer.
-        
+
         Args:
             template_dir: Directory containing Jinja2 template files (.j2)
         """
         self.template_dir = Path(template_dir)
         self.env = Environment(
             loader=FileSystemLoader(str(self.template_dir)),
-            autoescape=select_autoescape(['html', 'xml']),
+            autoescape=select_autoescape(["html", "xml"]),
             trim_blocks=True,
-            lstrip_blocks=True
+            lstrip_blocks=True,
         )
         _attach_roms_jinja_filters(self.env)
-    
+
     @staticmethod
     def _fortran_bool(value: bool) -> str:
         """
         Convert Python boolean to Fortran boolean string.
-        
+
         Args:
             value: Python boolean value
-            
+
         Returns:
             Fortran boolean string ('.true.' or '.false.')
         """
-        return '.true.' if value else '.false.'
-    
-    def render_template(self, template_name: str, context: Dict[str, Any]) -> str:
+        return ".true." if value else ".false."
+
+    def render_template(self, template_name: str, context: dict[str, Any]) -> str:
         """
         Render a single template with the given context.
-        
+
         Args:
             template_name: Name of the template file (with .j2 extension)
             context: Configuration dictionary for template rendering
-            
+
         Returns:
             Rendered template content as string
         """
@@ -344,8 +334,8 @@ def _attach_roms_jinja_filters(env: Environment) -> None:
 
 
 def write_roms_namelist(
-    settings_run_time: Dict[str, Any],
-    output_dir: Union[str, Path],
+    settings_run_time: dict[str, Any],
+    output_dir: str | Path,
     n_tracers: int,
 ) -> None:
     """
@@ -373,4 +363,3 @@ def write_roms_namelist(
     """
     rt = RunTimeSettings.model_validate(settings_run_time)
     build_namelist(rt, n_tracers).write(Path(output_dir) / "namelist.nml")
-

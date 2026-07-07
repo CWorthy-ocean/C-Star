@@ -33,8 +33,13 @@ import argparse
 import copy
 import logging
 import warnings
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Protocol, Tuple, Union, runtime_checkable
+from typing import (
+    Any,
+    Protocol,
+    runtime_checkable,
+)
 
 from .namelist_model import validate_run_time_sections
 from .spec_config import SpecConfig
@@ -72,11 +77,17 @@ logger = logging.getLogger(__name__)
 
 # Sections the config omits because they are filled at processing time; listed here
 # only for documentation/clarity (the overlay never touches them).
-PROCESSING_FILLED_SECTIONS = ("grid", "initial", "forcing", "s_coord",
-                              "title", "output_root_name")
+PROCESSING_FILLED_SECTIONS = (
+    "grid",
+    "initial",
+    "forcing",
+    "s_coord",
+    "title",
+    "output_root_name",
+)
 
 
-def sources_to_forcing_override(cfg: SpecConfig) -> Optional[Dict[str, Any]]:
+def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any] | None:
     """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
 
     Returns None when sources are model defaults (composition.forcing.origin ==
@@ -87,33 +98,37 @@ def sources_to_forcing_override(cfg: SpecConfig) -> Optional[Dict[str, Any]]:
     if cfg.composition.forcing.origin == "model_default":
         return None
 
-    def _src(spec) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"name": spec.name, "climatology": spec.climatology}
+    def _src(spec) -> dict[str, Any]:
+        d: dict[str, Any] = {"name": spec.name, "climatology": spec.climatology}
         if spec.glorys_layout:
             d["glorys_layout"] = spec.glorys_layout
         return d
 
-    def _item(item) -> Dict[str, Any]:
+    def _item(item) -> dict[str, Any]:
         d = item.model_dump(exclude={"source"})
         d["source"] = _src(item.source)
         return {k: v for k, v in d.items() if v is not None}
 
     f = cfg.forcing
     ic_spec = f.initial_conditions
-    ic: Dict[str, Any] = {"source": _src(ic_spec.source)}
+    ic: dict[str, Any] = {"source": _src(ic_spec.source)}
     if ic_spec.bgc_source:
         ic["bgc_source"] = _src(ic_spec.bgc_source)
 
-    forc: Dict[str, Any] = {}
-    for cat, items in [("surface", f.surface), ("boundary", f.boundary),
-                       ("tidal", f.tidal), ("river", f.river)]:
+    forc: dict[str, Any] = {}
+    for cat, items in [
+        ("surface", f.surface),
+        ("boundary", f.boundary),
+        ("tidal", f.tidal),
+        ("river", f.river),
+    ]:
         if items:
             forc[cat] = [_item(it) for it in items]
 
     return {"initial_conditions": ic, "forcing": forc}
 
 
-def spec_config_to_builder_kwargs(cfg: SpecConfig) -> Dict[str, Any]:
+def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
     """Map a ``SpecConfig``'s atomic inputs to ``CstarSpecBuilder`` constructor kwargs.
 
     Host/machine/path values are intentionally NOT passed — the builder resolves
@@ -148,7 +163,7 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> Dict[str, Any]:
     return kwargs
 
 
-def split_model_settings(cfg: SpecConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def split_model_settings(cfg: SpecConfig) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split the flat ``model_settings`` into (run_time_overrides, compile_time_overrides).
 
     ``cppdefs`` is the only compile-time section; everything else is a namelist
@@ -157,14 +172,17 @@ def split_model_settings(cfg: SpecConfig) -> Tuple[Dict[str, Any], Dict[str, Any
     """
     run_overrides = {k: copy.deepcopy(v) for k, v in cfg.model_settings.items()}
     cppdefs = run_overrides.pop("cppdefs", None)
-    compile_overrides = {"cppdefs": copy.deepcopy(cppdefs)} if cppdefs is not None else {}
+    compile_overrides = (
+        {"cppdefs": copy.deepcopy(cppdefs)} if cppdefs is not None else {}
+    )
     return run_overrides, compile_overrides
 
 
-def verify_content_hash(cfg: SpecConfig) -> Optional[str]:
+def verify_content_hash(cfg: SpecConfig) -> str | None:
     """If the config carries a recorded integrity hash and it no longer matches the
     recomputed hash of the results-affecting data, return a warning message (the file
-    appears hand-edited since write-out); otherwise None."""
+    appears hand-edited since write-out); otherwise None.
+    """
     recorded = cfg.provenance.content_hash
     if recorded:
         actual = cfg.content_hash()
@@ -178,7 +196,7 @@ def verify_content_hash(cfg: SpecConfig) -> Optional[str]:
     return None
 
 
-def resolve_host(cfg: Optional[SpecConfig] = None) -> Dict[str, Any]:
+def resolve_host(cfg: SpecConfig | None = None) -> dict[str, Any]:
     """Resolve the host (machine tag + data paths) from :mod:`cstar_forge.config`.
 
     If ``cfg`` is given, also include the host-derived run paths
@@ -187,9 +205,12 @@ def resolve_host(cfg: Optional[SpecConfig] = None) -> Dict[str, Any]:
     from . import config
 
     p = config.paths
-    info: Dict[str, Any] = {
+    info: dict[str, Any] = {
         "system": config.system,
-        "paths": {k: str(getattr(p, k)) for k in ("source_data", "input_data", "scratch", "catalog")},
+        "paths": {
+            k: str(getattr(p, k))
+            for k in ("source_data", "input_data", "scratch", "catalog")
+        },
     }
     mc = getattr(config, "machine_config", None)
     if mc is not None:
@@ -205,12 +226,14 @@ def resolve_host(cfg: Optional[SpecConfig] = None) -> Dict[str, Any]:
     return info
 
 
-def host_summary(cfg: Optional[SpecConfig] = None) -> str:
+def host_summary(cfg: SpecConfig | None = None) -> str:
     """A human-readable one-block summary of the resolved host."""
     h = resolve_host(cfg)
     lines = [f"Host: {h['system']}"]
     if "machine" in h and h["machine"].get("account"):
-        lines.append(f"  account: {h['machine']['account']}  pes/node: {h['machine'].get('pes_per_node')}")
+        lines.append(
+            f"  account: {h['machine']['account']}  pes/node: {h['machine'].get('pes_per_node')}"
+        )
     for k, v in h["paths"].items():
         lines.append(f"  {k:11s} -> {v}")
     if cfg is not None:
@@ -222,14 +245,15 @@ def host_summary(cfg: Optional[SpecConfig] = None) -> str:
 def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
     """Forge's default executor: a ``CstarSpecBuilder`` built from the config's
     atomic inputs. Imported lazily so the lightweight bits above (host resolution,
-    settings split) stay importable without the full forge stack."""
+    settings split) stay importable without the full forge stack.
+    """
     from ._core import CstarSpecBuilder
 
     return CstarSpecBuilder(**spec_config_to_builder_kwargs(cfg))
 
 
 def process_spec_config(
-    spec: Union[SpecConfig, str, Path],
+    spec: SpecConfig | str | Path,
     *,
     ensure_data: bool = True,
     generate: bool = True,
@@ -238,7 +262,7 @@ def process_spec_config(
     use_dask: bool = True,
     partition_files: bool = False,
     validate: bool = True,
-    executor_factory: Optional[ExecutorFactory] = None,
+    executor_factory: ExecutorFactory | None = None,
 ) -> SpecConfigExecutor:
     """Run Phase-2 processing for a ``SpecConfig`` (object or path to a YAML file).
 
@@ -288,29 +312,44 @@ def process_spec_config(
     if ensure_data:
         executor.ensure_source_data()
     if generate:
-        executor.generate_inputs(clobber=clobber, use_dask=use_dask,
-                                 partition_files=partition_files)
+        executor.generate_inputs(
+            clobber=clobber, use_dask=use_dask, partition_files=partition_files
+        )
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)
-        executor.configure_build(compile_time_settings=compile_overrides,
-                                 run_time_settings=run_overrides,
-                                 n_tracers=n_tracers_from_model_settings(cfg.model_settings))
+        executor.configure_build(
+            compile_time_settings=compile_overrides,
+            run_time_settings=run_overrides,
+            n_tracers=n_tracers_from_model_settings(cfg.model_settings),
+        )
     return executor
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m cstar_forge.spec_config_engine",
         description="Phase 2: process a spec_config.yml on this machine "
-                    "(generate inputs + configure build).")
+        "(generate inputs + configure build).",
+    )
     parser.add_argument("spec_config", help="path to a spec_config.yml")
-    parser.add_argument("--no-data", action="store_true", help="skip ensure_source_data")
-    parser.add_argument("--no-generate", action="store_true", help="skip generate_inputs")
-    parser.add_argument("--no-configure", action="store_true", help="skip configure_build")
-    parser.add_argument("--clobber", action="store_true", help="overwrite existing input files")
-    parser.add_argument("--no-dask", action="store_true", help="disable dask in input generation")
-    parser.add_argument("--host-only", action="store_true",
-                        help="just print the resolved host and exit")
+    parser.add_argument(
+        "--no-data", action="store_true", help="skip ensure_source_data"
+    )
+    parser.add_argument(
+        "--no-generate", action="store_true", help="skip generate_inputs"
+    )
+    parser.add_argument(
+        "--no-configure", action="store_true", help="skip configure_build"
+    )
+    parser.add_argument(
+        "--clobber", action="store_true", help="overwrite existing input files"
+    )
+    parser.add_argument(
+        "--no-dask", action="store_true", help="disable dask in input generation"
+    )
+    parser.add_argument(
+        "--host-only", action="store_true", help="just print the resolved host and exit"
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")

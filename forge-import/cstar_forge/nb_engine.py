@@ -3,47 +3,46 @@
 from __future__ import annotations
 
 import warnings
+
 # Suppress harmless warning about module already being in sys.modules
 # This occurs when cstar_forge package imports nb_engine before running as module
 # The warning is emitted by Python's runpy module, so we need to suppress it early
 warnings.filterwarnings("ignore", category=RuntimeWarning, module="runpy")
 
 import argparse
-import os
 import logging
-from pathlib import Path
+import os
 import re
 import sys
 import tempfile
-from typing import Any, Dict, Iterable, Optional, Union
+from collections.abc import Iterable
+from pathlib import Path
+from typing import Any
 
 import nbformat
-import platform
-from datetime import datetime
 
 try:
     import papermill
 except ImportError:  # pragma: no cover - exercised via explicit error path
     papermill = None
 
+from . import compute, config
 from .parsers import load_app_config, load_yaml_params
-from . import compute
-from . import config
 
 logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 
 
-def _get_kernel_name_from_env() -> Optional[str]:
+def _get_kernel_name_from_env() -> str | None:
     """Extract kernel name from environment.yml file."""
     # Try to find environment.yml relative to the package root
     package_root = Path(__file__).resolve().parent.parent
     env_file = package_root / "environment.yml"
-    
+
     if not env_file.exists():
         return None
-    
+
     try:
         env_data = load_yaml_params(env_file)
         kernel_name = env_data.get("name")
@@ -52,10 +51,10 @@ def _get_kernel_name_from_env() -> Optional[str]:
         return None
 
 
-def save_notebook_copy(notebook_name: str = None):
+def save_notebook_copy(notebook_name: str | None = None):
     """
     Save a timestamped copy of the current notebook to executed/forge/{os}/.
-    
+
     Parameters
     ----------
     notebook_name : str, optional
@@ -63,60 +62,64 @@ def save_notebook_copy(notebook_name: str = None):
     """
     # Detect OS and set subdirectory
     os_dir = config.system_id
-    
+
     # Get notebook filename
     if notebook_name is None:
         # Try to get from kernel or environment
         try:
             from IPython import get_ipython
+
             ipython = get_ipython()
             if ipython and hasattr(ipython, "kernel"):
                 # Try to get from kernel metadata
-                notebook_name = ipython.kernel.shell.user_ns.get("__vsc_ipynb_file__", None)
+                notebook_name = ipython.kernel.shell.user_ns.get(
+                    "__vsc_ipynb_file__", None
+                )
                 print(f"Notebook name: {notebook_name}")
-        except:
+        except Exception:
             pass
 
         # Fallback: use current directory and known filename
         if notebook_name is None:
             raise ValueError("No notebook name found")
-    
+
     # Ensure we have the full path
     if not Path(notebook_name).is_absolute():
         notebook_path = Path.cwd() / notebook_name
     else:
         notebook_path = Path(notebook_name)
-    
+
     if not notebook_path.exists():
         print(f"Warning: Notebook file not found: {notebook_path}")
         return
-    
+
     # Create output directory
     output_dir = Path("executed/forge") / os_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Generate timestamped filename
     stem = notebook_path.stem
     copy_name = f"{stem}_{os_dir}.ipynb"
     copy_path = output_dir / copy_name
-    
+
     # Read and save the notebook
     try:
-        with open(notebook_path, "r", encoding="utf-8") as f:
+        with open(notebook_path, encoding="utf-8") as f:
             nb = nbformat.read(f, as_version=4)
-        
+
         with open(copy_path, "w", encoding="utf-8") as f:
             nbformat.write(nb, f)
-        
+
         print(f"Notebook copy saved to: {copy_path}")
         return copy_path
     except Exception as e:
         print(f"Error saving notebook copy: {e}")
         return None
-        
+
+
 def _render_markdown_placeholders(
-    notebook_path: Path, parameters: Dict[str, Any]
-) -> Optional[Path]:
+    notebook_path: Path, parameters: dict[str, Any]
+) -> Path | None:
     import nbformat
 
     nb = nbformat.read(str(notebook_path), as_version=4)
@@ -186,7 +189,7 @@ def _notebook_executed_successfully(path: Path) -> bool:
 def run_notebook(
     notebook_path: Path,
     output_path: Path,
-    parameters: Dict[str, Any],
+    parameters: dict[str, Any],
     force_recompute: bool = False,
     kernel_name: str = "cstar-forge-v0",
 ) -> None:
@@ -206,7 +209,7 @@ def run_notebook(
         output_path.unlink()
     else:
         logger.info("Running %s", output_path)
-    
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = _render_markdown_placeholders(notebook_path, parameters)
     input_path = temp_path if temp_path is not None else notebook_path
@@ -217,7 +220,11 @@ def run_notebook(
         os.chdir(notebook_dir)
         previous_pythonpath = os.environ.get("PYTHONPATH", "")
         if str(repo_root) not in previous_pythonpath.split(os.pathsep):
-            updated = os.pathsep.join([str(repo_root), previous_pythonpath]) if previous_pythonpath else str(repo_root)
+            updated = (
+                os.pathsep.join([str(repo_root), previous_pythonpath])
+                if previous_pythonpath
+                else str(repo_root)
+            )
             os.environ["PYTHONPATH"] = updated
         return module.execute_notebook(
             input_path.name,
@@ -237,7 +244,6 @@ def run_notebook(
             temp_path.unlink()
 
 
-
 def _apply_test_overrides(value: Any) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -253,12 +259,15 @@ def _apply_test_overrides(value: Any) -> None:
         for item in value:
             _apply_test_overrides(item)
 
-def parse_args(args: Optional[Iterable[str]] = None) -> argparse.Namespace:
+
+def parse_args(args: Iterable[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
     # Get default kernel name from environment.yml
     default_kernel = _get_kernel_name_from_env()
-    
-    parser = argparse.ArgumentParser(description="Run parameterized notebooks with papermill.")
+
+    parser = argparse.ArgumentParser(
+        description="Run parameterized notebooks with papermill."
+    )
     parser.add_argument(
         "yaml_file",
         help="Path to parameters.yml file.",
@@ -281,7 +290,7 @@ def parse_args(args: Optional[Iterable[str]] = None) -> argparse.Namespace:
     return parser.parse_args(args=args)
 
 
-def main(args: Optional[Iterable[str]] = None) -> int:
+def main(args: Iterable[str] | None = None) -> int:
     """CLI entrypoint for running notebooks."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     parsed = parse_args(args=args)
@@ -300,26 +309,32 @@ def main(args: Optional[Iterable[str]] = None) -> int:
         for section in app_config.notebook_list.sections:
             cluster = None
             if section.use_dask_cluster and compute.slurm_available():
-                cluster = compute.dask_cluster(**dask_cluster_kwargs) if dask_cluster_kwargs else None
+                cluster = (
+                    compute.dask_cluster(**dask_cluster_kwargs)
+                    if dask_cluster_kwargs
+                    else None
+                )
             try:
                 for entry in section.children:
                     parameters = dict(entry.config.parameters)
-                    
-                    section_dask_kwargs = dict(dask_cluster_kwargs) if dask_cluster_kwargs else None
+
+                    section_dask_kwargs = (
+                        dict(dask_cluster_kwargs) if dask_cluster_kwargs else None
+                    )
                     if cluster is not None and section_dask_kwargs is not None:
                         section_dask_kwargs["scheduler_file"] = cluster.scheduler_file
                     if section_dask_kwargs is not None:
                         parameters["dask_cluster_kwargs"] = section_dask_kwargs
                     if parsed.test:
                         _apply_test_overrides(parameters)
-                    
+
                     # Resolve notebook path relative to workflow directory
                     notebook_path = Path(entry.notebook_name)
                     if not notebook_path.is_absolute():
                         notebook_path = workflow_dir / notebook_path
                     if notebook_path.suffix == "":
                         notebook_path = notebook_path.with_suffix(".ipynb")
-                    
+
                     # If notebook not found, try templates/ subdirectory
                     if not notebook_path.exists():
                         templates_path = workflow_dir / "templates" / notebook_path.name
@@ -328,17 +343,21 @@ def main(args: Optional[Iterable[str]] = None) -> int:
                     output_path = Path(entry.config.output_path)
                     if output_path.suffix == "":
                         output_path = output_path.with_suffix(".ipynb")
-                    
+
                     logger.info("Running %s -> %s", notebook_path, output_path)
                     try:
                         # Use parsed kernel or fall back to environment name from environment.yml
-                        kernel_name = parsed.kernel or _get_kernel_name_from_env() or "cstar-forge-v0"
+                        kernel_name = (
+                            parsed.kernel
+                            or _get_kernel_name_from_env()
+                            or "cstar-forge-v0"
+                        )
                         run_notebook(
                             notebook_path,
                             output_path=output_path,
                             parameters=parameters,
-                            force_recompute=parsed.force_recompute,                            
-                            kernel_name=kernel_name,                            
+                            force_recompute=parsed.force_recompute,
+                            kernel_name=kernel_name,
                         )
                         completed.append(str(output_path))
                         logger.info("Completed %s", output_path)
@@ -351,14 +370,13 @@ def main(args: Optional[Iterable[str]] = None) -> int:
                     cluster.shutdown()
     finally:
         pass
-    
+
     if failed:
         raise RuntimeError(
-            "Notebook execution failures. Completed: {completed}; Failed: {failed}".format(
-                completed=completed, failed=failed
-            )
+            f"Notebook execution failures. Completed: {completed}; Failed: {failed}"
         )
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

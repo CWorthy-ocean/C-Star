@@ -3,46 +3,53 @@ CstarSpecBuilder - Pydantic-based builder for C-Star blueprints.
 
 This class provides a Pydantic-based interface for building RomsMarblBlueprint objects.
 """
+
 from __future__ import annotations
 
 import asyncio
 import copy
 import os
+import shutil
 import sys
-import time
 import warnings
 from dataclasses import asdict as dataclass_asdict
 from datetime import datetime
-import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
-
-import xarray as xr
-import yaml
-from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR, ENV_CSTAR_IN_ACTIVE_ALLOCATION, ENV_CSTAR_NPROCS_POST
-from cstar.orchestration.models import Resource
-from cstar.orchestration.utils import ENV_CSTAR_SLURM_MAX_WALLTIME, ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from typing import Any
 
 import cstar.applications.roms_marbl.models as cstar_models
-from cstar.orchestration.serialization import deserialize
-from cstar.roms import ROMSSimulation
-from cstar.execution.handler import ExecutionStatus
-from cstar.entrypoint.config import get_job_config, get_service_config
-
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.app import RomsMarblRunner
-from cstar.applications.core import RunnerRequest
-from . import config
-from . import source_data
-from . import models as forge_models
-from . import input_data
-from .settings import render_roms_settings, write_roms_namelist
-from .util import compute_timestep_from_cfl, compute_v_sponge_from_grid, roms_tools_default_nesting_period_seconds
 import roms_tools as rt
+import xarray as xr
+import yaml
+from cstar.applications.core import RunnerRequest
+from cstar.applications.roms_marbl.app import RomsMarblRunner
+from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_IN_ACTIVE_ALLOCATION,
+    ENV_CSTAR_NPROCS_POST,
+)
+from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.orchestration.models import Resource
+from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.utils import (
+    ENV_CSTAR_SLURM_ACCOUNT,
+    ENV_CSTAR_SLURM_MAX_WALLTIME,
+    ENV_CSTAR_SLURM_QUEUE,
+)
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+
+from . import config, input_data, source_data
+from . import models as forge_models
+from .settings import render_roms_settings, write_roms_namelist
+from .util import (
+    compute_timestep_from_cfl,
+    compute_v_sponge_from_grid,
+    roms_tools_default_nesting_period_seconds,
+)
 
 
-def resolve_catalog_dir(catalog_root: Optional[Union[str, Path]]) -> Path:
+def resolve_catalog_dir(catalog_root: str | Path | None) -> Path:
     """
     Resolve the absolute inner *catalog* directory (direct parent of ``blueprints/``).
 
@@ -81,18 +88,19 @@ def _schedule_coroutine(coro):
         # No running loop, just run it directly
         return asyncio.run(coro)
 
+
 class DatasetsDict(dict):
     """Dictionary-like class that supports method call with key parameter."""
-    
-    def __call__(self, key: Optional[str] = None):
+
+    def __call__(self, key: str | None = None):
         """
         Return a specific dataset by key, or the whole dictionary if key is None.
-        
+
         Parameters
         ----------
         key : str, optional
             Key to retrieve. If None, returns self.
-        
+
         Returns
         -------
         Union[xr.Dataset, List[xr.Dataset], dict]
@@ -106,24 +114,25 @@ class DatasetsDict(dict):
 class BlueprintStage:
     """
     Blueprint stage constants and validation.
-    
+
     Valid stages:
     - PRECONFIG: Blueprint before configuration
     - POSTCONFIG: Blueprint after configuration
     - BUILD: Blueprint after building/compiling the model
     - RUN: Blueprint for running the simulation
     """
+
     PRECONFIG: str = "preconfig"
     POSTCONFIG: str = "postconfig"
     BUILD: str = "build"
     RUN: str = "run"
-    
+
     # Numerical values for stage comparison
     N_PRECONFIG: int = 0
     N_POSTCONFIG: int = 1
     N_BUILD: int = 2
     N_RUN: int = 3
-    
+
     @classmethod
     def validate_stage(cls, stage: str) -> str:
         """Validate that stage is one of the valid values."""
@@ -131,7 +140,7 @@ class BlueprintStage:
         if stage not in valid_stages:
             raise ValueError(f"stage must be one of {valid_stages}, got {stage}")
         return stage
-    
+
     @classmethod
     def get_stage_value(cls, stage: str) -> int:
         """Get the numerical value of a stage for comparison."""
@@ -144,7 +153,7 @@ class BlueprintStage:
         return stage_map.get(stage, -1)
 
 
-def _deep_merge_settings_dict(target: Dict[str, Any], update: Dict[str, Any]) -> None:
+def _deep_merge_settings_dict(target: dict[str, Any], update: dict[str, Any]) -> None:
     """
     Recursively merge ``update`` into ``target`` (mutates ``target`` in place).
 
@@ -161,35 +170,35 @@ def _deep_merge_settings_dict(target: Dict[str, Any], update: Dict[str, Any]) ->
 class CstarSpecBuilder(BaseModel):
     """
     Builder for C-Star RomsMarblBlueprint specifications.
-    
+
     This class provides a Pydantic-based interface for constructing
     and managing ROMS-MARBL blueprints through a staged workflow.
-    
+
     **Workflow and Stage Progression:**
-    
+
     The builder progresses through distinct stages, each representing a
     phase of the model configuration and execution pipeline:
-    
+
     1. **PRECONFIG** (initialization):
        - Created during `model_post_init()` via `_initialize_blueprint()`
        - Blueprint structure initialized with placeholder data
        - Settings dictionaries initialized from model defaults
        - Blueprint persisted to disk
-       
+
     2. **POSTCONFIG** (input generation):
        - Achieved by calling `generate_inputs()`
        - Source data prepared, input files generated (grid, initial conditions, forcing)
        - Blueprint updated with actual data file locations
        - Settings updated with input-specific values
        - Blueprint persisted to disk
-       
+
     3. **BUILD** (configuration):
        - Achieved by calling `configure_build()`
        - Jinja2 templates rendered with current settings
        - Blueprint updated with rendered code locations
        - Blueprint persisted to disk
        - ROMSSimulation instance created
-       
+
     4. **RUN** (execution):
        - Achieved by calling `run()` after `build()`
        - Blueprint persisted with runtime parameters
@@ -210,7 +219,7 @@ class CstarSpecBuilder(BaseModel):
     set, so you can still tune e.g. ``ndtfast`` or ``dt``.
 
     **Key Concepts:**
-    
+
     - Settings are stored in sidecar YAML files (not in blueprint itself)
     - Blueprint state is persisted to disk at each stage transition
     - Grid object is created during initialization and reused throughout
@@ -218,32 +227,36 @@ class CstarSpecBuilder(BaseModel):
     - Optional ``catalog_root`` selects an *outer* anchor so blueprints and builds live under
       ``<catalog_root>/catalog/`` (or use ``catalog_root='local'`` for the in-repo
       ``cstar_forge/catalog`` tree; default uses ``config.paths.catalog``).
-    
+
     .. warning::
         This functionality is under active development and not yet fully implemented.
         Some methods (e.g., `build()` and `run()`) may raise `NotImplementedError`.
         Use with caution.
     """
-    
+
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
-    
+
     # User inputs
     description: str = "Generated blueprint"
     model_name: str
     grid_name: str
-    grid_kwargs: Dict[str, Any]
-    grid_kwargs_parent: Optional[Dict[str, Any]] = Field(default=None, validate_default=False)
-    grid_kwargs_child: Optional[Dict[str, Any]] = Field(default=None, validate_default=False)
+    grid_kwargs: dict[str, Any]
+    grid_kwargs_parent: dict[str, Any] | None = Field(
+        default=None, validate_default=False
+    )
+    grid_kwargs_child: dict[str, Any] | None = Field(
+        default=None, validate_default=False
+    )
     open_boundaries: forge_models.OpenBoundaries
     partitioning: cstar_models.PartitioningParameterSet
     start_date: datetime = Field(alias="start_time")
     end_date: datetime = Field(alias="end_time")
-    cdr_forcing: Optional[dict] = Field(
+    cdr_forcing: dict | None = Field(
         default=None,
         alias="CDR_forcing",
         validate_default=False,
     )
-    forcing_override: Optional[Dict[str, Any]] = Field(
+    forcing_override: dict[str, Any] | None = Field(
         default=None,
         validate_default=False,
         description=(
@@ -252,7 +265,7 @@ class CstarSpecBuilder(BaseModel):
             "ForcingSpec selection; ignored when None (model defaults are used)."
         ),
     )
-    model_reference_date: Optional[datetime] = Field(
+    model_reference_date: datetime | None = Field(
         default=None,
         validate_default=False,
         description=(
@@ -260,9 +273,9 @@ class CstarSpecBuilder(BaseModel):
             "None uses the roms-tools default (2000-01-01)."
         ),
     )
-    override: Optional[List[Union[str, Path]]] = Field(default=None, validate_default=False)
-    ensemble_id: Optional[int] = Field(default=None, validate_default=False)
-    catalog_root: Optional[Union[str, Path]] = Field(
+    override: list[str | Path] | None = Field(default=None, validate_default=False)
+    ensemble_id: int | None = Field(default=None, validate_default=False)
+    catalog_root: str | Path | None = Field(
         default=None,
         validate_default=False,
         description=(
@@ -274,7 +287,7 @@ class CstarSpecBuilder(BaseModel):
             "Use ``'local'`` for the in-repo ``cstar_forge/catalog`` package directory."
         ),
     )
-    initialize_catalog_from: Optional[Union[str, Path]] = Field(
+    initialize_catalog_from: str | Path | None = Field(
         default=None,
         validate_default=False,
         description=(
@@ -302,56 +315,41 @@ class CstarSpecBuilder(BaseModel):
         ),
     )
     # Internal attributes (computed/loaded)
-    blueprint: Optional[cstar_models.RomsMarblBlueprint] = Field(
-        default=None,
-        init=False,
-        validate_default=False,
-        validate_assignment=False
+    blueprint: cstar_models.RomsMarblBlueprint | None = Field(
+        default=None, init=False, validate_default=False, validate_assignment=False
     )
-    src_data: Optional[source_data.SourceData] = Field(
-        default=None,
-        init=False,
-        validate_default=False
+    src_data: source_data.SourceData | None = Field(
+        default=None, init=False, validate_default=False
     )
-    grid: Optional[rt.Grid] = Field(
-        default=None,
-        init=False,
-        validate_default=False,
-        exclude=True
+    grid: rt.Grid | None = Field(
+        default=None, init=False, validate_default=False, exclude=True
     )
-    grid_parent: Optional[rt.Grid] = Field(
-        default=None,
-        init=False,
-        validate_default=False,
-        exclude=True
+    grid_parent: rt.Grid | None = Field(
+        default=None, init=False, validate_default=False, exclude=True
     )
-    grid_child: Optional[rt.Grid] = Field(
-        default=None,
-        init=False,
-        validate_default=False,
-        exclude=True
+    grid_child: rt.Grid | None = Field(
+        default=None, init=False, validate_default=False, exclude=True
     )
-    metadata_child: Optional[dict[str, Any]] = Field(
-        default=None,
-        init=False,
-        validate_default=False,
-        exclude=True
+    metadata_child: dict[str, Any] | None = Field(
+        default=None, init=False, validate_default=False, exclude=True
     )
-    _model_spec: Optional[forge_models.ModelSpec] = PrivateAttr(default=None)
-    _datasets: Optional[Dict[str, Union[xr.Dataset, List[xr.Dataset]]]] = PrivateAttr(default=None)
-    _stage: Optional[str] = PrivateAttr(default=None)
-    _cstar_simulation: Optional[Any] = PrivateAttr(default=None)
-    _settings_compile_time: Dict[str, Any] = PrivateAttr(default_factory=dict)
-    _settings_run_time: Dict[str, Any] = PrivateAttr(default_factory=dict)
-    _catalog_instance: Optional[Any] = PrivateAttr(default=None)
+    _model_spec: forge_models.ModelSpec | None = PrivateAttr(default=None)
+    _datasets: dict[str, xr.Dataset | list[xr.Dataset]] | None = PrivateAttr(
+        default=None
+    )
+    _stage: str | None = PrivateAttr(default=None)
+    _cstar_simulation: Any | None = PrivateAttr(default=None)
+    _settings_compile_time: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _settings_run_time: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _catalog_instance: Any | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
-    def _validate_dates(self) -> "CstarSpecBuilder":
+    def _validate_dates(self) -> CstarSpecBuilder:
         """Validate that start_date precedes end_date."""
         if self.end_date <= self.start_date:
             raise ValueError("end_date must be after start_date")
         return self
-    
+
     @property
     def input_data_dir(self) -> Path:
         """Directory for generated input NetCDF files (grid, forcing, etc.)."""
@@ -360,21 +358,20 @@ class CstarSpecBuilder(BaseModel):
         # paths on disk.
         safe = input_data.netcdf_filename_component(self.name)
         return config.paths.input_data / safe
-    
+
     def model_post_init(self, __context: Any) -> None:
         """
         Post-initialization hook called automatically after model validation.
-        
+
         This method is called by Pydantic after the instance is validated and
         performs critical initialization:
-        
+
         1. Creates the grid object from `grid_kwargs`
         2. Initializes the blueprint structure (calls `_initialize_blueprint()`)
-        
+
         After this method completes, the blueprint is in the **PRECONFIG** stage
         and has been persisted to disk.
         """
-        
         if self.catalog_root is None:
             print(
                 "Note: No catalog_root specified. Using internal cstar-forge catalog for ModelSpec "
@@ -389,20 +386,26 @@ class CstarSpecBuilder(BaseModel):
 
         # I am a parent but not a child
         if self.grid_kwargs_child is not None and self.grid_kwargs_parent is None:
-            # Make both parent and child, to make the nesting data. 
-            grid_kwargs_child = {k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"}
+            # Make both parent and child, to make the nesting data.
+            grid_kwargs_child = {
+                k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
+            }
 
             self.grid_child = rt.Grid(**grid_kwargs_child)
             self.grid = rt.Grid(**self.grid_kwargs)
             self.grid_child = rt.align_grids(self.grid, self.grid_child)
 
-            if 'metadata' in self.grid_kwargs_child:
-                self.metadata_child = self.grid_kwargs_child['metadata']
+            if "metadata" in self.grid_kwargs_child:
+                self.metadata_child = self.grid_kwargs_child["metadata"]
 
         # I am a parent and a child
         elif self.grid_kwargs_child is not None and self.grid_kwargs_parent is not None:
-            grid_kwargs_child = {k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"}
-            grid_kwargs_parent = {k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"}
+            grid_kwargs_child = {
+                k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
+            }
+            grid_kwargs_parent = {
+                k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
+            }
             grid_kwargs = {k: v for k, v in self.grid_kwargs.items() if k != "metadata"}
 
             # Adapt this grid to its parent, but create nesting data for its child
@@ -413,12 +416,14 @@ class CstarSpecBuilder(BaseModel):
             self.grid = rt.align_grids(self.grid_parent, self.grid)
             self.grid_child = rt.align_grids(self.grid, self.grid_child)
 
-            if 'metadata' in self.grid_kwargs_child:
-                self.metadata_child = self.grid_kwargs_child['metadata']
+            if "metadata" in self.grid_kwargs_child:
+                self.metadata_child = self.grid_kwargs_child["metadata"]
 
         # I am a child but not a parent
         elif self.grid_kwargs_child is None and self.grid_kwargs_parent is not None:
-            grid_kwargs_parent = {k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"}
+            grid_kwargs_parent = {
+                k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
+            }
             grid_kwargs = {k: v for k, v in self.grid_kwargs.items() if k != "metadata"}
 
             # Adapt this grid to its parent. no nesting data needed
@@ -435,13 +440,13 @@ class CstarSpecBuilder(BaseModel):
         self._print_planned_netcdf_outputs()
         self._print_output_paths()
 
-    def _planned_netcdf_outputs(self) -> List[Path]:
+    def _planned_netcdf_outputs(self) -> list[Path]:
         """Return the list of NetCDF files expected from input generation."""
         if self._model_spec is None:
             self._load_model_spec()
 
         input_data_dir = self.input_data_dir
-        planned_paths: List[Path] = []
+        planned_paths: list[Path] = []
 
         def _add_nc(stem: str) -> None:
             base = input_data.netcdf_filename_component(self.name)
@@ -454,7 +459,7 @@ class CstarSpecBuilder(BaseModel):
         if model_inputs is None:
             return planned_paths
 
-        inputs_cfg: Dict[str, Any] = {}
+        inputs_cfg: dict[str, Any] = {}
         if hasattr(model_inputs, "model_dump"):
             dumped_inputs = model_inputs.model_dump(exclude_none=True)
             if isinstance(dumped_inputs, dict):
@@ -494,9 +499,17 @@ class CstarSpecBuilder(BaseModel):
 
                         source_name = entry.get("source").get("name")
                         if entry.get("type") == "bgc" and source_name == "MBL_co2":
-                                stem = f"{category}-{forcing_type}-co2" if forcing_type else category
+                            stem = (
+                                f"{category}-{forcing_type}-co2"
+                                if forcing_type
+                                else category
+                            )
                         else:
-                            stem = f"{category}-{forcing_type}" if forcing_type else category
+                            stem = (
+                                f"{category}-{forcing_type}"
+                                if forcing_type
+                                else category
+                            )
                         _add_nc(stem)
                     continue
 
@@ -541,10 +554,12 @@ class CstarSpecBuilder(BaseModel):
     def name(self) -> str:
         """
         Return the name of this blueprint as '{model_spec.name}_{grid_name}'.
-        
+
         This property sets blueprint.name when the blueprint is created.
         """
-        ensemble_str = f"_{self.ensemble_id:03d}" if self.ensemble_id is not None else ""
+        ensemble_str = (
+            f"_{self.ensemble_id:03d}" if self.ensemble_id is not None else ""
+        )
         return f"{self._model_spec.name}_{self.grid_name}_{self.n_procs}procs{ensemble_str}"
 
     @property
@@ -555,7 +570,9 @@ class CstarSpecBuilder(BaseModel):
     @property
     def datestr(self) -> str:
         """Return the date string."""
-        return f"{self.start_date.strftime('%Y%m%d')}-{self.end_date.strftime('%Y%m%d')}"
+        return (
+            f"{self.start_date.strftime('%Y%m%d')}-{self.end_date.strftime('%Y%m%d')}"
+        )
 
     @property
     def casename(self) -> str:
@@ -566,12 +583,12 @@ class CstarSpecBuilder(BaseModel):
     def run_output_dir(self) -> Path:
         """Simulation scratch directory under ``config.paths.scratch`` (primary data tree)."""
         return config.paths.scratch / self.casename
-    
+
     @property
     def default_runtime_params(self) -> cstar_models.RuntimeParameterSet:
         """
         Get default runtime parameters.
-        
+
         Returns a RuntimeParameterSet with default values based on the builder's
         configuration (start_date, end_date, output_dir).
         """
@@ -585,6 +602,7 @@ class CstarSpecBuilder(BaseModel):
         """Return (and cache) a DomainCatalog for this builder's resolved catalog directory."""
         if self._catalog_instance is None:
             from .domain_catalog import DomainCatalog
+
             self._catalog_instance = DomainCatalog(
                 catalog_root=self.resolved_catalog_dir,
                 initialize_catalog_from=self.initialize_catalog_from,
@@ -602,39 +620,44 @@ class CstarSpecBuilder(BaseModel):
     def blueprint_dir(self) -> Path:
         """Return the blueprint directory path."""
         return self._get_catalog().blueprint_dir_for(config.system_id, self.name)
-    
+
     @property
     def compile_time_code_dir(self) -> Path:
         """Compile-time rendered templates inside this blueprint's Build/ directory."""
-        return self._get_catalog().build_dir_for(config.system_id, self.name) / "compile-time"
+        return (
+            self._get_catalog().build_dir_for(config.system_id, self.name)
+            / "compile-time"
+        )
 
     @property
     def run_time_code_dir(self) -> Path:
         """Run-time rendered templates inside this blueprint's Build/ directory."""
-        return self._get_catalog().build_dir_for(config.system_id, self.name) / "run-time"
+        return (
+            self._get_catalog().build_dir_for(config.system_id, self.name) / "run-time"
+        )
 
     def persist(self) -> None:
         """
         Persist the current blueprint state to a YAML file.
-        
+
         Saves the blueprint to disk at the file path determined by the current
         stage (PRECONFIG, POSTCONFIG, BUILD, or RUN). Also saves settings to
         a sidecar file.
-        
+
         **File Structure:**
-        
+
         - Blueprint: `B_{name}_{stage}.yml` (or with datestr for RUN stage)
         - Settings: `settings_B_{name}_{stage}.yml` (sidecar file)
-        
+
         The settings are stored separately from the blueprint to avoid
         cluttering the blueprint with configuration details.
-        
+
         **Notes:**
-        
+
         - The directory is created if it doesn't exist
         - Serialization warnings are suppressed (expected for placeholder values)
         - Path objects are converted to strings for YAML compatibility
-        
+
         Raises
         ------
         ValueError
@@ -644,26 +667,28 @@ class CstarSpecBuilder(BaseModel):
         """
         if self.blueprint is None:
             raise ValueError("Cannot persist: blueprint is not initialized")
-        
+
         if self._stage is None:
             raise ValueError("Cannot persist: _stage is not set")
-        
+
         # Validate stage
         stage = BlueprintStage.validate_stage(self._stage)
-        
+
         # Determine run_params for path_blueprint if stage is "run"
         run_params = None
         if stage == BlueprintStage.RUN:
             if self.blueprint.runtime_params is None:
-                raise ValueError("Cannot persist run blueprint: runtime_params is not set")
+                raise ValueError(
+                    "Cannot persist run blueprint: runtime_params is not set"
+                )
             run_params = self.blueprint.runtime_params
-        
+
         # Get the file path using path_blueprint
         bp_path = self.path_blueprint(stage=stage, run_params=run_params)
-        
+
         # Ensure directory exists
         bp_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Save blueprint to YAML file
         # Use mode='json' to ensure all values are JSON/YAML-serializable (no Python objects)
         # Use exclude_none=True to handle placeholder values gracefully
@@ -672,38 +697,31 @@ class CstarSpecBuilder(BaseModel):
             # Filter all Pydantic serialization warnings
             # These occur because placeholder values (None) don't match expected types
             warnings.filterwarnings(
-                'ignore',
-                message='.*Pydantic.*',
-                category=UserWarning
+                "ignore", message=".*Pydantic.*", category=UserWarning
             )
             warnings.filterwarnings(
-                'ignore',
-                message='.*serialization.*',
-                category=UserWarning
+                "ignore", message=".*serialization.*", category=UserWarning
             )
-            blueprint_dict = self.blueprint.model_dump(mode='json', exclude_none=True)
-        
+            blueprint_dict = self.blueprint.model_dump(mode="json", exclude_none=True)
+
         with bp_path.open("w") as f:
             yaml.safe_dump(blueprint_dict, f, default_flow_style=False, sort_keys=False)
-        
+
         # Write settings to sidecar file
         self._persist_settings(bp_path)
-    
 
-
-    
     def _path_settings_file(self, blueprint_path: Path) -> Path:
         """
         Return the path to the settings sidecar file for a given blueprint path.
-        
+
         The settings file has the same name as the blueprint file, with "settings_" prepended.
         For example: "B_model_postconfig.yml" -> "settings_B_model_postconfig.yml"
-        
+
         Parameters
         ----------
         blueprint_path : Path
             Path to the blueprint file.
-        
+
         Returns
         -------
         Path
@@ -712,22 +730,22 @@ class CstarSpecBuilder(BaseModel):
         # Get the directory and filename
         directory = blueprint_path.parent
         filename = blueprint_path.name
-        
+
         # Prepend "settings_" to the filename
         settings_filename = f"settings_{filename}"
-        
+
         return directory / settings_filename
-    
+
     def _convert_paths_to_strings(self, obj: Any) -> Any:
         """
         Recursively convert Path objects to strings and replace non-serializable
         objects (e.g. xarray.Dataset) with placeholders for YAML serialization.
-        
+
         Parameters
         ----------
         obj : Any
             Object to process (can be dict, list, Path, or other types).
-        
+
         Returns
         -------
         Any
@@ -746,61 +764,60 @@ class CstarSpecBuilder(BaseModel):
         else:
             return obj
 
-
     def _persist_settings(self, blueprint_path: Path) -> None:
         """
         Persist settings dictionaries to a sidecar file.
-        
+
         Writes compile_time and run_time settings to a YAML file with the same
         name as the blueprint file, prepended with "settings_".
-        
+
         Parameters
         ----------
         blueprint_path : Path
             Path to the blueprint file (used to determine settings file path).
         """
         settings_path = self._path_settings_file(blueprint_path)
-        
+
         # Prepare settings dictionary
         settings_dict = {
             "compile_time": self._settings_compile_time,
-            "run_time": self._settings_run_time
+            "run_time": self._settings_run_time,
         }
-        
+
         # Convert all Path objects to strings for YAML serialization
         settings_dict = self._convert_paths_to_strings(settings_dict)
-        
+
         # Ensure directory exists
         settings_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Write settings to YAML file
         with settings_path.open("w") as f:
             yaml.safe_dump(settings_dict, f, default_flow_style=False, sort_keys=False)
-    
+
     def _load_settings_from_file(self, blueprint_path: Path) -> None:
         """
         Load settings dictionaries from a sidecar file.
-        
+
         Reads compile_time and run_time settings from a YAML file with the same
         name as the blueprint file, prepended with "settings_".
-        
+
         If the settings file doesn't exist, leaves settings dictionaries unchanged.
-        
+
         Parameters
         ----------
         blueprint_path : Path
             Path to the blueprint file (used to determine settings file path).
         """
         settings_path = self._path_settings_file(blueprint_path)
-        
+
         if not settings_path.exists():
             # Settings file doesn't exist, leave settings unchanged
             return
-        
+
         try:
             with settings_path.open("r") as f:
                 settings_dict = yaml.safe_load(f)
-            
+
             # Update settings dictionaries if they exist in the file
             if settings_dict:
                 if "compile_time" in settings_dict:
@@ -812,13 +829,17 @@ class CstarSpecBuilder(BaseModel):
             warnings.warn(
                 f"Failed to load settings from {settings_path}: {type(e).__name__}: {e}",
                 UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
-    
-    def path_blueprint(self, stage: Optional[str] = None, run_params: Optional[cstar_models.RuntimeParameterSet] = None) -> Path:
+
+    def path_blueprint(
+        self,
+        stage: str | None = None,
+        run_params: cstar_models.RuntimeParameterSet | None = None,
+    ) -> Path:
         """
         Return the path to the blueprint file for a given stage.
-        
+
         Parameters
         ----------
         stage : str, optional
@@ -826,12 +847,12 @@ class CstarSpecBuilder(BaseModel):
         run_params : RuntimeParameterSet, optional
             Runtime parameters for the simulation. Required if stage="run", optional otherwise.
             Used to generate a unique filename for the run blueprint.
-        
+
         Returns
         -------
         Path
             Path to the blueprint YAML file for the specified stage.
-        
+
         Raises
         ------
         AssertionError
@@ -841,10 +862,12 @@ class CstarSpecBuilder(BaseModel):
         """
         if stage is None:
             if self.blueprint is None:
-                raise ValueError("stage must be provided if blueprint is not initialized")
+                raise ValueError(
+                    "stage must be provided if blueprint is not initialized"
+                )
             stage = self.blueprint.state
         BlueprintStage.validate_stage(stage)
-        
+
         if stage == BlueprintStage.RUN:
             if run_params is None:
                 raise ValueError("run_params is required when stage='run'")
@@ -859,12 +882,12 @@ class CstarSpecBuilder(BaseModel):
     def datasets(self) -> DatasetsDict:
         """
         Return a dictionary of xarray Datasets loaded from blueprint data files.
-        
+
         This property lazily loads xarray Datasets from the NetCDF files referenced
         in the blueprint. The datasets are cached in `_datasets` for efficiency.
-        
+
         **Supported Fields:**
-        
+
         The dictionary includes datasets for all data fields in the blueprint:
         - "grid": Grid dataset
         - "initial_conditions": Initial conditions dataset
@@ -873,85 +896,95 @@ class CstarSpecBuilder(BaseModel):
         - "forcing.tidal": Tidal forcing datasets
         - "forcing.rivers": River forcing datasets
         - "cdr_forcing": CDR forcing dataset
-        
+
         **Usage:**
-        
+
         Supports both dictionary-style and method-style access:
         - `datasets["grid"]` - dictionary indexing
         - `datasets(key="grid")` - method call with key parameter
         - `datasets()` or `datasets` - returns all datasets
-        
+
         **Data Loading:**
-        
+
         Datasets are loaded lazily from the blueprint's data file locations.
         If a field doesn't exist in the blueprint, it is skipped. Datasets are
         opened in read-only mode (lazy loading).
-        
+
         Returns
         -------
         DatasetsDict
             Dictionary-like object mapping field names to xarray Datasets.
             Returns empty DatasetsDict if blueprint is not initialized.
-            
+
         Warns
         -----
         UserWarning
             If blueprint is not initialized. Returns empty DatasetsDict.
         """
-        
         if self.blueprint is None:
             warnings.warn(
                 "Blueprint is not initialized. Cannot retrieve datasets.",
                 UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
             return DatasetsDict()
-        
+
         # Populate all datasets from blueprint if not already done
         if self._datasets is None:
             self._datasets = {}
-        
+
         # Dynamically generate list of fields that contain data entries
         # Start with grid and initial_conditions
         data_fields = ["grid", "initial_conditions"]
-        
+
         # Add forcing fields from model_spec.inputs.forcing
-        
-        if self._model_spec and self._model_spec.inputs and self._model_spec.inputs.forcing:
+
+        if (
+            self._model_spec
+            and self._model_spec.inputs
+            and self._model_spec.inputs.forcing
+        ):
             # Loop over all fields in the forcing configuration
             for field_name in self._model_spec.inputs.forcing.model_fields.keys():
                 data_fields.append(f"forcing.{field_name}")
-        
+
         # Add cdr_forcing (not part of inputs, but a separate blueprint field)
         data_fields.append("cdr_forcing")
-        
+
         # Loop over all data fields and call get_ds for each
         # Suppress Pydantic warnings when accessing datasets
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.main")
-            warnings.filterwarnings("ignore", message=".*Pydantic.*", category=UserWarning)
-            warnings.filterwarnings("ignore", message=".*serializer.*", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, module="pydantic.main"
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*Pydantic.*", category=UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*serializer.*", category=UserWarning
+            )
             for field in data_fields:
                 # Skip if already populated
                 if field in self._datasets:
                     continue
-                
+
                 # Call get_ds to get the datasets (it will return None if field doesn't exist)
                 ds_list = self.get_ds(field, from_file=False)
                 if ds_list is not None and len(ds_list) > 0:
                     # Store single dataset or list
                     self._datasets[field] = ds_list[0] if len(ds_list) == 1 else ds_list
-        
+
         # Return as DatasetsDict to support both dict access and method call
         return DatasetsDict(self._datasets)
-    
+
     def _load_model_spec(self):
         """Load ModelSpec from the builder's catalog when catalog_root is set, else from the default catalog."""
         if self._uses_explicit_catalog:
             self._model_spec = self._get_catalog().load_model_spec(self.model_name)
         else:
             from .domain_catalog import default_catalog
+
             self._model_spec = default_catalog.load_model_spec(self.model_name)
 
     @property
@@ -963,6 +996,7 @@ class CstarSpecBuilder(BaseModel):
         """Return MachineConfig from the builder's catalog when catalog_root is set, else from config."""
         if self._uses_explicit_catalog:
             from .config import MachineConfig
+
             try:
                 data = self._get_catalog().machine_data(config.system)
                 return MachineConfig(
@@ -977,12 +1011,12 @@ class CstarSpecBuilder(BaseModel):
     def _initialize_blueprint(self) -> None:
         """
         Initialize blueprint with basic structure and set stage to PRECONFIG.
-        
+
         This method creates the initial blueprint structure with placeholder data.
         It is called automatically during initialization via `model_post_init()`.
-        
+
         **Process:**
-        
+
         1. Loads the model specification from models.yml
         2. Initializes compile-time and run-time settings from defaults
         3. Creates blueprint with:
@@ -991,30 +1025,30 @@ class CstarSpecBuilder(BaseModel):
            - Placeholder Resource objects for grid, initial_conditions, forcing
         4. Sets `_stage` to PRECONFIG
         5. Persists blueprint to disk
-        
+
         The blueprint at this stage has the correct structure but contains
         placeholder data (None locations). Actual data files are added during
         the POSTCONFIG stage via `generate_inputs()`.
         """
-
         # Load model spec
         self._load_model_spec()
 
         # Initialize settings from defaults
         self._init_settings_compile_time()
         self._init_settings_run_time()
-                    
+
         # Create placeholder Resource objects to satisfy validation requirements
         placeholder_resource = Resource.model_construct(
-            location=None,
-            partitioned=False
+            location=None, partitioned=False
         )
         forcing_config = cstar_models.ForcingConfiguration.model_construct(
             boundary=cstar_models.Dataset.model_construct(data=[placeholder_resource]),
             surface=cstar_models.Dataset.model_construct(data=[placeholder_resource]),
-        )       
-        empty_dataset = cstar_models.Dataset.model_construct(data=[placeholder_resource])
-               
+        )
+        empty_dataset = cstar_models.Dataset.model_construct(
+            data=[placeholder_resource]
+        )
+
         # Use model_construct to bypass validation during initialization
         # The blueprint will be validated later when data is populated
         # Use placeholder datasets to satisfy structure requirements
@@ -1034,11 +1068,13 @@ class CstarSpecBuilder(BaseModel):
         )
         self._stage = BlueprintStage.PRECONFIG
         self.persist()
-    
-    def _load_blueprint_file(self, stage: Optional[str] = None, load_settings: bool = True) -> Optional[cstar_models.RomsMarblBlueprint]:
+
+    def _load_blueprint_file(
+        self, stage: str | None = None, load_settings: bool = True
+    ) -> cstar_models.RomsMarblBlueprint | None:
         """
         Load blueprint from file for the specified stage.
-        
+
         Parameters
         ----------
         stage : Optional[str], optional
@@ -1046,7 +1082,7 @@ class CstarSpecBuilder(BaseModel):
             If self._stage is also None, defaults to POSTCONFIG.
         load_settings : bool, optional
             If True, load settings from sidecar file. Defaults to True.
-        
+
         Returns
         -------
         Optional[cstar_models.RomsMarblBlueprint]
@@ -1055,23 +1091,31 @@ class CstarSpecBuilder(BaseModel):
         # Determine which stage to use
         if stage is None:
             stage = self._stage if self._stage is not None else BlueprintStage.PRECONFIG
-        
+
         # Get blueprint file path for this stage
         bp_path = self.path_blueprint(stage=stage, run_params=None)
-        
+
         if not bp_path.exists():
             return None
-        
+
         try:
             # Try to deserialize with full validation first
             # Suppress Pydantic serialization warnings (YAML may contain dicts where models expected)
             with warnings.catch_warnings():
                 # Filter all UserWarnings from pydantic module and pydantic.main
-                warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-                warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.main")
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, module="pydantic"
+                )
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, module="pydantic.main"
+                )
                 # Also filter warnings with "Pydantic" in the message
-                warnings.filterwarnings("ignore", message=".*Pydantic.*", category=UserWarning)
-                warnings.filterwarnings("ignore", message=".*serializer.*", category=UserWarning)
+                warnings.filterwarnings(
+                    "ignore", message=".*Pydantic.*", category=UserWarning
+                )
+                warnings.filterwarnings(
+                    "ignore", message=".*serializer.*", category=UserWarning
+                )
                 blueprint = deserialize(bp_path, cstar_models.RomsMarblBlueprint)
         except Exception as e:
             # If validation fails (e.g., files don't exist), try lenient loading
@@ -1080,7 +1124,9 @@ class CstarSpecBuilder(BaseModel):
                 with bp_path.open("r") as f:
                     blueprint_data = yaml.safe_load(f)
                 # Use model_construct to bypass validation (files may not exist)
-                blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_data)
+                blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+                    **blueprint_data
+                )
             except Exception as e2:
                 # If lenient loading also fails, issue a warning and return None
                 warnings.warn(
@@ -1088,24 +1134,24 @@ class CstarSpecBuilder(BaseModel):
                     f"{type(e).__name__}: {e}. "
                     f"Lenient loading also failed: {type(e2).__name__}: {e2}",
                     UserWarning,
-                    stacklevel=2
+                    stacklevel=2,
                 )
                 return None
-        
+
         # Load settings from sidecar file if blueprint was loaded and load_settings is True
         if blueprint is not None and load_settings:
             self._load_settings_from_file(bp_path)
-        
+
         return blueprint
-    
+
     @property
-    def blueprint_from_file(self) -> Optional[cstar_models.RomsMarblBlueprint]:
+    def blueprint_from_file(self) -> cstar_models.RomsMarblBlueprint | None:
         """
         Load and return blueprint from file based on current stage.
-        
+
         Uses self._stage to determine which blueprint file to load.
         If self._stage is None, defaults to POSTCONFIG stage.
-        
+
         Returns
         -------
         Optional[cstar_models.RomsMarblBlueprint]
@@ -1114,30 +1160,36 @@ class CstarSpecBuilder(BaseModel):
         # Suppress Pydantic warnings when loading blueprint
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.main")
-            warnings.filterwarnings("ignore", message=".*Pydantic.*", category=UserWarning)
-            warnings.filterwarnings("ignore", message=".*serializer.*", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, module="pydantic.main"
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*Pydantic.*", category=UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*serializer.*", category=UserWarning
+            )
             return self._load_blueprint_file()
-    
-    def get_ds(self, field: str, from_file: bool = True) -> Optional[List[xr.Dataset]]:
+
+    def get_ds(self, field: str, from_file: bool = True) -> list[xr.Dataset] | None:
         """
         Load xarray Datasets from NetCDF files referenced in a blueprint field.
-        
+
         This method reads the file locations from a specific blueprint field and
         returns lazy-loaded xarray Datasets. Returns a list of datasets even for
         single files to maintain consistency and avoid alignment issues.
-        
+
         **Field Paths:**
-        
+
         Field paths can be simple (e.g., "grid") or nested (e.g., "forcing.surface").
         Nested paths are resolved by traversing the blueprint structure.
-        
+
         **Data Source:**
-        
+
         The `from_file` parameter determines which blueprint to use:
         - `True`: Uses blueprint loaded from disk (default, recommended)
         - `False`: Uses in-memory blueprint (may not reflect persisted state)
-        
+
         Parameters
         ----------
         field : str
@@ -1151,7 +1203,7 @@ class CstarSpecBuilder(BaseModel):
             If True, loads blueprint from disk first (recommended).
             If False, uses in-memory blueprint.
             Default is True.
-        
+
         Returns
         -------
         Optional[List[xr.Dataset]]
@@ -1163,32 +1215,44 @@ class CstarSpecBuilder(BaseModel):
         # Suppress Pydantic warnings when accessing blueprint
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.main")
-            warnings.filterwarnings("ignore", message=".*Pydantic.*", category=UserWarning)
-            warnings.filterwarnings("ignore", message=".*serializer.*", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, module="pydantic.main"
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*Pydantic.*", category=UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*serializer.*", category=UserWarning
+            )
             if from_file:
                 blueprint = self.blueprint_from_file
             else:
                 blueprint = self.blueprint
-        
+
         if blueprint is None:
             return None
-        
+
         # Navigate to the field (handle nested fields like "forcing.surface")
         # Handle both model instances and dicts at each level
         # Suppress warnings during navigation as well
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.main")
-            warnings.filterwarnings("ignore", message=".*Pydantic.*", category=UserWarning)
-            warnings.filterwarnings("ignore", message=".*serializer.*", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore", category=UserWarning, module="pydantic.main"
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*Pydantic.*", category=UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*serializer.*", category=UserWarning
+            )
             field_parts = field.split(".")
             data = blueprint
             for part in field_parts:
                 # Convert model instances to dicts for easier navigation
-                if hasattr(data, 'model_dump'):
+                if hasattr(data, "model_dump"):
                     data = data.model_dump()
-                
+
                 if isinstance(data, dict):
                     if part not in data:
                         return None
@@ -1197,64 +1261,66 @@ class CstarSpecBuilder(BaseModel):
                     data = getattr(data, part)
                 else:
                     return None
-        
+
         # Convert Dataset to dict if it's a model instance
         if isinstance(data, cstar_models.Dataset):
             data = data.model_dump()
-        
-        # Extract locations from dict structure        
+
+        # Extract locations from dict structure
         if isinstance(data, dict) and "data" in data:
             location_list = [
-                item.get("location") 
-                for item in data["data"] 
+                item.get("location")
+                for item in data["data"]
                 if isinstance(item, dict) and item.get("location")
             ]
         else:
             return None
 
-        
         if not location_list:
             return None
-        
+
         # Convert locations to strings (handle Path and HttpUrl objects)
         location_strs = []
         for location in location_list:
             if isinstance(location, Path):
                 location_strs.append(str(location))
-            elif hasattr(location, '__str__'):
+            elif hasattr(location, "__str__"):
                 location_strs.append(str(location))
             else:
                 location_strs.append(location)
-        
+
         # Return a list of datasets (one per file) instead of combining them
         # This avoids alignment errors when datasets have incompatible dimensions
         # Suppress xarray FutureWarning about timedelta decoding
         with warnings.catch_warnings():
-            warnings.filterwarnings('ignore', category=FutureWarning, module='xarray')
-            return [xr.open_dataset(location, decode_timedelta=False) for location in location_strs]
-    
+            warnings.filterwarnings("ignore", category=FutureWarning, module="xarray")
+            return [
+                xr.open_dataset(location, decode_timedelta=False)
+                for location in location_strs
+            ]
+
     def ensure_source_data(self, include_streamable: bool = False):
         """
         Ensure source data is prepared and ready for input file generation.
-        
+
         This method prepares all required source datasets (grid, initial conditions,
         forcing data, etc.) using the model specification's dataset requirements.
         The prepared data is stored in `self.src_data` and used by `generate_inputs()`
         to create input files.
-        
+
         **When to Call:**
-        
+
         This method is called automatically by `generate_inputs()` if source data
         hasn't been prepared. It can also be called explicitly to prepare data
         before generating inputs, or to re-prepare data with different options.
-        
+
         Parameters
         ----------
         include_streamable : bool, optional
             If True, include streamable datasets in preparation (datasets that
             can be accessed on-demand rather than pre-downloaded).
             Default is False.
-        
+
         Raises
         ------
         RuntimeError
@@ -1265,10 +1331,10 @@ class CstarSpecBuilder(BaseModel):
                 "Grid must be created before preparing source data. "
                 "This should have been created during initialization."
             )
-        
+
         if self._model_spec is None:
             self._load_model_spec()
-        
+
         self.src_data = source_data.SourceData(
             datasets=self._model_spec.datasets,
             clobber=False,
@@ -1277,7 +1343,7 @@ class CstarSpecBuilder(BaseModel):
             start_time=self.start_date,
             end_time=self.end_date,
         ).prepare_all(include_streamable=include_streamable)
-    
+
     def generate_inputs(
         self,
         clobber: bool = False,
@@ -1325,34 +1391,39 @@ class CstarSpecBuilder(BaseModel):
             raise RuntimeError("Blueprint must be initialized before generating inputs")
 
         # Ensure settings are initialized before generating inputs.
-        if not hasattr(self, '_settings_compile_time') or not self._settings_compile_time:
+        if (
+            not hasattr(self, "_settings_compile_time")
+            or not self._settings_compile_time
+        ):
             raise RuntimeError("_settings_compile_time is not initialized or is empty.")
-        if not hasattr(self, '_settings_run_time') or not self._settings_run_time:
+        if not hasattr(self, "_settings_run_time") or not self._settings_run_time:
             raise RuntimeError("_settings_run_time is not initialized or is empty.")
 
         # Prepare source data if not already done.
         if self.src_data is None:
             self.ensure_source_data(include_streamable=False)
 
-        blueprint_elements, settings_compile_time, settings_run_time = input_data.RomsMarblInputData(
-            domain_name=self.name,
-            start_date=self.start_date,
-            end_date=self.end_date,
-            input_data_dir_override=self.input_data_dir,
-            model_spec=self._model_spec,
-            grid=self.grid,
-            grid_parent=self.grid_parent,
-            grid_child=self.grid_child,
-            metadata_child=self.metadata_child,
-            boundaries=self.open_boundaries,
-            source_data=self.src_data,
-            forcing_override=self.forcing_override,
-            model_reference_date=self.model_reference_date,
-            blueprint_dir=self.blueprint_dir,
-            partitioning=self.partitioning,
-            cdr_forcing=self.cdr_forcing,
-            use_dask=use_dask,
-        ).generate_all(partition_files=partition_files, clobber=clobber, test=test)
+        blueprint_elements, settings_compile_time, settings_run_time = (
+            input_data.RomsMarblInputData(
+                domain_name=self.name,
+                start_date=self.start_date,
+                end_date=self.end_date,
+                input_data_dir_override=self.input_data_dir,
+                model_spec=self._model_spec,
+                grid=self.grid,
+                grid_parent=self.grid_parent,
+                grid_child=self.grid_child,
+                metadata_child=self.metadata_child,
+                boundaries=self.open_boundaries,
+                source_data=self.src_data,
+                forcing_override=self.forcing_override,
+                model_reference_date=self.model_reference_date,
+                blueprint_dir=self.blueprint_dir,
+                partitioning=self.partitioning,
+                cdr_forcing=self.cdr_forcing,
+                use_dask=use_dask,
+            ).generate_all(partition_files=partition_files, clobber=clobber, test=test)
+        )
 
         if blueprint_elements is None:
             raise RuntimeError(
@@ -1369,23 +1440,43 @@ class CstarSpecBuilder(BaseModel):
 
         # Update the blueprint with the generated input data.
         blueprint_dict = self.blueprint.model_dump()
-        blueprint_dict["grid"] = blueprint_elements.grid.model_dump() if blueprint_elements.grid else None
-        blueprint_dict["initial_conditions"] = blueprint_elements.initial_conditions.model_dump() if blueprint_elements.initial_conditions else None
-        blueprint_dict["forcing"] = blueprint_elements.forcing.model_dump() if blueprint_elements.forcing else None
-        blueprint_dict["cdr_forcing"] = blueprint_elements.cdr_forcing.model_dump() if blueprint_elements.cdr_forcing else None
-        blueprint_dict["nesting_info"] = blueprint_elements.nesting_info.model_dump() if blueprint_elements.nesting_info else None
+        blueprint_dict["grid"] = (
+            blueprint_elements.grid.model_dump() if blueprint_elements.grid else None
+        )
+        blueprint_dict["initial_conditions"] = (
+            blueprint_elements.initial_conditions.model_dump()
+            if blueprint_elements.initial_conditions
+            else None
+        )
+        blueprint_dict["forcing"] = (
+            blueprint_elements.forcing.model_dump()
+            if blueprint_elements.forcing
+            else None
+        )
+        blueprint_dict["cdr_forcing"] = (
+            blueprint_elements.cdr_forcing.model_dump()
+            if blueprint_elements.cdr_forcing
+            else None
+        )
+        blueprint_dict["nesting_info"] = (
+            blueprint_elements.nesting_info.model_dump()
+            if blueprint_elements.nesting_info
+            else None
+        )
 
         # Settings are stored in a sidecar YAML, not in the blueprint itself.
         blueprint_dict["model_params"] = None
         blueprint_dict["runtime_params"] = None
 
-        self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_dict)
+        self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+            **blueprint_dict
+        )
         self._stage = BlueprintStage.POSTCONFIG
         self.persist()
         return self.blueprint
 
     def _merge_settings_override_file(self, path: Path, kind: str) -> None:
-        """
+        r"""
         Load a YAML override file and merge into compile- or run-time settings.
 
         Parameters
@@ -1426,7 +1517,7 @@ class CstarSpecBuilder(BaseModel):
 
         section = "compile_time" if kind == "compile" else "run_time"
         other_section = "run_time" if kind == "compile" else "compile_time"
-        payload: Dict[str, Any]
+        payload: dict[str, Any]
         if section in raw:
             section_data = raw.get(section)
             if section_data is None:
@@ -1445,9 +1536,13 @@ class CstarSpecBuilder(BaseModel):
         else:
             payload = raw
 
-        target = self._settings_compile_time if kind == "compile" else self._settings_run_time
+        target = (
+            self._settings_compile_time
+            if kind == "compile"
+            else self._settings_run_time
+        )
         label = "compile-time" if kind == "compile" else "run-time"
-        merged: Dict[str, Any] = {}
+        merged: dict[str, Any] = {}
         for key, value in payload.items():
             if key in target:
                 merged[key] = value
@@ -1467,7 +1562,7 @@ class CstarSpecBuilder(BaseModel):
         print(f"ℹ️  Merged {label} settings from {path.resolve()}")
 
     @property
-    def _override_paths(self) -> List[Path]:
+    def _override_paths(self) -> list[Path]:
         if not self.override:
             return []
         return [Path(p).expanduser().resolve() for p in self.override]
@@ -1479,11 +1574,11 @@ class CstarSpecBuilder(BaseModel):
     def _init_settings_compile_time(self) -> None:
         """
         Initialize compile-time settings dictionary from model defaults.
-        
+
         Loads default compile-time settings from the model specification and
         stores them in `_settings_compile_time`. This dictionary is used as
         the basis for template rendering during `configure_build()`.
-        
+
         Settings are deep-copied from the model spec to avoid modifying the
         original defaults. User overrides can be applied via `_update_settings_compile_time()`
         or by passing `compile_time_settings` to `configure_build()`.
@@ -1491,30 +1586,32 @@ class CstarSpecBuilder(BaseModel):
         **Called by:** `_initialize_blueprint()` during initialization.
         """
         # Initialize from defaults (deep copy to avoid modifying the original)
-        self._settings_compile_time = copy.deepcopy(self._model_spec.settings.compile_time.settings_dict)
+        self._settings_compile_time = copy.deepcopy(
+            self._model_spec.settings.compile_time.settings_dict
+        )
 
         self._merge_settings_override_files("compile")
 
-    def _init_settings_run_time(self, dt: Optional[float] = None) -> None:
+    def _init_settings_run_time(self, dt: float | None = None) -> None:
         """
         Initialize run-time settings dictionary from model defaults.
-        
+
         Loads default run-time settings from the model specification and stores
         them in `_settings_run_time`. This dictionary is used as the basis for
         template rendering during `configure_build()`.
-        
+
         **Dynamic Values:**
-        
+
         Some settings are set dynamically based on instance properties:
         - `title.casename`: Set from `self.casename`
         - `output_root_name.output_root_name`: Set from `self.run_output_dir`
         - `time_stepping`: Calculated based on simulation dates and timestep
         - `v_sponge.v_sponge`: Set from grid spacing (``size_x / nx`` in meters) / 10
-        
+
         Settings are deep-copied from the model spec to avoid modifying the
         original defaults. User overrides can be applied via `_update_settings_run_time()`
         or by passing `run_time_settings` to `configure_build()`.
-        
+
         Parameters
         ----------
         dt : Optional[float], optional
@@ -1524,14 +1621,16 @@ class CstarSpecBuilder(BaseModel):
         **Called by:** `_initialize_blueprint()` during initialization.
         """
         # Initialize from defaults (deep copy to avoid modifying the original)
-        self._settings_run_time = copy.deepcopy(self._model_spec.settings.run_time.settings_dict)
+        self._settings_run_time = copy.deepcopy(
+            self._model_spec.settings.run_time.settings_dict
+        )
 
         # Set dynamic values that depend on instance properties
         self._settings_run_time["title"] = dict(
-            casename = self.casename,
+            casename=self.casename,
         )
         self._settings_run_time["output_root_name"] = dict(
-            output_root_name = str(self.run_output_dir / "output" / self.casename),
+            output_root_name=str(self.run_output_dir / "output" / self.casename),
         )
 
         # Set timestepping defaults (will compute dt from CFL if dt is None)
@@ -1541,12 +1640,18 @@ class CstarSpecBuilder(BaseModel):
         if self.grid_child is not None:
             period_default = roms_tools_default_nesting_period_seconds()
             if "metadata" in self.grid_kwargs_child:
-               if "period" in self.grid_kwargs_child["metadata"]:
-                  self._settings_run_time["extract_data"]["extract_period"] = self.grid_kwargs_child["metadata"]["period"]
-               else:
-                  self._settings_run_time["extract_data"]["extract_period"] = period_default
+                if "period" in self.grid_kwargs_child["metadata"]:
+                    self._settings_run_time["extract_data"]["extract_period"] = (
+                        self.grid_kwargs_child["metadata"]["period"]
+                    )
+                else:
+                    self._settings_run_time["extract_data"]["extract_period"] = (
+                        period_default
+                    )
             else:
-               self._settings_run_time["extract_data"]["extract_period"] = period_default
+                self._settings_run_time["extract_data"]["extract_period"] = (
+                    period_default
+                )
 
         self._apply_v_sponge_default_from_grid()
 
@@ -1563,25 +1668,27 @@ class CstarSpecBuilder(BaseModel):
         v_sponge = compute_v_sponge_from_grid(self.grid.size_x, self.grid.nx)
         self._settings_run_time.setdefault("v_sponge", {})["v_sponge"] = v_sponge
 
-    def _update_settings_compile_time(self, settings_compile_time: Dict[str, Any]) -> None:
+    def _update_settings_compile_time(
+        self, settings_compile_time: dict[str, Any]
+    ) -> None:
         """
         Update compile-time settings by recursively merging nested dictionaries.
-        
+
         Top-level keys must already exist on the builder. Nested dicts are merged
         recursively so partial overrides do not drop sibling keys.
-        
+
         **Merging Behavior:**
-        
+
         - If key exists in both: nested dicts are merged recursively
         - If key exists only in new settings: raises ValueError (unknown key)
         - Non-dict values, or dict replacing a non-dict: replaced directly
-        
+
         Parameters
         ----------
         settings_compile_time : Dict[str, Any]
             Dictionary of compile-time settings to merge into `_settings_compile_time`.
             Top-level keys must match existing keys in `_settings_compile_time`.
-            
+
         Raises
         ------
         ValueError
@@ -1590,12 +1697,16 @@ class CstarSpecBuilder(BaseModel):
         """
         if not settings_compile_time:
             return
-        
+
         for key, value in settings_compile_time.items():
             if key in self._settings_compile_time:
-                if isinstance(self._settings_compile_time[key], dict) and isinstance(value, dict):
+                if isinstance(self._settings_compile_time[key], dict) and isinstance(
+                    value, dict
+                ):
                     value_copy = copy.deepcopy(value)
-                    _deep_merge_settings_dict(self._settings_compile_time[key], value_copy)
+                    _deep_merge_settings_dict(
+                        self._settings_compile_time[key], value_copy
+                    )
                 else:
                     self._settings_compile_time[key] = (
                         copy.deepcopy(value)
@@ -1607,27 +1718,27 @@ class CstarSpecBuilder(BaseModel):
                     f"Unknown compile-time setting key: '{key}'. "
                     f"Valid keys are: {sorted(self._settings_compile_time.keys())}"
                 )
-    
-    def _update_settings_run_time(self, settings_run_time: Dict[str, Any]) -> None:
+
+    def _update_settings_run_time(self, settings_run_time: dict[str, Any]) -> None:
         """
         Update run-time settings by recursively merging nested dictionaries.
-        
+
         Top-level keys must already exist on the builder. Nested dicts are merged
         recursively so partial overrides (e.g. only ``dt`` under ``time_stepping``)
         do not remove sibling keys populated from defaults.
-        
+
         **Merging Behavior:**
-        
+
         - If key exists in both: nested dicts are merged recursively
         - If key exists only in new settings: raises ValueError (unknown key)
         - Non-dict values, or dict replacing a non-dict: replaced directly
-        
+
         Parameters
         ----------
         settings_run_time : Dict[str, Any]
             Dictionary of run-time settings to merge into `_settings_run_time`.
             Top-level keys must match existing keys in `_settings_run_time`.
-            
+
         Raises
         ------
         ValueError
@@ -1638,15 +1749,17 @@ class CstarSpecBuilder(BaseModel):
         # Consider adding a test for the merge operation passing {"nothing-shared": "foo"} to test the no-intersection edge case.
         if not settings_run_time:
             return
-        
+
         for key, value in settings_run_time.items():
             if key in self._settings_run_time:
-                if isinstance(self._settings_run_time[key], dict) and isinstance(value, dict):
+                if isinstance(self._settings_run_time[key], dict) and isinstance(
+                    value, dict
+                ):
                     value_copy = copy.deepcopy(value)
                     # TODO: Evaluate whether corrective logic for passed-in values should live here
                     # Do we need to correct anything else?
                     if key == "time_stepping" and "ntimes" in value_copy:
-                        value_copy["ntimes"] = int(round(value_copy["ntimes"]))
+                        value_copy["ntimes"] = round(value_copy["ntimes"])
                     _deep_merge_settings_dict(self._settings_run_time[key], value_copy)
                 else:
                     self._settings_run_time[key] = (
@@ -1660,37 +1773,36 @@ class CstarSpecBuilder(BaseModel):
                     f"Unknown run-time setting key: '{key}'. "
                     f"Valid keys are: {sorted(self._settings_run_time.keys())}"
                 )
-    
-    def _set_run_time_settings_timestepping_defaults(self, dt: Optional[float] = None):
+
+    def _set_run_time_settings_timestepping_defaults(self, dt: float | None = None):
         """
         Update run-time timestepping settings in the settings dictionary.
-        
+
         Sets the `time_stepping` section of `_settings_run_time` with
         calculated values based on simulation dates and timestep.
-        
+
         **Timestep Calculation:**
-        
+
         If `dt` is not provided, it is computed from CFL criterion:
         1. Computes minimum grid spacing (dx, dy) from size_x/nx and size_y/ny
         2. Estimates fastest gravity wave speed: c = sqrt(g * H_max)
         3. Applies CFL condition: dt = CFL * dx_min / c
-        
+
         **Values Set:**
-        
+
         - `ntimes`: Number of timesteps (calculated from simulation duration / dt)
         - `dt`: Timestep in seconds (provided or computed)
         - `ndtfast`: Number of fast timesteps per baroclinic timestep (default: 60)
         - `ninfo`: Frequency of information output (default: 1)
-        
+
         Parameters
         ----------
         dt : Optional[float]
             Timestep in seconds. If None, computed from CFL criterion using grid
             properties. Default is None.
-        
+
         **Called by:** `_init_settings_run_time()` during initialization.
         """
-        
         if dt is None:
             dt = compute_timestep_from_cfl(
                 grid_size_x=self.grid.size_x,
@@ -1699,22 +1811,22 @@ class CstarSpecBuilder(BaseModel):
                 grid_ny=self.grid.ny,
                 grid_ds=self.grid.ds,
             )
-            
-        ntimes = int(round((self.end_date - self.start_date).days * 24 * 3600 / dt))
+
+        ntimes = round((self.end_date - self.start_date).days * 24 * 3600 / dt)
         self._settings_run_time["time_stepping"] = dict(
-            ntimes = ntimes,
-            dt = dt,
-            ndtfast = 60, # TODO: Think about if how to better NDTFAST based on this dt
-            ninfo = 1,
+            ntimes=ntimes,
+            dt=dt,
+            ndtfast=60,  # TODO: Think about if how to better NDTFAST based on this dt
+            ninfo=1,
         )
-   
+
     @classmethod
     def from_domain(
         cls,
-        domain_data: Dict[str, Any],
-        catalog: Optional[Any] = None,
+        domain_data: dict[str, Any],
+        catalog: Any | None = None,
         **overrides: Any,
-    ) -> "CstarSpecBuilder":
+    ) -> CstarSpecBuilder:
         """Create a CstarSpecBuilder from a domain dict returned by DomainCatalog.
 
         Handles date-string → datetime conversion, dict → Pydantic model
@@ -1783,27 +1895,31 @@ class CstarSpecBuilder(BaseModel):
 
         # Convert plain dicts → Pydantic model instances.
         if isinstance(cfg.get("open_boundaries"), dict):
-            cfg["open_boundaries"] = forge_models.OpenBoundaries(**cfg["open_boundaries"])
+            cfg["open_boundaries"] = forge_models.OpenBoundaries(
+                **cfg["open_boundaries"]
+            )
         if isinstance(cfg.get("partitioning"), dict):
-            cfg["partitioning"] = cstar_models.PartitioningParameterSet(**cfg["partitioning"])
+            cfg["partitioning"] = cstar_models.PartitioningParameterSet(
+                **cfg["partitioning"]
+            )
 
         cfg.update(overrides)
         return cls(**cfg)
 
     def configure_build(
         self,
-        compile_time_settings: Dict[str, Any] = None,
-        run_time_settings: Dict[str, Any] = None,
-        **kwargs
+        compile_time_settings: dict[str, Any] | None = None,
+        run_time_settings: dict[str, Any] | None = None,
+        **kwargs,
     ):
         """
         Configure blueprint by rendering templates and advance to BUILD stage.
-        
+
         This method renders Jinja2 templates with current settings to produce
         configuration files needed for model compilation and execution.
-        
+
         **Process:**
-        
+
         1. Validates blueprint is initialized and template configuration exists
         2. Merges user-provided settings overrides with existing settings
         3. Clears compile-time and run-time code output directories
@@ -1816,25 +1932,25 @@ class CstarSpecBuilder(BaseModel):
         7. Sets `_stage` to BUILD
         8. Persists blueprint to disk
         9. Creates ROMSSimulation instance from blueprint
-        
+
         **Stage Transition:**
-        
+
         - **Input:** Blueprint in POSTCONFIG stage (with input data files)
         - **Output:** Blueprint in BUILD stage (with rendered configuration files)
-        
+
         **Settings:**
-        
+
         Settings are merged using deep merge, preserving existing values while
         allowing user overrides. Run-time timestep (`dt`) can be provided
         explicitly or will be computed from CFL criterion.
-        
+
         **Template Rendering:**
-        
+
         Templates are rendered from the model specification's template locations
         using the current settings dictionaries. The rendered files are written
         to the code output directories and the blueprint is updated with their
         locations.
-        
+
         Parameters
         ----------
         compile_time_settings : Dict[str, Any], optional
@@ -1847,12 +1963,12 @@ class CstarSpecBuilder(BaseModel):
             Defaults to empty dict.
         **kwargs
             Additional keyword arguments (currently unused, reserved for future use).
-        
+
         Returns
         -------
         ROMSSimulation
             The C-Star simulation instance created from the configured blueprint.
-        
+
         Raises
         ------
         RuntimeError
@@ -1869,28 +1985,39 @@ class CstarSpecBuilder(BaseModel):
 
         # Validate that blueprint is initialized
         if self.blueprint is None:
-            raise RuntimeError("Blueprint must be initialized before configuration. Call generate_inputs() first.")
+            raise RuntimeError(
+                "Blueprint must be initialized before configuration. Call generate_inputs() first."
+            )
 
         # Validate template configuration
-        if (self._model_spec.templates is None or
-            self._model_spec.templates.compile_time is None or
-            self._model_spec.templates.compile_time.filter is None):
-            raise ValueError("Model spec must have templates.compile_time.filter with files list")
-        if (self._model_spec.templates.run_time is None or
-            self._model_spec.templates.run_time.filter is None):
-            raise ValueError("Model spec must have templates.run_time.filter with files list")
+        if (
+            self._model_spec.templates is None
+            or self._model_spec.templates.compile_time is None
+            or self._model_spec.templates.compile_time.filter is None
+        ):
+            raise ValueError(
+                "Model spec must have templates.compile_time.filter with files list"
+            )
+        if (
+            self._model_spec.templates.run_time is None
+            or self._model_spec.templates.run_time.filter is None
+        ):
+            raise ValueError(
+                "Model spec must have templates.run_time.filter with files list"
+            )
 
         # Initialize settings from defaults if not already initialized
-        if not hasattr(self, '_settings_compile_time') or self._settings_compile_time is None:
+        if (
+            not hasattr(self, "_settings_compile_time")
+            or self._settings_compile_time is None
+        ):
             self._init_settings_compile_time()
-        if not hasattr(self, '_settings_run_time') or self._settings_run_time is None:
+        if not hasattr(self, "_settings_run_time") or self._settings_run_time is None:
             self._init_settings_run_time()
 
         # Update settings with user-provided overrides (deep merge to preserve existing settings)
         self._update_settings_compile_time(compile_time_settings)
         self._update_settings_run_time(run_time_settings)
-
-
 
         # Ensure ntimes is an integer (don't recalculate, just ensure type is correct)
         if "time_stepping" in self._settings_run_time:
@@ -1898,10 +2025,8 @@ class CstarSpecBuilder(BaseModel):
                 ntimes = self._settings_run_time["time_stepping"]["ntimes"]
                 # Convert to integer if it's a float
                 if isinstance(ntimes, float):
-                    self._settings_run_time["time_stepping"]["ntimes"] = int(round(ntimes))
+                    self._settings_run_time["time_stepping"]["ntimes"] = round(ntimes)
 
-
-            
         # Derive n_tracers: if the caller computed it from model_settings (Phase 2
         # engine path), use that directly; otherwise fall back to model_spec.properties
         # for back-compat with the legacy builder-only path.
@@ -1945,7 +2070,8 @@ class CstarSpecBuilder(BaseModel):
         #    These are model-specific support files that aren't templated.
         # ------------------------------------------------------------------
         run_time_static_files = [
-            f for f in self._model_spec.templates.run_time.filter.files
+            f
+            for f in self._model_spec.templates.run_time.filter.files
             if not f.endswith(".j2")
         ]
         copied_run_time_files: list[str] = []
@@ -1953,7 +2079,7 @@ class CstarSpecBuilder(BaseModel):
             _copied = render_roms_settings(
                 template_files=run_time_static_files,
                 template_dir=self._model_spec.templates.run_time.location,
-                settings_dict={},   # plain copy — no template variables needed
+                settings_dict={},  # plain copy — no template variables needed
                 code_output_dir=self.run_time_code_dir,
             )
             copied_run_time_files = _copied["filter"]["files"]
@@ -1973,19 +2099,25 @@ class CstarSpecBuilder(BaseModel):
         run_time_code = {
             "location": str(self.run_time_code_dir.resolve()),
             "branch": "na",
-            "filter": {"files": sorted(["namelist.nml"] + copied_run_time_files)},
+            "filter": {"files": sorted(["namelist.nml", *copied_run_time_files])},
         }
 
         # Suppress Pydantic serialization warnings when using model_dump(mode='json') and model_construct
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-            blueprint_dict = self.blueprint.model_dump(mode='json')
+            blueprint_dict = self.blueprint.model_dump(mode="json")
             code_dict = blueprint_dict["code"]
             # Convert dicts from render_roms_settings / write_roms_namelist to CodeRepository objects
-            code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(**compile_time_code)
-            code_dict["run_time"] = cstar_models.CodeRepository.model_construct(**run_time_code)
-            blueprint_dict["code"] = cstar_models.ROMSCompositeCodeRepository.model_construct(**code_dict)
+            code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(
+                **compile_time_code
+            )
+            code_dict["run_time"] = cstar_models.CodeRepository.model_construct(
+                **run_time_code
+            )
+            blueprint_dict["code"] = (
+                cstar_models.ROMSCompositeCodeRepository.model_construct(**code_dict)
+            )
 
             blueprint_dict["model_params"] = {
                 "time_step": self._settings_run_time["time_stepping"]["dt"],
@@ -1996,22 +2128,24 @@ class CstarSpecBuilder(BaseModel):
                 "output_dir": self.run_output_dir,
             }
             blueprint_dict["working_dir"] = self.run_output_dir
-            
-            self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_dict)
+
+            self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+                **blueprint_dict
+            )
             self._stage = BlueprintStage.BUILD
             self.persist()
 
         return
 
-    def prep_cstar_environment(self,
-            account_key: Optional[str] = None,
-            queue_name: Optional[str] = None,
-            walltime: str | None = None,
-            clobber: bool = True,
-            on_compute_node: bool = False,
-            n_procs_available: int | None = None,
-        ):
-
+    def prep_cstar_environment(
+        self,
+        account_key: str | None = None,
+        queue_name: str | None = None,
+        walltime: str | None = None,
+        clobber: bool = True,
+        on_compute_node: bool = False,
+        n_procs_available: int | None = None,
+    ):
         """
         Configure the appropriate settings for the C-Star executable.
 
@@ -2027,19 +2161,24 @@ class CstarSpecBuilder(BaseModel):
             and you're on a shared or login node, you're probably going to use too many and get booted. If None, don't
             change it (e.g. you have set it externally)
         """
-
-
         mc = self._get_machine_config()
         queues = mc.queues or {}
 
-
-
         # precedence: passed variable > pre-existing env-var setting > internal machine config > some default
-        account_key = account_key or os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or mc.account or ""
-        queue_name = queue_name or os.getenv(ENV_CSTAR_SLURM_QUEUE) or queues.get("default") or ""
+        account_key = (
+            account_key or os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or mc.account or ""
+        )
+        queue_name = (
+            queue_name
+            or os.getenv(ENV_CSTAR_SLURM_QUEUE)
+            or queues.get("default")
+            or ""
+        )
         walltime = walltime or os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME) or "6:00:00"
         clobber = "1" if clobber else os.getenv(ENV_CSTAR_CLOBBER_WORKING_DIR, "0")
-        in_active_alloc = "1" if on_compute_node else os.getenv(ENV_CSTAR_IN_ACTIVE_ALLOCATION, "0")
+        in_active_alloc = (
+            "1" if on_compute_node else os.getenv(ENV_CSTAR_IN_ACTIVE_ALLOCATION, "0")
+        )
 
         # set everything
         os.environ[ENV_CSTAR_CLOBBER_WORKING_DIR] = clobber
@@ -2053,7 +2192,7 @@ class CstarSpecBuilder(BaseModel):
         elif n_procs_available == 0:
             if os.getenv(ENV_CSTAR_NPROCS_POST):
                 del os.environ[ENV_CSTAR_NPROCS_POST]
-        #implicit: elif n_procs_available is None, do nothing
+        # implicit: elif n_procs_available is None, do nothing
 
         if config.system == "RCAC_anvil":
             # find the right conda path to this environment and put it in the front of the path
@@ -2071,47 +2210,47 @@ class CstarSpecBuilder(BaseModel):
             _current_path = os.environ["PATH"]
             os.environ["PATH"] = str(Path.cwd()) + os.pathsep + _current_path
 
-
     async def run(
         self,
     ):
-        """
-        Run C-Star for this Builder's BUILD blueprint
-        """
-
+        """Run C-Star for this Builder's BUILD blueprint"""
         self.prep_cstar_environment()
 
-        request = RunnerRequest(uri=str(self.path_blueprint(stage=BlueprintStage.BUILD)), bp_type=RomsMarblBlueprint, name=self.casename)
+        request = RunnerRequest(
+            uri=str(self.path_blueprint(stage=BlueprintStage.BUILD)),
+            bp_type=RomsMarblBlueprint,
+            name=self.casename,
+        )
         service_cfg = get_service_config(log_level="INFO")
         job_cfg = get_job_config()
-        runner = RomsMarblRunner(request=request, service_cfg=service_cfg, job_cfg=job_cfg)
+        runner = RomsMarblRunner(
+            request=request, service_cfg=service_cfg, job_cfg=job_cfg
+        )
         await runner.execute()
 
         # Persist blueprint to file
         self._stage = BlueprintStage.RUN
         self.persist()
 
-
-
-    def dump(self, file_path: Union[str, Path]) -> None:
+    def dump(self, file_path: str | Path) -> None:
         """
         Dump the exact state of CstarSpecBuilder to a YAML file.
-        
+
         This method serializes all serializable fields including:
         - Regular Pydantic model fields (description, model_name, grid_name, etc.)
         - PrivateAttr fields (_model_spec, _stage, _settings_compile_time, _settings_run_time)
         - Complex nested objects (blueprint, src_data)
-        
+
         Fields that cannot be serialized are excluded:
         - grid (excluded from model, but grid_kwargs is saved)
         - _datasets (xarray.Dataset objects - not directly YAML-serializable)
         - _cstar_simulation (runtime object - not serializable)
-        
+
         Parameters
         ----------
         file_path : Union[str, Path]
             Path to the YAML file where the state will be saved.
-        
+
         Notes
         -----
         - xarray.Dataset objects in _datasets are not serialized. They can be
@@ -2121,27 +2260,33 @@ class CstarSpecBuilder(BaseModel):
         """
         file_path = Path(file_path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Start with Pydantic model dump (includes all regular fields)
-        state_dict = self.model_dump(mode='json', exclude_none=True)
-        
+        state_dict = self.model_dump(mode="json", exclude_none=True)
+
         # Add PrivateAttr fields that can be serialized
         private_attrs = {}
-        
+
         # Serialize _model_spec if it exists (Pydantic model)
         if self._model_spec is not None:
-            private_attrs["_model_spec"] = self._model_spec.model_dump(mode='json', exclude_none=True)
-        
+            private_attrs["_model_spec"] = self._model_spec.model_dump(
+                mode="json", exclude_none=True
+            )
+
         # Serialize _stage (simple string)
         if self._stage is not None:
             private_attrs["_stage"] = self._stage
-        
+
         # Serialize settings dictionaries
         if self._settings_compile_time:
-            private_attrs["_settings_compile_time"] = self._convert_paths_to_strings(self._settings_compile_time)
+            private_attrs["_settings_compile_time"] = self._convert_paths_to_strings(
+                self._settings_compile_time
+            )
         if self._settings_run_time:
-            private_attrs["_settings_run_time"] = self._convert_paths_to_strings(self._settings_run_time)
-        
+            private_attrs["_settings_run_time"] = self._convert_paths_to_strings(
+                self._settings_run_time
+            )
+
         # Serialize src_data if it exists (dataclass)
         if self.src_data is not None:
             # Convert dataclass to dict, but exclude grid object
@@ -2150,47 +2295,53 @@ class CstarSpecBuilder(BaseModel):
             src_data_dict.pop("grid", None)
             # Convert Path objects to strings
             private_attrs["src_data"] = self._convert_paths_to_strings(src_data_dict)
-        
+
         # Note: _datasets and _cstar_simulation are intentionally excluded
         # as they contain xarray.Dataset objects and runtime objects that
         # cannot be easily serialized to YAML.
-        
+
         # Combine state with private attrs
         state_dict["_private_attrs"] = private_attrs
-        
+
         # Convert all Path objects to strings for YAML serialization
         state_dict = self._convert_paths_to_strings(state_dict)
-        
+
         # Write to YAML file
         with file_path.open("w") as f:
-            yaml.safe_dump(state_dict, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
-    
+            yaml.safe_dump(
+                state_dict,
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+
     @classmethod
-    def load(cls, file_path: Union[str, Path]) -> "CstarSpecBuilder":
+    def load(cls, file_path: str | Path) -> CstarSpecBuilder:
         """
         Load CstarSpecBuilder state from a YAML file.
-        
+
         This method deserializes a previously saved state and reconstructs
         the CstarSpecBuilder instance. After loading:
         - Regular Pydantic fields are restored
         - PrivateAttr fields are restored where possible
         - The grid object is reconstructed from grid_kwargs
         - The blueprint object is restored
-        
+
         Fields that cannot be deserialized remain uninitialized:
         - _datasets: Will be populated when accessed (via datasets property)
         - _cstar_simulation: Will be initialized when build() is called
-        
+
         Parameters
         ----------
         file_path : Union[str, Path]
             Path to the YAML file containing the saved state.
-        
+
         Returns
         -------
         CstarSpecBuilder
             A new CstarSpecBuilder instance with state restored from the file.
-        
+
         Notes
         -----
         - The grid object is automatically reconstructed from grid_kwargs
@@ -2202,52 +2353,70 @@ class CstarSpecBuilder(BaseModel):
         """
         file_path = Path(file_path)
         if not file_path.exists():
-            raise FileNotFoundError(f"CstarSpecBuilder state file not found: {file_path}")
-        
+            raise FileNotFoundError(
+                f"CstarSpecBuilder state file not found: {file_path}"
+            )
+
         # Load YAML file
         with file_path.open("r") as f:
             state_dict = yaml.safe_load(f) or {}
-        
+
         # Extract private attributes
         private_attrs = state_dict.pop("_private_attrs", {})
-        
+
         # Restore _model_spec if present
         model_spec_dict = private_attrs.pop("_model_spec", None)
-        
+
         # Handle blueprint separately - use model_construct to handle None values
         blueprint_dict = state_dict.pop("blueprint", None)
-        
+
         # Create instance using Pydantic model_validate
         # This will trigger model_post_init which creates the grid
         instance = cls.model_validate(state_dict)
-        
+
         # Restore blueprint using model_construct to handle None values
         if blueprint_dict is not None:
             with warnings.catch_warnings():
-                warnings.filterwarnings('ignore', category=UserWarning, module='pydantic')
-                warnings.filterwarnings('ignore', message='.*Pydantic.*', category=UserWarning)
-                warnings.filterwarnings('ignore', message='.*serialization.*', category=UserWarning)
-                instance.blueprint = cstar_models.RomsMarblBlueprint.model_construct(**blueprint_dict)
-        
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, module="pydantic"
+                )
+                warnings.filterwarnings(
+                    "ignore", message=".*Pydantic.*", category=UserWarning
+                )
+                warnings.filterwarnings(
+                    "ignore", message=".*serialization.*", category=UserWarning
+                )
+                instance.blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+                    **blueprint_dict
+                )
+
         # Restore PrivateAttr fields after instance creation
         if model_spec_dict is not None:
             # Use model_construct to handle None values and missing required fields
             with warnings.catch_warnings():
-                warnings.filterwarnings('ignore', category=UserWarning, module='pydantic')
-                warnings.filterwarnings('ignore', message='.*Pydantic.*', category=UserWarning)
-                warnings.filterwarnings('ignore', message='.*serialization.*', category=UserWarning)
-                instance._model_spec = forge_models.ModelSpec.model_construct(**model_spec_dict)
-        
+                warnings.filterwarnings(
+                    "ignore", category=UserWarning, module="pydantic"
+                )
+                warnings.filterwarnings(
+                    "ignore", message=".*Pydantic.*", category=UserWarning
+                )
+                warnings.filterwarnings(
+                    "ignore", message=".*serialization.*", category=UserWarning
+                )
+                instance._model_spec = forge_models.ModelSpec.model_construct(
+                    **model_spec_dict
+                )
+
         # Restore _stage
         if "_stage" in private_attrs:
             instance._stage = private_attrs["_stage"]
-        
+
         # Restore settings dictionaries
         if "_settings_compile_time" in private_attrs:
             instance._settings_compile_time = private_attrs["_settings_compile_time"]
         if "_settings_run_time" in private_attrs:
             instance._settings_run_time = private_attrs["_settings_run_time"]
-        
+
         # Restore src_data if present
         if "src_data" in private_attrs:
             src_data_dict = private_attrs["src_data"]
@@ -2255,17 +2424,17 @@ class CstarSpecBuilder(BaseModel):
             # Note: grid object cannot be restored from src_data_dict
             # as it was excluded during serialization
             instance.src_data = source_data.SourceData(**src_data_dict)
-        
+
         # Note: _datasets and _cstar_simulation are not restored here.
         # They will be initialized when accessed or when build() is called.
-        
+
         return instance
 
 
 class CstarSpecEngine:
     """
     Engine for executing CstarSpecBuilder workflows from domain configurations.
-    
+
     This class provides a convenient interface for loading domain configurations
     from a YAML file and executing the complete workflow:
     1. ensure_source_data()
@@ -2273,21 +2442,21 @@ class CstarSpecEngine:
     3. configure_build()
     4. build()
     5. pre_run()
-    
+
     **Usage:**
-    
+
     ```python
     from cstar_forge import CstarSpecEngine
-    
+
     # Load and execute workflow for a domain
     engine = CstarSpecEngine(domains_file="domains.yml")
     builder = engine.generate_domain("test-tiny")
     ```
-    
+
     **Domain Configuration:**
-    
+
     Domain configurations are stored in a YAML file with the following structure:
-    
+
     ```yaml
     grid_name:
       description: str
@@ -2300,17 +2469,18 @@ class CstarSpecEngine:
       partitioning: dict
     ```
     """
+
     import asyncio
 
     def __init__(
         self,
-        domains_file: Union[str, Path],
+        domains_file: str | Path,
         *,
-        catalog_root: Optional[Union[str, Path]] = None,
+        catalog_root: str | Path | None = None,
     ):
         """
         Initialize CstarSpecEngine.
-        
+
         Parameters
         ----------
         domains_file : Union[str, Path]
@@ -2321,18 +2491,18 @@ class CstarSpecEngine:
             ``catalog_root="local"`` which uses the in-repo ``cstar_forge/catalog`` directory).
         """
         domains_file = Path(domains_file)
-        
+
         self.domains_file = domains_file
-        self._domains: Optional[Dict[str, Any]] = None
-        self.builder: Optional[Dict[str, CstarSpecBuilder]] = None
-        self._engine_catalog_root: Optional[Union[str, Path]] = catalog_root
+        self._domains: dict[str, Any] | None = None
+        self.builder: dict[str, CstarSpecBuilder] | None = None
+        self._engine_catalog_root: str | Path | None = catalog_root
         # Load domains on initialization
         self._load_domains()
-    
-    def _load_domains(self) -> Dict[str, Any]:
+
+    def _load_domains(self) -> dict[str, Any]:
         """
         Load domain configurations from YAML file.
-        
+
         Returns
         -------
         Dict[str, Any]
@@ -2340,39 +2510,37 @@ class CstarSpecEngine:
         """
         if self._domains is None:
             if not self.domains_file.exists():
-                raise FileNotFoundError(
-                    f"Domains file not found: {self.domains_file}"
-                )
+                raise FileNotFoundError(f"Domains file not found: {self.domains_file}")
             with self.domains_file.open("r") as f:
                 self._domains = yaml.safe_load(f) or {}
         return self._domains
-    
+
     @property
-    def domains(self) -> List[str]:
+    def domains(self) -> list[str]:
         """
         Return a list of available domain names (grid names).
-        
+
         Returns
         -------
         List[str]
             Sorted list of domain names available in the domains file.
         """
         return sorted(self._load_domains().keys())
-    
-    def _get_domain_config(self, domain_name: str) -> Dict[str, Any]:
+
+    def _get_domain_config(self, domain_name: str) -> dict[str, Any]:
         """
         Get domain configuration for a specific grid name.
-        
+
         Parameters
         ----------
         domain_name : str
             Name of the grid/domain to load.
-        
+
         Returns
         -------
         Dict[str, Any]
             Domain configuration dictionary.
-        
+
         Raises
         ------
         KeyError
@@ -2385,17 +2553,17 @@ class CstarSpecEngine:
                 f"Available domains: {sorted(domains.keys())}"
             )
         return domains[domain_name]
-    
+
     def _create_builder(
         self,
         domain_name: str,
-        overrides: Optional[Dict[str, Any]] = None,
-        ensemble_id: Optional[int] = None,
-        catalog_root: Optional[Union[str, Path]] = None,
+        overrides: dict[str, Any] | None = None,
+        ensemble_id: int | None = None,
+        catalog_root: str | Path | None = None,
     ) -> CstarSpecBuilder:
         """
         Create a CstarSpecBuilder instance from domain configuration.
-        
+
         Parameters
         ----------
         domain_name : str
@@ -2410,7 +2578,7 @@ class CstarSpecEngine:
             If set, written into the builder config (overrides domain YAML unless
             already set there). Outer anchor for ``CstarSpecBuilder.catalog_root``.
             ``None`` leaves domain/engine defaults only.
-        
+
         Returns
         -------
         CstarSpecBuilder
@@ -2428,7 +2596,9 @@ class CstarSpecEngine:
             ("_child_grid_name", "grid_kwargs_child"),
         ):
             if ref_key in cfg:
-                cfg[kwarg_key] = self._get_domain_config(cfg.pop(ref_key))["grid_kwargs"]
+                cfg[kwarg_key] = self._get_domain_config(cfg.pop(ref_key))[
+                    "grid_kwargs"
+                ]
 
         # catalog_root: explicit call wins, else engine default, else domain YAML only.
         if catalog_root is not None:
@@ -2437,29 +2607,29 @@ class CstarSpecEngine:
             cfg.setdefault("catalog_root", self._engine_catalog_root)
 
         return CstarSpecBuilder.from_domain(cfg, **(overrides or {}))
-    
+
     def generate_domain(
         self,
         domain_name: str,
-        overrides: Optional[Dict[str, Any]] = None,
+        overrides: dict[str, Any] | None = None,
         clobber_inputs: bool = True,
         partition_files: bool = False,
         test: bool = False,
-        compile_time_settings: Optional[Dict[str, Any]] = None,
-        run_time_settings: Optional[Dict[str, Any]] = None,
-        ensemble_id: Optional[int] = None,
-        catalog_root: Optional[Union[str, Path]] = None,
+        compile_time_settings: dict[str, Any] | None = None,
+        run_time_settings: dict[str, Any] | None = None,
+        ensemble_id: int | None = None,
+        catalog_root: str | Path | None = None,
     ) -> CstarSpecBuilder:
         """
         Execute the complete workflow for a domain.
-        
+
         This method executes the full workflow:
         1. ensure_source_data()
         2. generate_inputs()
         3. configure_build()
         4. build()
         5. pre_run()
-        
+
         Parameters
         ----------
         domain_name : str
@@ -2483,7 +2653,7 @@ class CstarSpecEngine:
             Overrides ``CstarSpecEngine`` default and domain YAML for this call only.
             Outer anchor: blueprints and builds resolve under ``<catalog_root>/catalog/``.
             Same rules as ``CstarSpecBuilder.catalog_root`` (including ``"local"``).
-        
+
         Returns
         -------
         CstarSpecBuilder
@@ -2496,50 +2666,48 @@ class CstarSpecEngine:
             ensemble_id=ensemble_id,
             catalog_root=catalog_root,
         )
-        
+
         # Execute workflow
         builder.ensure_source_data()
         builder.generate_inputs(
-            clobber=clobber_inputs,
-            partition_files=partition_files,
-            test=test
+            clobber=clobber_inputs, partition_files=partition_files, test=test
         )
         builder.configure_build(
             compile_time_settings=compile_time_settings or {},
-            run_time_settings=run_time_settings or {}
+            run_time_settings=run_time_settings or {},
         )
         # TODO: pass prep args as dict to generate_domain()
         builder.prep_cstar_environment(
-            account_key = None,  # None gets from machine config or override here
-            queue_name = None,  # None gets from machine config or override here
-            walltime = "00:10:00",
-            clobber = True,  # recommend True, but it will clear previous results from this run 
-            n_procs_available = 0,  # 0 is auto-detect, change if on a login or shared node to not overuse resources
+            account_key=None,  # None gets from machine config or override here
+            queue_name=None,  # None gets from machine config or override here
+            walltime="00:10:00",
+            clobber=True,  # recommend True, but it will clear previous results from this run
+            n_procs_available=0,  # 0 is auto-detect, change if on a login or shared node to not overuse resources
         )
-        #import asyncio
+        # import asyncio
         asyncio.run(builder.run())
-        
+
         return builder
-    
+
     def generate_all(
         self,
-        overrides: Optional[Dict[str, Any]] = None,
+        overrides: dict[str, Any] | None = None,
         clobber_inputs: bool = True,
         partition_files: bool = False,
         test: bool = False,
-        compile_time_settings: Optional[Dict[str, Any]] = None,
-        run_time_settings: Optional[Dict[str, Any]] = None,
-        ensemble_id: Optional[int] = None,
+        compile_time_settings: dict[str, Any] | None = None,
+        run_time_settings: dict[str, Any] | None = None,
+        ensemble_id: int | None = None,
         stop_on_failure: bool = False,
-        catalog_root: Optional[Union[str, Path]] = None,
-    ) -> Dict[str, CstarSpecBuilder]:
+        catalog_root: str | Path | None = None,
+    ) -> dict[str, CstarSpecBuilder]:
         """
         Execute the complete workflow for all domains (generation only).
-        
+
         This method calls `generate_domain()` for each domain in the domains file.
         The generated builders are stored in `self.builder` attribute.
         To run the simulations, call `run_all()` after this method.
-        
+
         Parameters
         ----------
         overrides : Optional[Dict[str, Any]], optional
@@ -2560,7 +2728,7 @@ class CstarSpecEngine:
         catalog_root : str or Path, optional
             Passed through to each ``generate_domain`` call (overrides engine default for
             this batch only). Outer anchor: ``<catalog_root>/catalog/{blueprints,builds}``.
-        
+
         Returns
         -------
         Dict[str, CstarSpecBuilder]
@@ -2570,33 +2738,33 @@ class CstarSpecEngine:
         builders = {}
         domain_list = self.domains
         total_domains = len(domain_list)
-        
-        print(f"\n{'='*80}")
+
+        print(f"\n{'=' * 80}")
         print(f"Starting generation for {total_domains} domain(s)")
-        print(f"{'='*80}\n")
-        
-        
+        print(f"{'=' * 80}\n")
+
         failed_domains = []
-        
+
         for idx, grid_name in enumerate(domain_list, start=1):
-            print(f"\n{'-'*80}")
+            print(f"\n{'-' * 80}")
             print(f"[{idx}/{total_domains}] Processing domain: {grid_name}")
-            print(f"{'-'*80}")
-            
+            print(f"{'-' * 80}")
+
             # TEMPORARY: Remove stale cache between runs
             # TODO: Remove this once C-Star has a proper cache management system.
             # https://cworthy.atlassian.net/browse/CSD-538
             cache_dir = Path.home() / ".cache" / "cstar"
             if cache_dir.exists():
                 shutil.rmtree(cache_dir)
-                print("⚠ Removed ~/.cache/cstar to avoid stale C-Star cache between runs")
+                print(
+                    "⚠ Removed ~/.cache/cstar to avoid stale C-Star cache between runs"
+                )
                 warnings.warn(
                     "~/.cache/cstar was removed to avoid stale cache state",
                     UserWarning,
                     stacklevel=2,
                 )
-                        
-            
+
             try:
                 builders[grid_name] = self.generate_domain(
                     domain_name=grid_name,
@@ -2617,55 +2785,55 @@ class CstarSpecEngine:
                 warnings.warn(
                     f"Error processing domain {grid_name}: {e}",
                     UserWarning,
-                    stacklevel=2
+                    stacklevel=2,
                 )
                 failed_domains.append((grid_name, str(e)))
-        
-        print(f"\n{'='*80}")
+
+        print(f"\n{'=' * 80}")
         print(f"Completed generation for all {total_domains} domain(s)")
         if failed_domains:
             print(f"⚠ {len(failed_domains)} domain(s) failed:")
             for grid_name, error in failed_domains:
                 print(f"  - {grid_name}: {error}")
-        print(f"{'='*80}\n")
-        
+        print(f"{'=' * 80}\n")
+
         # Store builders as builder attribute (only successful ones)
         self.builder = builders
-        
+
         # Warn if any domains failed
         if failed_domains:
             failed_names = [name for name, _ in failed_domains]
             warnings.warn(
                 f"{len(failed_domains)} domain(s) failed during generation: {', '.join(failed_names)}",
                 UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
-        
+
         return builders
-    
+
     def run_all(
         self,
         poll_interval: int = 30,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run all simulations and wait for completion.
-        
+
         This method runs each simulation from the `builder` attribute (set by `generate_all()`)
         and polls execution status until each simulation reaches a terminal state before
         moving to the next one.
-        
+
         Parameters
         ----------
         poll_interval : int, optional
             Number of seconds between status checks. Default is 30.
-        
+
         Returns
         -------
         Dict[str, Any]
             Dictionary containing:
             - "builders": Dict[str, CstarSpecBuilder] mapping grid_name to CstarSpecBuilder instances
             - "execution_handlers": Dict[str, ExecutionHandler] mapping grid_name to execution handler instances
-        
+
         Raises
         ------
         RuntimeError
@@ -2676,30 +2844,30 @@ class CstarSpecEngine:
             raise RuntimeError(
                 "No builders available. Call generate_all() first to create builders."
             )
-        
+
         builders = self.builder
         total_domains = len(builders)
-        
-        print(f"\n{'='*80}")
+
+        print(f"\n{'=' * 80}")
         print(f"Starting execution for {total_domains} domain(s)")
-        print(f"{'='*80}\n")
-        
+        print(f"{'=' * 80}\n")
+
         execution_results = {}
         failed_simulations = []
-        
+
         for idx, (grid_name, builder) in enumerate(builders.items(), start=1):
-            print(f"\n{'-'*80}")
+            print(f"\n{'-' * 80}")
             print(f"[{idx}/{total_domains}] Running simulation: {grid_name}")
-            print(f"{'-'*80}")
-            
+            print(f"{'-' * 80}")
+
             try:
                 # Start the simulation
                 builder.prep_cstar_environment(
-                    account_key = None,  # None gets from machine config or override here
-                    queue_name = None,  # None gets from machine config or override here
-                    walltime = "12:00:00",  # don't know how long this will take, so give it a long time
-                    clobber = True,  # recommend True, but it will clear previous results from this run 
-                    n_procs_available = 0,  # 0 is auto-detect, change if on a login or shared node to not overuse resources
+                    account_key=None,  # None gets from machine config or override here
+                    queue_name=None,  # None gets from machine config or override here
+                    walltime="12:00:00",  # don't know how long this will take, so give it a long time
+                    clobber=True,  # recommend True, but it will clear previous results from this run
+                    n_procs_available=0,  # 0 is auto-detect, change if on a login or shared node to not overuse resources
                 )
                 builder.run()
 
@@ -2707,13 +2875,13 @@ class CstarSpecEngine:
                 # TODO: remove this once we run_all() behvior is refactored
                 # ------------------------------------------------------------------------------
                 # execution_handler = builder.run()
-                
+
                 # # Poll execution status until terminal
                 # print(f"Monitoring execution status for {grid_name}...")
                 # while True:
                 #     status = execution_handler.status
                 #     print(f"  Status: {status}")
-                    
+
                 #     if ExecutionStatus.is_terminal(status):
                 #         if status == ExecutionStatus.COMPLETED:
                 #             print(f"\n✓ Simulation completed successfully: {grid_name}")
@@ -2734,38 +2902,39 @@ class CstarSpecEngine:
                 #             )
                 #             failed_simulations.append((grid_name, status, "cancelled"))
                 #         break
-                    
+
                 #     # Wait before next status check
                 #     time.sleep(poll_interval)
-                
+
                 # execution_results[grid_name] = execution_handler
                 # ------------------------------------------------------------------------------
-
 
             except Exception as e:
                 print(f"\n✗ Error running simulation {grid_name}: {e}")
                 warnings.warn(
                     f"Error running simulation {grid_name}: {e}",
                     UserWarning,
-                    stacklevel=2
+                    stacklevel=2,
                 )
                 failed_simulations.append((grid_name, None, f"error: {e}"))
-        
-        print(f"\n{'='*80}")
+
+        print(f"\n{'=' * 80}")
         print(f"Completed execution for all {total_domains} domain(s)")
         if failed_simulations:
-            print(f"⚠ {len(failed_simulations)} simulation(s) failed or were cancelled:")
+            print(
+                f"⚠ {len(failed_simulations)} simulation(s) failed or were cancelled:"
+            )
             for grid_name, status, reason in failed_simulations:
                 print(f"  - {grid_name}: {reason}")
-        print(f"{'='*80}\n")
-        
+        print(f"{'=' * 80}\n")
+
         # Warn if any simulations failed
         if failed_simulations:
             failed_names = [name for name, _, _ in failed_simulations]
             warnings.warn(
                 f"{len(failed_simulations)} simulation(s) failed or were cancelled: {', '.join(failed_names)}",
                 UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
-        
+
         return execution_results

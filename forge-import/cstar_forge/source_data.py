@@ -1,10 +1,9 @@
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, Dict, List, Optional
-from datetime import datetime, timedelta
-
 import shutil
 import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 from urllib.request import urlopen
 
 import copernicusmarine
@@ -12,7 +11,6 @@ import gdown
 import roms_tools as rt
 
 from . import config
-
 
 # -----------------------------------------
 # Dataset registry (name -> handler + metadata)
@@ -22,15 +20,15 @@ from . import config
 class DatasetHandler:
     """Container for a dataset handler and its required SourceData attributes."""
 
-    def __init__(self, func: Callable["SourceData", Path], requires: List[str]):
+    def __init__(self, func: Callable[["SourceData"], Path], requires: list[str]):
         self.func = func
         self.requires = requires
 
 
-DATASET_REGISTRY: Dict[str, DatasetHandler] = {}
+DATASET_REGISTRY: dict[str, DatasetHandler] = {}
 
 
-def register_dataset(name: str, requires: Optional[List[str]] = None) -> Callable:
+def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
     """
     Decorator to register a dataset handler.
 
@@ -51,7 +49,7 @@ def register_dataset(name: str, requires: Optional[List[str]] = None) -> Callabl
     if requires is None:
         requires = []
 
-    def decorator(func: Callable["SourceData", Path]) -> Callable:
+    def decorator(func: Callable[["SourceData"], Path]) -> Callable:
         DATASET_REGISTRY[name.upper()] = DatasetHandler(func=func, requires=requires)
         return func
 
@@ -66,21 +64,21 @@ def register_dataset(name: str, requires: Optional[List[str]] = None) -> Callabl
 # without the heavy acquisition deps). Re-exported here for existing consumers.
 # -----------------------------------------
 from .source_registry import (  # noqa: E402,F401  (re-export)
-    SRTM15_VERSION,
-    SRTM15_URL,
     GLORYS_DATASET_ID,
     MBL_CO2_URL,
-    WOA_DOWNLOAD_URL,
-    UNIFIED_BGC_URL,
     SOURCE_ALIAS,
+    SRTM15_URL,
+    SRTM15_VERSION,
     STREAMABLE_SOURCES,
+    UNIFIED_BGC_URL,
+    WOA_DOWNLOAD_URL,
     map_source_to_dataset_key,
 )
 
 # Back-compat alias (handlers reference the lowercase name).
 glorys_dataset_id: str = GLORYS_DATASET_ID
 
-WOA_FILENAMES: List[str] = [f"woa*_decav_s{month:02d}_*.nc" for month in range(1, 13)]
+WOA_FILENAMES: list[str] = [f"woa*_decav_s{month:02d}_*.nc" for month in range(1, 13)]
 
 
 # -----------------------------------------
@@ -106,14 +104,14 @@ class SourceData:
         For example, GLORYS_REGIONAL needs all four.
     """
 
-    datasets: List[str]
+    datasets: list[str]
     clobber: bool = False
 
     # Optional attributes — only required if a dataset handler declares them
-    grid: Optional[object] = None
-    grid_name: Optional[str] = None
-    start_time: Optional[object] = None
-    end_time: Optional[object] = None
+    grid: object | None = None
+    grid_name: str | None = None
+    start_time: object | None = None
+    end_time: object | None = None
 
     def __post_init__(self):
         # Normalize dataset names through SOURCE_ALIAS (if not found, use uppercased name)
@@ -122,7 +120,7 @@ class SourceData:
             ds_upper = ds.upper()
             normalized.append(SOURCE_ALIAS.get(ds_upper, ds_upper))
         self.datasets = normalized
-        
+
         # Validate requested datasets
         known = set(DATASET_REGISTRY.keys())
         unknown = set(self.datasets) - known
@@ -133,8 +131,8 @@ class SourceData:
             )
 
         # Per-dataset paths (generic) + convenience attrs
-        self.paths: Dict[str, Path] = {}
-        self.srtm15_path: Optional[Path] = None
+        self.paths: dict[str, Path] = {}
+        self.srtm15_path: Path | None = None
 
     # -----------------------------------------
     # Public API
@@ -143,7 +141,7 @@ class SourceData:
     def prepare_all(self, include_streamable: bool = False):
         """
         Prepare all requested source datasets and populate `self.paths`.
-        
+
         Parameters
         ----------
         include_streamable : bool, optional
@@ -159,7 +157,9 @@ class SourceData:
 
             handler = DATASET_REGISTRY[name]
             # Make sure required attributes are provided
-            missing_attrs = [attr for attr in handler.requires if getattr(self, attr) is None]
+            missing_attrs = [
+                attr for attr in handler.requires if getattr(self, attr) is None
+            ]
             if missing_attrs:
                 raise ValueError(
                     f"Dataset '{name}' requires attributes {missing_attrs}, "
@@ -178,7 +178,7 @@ class SourceData:
     def dataset_key_for_source(
         self,
         logical_name: str,
-        glorys_layout: Optional[str] = None,
+        glorys_layout: str | None = None,
     ) -> str:
         """
         Given a logical source name (e.g. "GLORYS", "UNIFIED"), return the
@@ -195,7 +195,7 @@ class SourceData:
     def path_for_source(
         self,
         logical_name: str,
-        glorys_layout: Optional[str] = None,
+        glorys_layout: str | None = None,
     ) -> Path:
         """
         Return the prepared file path associated with a logical source name.
@@ -221,7 +221,7 @@ class SourceData:
         """
         key = self.dataset_key_for_source(logical_name, glorys_layout=glorys_layout)
         try:
-            return self.paths[key]            
+            return self.paths[key]
         except KeyError:
             if key in STREAMABLE_SOURCES:
                 return None
@@ -238,7 +238,7 @@ class SourceData:
 
     def _construct_glorys_path(self, date: datetime, is_regional: bool) -> Path:
         """Construct filename for a single day of GLORYS data."""
-        date_str = date.strftime('%Y%m%d')
+        date_str = date.strftime("%Y%m%d")
         dataset_name = "GLORYS_REGIONAL" if is_regional else "GLORYS_GLOBAL"
         if is_regional:
             fn = f"{glorys_dataset_id}_REGIONAL_{self.grid_name}_{date_str}.nc"
@@ -248,10 +248,12 @@ class SourceData:
         dataset_dir.mkdir(parents=True, exist_ok=True)
         return dataset_dir / fn
 
-    def _prepare_glorys_daily(self, is_regional: bool, bounds: Dict[str, Optional[float]]) -> List[Path]:
+    def _prepare_glorys_daily(
+        self, is_regional: bool, bounds: dict[str, float | None]
+    ) -> list[Path]:
         """
         Download or reuse daily GLORYS subsets.
-        
+
         Parameters
         ----------
         is_regional : bool
@@ -267,14 +269,12 @@ class SourceData:
         condition interpolation has temporal context.
         """
         paths = []
-        
+
         # Iterate over each day with a ±1 day temporal padding window.
         current_date = datetime(
             self.start_time.year, self.start_time.month, self.start_time.day
         )
-        end_date = datetime(
-            self.end_time.year, self.end_time.month, self.end_time.day
-        )
+        end_date = datetime(self.end_time.year, self.end_time.month, self.end_time.day)
         # Pad the range by 1 day on each side to ensure boundary/initial condition can be interpolated
         current_date, end_date = _pad_date_range(current_date, end_date, pad_days=1)
 
@@ -282,17 +282,19 @@ class SourceData:
             # Construct path for this day
             path = self._construct_glorys_path(current_date, is_regional)
             paths.append(path)
-            
+
             needs_download = self.clobber or (not path.exists())
-            
+
             if needs_download:
                 if path.exists():
                     dataset_type = "GLORYS_REGIONAL" if is_regional else "GLORYS_GLOBAL"
-                    print(f"⚠️  Clobber=True: removing existing {dataset_type} file {path.name}")
+                    print(
+                        f"⚠️  Clobber=True: removing existing {dataset_type} file {path.name}"
+                    )
                     path.unlink()
-                
+
                 dataset_type = "GLORYS_REGIONAL" if is_regional else "GLORYS_GLOBAL"
-                date_str = current_date.strftime('%Y-%m-%d')
+                date_str = current_date.strftime("%Y-%m-%d")
                 print(f"⬇️  Downloading {dataset_type} for {date_str} → {path.name}")
 
                 copernicusmarine.subset(
@@ -308,16 +310,20 @@ class SourceData:
                 )
             else:
                 dataset_type = "GLORYS_REGIONAL" if is_regional else "GLORYS_GLOBAL"
-                date_str = current_date.strftime('%Y-%m-%d')
-                print(f"✔️  Using existing {dataset_type} file for {date_str}: {path.name}")
-            
+                date_str = current_date.strftime("%Y-%m-%d")
+                print(
+                    f"✔️  Using existing {dataset_type} file for {date_str}: {path.name}"
+                )
+
             # Move to next day
             current_date += timedelta(days=1)
-        
+
         return paths
 
 
-def _pad_date_range(sd: datetime, ed: datetime, pad_days: int=1) -> tuple[datetime, datetime]:
+def _pad_date_range(
+    sd: datetime, ed: datetime, pad_days: int = 1
+) -> tuple[datetime, datetime]:
     """Return a new date range with padding added to both ends."""
     if sd > ed:
         raise ValueError("Start date must precede end date")
@@ -336,7 +342,7 @@ def _pad_date_range(sd: datetime, ed: datetime, pad_days: int=1) -> tuple[dateti
     "GLORYS_REGIONAL",
     requires=["grid", "grid_name", "start_time", "end_time"],
 )
-def _prepare_glorys_regional(self: SourceData) -> List[Path]:
+def _prepare_glorys_regional(self: SourceData) -> list[Path]:
     """Download or reuse daily regional GLORYS subsets for this grid and time range."""
     is_regional = True
     bounds = rt.get_glorys_bounds(self.grid)
@@ -355,7 +361,7 @@ def _prepare_glorys_regional(self: SourceData) -> List[Path]:
     "GLORYS_GLOBAL",
     requires=["start_time", "end_time"],
 )
-def _prepare_glorys_global(self: SourceData) -> List[Path]:
+def _prepare_glorys_global(self: SourceData) -> list[Path]:
     """Download or reuse daily global GLORYS subsets for this time range."""
     is_regional = False
     bounds = {
@@ -368,6 +374,7 @@ def _prepare_glorys_global(self: SourceData) -> List[Path]:
     # Store paths under the dataset key
     self.paths["GLORYS_GLOBAL"] = paths[0] if len(paths) == 1 else paths
     return paths
+
 
 # ---------------------------
 # UNIFIED BGC handler
@@ -464,7 +471,7 @@ def _prepare_mblco2(self: SourceData) -> Path:
     """
     dataset_dir = config.paths.source_data / "MBL_CO2"
     dataset_dir.mkdir(parents=True, exist_ok=True)
-    path = dataset_dir / f"co2_GHGreference.1785677502_surface.txt"
+    path = dataset_dir / "co2_GHGreference.1785677502_surface.txt"
 
     needs_download = self.clobber or (not path.exists())
 
@@ -492,6 +499,7 @@ def _prepare_mblco2(self: SourceData) -> Path:
 @register_dataset("ERA5")
 def _prepare_era5(self: SourceData) -> Path:
     pass
+
 
 # ---------------------------
 # TPXO handler (user-provided dataset)
@@ -542,13 +550,16 @@ def _prepare_tpxo(self: SourceData) -> Path:
 
     if missing_files:
         raise FileNotFoundError(
-            f"TPXO dataset is incomplete. Missing files:\n" + "\n".join(missing_files) + "\n"
+            "TPXO dataset is incomplete. Missing files:\n"
+            + "\n".join(missing_files)
+            + "\n"
             f"Please ensure all TPXO files are present in: {tpxo_path}"
         )
 
     print(f"✔️  TPXO dataset verified at: {tpxo_path}")
     self.paths["TPXO"] = tpxo_path
     return tpxo_dict
+
 
 # ---------------------------
 # WOA handler (user-provided dataset)
@@ -581,8 +592,7 @@ def _prepare_woa(self: SourceData) -> Path:
     woa_path = config.paths.source_data / "WOA"
 
     woa_dict = {
-        f"s{m:02d}": woa_path / f"woa*_decav_s{m:02d}_*.nc"
-        for m in range(1, 13)
+        f"s{m:02d}": woa_path / f"woa*_decav_s{m:02d}_*.nc" for m in range(1, 13)
     }
 
     # Check that the base directory exists
@@ -598,7 +608,7 @@ def _prepare_woa(self: SourceData) -> Path:
     # Check that all required files exist
     # Check that all required files exist (resolving globs)
     missing_files = []
-    resolved: Dict[str, Path] = {}
+    resolved: dict[str, Path] = {}
     for key, file_path in woa_dict.items():
         matches = list(file_path.parent.glob(file_path.name))
         if not matches:
@@ -608,8 +618,9 @@ def _prepare_woa(self: SourceData) -> Path:
 
     if missing_files:
         raise FileNotFoundError(
-            f"WOA dataset is incomplete. Missing files:\n" + "\n".join(missing_files) + "\n"
-
+            "WOA dataset is incomplete. Missing files:\n"
+            + "\n".join(missing_files)
+            + "\n"
         )
 
     print(f"✔️  WOA dataset verified at: {woa_path}")

@@ -49,9 +49,9 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from pathlib import Path
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -66,31 +66,36 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class SurfaceType(str, Enum):
     """Accepted values for ``SurfaceForcing.type``."""
-    PHYSICS = "physics"     # wind, heat, freshwater fluxes (ERA5)
-    BGC = "bgc"             # pCO₂ / iron deposition (UNIFIED, CESM_REGRIDDED, MBL_co2)
-    RESTORING = "restoring" # SSS restoring (WOA, UNIFIED)
+
+    PHYSICS = "physics"  # wind, heat, freshwater fluxes (ERA5)
+    BGC = "bgc"  # pCO₂ / iron deposition (UNIFIED, CESM_REGRIDDED, MBL_co2)
+    RESTORING = "restoring"  # SSS restoring (WOA, UNIFIED)
 
 
 class BoundaryType(str, Enum):
     """Accepted values for ``BoundaryForcing.type``."""
-    PHYSICS = "physics"     # T, S, u, v, ζ (GLORYS)
-    BGC = "bgc"             # BGC tracers (UNIFIED, CESM_REGRIDDED)
+
+    PHYSICS = "physics"  # T, S, u, v, ζ (GLORYS)
+    BGC = "bgc"  # BGC tracers (UNIFIED, CESM_REGRIDDED)
 
 
 class CoarseGridMode(str, Enum):
     """Accepted values for ``SurfaceForcing.coarse_grid_mode``."""
-    AUTO = "auto"     # coarsen only when source is coarser than ROMS grid (default)
-    ALWAYS = "always" # always interpolate onto a factor-2 coarsened grid
-    NEVER = "never"   # always use the full-resolution source
+
+    AUTO = "auto"  # coarsen only when source is coarser than ROMS grid (default)
+    ALWAYS = "always"  # always interpolate onto a factor-2 coarsened grid
+    NEVER = "never"  # always use the full-resolution source
 
 
 class RestoringForce(str, Enum):
     """Variables accepted in ``SurfaceForcing.restoring_forces``."""
-    SSS = "sss"       # sea-surface salinity restoring (WOA or UNIFIED)
+
+    SSS = "sss"  # sea-surface salinity restoring (WOA or UNIFIED)
 
 
 class ClimatologyMode(str, Enum):
     """Accepted values for ``RiverForcing.convert_to_climatology``."""
+
     NEVER = "never"
     IF_ANY_MISSING = "if_any_missing"  # default: compute if any months absent
     ALWAYS = "always"
@@ -99,26 +104,34 @@ class ClimatologyMode(str, Enum):
 class BgcInterpMethod(str, Enum):
     """Accepted values for ``bgc_interpolation_method`` on ``InitialConditions``
     and ``BoundaryForcing`` (roms-tools >=4). Selects the vertical interpolation
-    used for BGC tracers."""
-    DEPTH = "depth"              # default: linear interpolation in depth
-    DENSITY = "density"          # linear interpolation in potential-density (isopycnal) space
+    used for BGC tracers.
+    """
+
+    DEPTH = "depth"  # default: linear interpolation in depth
+    DENSITY = "density"  # linear interpolation in potential-density (isopycnal) space
     DENSITY_MLD = "density_mld"  # mixed-layer-depth-anchored density interpolation
 
 
 class Prefill(str, Enum):
     """Accepted values for ``BoundaryForcing.prefill`` (roms-tools >=4): how to
     fill NaN (land/void) cells in the *source* before regridding. ``None`` (the
-    default, expressed as an absent field) applies no source prefill."""
-    LATERAL_FILL_2D = "2d_lateral_fill"    # legacy AMG Poisson fill (smoothest, slow)
-    INVERSE_DIST = "inverse_dist"          # xESMF inverse-distance source fill
-    NEAREST_S2D = "nearest_s2d"            # xESMF nearest-source fill
-    NEAREST_NEIGHBOR = "nearest_neighbor"  # cheap scipy distance-transform fill (no xESMF)
+    default, expressed as an absent field) applies no source prefill.
+    """
+
+    LATERAL_FILL_2D = "2d_lateral_fill"  # legacy AMG Poisson fill (smoothest, slow)
+    INVERSE_DIST = "inverse_dist"  # xESMF inverse-distance source fill
+    NEAREST_S2D = "nearest_s2d"  # xESMF nearest-source fill
+    NEAREST_NEIGHBOR = (
+        "nearest_neighbor"  # cheap scipy distance-transform fill (no xESMF)
+    )
 
 
 class RegridMethod(str, Enum):
     """Accepted values for ``BoundaryForcing.regrid_method`` (roms-tools >=4):
-    the horizontal regrid engine, chosen independently of ``prefill``."""
-    AUTO = "auto"    # xESMF if installed, else scipy (default when unset)
+    the horizontal regrid engine, chosen independently of ``prefill``.
+    """
+
+    AUTO = "auto"  # xESMF if installed, else scipy (default when unset)
     XESMF = "xesmf"  # force xESMF (raises if absent)
     SCIPY = "scipy"  # force scipy interp (byte-reproducible with prefill)
 
@@ -126,13 +139,16 @@ class RegridMethod(str, Enum):
 class ExtrapMethod(str, Enum):
     """Accepted values for ``BoundaryForcing.extrap_method`` (roms-tools >=4):
     xESMF destination extrapolation on the default (prefill=None) path. Ignored
-    when ``prefill`` is set."""
+    when ``prefill`` is set.
+    """
+
     INVERSE_DIST = "inverse_dist"  # inverse-distance-weighted (effective default)
-    NEAREST_S2D = "nearest_s2d"    # single nearest source point
+    NEAREST_S2D = "nearest_s2d"  # single nearest source point
 
 
 class FillValues(str, Enum):
     """Accepted values for ``VolumeRelease.fill_values``."""
+
     AUTO = "auto"  # fill missing tracer concentrations with dataset defaults
     ZERO = "zero"  # fill missing tracer concentrations with zero
 
@@ -140,13 +156,16 @@ class FillValues(str, Enum):
 # --- Valid source names per object + type -----------------------------------
 # Mirrors the dataset-registry dicts / if-elif chains in the installed roms-tools.
 
+
 class PhysicsSurfaceSource(str, Enum):
     """Source names accepted by SurfaceForcing when type='physics'."""
+
     ERA5 = "ERA5"
 
 
 class BgcSurfaceSource(str, Enum):
     """Source names accepted by SurfaceForcing when type='bgc'."""
+
     UNIFIED = "UNIFIED"
     CESM_REGRIDDED = "CESM_REGRIDDED"
     MBL_CO2 = "MBL_co2"
@@ -154,45 +173,54 @@ class BgcSurfaceSource(str, Enum):
 
 class RestoringSurfaceSource(str, Enum):
     """Source names accepted by SurfaceForcing when type='restoring'."""
+
     WOA = "WOA"
     UNIFIED = "UNIFIED"
 
 
 class PhysicsBoundarySource(str, Enum):
     """Source names accepted by BoundaryForcing when type='physics'."""
+
     GLORYS = "GLORYS"
 
 
 class BgcBoundarySource(str, Enum):
     """Source names accepted by BoundaryForcing when type='bgc'."""
+
     UNIFIED = "UNIFIED"
     CESM_REGRIDDED = "CESM_REGRIDDED"
 
 
 class InitialConditionsSource(str, Enum):
     """Source names accepted by InitialConditions (physics)."""
+
     GLORYS = "GLORYS"
 
 
 class BgcInitialConditionsSource(str, Enum):
     """Source names accepted by InitialConditions (bgc_source)."""
+
     UNIFIED = "UNIFIED"
     CESM_REGRIDDED = "CESM_REGRIDDED"
 
 
 class TidalSource(str, Enum):
     """Source names accepted by TidalForcing."""
+
     TPXO = "TPXO"
 
 
 class RiverSource(str, Enum):
     """Source names accepted by RiverForcing."""
+
     DAI = "DAI"
 
 
 class TopographySource(str, Enum):
     """Source names accepted by Grid (without a custom path)."""
+
     ETOPO5 = "ETOPO5"
+
 
 # Top-level sections EXCLUDED from the integrity hash: provenance (where the hash
 # lives), composition + identity (labels/provenance, not results-affecting), and the
@@ -228,7 +256,7 @@ class Identity(_Section):
 
     model_name: str  # the ModelSpec id, e.g. "cson_roms-marbl_v0.1"
     grid_name: str  # e.g. "test-tiny"
-    ensemble_id: Optional[int] = None
+    ensemble_id: int | None = None
     description: str = "Generated blueprint"
 
 
@@ -265,14 +293,14 @@ class Domain(_Section):
     processing from the generated grid rather than duplicated here.
     """
 
-    grid_kwargs: Dict[str, Any]
-    topography_source: Union[TopographySource, str] = TopographySource.ETOPO5
+    grid_kwargs: dict[str, Any]
+    topography_source: TopographySource | str = TopographySource.ETOPO5
     # str fallback allows a custom path dict to be passed through grid_kwargs
     open_boundaries: OpenBoundaries
     partitioning: Partitioning
-    grid_kwargs_parent: Optional[Dict[str, Any]] = None
-    grid_kwargs_child: Optional[Dict[str, Any]] = None
-    metadata_child: Optional[Dict[str, Any]] = None
+    grid_kwargs_parent: dict[str, Any] | None = None
+    grid_kwargs_child: dict[str, Any] | None = None
+    metadata_child: dict[str, Any] | None = None
     nesting_include_pressure_fluxes: bool = False
     """Whether to include baroclinic pressure fluxes in the nesting extraction file
     (passed to make_nesting_info / make_edata as include_pressure_fluxes)."""
@@ -295,7 +323,7 @@ class SourceSpec(_Section):
 
     name: str
     climatology: bool = False
-    glorys_layout: Optional[str] = None  # "regional" | "global"
+    glorys_layout: str | None = None  # "regional" | "global"
 
 
 class SurfaceForcingItem(_Section):
@@ -303,49 +331,60 @@ class SurfaceForcingItem(_Section):
     type: SurfaceType = SurfaceType.PHYSICS
     correct_radiation: bool = False
     coarse_grid_mode: CoarseGridMode = CoarseGridMode.AUTO
-    restoring_forces: Optional[List[RestoringForce]] = None
+    restoring_forces: list[RestoringForce] | None = None
     wind_dropoff: bool = False  # coastal wind-speed reduction
 
 
 class BoundaryForcingItem(_Section):
     source: SourceSpec
     type: BoundaryType = BoundaryType.PHYSICS
-    bgc_interpolation_method: BgcInterpMethod = BgcInterpMethod.DEPTH  # BGC vertical interp (type='bgc')
-    prefill: Optional[Prefill] = None            # source NaN prefill before regridding
-    prefill_kwargs: Optional[Dict[str, Any]] = None
-    regrid_method: Optional[RegridMethod] = None  # horizontal regrid engine (None -> auto)
-    extrap_method: Optional[ExtrapMethod] = None  # destination extrapolation (default path)
-    extrap_kwargs: Optional[Dict[str, Any]] = None
+    bgc_interpolation_method: BgcInterpMethod = (
+        BgcInterpMethod.DEPTH
+    )  # BGC vertical interp (type='bgc')
+    prefill: Prefill | None = None  # source NaN prefill before regridding
+    prefill_kwargs: dict[str, Any] | None = None
+    regrid_method: RegridMethod | None = None  # horizontal regrid engine (None -> auto)
+    extrap_method: ExtrapMethod | None = (
+        None  # destination extrapolation (default path)
+    )
+    extrap_kwargs: dict[str, Any] | None = None
 
 
 class TidalForcingItem(_Section):
     source: SourceSpec
-    ntides: Optional[int] = None
+    ntides: int | None = None
 
 
 class RiverForcingItem(_Section):
     source: SourceSpec
     include_bgc: bool = False
     convert_to_climatology: ClimatologyMode = ClimatologyMode.IF_ANY_MISSING
-    bgc_source: Optional[Dict[str, Any]] = None  # separate river-BGC dataset config
-    coast_snap_buffer_km: Optional[float] = None  # override coastal snap buffer (km); None -> dataset default
-    domain_edge_buffer: int = 20  # grid cells beyond domain edge kept in the bounding-box pre-filter
+    bgc_source: dict[str, Any] | None = None  # separate river-BGC dataset config
+    coast_snap_buffer_km: float | None = (
+        None  # override coastal snap buffer (km); None -> dataset default
+    )
+    domain_edge_buffer: int = (
+        20  # grid cells beyond domain edge kept in the bounding-box pre-filter
+    )
 
 
 class InitialConditions(_Section):
     source: SourceSpec
-    bgc_source: Optional[SourceSpec] = None
-    bgc_interpolation_method: BgcInterpMethod = BgcInterpMethod.DEPTH  # BGC vertical interp
+    bgc_source: SourceSpec | None = None
+    bgc_interpolation_method: BgcInterpMethod = (
+        BgcInterpMethod.DEPTH
+    )  # BGC vertical interp
     allow_flex_time: bool = False  # ±24h search window around ini_time
 
 
 class ResolvedDataset(_Section):
     """A snapshot of how a logical source resolves — frozen from the hardcoded
-    registry so the processing host uses exactly these IDs/URLs."""
+    registry so the processing host uses exactly these IDs/URLs.
+    """
 
     dataset_key: str
-    dataset_id: Optional[str] = None
-    url: Optional[str] = None
+    dataset_id: str | None = None
+    url: str | None = None
     streamable: bool = False
 
 
@@ -358,13 +397,13 @@ class Forcing(_Section):
     """
 
     initial_conditions: InitialConditions
-    surface: List[SurfaceForcingItem] = Field(default_factory=list)
-    boundary: List[BoundaryForcingItem] = Field(default_factory=list)
-    tidal: List[TidalForcingItem] = Field(default_factory=list)
-    river: List[RiverForcingItem] = Field(default_factory=list)
-    cdr_forcing: Optional[Dict[str, Any]] = None
+    surface: list[SurfaceForcingItem] = Field(default_factory=list)
+    boundary: list[BoundaryForcingItem] = Field(default_factory=list)
+    tidal: list[TidalForcingItem] = Field(default_factory=list)
+    river: list[RiverForcingItem] = Field(default_factory=list)
+    cdr_forcing: dict[str, Any] | None = None
     # logical-name -> resolved registry entry (snapshot of source_data.py tables)
-    resolved_datasets: Dict[str, ResolvedDataset] = Field(default_factory=dict)
+    resolved_datasets: dict[str, ResolvedDataset] = Field(default_factory=dict)
 
 
 # Back-compat alias: code that imported Sources can import Forcing instead.
@@ -376,22 +415,23 @@ Sources = Forcing
 # ===========================================================================
 class CodeRepo(_Section):
     location: str
-    commit: Optional[str] = None
-    branch: Optional[str] = None
+    commit: str | None = None
+    branch: str | None = None
 
 
 class TemplateRepo(CodeRepo):
     """A template source pulled from a repo — like ``code.roms`` / ``code.marbl``
     (``location`` + one of ``commit`` / ``branch``) but with a file filter: the
-    ``files`` to pull, optionally under an in-repo ``directory``."""
+    ``files`` to pull, optionally under an in-repo ``directory``.
+    """
 
-    directory: Optional[str] = None
-    files: List[str] = Field(default_factory=list)
+    directory: str | None = None
+    files: list[str] = Field(default_factory=list)
 
 
 class Code(_Section):
     roms: CodeRepo
-    marbl: Optional[CodeRepo] = None
+    marbl: CodeRepo | None = None
     templates_compile_time: TemplateRepo
     templates_run_time: TemplateRepo
 
@@ -407,7 +447,7 @@ class PieceRef(_Section):
     user edited it, or whether it was authored from scratch.
     """
 
-    name: Optional[str] = None  # catalog entry name, or None if authored from scratch
+    name: str | None = None  # catalog entry name, or None if authored from scratch
     origin: str = "custom"  # "catalog" | "custom" | "model_default"
     modified: bool = False  # True if a catalog piece was edited after selection
 
@@ -417,30 +457,34 @@ class Composition(_Section):
     in the sections above; this records provenance for review/UI.
 
     ``forcing`` corresponds to the ``sources`` section (initial conditions + surface/
-    boundary/tidal/river + CDR)."""
+    boundary/tidal/river + CDR).
+    """
 
     model: PieceRef = Field(default_factory=PieceRef)
     domain: PieceRef = Field(default_factory=PieceRef)
     forcing: PieceRef = Field(default_factory=PieceRef)
-    output: PieceRef = Field(default_factory=PieceRef)  # output-settings piece (OutputSpec)
+    output: PieceRef = Field(
+        default_factory=PieceRef
+    )  # output-settings piece (OutputSpec)
     # Manual edits applied on top of the composed pieces: a sparse
     # {section: {field: value}} (or {section: scalar}) layer. ``model_settings`` already
     # reflects these; this records *which* values were overridden vs. composed/derived.
-    overrides: Dict[str, Any] = Field(default_factory=dict)
+    overrides: dict[str, Any] = Field(default_factory=dict)
 
 
 class Provenance(_Section):
     """Audit trail. Timestamps are passed in (never generated inside a resolver, to
-    keep Phase 1 deterministic/reproducible)."""
+    keep Phase 1 deterministic/reproducible).
+    """
 
-    generated_at: Optional[datetime] = None
-    forge_version: Optional[str] = None
-    roms_tools_version: Optional[str] = None
-    override_files_applied: List[str] = Field(default_factory=list)
+    generated_at: datetime | None = None
+    forge_version: str | None = None
+    roms_tools_version: str | None = None
+    override_files_applied: list[str] = Field(default_factory=list)
     # sha256 of the results-affecting data (set on save by SpecConfig.to_yaml*).
     # Processing recomputes and compares it to detect hand-edits since write-out.
-    content_hash: Optional[str] = None
-    notes: Optional[str] = None
+    content_hash: str | None = None
+    notes: str | None = None
 
 
 # ===========================================================================
@@ -463,12 +507,14 @@ class SpecConfig(_Section):
     """
 
     spec_config_version: int = SPEC_CONFIG_VERSION
-    application: str = DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
+    application: str = (
+        DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
+    )
     identity: Identity
     run: RunWindow
     domain: Domain
     forcing: Forcing
-    model_settings: Dict[str, Any] = Field(default_factory=dict)  # flat sections
+    model_settings: dict[str, Any] = Field(default_factory=dict)  # flat sections
     # n_tracers is NOT stored — it is derived at processing time as
     # model_settings["param"]["ntrc_bio"] + model_settings["param"]["nt_passive"] + 2
     # (temperature + salinity). marbl is read from model_settings["cppdefs"]["marbl"].
@@ -483,7 +529,9 @@ class SpecConfig(_Section):
 
     @property
     def name(self) -> str:
-        base = f"{self.identity.model_name}_{self.identity.grid_name}_{self.n_procs}procs"
+        base = (
+            f"{self.identity.model_name}_{self.identity.grid_name}_{self.n_procs}procs"
+        )
         if self.identity.ensemble_id is not None:
             base += f"_{self.identity.ensemble_id:03d}"
         return base
@@ -496,20 +544,22 @@ class SpecConfig(_Section):
     def casename(self) -> str:
         return f"{self.name}_{self.datestr}"
 
-    def run_output_dir(self, scratch: Union[str, Path]) -> Path:
+    def run_output_dir(self, scratch: str | Path) -> Path:
         """Derived at processing time from the host scratch path: ``scratch/casename``."""
         return Path(scratch) / self.casename
 
-    def output_root_name(self, scratch: Union[str, Path]) -> str:
+    def output_root_name(self, scratch: str | Path) -> str:
         """Namelist ``output_root_name``, derived at processing time:
-        ``<run_output_dir>/output/<casename>``."""
+        ``<run_output_dir>/output/<casename>``.
+        """
         return str(self.run_output_dir(scratch) / "output" / self.casename)
 
     # ---- integrity hash ----
     def content_hash(self) -> str:
         """sha256 over the *results-affecting* data (everything except the sections in
         ``_HASH_EXCLUDE``). Deterministic across a YAML round-trip — used to detect
-        hand-edits between write-out and processing."""
+        hand-edits between write-out and processing.
+        """
         data = self.model_dump(mode="json")
         for key in _HASH_EXCLUDE:
             data.pop(key, None)
@@ -517,7 +567,7 @@ class SpecConfig(_Section):
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     # ---- serialization ----
-    def to_yaml(self, path: Union[str, Path]) -> Path:
+    def to_yaml(self, path: str | Path) -> Path:
         """Write the authoritative config to ``path`` and return it."""
         path = Path(path)
         path.write_text(self.to_yaml_str())
@@ -526,13 +576,18 @@ class SpecConfig(_Section):
     def to_yaml_str(self) -> str:
         # stamp the integrity hash into provenance on the way out (the hash itself
         # excludes provenance, so this doesn't perturb it)
-        stamped = self.model_copy(update={
-            "provenance": self.provenance.model_copy(update={"content_hash": self.content_hash()})})
+        stamped = self.model_copy(
+            update={
+                "provenance": self.provenance.model_copy(
+                    update={"content_hash": self.content_hash()}
+                )
+            }
+        )
         data = stamped.model_dump(mode="json", exclude_none=False)
         return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, path: Union[str, Path]) -> "SpecConfig":
+    def from_yaml(cls, path: str | Path) -> SpecConfig:
         """Load and validate a ``spec_config.yml`` (Phase 2 entry point)."""
         data = yaml.safe_load(Path(path).read_text())
         version = (data or {}).get("spec_config_version")

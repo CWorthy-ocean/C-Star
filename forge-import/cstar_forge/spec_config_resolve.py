@@ -27,13 +27,14 @@ from __future__ import annotations
 import copy
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import yaml
 
 # Dual import: package context (production) or standalone file (lightweight / UI / test).
 try:  # pragma: no cover - exercised both ways
     from .spec_config import (
+        BoundaryForcingItem,
         Code,
         CodeRepo,
         Composition,
@@ -46,17 +47,17 @@ try:  # pragma: no cover - exercised both ways
         PieceRef,
         Provenance,
         ResolvedDataset,
+        RiverForcingItem,
         RunWindow,
         SourceSpec,
         SpecConfig,
         SurfaceForcingItem,
-        BoundaryForcingItem,
-        TidalForcingItem,
-        RiverForcingItem,
         TemplateRepo,
+        TidalForcingItem,
     )
 except ImportError:  # pragma: no cover
     from spec_config import (  # type: ignore
+        BoundaryForcingItem,
         Code,
         CodeRepo,
         Composition,
@@ -69,14 +70,13 @@ except ImportError:  # pragma: no cover
         PieceRef,
         Provenance,
         ResolvedDataset,
+        RiverForcingItem,
         RunWindow,
         SourceSpec,
         SpecConfig,
         SurfaceForcingItem,
-        BoundaryForcingItem,
-        TidalForcingItem,
-        RiverForcingItem,
         TemplateRepo,
+        TidalForcingItem,
     )
 
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
@@ -92,13 +92,14 @@ DEFAULT_TEMPLATE_REPO = CodeRepo(
     location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
 )
 
+
 # Source-name resolution is single-sourced in ``source_registry`` (a lightweight,
 # dependency-free module also used by ``source_data``) — no duplicate table here.
-def _resolve_dataset_key(name: str, glorys_layout: Optional[str] = None) -> str:
+def _resolve_dataset_key(name: str, glorys_layout: str | None = None) -> str:
     return resolve_dataset_key(name, glorys_layout)
 
 
-def _resolved_dataset(name: str, glorys_layout: Optional[str] = None) -> ResolvedDataset:
+def _resolved_dataset(name: str, glorys_layout: str | None = None) -> ResolvedDataset:
     return ResolvedDataset(**resolve_source(name, glorys_layout))
 
 
@@ -106,7 +107,7 @@ def _parse_source(block: Any) -> SourceSpec:
     """A model.yml ``source`` block: a bare name string or a dict."""
     if isinstance(block, str):
         name = block
-        d: Dict[str, Any] = {}
+        d: dict[str, Any] = {}
     else:
         d = dict(block or {})
         name = d.get("name")
@@ -118,7 +119,7 @@ def _parse_source(block: Any) -> SourceSpec:
     )
 
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge ``override`` into ``base`` (override wins). Returns base."""
     for k, v in (override or {}).items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
@@ -128,7 +129,7 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return base
 
 
-def load_model_spec_data(model_dir: Union[str, Path]) -> Dict[str, Any]:
+def load_model_spec_data(model_dir: str | Path) -> dict[str, Any]:
     """Read a ModelSpec directory into plain dicts (no heavy deps).
 
     Returns ``{"model": <model.yml dict>, "compile_defaults": {...},
@@ -142,8 +143,8 @@ def load_model_spec_data(model_dir: Union[str, Path]) -> Dict[str, Any]:
         if len(model) == 1:
             model = next(iter(model.values()))
 
-    def _load_defaults(stage: str) -> Dict[str, Any]:
-        ref = (model.get("settings", {}).get(stage, {}) or {})
+    def _load_defaults(stage: str) -> dict[str, Any]:
+        ref = model.get("settings", {}).get(stage, {}) or {}
         rel = ref.get("_default_config_yaml") or ref.get("default_config_yaml")
         if not rel:
             return {}
@@ -162,17 +163,33 @@ def load_model_spec_data(model_dir: Union[str, Path]) -> Dict[str, Any]:
 
 # Sections that are filled at processing time (host/artifact/identity-derived) and
 # therefore omitted from the stored, flat model_settings.
-_PROCESSING_FILLED_SECTIONS = ("grid", "initial", "forcing", "s_coord", "title", "output_root_name")
+_PROCESSING_FILLED_SECTIONS = (
+    "grid",
+    "initial",
+    "forcing",
+    "s_coord",
+    "title",
+    "output_root_name",
+)
 
 # The "output settings" piece (OutputSpec): whole model_settings sections that are
 # output controls, plus the MARBL output write-lists (a partial of marbl_bgc).
-OUTPUT_SECTIONS = ("ocean_vars", "surf_flux", "diagnostics", "stdout_diag",
-                   "ts_output", "frc_output", "cdr_output", "upscale_output",
-                   "zslice", "random_output")
+OUTPUT_SECTIONS = (
+    "ocean_vars",
+    "surf_flux",
+    "diagnostics",
+    "stdout_diag",
+    "ts_output",
+    "frc_output",
+    "cdr_output",
+    "upscale_output",
+    "zslice",
+    "random_output",
+)
 OUTPUT_MARBL_FIELDS = ("marbl_tracers_to_write", "marbl_diagnostics_to_write")
 
 
-def n_tracers_from_model_settings(model_settings: Dict[str, Any]) -> int:
+def n_tracers_from_model_settings(model_settings: dict[str, Any]) -> int:
     """Derive the total ROMS tracer count from the flat model_settings dict.
 
     ROMS total tracers = T + S + BGC (ntrc_bio) + passive (nt_passive).
@@ -183,7 +200,7 @@ def n_tracers_from_model_settings(model_settings: Dict[str, Any]) -> int:
     return 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
 
 
-def marbl_from_model_settings(model_settings: Dict[str, Any]) -> bool:
+def marbl_from_model_settings(model_settings: dict[str, Any]) -> bool:
     """Return whether MARBL is enabled, read from ``model_settings["cppdefs"]["marbl"]``.
 
     Replaces reads of ``model_spec.settings.properties.marbl`` in input generation.
@@ -191,10 +208,11 @@ def marbl_from_model_settings(model_settings: Dict[str, Any]) -> bool:
     return bool((model_settings.get("cppdefs") or {}).get("marbl", False))
 
 
-def extract_output_settings(model_settings: Dict[str, Any]) -> Dict[str, Any]:
+def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
     """Pull the output-settings subset out of a full model_settings dict (used to
-    seed an OutputSpec catalog entry and to gather the piece for save)."""
-    out: Dict[str, Any] = {}
+    seed an OutputSpec catalog entry and to gather the piece for save).
+    """
+    out: dict[str, Any] = {}
     for sec in OUTPUT_SECTIONS:
         if sec in model_settings:
             out[sec] = copy.deepcopy(model_settings[sec])
@@ -207,32 +225,32 @@ def extract_output_settings(model_settings: Dict[str, Any]) -> Dict[str, Any]:
 
 def build_spec_config(
     *,
-    model_dir: Union[str, Path],
+    model_dir: str | Path,
     grid_name: str,
-    grid_kwargs: Dict[str, Any],
-    open_boundaries: Dict[str, bool],
-    partitioning: Dict[str, int],
+    grid_kwargs: dict[str, Any],
+    open_boundaries: dict[str, bool],
+    partitioning: dict[str, int],
     start_date: datetime,
     end_date: datetime,
-    ensemble_id: Optional[int] = None,
+    ensemble_id: int | None = None,
     description: str = "Generated blueprint",
-    cdr_forcing: Optional[Dict[str, Any]] = None,
-    forcing_inputs: Optional[Dict[str, Any]] = None,
-    output_settings: Optional[Dict[str, Any]] = None,
-    grid_kwargs_child: Optional[Dict[str, Any]] = None,
-    grid_kwargs_parent: Optional[Dict[str, Any]] = None,
-    metadata_child: Optional[Dict[str, Any]] = None,
+    cdr_forcing: dict[str, Any] | None = None,
+    forcing_inputs: dict[str, Any] | None = None,
+    output_settings: dict[str, Any] | None = None,
+    grid_kwargs_child: dict[str, Any] | None = None,
+    grid_kwargs_parent: dict[str, Any] | None = None,
+    metadata_child: dict[str, Any] | None = None,
     nesting_include_pressure_fluxes: bool = False,
-    run_time_overrides: Optional[Dict[str, Any]] = None,
-    compile_time_overrides: Optional[Dict[str, Any]] = None,
-    dt: Optional[float] = None,
+    run_time_overrides: dict[str, Any] | None = None,
+    compile_time_overrides: dict[str, Any] | None = None,
+    dt: float | None = None,
     grid: Any = None,
-    templates_repo: Optional[CodeRepo] = None,
-    composition: Optional[Composition] = None,
-    generated_at: Optional[datetime] = None,
-    forge_version: Optional[str] = None,
-    roms_tools_version: Optional[str] = None,
-    notes: Optional[str] = None,
+    templates_repo: CodeRepo | None = None,
+    composition: Composition | None = None,
+    generated_at: datetime | None = None,
+    forge_version: str | None = None,
+    roms_tools_version: str | None = None,
+    notes: str | None = None,
 ) -> SpecConfig:
     """Resolve the composable pieces into a validated, host-independent ``SpecConfig``.
 
@@ -248,7 +266,11 @@ def build_spec_config(
     compile_defaults = copy.deepcopy(spec["compile_defaults"])
     # forcing inputs: an explicit selection (a ForcingSpec or UI-edited dict) overrides
     # the model's default `inputs`; both share the same shape.
-    inputs = forcing_inputs if forcing_inputs is not None else (model.get("inputs", {}) or {})
+    inputs = (
+        forcing_inputs
+        if forcing_inputs is not None
+        else (model.get("inputs", {}) or {})
+    )
 
     nx = grid_kwargs["nx"]
     ny = grid_kwargs["ny"]
@@ -261,19 +283,28 @@ def build_spec_config(
     if dt is None:
         dt = _compute_dt_from_cfl(grid_kwargs, grid)
     n_days = (end_date - start_date).days
-    ntimes = int(round(n_days * 24 * 3600 / dt))
+    ntimes = round(n_days * 24 * 3600 / dt)
     # v_sponge default = grid spacing (m) / 10  (== cstar_forge.util.compute_v_sponge_from_grid)
     v_sponge = (size_x / nx) * 1000.0 / 10.0
 
     # ----- flat model_settings ----------------------------------------------
-    settings: Dict[str, Any] = copy.deepcopy(run_defaults)
+    settings: dict[str, Any] = copy.deepcopy(run_defaults)
     for sec in _PROCESSING_FILLED_SECTIONS:
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
     settings["v_sponge"] = {"v_sponge": v_sponge}
     param = dict(settings.get("param", {}))
-    param.update({"llm": nx, "mmm": ny, "n": nvert, "np_xi": npx, "np_eta": npy,
-                  "nsub_x": 1, "nsub_e": 1})
+    param.update(
+        {
+            "llm": nx,
+            "mmm": ny,
+            "n": nvert,
+            "np_xi": npx,
+            "np_eta": npy,
+            "nsub_x": 1,
+            "nsub_e": 1,
+        }
+    )
     settings["param"] = param
 
     # cppdefs (compile-time) sits at the same flat level as the namelist sections
@@ -308,8 +339,11 @@ def build_spec_config(
         extract["extract_file"] = "nesting.nc"  # fixed convention (see input_data)
         if "N" in grid_kwargs_child:
             extract["n_chd"] = grid_kwargs_child["N"]
-        for src, dst in (("theta_s", "theta_s_chd"), ("theta_b", "theta_b_chd"),
-                         ("hc", "hc_chd")):
+        for src, dst in (
+            ("theta_s", "theta_s_chd"),
+            ("theta_b", "theta_b_chd"),
+            ("hc", "hc_chd"),
+        ):
             if src in grid_kwargs_child:
                 extract[dst] = grid_kwargs_child[src]
         period = (metadata_child or {}).get("period")
@@ -323,47 +357,75 @@ def build_spec_config(
 
     # overrides win (mirror CstarSpecBuilder.configure_build precedence)
     if compile_time_overrides:
-        _deep_merge(settings["cppdefs"], compile_time_overrides.get("cppdefs", compile_time_overrides))
+        _deep_merge(
+            settings["cppdefs"],
+            compile_time_overrides.get("cppdefs", compile_time_overrides),
+        )
     if run_time_overrides:
         _deep_merge(settings, run_time_overrides)
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
-    sources = _build_forcing(inputs, cdr_forcing)  # kept as `sources` locally for brevity
+    sources = _build_forcing(
+        inputs, cdr_forcing
+    )  # kept as `sources` locally for brevity
 
     # ----- code + templates --------------------------------------------------
     code = _build_code(model, templates_repo or DEFAULT_TEMPLATE_REPO)
 
     return SpecConfig(
-        identity=Identity(model_name=model_name, grid_name=grid_name,
-                          ensemble_id=ensemble_id, description=description),
+        identity=Identity(
+            model_name=model_name,
+            grid_name=grid_name,
+            ensemble_id=ensemble_id,
+            description=description,
+        ),
         run=RunWindow(start_date=start_date, end_date=end_date),
         domain=Domain(
             grid_kwargs=grid_kwargs,
-            topography_source=(inputs.get("grid", {}) or {}).get("topography_source", "ETOPO5"),
-            open_boundaries=OpenBoundaries(**{k: bool(open_boundaries.get(k, False))
-                                              for k in ("north", "south", "east", "west")}),
+            topography_source=(inputs.get("grid", {}) or {}).get(
+                "topography_source", "ETOPO5"
+            ),
+            open_boundaries=OpenBoundaries(
+                **{
+                    k: bool(open_boundaries.get(k, False))
+                    for k in ("north", "south", "east", "west")
+                }
+            ),
             partitioning=Partitioning(n_procs_x=npx, n_procs_y=npy),
             grid_kwargs_child=grid_kwargs_child,
             grid_kwargs_parent=grid_kwargs_parent,
             metadata_child=metadata_child,
-            nesting_include_pressure_fluxes=nesting_include_pressure_fluxes),
+            nesting_include_pressure_fluxes=nesting_include_pressure_fluxes,
+        ),
         forcing=sources,
         model_settings=settings,
         code=code,
-        composition=composition or Composition(
+        composition=composition
+        or Composition(
             model=PieceRef(name=model_name, origin="catalog"),
             domain=PieceRef(name=grid_name, origin="custom"),
-            forcing=PieceRef(name=None,
-                             origin="custom" if forcing_inputs is not None else "model_default"),
-            output=PieceRef(name=None,
-                            origin="custom" if output_settings is not None else "model_default")),
-        provenance=Provenance(generated_at=generated_at, forge_version=forge_version,
-                              roms_tools_version=roms_tools_version,
-                              override_files_applied=[], notes=notes),
+            forcing=PieceRef(
+                name=None,
+                origin="custom" if forcing_inputs is not None else "model_default",
+            ),
+            output=PieceRef(
+                name=None,
+                origin="custom" if output_settings is not None else "model_default",
+            ),
+        ),
+        provenance=Provenance(
+            generated_at=generated_at,
+            forge_version=forge_version,
+            roms_tools_version=roms_tools_version,
+            override_files_applied=[],
+            notes=notes,
+        ),
     )
 
 
-def _build_forcing(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]) -> Forcing:
+def _build_forcing(
+    inputs: dict[str, Any], cdr_forcing: dict[str, Any] | None
+) -> Forcing:
     """Build the flat ``Forcing`` object from model inputs + CDR config.
 
     The former ``Sources / inner Forcing`` two-level nesting is flattened here:
@@ -375,7 +437,7 @@ def _build_forcing(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]
 
     def _items(key, cls, extra):
         out = []
-        for it in (forcing_block.get(key, []) or []):
+        for it in forcing_block.get(key, []) or []:
             it = it or {}
             kw = {"source": _parse_source(it.get("source"))}
             for f in extra:
@@ -386,27 +448,49 @@ def _build_forcing(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]
 
     ic_kw = {
         "source": _parse_source(ic_block.get("source")),
-        "bgc_source": _parse_source(ic_block["bgc_source"]) if ic_block.get("bgc_source") else None,
+        "bgc_source": _parse_source(ic_block["bgc_source"])
+        if ic_block.get("bgc_source")
+        else None,
     }
     for f in ("bgc_interpolation_method", "allow_flex_time"):
         if f in ic_block:
             ic_kw[f] = ic_block[f]
     ic = InitialConditions(**ic_kw)
 
-    surface = _items("surface", SurfaceForcingItem,
-                     ("type", "correct_radiation", "coarse_grid_mode", "restoring_forces"))
-    boundary = _items("boundary", BoundaryForcingItem,
-                      ("type", "bgc_interpolation_method", "prefill", "prefill_kwargs",
-                       "regrid_method", "extrap_method", "extrap_kwargs"))
+    surface = _items(
+        "surface",
+        SurfaceForcingItem,
+        ("type", "correct_radiation", "coarse_grid_mode", "restoring_forces"),
+    )
+    boundary = _items(
+        "boundary",
+        BoundaryForcingItem,
+        (
+            "type",
+            "bgc_interpolation_method",
+            "prefill",
+            "prefill_kwargs",
+            "regrid_method",
+            "extrap_method",
+            "extrap_kwargs",
+        ),
+    )
     tidal = _items("tidal", TidalForcingItem, ("ntides",))
-    river = _items("river", RiverForcingItem,
-                   ("include_bgc", "coast_snap_buffer_km", "domain_edge_buffer"))
+    river = _items(
+        "river",
+        RiverForcingItem,
+        ("include_bgc", "coast_snap_buffer_km", "domain_edge_buffer"),
+    )
 
     # snapshot every distinct logical source touched
-    resolved: Dict[str, ResolvedDataset] = {}
+    resolved: dict[str, ResolvedDataset] = {}
+
     def _note(src: SourceSpec):
         if src and src.name:
-            resolved.setdefault(src.name, _resolved_dataset(src.name, src.glorys_layout))
+            resolved.setdefault(
+                src.name, _resolved_dataset(src.name, src.glorys_layout)
+            )
+
     _note(ic.source)
     _note(ic.bgc_source)
     for grp in (surface, boundary, tidal, river):
@@ -417,41 +501,57 @@ def _build_forcing(inputs: Dict[str, Any], cdr_forcing: Optional[Dict[str, Any]]
     if topo:
         resolved.setdefault(topo, _resolved_dataset(topo))
 
-    return Forcing(initial_conditions=ic, surface=surface, boundary=boundary,
-                   tidal=tidal, river=river,
-                   cdr_forcing=cdr_forcing, resolved_datasets=resolved)
+    return Forcing(
+        initial_conditions=ic,
+        surface=surface,
+        boundary=boundary,
+        tidal=tidal,
+        river=river,
+        cdr_forcing=cdr_forcing,
+        resolved_datasets=resolved,
+    )
 
 
 # Back-compat alias used by some internal call sites
 _build_sources = _build_forcing
 
 
-def _build_code(model: Dict[str, Any], templates_repo: CodeRepo) -> Code:
+def _build_code(model: dict[str, Any], templates_repo: CodeRepo) -> Code:
     code_block = model.get("code", {}) or {}
 
-    def _repo(name) -> Optional[CodeRepo]:
+    def _repo(name) -> CodeRepo | None:
         b = code_block.get(name)
         if not b:
             return None
-        return CodeRepo(location=b.get("location"), commit=b.get("commit"), branch=b.get("branch"))
+        return CodeRepo(
+            location=b.get("location"), commit=b.get("commit"), branch=b.get("branch")
+        )
 
     templates = model.get("templates", {}) or {}
 
     def _template(stage) -> TemplateRepo:
         t = templates.get(stage, {}) or {}
-        files = ((t.get("filter", {}) or {}).get("files", []) or [])
-        return TemplateRepo(location=templates_repo.location, commit=templates_repo.commit,
-                            branch=templates_repo.branch, directory=t.get("location"), files=list(files))
+        files = (t.get("filter", {}) or {}).get("files", []) or []
+        return TemplateRepo(
+            location=templates_repo.location,
+            commit=templates_repo.commit,
+            branch=templates_repo.branch,
+            directory=t.get("location"),
+            files=list(files),
+        )
 
     roms = _repo("roms")
     if roms is None:
         raise ValueError("ModelSpec model.yml is missing a code.roms repository")
-    return Code(roms=roms, marbl=_repo("marbl"),
-                templates_compile_time=_template("compile_time"),
-                templates_run_time=_template("run_time"))
+    return Code(
+        roms=roms,
+        marbl=_repo("marbl"),
+        templates_compile_time=_template("compile_time"),
+        templates_run_time=_template("run_time"),
+    )
 
 
-def _compute_dt_from_cfl(grid_kwargs: Dict[str, Any], grid: Any) -> float:
+def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
     """Lazily compute dt from the CFL criterion (needs roms_tools + cstar_forge.util)."""
     try:
         from cstar_forge.util import compute_timestep_from_cfl
@@ -462,9 +562,13 @@ def _compute_dt_from_cfl(grid_kwargs: Dict[str, Any], grid: Any) -> float:
             f"dependency-light. ({exc})"
         ) from exc
     if grid is None:
-        import roms_tools as rt  # noqa
+        import roms_tools as rt
+
         grid = rt.Grid(**grid_kwargs)
     return compute_timestep_from_cfl(
-        grid_size_x=grid.size_x, grid_size_y=grid.size_y,
-        grid_nx=grid.nx, grid_ny=grid.ny, grid_ds=grid.ds,
+        grid_size_x=grid.size_x,
+        grid_size_y=grid.size_y,
+        grid_nx=grid.nx,
+        grid_ny=grid.ny,
+        grid_ds=grid.ds,
     )

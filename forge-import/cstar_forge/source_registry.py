@@ -16,18 +16,20 @@ processing layer eventually moves to C-Star, this module travels with ``source_d
 
 from __future__ import annotations
 
-from typing import Dict, Optional
-
 # --- versioned constants -----------------------------------------------------
 SRTM15_VERSION = "V2.7"
 SRTM15_URL = f"https://topex.ucsd.edu/pub/srtm15_plus/SRTM15_{SRTM15_VERSION}.nc"
 GLORYS_DATASET_ID = "cmems_mod_glo_phy_my_0.083deg_P1D-m"
-MBL_CO2_URL = "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
-WOA_DOWNLOAD_URL = "https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/"
+MBL_CO2_URL = (
+    "https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt"
+)
+WOA_DOWNLOAD_URL = (
+    "https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/"
+)
 UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq"
 
 # --- logical source-name -> dataset key --------------------------------------
-SOURCE_ALIAS: Dict[str, str] = {
+SOURCE_ALIAS: dict[str, str] = {
     "ERA5": "ERA5",
     # GLORYS defaults to regional when only the logical name is known
     # (see SourceSpec.glorys_layout / resolve_dataset_key).
@@ -47,7 +49,7 @@ SOURCE_ALIAS: Dict[str, str] = {
 STREAMABLE_SOURCES = ["ERA5", "DAI"]
 
 # Per-key provenance metadata (snapshotted into SpecConfig.sources.resolved_datasets).
-DATASET_METADATA: Dict[str, Dict[str, str]] = {
+DATASET_METADATA: dict[str, dict[str, str]] = {
     "GLORYS_REGIONAL": {"dataset_id": GLORYS_DATASET_ID},
     "GLORYS_GLOBAL": {"dataset_id": GLORYS_DATASET_ID},
     "UNIFIED_BGC": {"url": UNIFIED_BGC_URL},
@@ -68,22 +70,29 @@ def map_source_to_dataset_key(name: str) -> str:
     return SOURCE_ALIAS.get(name.upper(), name.upper())
 
 
-def resolve_dataset_key(name: str, glorys_layout: Optional[str] = None) -> str:
+def resolve_dataset_key(name: str, glorys_layout: str | None = None) -> str:
     """Layout-aware key resolution. For logical ``GLORYS``, ``glorys_layout``
-    selects ``GLORYS_GLOBAL`` vs ``GLORYS_REGIONAL`` (defaults to regional)."""
+    selects ``GLORYS_GLOBAL`` vs ``GLORYS_REGIONAL`` (defaults to regional).
+    """
     if name.upper() == "GLORYS":
-        return "GLORYS_GLOBAL" if (glorys_layout or "regional").lower() == "global" else "GLORYS_REGIONAL"
+        return (
+            "GLORYS_GLOBAL"
+            if (glorys_layout or "regional").lower() == "global"
+            else "GLORYS_REGIONAL"
+        )
     return map_source_to_dataset_key(name)
 
 
-def resolve_source(name: str, glorys_layout: Optional[str] = None) -> Dict[str, object]:
+def resolve_source(name: str, glorys_layout: str | None = None) -> dict[str, object]:
     """Resolve a logical source to ``{dataset_key, dataset_id, url, streamable}``
-    (plain dict — callers wrap it into their own model)."""
+    (plain dict — callers wrap it into their own model).
+    """
     key = resolve_dataset_key(name, glorys_layout)
     meta = DATASET_METADATA.get(key, {})
     return {
         "dataset_key": key,
         "dataset_id": meta.get("dataset_id"),
         "url": meta.get("url"),
-        "streamable": name.upper() in _STREAMABLE_UPPER or key.upper() in _STREAMABLE_UPPER,
+        "streamable": name.upper() in _STREAMABLE_UPPER
+        or key.upper() in _STREAMABLE_UPPER,
     }

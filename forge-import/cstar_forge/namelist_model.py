@@ -17,11 +17,55 @@ lives in C-Star (:mod:`cstar.roms.namelist`) and is imported here; that is the
 reusable read/edit/write schema. ``settings.write_roms_namelist`` is a thin
 wrapper over ``build_namelist``.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Annotated, List, Optional, Union
+from typing import Annotated
 
+from cstar.roms.namelist import (
+    BasicOutputSettings,
+    BgcSettings,
+    BottomDragSettings,
+    CalcPflxSettings,
+    CdrFrcSettings,
+    CdrOutputSettings,
+    DiagnosticsSettings,
+    DicAlkCorrection,
+    ExtractDataSettings,
+    ForcingFiles,
+    FrcOutputSettings,
+    Gamma2Settings,
+    GridSettings,
+    InitialConditions,
+    LateralViscSettings,
+    LinRhoEosSettings,
+    MarblBiogeochemistrySettings,
+    ParamSettings,
+    ParticlesSettings,
+    PipeFrcSettings,
+    RandomOutputSettings,
+    Rho0Settings,
+    RiverFrcSettings,
+    RomsNamelist,
+    SCoord,
+    SimulationNameSettings,
+    SpongeTuneSettings,
+    SssCorrection,
+    SstCorrection,
+    StdoutDiagSettings,
+    SurfFlxOutputSettings,
+    SurfFrcSettings,
+    TidalFrcSettings,
+    TimeStepping,
+    TracerDiff2,
+    TsOutputSettings,
+    UbindSettings,
+    UpscaleSettings,
+    VerticalMixingSettings,
+    VSpongeSettings,
+    ZsliceSettings,
+)
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -31,30 +75,18 @@ from pydantic import (
     ValidationError,
 )
 
-from cstar.roms.namelist import (
-    RomsNamelist,
-    SimulationNameSettings, TimeStepping, GridSettings, SCoord, ParamSettings,
-    InitialConditions, ForcingFiles, SurfFrcSettings,
-    RiverFrcSettings, TidalFrcSettings, BasicOutputSettings, TsOutputSettings,
-    FrcOutputSettings, ExtractDataSettings, SpongeTuneSettings, CalcPflxSettings,
-    ZsliceSettings, BgcSettings, MarblBiogeochemistrySettings, CdrFrcSettings,
-    CdrOutputSettings, UpscaleSettings, LinRhoEosSettings, Rho0Settings,
-    Gamma2Settings, TracerDiff2, BottomDragSettings, VerticalMixingSettings,
-    LateralViscSettings, UbindSettings, VSpongeSettings, SssCorrection,
-    SstCorrection, DicAlkCorrection, DiagnosticsSettings, StdoutDiagSettings,
-    RandomOutputSettings, SurfFlxOutputSettings, PipeFrcSettings, ParticlesSettings,
-)
 
 def _coerce_pathlike(v):
     """Accept ``pathlib.Path``/``os.PathLike`` for path-valued settings fields —
     input generation fills them with ``Path`` objects — coercing to ``str``.
-    ``None`` and ``str`` pass through unchanged."""
+    ``None`` and ``str`` pass through unchanged.
+    """
     return os.fspath(v) if isinstance(v, os.PathLike) else v
 
 
 # An optional path string that also accepts a Path (coerced to str). Used for
 # the settings fields that input generation populates with Path objects.
-PathStr = Annotated[Optional[str], BeforeValidator(_coerce_pathlike)]
+PathStr = Annotated[str | None, BeforeValidator(_coerce_pathlike)]
 
 
 # ===========================================================================
@@ -77,11 +109,11 @@ class _SettingsSection(BaseModel):
 
 
 class TitleCfg(_SettingsSection):
-    casename: Optional[str] = None       # set dynamically
+    casename: str | None = None  # set dynamically
 
 
 class OutputRootNameCfg(_SettingsSection):
-    output_root_name: Optional[str] = None   # set dynamically
+    output_root_name: str | None = None  # set dynamically
 
 
 class TimeSteppingCfg(_SettingsSection):
@@ -92,13 +124,15 @@ class TimeSteppingCfg(_SettingsSection):
 
 
 class GridCfg(_SettingsSection):
-    grid_file: PathStr = Field(default=None, serialization_alias="grdname")  # set from generated grid
+    grid_file: PathStr = Field(
+        default=None, serialization_alias="grdname"
+    )  # set from generated grid
 
 
 class SCoordCfg(_SettingsSection):
-    theta_s: Optional[float] = None      # set from grid
-    theta_b: Optional[float] = None
-    tcline: Optional[float] = Field(default=None, serialization_alias="hc")
+    theta_s: float | None = None  # set from grid
+    theta_b: float | None = None
+    tcline: float | None = Field(default=None, serialization_alias="hc")
 
 
 class ParamCfg(_SettingsSection):
@@ -112,7 +146,9 @@ class ParamCfg(_SettingsSection):
 
 
 class InitialCfg(_SettingsSection):
-    initial_file: PathStr = Field(default=None, serialization_alias="inifile")  # set from generated IC
+    initial_file: PathStr = Field(
+        default=None, serialization_alias="inifile"
+    )  # set from generated IC
 
 
 class ForcingCfg(_SettingsSection):
@@ -233,9 +269,9 @@ class ZsliceCfg(_SettingsSection):
     output_period: float = Field(serialization_alias="output_period_zslice")
     nrpf: int = Field(serialization_alias="nrpf_zslice")
     ndep: int
-    vecdep: List[float]
+    vecdep: list[float]
     nt_z: int = Field(serialization_alias="nt_zslice")
-    trc2zsc: List[int]
+    trc2zsc: list[int]
 
 
 class BgcCfg(_SettingsSection):
@@ -247,10 +283,14 @@ class BgcCfg(_SettingsSection):
     output_period_avg: float = Field(serialization_alias="output_period_bgc_avg")
     nrpf_avg: int = Field(serialization_alias="nrpf_bgc_avg")
     wrt_his_dia: bool = Field(serialization_alias="wrt_bgc_dia_his")
-    output_period_his_dia: float = Field(serialization_alias="output_period_bgc_his_dia")
+    output_period_his_dia: float = Field(
+        serialization_alias="output_period_bgc_his_dia"
+    )
     nrpf_his_dia: int = Field(serialization_alias="nrpf_bgc_his_dia")
     wrt_avg_dia: bool = Field(serialization_alias="wrt_bgc_dia_avg")
-    output_period_avg_dia: float = Field(serialization_alias="output_period_bgc_avg_dia")
+    output_period_avg_dia: float = Field(
+        serialization_alias="output_period_bgc_avg_dia"
+    )
     nrpf_avg_dia: int = Field(serialization_alias="nrpf_bgc_avg_dia")
     xco2air_default: float
 
@@ -260,7 +300,9 @@ class CdrFrcCfg(_SettingsSection):
     cdr_file: str
     ncdr_parm: int = Field(serialization_alias="cdr_ncdr_parm")
     nz_chd: int = Field(serialization_alias="cdr_nz_chd")
-    forcing_depth_profiles: bool = Field(serialization_alias="cdr_forcing_depth_profiles")
+    forcing_depth_profiles: bool = Field(
+        serialization_alias="cdr_forcing_depth_profiles"
+    )
     forcing_3d: bool = Field(serialization_alias="cdr_forcing_3d")
     forcing_parameterized: bool = Field(serialization_alias="cdr_forcing_parameterized")
     time_interpolation: bool = Field(serialization_alias="cdr_time_interpolation")
@@ -374,8 +416,8 @@ class VSpongeCfg(_SettingsSection):
 
 class MarblBgcCfg(_SettingsSection):
     marbl_config_file: str
-    marbl_tracers_to_write: Union[List[str], str]
-    marbl_diagnostics_to_write: Union[List[str], str]
+    marbl_tracers_to_write: list[str] | str
+    marbl_diagnostics_to_write: list[str] | str
     marbl_timestep: float
 
 
@@ -385,6 +427,7 @@ class RunTimeSettings(_SettingsSection):
     Sections are required: the (per-ModelSpec) YAML must define them all. There
     are no value defaults here — the YAML is the single source of defaults.
     """
+
     title: TitleCfg
     output_root_name: OutputRootNameCfg
     time_stepping: TimeSteppingCfg
@@ -430,9 +473,12 @@ class RunTimeSettings(_SettingsSection):
 
 # Canonical forcing order -> frcfiles (matches write_roms_namelist).
 _FORCING_ORDER = (
-    "surface_forcing_path", "surface_forcing_bgc_path",
-    "boundary_forcing_path", "boundary_forcing_bgc_path",
-    "tidal_forcing_path", "river_path",
+    "surface_forcing_path",
+    "surface_forcing_bgc_path",
+    "boundary_forcing_path",
+    "boundary_forcing_bgc_path",
+    "tidal_forcing_path",
+    "river_path",
 )
 
 
@@ -447,30 +493,38 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
     the cross-section read of ``rho0`` from ``lateral_visc``. ``exclude=`` drops
     the settings-only fields with no namelist counterpart.
     """
+
     def grp(section) -> dict:
         return section.model_dump(by_alias=True)
 
-    frc = [getattr(rt.forcing, k) for k in _FORCING_ORDER
-           if getattr(rt.forcing, k) is not None]
+    frc = [
+        getattr(rt.forcing, k)
+        for k in _FORCING_ORDER
+        if getattr(rt.forcing, k) is not None
+    ]
 
     return RomsNamelist(
         # ---- structural transforms (regroup / computed / cross-section) ----
         simulation_name_settings=SimulationNameSettings(
             output_root_name=rt.output_root_name.output_root_name,
-            title=rt.title.casename),                              # regroup; casename -> title
-        forcing_files=ForcingFiles(frcfiles=frc),                  # 6 *_path -> frcfiles list
+            title=rt.title.casename,
+        ),  # regroup; casename -> title
+        forcing_files=ForcingFiles(frcfiles=frc),  # 6 *_path -> frcfiles list
         tracer_diff2=TracerDiff2(tnu2=[rt.tracer_diff2.tnu2_default] * n_tracers),
         vertical_mixing_settings=VerticalMixingSettings(
-            akv_bak=rt.vertical_mixing.akv,                       # akv -> akv_bak
-            akt_bak=[rt.vertical_mixing.akt_default] * n_tracers),
-        rho0_settings=Rho0Settings(rho0=rt.lateral_visc.rho0),    # cross-section
+            akv_bak=rt.vertical_mixing.akv,  # akv -> akv_bak
+            akt_bak=[rt.vertical_mixing.akt_default] * n_tracers,
+        ),
+        rho0_settings=Rho0Settings(rho0=rt.lateral_visc.rho0),  # cross-section
         gamma2_settings=Gamma2Settings(gamma2=rt.gamma2),
         ubind_settings=UbindSettings(ubind=rt.ubind),
         diagnostics_settings=DiagnosticsSettings(**grp(rt.diagnostics)),
         basic_output_settings=BasicOutputSettings(
-            **rt.ocean_vars.model_dump(by_alias=True)),
+            **rt.ocean_vars.model_dump(by_alias=True)
+        ),
         lateral_visc_settings=LateralViscSettings(
-            **rt.lateral_visc.model_dump(by_alias=True, exclude={"rho0"})),
+            **rt.lateral_visc.model_dump(by_alias=True, exclude={"rho0"})
+        ),
         surf_frc_settings=SurfFrcSettings(**{**grp(rt.blk_frc), **grp(rt.flux_frc)}),
         # ---- 1:1 groups (aliases handle the renames) ----
         time_stepping=TimeStepping(**grp(rt.time_stepping)),
@@ -487,7 +541,9 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         calc_pflx_settings=CalcPflxSettings(**grp(rt.calc_pflx)),
         zslice_settings=ZsliceSettings(**grp(rt.zslice)),
         bgc_settings=BgcSettings(**grp(rt.bgc)),
-        marbl_biogeochemistry_settings=MarblBiogeochemistrySettings(**grp(rt.marbl_bgc)),
+        marbl_biogeochemistry_settings=MarblBiogeochemistrySettings(
+            **grp(rt.marbl_bgc)
+        ),
         cdr_frc_settings=CdrFrcSettings(**grp(rt.cdr_frc)),
         cdr_output_settings=CdrOutputSettings(**grp(rt.cdr_output)),
         upscale_settings=UpscaleSettings(**grp(rt.upscale_output)),
@@ -505,7 +561,7 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
     )
 
 
-def validate_run_time_sections(settings: dict) -> List[str]:
+def validate_run_time_sections(settings: dict) -> list[str]:
     """Validate the *present* run-time sections of a (possibly partial) settings dict
     against the ``RunTimeSettings`` schema, returning a list of human-readable errors
     (empty if all good).
@@ -517,7 +573,7 @@ def validate_run_time_sections(settings: dict) -> List[str]:
     skipped. Use it for fail-fast feedback on hand-edited / loaded configs, where the
     inner values are otherwise opaque (``model_settings`` is ``Dict[str, Any]``).
     """
-    errors: List[str] = []
+    errors: list[str] = []
     fields = RunTimeSettings.model_fields
     for key, value in (settings or {}).items():
         if key not in fields:

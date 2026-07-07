@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from pathlib import Path
+import argparse
+import json
 import os
 import platform
 import socket
-from typing import Callable, Dict, Tuple, Optional, Any
-import argparse
-import json
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from pathlib import Path
+
 import yaml
 
 USER = os.environ.get("USER", None)
 if USER is None:
     raise ValueError("USER environment variable is not set")
+
 
 def _ensure_dir(path: Path) -> Path:
     """Create directory if needed and return it."""
@@ -61,14 +63,16 @@ class MachineConfig:
     queues : dict, optional
         Dictionary of queue names, with 'default' and optionally 'premium' keys.
     """
-    account: Optional[str] = None
-    pes_per_node: Optional[int] = None
-    queues: Optional[Dict[str, str]] = None
+
+    account: str | None = None
+    pes_per_node: int | None = None
+    queues: dict[str, str] | None = None
 
 
 # --------------------------------------------------------
 # Hostname / system detection helpers
 # --------------------------------------------------------
+
 
 def _get_hostname() -> str:
     """Return lowercase hostname from multiple sources."""
@@ -92,7 +96,6 @@ def _detect_system() -> str:
 
     Extendable via SYSTEM_LAYOUT_REGISTRY.
     """
-
     system = platform.system().lower()
     if system == "darwin":
         return "MacOS"
@@ -114,8 +117,8 @@ def _detect_system() -> str:
 
 # Now each layout returns 3 paths:
 # (source_data, input_data, scratch)
-SystemLayoutFn = Callable[[Path, dict], Tuple[Path, Path, Path]]
-SYSTEM_LAYOUT_REGISTRY: Dict[str, SystemLayoutFn] = {}
+SystemLayoutFn = Callable[[Path, dict], tuple[Path, Path, Path]]
+SYSTEM_LAYOUT_REGISTRY: dict[str, SystemLayoutFn] = {}
 
 
 def register_system(tag: str) -> Callable[[SystemLayoutFn], SystemLayoutFn]:
@@ -125,6 +128,7 @@ def register_system(tag: str) -> Callable[[SystemLayoutFn], SystemLayoutFn]:
     The decorated function must accept (home: Path, env: dict)
     and return (source_data, input_data, scratch).
     """
+
     def decorator(func: SystemLayoutFn) -> SystemLayoutFn:
         SYSTEM_LAYOUT_REGISTRY[tag] = func
         return func
@@ -136,8 +140,9 @@ def register_system(tag: str) -> Callable[[SystemLayoutFn], SystemLayoutFn]:
 # Default system layouts
 # --------------------------------------------------------
 
+
 @register_system("MacOS")
-def _layout_mac(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_mac(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
@@ -146,7 +151,7 @@ def _layout_mac(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 
 
 @register_system("RCAC_anvil")
-def _layout_RCAC_anvil(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_RCAC_anvil(home: Path, env: dict) -> tuple[Path, Path, Path]:
     work = Path(env.get("WORK", home / "work"))
     scratch_root = Path(env.get("SCRATCH", work / "scratch"))
 
@@ -158,7 +163,7 @@ def _layout_RCAC_anvil(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 
 
 @register_system("NERSC_perlmutter")
-def _layout_NERSC_perlmutter(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_NERSC_perlmutter(home: Path, env: dict) -> tuple[Path, Path, Path]:
     scratch_root = Path(env.get("SCRATCH", home / "scratch"))
     base = scratch_root / "cstar-forge-data"
 
@@ -169,7 +174,7 @@ def _layout_NERSC_perlmutter(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 
 
 @register_system("unknown")
-def _layout_unknown(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_unknown(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
@@ -180,6 +185,7 @@ def _layout_unknown(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 # --------------------------------------------------------
 # Path factory
 # --------------------------------------------------------
+
 
 def default_catalog_inner_dir(input_data: Path) -> Path:
     """
@@ -192,9 +198,7 @@ def default_catalog_inner_dir(input_data: Path) -> Path:
 
 
 def get_data_paths() -> DataPaths:
-    """
-    Return canonical data and project paths adapted to the system we're running on.
-    """
+    """Return canonical data and project paths adapted to the system we're running on."""
     env = os.environ
     home = Path(env.get("SCRATCH", str(Path.home())))
     system_tag = _detect_system()
@@ -252,6 +256,7 @@ def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
 # Machine configuration loader
 # --------------------------------------------------------
 
+
 def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineConfig:
     """
     Load machine-specific configuration from machines.yml.
@@ -287,6 +292,7 @@ def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineCon
         # If there's any error loading the config, return empty config
         return MachineConfig()
 
+
 # =========================================================
 # Model execution (run) functions
 # =========================================================
@@ -294,6 +300,7 @@ def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineCon
 
 class ClusterType:
     """Constants for cluster/scheduler types."""
+
     LOCAL = "LocalCluster"
     SLURM = "SLURMCluster"
     PBS = "PBSCluster"  # For future extensibility
@@ -318,24 +325,29 @@ def _default_cluster_type(system_tag: str) -> str:
     elif system_tag in ["RCAC_anvil", "NERSC_perlmutter"]:
         return ClusterType.SLURM
     else:
-        raise NotImplementedError(f"Cluster type not implemented for system: {system_tag}")
+        raise NotImplementedError(
+            f"Cluster type not implemented for system: {system_tag}"
+        )
+
 
 # --------------------------------------------------------
 # Environment and Machine Information
 # --------------------------------------------------------
 
+
 @dataclass
 class EnvironmentInfo:
     """Information about the execution environment and machine."""
+
     hostname: str
     system_tag: str
     os_info: str
     python_version: str
     python_executable: str
-    conda_env: Optional[str]
-    conda_prefix: Optional[str]
-    kernel_name: Optional[str]
-    kernel_version: Optional[str]
+    conda_env: str | None
+    conda_prefix: str | None
+    kernel_name: str | None
+    kernel_version: str | None
 
     @property
     def env_info(self) -> str:
@@ -362,7 +374,9 @@ def get_environment_info() -> EnvironmentInfo:
         EnvironmentInfo: Dataclass containing machine and environment details.
     """
     # Get machine information
-    hostname = socket.gethostname() or platform.node() or os.environ.get("HOSTNAME", "unknown")
+    hostname = (
+        socket.gethostname() or platform.node() or os.environ.get("HOSTNAME", "unknown")
+    )
     system_tag = _detect_system()
     os_info = f"{platform.system()} {platform.release()} ({platform.machine()})"
 
@@ -375,7 +389,8 @@ def get_environment_info() -> EnvironmentInfo:
     kernel_version = None
     try:
         from jupyter_client.kernelspec import KernelSpecManager
-        ksm = KernelSpecManager()
+
+        KernelSpecManager()  # verifies jupyter_client is importable
         # Try to get current kernel name from environment or kernel spec
         kernel_name = os.environ.get("JPY_KERNEL_NAME", None)
         if not kernel_name:
@@ -386,8 +401,9 @@ def get_environment_info() -> EnvironmentInfo:
                 kernel_name = None
         try:
             import ipykernel
+
             kernel_version = f"ipykernel {ipykernel.__version__}"
-        except:
+        except Exception:
             kernel_version = None
     except Exception:
         pass
@@ -396,12 +412,14 @@ def get_environment_info() -> EnvironmentInfo:
     conda_env = os.environ.get("CONDA_DEFAULT_ENV", None)
     conda_prefix = None
     if conda_env:
-        conda_prefix = os.environ.get("CONDA_PREFIX", os.environ.get("MAMBA_ROOT_PREFIX", None))
+        conda_prefix = os.environ.get(
+            "CONDA_PREFIX", os.environ.get("MAMBA_ROOT_PREFIX", None)
+        )
 
     # Import the class from the current module to ensure it's accessible
     # This handles autoreload issues where the class might not be in scope
     current_module = sys.modules[__name__]
-    EnvironmentInfo = getattr(current_module, 'EnvironmentInfo')
+    EnvironmentInfo = getattr(current_module, "EnvironmentInfo")
 
     return EnvironmentInfo(
         hostname=hostname,
@@ -416,20 +434,17 @@ def get_environment_info() -> EnvironmentInfo:
     )
 
 
-
-
 # --------------------------------------------------------
 # CLI
 # --------------------------------------------------------
+
 
 def _paths_to_dict(dp: DataPaths) -> dict:
     return {k: str(v) for k, v in dp.__dict__.items()}
 
 
 def main(argv: list[str] | None = None) -> int:
-    """
-    CLI for inspecting detected compute environment and configured paths.
-    """
+    """CLI for inspecting detected compute environment and configured paths."""
     if argv is None:
         argv = sys.argv[1:]
 
@@ -481,11 +496,11 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-
 def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
     """Load machine config from the default DomainCatalog (internal cstar-forge catalog)."""
     try:
         from .domain_catalog import default_catalog
+
         data = default_catalog.machine_data(system_tag)
         return MachineConfig(
             account=data.get("account"),

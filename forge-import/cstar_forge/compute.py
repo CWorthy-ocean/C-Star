@@ -1,26 +1,24 @@
-"""
-Utilities for launching a Dask cluster
-"""
+"""Utilities for launching a Dask cluster"""
 
 import os
 import shutil
-from subprocess import check_output, check_call
-from pathlib import Path
-
-import tempfile
-import time
-import textwrap
 import signal
+import tempfile
+import textwrap
+import time
+from pathlib import Path
+from subprocess import check_call, check_output
 
 import dask
 from dask.distributed import Client, LocalCluster
 
-from .config import paths, system, machine_config
+from .config import machine_config, paths, system
 
 # Get JupyterHub URL from environment variable, default to empty string
 JUPYTERHUB_URL = os.environ.get("JUPYTERHUB_SERVICE_PREFIX", "")
 
-class dask_cluster(object):
+
+class dask_cluster:
     """Launch or connect to a Dask cluster on SLURM, or fall back to local."""
 
     def __init__(
@@ -80,7 +78,6 @@ class dask_cluster(object):
 
         self.scheduler_file = scheduler_file
         self.client = None
-        
 
         if not slurm_available():
             self.cluster = LocalCluster()
@@ -90,13 +87,15 @@ class dask_cluster(object):
             self.local_cluster = True
             print(f"Local cluster running at {self.client.dashboard_link}")
             return
-        
+
         if self.scheduler_file is not None:
             self.scheduler_file = str(self.scheduler_file)
             if not os.path.exists(self.scheduler_file):
-                raise FileNotFoundError(f"scheduler_file not found: {self.scheduler_file}")
+                raise FileNotFoundError(
+                    f"scheduler_file not found: {self.scheduler_file}"
+                )
             self.jobid = None
-        
+
         else:
             if account is None:
                 raise ValueError("account is required to launch a dask cluster")
@@ -110,10 +109,10 @@ class dask_cluster(object):
             )
 
         self.local_cluster = False
-        dask.config.config["distributed"]["dashboard"][
-            "link"
-        ] = "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
-        
+        dask.config.config["distributed"]["dashboard"]["link"] = (
+            "{JUPYTERHUB_SERVICE_PREFIX}proxy/{host}:{port}/status"
+        )
+
         try:
             self._connect_client()
         except RuntimeError:
@@ -137,7 +136,6 @@ class dask_cluster(object):
                 raise
         self.dashboard_link = f"{JUPYTERHUB_URL}{self.client.dashboard_link}"
 
-
         print(f"Dashboard:\n {self.dashboard_link}")
 
     def _launch_dask_cluster(
@@ -145,7 +143,11 @@ class dask_cluster(object):
     ):
         """Submit a SLURM job that starts a Dask scheduler and workers."""
         # Use scratch parent as scratch location, or fall back to environment variable
-        scratch_root = paths.scratch.parent if hasattr(paths, 'scratch') else Path(os.environ.get("SCRATCH", "/tmp"))
+        scratch_root = (
+            paths.scratch.parent
+            if hasattr(paths, "scratch")
+            else Path(os.environ.get("SCRATCH", "/tmp"))
+        )
         path_dask = scratch_root / "dask"
         path_dask_str = str(path_dask)
         os.makedirs(path_dask_str, exist_ok=True)
@@ -241,7 +243,7 @@ class dask_cluster(object):
             srun dask-worker \
             --scheduler-file $scheduler_file \
                 --interface {dask_interface} \
-                --nworkers 1 
+                --nworkers 1
 
             echo "Killing scheduler"
             kill -9 $dask_pid
@@ -254,11 +256,7 @@ class dask_cluster(object):
 
         print(f"spinning up dask cluster with scheduler:\n  {scheduler_file}")
         print(
-            "  nodes: {nodes}, tasks_per_node: {tasks}, wallclock: {wallclock}".format(
-                nodes=n_nodes,
-                tasks=n_tasks_per_node,
-                wallclock=wallclock,
-            )
+            f"  nodes: {n_nodes}, tasks_per_node: {n_tasks_per_node}, wallclock: {wallclock}"
         )
         jobid = (
             check_output(f"sbatch {script_file} " + "awk '{print $1}'", shell=True)
@@ -278,7 +276,9 @@ class dask_cluster(object):
         try:
             while not os.path.exists(scheduler_file):
                 if interrupted:
-                    raise KeyboardInterrupt("Interrupted while waiting for scheduler file.")
+                    raise KeyboardInterrupt(
+                        "Interrupted while waiting for scheduler file."
+                    )
                 time.sleep(1)
         finally:
             signal.signal(signal.SIGINT, previous_handler)
@@ -290,7 +290,9 @@ class dask_cluster(object):
         last_exc = None
         for _ in range(retries):
             try:
-                self.client = Client(scheduler_file=self.scheduler_file, timeout=timeout)
+                self.client = Client(
+                    scheduler_file=self.scheduler_file, timeout=timeout
+                )
                 return
             except Exception as exc:
                 last_exc = exc
