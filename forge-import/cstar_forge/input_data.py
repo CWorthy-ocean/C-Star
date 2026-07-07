@@ -23,8 +23,8 @@ import yaml
 from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
 
-from cstar_forge import config, source_data
 from cstar_forge import models as forge_models
+from cstar_forge import source_data
 from cstar_forge.util import roms_tools_nesting_writer
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the
@@ -93,20 +93,15 @@ class InputData:
     start_date: Any
     end_date: Any
 
-    # Derived paths
-    input_data_dir: Path = field(init=False)
+    # Output directory for generated NetCDFs — injected by the caller (executor).
+    # Required: input_data no longer resolves paths from cstar_forge.config (so C-Star can
+    # supply its own when the forge application relocates). kw_only so subclasses can
+    # declare required positional fields without dataclass default-ordering conflicts.
+    input_data_dir: Path = field(kw_only=True)
 
     def __post_init__(self):
-        """Initialize paths and storage."""
-        # Subclasses (e.g. RomsMarblInputData) may define input_data_dir_override as a
-        # trailing optional field; base InputData does not declare it (dataclass ordering).
-        override = getattr(self, "input_data_dir_override", None)
-        if override is not None:
-            self.input_data_dir = Path(override)
-        else:
-            self.input_data_dir = config.paths.input_data / netcdf_filename_component(
-                self.domain_name
-            )
+        """Create the injected output directory."""
+        self.input_data_dir = Path(self.input_data_dir)
         self.input_data_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_all(self):
@@ -230,9 +225,6 @@ class RomsMarblInputData(InputData):
     grid_child: rt.Grid | None = None
     metadata_child: dict[str, Any] | None = None
     use_dask: bool = True
-    input_data_dir_override: Path | None = None
-    """If set, NetCDF inputs are written here; otherwise under ``config.paths.input_data`` using a
-    sanitized ``domain_name`` (same rule as NetCDF basenames: no ``.`` in the dirname)."""
 
     # Blueprint elements containing input data
     blueprint_elements: RomsMarblBlueprintInputData = field(init=False)

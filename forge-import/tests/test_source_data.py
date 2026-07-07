@@ -237,7 +237,9 @@ class TestSourceDataMethods:
     def test_prepare_all_skips_streamable_by_default(self):
         """Test that prepare_all skips streamable sources by default."""
         # Use UNIFIED_BGC and TPXO which are not streamable
-        sd = SourceData(datasets=["UNIFIED_BGC", "TPXO"])
+        sd = SourceData(
+            datasets=["UNIFIED_BGC", "TPXO"], source_data_dir=Path("/tmp/test_srcdata")
+        )
         
         # Mock the handlers to avoid actual downloads
         mock_unified_handler = MagicMock()
@@ -261,8 +263,10 @@ class TestSourceDataMethods:
     def test_prepare_all_includes_streamable(self):
         """Test that prepare_all includes streamable sources when requested."""
         # Use UNIFIED_BGC which is in registry
-        sd = SourceData(datasets=["UNIFIED_BGC"])
-        
+        sd = SourceData(
+            datasets=["UNIFIED_BGC"], source_data_dir=Path("/tmp/test_srcdata")
+        )
+
         # Mock the handler
         mock_handler = MagicMock()
         mock_handler.requires = []
@@ -368,30 +372,32 @@ class TestSourceDataHelperMethods:
     
     def test_construct_glorys_path_regional(self, tmp_path):
         """Test _construct_glorys_path for regional data."""
-        sd = SourceData(datasets=["GLORYS_REGIONAL"], grid_name="test_grid")
+        sd = SourceData(
+            datasets=["GLORYS_REGIONAL"],
+            grid_name="test_grid",
+            source_data_dir=tmp_path / "source_data",
+        )
         date = datetime(2020, 1, 15)
-        
-        with patch('cstar_forge.source_data.config.paths') as mock_paths:
-            mock_paths.source_data = tmp_path / "source_data"
-            path = sd._construct_glorys_path(date, is_regional=True)
-            
-            assert "GLORYS_REGIONAL" in str(path)
-            assert "test_grid" in str(path)
-            assert "20200115" in str(path)
-            assert path.parent == tmp_path / "source_data" / "GLORYS_REGIONAL"
+
+        path = sd._construct_glorys_path(date, is_regional=True)
+
+        assert "GLORYS_REGIONAL" in str(path)
+        assert "test_grid" in str(path)
+        assert "20200115" in str(path)
+        assert path.parent == tmp_path / "source_data" / "GLORYS_REGIONAL"
     
     def test_construct_glorys_path_global(self, tmp_path):
         """Test _construct_glorys_path for global data."""
-        sd = SourceData(datasets=["GLORYS_GLOBAL"])
+        sd = SourceData(
+            datasets=["GLORYS_GLOBAL"], source_data_dir=tmp_path / "source_data"
+        )
         date = datetime(2020, 1, 15)
-        
-        with patch('cstar_forge.source_data.config.paths') as mock_paths:
-            mock_paths.source_data = tmp_path / "source_data"
-            path = sd._construct_glorys_path(date, is_regional=False)
-            
-            assert "GLORYS_GLOBAL" in str(path)
-            assert "20200115" in str(path)
-            assert path.parent == tmp_path / "source_data" / "GLORYS_GLOBAL"
-            # Global should not have grid_name in filename
-            assert "test_grid" not in str(path)
+
+        path = sd._construct_glorys_path(date, is_regional=False)
+
+        assert "GLORYS_GLOBAL" in str(path)
+        assert "20200115" in str(path)
+        assert path.parent == tmp_path / "source_data" / "GLORYS_GLOBAL"
+        # Global should not have grid_name in filename
+        assert "test_grid" not in str(path)
 

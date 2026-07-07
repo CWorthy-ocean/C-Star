@@ -10,8 +10,6 @@ import copernicusmarine
 import gdown
 import roms_tools as rt
 
-from cstar_forge import config
-
 # -----------------------------------------
 # Dataset registry (name -> handler + metadata)
 # -----------------------------------------
@@ -112,6 +110,10 @@ class SourceData:
     grid_name: str | None = None
     start_time: object | None = None
     end_time: object | None = None
+    # Injected by the caller (executor). Root dir under which datasets are cached.
+    # Host-independent: source_data no longer resolves paths from cstar_forge.config,
+    # so this can be supplied by C-Star when the forge application relocates.
+    source_data_dir: Path | None = None
 
     def __post_init__(self):
         # Normalize dataset names through SOURCE_ALIAS (if not found, use uppercased name)
@@ -129,6 +131,9 @@ class SourceData:
                 f"Unknown dataset(s) requested: {', '.join(sorted(unknown))}. "
                 f"Known datasets: {', '.join(sorted(known))}"
             )
+
+        if self.source_data_dir is not None:
+            self.source_data_dir = Path(self.source_data_dir)
 
         # Per-dataset paths (generic) + convenience attrs
         self.paths: dict[str, Path] = {}
@@ -164,6 +169,12 @@ class SourceData:
                 raise ValueError(
                     f"Dataset '{name}' requires attributes {missing_attrs}, "
                     "but they were not provided to SourceData()."
+                )
+            if self.source_data_dir is None:
+                raise ValueError(
+                    f"SourceData.source_data_dir must be set to prepare '{name}' — the "
+                    "caller must inject the dataset cache root (source_data no longer "
+                    "reads cstar_forge.config)."
                 )
 
             path = handler.func(self)  # call handler with this instance
@@ -244,7 +255,7 @@ class SourceData:
             fn = f"{glorys_dataset_id}_REGIONAL_{self.grid_name}_{date_str}.nc"
         else:
             fn = f"{glorys_dataset_id}_GLOBAL_{date_str}.nc"
-        dataset_dir = config.paths.source_data / dataset_name
+        dataset_dir = self.source_data_dir / dataset_name
         dataset_dir.mkdir(parents=True, exist_ok=True)
         return dataset_dir / fn
 
@@ -385,7 +396,7 @@ def _prepare_glorys_global(self: SourceData) -> list[Path]:
 def _prepare_unified_bgc_dataset(self: SourceData) -> Path:
     """Ensure the UNIFIED_BGC dataset exists locally."""
     url_bgc_forcing = UNIFIED_BGC_URL
-    dataset_dir = config.paths.source_data / "UNIFIED_BGC"
+    dataset_dir = self.source_data_dir / "UNIFIED_BGC"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     path = dataset_dir / "BGCdataset.nc"
     needs_download = self.clobber or (not path.exists())
@@ -419,9 +430,9 @@ def _prepare_srtm15(self: SourceData) -> Path:
       - the file does not exist, or
       - clobber=True.
 
-    The file is stored under config.paths.source_data / "SRTM15" / "SRTM15_{SRTM15_VERSION}.nc".
+    The file is stored under self.source_data_dir / "SRTM15" / "SRTM15_{SRTM15_VERSION}.nc".
     """
-    dataset_dir = config.paths.source_data / "SRTM15"
+    dataset_dir = self.source_data_dir / "SRTM15"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     path = dataset_dir / f"SRTM15_{SRTM15_VERSION}.nc"
 
@@ -467,9 +478,9 @@ def _prepare_mblco2(self: SourceData) -> Path:
       - the file does not exist, or
       - clobber=True.
 
-    The file is stored under config.paths.source_data / "MBL_CO2" / "co2_GHGreference.1785677502_surface.txt".
+    The file is stored under self.source_data_dir / "MBL_CO2" / "co2_GHGreference.1785677502_surface.txt".
     """
-    dataset_dir = config.paths.source_data / "MBL_CO2"
+    dataset_dir = self.source_data_dir / "MBL_CO2"
     dataset_dir.mkdir(parents=True, exist_ok=True)
     path = dataset_dir / "co2_GHGreference.1785677502_surface.txt"
 
@@ -513,9 +524,9 @@ def _prepare_tpxo(self: SourceData) -> Path:
 
     This is a USER_DATASET that must be downloaded by the user.
     The handler checks that all required files exist at the expected location:
-    - config.paths.source_data / "TPXO/TPXO10.v2a/grid_tpxo10v2a.nc"
-    - config.paths.source_data / "TPXO/TPXO10.v2a/h_tpxo10.v2a.nc"
-    - config.paths.source_data / "TPXO/TPXO10.v2a/u_tpxo10.v2a.nc"
+    - self.source_data_dir / "TPXO/TPXO10.v2a/grid_tpxo10v2a.nc"
+    - self.source_data_dir / "TPXO/TPXO10.v2a/h_tpxo10.v2a.nc"
+    - self.source_data_dir / "TPXO/TPXO10.v2a/u_tpxo10.v2a.nc"
 
     Returns
     -------
@@ -527,7 +538,7 @@ def _prepare_tpxo(self: SourceData) -> Path:
     FileNotFoundError
         If the TPXO directory or any required files are missing.
     """
-    tpxo_path = config.paths.source_data / "TPXO" / "TPXO10.v2a"
+    tpxo_path = self.source_data_dir / "TPXO" / "TPXO10.v2a"
 
     tpxo_dict = {
         "grid": tpxo_path / "grid_tpxo10v2a.nc",
@@ -576,7 +587,7 @@ def _prepare_woa(self: SourceData) -> Path:
         https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA/salinity/netcdf/decav/0.25/
 
     Expected layout:
-        config.paths.source_data / "WOA" / "woa{YY}_decav_s{MM}_{gr}.nc"
+        self.source_data_dir / "WOA" / "woa{YY}_decav_s{MM}_{gr}.nc"
         for MM in 01..12. YY is atlas year (18, 23). gr is grid resolution - 04 is quarter deg.
 
     Returns
@@ -589,7 +600,7 @@ def _prepare_woa(self: SourceData) -> Path:
     FileNotFoundError
         If the WOA directory or any of the 12 monthly files are missing.
     """
-    woa_path = config.paths.source_data / "WOA"
+    woa_path = self.source_data_dir / "WOA"
 
     woa_dict = {
         f"s{m:02d}": woa_path / f"woa*_decav_s{m:02d}_*.nc" for m in range(1, 13)

@@ -12,7 +12,7 @@ Tests cover:
 - Edge cases and error handling
 """
 import tempfile
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, call
@@ -234,7 +234,7 @@ def sample_roms_marbl_input_data(
         blueprint_dir=blueprint_dir,
         partitioning=sample_partitioning,
         use_dask=False,
-        input_data_dir_override=data_dir,
+        input_data_dir=data_dir,
     )
 
 
@@ -243,11 +243,12 @@ class TestInputData:
     
     def test_inputdata_initialization(self, tmp_path):
         """Test InputData initialization."""
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2)
+                end_date=datetime(2012, 1, 2),
+                input_data_dir=tmp_path,
             )
             
             assert data.domain_name == "test_grid"
@@ -255,23 +256,18 @@ class TestInputData:
             assert data.end_date == datetime(2012, 1, 2)
             assert data.input_data_dir.exists()
 
-    def test_inputdata_input_data_dir_sanitizes_domain_dots(self, tmp_path):
-        """Directory name matches NetCDF basename rule (no ``.`` except in ``.nc`` files)."""
-        with patch("cstar_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
-            data = InputData(
-                domain_name="run_v0.1_case",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-            )
-            assert data.input_data_dir.name == "run_v0_1_case"
+    # NB: input_data_dir dirname sanitization moved to the executor's input_data_dir
+    # property (Phase C config-injection); the base class now uses the injected dir
+    # verbatim. That behavior is covered by test_core::test_path_input_data_property.
 
     def test_inputdata_forcing_filename(self, tmp_path):
         """Test _forcing_filename method."""
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2)
+                end_date=datetime(2012, 1, 2),
+                input_data_dir=tmp_path,
             )
             
             filename = data._forcing_filename("grid")
@@ -280,11 +276,12 @@ class TestInputData:
 
     def test_inputdata_forcing_filename_dots_replaced_except_nc_suffix(self, tmp_path):
         """Basenames must have no ``.`` except ``.nc`` (e.g. ``v0.1`` in domain name)."""
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = InputData(
                 domain_name="case_v0.1_x",
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
+                input_data_dir=tmp_path,
             )
             filename = data._forcing_filename("surface-physics")
             assert filename.name == "case_v0_1_x_surface-physics.nc"
@@ -293,11 +290,12 @@ class TestInputData:
     
     def test_inputdata_ensure_empty_or_clobber_no_files(self, tmp_path):
         """Test _ensure_empty_or_clobber when directory is empty."""
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2)
+                end_date=datetime(2012, 1, 2),
+                input_data_dir=tmp_path,
             )
             
             result = data._ensure_empty_or_clobber(clobber=False)
@@ -305,11 +303,12 @@ class TestInputData:
     
     def test_inputdata_ensure_empty_or_clobber_with_files_no_clobber(self, tmp_path):
         """When .nc files exist and clobber=False, allow continuing (reuse mode)."""
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2)
+                end_date=datetime(2012, 1, 2),
+                input_data_dir=tmp_path,
             )
             
             # Create a dummy .nc file
@@ -322,11 +321,12 @@ class TestInputData:
     
     def test_inputdata_ensure_empty_or_clobber_with_files_clobber(self, tmp_path):
         """Test _ensure_empty_or_clobber when files exist and clobber=True."""
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2)
+                end_date=datetime(2012, 1, 2),
+                input_data_dir=tmp_path,
             )
             
             # Create dummy .nc files
@@ -339,11 +339,12 @@ class TestInputData:
     
     def test_inputdata_generate_all_not_implemented(self, tmp_path):
         """Test that InputData.generate_all raises NotImplementedError."""
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = InputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2)
+                end_date=datetime(2012, 1, 2),
+                input_data_dir=tmp_path,
             )
             
             with pytest.raises(NotImplementedError):
@@ -471,7 +472,7 @@ class TestRomsMarblInputDataInitialization:
         blueprint_dir = tmp_path / "blueprints"
         blueprint_dir.mkdir(parents=True, exist_ok=True)
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = RomsMarblInputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -482,9 +483,10 @@ class TestRomsMarblInputDataInitialization:
                 source_data=sample_source_data,
                 blueprint_dir=blueprint_dir,
                 partitioning=sample_partitioning,
+                input_data_dir=tmp_path,
                 use_dask=False
             )
-            
+
             assert data.domain_name == "test_grid"
             assert data.grid is not None
             assert data.model_spec is not None
@@ -559,7 +561,7 @@ class TestRomsMarblInputDataInitialization:
         partitioning = cstar_models.PartitioningParameterSet(n_procs_x=2, n_procs_y=2)
         
         # This should work since all inputs are registered
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             data = RomsMarblInputData(
                 domain_name="test_grid",
                 start_date=datetime(2012, 1, 1),
@@ -570,6 +572,7 @@ class TestRomsMarblInputDataInitialization:
                 source_data=mock_source_data,
                 blueprint_dir=blueprint_dir,
                 partitioning=partitioning,
+                input_data_dir=tmp_path,
                 use_dask=False
             )
             
@@ -683,7 +686,7 @@ class TestRomsMarblInputDataGeneration:
         mock_grid_class.return_value = sample_roms_marbl_input_data.grid
         sample_roms_marbl_input_data.grid = mock_grid
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             # Update input_data_dir to use the mocked path since it was set in __post_init__
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
@@ -719,7 +722,7 @@ class TestRomsMarblInputDataGeneration:
         mock_ic.save.return_value = [ic_path]
         mock_ic_class.return_value = mock_ic
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._generate_initial_conditions()
             
             # Check that InitialConditions was created
@@ -741,7 +744,7 @@ class TestRomsMarblInputDataGeneration:
         mock_ic.save.return_value = [ic1_path, ic2_path]
         mock_ic_class.return_value = mock_ic
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._generate_initial_conditions()
             
             # Should have 2 resources
@@ -756,7 +759,7 @@ class TestRomsMarblInputDataGeneration:
         mock_sf.save.return_value = surface_path
         mock_sf_class.return_value = mock_sf
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._generate_surface_forcing(
                 key="forcing.surface",
                 source={"name": "ERA5"},
@@ -787,7 +790,7 @@ class TestRomsMarblInputDataGeneration:
     ):
         """When NetCDF exists, reuse paths without constructing SurfaceForcing."""
 
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data.input_data_dir = (
                 tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             )
@@ -815,7 +818,7 @@ class TestRomsMarblInputDataGeneration:
         mock_bf.save.return_value = boundary_path
         mock_bf_class.return_value = mock_bf
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._generate_boundary_forcing(
                 key="forcing.boundary",
                 source={"name": "GLORYS"},
@@ -849,7 +852,7 @@ class TestRomsMarblInputDataGeneration:
         mock_tf.save.return_value = tidal_path
         mock_tf_class.return_value = mock_tf
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._generate_tidal_forcing(
                 key="forcing.tidal",
                 source={"name": "TPXO"}
@@ -868,7 +871,7 @@ class TestRomsMarblInputDataGeneration:
     ):
 
         """When NetCDF and YAML exist, do not construct TidalForcing."""
-        with patch("cstar_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data.input_data_dir = (
                 tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             )
@@ -901,7 +904,7 @@ class TestRomsMarblInputDataGeneration:
         mock_rf.ds = mock_ds
         mock_rf_class.return_value = mock_rf
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._generate_river_forcing(
                 key="forcing.river",
                 source={"name": "DAI"}
@@ -919,7 +922,7 @@ class TestRomsMarblInputDataGeneration:
         self, mock_rf_class, sample_roms_marbl_input_data, tmp_path
     ):
         """When NetCDF and YAML exist, do not construct RiverForcing."""
-        with patch("cstar_forge.input_data.config.paths", _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data.input_data_dir = (
                 tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             )
@@ -961,7 +964,7 @@ class TestRomsMarblInputDataGeneration:
         mock_cdr.save.return_value = cdr_path
         mock_cdr_class.return_value = mock_cdr
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._generate_cdr_forcing(
                 key="cdr_forcing",
                 cdr_kwargs={"foo": "bar"}
@@ -1010,7 +1013,7 @@ class TestRomsMarblInputDataGeneration:
         mock_child.hc = 300.0
         sample_roms_marbl_input_data.grid_child = mock_child
 
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1061,7 +1064,7 @@ class TestRomsMarblInputDataGeneration:
         mock_child.hc = 300.0
         sample_roms_marbl_input_data.grid_child = mock_child
 
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1086,7 +1089,7 @@ class TestRomsMarblInputDataGeneration:
         sample_roms_marbl_input_data.grid = mock_grid
         sample_roms_marbl_input_data.grid_child = None
 
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
             sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1186,7 +1189,7 @@ class TestRomsMarblInputDataGenerateAll:
         mock_river_instance.ds = mock_river_ds
         mock_river.return_value = mock_river_instance
         mock_ds = xr.Dataset()
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             # Mock xr.open_dataset to prevent file operations when opening source files
             with patch('xarray.combine_by_coords') as mock_combine:
                 mock_combine.return_value = mock_ds
@@ -1222,7 +1225,7 @@ class TestRomsMarblInputDataGenerateAll:
         mock_open_dataset.return_value = mock_ds
         mock_combine.return_value = mock_ds
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             result = sample_roms_marbl_input_data.generate_all(clobber=True, test=True)
             
             # In test mode, should only process forcing.boundary
@@ -1318,7 +1321,7 @@ class TestRomsMarblInputDataGenerateAll:
         })
         mock_river.return_value = mock_river_instance
 
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             (sample_roms_marbl_input_data.input_data_dir / "existing.nc").touch()
             mock_ds = xr.Dataset()
             with patch('xarray.combine_by_coords') as mock_combine:
@@ -1410,7 +1413,7 @@ class TestRomsMarblInputDataGenerateAll:
             Resource(location=str(surface_file), partitioned=False)
         )
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             # Patch at class level so the registry uses the patched methods
             with patch('cstar_forge.input_data.RomsMarblInputData._generate_grid'):
                 with patch('cstar_forge.input_data.RomsMarblInputData._generate_initial_conditions'):
@@ -1460,7 +1463,7 @@ class TestRomsMarblInputDataPartitionFiles:
             p.touch()
         mock_partition.return_value = partitioned_paths
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             sample_roms_marbl_input_data._partition_files()
             
             # Should have called partition_netcdf
@@ -1531,7 +1534,7 @@ class TestRomsMarblInputDataPartitionFiles:
             p.touch()
         mock_partition.return_value = partitioned_paths
         
-        with patch('cstar_forge.input_data.config.paths', _create_mock_paths(tmp_path)):
+        with nullcontext():
             # Need to set up input_list to include forcing.surface
             # The actual partitioning happens in a loop over input_list
             # For this test, we'll directly test the partitioning logic

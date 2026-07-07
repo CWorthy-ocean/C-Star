@@ -1341,6 +1341,7 @@ class CstarSpecBuilder(BaseModel):
             grid_name=self.grid_name,
             start_time=self.start_date,
             end_time=self.end_date,
+            source_data_dir=config.paths.source_data,
         ).prepare_all(include_streamable=include_streamable)
 
     def generate_inputs(
@@ -1407,7 +1408,7 @@ class CstarSpecBuilder(BaseModel):
                 domain_name=self.name,
                 start_date=self.start_date,
                 end_date=self.end_date,
-                input_data_dir_override=self.input_data_dir,
+                input_data_dir=self.input_data_dir,
                 model_spec=self._model_spec,
                 grid=self.grid,
                 grid_parent=self.grid_parent,
