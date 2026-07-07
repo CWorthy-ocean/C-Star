@@ -235,9 +235,11 @@ _HASH_EXCLUDE = {"spec_config_version", "identity", "composition", "provenance"}
 # rejects files declaring a *newer* version than this build understands.
 SPEC_CONFIG_VERSION = 2
 
-# Identifies which C-Star application this blueprint targets (the planned home of the
-# processing engine). Stable across schema/field iteration; used to route the blueprint.
-DEFAULT_APPLICATION = "roms_marbl"
+# Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
+# application (this processing engine), whose blueprint IS the SpecConfig. Do not confuse
+# with the downstream roms_marbl application (whose blueprint this run *emits*). Stable
+# across schema/field iteration; used by C-Star to route the blueprint to its application.
+DEFAULT_APPLICATION = "forge"
 
 
 class _Section(BaseModel):

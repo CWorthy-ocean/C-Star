@@ -1,15 +1,5 @@
-# EXAMPLE SpecConfig — produced by cstar_forge.spec_config_resolve.build_spec_config
-# from the demo notebook inputs for the 'test-tiny' domain. See docs/spec-config-inventory.md.
-# Draft schema; not yet wired into CstarSpecBuilder.
-#
-#   application      = roms_marbl   (target C-Star app)
-#   name             = cson_roms-marbl_v0.1_test-tiny_1procs
-#   casename         = cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102   (derived, not stored)
-#   machine + data paths + run_output_dir/output_root_name <- resolved at processing
-#   s_coord + grid/initial/forcing paths <- generated artifacts (in the blueprint)
-
 spec_config_version: 2
-application: roms_marbl
+application: forge
 identity:
   model_name: cson_roms-marbl_v0.1
   grid_name: test-tiny
@@ -55,7 +45,9 @@ forcing:
       name: UNIFIED
       climatology: true
       glorys_layout: null
+    bgc_interpolation_method: depth
     allow_flex_time: false
+    options: {}
   surface:
   - source:
       name: ERA5
@@ -66,6 +58,7 @@ forcing:
     coarse_grid_mode: never
     restoring_forces: null
     wind_dropoff: false
+    options: {}
   - source:
       name: UNIFIED
       climatology: true
@@ -75,23 +68,39 @@ forcing:
     coarse_grid_mode: never
     restoring_forces: null
     wind_dropoff: false
+    options: {}
   boundary:
   - source:
       name: GLORYS
       climatology: false
       glorys_layout: regional
     type: physics
+    bgc_interpolation_method: depth
+    prefill: null
+    prefill_kwargs: null
+    regrid_method: null
+    extrap_method: null
+    extrap_kwargs: null
+    options: {}
   - source:
       name: UNIFIED
       climatology: true
       glorys_layout: null
     type: bgc
+    bgc_interpolation_method: depth
+    prefill: null
+    prefill_kwargs: null
+    regrid_method: null
+    extrap_method: null
+    extrap_kwargs: null
+    options: {}
   tidal:
   - source:
       name: TPXO
       climatology: false
       glorys_layout: null
     ntides: 15
+    options: {}
   river:
   - source:
       name: DAI
@@ -100,6 +109,9 @@ forcing:
     include_bgc: true
     convert_to_climatology: if_any_missing
     bgc_source: null
+    coast_snap_buffer_km: null
+    domain_edge_buffer: 20
+    options: {}
   cdr_forcing:
     start_time: '2012-01-01T00:00:00'
     end_time: '2012-01-02T00:00:00'
@@ -662,7 +674,7 @@ provenance:
   forge_version: null
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
-  content_hash: f6250651716e2c18b0b2673326bbc977619a62a98994261ffd55d67061261285
+  content_hash: 2baf8fcacccb1ec10efc8a4ad6b3a1247b013584c6b5e282714c3917e7328e43
   notes: Built by cstar_forge.spec_config_resolve.build_spec_config from the demo
     notebook inputs (test-tiny). Machine/paths and naming are NOT stored (resolved
     at processing / derived). s_coord + file paths are processing outputs. provenance.overrides
