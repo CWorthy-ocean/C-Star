@@ -653,51 +653,6 @@ class DomainCatalog:
         path = self.model_path(model_name)
         return load_models_yaml(path, model_name)
 
-    def to_builder(
-        self,
-        domain_name: str,
-        start_time: Any | None = None,
-        end_time: Any | None = None,
-        **overrides: Any,
-    ) -> Any:
-        """Return a CstarSpecBuilder initialised from the named domain.
-
-        All fields come from the domain's ``Domain.yml``; ``start_time`` and
-        ``end_time`` (which are often placeholder single-day values in the
-        catalog) can be overridden here or via ``**overrides``.  For nested
-        domains that reference another domain via ``_parent_grid_name`` or
-        ``_child_grid_name``, the cross-references are resolved automatically
-        using this catalog.
-
-        Parameters
-        ----------
-        domain_name : str
-            Name of the domain (must exist in ``DomainSpec/``).
-        start_time : str or datetime, optional
-            Simulation start time.  Overrides the value in ``Domain.yml``.
-            Required if ``Domain.yml`` omits ``start_time``.
-        end_time : str or datetime, optional
-            Simulation end time.  Overrides the value in ``Domain.yml``.
-            Required if ``Domain.yml`` omits ``end_time``.
-        **overrides
-            Any additional ``CstarSpecBuilder`` field values to override.
-
-        Returns
-        -------
-        CstarSpecBuilder
-        """
-        from cstar_forge._core import CstarSpecBuilder
-
-        kw: dict[str, Any] = {}
-        if start_time is not None:
-            kw["start_time"] = start_time
-        if end_time is not None:
-            kw["end_time"] = end_time
-        kw.update(overrides)
-        return CstarSpecBuilder.from_domain(
-            self.domain_data(domain_name), catalog=self, **kw
-        )
-
     # ------------------------------------------------------------------
     # Registration / mutation methods
     # ------------------------------------------------------------------

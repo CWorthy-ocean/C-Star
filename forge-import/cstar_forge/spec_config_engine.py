@@ -259,7 +259,7 @@ def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
     """
     from cstar_forge._core import CstarSpecBuilder
 
-    return CstarSpecBuilder(**spec_config_to_builder_kwargs(cfg))
+    return CstarSpecBuilder.from_spec_config(cfg)
 
 
 def process_spec_config(

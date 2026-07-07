@@ -68,7 +68,8 @@ def test_naming_is_derived_not_stored():
 
 def test_spec_config_is_portable_no_forge_or_cstar_imports():
     """spec_config.py is the C-Star-relocatable blueprint model: it must depend on
-    nothing from cstar_forge / cstar (only stdlib + pydantic + yaml)."""
+    nothing from cstar_forge / cstar (only stdlib + pydantic + yaml).
+    """
     src = Path(cstar_forge.__file__).parent / "spec_config.py"
     text = src.read_text()
     import re
@@ -155,7 +156,7 @@ def test_content_hash_round_trips_through_yaml(tmp_path):
 
 
 def test_engine_warns_on_hash_mismatch(tmp_path):
-    from cstar_forge.spec_config_engine import verify_content_hash, process_spec_config
+    from cstar_forge.spec_config_engine import process_spec_config, verify_content_hash
 
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "spec_config.yml")
@@ -201,7 +202,8 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
 )
 def test_golden_namelist_matches_fixture():  # pragma: no cover
     """At migration time: process the example and assert the generated namelist.nml
-    matches a committed golden fixture, proving the C-Star engine preserves behavior."""
+    matches a committed golden fixture, proving the C-Star engine preserves behavior.
+    """
     raise NotImplementedError
 
 
@@ -278,8 +280,8 @@ def test_sources_to_forcing_override_returns_none_for_model_default():
 
 
 def test_sources_to_forcing_override_converts_custom_forcing():
-    from cstar_forge.spec_config_engine import sources_to_forcing_override
     from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar_forge.spec_config_engine import sources_to_forcing_override
 
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
@@ -297,11 +299,12 @@ def test_sources_to_forcing_override_converts_custom_forcing():
 
 def test_forcing_override_used_by_input_data(tmp_path):
     """When forcing_override is provided, RomsMarblInputData uses it instead of
-    model_spec.inputs — the input_list reflects the override, not the defaults."""
+    model_spec.inputs — the input_list reflects the override, not the defaults.
+    """
     from unittest.mock import MagicMock, patch
+
     from cstar_forge import input_data as id_mod
     from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge import models as forge_models
 
     fdata = cat.forcing_data("glorys-era5-unified")
     override = {
@@ -385,7 +388,7 @@ def test_resolver_output_settings_override():
 
 
 def test_extract_output_settings_helper():
-    from cstar_forge.spec_config_resolve import extract_output_settings, OUTPUT_SECTIONS
+    from cstar_forge.spec_config_resolve import OUTPUT_SECTIONS, extract_output_settings
 
     cfg = _build()
     out = extract_output_settings(cfg.model_settings)
@@ -583,7 +586,8 @@ class TestSpecConfigWizard:
 
     def test_load_existing_config_round_trips(self, tmp_path):
         """Save a config, load it into a fresh wizard, and confirm widgets +
-        resolved config round-trip (the #7 load affordance)."""
+        resolved config round-trip (the #7 load affordance).
+        """
         w1 = self._wizard()
         if "gulf-guinea-toy" in w1.domain_dd.options:
             w1.domain_dd.value = "gulf-guinea-toy"
@@ -868,8 +872,8 @@ class TestSpecConfigEngine:
 
     def test_split_model_settings(self):
         from cstar_forge.spec_config_engine import (
-            split_model_settings,
             PROCESSING_FILLED_SECTIONS,
+            split_model_settings,
         )
 
         run_ov, comp_ov = split_model_settings(self._cfg())
@@ -905,8 +909,8 @@ class TestSpecConfigEngine:
 
     def test_executor_must_implement_interface(self):
         from cstar_forge.spec_config_engine import (
-            process_spec_config,
             SpecConfigExecutor,
+            process_spec_config,
         )
 
         # _FakeBuilder satisfies the runtime-checkable Protocol
@@ -1011,6 +1015,7 @@ class TestResolverBuilderParity:
     ):
         pytest.importorskip("roms_tools")
         from datetime import datetime
+
         from cstar_forge._core import CstarSpecBuilder
         from cstar_forge.spec_config_resolve import build_spec_config
 
@@ -1055,3 +1060,66 @@ class TestResolverBuilderParity:
             if sec not in _PARITY_SKIP and b_rt.get(sec) != rval
         }
         assert not mismatches, f"resolver/builder drift: {mismatches}"
+
+    @pytest.mark.parametrize(
+        "grid_name,grid_kwargs,boundaries,partitioning", _PARITY_DOMAINS
+    )
+    def test_from_spec_config_matches_direct_builder(
+        self, grid_name, grid_kwargs, boundaries, partitioning, tmp_path
+    ):
+        """Phase-B non-lossy gate: ``from_spec_config(build_spec_config(inputs))`` must
+        reproduce the same builder *inputs* as constructing ``CstarSpecBuilder`` directly.
+        This proves the SpecConfig->builder mapping drops nothing, so the direct
+        raw-kwargs / ``from_domain`` paths can be retired safely.
+        """
+        pytest.importorskip("roms_tools")
+        from datetime import datetime
+
+        from cstar_forge._core import CstarSpecBuilder
+        from cstar_forge.spec_config_resolve import build_spec_config
+
+        start, end = datetime(2012, 1, 1), datetime(2012, 1, 2)
+        direct = CstarSpecBuilder(
+            description="parity",
+            model_name="cson_roms-marbl_v0.1",
+            grid_name=grid_name,
+            grid_kwargs=grid_kwargs,
+            open_boundaries=boundaries,
+            partitioning=partitioning,
+            start_time=start,
+            end_time=end,
+            catalog_root=str(tmp_path / "catalog"),
+            initialize_catalog_from="local",
+        )
+        cfg = build_spec_config(
+            model_dir=direct._get_catalog().model_dir("cson_roms-marbl_v0.1"),
+            grid_name=grid_name,
+            grid_kwargs=grid_kwargs,
+            open_boundaries=boundaries,
+            partitioning=partitioning,
+            start_date=start,
+            end_date=end,
+            description="parity",
+        )
+        via_cfg = CstarSpecBuilder.from_spec_config(cfg)
+
+        # Results-affecting inputs must match exactly across the two construction paths.
+        assert via_cfg.model_name == direct.model_name
+        assert via_cfg.grid_name == direct.grid_name
+        assert via_cfg.description == direct.description
+        assert via_cfg.grid_kwargs == direct.grid_kwargs
+        assert via_cfg.grid_kwargs_parent == direct.grid_kwargs_parent
+        assert via_cfg.grid_kwargs_child == direct.grid_kwargs_child
+        assert via_cfg.open_boundaries.model_dump() == direct.open_boundaries.model_dump()
+        assert via_cfg.partitioning.model_dump() == direct.partitioning.model_dump()
+        assert (via_cfg.start_date, via_cfg.end_date) == (
+            direct.start_date,
+            direct.end_date,
+        )
+        assert via_cfg.cdr_forcing == direct.cdr_forcing
+        assert via_cfg.ensemble_id == direct.ensemble_id
+        # model-default forcing -> no forcing_override on either path
+        assert via_cfg.forcing_override is None and direct.forcing_override is None
+        # model_reference_date: from_spec_config forwards the run-level value; the direct
+        # path leaves it None (rt default 2000-01-01) — functionally the same t=0.
+        assert via_cfg.model_reference_date == cfg.run.model_reference_date
