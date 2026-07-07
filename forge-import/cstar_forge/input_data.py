@@ -23,9 +23,9 @@ import yaml
 from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import config, source_data
-from . import models as forge_models
-from .util import roms_tools_nesting_writer
+from cstar_forge import config, source_data
+from cstar_forge import models as forge_models
+from cstar_forge.util import roms_tools_nesting_writer
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the
 # substring ``cdr.nc`` so C-Star's ROMS build check on ``cdr_frc.opt`` passes.

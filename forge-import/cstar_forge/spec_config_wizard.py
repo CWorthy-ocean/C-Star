@@ -32,8 +32,8 @@ from typing import Any, get_args, get_origin
 import yaml
 from pydantic import BaseModel
 
-from .namelist_model import RunTimeSettings, validate_run_time_sections
-from .spec_config import (
+from cstar_forge.namelist_model import RunTimeSettings, validate_run_time_sections
+from cstar_forge.spec_config import (
     BgcBoundarySource,
     BgcInitialConditionsSource,
     BgcInterpMethod,
@@ -55,7 +55,7 @@ from .spec_config import (
     SurfaceType,
     TidalSource,
 )
-from .spec_config_resolve import (
+from cstar_forge.spec_config_resolve import (
     OUTPUT_MARBL_FIELDS,
     OUTPUT_SECTIONS,
     build_spec_config,
@@ -1057,7 +1057,7 @@ _DEFAULT_GRID = dict(
 
 def _get_catalog():
     """Return the bundled DomainCatalog (read-only discovery of pieces)."""
-    from .domain_catalog import default_catalog
+    from cstar_forge.domain_catalog import default_catalog
 
     return default_catalog
 

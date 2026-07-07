@@ -33,7 +33,7 @@ import yaml
 
 # Dual import: package context (production) or standalone file (lightweight / UI / test).
 try:  # pragma: no cover - exercised both ways
-    from .spec_config import (
+    from cstar_forge.spec_config import (
         BoundaryForcingItem,
         Code,
         CodeRepo,
@@ -82,7 +82,7 @@ except ImportError:  # pragma: no cover
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
 # dependency-free. Dual import to keep the resolver standalone-importable.
 try:  # pragma: no cover - exercised both ways
-    from .source_registry import resolve_dataset_key, resolve_source
+    from cstar_forge.source_registry import resolve_dataset_key, resolve_source
 except ImportError:  # pragma: no cover
     from source_registry import resolve_dataset_key, resolve_source  # type: ignore
 

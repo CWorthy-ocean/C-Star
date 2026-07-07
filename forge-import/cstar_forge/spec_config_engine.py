@@ -41,9 +41,9 @@ from typing import (
     runtime_checkable,
 )
 
-from .namelist_model import validate_run_time_sections
-from .spec_config import SpecConfig
-from .spec_config_resolve import n_tracers_from_model_settings
+from cstar_forge.namelist_model import validate_run_time_sections
+from cstar_forge.spec_config import SpecConfig
+from cstar_forge.spec_config_resolve import n_tracers_from_model_settings
 
 
 @runtime_checkable
@@ -202,7 +202,7 @@ def resolve_host(cfg: SpecConfig | None = None) -> dict[str, Any]:
     If ``cfg`` is given, also include the host-derived run paths
     (``run_output_dir`` / namelist ``output_root_name``) computed from the scratch path.
     """
-    from . import config
+    from cstar_forge import config
 
     p = config.paths
     info: dict[str, Any] = {
@@ -247,7 +247,7 @@ def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
     atomic inputs. Imported lazily so the lightweight bits above (host resolution,
     settings split) stay importable without the full forge stack.
     """
-    from ._core import CstarSpecBuilder
+    from cstar_forge._core import CstarSpecBuilder
 
     return CstarSpecBuilder(**spec_config_to_builder_kwargs(cfg))
 

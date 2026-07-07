@@ -39,10 +39,10 @@ from cstar.orchestration.utils import (
 )
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from . import config, input_data, source_data
-from . import models as forge_models
-from .settings import render_roms_settings, write_roms_namelist
-from .util import (
+from cstar_forge import config, input_data, source_data
+from cstar_forge import models as forge_models
+from cstar_forge.settings import render_roms_settings, write_roms_namelist
+from cstar_forge.util import (
     compute_timestep_from_cfl,
     compute_v_sponge_from_grid,
     roms_tools_default_nesting_period_seconds,
@@ -601,7 +601,7 @@ class CstarSpecBuilder(BaseModel):
     def _get_catalog(self) -> Any:
         """Return (and cache) a DomainCatalog for this builder's resolved catalog directory."""
         if self._catalog_instance is None:
-            from .domain_catalog import DomainCatalog
+            from cstar_forge.domain_catalog import DomainCatalog
 
             self._catalog_instance = DomainCatalog(
                 catalog_root=self.resolved_catalog_dir,
@@ -983,7 +983,7 @@ class CstarSpecBuilder(BaseModel):
         if self._uses_explicit_catalog:
             self._model_spec = self._get_catalog().load_model_spec(self.model_name)
         else:
-            from .domain_catalog import default_catalog
+            from cstar_forge.domain_catalog import default_catalog
 
             self._model_spec = default_catalog.load_model_spec(self.model_name)
 
@@ -995,7 +995,7 @@ class CstarSpecBuilder(BaseModel):
     def _get_machine_config(self):
         """Return MachineConfig from the builder's catalog when catalog_root is set, else from config."""
         if self._uses_explicit_catalog:
-            from .config import MachineConfig
+            from cstar_forge.config import MachineConfig
 
             try:
                 data = self._get_catalog().machine_data(config.system)

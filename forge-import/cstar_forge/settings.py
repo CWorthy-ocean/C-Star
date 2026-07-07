@@ -12,7 +12,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, meta, select_autoescape
 
-from .namelist_model import RunTimeSettings, build_namelist
+from cstar_forge.namelist_model import RunTimeSettings, build_namelist
 
 
 def _fortran_cdr_file_decl(path: Any, max_line_len: int = 72) -> str:

@@ -12,7 +12,7 @@ from subprocess import check_call, check_output
 import dask
 from dask.distributed import Client, LocalCluster
 
-from .config import machine_config, paths, system
+from cstar_forge.config import machine_config, paths, system
 
 # Get JupyterHub URL from environment variable, default to empty string
 JUPYTERHUB_URL = os.environ.get("JUPYTERHUB_SERVICE_PREFIX", "")

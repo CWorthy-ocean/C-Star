@@ -9,7 +9,7 @@ convenience instance for code that already imports from here.
 from pathlib import Path
 from typing import Any
 
-from .domain_catalog import DomainCatalog, default_catalog
+from cstar_forge.domain_catalog import DomainCatalog, default_catalog
 
 
 class BlueprintCatalog:

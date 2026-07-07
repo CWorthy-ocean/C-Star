@@ -5,7 +5,7 @@ This package provides utilities for comparing model outputs to observational dat
 and computing diagnostic metrics.
 """
 
-from . import glodap
+from cstar_forge.diagnostics import glodap
 
 # Export public API
 __all__ = [
@@ -19,7 +19,7 @@ __all__ = [
 ]
 
 # Import commonly used functions for convenience
-from .glodap import (
+from cstar_forge.diagnostics.glodap import (
     compute_grid_area,
     depth_bnds,
     known_products,

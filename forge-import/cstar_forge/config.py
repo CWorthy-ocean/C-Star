@@ -499,7 +499,7 @@ def main(argv: list[str] | None = None) -> int:
 def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
     """Load machine config from the default DomainCatalog (internal cstar-forge catalog)."""
     try:
-        from .domain_catalog import default_catalog
+        from cstar_forge.domain_catalog import default_catalog
 
         data = default_catalog.machine_data(system_tag)
         return MachineConfig(

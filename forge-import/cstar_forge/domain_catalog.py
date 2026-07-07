@@ -648,7 +648,7 @@ class DomainCatalog:
         ModelSpec
             Parsed Pydantic ModelSpec instance.
         """
-        from .models import load_models_yaml
+        from cstar_forge.models import load_models_yaml
 
         path = self.model_path(model_name)
         return load_models_yaml(path, model_name)
@@ -686,7 +686,7 @@ class DomainCatalog:
         -------
         CstarSpecBuilder
         """
-        from ._core import CstarSpecBuilder
+        from cstar_forge._core import CstarSpecBuilder
 
         kw: dict[str, Any] = {}
         if start_time is not None:
