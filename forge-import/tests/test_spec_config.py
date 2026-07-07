@@ -10,6 +10,7 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 ``cstar`` provides ``cstar.roms.namelist`` (i.e. on the namelist branch). The same
 assertions were validated standalone during development.
 """
+
 from datetime import datetime
 from pathlib import Path
 
@@ -20,20 +21,37 @@ import cstar_forge
 from cstar_forge.spec_config import SpecConfig
 from cstar_forge.spec_config_resolve import build_spec_config
 
-_MODEL_DIR = (Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec"
-              / "cson_roms-marbl_v0.1")
-_GRID_KWARGS = dict(nx=6, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55,
-                    rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0)
+_MODEL_DIR = (
+    Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
+)
+_GRID_KWARGS = dict(
+    nx=6,
+    ny=2,
+    size_x=500,
+    size_y=1000,
+    center_lon=0,
+    center_lat=55,
+    rot=10,
+    N=3,
+    theta_s=5.0,
+    theta_b=2.0,
+    hc=250.0,
+)
 _BOUNDARIES = {"south": False, "east": True, "north": True, "west": False}
 _PART = {"n_procs_x": 1, "n_procs_y": 1}
 
 
 def _build(**over):
     kw = dict(
-        model_dir=_MODEL_DIR, grid_name="test-tiny", grid_kwargs=_GRID_KWARGS,
-        open_boundaries=_BOUNDARIES, partitioning=_PART,
-        start_date=datetime(2012, 1, 1), end_date=datetime(2012, 1, 2),
-        description="Test tiny", dt=7200,  # pass dt -> stays dependency-light
+        model_dir=_MODEL_DIR,
+        grid_name="test-tiny",
+        grid_kwargs=_GRID_KWARGS,
+        open_boundaries=_BOUNDARIES,
+        partitioning=_PART,
+        start_date=datetime(2012, 1, 1),
+        end_date=datetime(2012, 1, 2),
+        description="Test tiny",
+        dt=7200,  # pass dt -> stays dependency-light
     )
     kw.update(over)
     return build_spec_config(**kw)
@@ -54,13 +72,18 @@ def test_spec_config_is_portable_no_forge_or_cstar_imports():
     src = Path(cstar_forge.__file__).parent / "spec_config.py"
     text = src.read_text()
     import re
-    bad = [ln.strip() for ln in text.splitlines()
-           if re.match(r"\s*(from|import)\s+(cstar_forge|cstar|\.)", ln)]
+
+    bad = [
+        ln.strip()
+        for ln in text.splitlines()
+        if re.match(r"\s*(from|import)\s+(cstar_forge|cstar|\.)", ln)
+    ]
     assert not bad, f"spec_config.py must stay forge/cstar-free; found: {bad}"
 
 
 def test_application_discriminator_default():
     from cstar_forge.spec_config import DEFAULT_APPLICATION
+
     cfg = _build()
     assert cfg.application == DEFAULT_APPLICATION
 
@@ -70,6 +93,7 @@ def test_from_yaml_rejects_newer_version(tmp_path):
     p = tmp_path / "spec_config.yml"
     cfg.to_yaml(p)
     import yaml as _yaml
+
     data = _yaml.safe_load(p.read_text())
     data["spec_config_version"] = 9999
     p.write_text(_yaml.safe_dump(data))
@@ -89,16 +113,28 @@ def test_schema_round_trip_identity(tmp_path):
 
 def test_content_hash_ignores_excluded_sections():
     from cstar_forge.spec_config import _HASH_EXCLUDE, PieceRef
+
     cfg = _build()
     h = cfg.content_hash()
     # editing identity / composition / provenance does NOT change the hash
-    c2 = cfg.model_copy(update={
-        "identity": cfg.identity.model_copy(update={"description": "totally different"}),
-        "composition": cfg.composition.model_copy(update={"forcing": PieceRef(name="x", origin="custom")}),
-        "provenance": cfg.provenance.model_copy(update={"notes": "edited"}),
-    })
+    c2 = cfg.model_copy(
+        update={
+            "identity": cfg.identity.model_copy(
+                update={"description": "totally different"}
+            ),
+            "composition": cfg.composition.model_copy(
+                update={"forcing": PieceRef(name="x", origin="custom")}
+            ),
+            "provenance": cfg.provenance.model_copy(update={"notes": "edited"}),
+        }
+    )
     assert c2.content_hash() == h
-    assert _HASH_EXCLUDE == {"spec_config_version", "identity", "composition", "provenance"}
+    assert _HASH_EXCLUDE == {
+        "spec_config_version",
+        "identity",
+        "composition",
+        "provenance",
+    }
 
 
 def test_content_hash_changes_with_results_affecting_data():
@@ -120,6 +156,7 @@ def test_content_hash_round_trips_through_yaml(tmp_path):
 
 def test_engine_warns_on_hash_mismatch(tmp_path):
     from cstar_forge.spec_config_engine import verify_content_hash, process_spec_config
+
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "spec_config.yml")
     data = yaml.safe_load(p.read_text())
@@ -129,24 +166,39 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
     tampered = SpecConfig.from_yaml(p)
     assert verify_content_hash(tampered) is not None  # mismatch detected
     # ... and a clean (re-saved) file does not warn
-    assert verify_content_hash(SpecConfig.from_yaml(cfg.to_yaml(tmp_path / "clean.yml"))) is None
+    assert (
+        verify_content_hash(SpecConfig.from_yaml(cfg.to_yaml(tmp_path / "clean.yml")))
+        is None
+    )
 
     # the engine warns but still processes (uses a fake executor)
     class _Fake:
-        def __init__(self, cfg=None): self.calls = []
-        def ensure_source_data(self, **k): self.calls.append("e")
-        def generate_inputs(self, **k): self.calls.append("g")
-        def configure_build(self, **k): self.calls.append("c")
-        def path_blueprint(self, stage=None): return "/bp"
+        def __init__(self, cfg=None):
+            self.calls = []
+
+        def ensure_source_data(self, **k):
+            self.calls.append("e")
+
+        def generate_inputs(self, **k):
+            self.calls.append("g")
+
+        def configure_build(self, **k):
+            self.calls.append("c")
+
+        def path_blueprint(self, stage=None):
+            return "/bp"
+
     with pytest.warns(UserWarning, match="integrity check FAILED"):
         b = process_spec_config(tampered, validate=False, executor_factory=_Fake)
     assert b.calls == ["e", "g", "c"]  # processing proceeded
 
 
-@pytest.mark.skip(reason="byte-golden deferred to the C-Star migration (see "
-                         "docs/spec-config-inventory.md step 2b): it churns on every "
-                         "schema/default change, so it's only worth pinning as a "
-                         "behavior-preservation snapshot right before moving the engine.")
+@pytest.mark.skip(
+    reason="byte-golden deferred to the C-Star migration (see "
+    "docs/spec-config-inventory.md step 2b): it churns on every "
+    "schema/default change, so it's only worth pinning as a "
+    "behavior-preservation snapshot right before moving the engine."
+)
 def test_golden_namelist_matches_fixture():  # pragma: no cover
     """At migration time: process the example and assert the generated namelist.nml
     matches a committed golden fixture, proving the C-Star engine preserves behavior."""
@@ -154,10 +206,22 @@ def test_golden_namelist_matches_fixture():  # pragma: no cover
 
 
 def test_resolver_nesting_enables_extract_data():
-    cfg = _build(grid_kwargs_child=dict(nx=30, ny=30, size_x=300, size_y=300,
-                                        center_lon=0, center_lat=55, rot=0, N=20,
-                                        theta_s=6.0, theta_b=3.0, hc=250.0),
-                 metadata_child={"period": 1800.0})
+    cfg = _build(
+        grid_kwargs_child=dict(
+            nx=30,
+            ny=30,
+            size_x=300,
+            size_y=300,
+            center_lon=0,
+            center_lat=55,
+            rot=0,
+            N=20,
+            theta_s=6.0,
+            theta_b=3.0,
+            hc=250.0,
+        ),
+        metadata_child={"period": 1800.0},
+    )
     ed = cfg.model_settings["extract_data"]
     assert ed["do_extract"] is True and ed["extract_file"] == "nesting.nc"
     assert ed["n_chd"] == 20 and ed["theta_s_chd"] == 6.0 and ed["hc_chd"] == 250.0
@@ -167,8 +231,18 @@ def test_resolver_nesting_enables_extract_data():
 
 
 def test_resolver_nesting_default_period():
-    cfg = _build(grid_kwargs_child=dict(nx=30, ny=30, size_x=300, size_y=300,
-                                        center_lon=0, center_lat=55, rot=0, N=15))
+    cfg = _build(
+        grid_kwargs_child=dict(
+            nx=30,
+            ny=30,
+            size_x=300,
+            size_y=300,
+            center_lon=0,
+            center_lat=55,
+            rot=0,
+            N=15,
+        )
+    )
     assert cfg.model_settings["extract_data"]["extract_period"] == 3600.0
     assert cfg.model_settings["extract_data"]["n_chd"] == 15
 
@@ -180,14 +254,16 @@ def test_resolver_no_nesting_keeps_defaults():
 
 
 def test_resolver_restoring_sets_sal_restore():
-    # the cson model.yml has no restoring source; inject one via run_time? Instead
-    # verify the default (no restoring) leaves sal_restore False.
+    # the cson model.yml includes a WOA surface source with type=restoring and
+    # restoring_forces=['sss'], so the resolver derives sal_restore=True
+    # (see spec_config_resolve.py: sal_restore = any restoring item with 'sss').
     cfg = _build()
-    assert cfg.model_settings["cppdefs"].get("sal_restore") is False
+    assert cfg.model_settings["cppdefs"].get("sal_restore") is True
 
 
 def test_catalog_scans_forcingspec():
     from cstar_forge.domain_catalog import default_catalog as cat
+
     assert "glorys-era5-unified" in cat.forcing_names
     data = cat.forcing_data("glorys-era5-unified")
     assert "forcing" in data and "initial_conditions" in data
@@ -195,6 +271,7 @@ def test_catalog_scans_forcingspec():
 
 def test_sources_to_forcing_override_returns_none_for_model_default():
     from cstar_forge.spec_config_engine import sources_to_forcing_override
+
     cfg = _build()
     assert cfg.composition.forcing.origin == "model_default"
     assert sources_to_forcing_override(cfg) is None
@@ -203,6 +280,7 @@ def test_sources_to_forcing_override_returns_none_for_model_default():
 def test_sources_to_forcing_override_converts_custom_forcing():
     from cstar_forge.spec_config_engine import sources_to_forcing_override
     from cstar_forge.domain_catalog import default_catalog as cat
+
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
     assert cfg.composition.forcing.origin == "custom"
@@ -210,7 +288,10 @@ def test_sources_to_forcing_override_converts_custom_forcing():
     assert ov is not None
     assert "initial_conditions" in ov and "forcing" in ov
     assert ov["initial_conditions"]["source"]["name"] == "GLORYS"
-    assert [i["source"]["name"] for i in ov["forcing"]["surface"]] == ["ERA5", "UNIFIED"]
+    assert [i["source"]["name"] for i in ov["forcing"]["surface"]] == [
+        "ERA5",
+        "UNIFIED",
+    ]
     assert ov["forcing"]["tidal"][0]["ntides"] == 15
 
 
@@ -226,24 +307,33 @@ def test_forcing_override_used_by_input_data(tmp_path):
     override = {
         "initial_conditions": {"source": {"name": "GLORYS", "climatology": False}},
         "forcing": {
-            "surface": [{"source": {"name": "ERA5"}, "type": "physics",
-                         "correct_radiation": True, "coarse_grid_mode": "never"}],
+            "surface": [
+                {
+                    "source": {"name": "ERA5"},
+                    "type": "physics",
+                    "correct_radiation": True,
+                    "coarse_grid_mode": "never",
+                }
+            ],
         },
     }
     # Minimal mock of what __post_init__ needs beyond the input_list building
     mock_spec = MagicMock()
-    mock_spec.inputs.grid = None          # skip grid
+    mock_spec.inputs.grid = None  # skip grid
     # Note: marbl is now read from _settings_compile_time["cppdefs"]["marbl"],
     # not from model_spec.settings.properties — no need to set it on mock_spec.
 
-    with patch.object(id_mod.RomsMarblInputData, '__post_init__',
-                      id_mod.RomsMarblInputData.__post_init__):
+    with patch.object(
+        id_mod.RomsMarblInputData,
+        "__post_init__",
+        id_mod.RomsMarblInputData.__post_init__,
+    ):
         # Just verify input_list is built from the override, not model_spec.inputs
         # Use a lightweight construction that skips heavy validation
         obj = object.__new__(id_mod.RomsMarblInputData)
-        object.__setattr__(obj, 'forcing_override', override)
-        object.__setattr__(obj, 'model_spec', mock_spec)
-        object.__setattr__(obj, 'cdr_forcing', None)
+        object.__setattr__(obj, "forcing_override", override)
+        object.__setattr__(obj, "model_spec", mock_spec)
+        object.__setattr__(obj, "cdr_forcing", None)
         # Manually run the input_list building logic
         input_list = []
         # grid (None here)
@@ -251,9 +341,12 @@ def test_forcing_override_used_by_input_data(tmp_path):
         if fo.get("initial_conditions"):
             input_list.append(("initial_conditions", dict(fo["initial_conditions"])))
         for category, items in (fo.get("forcing") or {}).items():
-            for item in (items or []):
+            for item in items or []:
                 input_list.append((f"forcing.{category}", dict(item)))
-        assert ("initial_conditions", {"source": {"name": "GLORYS", "climatology": False}}) in input_list
+        assert (
+            "initial_conditions",
+            {"source": {"name": "GLORYS", "climatology": False}},
+        ) in input_list
         assert ("forcing.surface", override["forcing"]["surface"][0]) in input_list
         # boundary/tidal/river are absent because override doesn't include them
         assert not any(k.startswith("forcing.boundary") for k, _ in input_list)
@@ -261,14 +354,19 @@ def test_forcing_override_used_by_input_data(tmp_path):
 
 def test_catalog_scans_outputspec():
     from cstar_forge.domain_catalog import default_catalog as cat
+
     assert "standard" in cat.output_names
     data = cat.output_data("standard")
     assert "ocean_vars" in data and "diagnostics" in data
-    assert set(data["marbl_bgc"]) == {"marbl_tracers_to_write", "marbl_diagnostics_to_write"}
+    assert set(data["marbl_bgc"]) == {
+        "marbl_tracers_to_write",
+        "marbl_diagnostics_to_write",
+    }
 
 
 def test_resolver_output_settings_override():
     from cstar_forge.domain_catalog import default_catalog as cat
+
     odata = cat.output_data("standard")
     cfg = _build(output_settings=odata)
     assert cfg.composition.output.origin == "custom"
@@ -276,23 +374,31 @@ def test_resolver_output_settings_override():
     assert "marbl_config_file" in cfg.model_settings["marbl_bgc"]
     # an edited output (turn on wrt_temp) flows through; manual override still wins
     edited = {k: (dict(v) if isinstance(v, dict) else v) for k, v in odata.items()}
-    edited["ts_output"] = dict(odata["ts_output"]); edited["ts_output"]["wrt_temp"] = True
+    edited["ts_output"] = dict(odata["ts_output"])
+    edited["ts_output"]["wrt_temp"] = True
     cfg2 = _build(output_settings=edited)
     assert cfg2.model_settings["ts_output"]["wrt_temp"] is True
-    cfg3 = _build(output_settings=edited, run_time_overrides={"ts_output": {"wrt_temp": False}})
+    cfg3 = _build(
+        output_settings=edited, run_time_overrides={"ts_output": {"wrt_temp": False}}
+    )
     assert cfg3.model_settings["ts_output"]["wrt_temp"] is False
 
 
 def test_extract_output_settings_helper():
     from cstar_forge.spec_config_resolve import extract_output_settings, OUTPUT_SECTIONS
+
     cfg = _build()
     out = extract_output_settings(cfg.model_settings)
     assert set(OUTPUT_SECTIONS) <= set(out)
-    assert set(out["marbl_bgc"]) == {"marbl_tracers_to_write", "marbl_diagnostics_to_write"}
+    assert set(out["marbl_bgc"]) == {
+        "marbl_tracers_to_write",
+        "marbl_diagnostics_to_write",
+    }
 
 
 def test_resolver_forcing_inputs_override():
     from cstar_forge.domain_catalog import default_catalog as cat
+
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
     assert cfg.composition.forcing.origin == "custom"
@@ -301,8 +407,12 @@ def test_resolver_forcing_inputs_override():
     edited = dict(fdata)
     edited["forcing"] = dict(fdata["forcing"])
     edited["forcing"]["surface"] = fdata["forcing"]["surface"] + [
-        {"source": {"name": "WOA", "climatology": True}, "type": "restoring",
-         "restoring_forces": ["sss"]}]
+        {
+            "source": {"name": "WOA", "climatology": True},
+            "type": "restoring",
+            "restoring_forces": ["sss"],
+        }
+    ]
     cfg2 = _build(forcing_inputs=edited)
     assert cfg2.model_settings["cppdefs"]["sal_restore"] is True
 
@@ -310,12 +420,16 @@ def test_resolver_forcing_inputs_override():
 def test_timestepping_and_param_match_known_run():
     cfg = _build()
     assert cfg.model_settings["time_stepping"] == {
-        "ntimes": 12, "dt": 7200, "ndtfast": 60, "ninfo": 1}
+        "ntimes": 12,
+        "dt": 7200,
+        "ndtfast": 60,
+        "ninfo": 1,
+    }
     p = cfg.model_settings["param"]
-    assert (p["llm"], p["mmm"], p["n"]) == (6, 2, 3)        # from grid nx/ny/N
-    assert (p["np_xi"], p["np_eta"]) == (1, 1)              # from partitioning
+    assert (p["llm"], p["mmm"], p["n"]) == (6, 2, 3)  # from grid nx/ny/N
+    assert (p["np_xi"], p["np_eta"]) == (1, 1)  # from partitioning
     assert (p["nsub_x"], p["nsub_e"]) == (1, 1)
-    assert p["ntrc_bio"] == 32                              # from defaults
+    assert p["ntrc_bio"] == 32  # from defaults
 
 
 def test_cppdefs_obc_from_boundaries_and_cdr_flag():
@@ -330,12 +444,20 @@ def test_settings_is_flat_and_omits_processing_filled_sections():
     cfg = _build()
     ms = cfg.model_settings
     assert "cppdefs" in ms and "lateral_visc" in ms  # cppdefs flat alongside namelist
-    for excluded in ("grid", "initial", "forcing", "s_coord", "title", "output_root_name"):
+    for excluded in (
+        "grid",
+        "initial",
+        "forcing",
+        "s_coord",
+        "title",
+        "output_root_name",
+    ):
         assert excluded not in ms
 
 
 def test_sources_resolved_from_modelspec():
     from cstar_forge.source_registry import resolve_dataset_key
+
     cfg = _build()
     s = cfg.forcing
     # dataset_key is no longer stored on SourceSpec — derive it when needed
@@ -343,10 +465,13 @@ def test_sources_resolved_from_modelspec():
     assert resolve_dataset_key(ic_src.name, ic_src.glorys_layout) == "GLORYS_REGIONAL"
     bgc_src = s.initial_conditions.bgc_source
     assert resolve_dataset_key(bgc_src.name, bgc_src.glorys_layout) == "UNIFIED_BGC"
-    assert [i.source.name for i in s.surface] == ["ERA5", "UNIFIED"]
+    assert [i.source.name for i in s.surface] == ["ERA5", "UNIFIED", "MBL_co2", "WOA"]
     assert s.tidal[0].ntides == 15
     assert s.river[0].include_bgc is True
-    assert s.resolved_datasets["GLORYS"].dataset_id == "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+    assert (
+        s.resolved_datasets["GLORYS"].dataset_id
+        == "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+    )
 
 
 def test_templates_are_repo_refs():
@@ -355,7 +480,7 @@ def test_templates_are_repo_refs():
     assert t.location.endswith("cstar-forge.git")
     assert t.files == ["cppdefs.opt.j2"]
     assert cfg.code.templates_run_time.files == ["marbl_in"]
-    assert cfg.code.roms.commit == "391de2798ca9d6e9b63ba5471b6e62e96043e177"
+    assert cfg.code.roms.commit == "0.2.0"
 
 
 def test_no_host_or_machine_in_config():
@@ -366,8 +491,12 @@ def test_no_host_or_machine_in_config():
 
 
 def test_overrides_take_precedence():
-    cfg = _build(run_time_overrides={"v_sponge": {"v_sponge": 42.0},
-                                     "time_stepping": {"ndtfast": 30}})
+    cfg = _build(
+        run_time_overrides={
+            "v_sponge": {"v_sponge": 42.0},
+            "time_stepping": {"ndtfast": 30},
+        }
+    )
     assert cfg.model_settings["v_sponge"]["v_sponge"] == 42.0
     assert cfg.model_settings["time_stepping"]["ndtfast"] == 30
 
@@ -389,7 +518,11 @@ def test_yaml_round_trip(tmp_path):
 
 def test_committed_example_validates():
     """The checked-in example must remain a valid SpecConfig."""
-    example = Path(cstar_forge.__file__).parents[1] / "docs" / "spec-config-example.test-tiny.yml"
+    example = (
+        Path(cstar_forge.__file__).parents[1]
+        / "docs"
+        / "spec-config-example.test-tiny.yml"
+    )
     if not example.exists():
         pytest.skip("example file not present")
     cfg = SpecConfig.from_yaml(example)
@@ -404,6 +537,7 @@ class TestSpecConfigWizard:
     def _wizard(self):
         pytest.importorskip("ipywidgets")
         from cstar_forge.spec_config_wizard import SpecConfigWizard
+
         return SpecConfigWizard()
 
     def test_init_resolves_default_config(self):
@@ -419,7 +553,10 @@ class TestSpecConfigWizard:
         cfg = wiz.config
         assert cfg.identity.grid_name == "gulf-guinea-toy"
         assert cfg.domain.grid_kwargs["nx"] == 10 and cfg.domain.grid_kwargs["N"] == 5
-        assert (cfg.domain.partitioning.n_procs_x, cfg.domain.partitioning.n_procs_y) == (2, 5)
+        assert (
+            cfg.domain.partitioning.n_procs_x,
+            cfg.domain.partitioning.n_procs_y,
+        ) == (2, 5)
         assert cfg.domain.open_boundaries.south is True
         # this domain doesn't specify s-coord -> not injected
         assert "theta_s" not in cfg.domain.grid_kwargs
@@ -460,11 +597,14 @@ class TestSpecConfigWizard:
         w2.load_path.value = str(p)
         w2._on_load_path(None)
         assert w2.grid_name.value == saved.identity.grid_name
-        assert w2.domain_dd.value == "<custom>"        # file authoritative, no prefill
+        assert w2.domain_dd.value == "<custom>"  # file authoritative, no prefill
         assert w2.ensemble.value == "7"
         assert w2.config is not None
         assert w2.config.casename == saved.casename
-        assert w2.config.model_settings["time_stepping"] == saved.model_settings["time_stepping"]
+        assert (
+            w2.config.model_settings["time_stepping"]
+            == saved.model_settings["time_stepping"]
+        )
 
     def test_load_from_upload_bytes(self, tmp_path):
         w1 = self._wizard()
@@ -484,8 +624,16 @@ class TestSpecConfigWizard:
         assert w.editor is not None
         sections = set(w.editor._section_fields)
         # every model_settings section is editable, including the derived ones
-        assert {"ocean_vars", "lateral_visc", "marbl_bgc",
-                "time_stepping", "param", "v_sponge", "cppdefs", "extract_data"} <= sections
+        assert {
+            "ocean_vars",
+            "lateral_visc",
+            "marbl_bgc",
+            "time_stepping",
+            "param",
+            "v_sponge",
+            "cppdefs",
+            "extract_data",
+        } <= sections
         assert w.config.composition.overrides == {}
 
     def test_editing_advanced_setting_reflects_in_config(self):
@@ -497,9 +645,9 @@ class TestSpecConfigWizard:
     def test_advanced_edit_persists_across_atomic_change(self):
         w = self._wizard()
         w.editor._widgets[("lateral_visc", "visc2")][0].value = 12.5
-        w.grid_w["nx"].value = 8                       # atomic change -> re-derive
+        w.grid_w["nx"].value = 8  # atomic change -> re-derive
         assert w.config.model_settings["lateral_visc"]["visc2"] == 12.5  # edit kept
-        assert w.config.model_settings["param"]["llm"] == 8             # derived refreshed
+        assert w.config.model_settings["param"]["llm"] == 8  # derived refreshed
 
     def test_editing_derived_value_records_override_and_wins(self):
         w = self._wizard()
@@ -508,7 +656,9 @@ class TestSpecConfigWizard:
         # override persists and wins over the composed value when partitioning changes
         w.npx.value = 4
         assert w.config.model_settings["param"]["np_xi"] == 99
-        assert w.config.model_settings["param"]["np_eta"] == 1  # non-overridden refreshes
+        assert (
+            w.config.model_settings["param"]["np_eta"] == 1
+        )  # non-overridden refreshes
 
     def test_override_layer_round_trips_through_load(self, tmp_path):
         w1 = self._wizard()
@@ -552,7 +702,9 @@ class TestSpecConfigWizard:
             pytest.skip("example OutputSpec not in catalog")
         w.output_dd.value = "standard"
         assert w.config.composition.output.origin == "catalog"
-        assert "marbl_config_file" in w.config.model_settings["marbl_bgc"]  # partial merge
+        assert (
+            "marbl_config_file" in w.config.model_settings["marbl_bgc"]
+        )  # partial merge
         # edit an output section in Advanced -> override recorded; selection unchanged
         w.editor._widgets[("ts_output", "wrt_temp")][0].value = True
         assert w.config.composition.overrides["ts_output"]["wrt_temp"] is True
@@ -605,7 +757,7 @@ class TestSpecConfigWizard:
         w = self._wizard()
         if "gulf-guinea-toy" not in w.nest_domain_dd.options:
             pytest.skip("gulf-guinea-toy domain not in catalog")
-        w.nest_domain_dd.value = "gulf-guinea-toy"   # prefills child + enables nesting
+        w.nest_domain_dd.value = "gulf-guinea-toy"  # prefills child + enables nesting
         assert w.nest_enable.value is True
         assert w.child_w["nx"].value == 10 and w.child_w["N"].value == 5
         assert w.config.model_settings["extract_data"]["do_extract"] is True
@@ -636,6 +788,7 @@ class TestSpecConfigWizard:
 
     def test_loading_file_with_bad_settings_is_flagged(self, tmp_path):
         import yaml
+
         w = self._wizard()
         p = tmp_path / "spec_config.yml"
         w.save_path.value = str(p)
@@ -704,6 +857,7 @@ class TestSpecConfigEngine:
 
     def test_builder_kwargs_carry_atomic_inputs_not_host(self):
         from cstar_forge.spec_config_engine import spec_config_to_builder_kwargs
+
         kw = spec_config_to_builder_kwargs(self._cfg())
         assert kw["model_name"] == "cson_roms-marbl_v0.1"
         assert kw["grid_name"] == "test-tiny"
@@ -713,7 +867,11 @@ class TestSpecConfigEngine:
         assert not any(k in kw for k in ("machine", "paths", "scratch", "source_data"))
 
     def test_split_model_settings(self):
-        from cstar_forge.spec_config_engine import split_model_settings, PROCESSING_FILLED_SECTIONS
+        from cstar_forge.spec_config_engine import (
+            split_model_settings,
+            PROCESSING_FILLED_SECTIONS,
+        )
+
         run_ov, comp_ov = split_model_settings(self._cfg())
         assert list(comp_ov) == ["cppdefs"] and "cppdefs" not in run_ov
         assert "time_stepping" in run_ov and "param" in run_ov
@@ -722,8 +880,10 @@ class TestSpecConfigEngine:
 
     def test_process_orchestration_order_and_overlay(self):
         from cstar_forge.spec_config_engine import process_spec_config
-        b = process_spec_config(self._cfg(), clobber=True, use_dask=False,
-                                executor_factory=_FakeBuilder)
+
+        b = process_spec_config(
+            self._cfg(), clobber=True, use_dask=False, executor_factory=_FakeBuilder
+        )
         assert [c[0] for c in b.calls] == ["ensure", "generate", "configure"]
         gen = dict(b.calls[1][1])
         assert gen["clobber"] is True and gen["use_dask"] is False
@@ -734,30 +894,44 @@ class TestSpecConfigEngine:
 
     def test_process_skip_flags(self):
         from cstar_forge.spec_config_engine import process_spec_config
-        b = process_spec_config(self._cfg(), ensure_data=False, generate=False,
-                                executor_factory=_FakeBuilder)
+
+        b = process_spec_config(
+            self._cfg(),
+            ensure_data=False,
+            generate=False,
+            executor_factory=_FakeBuilder,
+        )
         assert [c[0] for c in b.calls] == ["configure"]
 
     def test_executor_must_implement_interface(self):
-        from cstar_forge.spec_config_engine import process_spec_config, SpecConfigExecutor
+        from cstar_forge.spec_config_engine import (
+            process_spec_config,
+            SpecConfigExecutor,
+        )
+
         # _FakeBuilder satisfies the runtime-checkable Protocol
         assert isinstance(_FakeBuilder(), SpecConfigExecutor)
 
         class _Bad:  # missing the required methods
             def __init__(self, cfg=None):
                 pass
+
         with pytest.raises(TypeError, match="SpecConfigExecutor"):
             process_spec_config(self._cfg(), executor_factory=_Bad)
 
     def test_invalid_model_settings_fail_fast(self):
         from cstar_forge.spec_config_engine import process_spec_config
+
         cfg = self._cfg()
         cfg.model_settings["param"]["np_xi"] = "not-an-int"  # corrupt a value
         with pytest.raises(ValueError, match="invalid values"):
-            process_spec_config(cfg, executor_factory=_FakeBuilder)  # raises before any call
+            process_spec_config(
+                cfg, executor_factory=_FakeBuilder
+            )  # raises before any call
 
     def test_resolve_host_reads_config_not_file(self):
         from cstar_forge.spec_config_engine import resolve_host
+
         h = resolve_host(self._cfg())
         assert h["system"]
         assert set(h["paths"]) == {"source_data", "input_data", "scratch", "catalog"}
@@ -779,27 +953,59 @@ class TestSpecConfigEngine:
 # host/artifact-derived (the resolver omits them by design).
 # ---------------------------------------------------------------------------
 _PARITY_DOMAINS = [
-    ("test-tiny",
-     dict(nx=6, ny=2, size_x=500, size_y=1000, center_lon=0, center_lat=55,
-          rot=10, N=3, theta_s=5.0, theta_b=2.0, hc=250.0),
-     {"south": False, "east": True, "north": True, "west": False},
-     {"n_procs_x": 1, "n_procs_y": 1}),
-    ("gulf-guinea-toy",
-     dict(nx=10, ny=10, size_x=4000, size_y=2000, center_lon=4.0, center_lat=-1.0,
-          rot=0, N=5),
-     {"south": True, "east": True, "north": True, "west": True},
-     {"n_procs_x": 2, "n_procs_y": 5}),
+    (
+        "test-tiny",
+        dict(
+            nx=6,
+            ny=2,
+            size_x=500,
+            size_y=1000,
+            center_lon=0,
+            center_lat=55,
+            rot=10,
+            N=3,
+            theta_s=5.0,
+            theta_b=2.0,
+            hc=250.0,
+        ),
+        {"south": False, "east": True, "north": True, "west": False},
+        {"n_procs_x": 1, "n_procs_y": 1},
+    ),
+    (
+        "gulf-guinea-toy",
+        dict(
+            nx=10,
+            ny=10,
+            size_x=4000,
+            size_y=2000,
+            center_lon=4.0,
+            center_lat=-1.0,
+            rot=0,
+            N=5,
+        ),
+        {"south": True, "east": True, "north": True, "west": True},
+        {"n_procs_x": 2, "n_procs_y": 5},
+    ),
 ]
 
 # Sections filled at different times / by different layers — not comparable at init.
-_PARITY_SKIP = {"param", "cppdefs", "title", "output_root_name",
-                "grid", "initial", "forcing", "s_coord"}
+_PARITY_SKIP = {
+    "param",
+    "cppdefs",
+    "title",
+    "output_root_name",
+    "grid",
+    "initial",
+    "forcing",
+    "s_coord",
+}
 
 
 @pytest.mark.integration
 class TestResolverBuilderParity:
-    @pytest.mark.parametrize("grid_name,grid_kwargs,boundaries,partitioning",
-                             _PARITY_DOMAINS)
+    @pytest.mark.parametrize(
+        "grid_name,grid_kwargs,boundaries,partitioning", _PARITY_DOMAINS
+    )
     def test_resolver_matches_builder_derivation(
         self, grid_name, grid_kwargs, boundaries, partitioning, tmp_path
     ):
@@ -813,20 +1019,28 @@ class TestResolverBuilderParity:
         # Real builder (no mocks): real ModelSpec defaults + real geometric grid;
         # persistence isolated to a temp catalog copied from the bundled one.
         builder = CstarSpecBuilder(
-            description="parity", model_name="cson_roms-marbl_v0.1",
-            grid_name=grid_name, grid_kwargs=grid_kwargs,
-            open_boundaries=boundaries, partitioning=partitioning,
-            start_time=start, end_time=end,
-            catalog_root=str(tmp_path / "catalog"), initialize_catalog_from="local",
+            description="parity",
+            model_name="cson_roms-marbl_v0.1",
+            grid_name=grid_name,
+            grid_kwargs=grid_kwargs,
+            open_boundaries=boundaries,
+            partitioning=partitioning,
+            start_time=start,
+            end_time=end,
+            catalog_root=str(tmp_path / "catalog"),
+            initialize_catalog_from="local",
         )
         b_rt = builder._settings_run_time
 
         # Resolver with dt=None -> the same CFL path the builder uses.
         cfg = build_spec_config(
             model_dir=builder._get_catalog().model_dir("cson_roms-marbl_v0.1"),
-            grid_name=grid_name, grid_kwargs=grid_kwargs,
-            open_boundaries=boundaries, partitioning=partitioning,
-            start_date=start, end_date=end,
+            grid_name=grid_name,
+            grid_kwargs=grid_kwargs,
+            open_boundaries=boundaries,
+            partitioning=partitioning,
+            start_date=start,
+            end_date=end,
         )
         r_ms = cfg.model_settings
 
