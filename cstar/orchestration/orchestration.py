@@ -33,7 +33,6 @@ from cstar.system.manager import get_sysmgr
 
 nx = lazy_import("networkx")
 
-KEY_STATUS: t.Literal["status"] = "status"
 KEY_STEP: t.Literal["step"] = "step"
 KEY_TASK: t.Literal["task"] = "task"
 
@@ -389,9 +388,8 @@ class Planner(LoggingMixin):
                 data[prereq].append(step.name)
 
         g = nx.DiGraph(data)
-        defaults: dict[str, dict[str, Status | Step | None]] = {
+        defaults: dict[str, dict[str, Step | None]] = {
             str(n.name): {
-                KEY_STATUS: Status.Unsubmitted,
                 KEY_STEP: LiveStep.from_step(n),
                 KEY_TASK: None,
             }
@@ -405,20 +403,12 @@ class Planner(LoggingMixin):
 
         Returns
         -------
-        Iterable[Step]
+        Sequence[Step]
             A traversal of the execution plan honoring all dependencies.
         """
-
-        def f(step: Step) -> bool:
-            """Filter steps that are non-null."""
-            return step is not None
-
         keys = nx.topological_sort(self.graph)
-        steps = self.retrieve_all(KEY_STEP, filter_fn=f)
-        return tuple(steps[k] for k in keys)
-
-    @t.overload
-    def store(self, n: str, key: t.Literal["status"], value: Status) -> None: ...
+        steps = self.retrieve_all(KEY_STEP)
+        return [steps[k] for k in keys]
 
     @t.overload
     def store(self, n: str, key: t.Literal["step"], value: LiveStep) -> None: ...
@@ -441,19 +431,11 @@ class Planner(LoggingMixin):
             The value to be stored.
         """
         stored = self.graph.nodes[n].get(key, "")
-        if key in {KEY_STATUS, KEY_STEP, KEY_TASK} and stored != value:
+        if key in {KEY_STEP, KEY_TASK} and stored != value:
             msg = f"Updating reserved key `{key}` on node `{n}` with value `{value}`"
             self.log.trace(msg)
 
         self.graph.nodes[n][key] = value
-
-    @t.overload
-    def retrieve(
-        self,
-        n: str,
-        key: t.Literal["status"],
-        default: Status | None = None,
-    ) -> Status | None: ...
 
     @t.overload
     def retrieve(
@@ -499,14 +481,6 @@ class Planner(LoggingMixin):
     @t.overload
     def retrieve_all(
         self,
-        key: t.Literal["status"],
-        default: Status | None = None,
-        filter_fn: Callable[[Status], bool] | None = None,
-    ) -> Mapping[str, Status]: ...
-
-    @t.overload
-    def retrieve_all(
-        self,
         key: t.Literal["step"],
         default: Step | None = None,
         filter_fn: Callable[[Step], bool] | None = None,
@@ -542,9 +516,10 @@ class Planner(LoggingMixin):
         Mapping[str, _TValue]
             Mapping of node name to value retrieved for the key.
         """
-        values = {n: self.graph.nodes[n].get(key, default) for n in self.graph.nodes}
+        all_nodes = {n: self.graph.nodes[n].get(key, default) for n in self.graph.nodes}
+        values = {n: v for n, v in all_nodes.items() if v}
         if filter_fn:
-            values = {k: v for k, v in values.items() if filter_fn(v)}
+            values = {n: v for n, v in values.items() if filter_fn(v)}
         return values
 
 
@@ -658,7 +633,7 @@ class Orchestrator(LoggingMixin):
     planner: Planner
     """The planner used by the orchestrator to prioritize tasks."""
 
-    launcher: Launcher[t.Any]
+    launcher: Launcher[ProcessHandle]
     """The launcher used by the orchestrator to manage task execution."""
 
     _on_status_changed: Callable[[ProcessHandle], Awaitable[None]] | None = None
@@ -707,15 +682,15 @@ class Orchestrator(LoggingMixin):
             return None
 
         for n in working_list:
-            in_edges = list(g.in_edges(n))
+            in_edges = [x for x in list(g.in_edges(n)) if g.nodes[n][KEY_TASK]]
             in_degree = g.in_degree(n)
 
             satisfied = all(
                 (
-                    Status.is_in_progress(g.nodes[u][KEY_STATUS])
-                    or Status.is_terminal(g.nodes[u][KEY_STATUS])
+                    Status.is_in_progress(g.nodes[u][KEY_TASK].status)
+                    or Status.is_terminal(g.nodes[u][KEY_TASK].status)
                     if mode == RunMode.Schedule
-                    else Status.is_terminal(g.nodes[u][KEY_STATUS])
+                    else Status.is_terminal(g.nodes[u][KEY_TASK].status)
                 )
                 for (u, _) in in_edges
             )
@@ -723,7 +698,7 @@ class Orchestrator(LoggingMixin):
             if in_degree == 0:
                 open_nodes[n] = Status.Unsubmitted
             elif satisfied:
-                open_nodes[n] = g.nodes[n][KEY_STATUS]
+                open_nodes[n] = g.nodes[n][KEY_TASK].status
 
         if working_list:
             # working list has options. if none are ready, return empty set.
@@ -745,7 +720,11 @@ class Orchestrator(LoggingMixin):
             # anything previously scheduled is "closed" when scheduling
             targets.update({Status.Submitted, Status.Running, Status.Ending})
 
-        return self.planner.retrieve_all(KEY_STATUS, filter_fn=lambda x: x in targets)
+        return {
+            k: v.status
+            for k, v in self.planner.retrieve_all(KEY_TASK).items()
+            if v.status in targets
+        }
 
     def _locate_dependencies(self, step: LiveStep) -> list[ProcessHandle] | None:
         """Look for the dependencies of the step.
@@ -801,11 +780,8 @@ class Orchestrator(LoggingMixin):
         if task := self.planner.retrieve(node, KEY_TASK):
             old_status = task.status
             new_status = await self.launcher.query_status(task)
-            if old_status != new_status:
-                task.status = new_status
-
-                if self._on_status_changed:
-                    await self._on_status_changed(task.handle)
+            if old_status != new_status and self._on_status_changed:
+                await self._on_status_changed(task.handle)
         else:
             task = await self.launcher.launch(step, dependencies)
             self.planner.store(node, KEY_TASK, task)
@@ -814,7 +790,6 @@ class Orchestrator(LoggingMixin):
             if self._on_launched:
                 await self._on_launched(task.handle)
 
-        self.planner.store(node, KEY_STATUS, task.status)
         return task
 
     async def update_planner_state(
@@ -860,10 +835,9 @@ class Orchestrator(LoggingMixin):
 
         if open_set is None:
             # no open nodes were found, return all current statuses
-            return self.planner.retrieve_all(
-                KEY_STATUS,
-                default=Status.Unsubmitted,
-            )
+            return {
+                k: v.status for k, v in self.planner.retrieve_all(KEY_TASK).items() if v
+            }
 
         # Ensure task/result pairing is consistent with a list
         exec_tasks = [asyncio.Task(self.process_node(n)) for n in open_set.keys()]
@@ -908,7 +882,6 @@ class Orchestrator(LoggingMixin):
             else:
                 msg = f"The orchestrator requested cancellation of: {task.step.name}"
                 self.log.warning(msg)
-                self.planner.store(task.step.name, KEY_STATUS, task.status)
 
     def set_callback(
         self,
