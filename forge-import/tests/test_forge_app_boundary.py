@@ -24,6 +24,15 @@ import cstar_forge
 
 _PKG = Path(cstar_forge.__file__).parent
 
+
+def _module_path(short_name: str) -> Path:
+    """Resolve a forge-app module wherever it currently lives (top-level or under the
+    ``forge/`` package), so this guard survives the incremental Phase-C relocation."""
+    for cand in (_PKG / "forge" / f"{short_name}.py", _PKG / f"{short_name}.py"):
+        if cand.exists():
+            return cand
+    raise FileNotFoundError(f"forge-app module not found: {short_name}")
+
 # Modules that make up (or will make up) the relocatable forge application.
 _FORGE_APP_MODULES = (
     "input_data",
@@ -63,7 +72,7 @@ _KNOWN_VIOLATIONS = {
 
 def _imported_forge_submodules(module_name: str) -> set[str]:
     """Return the set of ``cstar_forge`` submodule names imported by a module."""
-    src = (_PKG / f"{module_name}.py").read_text()
+    src = _module_path(module_name).read_text()
     tree = ast.parse(src)
     found: set[str] = set()
     for node in ast.walk(tree):

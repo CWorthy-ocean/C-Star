@@ -12,7 +12,7 @@ import pytest
 import yaml
 
 import cstar_forge
-from cstar_forge.settings import write_roms_namelist
+from cstar_forge.forge.settings import write_roms_namelist
 from cstar_forge.namelist_model import (
     RunTimeSettings,
     build_namelist,

@@ -459,7 +459,7 @@ def test_settings_is_flat_and_omits_processing_filled_sections():
 
 
 def test_sources_resolved_from_modelspec():
-    from cstar_forge.source_registry import resolve_dataset_key
+    from cstar_forge.forge.source_registry import resolve_dataset_key
 
     cfg = _build()
     s = cfg.forcing

@@ -61,7 +61,7 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
 # lightweight ``source_registry`` module (single source of truth, importable
 # without the heavy acquisition deps). Re-exported here for existing consumers.
 # -----------------------------------------
-from cstar_forge.source_registry import (  # noqa: E402,F401  (re-export)
+from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
     GLORYS_DATASET_ID,
     MBL_CO2_URL,
     SOURCE_ALIAS,
@@ -199,7 +199,7 @@ class SourceData:
         For logical "GLORYS", pass ``glorys_layout`` from SourceSpec
         (``"global"`` or ``"regional"``). If omitted, defaults to regional.
         """
-        from cstar_forge.source_registry import resolve_dataset_key
+        from cstar_forge.forge.source_registry import resolve_dataset_key
 
         return resolve_dataset_key(logical_name, glorys_layout)
 

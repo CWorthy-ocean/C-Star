@@ -40,7 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from cstar_forge import config, input_data, source_data
 from cstar_forge import models as forge_models
-from cstar_forge.settings import render_roms_settings, write_roms_namelist
+from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
 from cstar_forge.util import (
     compute_timestep_from_cfl,
     compute_v_sponge_from_grid,

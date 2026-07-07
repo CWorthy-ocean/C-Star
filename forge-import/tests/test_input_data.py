@@ -12,7 +12,7 @@ Tests cover:
 - Edge cases and error handling
 """
 import tempfile
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, call
@@ -243,18 +243,17 @@ class TestInputData:
     
     def test_inputdata_initialization(self, tmp_path):
         """Test InputData initialization."""
-        with nullcontext():
-            data = InputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                input_data_dir=tmp_path,
-            )
+        data = InputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+        )
             
-            assert data.domain_name == "test_grid"
-            assert data.start_date == datetime(2012, 1, 1)
-            assert data.end_date == datetime(2012, 1, 2)
-            assert data.input_data_dir.exists()
+        assert data.domain_name == "test_grid"
+        assert data.start_date == datetime(2012, 1, 1)
+        assert data.end_date == datetime(2012, 1, 2)
+        assert data.input_data_dir.exists()
 
     # NB: input_data_dir dirname sanitization moved to the executor's input_data_dir
     # property (Phase C config-injection); the base class now uses the injected dir
@@ -262,93 +261,87 @@ class TestInputData:
 
     def test_inputdata_forcing_filename(self, tmp_path):
         """Test _forcing_filename method."""
-        with nullcontext():
-            data = InputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                input_data_dir=tmp_path,
-            )
+        data = InputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+        )
             
-            filename = data._forcing_filename("grid")
-            assert filename.name == "test_grid_grid.nc"
-            assert filename.parent == data.input_data_dir
+        filename = data._forcing_filename("grid")
+        assert filename.name == "test_grid_grid.nc"
+        assert filename.parent == data.input_data_dir
 
     def test_inputdata_forcing_filename_dots_replaced_except_nc_suffix(self, tmp_path):
         """Basenames must have no ``.`` except ``.nc`` (e.g. ``v0.1`` in domain name)."""
-        with nullcontext():
-            data = InputData(
-                domain_name="case_v0.1_x",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                input_data_dir=tmp_path,
-            )
-            filename = data._forcing_filename("surface-physics")
-            assert filename.name == "case_v0_1_x_surface-physics.nc"
-            assert filename.name.count(".") == 1
-            assert filename.name.endswith(".nc")
+        data = InputData(
+            domain_name="case_v0.1_x",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+        )
+        filename = data._forcing_filename("surface-physics")
+        assert filename.name == "case_v0_1_x_surface-physics.nc"
+        assert filename.name.count(".") == 1
+        assert filename.name.endswith(".nc")
     
     def test_inputdata_ensure_empty_or_clobber_no_files(self, tmp_path):
         """Test _ensure_empty_or_clobber when directory is empty."""
-        with nullcontext():
-            data = InputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                input_data_dir=tmp_path,
-            )
+        data = InputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+        )
             
-            result = data._ensure_empty_or_clobber(clobber=False)
-            assert result is True
+        result = data._ensure_empty_or_clobber(clobber=False)
+        assert result is True
     
     def test_inputdata_ensure_empty_or_clobber_with_files_no_clobber(self, tmp_path):
         """When .nc files exist and clobber=False, allow continuing (reuse mode)."""
-        with nullcontext():
-            data = InputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                input_data_dir=tmp_path,
-            )
+        data = InputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+        )
             
-            # Create a dummy .nc file
-            nc_path = data.input_data_dir / "test.nc"
-            nc_path.touch()
+        # Create a dummy .nc file
+        nc_path = data.input_data_dir / "test.nc"
+        nc_path.touch()
             
-            result = data._ensure_empty_or_clobber(clobber=False)
-            assert result is True
-            assert nc_path.exists()
+        result = data._ensure_empty_or_clobber(clobber=False)
+        assert result is True
+        assert nc_path.exists()
     
     def test_inputdata_ensure_empty_or_clobber_with_files_clobber(self, tmp_path):
         """Test _ensure_empty_or_clobber when files exist and clobber=True."""
-        with nullcontext():
-            data = InputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                input_data_dir=tmp_path,
-            )
+        data = InputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+        )
             
-            # Create dummy .nc files
-            (data.input_data_dir / "test1.nc").touch()
-            (data.input_data_dir / "test2.nc").touch()
+        # Create dummy .nc files
+        (data.input_data_dir / "test1.nc").touch()
+        (data.input_data_dir / "test2.nc").touch()
             
-            result = data._ensure_empty_or_clobber(clobber=True)
-            assert result is True
-            assert len(list(data.input_data_dir.glob("*.nc"))) == 0
+        result = data._ensure_empty_or_clobber(clobber=True)
+        assert result is True
+        assert len(list(data.input_data_dir.glob("*.nc"))) == 0
     
     def test_inputdata_generate_all_not_implemented(self, tmp_path):
         """Test that InputData.generate_all raises NotImplementedError."""
-        with nullcontext():
-            data = InputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                input_data_dir=tmp_path,
-            )
+        data = InputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+        )
             
-            with pytest.raises(NotImplementedError):
-                data.generate_all()
+        with pytest.raises(NotImplementedError):
+            data.generate_all()
 
 
 class TestRomsMarblBlueprintInputData:
@@ -472,26 +465,25 @@ class TestRomsMarblInputDataInitialization:
         blueprint_dir = tmp_path / "blueprints"
         blueprint_dir.mkdir(parents=True, exist_ok=True)
         
-        with nullcontext():
-            data = RomsMarblInputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                model_spec=sample_model_spec,
-                grid=sample_grid,
-                boundaries=sample_open_boundaries,
-                source_data=sample_source_data,
-                blueprint_dir=blueprint_dir,
-                partitioning=sample_partitioning,
-                input_data_dir=tmp_path,
-                use_dask=False
-            )
+        data = RomsMarblInputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            model_spec=sample_model_spec,
+            grid=sample_grid,
+            boundaries=sample_open_boundaries,
+            source_data=sample_source_data,
+            blueprint_dir=blueprint_dir,
+            partitioning=sample_partitioning,
+            input_data_dir=tmp_path,
+            use_dask=False
+        )
 
-            assert data.domain_name == "test_grid"
-            assert data.grid is not None
-            assert data.model_spec is not None
-            assert data.blueprint_elements is not None
-            assert len(data.input_list) > 0
+        assert data.domain_name == "test_grid"
+        assert data.grid is not None
+        assert data.model_spec is not None
+        assert data.blueprint_elements is not None
+        assert len(data.input_list) > 0
     
     def test_romsmarblinputdata_missing_handler(self, tmp_path, sample_grid, sample_model_spec):
         """Test RomsMarblInputData raises error for missing handler."""
@@ -561,23 +553,22 @@ class TestRomsMarblInputDataInitialization:
         partitioning = cstar_models.PartitioningParameterSet(n_procs_x=2, n_procs_y=2)
         
         # This should work since all inputs are registered
-        with nullcontext():
-            data = RomsMarblInputData(
-                domain_name="test_grid",
-                start_date=datetime(2012, 1, 1),
-                end_date=datetime(2012, 1, 2),
-                model_spec=model_spec,
-                grid=sample_grid,
-                boundaries=open_boundaries,
-                source_data=mock_source_data,
-                blueprint_dir=blueprint_dir,
-                partitioning=partitioning,
-                input_data_dir=tmp_path,
-                use_dask=False
-            )
+        data = RomsMarblInputData(
+            domain_name="test_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            model_spec=model_spec,
+            grid=sample_grid,
+            boundaries=open_boundaries,
+            source_data=mock_source_data,
+            blueprint_dir=blueprint_dir,
+            partitioning=partitioning,
+            input_data_dir=tmp_path,
+            use_dask=False
+        )
             
-            # Should have input_list with registered handlers
-            assert len(data.input_list) > 0
+        # Should have input_list with registered handlers
+        assert len(data.input_list) > 0
 
 
 class TestRomsMarblInputDataHelperMethods:
@@ -686,31 +677,30 @@ class TestRomsMarblInputDataGeneration:
         mock_grid_class.return_value = sample_roms_marbl_input_data.grid
         sample_roms_marbl_input_data.grid = mock_grid
         
-        with nullcontext():
-            # Update input_data_dir to use the mocked path since it was set in __post_init__
-            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
-            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        # Update input_data_dir to use the mocked path since it was set in __post_init__
+        sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
             
-            # Make grid.save() actually create a file so Pydantic validation passes
-            # _generate_grid creates a Resource with location=out_path, which must exist
-            out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.touch()  # Create empty file so it exists for validation
+        # Make grid.save() actually create a file so Pydantic validation passes
+        # _generate_grid creates a Resource with location=out_path, which must exist
+        out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.touch()  # Create empty file so it exists for validation
             
-            # Mock xarray.open_dataset since we're using a dummy file
-            # _generate_grid reads the file back to check for xi_coarse dimension
-            # Note: xarray is imported inside _generate_grid, so we patch it at the module level
-            # xr.Dataset is already a context manager, so it works with 'with xr.open_dataset()'
-            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
-            with patch('xarray.open_dataset', return_value=mock_ds):
-                sample_roms_marbl_input_data._generate_grid()
+        # Mock xarray.open_dataset since we're using a dummy file
+        # _generate_grid reads the file back to check for xi_coarse dimension
+        # Note: xarray is imported inside _generate_grid, so we patch it at the module level
+        # xr.Dataset is already a context manager, so it works with 'with xr.open_dataset()'
+        mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+        with patch('xarray.open_dataset', return_value=mock_ds):
+            sample_roms_marbl_input_data._generate_grid()
             
-            # Check that grid.save was called
-            mock_grid.save.assert_called_once()
-            mock_grid.to_yaml.assert_called_once()
+        # Check that grid.save was called
+        mock_grid.save.assert_called_once()
+        mock_grid.to_yaml.assert_called_once()
             
-            # Check that resource was added to blueprint_elements
-            assert len(sample_roms_marbl_input_data.blueprint_elements.grid.data) > 0
+        # Check that resource was added to blueprint_elements
+        assert len(sample_roms_marbl_input_data.blueprint_elements.grid.data) > 0
     
     @patch('cstar_forge.input_data.rt.InitialConditions')
     def test_generate_initial_conditions(self, mock_ic_class, sample_roms_marbl_input_data, tmp_path):
@@ -722,16 +712,15 @@ class TestRomsMarblInputDataGeneration:
         mock_ic.save.return_value = [ic_path]
         mock_ic_class.return_value = mock_ic
         
-        with nullcontext():
-            sample_roms_marbl_input_data._generate_initial_conditions()
+        sample_roms_marbl_input_data._generate_initial_conditions()
             
-            # Check that InitialConditions was created
-            mock_ic_class.assert_called_once()
-            mock_ic.save.assert_called_once()
-            mock_ic.to_yaml.assert_called_once()
+        # Check that InitialConditions was created
+        mock_ic_class.assert_called_once()
+        mock_ic.save.assert_called_once()
+        mock_ic.to_yaml.assert_called_once()
             
-            # Check that resource was added
-            assert len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data) > 0
+        # Check that resource was added
+        assert len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data) > 0
     
     @patch('cstar_forge.input_data.rt.InitialConditions')
     def test_generate_initial_conditions_multiple_paths(self, mock_ic_class, sample_roms_marbl_input_data, tmp_path):
@@ -744,11 +733,10 @@ class TestRomsMarblInputDataGeneration:
         mock_ic.save.return_value = [ic1_path, ic2_path]
         mock_ic_class.return_value = mock_ic
         
-        with nullcontext():
-            sample_roms_marbl_input_data._generate_initial_conditions()
+        sample_roms_marbl_input_data._generate_initial_conditions()
             
-            # Should have 2 resources
-            assert len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data) == 2
+        # Should have 2 resources
+        assert len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data) == 2
     
     @patch('cstar_forge.input_data.rt.SurfaceForcing')
     def test_generate_surface_forcing(self, mock_sf_class, sample_roms_marbl_input_data, tmp_path):
@@ -759,19 +747,18 @@ class TestRomsMarblInputDataGeneration:
         mock_sf.save.return_value = surface_path
         mock_sf_class.return_value = mock_sf
         
-        with nullcontext():
-            sample_roms_marbl_input_data._generate_surface_forcing(
-                key="forcing.surface",
-                source={"name": "ERA5"},
-                type="physics"
-            )
+        sample_roms_marbl_input_data._generate_surface_forcing(
+            key="forcing.surface",
+            source={"name": "ERA5"},
+            type="physics"
+        )
             
-            mock_sf_class.assert_called_once()
-            mock_sf.save.assert_called_once()
-            mock_sf.to_yaml.assert_called_once()
+        mock_sf_class.assert_called_once()
+        mock_sf.save.assert_called_once()
+        mock_sf.to_yaml.assert_called_once()
             
-            # Check that resource was added to forcing.surface
-            assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data) > 0
+        # Check that resource was added to forcing.surface
+        assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data) > 0
     
     @patch('cstar_forge.input_data.rt.SurfaceForcing')
     def test_generate_surface_forcing_missing_type(self, mock_sf_class, sample_roms_marbl_input_data):
@@ -790,21 +777,20 @@ class TestRomsMarblInputDataGeneration:
     ):
         """When NetCDF exists, reuse paths without constructing SurfaceForcing."""
 
-        with nullcontext():
-            sample_roms_marbl_input_data.input_data_dir = (
-                tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
-            )
-            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
-            nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="surface-physics")
-            nc_path.touch()
-            yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.surface-physics")
-            yaml_path.write_text("---\nSurfaceForcing:\n  type: physics\n")
+        sample_roms_marbl_input_data.input_data_dir = (
+            tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        )
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="surface-physics")
+        nc_path.touch()
+        yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.surface-physics")
+        yaml_path.write_text("---\nSurfaceForcing:\n  type: physics\n")
 
-            sample_roms_marbl_input_data._generate_surface_forcing(
-                key="forcing.surface",
-                source={"name": "ERA5"},
-                type="physics",
-            )
+        sample_roms_marbl_input_data._generate_surface_forcing(
+            key="forcing.surface",
+            source={"name": "ERA5"},
+            type="physics",
+        )
 
         mock_sf_class.assert_not_called()
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data) > 0
@@ -818,19 +804,18 @@ class TestRomsMarblInputDataGeneration:
         mock_bf.save.return_value = boundary_path
         mock_bf_class.return_value = mock_bf
         
-        with nullcontext():
-            sample_roms_marbl_input_data._generate_boundary_forcing(
-                key="forcing.boundary",
-                source={"name": "GLORYS"},
-                type="physics"
-            )
+        sample_roms_marbl_input_data._generate_boundary_forcing(
+            key="forcing.boundary",
+            source={"name": "GLORYS"},
+            type="physics"
+        )
             
-            mock_bf_class.assert_called_once()
-            mock_bf.save.assert_called_once()
-            mock_bf.to_yaml.assert_called_once()
+        mock_bf_class.assert_called_once()
+        mock_bf.save.assert_called_once()
+        mock_bf.to_yaml.assert_called_once()
             
-            # Check that resource was added to forcing.boundary
-            assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.boundary.data) > 0
+        # Check that resource was added to forcing.boundary
+        assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.boundary.data) > 0
     
     @patch('cstar_forge.input_data.rt.BoundaryForcing')
     def test_generate_boundary_forcing_missing_type(self, mock_bf_class, sample_roms_marbl_input_data):
@@ -852,18 +837,17 @@ class TestRomsMarblInputDataGeneration:
         mock_tf.save.return_value = tidal_path
         mock_tf_class.return_value = mock_tf
         
-        with nullcontext():
-            sample_roms_marbl_input_data._generate_tidal_forcing(
-                key="forcing.tidal",
-                source={"name": "TPXO"}
-            )
+        sample_roms_marbl_input_data._generate_tidal_forcing(
+            key="forcing.tidal",
+            source={"name": "TPXO"}
+        )
             
-            mock_tf_class.assert_called_once()
-            mock_tf.save.assert_called_once()
-            mock_tf.to_yaml.assert_called_once()
+        mock_tf_class.assert_called_once()
+        mock_tf.save.assert_called_once()
+        mock_tf.to_yaml.assert_called_once()
             
-            # Check that resource was added to forcing.tidal
-            assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
+        # Check that resource was added to forcing.tidal
+        assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
 
     @patch("cstar_forge.input_data.rt.TidalForcing")
     def test_generate_tidal_forcing_reuse_skips_roms_tools_calls(
@@ -871,20 +855,19 @@ class TestRomsMarblInputDataGeneration:
     ):
 
         """When NetCDF and YAML exist, do not construct TidalForcing."""
-        with nullcontext():
-            sample_roms_marbl_input_data.input_data_dir = (
-                tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
-            )
-            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
-            nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="tidal")
-            nc_path.touch()
-            yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.tidal")
-            yaml_path.write_text("TidalForcing: \n  ntides: 10\n")
+        sample_roms_marbl_input_data.input_data_dir = (
+            tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        )
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="tidal")
+        nc_path.touch()
+        yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.tidal")
+        yaml_path.write_text("TidalForcing: \n  ntides: 10\n")
 
-            sample_roms_marbl_input_data._generate_tidal_forcing(
-                key="forcing.tidal",
-                source={"name": "TPXO", "path": str(nc_path)},
-            )
+        sample_roms_marbl_input_data._generate_tidal_forcing(
+            key="forcing.tidal",
+            source={"name": "TPXO", "path": str(nc_path)},
+        )
 
         mock_tf_class.assert_not_called()
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
@@ -904,48 +887,46 @@ class TestRomsMarblInputDataGeneration:
         mock_rf.ds = mock_ds
         mock_rf_class.return_value = mock_rf
         
-        with nullcontext():
-            sample_roms_marbl_input_data._generate_river_forcing(
-                key="forcing.river",
-                source={"name": "DAI"}
-            )
+        sample_roms_marbl_input_data._generate_river_forcing(
+            key="forcing.river",
+            source={"name": "DAI"}
+        )
             
-            mock_rf_class.assert_called_once()
-            mock_rf.save.assert_called_once()
-            mock_rf.to_yaml.assert_called_once()
+        mock_rf_class.assert_called_once()
+        mock_rf.save.assert_called_once()
+        mock_rf.to_yaml.assert_called_once()
             
-            # Check that resource was added to forcing.river
-            assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
+        # Check that resource was added to forcing.river
+        assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
 
     @patch("cstar_forge.input_data.rt.RiverForcing")
     def test_generate_river_forcing_reuse_skips_roms_tools_calls(
         self, mock_rf_class, sample_roms_marbl_input_data, tmp_path
     ):
         """When NetCDF and YAML exist, do not construct RiverForcing."""
-        with nullcontext():
-            sample_roms_marbl_input_data.input_data_dir = (
-                tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
-            )
-            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
-            nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="river")
-            nriver, ntime, ntrc = 2, 2, 1
-            ds = xr.Dataset(
-                {
-                    "river_volume": (["nriver", "time"], np.ones((nriver, ntime))),
-                    "river_tracer": (
-                        ["nriver", "time", "tracer"],
-                        np.ones((nriver, ntime, ntrc)),
-                    ),
-                }
-            )
-            ds.to_netcdf(nc_path)
-            yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.river")
-            yaml_path.write_text("roms_tools_version: test\n")
+        sample_roms_marbl_input_data.input_data_dir = (
+            tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        )
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        nc_path = sample_roms_marbl_input_data._forcing_filename(input_name="river")
+        nriver, ntime, ntrc = 2, 2, 1
+        ds = xr.Dataset(
+            {
+                "river_volume": (["nriver", "time"], np.ones((nriver, ntime))),
+                "river_tracer": (
+                    ["nriver", "time", "tracer"],
+                    np.ones((nriver, ntime, ntrc)),
+                ),
+            }
+        )
+        ds.to_netcdf(nc_path)
+        yaml_path = sample_roms_marbl_input_data._yaml_filename("forcing.river")
+        yaml_path.write_text("roms_tools_version: test\n")
 
-            sample_roms_marbl_input_data._generate_river_forcing(
-                key="forcing.river",
-                source={"name": "DAI"},
-            )
+        sample_roms_marbl_input_data._generate_river_forcing(
+            key="forcing.river",
+            source={"name": "DAI"},
+        )
 
         mock_rf_class.assert_not_called()
         assert len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
@@ -964,18 +945,17 @@ class TestRomsMarblInputDataGeneration:
         mock_cdr.save.return_value = cdr_path
         mock_cdr_class.return_value = mock_cdr
         
-        with nullcontext():
-            sample_roms_marbl_input_data._generate_cdr_forcing(
-                key="cdr_forcing",
-                cdr_kwargs={"foo": "bar"}
-            )
+        sample_roms_marbl_input_data._generate_cdr_forcing(
+            key="cdr_forcing",
+            cdr_kwargs={"foo": "bar"}
+        )
             
-            mock_cdr_class.assert_called_once()
-            mock_cdr.save.assert_called_once()
-            mock_cdr.to_yaml.assert_called_once()
+        mock_cdr_class.assert_called_once()
+        mock_cdr.save.assert_called_once()
+        mock_cdr.to_yaml.assert_called_once()
             
-            # Check that resource was added to cdr_forcing
-            assert len(sample_roms_marbl_input_data.blueprint_elements.cdr_forcing.data) > 0
+        # Check that resource was added to cdr_forcing
+        assert len(sample_roms_marbl_input_data.blueprint_elements.cdr_forcing.data) > 0
     
     def test_generate_cdr_forcing_empty_list(self, sample_roms_marbl_input_data):
         """Test _generate_cdr_forcing with empty cdr_list returns early."""
@@ -1013,36 +993,35 @@ class TestRomsMarblInputDataGeneration:
         mock_child.hc = 300.0
         sample_roms_marbl_input_data.grid_child = mock_child
 
-        with nullcontext():
-            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
-            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create expected output files so Pydantic resource validation passes
-            out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.touch()
-            out_path_child = sample_roms_marbl_input_data._forcing_filename(input_name="grid_child")
-            out_path_child.touch()
-            out_path_nesting = sample_roms_marbl_input_data._forcing_filename(input_name="nesting")
-            out_path_nesting.touch()
+        # Create expected output files so Pydantic resource validation passes
+        out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.touch()
+        out_path_child = sample_roms_marbl_input_data._forcing_filename(input_name="grid_child")
+        out_path_child.touch()
+        out_path_nesting = sample_roms_marbl_input_data._forcing_filename(input_name="nesting")
+        out_path_nesting.touch()
 
-            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
-            with patch('xarray.open_dataset', return_value=mock_ds):
-                sample_roms_marbl_input_data._generate_grid()
+        mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+        with patch('xarray.open_dataset', return_value=mock_ds):
+            sample_roms_marbl_input_data._generate_grid()
 
-            # nesting_info should be set as a Dataset pointing to the nesting file
-            assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is not None
-            nesting_resources = sample_roms_marbl_input_data.blueprint_elements.nesting_info.data
-            assert len(nesting_resources) == 1
-            assert str(out_path_nesting) in nesting_resources[0].location
+        # nesting_info should be set as a Dataset pointing to the nesting file
+        assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is not None
+        nesting_resources = sample_roms_marbl_input_data.blueprint_elements.nesting_info.data
+        assert len(nesting_resources) == 1
+        assert str(out_path_nesting) in nesting_resources[0].location
 
-            # extract_data settings should be set
-            extract_data = sample_roms_marbl_input_data._settings_run_time["extract_data"]
-            assert extract_data["do_extract"] is True
-            assert extract_data["n_chd"] == mock_child.N
-            assert extract_data["theta_s_chd"] == mock_child.theta_s
-            assert extract_data["theta_b_chd"] == mock_child.theta_b
-            assert extract_data["hc_chd"] == mock_child.hc
+        # extract_data settings should be set
+        extract_data = sample_roms_marbl_input_data._settings_run_time["extract_data"]
+        assert extract_data["do_extract"] is True
+        assert extract_data["n_chd"] == mock_child.N
+        assert extract_data["theta_s_chd"] == mock_child.theta_s
+        assert extract_data["theta_b_chd"] == mock_child.theta_b
+        assert extract_data["hc_chd"] == mock_child.hc
 
     @patch('cstar_forge.input_data.roms_tools_nesting_writer')
     @patch('cstar_forge.input_data.rt.Grid')
@@ -1064,23 +1043,22 @@ class TestRomsMarblInputDataGeneration:
         mock_child.hc = 300.0
         sample_roms_marbl_input_data.grid_child = mock_child
 
-        with nullcontext():
-            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
-            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
-            for name in ("grid", "grid_child", "nesting"):
-                p = sample_roms_marbl_input_data._forcing_filename(input_name=name)
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.touch()
+        for name in ("grid", "grid_child", "nesting"):
+            p = sample_roms_marbl_input_data._forcing_filename(input_name=name)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.touch()
 
-            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
-            with patch('xarray.open_dataset', return_value=mock_ds):
-                sample_roms_marbl_input_data._generate_grid()
+        mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+        with patch('xarray.open_dataset', return_value=mock_ds):
+            sample_roms_marbl_input_data._generate_grid()
 
-            extract_file = sample_roms_marbl_input_data._settings_run_time["extract_data"]["extract_file"]
-            # Should be just the filename, not an absolute path
-            assert extract_file == "nesting.nc"
-            assert "/" not in str(extract_file)
+        extract_file = sample_roms_marbl_input_data._settings_run_time["extract_data"]["extract_file"]
+        # Should be just the filename, not an absolute path
+        assert extract_file == "nesting.nc"
+        assert "/" not in str(extract_file)
 
     @patch('cstar_forge.input_data.rt.Grid')
     def test_generate_grid_without_child_nesting_info_is_none(self, mock_grid_class, sample_roms_marbl_input_data, tmp_path):
@@ -1089,17 +1067,16 @@ class TestRomsMarblInputDataGeneration:
         sample_roms_marbl_input_data.grid = mock_grid
         sample_roms_marbl_input_data.grid_child = None
 
-        with nullcontext():
-            sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
-            sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+        sample_roms_marbl_input_data.input_data_dir = tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
 
-            out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.touch()
+        out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.touch()
 
-            mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
-            with patch('xarray.open_dataset', return_value=mock_ds):
-                sample_roms_marbl_input_data._generate_grid()
+        mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+        with patch('xarray.open_dataset', return_value=mock_ds):
+            sample_roms_marbl_input_data._generate_grid()
 
         assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is None
         assert not sample_roms_marbl_input_data._settings_run_time.get("extract_data", {}).get("do_extract", False)
@@ -1189,19 +1166,18 @@ class TestRomsMarblInputDataGenerateAll:
         mock_river_instance.ds = mock_river_ds
         mock_river.return_value = mock_river_instance
         mock_ds = xr.Dataset()
-        with nullcontext():
-            # Mock xr.open_dataset to prevent file operations when opening source files
-            with patch('xarray.combine_by_coords') as mock_combine:
-                mock_combine.return_value = mock_ds
-                with _patch_xarray_open_dataset_for_input_data(mock_ds):
-                    result = sample_roms_marbl_input_data.generate_all(clobber=True, test=False)
+        # Mock xr.open_dataset to prevent file operations when opening source files
+        with patch('xarray.combine_by_coords') as mock_combine:
+            mock_combine.return_value = mock_ds
+            with _patch_xarray_open_dataset_for_input_data(mock_ds):
+                result = sample_roms_marbl_input_data.generate_all(clobber=True, test=False)
             
-            assert result is not None
-            blueprint_elements, settings_compile_time, settings_run_time = result
-            assert blueprint_elements == sample_roms_marbl_input_data.blueprint_elements
-            # Settings should be populated (non-empty dicts)
-            assert settings_compile_time is not None
-            assert settings_run_time is not None
+        assert result is not None
+        blueprint_elements, settings_compile_time, settings_run_time = result
+        assert blueprint_elements == sample_roms_marbl_input_data.blueprint_elements
+        # Settings should be populated (non-empty dicts)
+        assert settings_compile_time is not None
+        assert settings_run_time is not None
     
     @patch('cstar_forge.input_data.rt.BoundaryForcing')
     @patch('xarray.combine_by_coords')
@@ -1225,13 +1201,12 @@ class TestRomsMarblInputDataGenerateAll:
         mock_open_dataset.return_value = mock_ds
         mock_combine.return_value = mock_ds
         
-        with nullcontext():
-            result = sample_roms_marbl_input_data.generate_all(clobber=True, test=True)
+        result = sample_roms_marbl_input_data.generate_all(clobber=True, test=True)
             
-            # In test mode, should only process forcing.boundary
-            # and stop after 2 iterations
-            # The exact behavior depends on the order of steps
-            assert result is not None
+        # In test mode, should only process forcing.boundary
+        # and stop after 2 iterations
+        # The exact behavior depends on the order of steps
+        assert result is not None
     
     @patch('cstar_forge.input_data.rt.Grid')
     @patch('cstar_forge.input_data.rt.InitialConditions')
@@ -1321,13 +1296,12 @@ class TestRomsMarblInputDataGenerateAll:
         })
         mock_river.return_value = mock_river_instance
 
-        with nullcontext():
-            (sample_roms_marbl_input_data.input_data_dir / "existing.nc").touch()
-            mock_ds = xr.Dataset()
-            with patch('xarray.combine_by_coords') as mock_combine:
-                mock_combine.return_value = mock_ds
-                with _patch_xarray_open_dataset_for_input_data(mock_ds):
-                    result = sample_roms_marbl_input_data.generate_all(clobber=False, test=False)
+        (sample_roms_marbl_input_data.input_data_dir / "existing.nc").touch()
+        mock_ds = xr.Dataset()
+        with patch('xarray.combine_by_coords') as mock_combine:
+            mock_combine.return_value = mock_ds
+            with _patch_xarray_open_dataset_for_input_data(mock_ds):
+                result = sample_roms_marbl_input_data.generate_all(clobber=False, test=False)
 
         assert result is not None
         assert result != (None, {}, {})
@@ -1413,29 +1387,28 @@ class TestRomsMarblInputDataGenerateAll:
             Resource(location=str(surface_file), partitioned=False)
         )
         
-        with nullcontext():
-            # Patch at class level so the registry uses the patched methods
-            with patch('cstar_forge.input_data.RomsMarblInputData._generate_grid'):
-                with patch('cstar_forge.input_data.RomsMarblInputData._generate_initial_conditions'):
-                    with patch('cstar_forge.input_data.RomsMarblInputData._generate_surface_forcing'):
-                        with patch('cstar_forge.input_data.RomsMarblInputData._generate_boundary_forcing'):
-                            with patch('cstar_forge.input_data.RomsMarblInputData._generate_tidal_forcing'):
-                                with patch('cstar_forge.input_data.RomsMarblInputData._generate_river_forcing'):
-                                    # This should raise NotImplementedError since partition_files=True
-                                    # But actually _partition_files doesn't raise NotImplementedError, 
-                                    # so this test might need to be updated
-                                    # For now, just verify it doesn't crash
-                                    try:
-                                        result = sample_roms_marbl_input_data.generate_all(
-                                            clobber=True,
-                                            partition_files=True,
-                                            test=False
-                                        )
-                                        # If it succeeds, that's fine - partitioning is implemented
-                                        assert result is not None
-                                    except NotImplementedError:
-                                        # If it raises NotImplementedError, that's also fine
-                                        pass
+        # Patch at class level so the registry uses the patched methods
+        with patch('cstar_forge.input_data.RomsMarblInputData._generate_grid'):
+            with patch('cstar_forge.input_data.RomsMarblInputData._generate_initial_conditions'):
+                with patch('cstar_forge.input_data.RomsMarblInputData._generate_surface_forcing'):
+                    with patch('cstar_forge.input_data.RomsMarblInputData._generate_boundary_forcing'):
+                        with patch('cstar_forge.input_data.RomsMarblInputData._generate_tidal_forcing'):
+                            with patch('cstar_forge.input_data.RomsMarblInputData._generate_river_forcing'):
+                                # This should raise NotImplementedError since partition_files=True
+                                # But actually _partition_files doesn't raise NotImplementedError, 
+                                # so this test might need to be updated
+                                # For now, just verify it doesn't crash
+                                try:
+                                    result = sample_roms_marbl_input_data.generate_all(
+                                        clobber=True,
+                                        partition_files=True,
+                                        test=False
+                                    )
+                                    # If it succeeds, that's fine - partitioning is implemented
+                                    assert result is not None
+                                except NotImplementedError:
+                                    # If it raises NotImplementedError, that's also fine
+                                    pass
 
 
 class TestRomsMarblInputDataPartitionFiles:
@@ -1463,18 +1436,17 @@ class TestRomsMarblInputDataPartitionFiles:
             p.touch()
         mock_partition.return_value = partitioned_paths
         
-        with nullcontext():
-            sample_roms_marbl_input_data._partition_files()
+        sample_roms_marbl_input_data._partition_files()
             
-            # Should have called partition_netcdf
-            mock_partition.assert_called()
+        # Should have called partition_netcdf
+        mock_partition.assert_called()
             
-            # Should have created new resources
-            # Note: grid and initial_conditions are skipped, so only forcing should be partitioned
-            surface_resources = sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data
-            # The original resource should be replaced with partitioned ones
-            # But since we're skipping grid and initial_conditions, and the input_list
-            # determines what gets partitioned, we need to check the actual behavior
+        # Should have created new resources
+        # Note: grid and initial_conditions are skipped, so only forcing should be partitioned
+        surface_resources = sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data
+        # The original resource should be replaced with partitioned ones
+        # But since we're skipping grid and initial_conditions, and the input_list
+        # determines what gets partitioned, we need to check the actual behavior
     
     @patch('cstar_forge.input_data.rt.partition_netcdf')
     def test_partition_files_skips_empty(self, mock_partition, sample_roms_marbl_input_data):
@@ -1534,26 +1506,25 @@ class TestRomsMarblInputDataPartitionFiles:
             p.touch()
         mock_partition.return_value = partitioned_paths
         
-        with nullcontext():
-            # Need to set up input_list to include forcing.surface
-            # The actual partitioning happens in a loop over input_list
-            # For this test, we'll directly test the partitioning logic
-            dataset = sample_roms_marbl_input_data.blueprint_elements.forcing.surface
-            new_resources = []
-            for resource in dataset.data:
-                if resource.location is None:
-                    new_resources.append(resource)
-                    continue
-                partitioned_paths_result = mock_partition(resource.location)
-                for p_path in partitioned_paths_result:
-                    resource_dict = resource.model_dump()
-                    resource_dict["location"] = str(p_path)  # Convert to str for Pydantic validation
-                    resource_dict["partitioned"] = True
-                    new_resources.append(Resource(**resource_dict))
-            dataset.data = new_resources
+        # Need to set up input_list to include forcing.surface
+        # The actual partitioning happens in a loop over input_list
+        # For this test, we'll directly test the partitioning logic
+        dataset = sample_roms_marbl_input_data.blueprint_elements.forcing.surface
+        new_resources = []
+        for resource in dataset.data:
+            if resource.location is None:
+                new_resources.append(resource)
+                continue
+            partitioned_paths_result = mock_partition(resource.location)
+            for p_path in partitioned_paths_result:
+                resource_dict = resource.model_dump()
+                resource_dict["location"] = str(p_path)  # Convert to str for Pydantic validation
+                resource_dict["partitioned"] = True
+                new_resources.append(Resource(**resource_dict))
+        dataset.data = new_resources
             
-            # Should have 3 resources now
-            assert len(dataset.data) == 3
-            assert all(r.partitioned for r in dataset.data)
-            assert all(r.location is not None for r in dataset.data)
+        # Should have 3 resources now
+        assert len(dataset.data) == 3
+        assert all(r.partitioned for r in dataset.data)
+        assert all(r.location is not None for r in dataset.data)
 

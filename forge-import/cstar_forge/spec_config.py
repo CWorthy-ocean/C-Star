@@ -317,7 +317,7 @@ class SourceSpec(_Section):
     ``name`` is the logical/friendly name (e.g. ``"GLORYS"``, ``"ERA5"``,
     ``"UNIFIED"``). The resolved registry key (``"GLORYS_REGIONAL"``,
     ``"UNIFIED_BGC"``, …) is derivable at any time via
-    :func:`cstar_forge.source_registry.resolve_dataset_key(name, glorys_layout)`
+    :func:`cstar_forge.forge.source_registry.resolve_dataset_key(name, glorys_layout)`
     and is not stored here — the necessary disambiguation is already carried by
     ``glorys_layout``. The canonical registry snapshot lives in
     ``Forcing.resolved_datasets`` (keyed by logical name → ``ResolvedDataset``).

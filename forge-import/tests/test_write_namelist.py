@@ -1,5 +1,5 @@
 """
-Tests for ``cstar_forge.settings.write_roms_namelist`` (the ``namelist.nml``
+Tests for ``cstar_forge.forge.settings.write_roms_namelist`` (the ``namelist.nml``
 writer) and its MARBL string-list helper / bounds guard.
 
 These exercise the heart of the namelist refactor end-to-end: a populated flat
@@ -15,7 +15,7 @@ import yaml
 import f90nml
 
 import cstar_forge
-from cstar_forge.settings import write_roms_namelist
+from cstar_forge.forge.settings import write_roms_namelist
 from cstar.roms.namelist import (
     _namelist_str_list,
     MARBL_TRACERS_TO_WRITE_MAX,

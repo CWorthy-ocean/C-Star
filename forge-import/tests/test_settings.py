@@ -13,7 +13,7 @@ import pytest
 import yaml
 from unittest.mock import MagicMock
 
-from cstar_forge.settings import (
+from cstar_forge.forge.settings import (
     render_roms_settings,
     ROMSTemplateRenderer,
     _fortran_cdr_file_decl,
