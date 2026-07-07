@@ -34,6 +34,16 @@ import cstar.applications.roms_marbl.models as cstar_models
 from cstar.orchestration.models import Resource
 
 
+def _make_builder(args, **overrides):
+    """Single construction point for the builder/executor under test.
+
+    Every test builds through here, so the Phase-C rename
+    (``CstarSpecBuilder`` -> ``ForgeExecutor``) and any constructor-signature change
+    touch ONE site instead of ~69. ``overrides`` layer on top of the base ``args`` dict.
+    """
+    return CstarSpecBuilder(**{**args, **overrides})
+
+
 def _create_empty_dataset(tmp_path):
     """Helper to create an empty Dataset with a placeholder resource."""
     placeholder_file = tmp_path / "placeholder.nc"
@@ -319,7 +329,7 @@ class TestCstarSpecBuilderInitialization:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 assert builder.model_name == "cson_roms-marbl_v0.1"
                 assert builder.grid_name == "test-grid"
@@ -333,7 +343,7 @@ class TestCstarSpecBuilderInitialization:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 assert builder.description == "Custom description"
 
     def test_initialization_prints_planned_netcdf_outputs(
@@ -356,7 +366,7 @@ class TestCstarSpecBuilderInitialization:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                _make_builder(minimal_cstar_spec_builder_args)
 
         stdout = capsys.readouterr().out
         assert "CstarSpecBuilder: planned NetCDF outputs" in stdout
@@ -383,7 +393,7 @@ class TestCstarSpecBuilderInitialization:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 with pytest.raises(ValidationError) as exc_info:
-                    CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    _make_builder(minimal_cstar_spec_builder_args)
                 assert "start_date must precede end_date" in str(exc_info.value) or "end_date must be after start_date" in str(exc_info.value)
 
     def test_validation_end_date_equals_start_date(self, minimal_cstar_spec_builder_args, mock_model_spec):
@@ -396,7 +406,7 @@ class TestCstarSpecBuilderInitialization:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 with pytest.raises(ValidationError) as exc_info:
-                    CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    _make_builder(minimal_cstar_spec_builder_args)
                 assert "start_date must precede end_date" in str(exc_info.value) or "end_date must be after start_date" in str(exc_info.value)
 
     def test_validation_extra_fields_forbidden(self, minimal_cstar_spec_builder_args):
@@ -404,7 +414,7 @@ class TestCstarSpecBuilderInitialization:
         minimal_cstar_spec_builder_args["extra_field"] = "not allowed"
         
         with pytest.raises(ValidationError) as exc_info:
-            CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+            _make_builder(minimal_cstar_spec_builder_args)
         assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
 
 
@@ -424,7 +434,7 @@ class TestOverrideSettings:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
         assert builder._settings_compile_time["cppdefs"]["test"] is False
 
     def test_override_compile_unknown_top_level_warns(
@@ -441,7 +451,7 @@ class TestOverrideSettings:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 with pytest.warns(UserWarning, match="unknown_top"):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
         assert builder._settings_compile_time["cppdefs"]["test"] is True
 
     def test_override_run_time_merge_after_timestep(
@@ -467,7 +477,7 @@ class TestOverrideSettings:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
         assert builder._settings_run_time["foo_section"]["bar"] == 99
         assert builder._settings_run_time["time_stepping"]["ndtfast"] == 12
         assert "ntimes" in builder._settings_run_time["time_stepping"]
@@ -483,7 +493,7 @@ class TestVSpongeDefault:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
 
         # grid mock: size_x=100 km, nx=100 -> spacing 1 km -> v_sponge = 100 m^2/s
         assert builder._settings_run_time["v_sponge"]["v_sponge"] == 100.0
@@ -495,7 +505,7 @@ class TestVSpongeDefault:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
 
         builder._update_settings_run_time({"v_sponge": {"v_sponge": 42.0}})
         assert builder._settings_run_time["v_sponge"]["v_sponge"] == 42.0
@@ -519,7 +529,7 @@ class TestVSpongeDefault:
             mock_load.return_value = mock_model_spec
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
 
         assert builder._settings_run_time["v_sponge"]["v_sponge"] == 7.5
 
@@ -534,7 +544,7 @@ class TestCstarSpecBuilderProperties:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 # Name now includes n_procs suffix: {model_name}_{grid_name}_{n_procs}procs
                 n_procs = builder.partitioning.n_procs_x * builder.partitioning.n_procs_y
                 expected_name = f"{mock_model_spec.name}_{builder.grid_name}_{n_procs}procs"
@@ -557,7 +567,7 @@ class TestCstarSpecBuilderProperties:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     # Input data path is constructed in RomsMarblInputData, not as a property
                     # Verify the path would be constructed correctly
                     expected_path = mock_paths.input_data / f"{builder.model_name}_{builder.grid_name}"
@@ -584,7 +594,7 @@ class TestCstarSpecBuilderProperties:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     # Blueprint dir now includes system_id and n_procs suffix
                     expected_path = mock_paths.blueprints / "MacOS" / builder.name
                     assert builder.blueprint_dir == expected_path
@@ -607,7 +617,7 @@ class TestCstarSpecBuilderProperties:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     # path_blueprint is a method, not a property
                     # Blueprint path now includes system_id in the directory
                     expected_path = (
@@ -631,7 +641,7 @@ class TestCstarSpecBuilderProperties:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Set blueprint with data
                 builder.blueprint.grid = cstar_models.Dataset(
@@ -662,7 +672,7 @@ class TestCstarSpecBuilderModelPostInit:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 assert builder.blueprint is not None
                 assert isinstance(builder.blueprint, cstar_models.RomsMarblBlueprint)
@@ -676,7 +686,7 @@ class TestCstarSpecBuilderModelPostInit:
                 mock_grid_instance = _create_grid_mock()
                 mock_grid.return_value = mock_grid_instance
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 mock_grid.assert_called_once_with(**builder.grid_kwargs)
                 assert builder.grid == mock_grid_instance
@@ -760,7 +770,7 @@ class TestCstarSpecBuilderModelPostInit:
                     with blueprint_path.open("w") as f:
                         yaml.dump(blueprint_data, f)
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     
                     assert builder.blueprint_from_file is not None
                     assert isinstance(builder.blueprint_from_file, cstar_models.RomsMarblBlueprint)
@@ -816,7 +826,7 @@ class TestCstarSpecBuilderGetDs:
                     runtime_params=sample_runtime_params,
                 )
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = blueprint
                 
                 with patch("cstar_forge._core.xr.open_dataset") as mock_open:
@@ -838,7 +848,7 @@ class TestCstarSpecBuilderGetDs:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = None
                 
                 result = builder.get_ds("grid", from_file=False)
@@ -851,7 +861,7 @@ class TestCstarSpecBuilderGetDs:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 result = builder.get_ds("nonexistent_field", from_file=False)
                 assert result is None
@@ -899,7 +909,7 @@ class TestCstarSpecBuilderGetDs:
                     runtime_params=sample_runtime_params,
                 )
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = blueprint
                 
                 with patch("cstar_forge._core.xr.open_dataset") as mock_open:
@@ -925,7 +935,7 @@ class TestCstarSpecBuilderEnsureSourceData:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.grid = None
                 
                 with pytest.raises(RuntimeError) as exc_info:
@@ -945,7 +955,7 @@ class TestCstarSpecBuilderEnsureSourceData:
                     mock_source_data_class.return_value = mock_source_data_instance
                     mock_source_data_instance.prepare_all.return_value = mock_source_data_instance
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     builder.ensure_source_data()
                     
                     mock_source_data_class.assert_called_once()
@@ -962,7 +972,7 @@ class TestCstarSpecBuilderGenerateInputs:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = None
                 
                 with pytest.raises(RuntimeError) as exc_info:
@@ -983,7 +993,7 @@ class TestCstarSpecBuilderBuildAndRun:
                 mock_grid.return_value = _create_grid_mock()
                 mock_paths = _create_mock_paths_core(tmp_path, here=tmp_path)
                 with patch("cstar_forge._core.config.paths", new=mock_paths):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                         
                     # Get expected code_output_dir path using builder property
                     expected_code_output_dir = builder.compile_time_code_dir
@@ -1020,7 +1030,7 @@ class TestCstarSpecBuilderBuildAndRun:
                         "branch": "main"  # Required for ROMSCompositeCodeRepository
                     }
                     with patch("cstar_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                        builder = _make_builder(minimal_cstar_spec_builder_args)
 
                         builder.configure_build()
 
@@ -1042,7 +1052,7 @@ class TestCstarSpecBuilderBuildAndRun:
                         "branch": "main"  # Required for ROMSCompositeCodeRepository
                     }
                     with patch("cstar_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                        builder = _make_builder(minimal_cstar_spec_builder_args)
 
                         builder.configure_build()
 
@@ -1071,7 +1081,7 @@ class TestCstarSpecBuilderBuildAndRun:
                         "branch": "main"  # Required for ROMSCompositeCodeRepository
                     }
                     with patch("cstar_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                        builder = _make_builder(minimal_cstar_spec_builder_args)
 
 
                         original_model_construct = cstar_models.RomsMarblBlueprint.model_construct
@@ -1118,7 +1128,7 @@ class TestCstarSpecBuilderBuildAndRun:
                         "filter": {"files": ["test.opt"]}
                     }
                     with patch("cstar_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                        builder = _make_builder(minimal_cstar_spec_builder_args)
                         
                         # configure_build() checks for compile_time templates
                         with pytest.raises(ValueError, match="templates.compile_time"):
@@ -1164,7 +1174,7 @@ class TestCstarSpecBuilderPathBlueprint:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     path = builder.path_blueprint(stage="preconfig")
                     
                     assert "preconfig" in str(path)
@@ -1188,7 +1198,7 @@ class TestCstarSpecBuilderPathBlueprint:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     path = builder.path_blueprint(stage="postconfig")
                     
                     assert "postconfig" in str(path)
@@ -1211,7 +1221,7 @@ class TestCstarSpecBuilderPathBlueprint:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     path = builder.path_blueprint(stage="build")
                     
                     assert "build" in str(path)
@@ -1235,7 +1245,7 @@ class TestCstarSpecBuilderPathBlueprint:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     path = builder.path_blueprint(stage="run", run_params=sample_runtime_params)
                     
                     assert "run" in str(path)
@@ -1249,7 +1259,7 @@ class TestCstarSpecBuilderPathBlueprint:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 with pytest.raises(ValueError) as exc_info:
                     builder.path_blueprint(stage="run", run_params=None)
@@ -1262,7 +1272,7 @@ class TestCstarSpecBuilderPathBlueprint:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 with pytest.raises(ValueError) as exc_info:
                     builder.path_blueprint(stage="invalid_stage")
@@ -1285,7 +1295,7 @@ class TestCstarSpecBuilderPathBlueprint:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     # Set blueprint state
                     builder.blueprint.state = "postconfig"
                     
@@ -1310,7 +1320,7 @@ class TestCstarSpecBuilderPersist:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     builder._stage = "preconfig"
                     
                     builder.persist()
@@ -1339,7 +1349,7 @@ class TestCstarSpecBuilderPersist:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     builder._stage = "postconfig"
                     
                     builder.persist()
@@ -1361,7 +1371,7 @@ class TestCstarSpecBuilderPersist:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     builder._stage = "run"
                     builder.blueprint.runtime_params = sample_runtime_params
                     
@@ -1377,7 +1387,7 @@ class TestCstarSpecBuilderPersist:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = None
                 builder._stage = "preconfig"
                 
@@ -1392,7 +1402,7 @@ class TestCstarSpecBuilderPersist:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder._stage = None
                 
                 with pytest.raises(ValueError) as exc_info:
@@ -1406,7 +1416,7 @@ class TestCstarSpecBuilderPersist:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder._stage = "run"
                 builder.blueprint.runtime_params = None
                 
@@ -1436,7 +1446,7 @@ class TestCstarSpecBuilderDefaultRuntimeParams:
                 with patch("cstar_forge._core.rt.Grid") as mock_grid:
                     mock_grid.return_value = _create_grid_mock()
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     runtime_params = builder.default_runtime_params
                     
                     assert runtime_params.start_date == builder.start_date
@@ -1459,7 +1469,7 @@ class TestCstarSpecBuilderRun:
                 mock_grid.return_value = _create_grid_mock()
                 with patch("cstar_forge._core.config.paths", new=_create_mock_paths_core(tmp_path)):
                     
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
                     
                     # Create custom runtime params
                     custom_params = cstar_models.RuntimeParameterSet(
@@ -1593,7 +1603,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 
                 with pytest.raises(NotImplementedError) as exc_info:
                     builder.generate_inputs(partition_files=True)
@@ -1623,7 +1633,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                 mock_grid.return_value = _create_grid_mock()
                 with patch.object(CstarSpecBuilder, 'ensure_source_data'):
                     with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                        builder = _make_builder(minimal_cstar_spec_builder_args)
                         builder.generate_inputs(clobber=True, test=True)
 
                         # Check that RomsMarblInputData was called with correct args
@@ -1657,7 +1667,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                 mock_grid.return_value = _create_grid_mock()
                 with patch.object(CstarSpecBuilder, 'ensure_source_data'):
                     with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
-                        builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                        builder = _make_builder(minimal_cstar_spec_builder_args)
 
                         with patch('cstar_forge._core.CstarSpecBuilder.persist') as mock_persist:
                             builder.generate_inputs(clobber=True, test=True)
@@ -1682,7 +1692,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 with patch.object(CstarSpecBuilder, 'ensure_source_data'):
-                    builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                    builder = _make_builder(minimal_cstar_spec_builder_args)
 
                     with pytest.raises(RuntimeError) as exc_info:
                         builder.generate_inputs(clobber=True)
@@ -1724,7 +1734,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                 with patch.object(CstarSpecBuilder, 'ensure_source_data'):
                     with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
                         with patch('cstar_forge._core.CstarSpecBuilder.persist'):
-                            builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                            builder = _make_builder(minimal_cstar_spec_builder_args)
                             # Manually set settings so the guard passes
                             builder._settings_compile_time = {"cppdefs": {}}
                             builder._settings_run_time = {"time_stepping": {}}
@@ -1767,7 +1777,7 @@ class TestCstarSpecBuilderGenerateInputsComprehensive:
                 with patch.object(CstarSpecBuilder, 'ensure_source_data'):
                     with patch('cstar_forge._core.config.paths', new=_create_mock_paths_core(tmp_path)):
                         with patch('cstar_forge._core.CstarSpecBuilder.persist'):
-                            builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                            builder = _make_builder(minimal_cstar_spec_builder_args)
                             builder._settings_compile_time = {"cppdefs": {}}
                             builder._settings_run_time = {"time_stepping": {}}
 
@@ -1822,7 +1832,7 @@ class TestCstarSpecBuilderGetDsComprehensive:
                     ),
                 )
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = blueprint
                 
                 with patch("cstar_forge._core.xr.open_dataset") as mock_open:
@@ -1873,7 +1883,7 @@ class TestCstarSpecBuilderGetDsComprehensive:
                     ),
                 )
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = blueprint
                 
                 # Test that get_ds raises FileNotFoundError when file doesn't exist
@@ -1921,7 +1931,7 @@ class TestCstarSpecBuilderGetDsComprehensive:
                     ),
                 )
                 
-                builder = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder.blueprint = blueprint
                 
                 with patch("cstar_forge._core.xr.open_dataset") as mock_open:
@@ -2025,7 +2035,7 @@ class TestCstarSpecBuilderDumpLoad:
                 mock_grid.return_value = _create_grid_mock()
                 
                 # Create original builder
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Dump to file
                 dump_file = tmp_path / "builder_state.yaml"
@@ -2054,7 +2064,7 @@ class TestCstarSpecBuilderDumpLoad:
                 
                 # Create original with custom description
                 minimal_cstar_spec_builder_args["description"] = "Test description"
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Dump and load
                 dump_file = tmp_path / "builder_state.yaml"
@@ -2078,7 +2088,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Set some PrivateAttr fields
                 original._stage = "preconfig"
@@ -2106,7 +2116,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Dump and load
                 dump_file = tmp_path / "builder_state.yaml"
@@ -2132,7 +2142,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Create and set src_data
                 original.src_data = source_data.SourceData(
@@ -2161,7 +2171,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 original_grid_kwargs = original.grid_kwargs.copy()
                 
                 # Dump and load
@@ -2183,7 +2193,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Set _datasets (should not be serialized)
                 original._datasets = {"test": "dataset"}
@@ -2211,7 +2221,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Ensure settings are empty
                 original._settings_compile_time = {}
@@ -2233,7 +2243,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Ensure src_data is None
                 original.src_data = None
@@ -2254,7 +2264,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Dump and load
                 dump_file = tmp_path / "builder_state.yaml"
@@ -2273,7 +2283,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 
                 # Dump and load
                 dump_file = tmp_path / "builder_state.yaml"
@@ -2292,7 +2302,7 @@ class TestCstarSpecBuilderDumpLoad:
             with patch("cstar_forge._core.rt.Grid") as mock_grid:
                 mock_grid.return_value = _create_grid_mock()
                 
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 original._stage = "preconfig"
                 
                 # Dump to file
@@ -2326,7 +2336,7 @@ class TestCstarSpecBuilderDumpLoad:
                 mock_grid.return_value = _create_grid_mock()
                 
                 # Create original builder
-                original = CstarSpecBuilder(**minimal_cstar_spec_builder_args)
+                original = _make_builder(minimal_cstar_spec_builder_args)
                 original._stage = "preconfig"
                 original._settings_compile_time = {"param.LLm": 256}
                 original._settings_run_time = {"time_stepping.dt": 1800}
