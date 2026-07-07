@@ -24,7 +24,7 @@ from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
 
 from cstar_forge import models as forge_models
-from cstar_forge import source_data
+from cstar_forge.forge import source_data
 from cstar_forge.util import roms_tools_nesting_writer
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the

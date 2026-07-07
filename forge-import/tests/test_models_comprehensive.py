@@ -1100,8 +1100,8 @@ class TestExtractSourceName:
 class TestDatasetKeysFromInputs:
     """Tests for _dataset_keys_from_inputs helper function."""
     
-    @patch('cstar_forge.source_data.map_source_to_dataset_key')
-    @patch('cstar_forge.source_data.DATASET_REGISTRY')
+    @patch('cstar_forge.forge.source_data.map_source_to_dataset_key')
+    @patch('cstar_forge.forge.source_data.DATASET_REGISTRY')
     def test_dataset_keys_from_inputs_basic(self, mock_registry, mock_map):
         """Test extracting dataset keys from ModelInputs."""
         # Mock source_data module functions
@@ -1149,8 +1149,8 @@ class TestDatasetKeysFromInputs:
         assert "UNIFIED_BGC" in dataset_keys
         assert "ERA5" in dataset_keys
     
-    @patch('cstar_forge.source_data.map_source_to_dataset_key')
-    @patch('cstar_forge.source_data.DATASET_REGISTRY')
+    @patch('cstar_forge.forge.source_data.map_source_to_dataset_key')
+    @patch('cstar_forge.forge.source_data.DATASET_REGISTRY')
     def test_dataset_keys_from_inputs_with_tidal_river(self, mock_registry, mock_map):
         """Test extracting dataset keys including tidal and river."""
         mock_map.side_effect = lambda x: {
@@ -1220,7 +1220,7 @@ class TestDatasetKeysFromInputs:
         )
         
         # Mock AttributeError when source_data functions are missing
-        with patch('cstar_forge.source_data.map_source_to_dataset_key', side_effect=AttributeError("Function not available")):
+        with patch('cstar_forge.forge.source_data.map_source_to_dataset_key', side_effect=AttributeError("Function not available")):
             with pytest.raises(ValueError) as exc_info:
                 _dataset_keys_from_inputs(inputs)
             assert "source_data module functions are not available" in str(exc_info.value)

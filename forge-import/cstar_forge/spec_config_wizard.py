@@ -33,8 +33,7 @@ from typing import Any, get_args, get_origin
 import yaml
 from pydantic import BaseModel
 
-from cstar_forge.namelist_model import RunTimeSettings, validate_run_time_sections
-from cstar_forge.spec_config import (
+from cstar_forge.forge.spec_config import (
     BgcBoundarySource,
     BgcInitialConditionsSource,
     BgcInterpMethod,
@@ -56,6 +55,7 @@ from cstar_forge.spec_config import (
     SurfaceType,
     TidalSource,
 )
+from cstar_forge.namelist_model import RunTimeSettings, validate_run_time_sections
 from cstar_forge.spec_config_resolve import (
     OUTPUT_MARBL_FIELDS,
     OUTPUT_SECTIONS,

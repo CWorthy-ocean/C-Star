@@ -2,7 +2,7 @@
 ``SpecConfig``: the single authoritative, fully-resolved input to processing.
 
 This is a **draft / starting point** for the planned refactor that splits
-``CstarSpecBuilder`` into two phases (see ``docs/spec-config-inventory.md``):
+``ForgeExecutor`` into two phases (see ``docs/spec-config-inventory.md``):
 
 1. **Collection / curation** — assemble every option from its source (constructor
    args, the ModelSpec, and the *pure* derived values), validate it, and write one
@@ -39,7 +39,7 @@ be hand-edited before processing. Fixed implementation details (e.g. the ``cdr.n
 ``nesting.nc`` filenames, ``nrrec``, the tide flags set during generation) are NOT
 stored — they are deterministic and set by the processing step.
 
-NOTE: This module is not yet wired into ``CstarSpecBuilder``. It defines the target
+NOTE: This module is not yet wired into ``ForgeExecutor``. It defines the target
 schema and the ``to_yaml``/``from_yaml`` round-trip so the resolver (Phase 1) and
 engine (Phase 2) can be built against a stable contract.
 """

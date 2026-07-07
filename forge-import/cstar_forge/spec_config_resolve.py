@@ -17,7 +17,7 @@ What this does NOT do (by design — it is host- and artifact-independent):
 * no ``s_coord`` / file paths / ``title`` / ``output_root_name`` (filled at
   processing or derived from identity).
 
-NOTE: the dataset registry below is a *snapshot* of ``cstar_forge.source_data``
+NOTE: the dataset registry below is a *snapshot* of ``cstar_forge.forge.source_data``
 mappings, duplicated here to keep this module importable without the heavy stack.
 It should be unified with ``source_data.py`` once the two-phase refactor lands.
 """
@@ -33,7 +33,7 @@ import yaml
 
 # Dual import: package context (production) or standalone file (lightweight / UI / test).
 try:  # pragma: no cover - exercised both ways
-    from cstar_forge.spec_config import (
+    from cstar_forge.forge.spec_config import (
         BoundaryForcingItem,
         Code,
         CodeRepo,
@@ -355,7 +355,7 @@ def build_spec_config(
     if output_settings:
         _deep_merge(settings, output_settings)
 
-    # overrides win (mirror CstarSpecBuilder.configure_build precedence)
+    # overrides win (mirror ForgeExecutor.configure_build precedence)
     if compile_time_overrides:
         _deep_merge(
             settings["cppdefs"],

@@ -177,7 +177,7 @@ def test_all_rt_params_are_exposed_or_skipped(cls_name, forge_cls_name):
 # ── models.py ↔ spec_config.py lockstep ───────────────────────────────────────
 # The option knobs live in TWO parallel Forge schemas: the processing-side item
 # models in ``cstar_forge.models`` (consumed by ``RomsMarblInputData``) and the
-# authoring-side item models in ``cstar_forge.spec_config`` (the SpecConfig / wizard).
+# authoring-side item models in ``cstar_forge.forge.spec_config`` (the SpecConfig / wizard).
 # The engine bridge (``sources_to_forcing_override``) ``model_dump``s the spec_config
 # item and feeds it to the models.py item, so a typed field added to one but not the
 # other silently breaks the round trip: a value set in the UI never reaches
@@ -200,7 +200,8 @@ def test_forge_item_models_in_lockstep(models_name, spec_name):
     a UI value is silently dropped by the bridge (or an ``input_data`` field is
     un-authorable) — exactly the class of bug this guard exists to prevent.
     """
-    from cstar_forge import models, spec_config
+    from cstar_forge import models
+    from cstar_forge.forge import spec_config
 
     models_fields = set(getattr(models, models_name).model_fields.keys())
     spec_fields = set(getattr(spec_config, spec_name).model_fields.keys())

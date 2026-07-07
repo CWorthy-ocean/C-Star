@@ -111,9 +111,9 @@ class DomainCatalog():
         '''scan the models yaml files, essentially the same things as _scan_domains()'''
         pass # scan the models.yaml, essential a database
 
-    def register_domain(builder: CstarSpecBuilder):
-        ''' Create a new domain by copying information from a CstarSpecBuilder ... somehow this has
-        to be called by CstarSpecBuilder, as it will supply the builder paths.
+    def register_domain(builder: ForgeExecutor):
+        ''' Create a new domain by copying information from a ForgeExecutor ... somehow this has
+        to be called by ForgeExecutor, as it will supply the builder paths.
 
         '''
         pass

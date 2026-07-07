@@ -1,5 +1,5 @@
 """
-CstarSpecBuilder - Pydantic-based builder for C-Star blueprints.
+ForgeExecutor - Pydantic-based builder for C-Star blueprints.
 
 This class provides a Pydantic-based interface for building RomsMarblBlueprint objects.
 """
@@ -38,8 +38,9 @@ from cstar.orchestration.utils import (
 )
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from cstar_forge import config, input_data, source_data
+from cstar_forge import config
 from cstar_forge import models as forge_models
+from cstar_forge.forge import input_data, source_data
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
 from cstar_forge.util import (
     compute_timestep_from_cfl,
@@ -166,7 +167,7 @@ def _deep_merge_settings_dict(target: dict[str, Any], update: dict[str, Any]) ->
             target[k] = copy.deepcopy(v)
 
 
-class CstarSpecBuilder(BaseModel):
+class ForgeExecutor(BaseModel):
     """
     Builder for C-Star RomsMarblBlueprint specifications.
 
@@ -309,7 +310,7 @@ class CstarSpecBuilder(BaseModel):
         validate_default=False,
         description=(
             "Skip the catalog structure validation check when opening the catalog. "
-            "Defaults to True so that CstarSpecBuilder can operate on an empty or "
+            "Defaults to True so that ForgeExecutor can operate on an empty or "
             "partially populated catalog without raising an error."
         ),
     )
@@ -343,7 +344,7 @@ class CstarSpecBuilder(BaseModel):
     _catalog_instance: Any | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
-    def _validate_dates(self) -> CstarSpecBuilder:
+    def _validate_dates(self) -> ForgeExecutor:
         """Validate that start_date precedes end_date."""
         if self.end_date <= self.start_date:
             raise ValueError("end_date must be after start_date")
@@ -377,7 +378,7 @@ class CstarSpecBuilder(BaseModel):
                 "and MachineSpec (default/example values).\n"
                 f"      Blueprints will be written to: {config.paths.catalog}\n"
                 "      To use a custom catalog, set catalog_root=<path> or catalog_root='default' "
-                "when creating CstarSpecBuilder."
+                "when creating ForgeExecutor."
             )
 
         # Create grids, 4 cases:
@@ -522,7 +523,7 @@ class CstarSpecBuilder(BaseModel):
     def _print_planned_netcdf_outputs(self) -> None:
         """Print the list of expected NetCDF files to stdout."""
         planned_paths = self._planned_netcdf_outputs()
-        print("CstarSpecBuilder: planned NetCDF outputs")
+        print("ForgeExecutor: planned NetCDF outputs")
         if not planned_paths:
             print("  (none)")
         else:
@@ -535,7 +536,7 @@ class CstarSpecBuilder(BaseModel):
         netcdf_dir = self.input_data_dir.resolve()
         yaml_dir = self.blueprint_dir.resolve()
         lines = [
-            "CstarSpecBuilder: output locations",
+            "ForgeExecutor: output locations",
             f"  NetCDF files: {netcdf_dir}",
             f"  YAML files: {yaml_dir}",
         ]
@@ -1821,7 +1822,7 @@ class CstarSpecBuilder(BaseModel):
         )
 
     @classmethod
-    def from_spec_config(cls, cfg: Any) -> CstarSpecBuilder:
+    def from_spec_config(cls, cfg: Any) -> ForgeExecutor:
         """Canonical constructor: build the executor directly from a resolved
         ``SpecConfig`` (the forge application's blueprint).
 
@@ -1831,7 +1832,7 @@ class CstarSpecBuilder(BaseModel):
         here — so there is one place that maps blueprint → builder inputs
         (``spec_config_engine.spec_config_to_builder_kwargs``).
         """
-        from cstar_forge.spec_config_engine import spec_config_to_builder_kwargs
+        from cstar_forge.forge.spec_config_engine import spec_config_to_builder_kwargs
 
         return cls(**spec_config_to_builder_kwargs(cfg))
 
@@ -2163,7 +2164,7 @@ class CstarSpecBuilder(BaseModel):
 
     def dump(self, file_path: str | Path) -> None:
         """
-        Dump the exact state of CstarSpecBuilder to a YAML file.
+        Dump the exact state of ForgeExecutor to a YAML file.
 
         This method serializes all serializable fields including:
         - Regular Pydantic model fields (description, model_name, grid_name, etc.)
@@ -2246,12 +2247,12 @@ class CstarSpecBuilder(BaseModel):
             )
 
     @classmethod
-    def load(cls, file_path: str | Path) -> CstarSpecBuilder:
+    def load(cls, file_path: str | Path) -> ForgeExecutor:
         """
-        Load CstarSpecBuilder state from a YAML file.
+        Load ForgeExecutor state from a YAML file.
 
         This method deserializes a previously saved state and reconstructs
-        the CstarSpecBuilder instance. After loading:
+        the ForgeExecutor instance. After loading:
         - Regular Pydantic fields are restored
         - PrivateAttr fields are restored where possible
         - The grid object is reconstructed from grid_kwargs
@@ -2268,8 +2269,8 @@ class CstarSpecBuilder(BaseModel):
 
         Returns
         -------
-        CstarSpecBuilder
-            A new CstarSpecBuilder instance with state restored from the file.
+        ForgeExecutor
+            A new ForgeExecutor instance with state restored from the file.
 
         Notes
         -----
@@ -2282,9 +2283,7 @@ class CstarSpecBuilder(BaseModel):
         """
         file_path = Path(file_path)
         if not file_path.exists():
-            raise FileNotFoundError(
-                f"CstarSpecBuilder state file not found: {file_path}"
-            )
+            raise FileNotFoundError(f"ForgeExecutor state file not found: {file_path}")
 
         # Load YAML file
         with file_path.open("r") as f:

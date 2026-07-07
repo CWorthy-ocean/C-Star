@@ -8,10 +8,10 @@ resolved from :mod:`cstar_forge.config` — nothing host-specific is read from t
 config file. The reviewed, host-independent ``SpecConfig`` provides everything else.
 
 Strategy (see ``docs/spec-config-inventory.md`` §3): the existing
-``CstarSpecBuilder`` already performs host resolution, grid building, input
+``ForgeExecutor`` already performs host resolution, grid building, input
 generation, and namelist/cppdefs writing. So Phase 2:
 
-1. reconstructs a ``CstarSpecBuilder`` from the config's atomic inputs (identity,
+1. reconstructs a ``ForgeExecutor`` from the config's atomic inputs (identity,
    run window, grid kwargs, boundaries, partitioning, CDR) — the builder resolves
    the host and the artifact-derived values (``s_coord``, file paths, ``run_output_dir``,
    ``output_root_name``) itself;
@@ -41,8 +41,8 @@ from typing import (
     runtime_checkable,
 )
 
+from cstar_forge.forge.spec_config import SpecConfig
 from cstar_forge.namelist_model import validate_run_time_sections
-from cstar_forge.spec_config import SpecConfig
 from cstar_forge.spec_config_resolve import n_tracers_from_model_settings
 
 
@@ -52,7 +52,7 @@ class SpecConfigExecutor(Protocol):
 
     This is the seam between the host-independent ``SpecConfig`` and whatever
     actually generates inputs / configures the build on the run machine. Today
-    ``cstar_forge._core.CstarSpecBuilder`` satisfies it; when the engine moves into
+    ``cstar_forge.forge.executor.ForgeExecutor`` satisfies it; when the engine moves into
     C-Star as an application, that app provides its own implementation and the only
     change here is the default factory.
 
@@ -70,7 +70,7 @@ class SpecConfigExecutor(Protocol):
 
 
 # A factory maps a host-independent SpecConfig to a ready-to-run executor. The
-# forge default builds a CstarSpecBuilder; a C-Star app would provide its own.
+# forge default builds a ForgeExecutor; a C-Star app would provide its own.
 ExecutorFactory = Callable[[SpecConfig], SpecConfigExecutor]
 
 logger = logging.getLogger(__name__)
@@ -139,7 +139,7 @@ def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any] | None:
 
 
 def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
-    """Map a ``SpecConfig``'s atomic inputs to ``CstarSpecBuilder`` constructor kwargs.
+    """Map a ``SpecConfig``'s atomic inputs to ``ForgeExecutor`` constructor kwargs.
 
     Host/machine/path values are intentionally NOT passed — the builder resolves
     those from :mod:`cstar_forge.config` on the run host.
@@ -253,13 +253,13 @@ def host_summary(cfg: SpecConfig | None = None) -> str:
 
 
 def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
-    """Forge's default executor: a ``CstarSpecBuilder`` built from the config's
+    """Forge's default executor: a ``ForgeExecutor`` built from the config's
     atomic inputs. Imported lazily so the lightweight bits above (host resolution,
     settings split) stay importable without the full forge stack.
     """
-    from cstar_forge._core import CstarSpecBuilder
+    from cstar_forge.forge.executor import ForgeExecutor
 
-    return CstarSpecBuilder.from_spec_config(cfg)
+    return ForgeExecutor.from_spec_config(cfg)
 
 
 def process_spec_config(
@@ -280,7 +280,7 @@ def process_spec_config(
     :class:`SpecConfigExecutor` through ``ensure_source_data`` → ``generate_inputs``
     → ``configure_build`` (the reviewed ``model_settings`` overlaid via the last).
 
-    Returns the executor (``CstarSpecBuilder`` by default), so callers can reach
+    Returns the executor (``ForgeExecutor`` by default), so callers can reach
     ``.path_blueprint('build')`` / ``.prep_cstar_environment(...)`` / ``.run()``.
 
     Parameters
@@ -290,7 +290,7 @@ def process_spec_config(
         against the run-time schema *before* any downloads/generation.
     executor_factory :
         Maps the ``SpecConfig`` to an executor; defaults to the forge
-        ``CstarSpecBuilder``. Injectable for tests and for the eventual C-Star app
+        ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
         (which supplies its own executor for the same ``SpecConfig`` blueprint).
     """
     cfg = spec if isinstance(spec, SpecConfig) else SpecConfig.from_yaml(spec)
@@ -337,7 +337,7 @@ def process_spec_config(
 
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m cstar_forge.spec_config_engine",
+        prog="python -m cstar_forge.forge.spec_config_engine",
         description="Phase 2: process a spec_config.yml on this machine "
         "(generate inputs + configure build).",
     )

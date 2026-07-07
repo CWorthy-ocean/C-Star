@@ -5,7 +5,7 @@ download URL), and the resolution helpers.
 
 This module holds ONLY pure data + functions (stdlib/typing) so it can be imported
 by both:
-  * ``cstar_forge.source_data`` (the heavy acquisition layer — copernicusmarine /
+  * ``cstar_forge.forge.source_data`` (the heavy acquisition layer — copernicusmarine /
     gdown / roms_tools), which re-exports these names for its existing consumers, and
   * ``cstar_forge.spec_config_resolve`` (the dependency-light Phase-1 resolver),
     which previously carried a hand-copied duplicate of this table.

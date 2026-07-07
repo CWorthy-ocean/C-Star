@@ -19,7 +19,7 @@ from cstar.applications.roms_marbl.models import (
 )
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from cstar_forge.spec_config import (
+from cstar_forge.forge.spec_config import (
     BgcInterpMethod,
     BoundaryType,
     ClimatologyMode,
@@ -689,7 +689,7 @@ def _dataset_keys_from_inputs(inputs: ModelInputs) -> set[str]:
     """
     # Lazy import to avoid dependency issues during testing
     try:
-        from cstar_forge import source_data
+        from cstar_forge.forge import source_data
     except ImportError:
         # If source_data is not available, return empty set
         return set()

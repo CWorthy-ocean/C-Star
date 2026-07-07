@@ -33,7 +33,7 @@ from cstar_forge.config import (
     with_catalog,
     default_catalog_inner_dir,
 )
-from cstar_forge._core import resolve_catalog_dir
+from cstar_forge.forge.executor import resolve_catalog_dir
 
 
 class TestDataPaths:

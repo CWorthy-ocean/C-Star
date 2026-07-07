@@ -431,7 +431,7 @@ class DomainCatalog:
         return self.catalog_root / "blueprints"
 
     # ------------------------------------------------------------------
-    # Path helpers (used by CstarSpecBuilder)
+    # Path helpers (used by ForgeExecutor)
     # ------------------------------------------------------------------
     def tree(self) -> None:
         """Print the tree of the catalog."""
@@ -676,14 +676,14 @@ class DomainCatalog:
         self._scan_models()
 
     def register_domain(self, builder: Any) -> None:
-        """Create a new DomainSpec entry from a CstarSpecBuilder instance.
+        """Create a new DomainSpec entry from a ForgeExecutor instance.
 
         Writes a Domain.yml file and creates an empty Assets/ directory under
         DomainSpec/<grid_name>/. The domain name is taken from builder.grid_name.
 
         Parameters
         ----------
-        builder : CstarSpecBuilder
+        builder : ForgeExecutor
             A configured builder whose grid_name, model_name, grid_kwargs,
             open_boundaries, and partitioning will be recorded.
         """

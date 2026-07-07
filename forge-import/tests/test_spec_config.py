@@ -1,5 +1,5 @@
 """
-Tests for the SpecConfig schema (``cstar_forge.spec_config``) and the Phase-1
+Tests for the SpecConfig schema (``cstar_forge.forge.spec_config``) and the Phase-1
 resolver (``cstar_forge.spec_config_resolve.build_spec_config``).
 
 These validate that the resolver reproduces the known ``test-tiny`` demo values,
@@ -18,7 +18,7 @@ import pytest
 import yaml
 
 import cstar_forge
-from cstar_forge.spec_config import SpecConfig
+from cstar_forge.forge.spec_config import SpecConfig
 from cstar_forge.spec_config_resolve import build_spec_config
 
 _MODEL_DIR = (
@@ -70,7 +70,7 @@ def test_spec_config_is_portable_no_forge_or_cstar_imports():
     """spec_config.py is the C-Star-relocatable blueprint model: it must depend on
     nothing from cstar_forge / cstar (only stdlib + pydantic + yaml).
     """
-    src = Path(cstar_forge.__file__).parent / "spec_config.py"
+    src = Path(cstar_forge.__file__).parent / "forge" / "spec_config.py"
     text = src.read_text()
     import re
 
@@ -83,7 +83,7 @@ def test_spec_config_is_portable_no_forge_or_cstar_imports():
 
 
 def test_application_discriminator_default():
-    from cstar_forge.spec_config import DEFAULT_APPLICATION
+    from cstar_forge.forge.spec_config import DEFAULT_APPLICATION
 
     cfg = _build()
     assert cfg.application == DEFAULT_APPLICATION
@@ -113,7 +113,7 @@ def test_schema_round_trip_identity(tmp_path):
 
 
 def test_content_hash_ignores_excluded_sections():
-    from cstar_forge.spec_config import _HASH_EXCLUDE, PieceRef
+    from cstar_forge.forge.spec_config import _HASH_EXCLUDE, PieceRef
 
     cfg = _build()
     h = cfg.content_hash()
@@ -156,7 +156,7 @@ def test_content_hash_round_trips_through_yaml(tmp_path):
 
 
 def test_engine_warns_on_hash_mismatch(tmp_path):
-    from cstar_forge.spec_config_engine import process_spec_config, verify_content_hash
+    from cstar_forge.forge.spec_config_engine import process_spec_config, verify_content_hash
 
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "spec_config.yml")
@@ -272,7 +272,7 @@ def test_catalog_scans_forcingspec():
 
 
 def test_sources_to_forcing_override_returns_none_for_model_default():
-    from cstar_forge.spec_config_engine import sources_to_forcing_override
+    from cstar_forge.forge.spec_config_engine import sources_to_forcing_override
 
     cfg = _build()
     assert cfg.composition.forcing.origin == "model_default"
@@ -281,7 +281,7 @@ def test_sources_to_forcing_override_returns_none_for_model_default():
 
 def test_sources_to_forcing_override_converts_custom_forcing():
     from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.spec_config_engine import sources_to_forcing_override
+    from cstar_forge.forge.spec_config_engine import sources_to_forcing_override
 
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
@@ -303,7 +303,7 @@ def test_forcing_override_used_by_input_data(tmp_path):
     """
     from unittest.mock import MagicMock, patch
 
-    from cstar_forge import input_data as id_mod
+    from cstar_forge.forge import input_data as id_mod
     from cstar_forge.domain_catalog import default_catalog as cat
 
     fdata = cat.forcing_data("glorys-era5-unified")
@@ -860,7 +860,7 @@ class TestSpecConfigEngine:
         return _build()
 
     def test_builder_kwargs_carry_atomic_inputs_not_host(self):
-        from cstar_forge.spec_config_engine import spec_config_to_builder_kwargs
+        from cstar_forge.forge.spec_config_engine import spec_config_to_builder_kwargs
 
         kw = spec_config_to_builder_kwargs(self._cfg())
         assert kw["model_name"] == "cson_roms-marbl_v0.1"
@@ -871,7 +871,7 @@ class TestSpecConfigEngine:
         assert not any(k in kw for k in ("machine", "paths", "scratch", "source_data"))
 
     def test_split_model_settings(self):
-        from cstar_forge.spec_config_engine import (
+        from cstar_forge.forge.spec_config_engine import (
             PROCESSING_FILLED_SECTIONS,
             split_model_settings,
         )
@@ -883,7 +883,7 @@ class TestSpecConfigEngine:
             assert sec not in run_ov
 
     def test_process_orchestration_order_and_overlay(self):
-        from cstar_forge.spec_config_engine import process_spec_config
+        from cstar_forge.forge.spec_config_engine import process_spec_config
 
         b = process_spec_config(
             self._cfg(), clobber=True, use_dask=False, executor_factory=_FakeBuilder
@@ -897,7 +897,7 @@ class TestSpecConfigEngine:
         assert "grid" not in cfgk["run_time_settings"]
 
     def test_process_skip_flags(self):
-        from cstar_forge.spec_config_engine import process_spec_config
+        from cstar_forge.forge.spec_config_engine import process_spec_config
 
         b = process_spec_config(
             self._cfg(),
@@ -908,7 +908,7 @@ class TestSpecConfigEngine:
         assert [c[0] for c in b.calls] == ["configure"]
 
     def test_executor_must_implement_interface(self):
-        from cstar_forge.spec_config_engine import (
+        from cstar_forge.forge.spec_config_engine import (
             SpecConfigExecutor,
             process_spec_config,
         )
@@ -924,7 +924,7 @@ class TestSpecConfigEngine:
             process_spec_config(self._cfg(), executor_factory=_Bad)
 
     def test_invalid_model_settings_fail_fast(self):
-        from cstar_forge.spec_config_engine import process_spec_config
+        from cstar_forge.forge.spec_config_engine import process_spec_config
 
         cfg = self._cfg()
         cfg.model_settings["param"]["np_xi"] = "not-an-int"  # corrupt a value
@@ -934,7 +934,7 @@ class TestSpecConfigEngine:
             )  # raises before any call
 
     def test_resolve_host_reads_config_not_file(self):
-        from cstar_forge.spec_config_engine import resolve_host
+        from cstar_forge.forge.spec_config_engine import resolve_host
 
         h = resolve_host(self._cfg())
         assert h["system"]
@@ -946,7 +946,7 @@ class TestSpecConfigEngine:
 
 
 # ---------------------------------------------------------------------------
-# Step 3 (parity): the Phase-1 resolver and the live CstarSpecBuilder must agree
+# Step 3 (parity): the Phase-1 resolver and the live ForgeExecutor must agree
 # on the derived values, so a reviewed config matches a from-scratch build.
 #
 # Compared at *construction* (no generate_inputs): the genuinely-computed numerics
@@ -1016,14 +1016,14 @@ class TestResolverBuilderParity:
         pytest.importorskip("roms_tools")
         from datetime import datetime
 
-        from cstar_forge._core import CstarSpecBuilder
+        from cstar_forge.forge.executor import ForgeExecutor
         from cstar_forge.spec_config_resolve import build_spec_config
 
         start, end = datetime(2012, 1, 1), datetime(2012, 1, 2)
 
         # Real builder (no mocks): real ModelSpec defaults + real geometric grid;
         # persistence isolated to a temp catalog copied from the bundled one.
-        builder = CstarSpecBuilder(
+        builder = ForgeExecutor(
             description="parity",
             model_name="cson_roms-marbl_v0.1",
             grid_name=grid_name,
@@ -1068,18 +1068,18 @@ class TestResolverBuilderParity:
         self, grid_name, grid_kwargs, boundaries, partitioning, tmp_path
     ):
         """Phase-B non-lossy gate: ``from_spec_config(build_spec_config(inputs))`` must
-        reproduce the same builder *inputs* as constructing ``CstarSpecBuilder`` directly.
+        reproduce the same builder *inputs* as constructing ``ForgeExecutor`` directly.
         This proves the SpecConfig->builder mapping drops nothing, so the direct
         raw-kwargs / ``from_domain`` paths can be retired safely.
         """
         pytest.importorskip("roms_tools")
         from datetime import datetime
 
-        from cstar_forge._core import CstarSpecBuilder
+        from cstar_forge.forge.executor import ForgeExecutor
         from cstar_forge.spec_config_resolve import build_spec_config
 
         start, end = datetime(2012, 1, 1), datetime(2012, 1, 2)
-        direct = CstarSpecBuilder(
+        direct = ForgeExecutor(
             description="parity",
             model_name="cson_roms-marbl_v0.1",
             grid_name=grid_name,
@@ -1101,7 +1101,7 @@ class TestResolverBuilderParity:
             end_date=end,
             description="parity",
         )
-        via_cfg = CstarSpecBuilder.from_spec_config(cfg)
+        via_cfg = ForgeExecutor.from_spec_config(cfg)
 
         # Results-affecting inputs must match exactly across the two construction paths.
         assert via_cfg.model_name == direct.model_name

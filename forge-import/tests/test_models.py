@@ -77,7 +77,7 @@ class TestGridInput:
     
     def test_gridinput_default_topography_source(self):
         """GridInput now has a default topography_source (TopographySource.ETOPO5)."""
-        from cstar_forge.spec_config import TopographySource
+        from cstar_forge.forge.spec_config import TopographySource
         assert GridInput().topography_source == TopographySource.ETOPO5
 
     def test_gridinput_rejects_unknown_topography_source(self):

@@ -64,9 +64,6 @@ _KNOWN_VIOLATIONS = {
     # resolve_host reads cstar_forge.config; that host-glue stays Forge-side / C-Star
     # supplies its own at relocation — Phase C.
     ("spec_config_engine", "config"),
-    # _default_executor_factory imports CstarSpecBuilder from _core; once the executor
-    # moves into the forge package the factory imports it from there — Phase C.
-    ("spec_config_engine", "_core"),
 }
 
 

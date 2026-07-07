@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
-from cstar_forge.source_data import (
+from cstar_forge.forge.source_data import (
     DatasetHandler,
     register_dataset,
     DATASET_REGISTRY,
