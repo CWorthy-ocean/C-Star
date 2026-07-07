@@ -1,5 +1,9 @@
 # ROMS-Tools Options Integration — Implementation Summary
 
+> **Looking to add/operate a roms-tools parameter?** See the forward-looking contract in
+> [`roms-tools-contributor-guide.md`](roms-tools-contributor-guide.md). This document is
+> the *historical record* of how the seams below were built.
+
 This document records the changes made to expose roms-tools constructor options through
 the Forge SpecConfig, resolver, processing engine, and wizard UI.
 

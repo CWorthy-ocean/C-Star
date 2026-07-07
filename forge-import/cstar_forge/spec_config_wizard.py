@@ -24,6 +24,7 @@ is the only action that builds a grid (needs ``roms_tools``).
 from __future__ import annotations
 
 import base64
+import json
 import typing
 from datetime import date, datetime
 from pathlib import Path
@@ -635,6 +636,54 @@ def _source_opts_for(cat: str, type_val: str | None) -> list[str]:
     return _SOURCE_OPTS.get((cat, type_val), _SOURCE_OPTS.get((cat, None), []))
 
 
+# The `options` passthrough (see spec_config.py `_OPTIONS_HELP`) is a free-form dict of
+# raw roms-tools kwargs, so it can't be rendered as typed controls. We surface it as a
+# small JSON editor per item — visible and round-tripped — rather than hidden. This is
+# the advanced/transitional hatch; promoting a knob to a typed field gives it a proper
+# widget above.
+_OPTIONS_PLACEHOLDER = (
+    'advanced roms-tools kwargs (JSON object), e.g. {"chunks": {"time": 1}}'
+)
+
+
+def _parse_options(text: str) -> dict[str, Any]:
+    """Parse the per-item `options` JSON editor into a dict.
+
+    Empty/whitespace → ``{}``. Invalid JSON or a non-object → ``{}`` (the raw text
+    stays in the widget, so nothing is lost — it simply isn't emitted into the spec
+    until it parses to an object). Values are forwarded verbatim to the rt constructor.
+    """
+    text = (text or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _dump_options(options: Any) -> str:
+    """Serialize an item's `options` dict back into the editor (empty → '')."""
+    if not options:
+        return ""
+    try:
+        return json.dumps(options, indent=2, default=str)
+    except (TypeError, ValueError):
+        return ""
+
+
+def _options_editor(W, value: Any, description: str = "options:"):
+    """A compact JSON Textarea for an item's `options` passthrough dict."""
+    return W.Textarea(
+        value=_dump_options(value),
+        description=description,
+        placeholder=_OPTIONS_PLACEHOLDER,
+        style={"description_width": "70px"},
+        layout=W.Layout(width="360px", height="48px"),
+    )
+
+
 class _ForcingEditor:
     """Editor for the forcing piece: initial conditions + per-category forcing items,
     with add/remove. ``gather()`` returns an ``inputs``-shaped dict the resolver
@@ -705,6 +754,7 @@ class _ForcingEditor:
             indent=False,
             tooltip=_tip("ic", "ic_flex_time"),
         )
+        self.ic_options = _options_editor(W, ic.get("options"))
         for _w in (
             self.ic_name,
             self.ic_layout,
@@ -712,6 +762,7 @@ class _ForcingEditor:
             self.ic_bgc_clim,
             self.ic_bgc_interp,
             self.ic_flex_time,
+            self.ic_options,
         ):
             _w.observe(lambda _ch: on_change(), names="value")
 
@@ -913,6 +964,8 @@ class _ForcingEditor:
                 layout=W.Layout(width="160px"),
                 tooltip=_tip("river", "domain_edge_buffer"),
             )
+        # Advanced passthrough: raw roms-tools kwargs not (yet) typed above.
+        w["options"] = _options_editor(W, item.get("options"))
         remove = W.Button(
             description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item"
         )
@@ -990,6 +1043,10 @@ class _ForcingEditor:
             item["coast_snap_buffer_km"] = float(w["coast_snap_buffer_km"].value)
         if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != 20:
             item["domain_edge_buffer"] = int(w["domain_edge_buffer"].value)
+        if "options" in w:  # advanced passthrough; omit when empty/unparseable
+            opts = _parse_options(w["options"].value)
+            if opts:
+                item["options"] = opts
         return item
 
     def gather(self) -> dict[str, Any]:
@@ -1009,6 +1066,9 @@ class _ForcingEditor:
             ic["bgc_interpolation_method"] = self.ic_bgc_interp.value
         if self.ic_flex_time.value:
             ic["allow_flex_time"] = True
+        ic_opts = _parse_options(self.ic_options.value)
+        if ic_opts:
+            ic["options"] = ic_opts
         forcing = {
             cat: [self._gather_item(cat, w) for w in self._rows[cat]]
             for cat in _FORCING_CATEGORIES
@@ -1028,6 +1088,7 @@ class _ForcingEditor:
                 W.HBox([self.ic_name, self.ic_layout]),
                 W.HBox([self.ic_bgc_name, self.ic_bgc_clim]),
                 W.HBox([self.ic_bgc_interp, self.ic_flex_time]),
+                self.ic_options,
             ]
         )
         panes = [ic_box] + [self._containers[c] for c in _FORCING_CATEGORIES]
@@ -1531,6 +1592,8 @@ class SpecConfigWizard:
             and getattr(_ic_interp, "value", _ic_interp) != BgcInterpMethod.DEPTH.value
         ):
             ic["bgc_interpolation_method"] = getattr(_ic_interp, "value", _ic_interp)
+        if getattr(f.initial_conditions, "options", None):
+            ic["options"] = dict(f.initial_conditions.options)
         forcing: dict[str, Any] = {}
         for cat, items in (
             ("surface", f.surface),
@@ -1573,6 +1636,8 @@ class SpecConfigWizard:
                     d["coast_snap_buffer_km"] = it.coast_snap_buffer_km
                 if getattr(it, "domain_edge_buffer", 20) != 20:
                     d["domain_edge_buffer"] = it.domain_edge_buffer
+                if getattr(it, "options", None):
+                    d["options"] = dict(it.options)
                 out.append(d)
             forcing[cat] = out
         return {

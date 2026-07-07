@@ -326,6 +326,21 @@ class SourceSpec(_Section):
     glorys_layout: str | None = None  # "regional" | "global"
 
 
+# The sanctioned escape hatch: raw roms-tools constructor kwargs that have NOT (yet)
+# been promoted to typed fields on these item models. Merged in
+# ``RomsMarblInputData._build_input_args`` AFTER the typed defaults and BEFORE the
+# run-time injections (``extra``). Lets a new roms-tools parameter be operated
+# end-to-end with no schema change; promote it to a typed field later for validation,
+# UI, and discoverability. Mirrors the ``options`` field on the corresponding
+# ``cstar_forge.models`` item model — the two are kept in lockstep by
+# ``tests/test_roms_tools_coverage.py::test_forge_item_models_in_lockstep``.
+_OPTIONS_HELP = (
+    "Raw roms-tools constructor kwargs not promoted to typed fields; merged after the "
+    "typed defaults and before run-time injections. The sanctioned escape hatch for "
+    "operating a new roms-tools parameter without a schema change."
+)
+
+
 class SurfaceForcingItem(_Section):
     source: SourceSpec
     type: SurfaceType = SurfaceType.PHYSICS
@@ -333,6 +348,7 @@ class SurfaceForcingItem(_Section):
     coarse_grid_mode: CoarseGridMode = CoarseGridMode.AUTO
     restoring_forces: list[RestoringForce] | None = None
     wind_dropoff: bool = False  # coastal wind-speed reduction
+    options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 
 class BoundaryForcingItem(_Section):
@@ -348,11 +364,13 @@ class BoundaryForcingItem(_Section):
         None  # destination extrapolation (default path)
     )
     extrap_kwargs: dict[str, Any] | None = None
+    options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 
 class TidalForcingItem(_Section):
     source: SourceSpec
     ntides: int | None = None
+    options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 
 class RiverForcingItem(_Section):
@@ -366,6 +384,7 @@ class RiverForcingItem(_Section):
     domain_edge_buffer: int = (
         20  # grid cells beyond domain edge kept in the bounding-box pre-filter
     )
+    options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 
 class InitialConditions(_Section):
@@ -375,6 +394,7 @@ class InitialConditions(_Section):
         BgcInterpMethod.DEPTH
     )  # BGC vertical interp
     allow_flex_time: bool = False  # ±24h search window around ini_time
+    options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 
 class ResolvedDataset(_Section):

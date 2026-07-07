@@ -109,11 +109,21 @@ def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any] | None:
         d["source"] = _src(item.source)
         return {k: v for k, v in d.items() if v is not None}
 
+    def _ic(spec) -> dict[str, Any]:
+        # Mirror _item, but IC carries a second SourceSpec (bgc_source) that also
+        # needs _src conversion. Forwarding the typed fields
+        # (bgc_interpolation_method, allow_flex_time) and the options passthrough
+        # here is what lets authored/UI IC choices actually reach input_data —
+        # previously only source/bgc_source were propagated, so any other IC field
+        # set in the wizard was silently dropped on the SpecConfig path.
+        d = spec.model_dump(exclude={"source", "bgc_source"})
+        d["source"] = _src(spec.source)
+        if spec.bgc_source:
+            d["bgc_source"] = _src(spec.bgc_source)
+        return {k: v for k, v in d.items() if v is not None}
+
     f = cfg.forcing
-    ic_spec = f.initial_conditions
-    ic: dict[str, Any] = {"source": _src(ic_spec.source)}
-    if ic_spec.bgc_source:
-        ic["bgc_source"] = _src(ic_spec.bgc_source)
+    ic = _ic(f.initial_conditions)
 
     forc: dict[str, Any] = {}
     for cat, items in [
