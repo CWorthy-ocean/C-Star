@@ -23,7 +23,7 @@ from cstar.orchestration.models import (
     KeyValueStore,
     Workplan,
 )
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, Planner
 from cstar.orchestration.serialization import deserialize, serialize
 
 if t.TYPE_CHECKING:
@@ -453,8 +453,10 @@ class WorkplanTransformer(LoggingMixin):
         if self._transformed:
             return self._transformed
 
+        # ensure upstream steps are transformed first
+        ordered_steps = Planner(self.original).flatten()
         # ensure consistent output targets for all steps in the workplan
-        live_steps = [LiveStep.from_step(s) for s in self.original.steps]
+        live_steps = [LiveStep.from_step(s) for s in ordered_steps]
 
         # fill template placeholders before any other transform operates on overrides
         if self.fill_transform is not None:
