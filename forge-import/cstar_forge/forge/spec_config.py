@@ -550,6 +550,14 @@ class SpecConfig(_Section):
         return self.domain.partitioning.n_procs_x * self.domain.partitioning.n_procs_y
 
     @property
+    def n_tracers(self) -> int:
+        """Total ROMS tracer count = T + S + BGC (ntrc_bio) + passive (nt_passive),
+        derived from ``model_settings['param']``.
+        """
+        param = self.model_settings.get("param", {}) or {}
+        return 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
+
+    @property
     def name(self) -> str:
         base = (
             f"{self.identity.model_name}_{self.identity.grid_name}_{self.n_procs}procs"

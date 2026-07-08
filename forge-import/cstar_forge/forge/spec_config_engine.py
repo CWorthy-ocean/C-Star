@@ -43,7 +43,6 @@ from typing import (
 
 from cstar_forge.forge.spec_config import SpecConfig
 from cstar_forge.namelist_model import validate_run_time_sections
-from cstar_forge.spec_config_resolve import n_tracers_from_model_settings
 
 
 @runtime_checkable
@@ -330,7 +329,7 @@ def process_spec_config(
         executor.configure_build(
             compile_time_settings=compile_overrides,
             run_time_settings=run_overrides,
-            n_tracers=n_tracers_from_model_settings(cfg.model_settings),
+            n_tracers=cfg.n_tracers,
         )
     return executor
 

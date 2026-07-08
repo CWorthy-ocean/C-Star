@@ -189,17 +189,6 @@ OUTPUT_SECTIONS = (
 OUTPUT_MARBL_FIELDS = ("marbl_tracers_to_write", "marbl_diagnostics_to_write")
 
 
-def n_tracers_from_model_settings(model_settings: dict[str, Any]) -> int:
-    """Derive the total ROMS tracer count from the flat model_settings dict.
-
-    ROMS total tracers = T + S + BGC (ntrc_bio) + passive (nt_passive).
-    This replaces the former ``SpecConfig.properties["n_tracers"]`` which
-    duplicated a value already present in ``model_settings["param"]``.
-    """
-    param = model_settings.get("param", {}) or {}
-    return 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
-
-
 def marbl_from_model_settings(model_settings: dict[str, Any]) -> bool:
     """Return whether MARBL is enabled, read from ``model_settings["cppdefs"]["marbl"]``.
 

@@ -57,12 +57,8 @@ _FORBIDDEN = {
 # ``(forge_app_module, forbidden_module)``. This set may only SHRINK — never add to it.
 # See docs/architecture-decomposition-plan.md.
 _KNOWN_VIOLATIONS = {
-    # RESOLVED (Phase C config-injection): input_data / source_data now receive their dirs
-    # injected (input_data_dir / source_data_dir) — they no longer import config.
-    # n_tracers_from_model_settings is a pure derivation; move it onto SpecConfig — Phase D.
-    ("spec_config_engine", "spec_config_resolve"),
     # resolve_host reads cstar_forge.config; that host-glue stays Forge-side / C-Star
-    # supplies its own at relocation — Phase C.
+    # supplies its own at relocation — the last remaining relocation blocker.
     ("spec_config_engine", "config"),
 }
 
