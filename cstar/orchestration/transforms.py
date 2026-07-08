@@ -560,8 +560,7 @@ class OverrideTransform(Transform[LiveStep]):
         Blueprint
             The blueprint with all overrides applied.
         """
-        overrides = overrides or {}
-        overrides = overrides.copy()
+        overrides = overrides.copy() if overrides else {}
 
         model = bp.model_dump(exclude_defaults=True, exclude_unset=True)
 
