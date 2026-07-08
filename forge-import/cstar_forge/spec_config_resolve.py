@@ -387,6 +387,15 @@ def build_spec_config(
             nesting_include_pressure_fluxes=nesting_include_pressure_fluxes,
         ),
         forcing=sources,
+        # Host-independent source-dataset keys to prepare (forcing/IC sources + topography),
+        # derived from the resolved sources so the executor never reads model_spec.datasets.
+        datasets=sorted(
+            {
+                rd.dataset_key
+                for rd in sources.resolved_datasets.values()
+                if rd.dataset_key
+            }
+        ),
         model_settings=settings,
         code=code,
         composition=composition

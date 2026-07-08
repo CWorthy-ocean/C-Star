@@ -226,7 +226,14 @@ class TopographySource(str, Enum):
 # lives), composition + identity (labels/provenance, not results-affecting), and the
 # schema version. Everything else (application, run, domain, sources, properties,
 # model_settings, code) is hashed.
-_HASH_EXCLUDE = {"spec_config_version", "identity", "composition", "provenance"}
+_HASH_EXCLUDE = {
+    "spec_config_version",
+    "identity",
+    "composition",
+    "provenance",
+    # host/location only — runtime-overridden per host; must not change the content hash.
+    "working_dir",
+}
 # Note: "properties" is no longer a top-level SpecConfig field (removed); n_tracers
 # and marbl are derived from model_settings at processing time.
 
@@ -538,10 +545,20 @@ class SpecConfig(_Section):
     application: str = (
         DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
     )
+    # Per-run artifact root: everything the executor PRODUCES (input netCDFs, namelist,
+    # cppdefs, the emitted roms_marbl blueprint, build dirs) lands under here. Stored with a
+    # sensible default but OVERRIDDEN at runtime by C-Star / the Forge executor for the host.
+    # Host/location only -> excluded from content_hash (see _HASH_EXCLUDE).
+    working_dir: str = "~/cstar-forge-data"
     identity: Identity
     run: RunWindow
     domain: Domain
     forcing: Forcing
+    # Resolved list of host-independent source-dataset keys the executor must prepare
+    # (forcing/IC sources + topography), e.g. ["GLORYS_REGIONAL", "UNIFIED_BGC", "ETOPO5"].
+    # Cache paths resolve at processing from the injected source_data_cache. Results-affecting
+    # -> stays IN the hash.
+    datasets: list[str] = Field(default_factory=list)
     model_settings: dict[str, Any] = Field(default_factory=dict)  # flat sections
     # n_tracers is NOT stored — it is derived at processing time as
     # model_settings["param"]["ntrc_bio"] + model_settings["param"]["nt_passive"] + 2

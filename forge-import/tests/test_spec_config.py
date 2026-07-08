@@ -135,6 +135,7 @@ def test_content_hash_ignores_excluded_sections():
         "identity",
         "composition",
         "provenance",
+        "working_dir",
     }
 
 
