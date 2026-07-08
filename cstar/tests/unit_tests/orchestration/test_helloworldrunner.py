@@ -298,8 +298,9 @@ def test_hello_world_workplan_dry_run(
             color=False,
         )
 
-    assert run_id in result.stdout
-    assert "completed" in result.stdout
+    action = "dry-run" if dry_run else "scheduling"
+    match = f"{action} has completed"
+    assert match in result.stdout
     assert result.exit_code == 0
 
 
