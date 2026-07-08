@@ -168,7 +168,31 @@ class TestSourceDataInitialization:
         """Test that unknown datasets raise ValueError."""
         with pytest.raises(ValueError, match="Unknown dataset"):
             SourceData(datasets=["UNKNOWN_DATASET"])
-    
+
+    def test_unstaged_datasets_do_not_raise(self):
+        """Recognized-but-not-Forge-staged keys (ETOPO5 fetched by roms-tools; DAI
+        streamed) must validate alongside real staged datasets — regression guard for
+        the resolver-emitted `datasets` list (decision #2)."""
+        sd = SourceData(
+            datasets=["GLORYS_REGIONAL", "UNIFIED_BGC", "ERA5", "TPXO", "ETOPO5", "DAI"]
+        )
+        assert "ETOPO5" in sd.datasets and "DAI" in sd.datasets
+
+    def test_unstaged_datasets_skipped_by_prepare_all(self):
+        """prepare_all skips unstaged datasets rather than trying (and failing) to stage
+        them — no handler lookup, no error."""
+        sd = SourceData(datasets=["ETOPO5", "DAI"])
+        # Nothing stageable requested → prepare_all completes without touching a handler.
+        sd.prepare_all(include_streamable=False)
+        assert sd.paths == {}
+
+    def test_srtm15_versioned_key_still_raises(self):
+        """Landmine guard: the resolver currently emits `SRTM15_V2.7` (no handler), which
+        must keep failing LOUDLY — not be silently skipped — until the SRTM15 key aliasing
+        is reconciled (tracked follow-up)."""
+        with pytest.raises(ValueError, match="Unknown dataset"):
+            SourceData(datasets=["SRTM15_V2.7"])
+
     def test_source_data_with_optional_attributes(self):
         """Test creating SourceData with optional attributes."""
         mock_grid = MagicMock()

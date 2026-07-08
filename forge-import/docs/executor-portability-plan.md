@@ -142,6 +142,25 @@ introduced vs. what predates it.
 - The offline test seam's `_local_args` omits the `or ""` guard the real `_template_repo_args`
   has (test-only; resolver always sets `directory`).
 
+### Follow-up filed 2026-07-08 — SRTM15 dataset-key aliasing (topography)
+Surfaced while unblocking a real wizard spec (`ValueError: Unknown dataset(s): DAI, ETOPO5`).
+Root cause was decision-#2's `datasets` derivation being too broad: it emits *every* resolved
+dataset key, including keys Forge doesn't stage. **Fixed (part a):** `source_registry`
+declares `UNSTAGED_DATASETS = {"ETOPO5", "DAI"}` (ETOPO5 is fetched by roms-tools at grid
+build; DAI is a streamed placeholder with no handler); `SourceData` validation and
+`prepare_all` skip these instead of rejecting them, while genuine typos still raise. Tests in
+`tests/test_source_data.py` exercise the unmocked path.
+
+**Still open (part b, task #16):** SRTM15 topography is *also* broken on this path —
+`SOURCE_ALIAS["SRTM15"]` and `DATASET_METADATA` use `SRTM15_V2.7`, but the handler is
+registered as `SRTM15`, so the resolver-emitted `SRTM15_V2.7` reaches no handler. It is kept
+**failing loudly** on purpose (NOT added to `UNSTAGED_DATASETS`) so it can't be silently
+skipped (which would run the grid with no bathymetry) — guarded by
+`test_srtm15_versioned_key_still_raises`. The fix reconciles to one canonical key (watch
+`content_hash`: `datasets` is hashed, so SRTM15-topo specs change; ETOPO5 specs don't), and
+must also confirm the staged SRTM15 path is injected into `grid_kwargs` (the executor's
+`rt.Grid(**grid_kwargs)` has no `srtm15_path`/`topography_source` reference — a likely 2nd gap).
+
 ### Still-open larger items (unchanged from prior sessions)
 - SpecConfig → C-Star `forge` application migration (executor + engine + SpecConfig-as-
   blueprint). Seams are in place (portability, executor factory, SpecConfigExecutor Protocol).

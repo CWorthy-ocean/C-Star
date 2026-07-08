@@ -48,6 +48,17 @@ SOURCE_ALIAS: dict[str, str] = {
 # Sources streamed at run time (not staged unless explicitly requested).
 STREAMABLE_SOURCES = ["ERA5", "DAI"]
 
+# Recognized dataset keys that Forge does NOT stage locally — they have no SourceData
+# handler because something else provides them:
+#   - "ETOPO5": roms-tools fetches this topography itself at grid-build time (only the
+#               SRTM15 alternative is staged by Forge).
+#   - "DAI":    river dataset streamed at run time (placeholder; no handler yet).
+# `SourceData` treats these as valid-but-skipped, distinct from a genuinely unknown key
+# (a typo), which still raises. NOTE: this is an *explicit* allowlist on purpose — it must
+# NOT swallow the SRTM15/SRTM15_V2.7 key-aliasing bug (tracked follow-up), which should keep
+# failing loudly until reconciled rather than being silently skipped.
+UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
+
 # Per-key provenance metadata (snapshotted into SpecConfig.sources.resolved_datasets).
 DATASET_METADATA: dict[str, dict[str, str]] = {
     "GLORYS_REGIONAL": {"dataset_id": GLORYS_DATASET_ID},

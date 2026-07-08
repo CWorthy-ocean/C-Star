@@ -69,6 +69,7 @@ from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
     SRTM15_VERSION,
     STREAMABLE_SOURCES,
     UNIFIED_BGC_URL,
+    UNSTAGED_DATASETS,
     WOA_DOWNLOAD_URL,
     map_source_to_dataset_key,
 )
@@ -123,13 +124,15 @@ class SourceData:
             normalized.append(SOURCE_ALIAS.get(ds_upper, ds_upper))
         self.datasets = normalized
 
-        # Validate requested datasets
+        # Validate requested datasets. `known` = datasets Forge stages (have a handler);
+        # `UNSTAGED_DATASETS` = recognized keys Forge legitimately does not stage (ETOPO5 is
+        # fetched by roms-tools; DAI is streamed). Anything else is a genuine typo → raise.
         known = set(DATASET_REGISTRY.keys())
-        unknown = set(self.datasets) - known
+        unknown = set(self.datasets) - known - UNSTAGED_DATASETS
         if unknown:
             raise ValueError(
                 f"Unknown dataset(s) requested: {', '.join(sorted(unknown))}. "
-                f"Known datasets: {', '.join(sorted(known))}"
+                f"Known datasets: {', '.join(sorted(known | UNSTAGED_DATASETS))}"
             )
 
         if self.source_data_dir is not None:
@@ -154,6 +157,10 @@ class SourceData:
             streamable datasets are skipped.
         """
         for name in self.datasets:
+            # Datasets Forge doesn't stage: provided by roms-tools (ETOPO5) or streamed
+            # at run time with no handler (DAI). Always skipped here, never staged.
+            if name in UNSTAGED_DATASETS:
+                continue
             if name in STREAMABLE_SOURCES and not include_streamable:
                 continue
             # raise error if not in registry (shouldn't happen after validation, but be safe)
