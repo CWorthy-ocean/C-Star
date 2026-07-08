@@ -156,6 +156,7 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
         cdr_forcing=cfg.forcing.cdr_forcing,
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
+        source_dataset_keys=list(cfg.datasets),
     )
     # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
     # block (which the SpecConfig stores separately) — re-embed it.

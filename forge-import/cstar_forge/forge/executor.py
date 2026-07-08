@@ -285,6 +285,15 @@ class ForgeExecutor(BaseModel):
             "(transitional; being phased out)."
         ),
     )
+    source_dataset_keys: list[str] | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "Resolved source-dataset keys to prepare (from the SpecConfig ``datasets``). "
+            "When None, falls back to the catalog ModelSpec's datasets (transitional). "
+            "Distinct from the ``datasets`` property, which returns the *loaded* datasets."
+        ),
+    )
     override: list[str | Path] | None = Field(default=None, validate_default=False)
     ensemble_id: int | None = Field(default=None, validate_default=False)
     catalog_root: str | Path | None = Field(
@@ -1359,7 +1368,11 @@ class ForgeExecutor(BaseModel):
             self._load_model_spec()
 
         self.src_data = source_data.SourceData(
-            datasets=self._model_spec.datasets,
+            datasets=(
+                self.source_dataset_keys
+                if self.source_dataset_keys is not None
+                else self._model_spec.datasets
+            ),
             clobber=False,
             grid=self.grid,
             grid_name=self.grid_name,

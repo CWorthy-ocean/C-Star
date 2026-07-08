@@ -195,17 +195,32 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
     assert b.calls == ["e", "g", "c"]  # processing proceeded
 
 
-@pytest.mark.skip(
-    reason="byte-golden deferred to the C-Star migration (see "
-    "docs/spec-config-inventory.md step 2b): it churns on every "
-    "schema/default change, so it's only worth pinning as a "
-    "behavior-preservation snapshot right before moving the engine."
-)
-def test_golden_namelist_matches_fixture():  # pragma: no cover
-    """At migration time: process the example and assert the generated namelist.nml
-    matches a committed golden fixture, proving the C-Star engine preserves behavior.
+def test_golden_model_settings_test_tiny():
+    """Behavior-preservation snapshot for the executor-portability refactor.
+
+    ``model_settings`` is the host-independent semantic source of both ``namelist.nml``
+    (run-time sections) and ``cppdefs.opt`` (``cppdefs``). ``configure_build`` already
+    overlays it (cfg wins), so it is the authoritative settings both before and after the
+    executor consumes it directly — pinning it byte-for-byte proves the generated ROMS
+    settings are unchanged by the refactor (and catches resolver drift).
     """
-    raise NotImplementedError
+    import json
+
+    golden_path = (
+        Path(cstar_forge.__file__).parents[1]
+        / "tests"
+        / "fixtures"
+        / "golden_model_settings_test-tiny.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build()  # test-tiny, dt=7200 (matches how the golden was captured)
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny drifted from the golden fixture. If this is "
+        "an intentional schema/default change, regenerate "
+        "tests/fixtures/golden_model_settings_test-tiny.json; otherwise the change is a "
+        "regression in the settings the executor feeds to namelist.nml / cppdefs.opt."
+    )
 
 
 def test_resolver_nesting_enables_extract_data():
