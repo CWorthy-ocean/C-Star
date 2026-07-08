@@ -390,7 +390,7 @@ class RestartFileTrxAdapter:
         }
 
 
-class ContinuanceTransform(Directive, OverrideTransform):
+class ContinuanceDirective(Directive, OverrideTransform):
     """A transform that locates a restart file with an unknown path at the
     time the task was scheduled.
     """
@@ -406,6 +406,10 @@ class ContinuanceTransform(Directive, OverrideTransform):
         """
         Directive.__init__(self, config)
         OverrideTransform.__init__(self, self._create_initial_condition_overrides())
+
+    @classmethod
+    def key(cls) -> str:
+        return "continue-from"
 
     def _create_initial_condition_overrides(
         self,
@@ -445,4 +449,4 @@ class ContinuanceTransform(Directive, OverrideTransform):
         return "cfrom"
 
 
-DirectiveConfig.register("continue-from", ContinuanceTransform)
+DirectiveConfig.register(ContinuanceDirective.key(), ContinuanceDirective)

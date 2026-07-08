@@ -9,7 +9,7 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import (
-    ContinuanceTransform,
+    ContinuanceDirective,
     RestartFile,
     RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
@@ -259,7 +259,7 @@ def test_continuance_transform_not_supported(test_working_dir: Path) -> None:
         and was written to the test directory, tmp_path.
     """
     with pytest.raises(NotImplementedError, match="supported"):
-        _ = ContinuanceTransform({"not-path": str(test_working_dir)})
+        _ = ContinuanceDirective({"not-path": str(test_working_dir)})
 
 
 def test_continuance_transform_path_dne() -> None:
@@ -267,7 +267,7 @@ def test_continuance_transform_path_dne() -> None:
     an exception being raised.
     """
     with pytest.raises(ValueError, match="No directory found"):
-        _ = ContinuanceTransform({"path": "./dir-that-dne"})
+        _ = ContinuanceDirective({"path": "./dir-that-dne"})
 
 
 @pytest.mark.parametrize("pad_size", range(1, 10))
@@ -302,7 +302,7 @@ def test_continuance_transform_happy_path(
         )
         reset_file_path = reset_file_path.rename(reset_file_path.with_name(name))
 
-    transform = ContinuanceTransform({"path": str(continue_from_dir)})
+    transform = ContinuanceDirective({"path": str(continue_from_dir)})
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()  # ensure nothing existing
 

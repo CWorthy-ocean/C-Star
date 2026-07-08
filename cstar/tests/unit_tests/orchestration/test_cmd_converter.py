@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import ContinuanceTransform
+from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.file_system import RomsFileSystemManager
@@ -264,7 +264,7 @@ def test_convert_step_to_preprocessed_roms_sim_no_reset_files(
     config = {"path": fsm.joined_output_dir}
 
     with pytest.raises(CstarExpectationFailed, match="No restart files"):
-        _ = ContinuanceTransform(config)
+        _ = ContinuanceDirective(config)
 
 
 def test_continuance_transform(
@@ -290,7 +290,7 @@ def test_continuance_transform(
     assert original_bp.initial_conditions.data, "data list is unexpectedly empty"
     original_ic = original_bp.initial_conditions.data[0].location
 
-    trx = ContinuanceTransform(config={"path": str(fsm.joined_output_dir)})
+    trx = ContinuanceDirective(config={"path": str(fsm.joined_output_dir)})
 
     transformed_step = next(iter(trx(step)), None)
     assert transformed_step, "Transform didn't return a transformed step"
@@ -303,7 +303,7 @@ def test_continuance_transform(
     assert bp_path_after != bp_path_before, "New step must reference a new blueprint"
 
     # confirm the path includes a suffix specified by the transform
-    assert ContinuanceTransform.suffix() in str(bp_path_after)
+    assert ContinuanceDirective.suffix() in str(bp_path_after)
 
     bp = deserialize(bp_path_after, RomsMarblBlueprint)
     assert bp.initial_conditions.data, "data list is unexpectedly empty"
