@@ -18,7 +18,7 @@ from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import Workplan, WorkplanState
+from cstar.orchestration.models import Step, Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import (
     ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
@@ -75,21 +75,21 @@ def hw_single_step_wp_path(
 @pytest.fixture
 def hw_single_step_wp(
     hw_single_step_wp_path: Path,
-) -> Workplan:
+) -> Workplan[Step]:
     """Return a workplan containing a single step that runs the hello_world application.
 
     Returns
     -------
     Workplan
     """
-    return deserialize(hw_single_step_wp_path, Workplan)
+    return deserialize(hw_single_step_wp_path, Workplan[Step])
 
 
 @pytest.fixture
 def heterogeneous_workplan_path(
     tmp_path: Path,
-    hw_single_step_wp: Workplan,
-    single_step_workplan: Workplan,
+    hw_single_step_wp: Workplan[Step],
+    single_step_workplan: Workplan[Step],
 ) -> Path:
     """Return the path to a workplan containing steps triggering different applications.
 
@@ -108,7 +108,7 @@ def heterogeneous_workplan_path(
     -------
     Path
     """
-    wp = Workplan(
+    wp = Workplan[Step](
         name="heterogeneous-workplan",
         description="This is a test workplan containing steps triggering different applications",
         state=WorkplanState.Draft,
@@ -224,7 +224,7 @@ async def test_hello_world_workplan(
     wp_path.write_text(wp_yaml)
 
     # ensure the read succeeds
-    workplan = deserialize(wp_path, Workplan)
+    workplan = deserialize(wp_path, Workplan[Step])
     assert workplan.name == expected_name
     assert workplan.description == expected_description
     assert workplan.state == draft_state
@@ -238,7 +238,7 @@ async def test_hello_world_workplan(
     assert serialize(wp_copy, workplan), "Failed to serialize workplan"
 
     # and sanity check the copy that was loaded
-    workplan_copy = deserialize(wp_copy, Workplan)
+    workplan_copy = deserialize(wp_copy, Workplan[Step])
     assert workplan_copy.name == workplan_copy.name
     assert workplan_copy.description == workplan_copy.description
     assert workplan_copy.state == workplan_copy.state

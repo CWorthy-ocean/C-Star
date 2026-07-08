@@ -60,7 +60,7 @@ def preload_step(context: typer.Context, step_name: str) -> str:
         msg = "A run-id is required to retrieve steps"
         raise typer.BadParameter(msg, param_hint="run_id")
 
-    wp = get_from_ctxmap(context, "workplan", Workplan)
+    wp = get_from_ctxmap(context, "workplan", Workplan[LiveStep])
     step = next((x for x in wp.steps if step_name in {x.name, x.safe_name}), None)
 
     if step is None:

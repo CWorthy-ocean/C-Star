@@ -64,7 +64,7 @@ def step_overiding_wp(
     wp_templates_dir: Path,
     bp_templates_dir: Path,
     default_blueprint_path: str,
-) -> Workplan:
+) -> Workplan[Step]:
     """Copy a template containing blueprint overrides to the test tmp_path.
 
     The step specifies overrides for the blueprint fields:
@@ -112,7 +112,7 @@ def step_overiding_wp(
         test_working_dir_override.as_posix(),
     )
     test_wp_path.write_text(wp_content)
-    wp = deserialize(test_wp_path, Workplan)
+    wp = deserialize(test_wp_path, Workplan[Step])
 
     return wp
 
@@ -150,7 +150,7 @@ def test_get_transforms_empty() -> None:
 
 
 def test_override_transform(
-    step_overiding_wp: Workplan,
+    step_overiding_wp: Workplan[Step],
     test_working_dir: Path,
     test_working_dir_override: Path,
 ) -> None:
@@ -207,7 +207,7 @@ def test_override_transform(
 
 def test_override_transform_system_precedence(
     tmp_path: Path,
-    step_overiding_wp: Workplan,
+    step_overiding_wp: Workplan[Step],
     test_working_dir: Path,
 ) -> None:
     """Verify that system-level overrides passed to the transform override
@@ -271,7 +271,7 @@ def test_continuance_transform_path_dne() -> None:
 
 @pytest.mark.parametrize("pad_size", range(1, 10))
 def test_continuance_transform_happy_path(
-    single_step_workplan: Workplan,
+    single_step_workplan: Workplan[Step],
     mocked_simulation_outputs: tuple[Path, Path, Path],
     pad_size: int,
 ) -> None:
@@ -322,7 +322,7 @@ def test_continuance_transform_happy_path(
 
 def test_workplan_transformer_applies_working_dir_overrides(
     tmp_path: Path,
-    step_overiding_wp: Workplan,
+    step_overiding_wp: Workplan[Step],
     test_working_dir: Path,
     test_working_dir_override: Path,
 ) -> None:
@@ -355,7 +355,7 @@ def test_workplan_transformer_applies_working_dir_overrides(
     ):
         wp_trx = wp_transformer.apply()
 
-    step_trx = t.cast("LiveStep", wp_trx.steps[0])
+    step_trx = wp_trx.steps[0]
 
     # sanity-check expectations for the original blueprint output location and override
     dir_orig = bp_orig.working_dir

@@ -78,7 +78,7 @@ def test_sleep_transform_registry(application: str) -> None:
     assert not transform
 
 
-def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
+def test_splitter(single_step_workplan: Workplan[Step], tmp_path: Path) -> None:
     """Verify the splitter returns the expected steps for a given time range."""
     transform = RomsMarblTimeSplitter()
 

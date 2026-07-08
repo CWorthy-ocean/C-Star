@@ -33,7 +33,7 @@ def draw_graph(planner: Planner) -> None:
 @pytest.fixture
 async def layered_workplan(
     tmp_path: Path,
-) -> AsyncGenerator[tuple[Workplan, dict[str, LocalHandle]]]:
+) -> AsyncGenerator[tuple[Workplan[Step], dict[str, LocalHandle]]]:
     """Create a layered workplan with the structure:
     0
     | \
@@ -108,7 +108,7 @@ async def layered_workplan(
 
             steps.append(step)
 
-        workplan = Workplan(
+        workplan = Workplan[Step](
             name="test-wp-with-dependencies",
             description="A workplan with nested dependencies demonstrating dependency-based status",
             steps=steps,
@@ -159,7 +159,7 @@ async def layered_workplan(
 async def test_dag_runner_load_run_state(
     open_indices: list[str],
     closed_indices: list[str],
-    layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
+    layered_workplan: tuple[Workplan[Step], dict[str, LocalHandle]],
 ) -> None:
     """Verify the status output matches expectations when all states are a single value."""
     workplan, handles = layered_workplan
@@ -228,7 +228,7 @@ async def test_dag_runner_load_run_state(
 async def test_dag_runner_get_status_detail_map(
     open_indices: list[str],
     closed_indices: list[str],
-    layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
+    layered_workplan: tuple[Workplan[Step], dict[str, LocalHandle]],
 ) -> None:
     """Verify the status output matches expectations when both open and closed tasks exist."""
     workplan, handles = layered_workplan

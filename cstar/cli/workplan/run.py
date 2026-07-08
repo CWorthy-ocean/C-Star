@@ -42,7 +42,7 @@ from cstar.orchestration.dag_runner import (
     ExecutiveStepSummary,
     build_and_run_dag,
 )
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import ProcessHandle
 from cstar.orchestration.serialization import (
     try_deserialize,
@@ -319,7 +319,9 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     msg = f"Workplan not found at path: {workplan_path}"
                     raise typer.BadParameter(msg)
 
-                validation_result = validate_serialized_entity(local_path, Workplan)
+                validation_result = validate_serialized_entity(
+                    local_path, Workplan[Step]
+                )
                 if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"

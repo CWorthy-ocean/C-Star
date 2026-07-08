@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from cstar.orchestration.models import Step, Workplan
-from cstar.orchestration.orchestration import Planner
+from cstar.orchestration.orchestration import LiveStep, Planner
 from cstar.orchestration.serialization import deserialize
 
 
@@ -16,7 +16,7 @@ def the_workplan(
     tmp_path: Path,
     fill_workplan_template: Callable[[dict[str, t.Any]], str],
     complete_workplan_template_input: dict[str, t.Any],
-) -> Workplan:
+) -> Workplan[Step]:
     """Create a valid workplan.
 
     Parameters
@@ -35,7 +35,7 @@ def the_workplan(
     yaml_path = tmp_path / "workplan.yaml"
     yaml_path.write_text(wp_yaml)
 
-    return deserialize(yaml_path, Workplan)
+    return deserialize(yaml_path, Workplan[Step])
 
 
 @pytest.mark.parametrize(
@@ -46,31 +46,35 @@ def the_workplan(
 )
 def test_planner_no_tasks(
     planner_type: type[Planner],
-    the_workplan: Workplan,
+    the_workplan: Workplan[Step],
 ) -> None:
     """Verify that planners do not blow up when supplied with an empty plan.
 
     Use object.__setattr__ to simulate an unexpected change to the model validation.
     - purposefully modifying the value of a frozen attribute
     """
-    object.__setattr__(the_workplan, "steps", [])
-    planner = planner_type(the_workplan)
+    content = the_workplan.model_dump()
+    content["steps"] = [LiveStep.from_step(s) for s in the_workplan.steps]
+    wp = Workplan[LiveStep](**content)
+
+    object.__setattr__(wp, "steps", [])
+    planner = planner_type(wp)
 
     plan = list(planner.flatten())
     assert len(plan) == 0
 
 
-def get_graph_plan_size(plan: Workplan) -> int:
+def get_graph_plan_size(plan: Workplan[Step]) -> int:
     """Compute the number of nodes expected in a graph planner."""
     return len(plan.steps)  # the planner should skips the start step
 
 
-def get_serial_plan_size(plan: Workplan) -> int:
+def get_serial_plan_size(plan: Workplan[Step]) -> int:
     """Compute the number of nodes expected in a serial planner."""
     return len(plan.steps)
 
 
-def get_monitored_graph_plan_size(plan: Workplan) -> int:
+def get_monitored_graph_plan_size(plan: Workplan[Step]) -> int:
     """Compute the number of nodes expected in a monitored graph planner."""
     return 2 * len(plan.steps)
 
@@ -87,7 +91,7 @@ def get_monitored_graph_plan_size(plan: Workplan) -> int:
 def test_planner_with_tasks(
     planner_type: type[Planner],
     num_steps: int,
-    node_fn: Callable[[Workplan], int],
+    node_fn: Callable[[Workplan[Step]], int],
     gen_fake_steps: Callable[[int], Generator[Step, None, None]],
     # the_workplan: Workplan,
 ) -> None:
@@ -105,8 +109,8 @@ def test_planner_with_tasks(
         A generator function to produce minimally valid test steps
 
     """
-    steps = list(gen_fake_steps(num_steps))
-    plan = Workplan(
+    steps = [LiveStep.from_step(s) for s in gen_fake_steps(num_steps)]
+    plan = Workplan[LiveStep](
         name="test-plan",
         description="test-description",
         steps=steps,
@@ -168,12 +172,12 @@ def test_planner_bfs_breaker(
     # O0--O1--O2--O3--05-->End
     assert num_steps >= 2, "Test assumes at least two tasks"  # noqa: PLR2004
 
-    steps = list(gen_fake_steps(num_steps))
+    steps = [LiveStep.from_step(s) for s in gen_fake_steps(num_steps)]
 
     for source, target in deps:
         steps[target].depends_on.append(steps[source].name)
 
-    plan = Workplan(
+    plan = Workplan[LiveStep](
         name="test-plan",
         description="test-description",
         steps=steps,

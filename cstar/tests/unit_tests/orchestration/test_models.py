@@ -579,7 +579,7 @@ def test_workplan_defaults(
     name = f"test-plan-{uuid.uuid4()}"
     description = f"test-desc-{uuid.uuid4()}"
 
-    plan = Workplan(
+    plan = Workplan[Step](
         name=name,
         description=description,
         steps=steps,
@@ -711,7 +711,7 @@ def test_workplan_steps_validation(invalid_value: list[str | None] | None) -> No
     description = f"test-desc-{uuid.uuid4()}"
 
     with pytest.raises(ValidationError) as error:
-        _ = Workplan(
+        _ = Workplan[Step](
             name=name,
             description=description,
             steps=invalid_value,  # type: ignore[arg-type]
@@ -783,7 +783,7 @@ def test_workplan_compute_environment(
         A generator function to produce minimally valid test steps
     """
     steps = list(gen_fake_steps(5))
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=steps,
@@ -805,7 +805,7 @@ def test_workplan_json_serialize(
 
     """
     fake_steps = list(gen_fake_steps(1))
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=fake_steps,
@@ -840,7 +840,7 @@ def test_workplan_yaml_serialize(
         Temporarily write a yaml document to disk for manual test review of failures.
 
     """
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(1)),
@@ -885,7 +885,7 @@ def test_workplan_yaml_deserialize(
         Temporarily write a yaml document to disk to ensure deserialization.
 
     """
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(1)),
@@ -894,7 +894,7 @@ def test_workplan_yaml_deserialize(
     yaml_path = tmp_path / "test.yaml"
     _ = serialize(yaml_path, plan)
 
-    plan2 = t.cast("Workplan", deserialize(yaml_path, Workplan))
+    plan2 = deserialize(yaml_path, Workplan[Step])
     # todo: fix so this str conversion isn't required.
     for step in plan.steps:
         step.blueprint_path = str(step.blueprint_path)
@@ -914,7 +914,7 @@ def test_workplan_step_copy(
 
     """
     steps = list(gen_fake_steps(2))
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=steps,
@@ -950,7 +950,7 @@ def test_workplan_step_set(
 
     """
     steps = list(gen_fake_steps(2))
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(1)),
@@ -975,7 +975,7 @@ def test_workplan_runtimevars_copy(
     """
     runtime_vars = ["a", "b", "c"]
 
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),
@@ -1010,7 +1010,7 @@ def test_workplan_runtimevars_set(
     """
     runtime_vars = ["a", "b", "c"]
 
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),
@@ -1036,7 +1036,7 @@ def test_workplan_runtimevars_duplicates(
     runtime_vars = ["a", "a", "c"]
 
     with pytest.raises(ValidationError) as error:
-        _ = Workplan(
+        _ = Workplan[Step](
             name="test-plan",
             description="test-description",
             steps=list(gen_fake_steps(2)),
@@ -1059,7 +1059,7 @@ def test_workplan_computeenv_copy(
     """
     compute_env: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
 
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),
@@ -1094,7 +1094,7 @@ def test_workplan_computeenv_set(
     """
     compute_env: KeyValueStore = {"a": 1, "b": 2, "c": "xyz"}
 
-    plan = Workplan(
+    plan = Workplan[Step](
         name="test-plan",
         description="test-description",
         steps=list(gen_fake_steps(2)),

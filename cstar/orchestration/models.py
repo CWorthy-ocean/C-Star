@@ -277,7 +277,10 @@ class Step(BaseModel):
         return slugify(self.name)
 
 
-class Workplan(BaseModel):
+TStep = t.TypeVar("TStep", bound=Step, covariant=True)
+
+
+class Workplan(BaseModel, t.Generic[TStep]):
     """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
@@ -286,7 +289,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: Sequence[SerializeAsAny[Step]] = Field(
+    steps: Sequence[SerializeAsAny[TStep]] = Field(
         min_length=1,
         frozen=True,
     )
@@ -310,7 +313,7 @@ class Workplan(BaseModel):
 
     @field_validator("steps", mode="before")
     @classmethod
-    def _deep_copy_steps(cls, value: list[Step]) -> list[Step]:
+    def _deep_copy_steps(cls, value: list[TStep]) -> list[TStep]:
         """Ensure the steps provided are deep copied to avoid external change propagation.
 
         Parameters
@@ -348,7 +351,7 @@ class Workplan(BaseModel):
 
     @field_validator("steps", mode="after")
     @classmethod
-    def _check_steps(cls, value: list[Step]) -> list[Step]:
+    def _check_steps(cls, value: list[TStep]) -> list[TStep]:
         """Verify step names are unique.
 
         Parameters
@@ -378,7 +381,7 @@ class Workplan(BaseModel):
 
     @field_validator("steps", mode="after")
     @classmethod
-    def _check_dependencies(cls, value: list[Step]) -> list[Step]:
+    def _check_dependencies(cls, value: list[TStep]) -> list[TStep]:
         """Verify the keys named in dependencies are valid step names.
 
         Parameters
@@ -395,7 +398,7 @@ class Workplan(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _model_validator(self) -> "Workplan":
+    def _model_validator(self) -> "Workplan[TStep]":
         """Validate attribute relationships."""
         return self
 

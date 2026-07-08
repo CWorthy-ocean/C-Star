@@ -19,6 +19,7 @@ from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
@@ -82,7 +83,7 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
         repo = TrackingRepository()
 
         if wp_run := await repo.get_workplan_run(run_id):
-            wp = deserialize(wp_run.trx_workplan_path, Workplan)
+            wp = deserialize(wp_run.trx_workplan_path, Workplan[LiveStep])
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:
@@ -369,7 +370,7 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     set_ctxmap(context, "run", wp_run)
 
     wp_path = wp_run.trx_workplan_path
-    wp = try_deserialize(wp_path, Workplan)
+    wp = try_deserialize(wp_path, Workplan[LiveStep])
     if not wp:
         msg = f"Unable to deserialize workplan for run {run_id!r} from {str(wp_path)!r}"
         raise typer.BadParameter(

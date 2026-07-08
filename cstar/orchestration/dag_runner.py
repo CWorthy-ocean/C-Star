@@ -254,7 +254,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     -------
     DagStatus
     """
-    wp = deserialize(wp_run.trx_workplan_path, Workplan)
+    wp = deserialize(wp_run.trx_workplan_path, Workplan[LiveStep])
     msg = f"Reloading workplan run: {wp.name}"
     log.debug(msg)
 
@@ -314,7 +314,7 @@ async def prepare_workplan(
     output_dir: Path,
     run_id: str,
     user_variables: Mapping[str, str] | None = None,
-) -> tuple[Workplan, Path]:
+) -> tuple[Workplan[LiveStep], Path]:
     """Load the workplan and apply any applicable transforms.
 
     Parameters
@@ -338,7 +338,7 @@ async def prepare_workplan(
     ValueError
         If the expected and provided user variables are not in agreement.
     """
-    wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
+    wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan[Step])
     run_root_dir = output_dir / run_id
 
     fill_transform: TemplateFillTransform | None = None
@@ -484,8 +484,9 @@ class ExecutiveRunSummary(BaseModel):
         cls,
         run: WorkplanRun,
     ) -> "ExecutiveRunSummary":
-        workplan = deserialize(run.trx_workplan_path, Workplan)
-        steps = [LiveStep.from_step(s) for s in workplan.steps]
+        plan_path = run.trx_workplan_path
+        workplan = deserialize(plan_path, Workplan[LiveStep])
+        steps = workplan.steps
         step_summaries: list[ExecutiveStepSummary] = []
 
         sentinels = await asyncio.gather(

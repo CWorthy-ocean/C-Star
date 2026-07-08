@@ -21,6 +21,7 @@ from cstar.orchestration.models import (
     Application,
     Blueprint,
     KeyValueStore,
+    Step,
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep
@@ -358,10 +359,10 @@ class TemplateFillTransform:
 class WorkplanTransformer(LoggingMixin):
     """Transform a workplan by applying transforms to its steps."""
 
-    original: Workplan
+    original: Workplan[Step]
     """The original, pre-transformation workplan."""
 
-    _transformed: Workplan | None = None
+    _transformed: Workplan[LiveStep] | None = None
     """The post-transformation workplan."""
 
     DERIVED_PATH_SUFFIX: t.Literal["_trx"] = "_trx"
@@ -369,7 +370,7 @@ class WorkplanTransformer(LoggingMixin):
 
     def __init__(
         self,
-        wp: Workplan,
+        wp: Workplan[Step],
         fill_transform: TemplateFillTransform | None = None,
     ) -> None:
         """Initialize the instance."""
@@ -391,7 +392,7 @@ class WorkplanTransformer(LoggingMixin):
         return dump_a != dump_b
 
     @property
-    def transformed(self) -> Workplan:
+    def transformed(self) -> Workplan[LiveStep]:
         """Return the transformed workplan.
 
         Returns
@@ -443,7 +444,7 @@ class WorkplanTransformer(LoggingMixin):
 
         return directory / filename
 
-    def apply(self) -> Workplan:
+    def apply(self) -> Workplan[LiveStep]:
         """Create a new workplan with appropriate transforms applied.
 
         Returns
@@ -505,12 +506,10 @@ class WorkplanTransformer(LoggingMixin):
                 trx_step.depends_on.clear()
                 trx_step.depends_on.extend(depends_on)
 
-        self._transformed = self.original.model_copy(
-            update={
-                "steps": transformed_steps,
-                "name": f"{self.original.name} (transformed)",
-            },
-        )
+        dumped = self.original.model_dump(by_alias=True)
+        dumped["steps"] = transformed_steps
+        dumped["name"] = f"{self.original.name} (transformed)"
+        self._transformed = Workplan(**dumped)
 
         return self._transformed
 

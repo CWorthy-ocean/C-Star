@@ -292,7 +292,7 @@ class LiveStep(Step):
     def from_step(
         cls,
         step: Step,
-        parent: "LiveStep | Step | None" = None,
+        parent: "LiveStep | None" = None,
         update: Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
         """Convert a step from orchestration planning into a LiveStep.
@@ -301,7 +301,7 @@ class LiveStep(Step):
         ----------
         step : Step
             The step to convert
-        parent : LiveStep | Step | None (default: None)
+        parent : LiveStep | None (default: None)
             The parent of the converted step
         update : Mapping[str, t.Any]
             A mapping of updates to apply to the step
@@ -350,7 +350,7 @@ class Task(BaseModel, t.Generic[_THandle]):
 class Planner(LoggingMixin):
     """Identifies depdendencies of a workplan to produce an execution plan."""
 
-    workplan: Workplan
+    workplan: Workplan[LiveStep]
     """The workplan to plan."""
 
     graph: "DiGraph"
@@ -358,7 +358,7 @@ class Planner(LoggingMixin):
 
     def __init__(
         self,
-        workplan: Workplan,
+        workplan: Workplan[LiveStep],
     ) -> None:
         """Initialize the planner and build an execution graph.
 
@@ -371,7 +371,7 @@ class Planner(LoggingMixin):
         self.graph = Planner._workplan_to_graph(workplan)
 
     @classmethod
-    def _workplan_to_graph(cls, workplan: Workplan) -> "DiGraph":
+    def _workplan_to_graph(cls, workplan: Workplan[Step]) -> "DiGraph[str]":
         """Convert a workplan into a graph for planning.
 
         Parameters
@@ -393,7 +393,7 @@ class Planner(LoggingMixin):
         defaults = {
             n.name: {
                 KEY_STATUS: Status.Unsubmitted,
-                KEY_STEP: LiveStep.from_step(n),
+                KEY_STEP: n,
                 KEY_TASK: None,
             }
             for n in workplan.steps

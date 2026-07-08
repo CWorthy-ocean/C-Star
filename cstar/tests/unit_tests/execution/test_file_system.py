@@ -132,7 +132,7 @@ def test_live_step(tmp_path: Path) -> None:
     step_3 = Step(name="C", application="roms_marbl", blueprint=bp.as_posix())
 
     ls_1 = LiveStep.from_step(step_1)
-    ls_2 = LiveStep.from_step(step_2, step_1)  # use plan "Step" as parent
+    ls_2 = LiveStep.from_step(step_2, ls_1)  # use plan "Step" as parent
     ls_3 = LiveStep.from_step(step_3, ls_2)  # use "LiveStep" as parent
     ls_4 = LiveStep.from_step(ls_3)  # step from another live step
 
