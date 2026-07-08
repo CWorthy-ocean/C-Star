@@ -1,7 +1,7 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
@@ -401,7 +401,7 @@ class Planner(LoggingMixin):
         nx.set_node_attributes(g, values=defaults)
         return g
 
-    def flatten(self) -> Iterable[Step]:
+    def flatten(self) -> Sequence[Step]:
         """Return the planned steps in execution order.
 
         Returns
@@ -416,7 +416,7 @@ class Planner(LoggingMixin):
 
         keys = nx.topological_sort(self.graph)
         steps = self.retrieve_all(KEY_STEP, filter_fn=f)
-        return [steps[k] for k in keys]
+        return tuple(steps[k] for k in keys)
 
     @t.overload
     def store(self, n: str, key: t.Literal["status"], value: Status) -> None: ...
