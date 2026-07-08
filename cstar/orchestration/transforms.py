@@ -354,6 +354,14 @@ class TemplateFillTransform:
         """
         return (LiveStep.from_step(self._fill(step)),)
 
+    @property
+    def variable_resolver(self) -> Callable[[str], str] | None:
+        return self._variable_resolver
+
+    @property
+    def scoped_resolver(self) -> Callable[[str, str], str] | None:
+        return self._scoped_resolver
+
 
 class WorkplanTransformer(LoggingMixin):
     """Transform a workplan by applying transforms to its steps."""
