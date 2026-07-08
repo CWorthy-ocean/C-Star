@@ -527,14 +527,20 @@ def _build_code(model: dict[str, Any], templates_repo: CodeRepo) -> Code:
 
     templates = model.get("templates", {}) or {}
 
+    # Optional per-ModelSpec pin of the forge commit serving the templates. When set it
+    # overrides the default branch (main); until pinned, template edits change build
+    # output without a content_hash bump (see docs/executor-portability-plan.md).
+    pinned_commit = templates.get("commit")
+
     def _template(stage) -> TemplateRepo:
         t = templates.get(stage, {}) or {}
         files = (t.get("filter", {}) or {}).get("files", []) or []
         return TemplateRepo(
             location=templates_repo.location,
-            commit=templates_repo.commit,
-            branch=templates_repo.branch,
-            directory=t.get("location"),
+            commit=pinned_commit or templates_repo.commit,
+            branch=None if pinned_commit else templates_repo.branch,
+            # repo-root-relative dir (legacy key: `location`)
+            directory=t.get("directory", t.get("location")),
             files=list(files),
         )
 

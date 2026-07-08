@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import os
+import shutil
 import sys
 import warnings
 from datetime import datetime
@@ -22,6 +23,7 @@ import yaml
 from cstar.applications.core import RunnerRequest
 from cstar.applications.roms_marbl.app import RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_IN_ACTIVE_ALLOCATION,
@@ -938,32 +940,41 @@ class ForgeExecutor(BaseModel):
             ),
         )
 
-    def _template_dir(self, stage: str) -> Path:
-        """Local directory holding the ``stage`` (``compile_time`` / ``run_time``)
-        templates, derived from ``code_spec``.
+    def _template_repo_args(self, stage: str) -> dict[str, Any]:
+        """C-Star :class:`AdditionalCode` constructor args for the ``stage``
+        (``compile_time`` / ``run_time``) templates, read purely from ``code_spec``.
 
-        The SpecConfig carries the template repo (git ``location`` + ``commit``/``branch``)
-        plus an in-repo ``directory``; the template files ship inside this package's bundled
-        catalog, so the local render source is
-        ``<pkg>/catalog/ModelSpec/<model_name>/<directory>``.
-
-        (Judgment call / follow-up: this is the one spot that reads from the bundled
-        catalog directory rather than purely from cfg+host. Decision #4 in the plan is to
-        fetch the templates from ``code_spec.templates_*`` git refs at processing time;
-        that git-fetch is the remaining follow-up. The read uses a bare ``import
-        cstar_forge`` for ``__file__`` only — no authoring module is imported, so the
-        forge-app boundary stays clean.)
+        The SpecConfig carries the template repo (git ``location`` + ``commit``/``branch``,
+        an in-repo ``directory``, and the ``files`` filter). This is the single seam the
+        offline test fixture overrides to point ``location`` at a local template directory
+        (see ``tests/conftest.py``); production leaves the git ref intact.
         """
-        import cstar_forge
-
         repo = getattr(self.code_spec, f"templates_{stage}")
-        return (
-            Path(cstar_forge.__file__).parent
-            / "catalog"
-            / "ModelSpec"
-            / self.model_name
-            / repo.directory
-        )
+        return {
+            "location": str(repo.location),
+            "subdir": repo.directory or "",
+            "checkout_target": repo.commit or repo.branch or "",
+            "files": list(repo.files),
+        }
+
+    def _stage_templates(self, stage: str) -> Path:
+        """Stage the ``stage`` template files locally and return their directory.
+
+        Reuses C-Star's :class:`AdditionalCode` to materialize the templates from the
+        ``code_spec`` git ref: a remote repo (``https://…`` + commit/branch) fetches the
+        filtered files; a local directory copies them. Nothing is read from the bundled
+        catalog, so the executor stays relocatable (decision #4 in the portability plan).
+
+        Reproducibility caveat (deferred follow-up): the resolver currently pins the
+        template repo by ``branch`` (``main``), not a commit, and ``code.templates_*.location``
+        participates in ``content_hash`` — so a template edit changes build output without a
+        hash bump until a commit is pinned. Tracked in docs/executor-portability-plan.md.
+        """
+        dest = self._require_host().working_dir / "templates" / stage
+        if dest.exists():
+            shutil.rmtree(dest)
+        AdditionalCode(**self._template_repo_args(stage)).get(local_dir=dest)
+        return dest
 
     def _template_files(self, stage: str) -> list[str]:
         """File list for the ``stage`` templates (from ``code_spec``)."""
@@ -1755,7 +1766,7 @@ class ForgeExecutor(BaseModel):
         }
         compile_time_code = render_roms_settings(
             template_files=["cppdefs.opt.j2"],
-            template_dir=self._template_dir("compile_time"),
+            template_dir=self._stage_templates("compile_time"),
             settings_dict=cppdefs_render_dict,
             code_output_dir=self.compile_time_code_dir,
             n_tracers=n_tracers,
@@ -1773,7 +1784,7 @@ class ForgeExecutor(BaseModel):
         if run_time_static_files:
             _copied = render_roms_settings(
                 template_files=run_time_static_files,
-                template_dir=self._template_dir("run_time"),
+                template_dir=self._stage_templates("run_time"),
                 settings_dict={},  # plain copy — no template variables needed
                 code_output_dir=self.run_time_code_dir,
             )

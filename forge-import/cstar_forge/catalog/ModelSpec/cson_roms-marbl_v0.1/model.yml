@@ -1,12 +1,19 @@
+# Render templates live at the forge repo root (templates/), decoupled from this
+# ModelSpec: they track a ROMS version, change infrequently, and may move into the
+# ucla-roms repo later. `directory` is relative to the repo root. At processing time
+# the executor fetches these via C-Star's AdditionalCode from the forge git ref.
+# Pin the serving forge commit with `commit:` (until pinned, the resolver defaults to
+# branch `main`).
 templates:
+  # commit: <forge-sha>   # pin the forge commit that serves these templates
   compile_time:
-    location: "templates/compile-time"
+    directory: "templates/compile-time"
     filter:
       files:
       - cppdefs.opt.j2
 
   run_time:
-    location: "templates/run-time"
+    directory: "templates/run-time"
     filter:
       files:
       - marbl_in

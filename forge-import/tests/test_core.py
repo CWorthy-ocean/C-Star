@@ -633,10 +633,11 @@ class TestForgeExecutorBuildAndRun:
                 assert "compile_time" in blueprint_data["code"]
                 assert "location" in blueprint_data["code"]["compile_time"]
 
-    def test_build_uses_compile_time_template_dir(
+    def test_build_stages_compile_time_templates(
         self, minimal_cstar_spec_builder_args
     ):
-        """Test that configure_build() uses the compile-time templates subdirectory."""
+        """configure_build() stages the compile-time templates (via C-Star
+        AdditionalCode) and renders from that staged directory."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         with patch(
@@ -654,13 +655,37 @@ class TestForgeExecutorBuildAndRun:
             compile_time_calls = [
                 call
                 for call in mock_render.call_args_list
-                if "compile-time" in str(call.kwargs.get("template_dir", ""))
+                if "compile_time" in str(call.kwargs.get("template_dir", ""))
             ]
             assert len(compile_time_calls) > 0
             template_dir = compile_time_calls[0].kwargs.get("template_dir")
             assert template_dir is not None
-            assert str(template_dir).endswith("compile-time")
             assert "templates" in str(template_dir)
+            # Staging really ran (offline, from the working tree): the template file
+            # was materialized into the staged directory.
+            assert (Path(template_dir) / "cppdefs.opt.j2").exists()
+
+    @pytest.mark.real_template_staging
+    def test_template_repo_args_map_from_code_spec(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """The (unpatched) cfg->AdditionalCode-args mapping forwards the git ref from
+        code.templates_* verbatim — the Forge side of the fetch that CI can't run live."""
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        for stage in ("compile_time", "run_time"):
+            repo = getattr(builder.code_spec, f"templates_{stage}")
+            args = builder._template_repo_args(stage)
+            assert args["location"] == str(repo.location)
+            assert args["subdir"] == (repo.directory or "")
+            assert args["checkout_target"] == (repo.commit or repo.branch or "")
+            assert args["files"] == list(repo.files)
+        # Resolver default: github repo + branch main, repo-root-relative directory.
+        ct = builder._template_repo_args("compile_time")
+        assert ct["location"].endswith("cstar-forge.git")
+        assert ct["subdir"] == "templates/compile-time"
+        assert ct["checkout_target"] == "main"
+        assert ct["files"] == ["cppdefs.opt.j2"]
 
 
 class TestForgeExecutorPathBlueprint:

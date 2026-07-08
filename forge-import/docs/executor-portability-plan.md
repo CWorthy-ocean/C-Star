@@ -30,8 +30,21 @@ reads **only** the `SpecConfig` + an injected runtime location, so the entire
    `source_data_cache`. **Results-affecting → stays IN the hash.**
 3. **`source_data` cache** — a separate injected host cache (shared across runs), not under
    `working_dir`.
-4. **Templates** — fetched from the repo refs already in `cfg.code.templates_*` (like code),
-   not embedded.
+4. **Templates** — fetched from the repo refs in `cfg.code.templates_*` (like code), not
+   embedded. **DONE** (2026-07-08): the render templates (`cppdefs.opt.j2`, `marbl_in`)
+   moved out of the bundled ModelSpec to repo-root `templates/` (decoupled — they track a
+   ROMS version and may move into ucla-roms later). `ForgeExecutor._stage_templates(stage)`
+   materializes them at processing via C-Star's `AdditionalCode` (remote repo → raw-file
+   fetch; local dir → copy) under `host.working_dir/templates/<stage>`; the old
+   `_template_dir` bundled-catalog read (`import cstar_forge` for `__file__`) is gone, so
+   the executor no longer touches the package/catalog. Tests stage offline from the working
+   tree via a conftest seam that redirects `location` (real `AdditionalCode` local-copy,
+   no network/clone/mock). **Deferred reproducibility follow-up:** the resolver still pins
+   the template repo by `branch` (`main`), not a commit, and `code.templates_*.location`
+   participates in `content_hash` — so a template edit changes build output without a hash
+   bump, and a local test `location` perturbs the (unasserted) hash. Model.yml has a
+   `templates.commit:` pin hook; the principled fix is to pin a commit and hash the
+   template *version* (commit/directory/files) rather than the fetch `location`.
 5. **Settings** — `cfg.model_settings` is authoritative; the executor uses it directly and
    stops re-deriving defaults from `model_spec.settings` + overlaying.
 6. **`code`** — build the cstar `ROMSCompositeCodeRepository` from `cfg.code` at processing
