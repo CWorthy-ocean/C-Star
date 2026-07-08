@@ -206,7 +206,6 @@ class RomsMarblInputData(InputData):
     - Corrections
     """
 
-    model_spec: forge_models.ModelSpec
     grid: rt.Grid
     boundaries: forge_models.OpenBoundaries
     source_data: source_data.SourceData
@@ -214,10 +213,11 @@ class RomsMarblInputData(InputData):
     partitioning: cstar_models.PartitioningParameterSet
     cdr_forcing: dict | None = None
     forcing_override: dict[str, Any] | None = None
-    """When provided, overrides model_spec.inputs for initial_conditions and forcing
-    categories. Keys mirror the inputs block structure: 'initial_conditions', 'forcing'
-    (with sub-keys 'surface', 'boundary', 'tidal', 'river'). This is how the
-    SpecConfig's authored sources reach input generation instead of the model defaults."""
+    """The fully-resolved initial-conditions + forcing selection driving input generation.
+    Keys mirror the inputs block structure: 'initial_conditions', 'forcing' (with sub-keys
+    'surface', 'boundary', 'tidal', 'river'). Always supplied on the SpecConfig path (the
+    resolver fills it from the model default or an authored selection); the grid is generated
+    from the injected ``grid`` object regardless."""
     model_reference_date: datetime | None = None
     """ROMS model reference date (t=0). Forwarded to every rt object that accepts it.
     If None, roms-tools defaults to 2000-01-01."""
@@ -243,48 +243,24 @@ class RomsMarblInputData(InputData):
         super().__post_init__()
 
         input_list = []
-        model_inputs = self.model_spec.inputs
 
-        # Grid always comes from model_spec (it is not part of the forcing override).
-        if model_inputs.grid:
-            kwargs = (
-                model_inputs.grid.model_dump()
-                if hasattr(model_inputs.grid, "model_dump")
-                else {}
+        # Grid is always generated from the injected ``grid`` object (built by the
+        # executor); its handler ignores the entry kwargs, so an empty payload suffices.
+        input_list.append(("grid", {}))
+
+        # Initial conditions and forcing come from the fully-resolved forcing_override
+        # (filled by the Phase-1 resolver from the model default or an authored selection).
+        if self.forcing_override is None:
+            raise ValueError(
+                "RomsMarblInputData requires a forcing_override (resolved initial "
+                "conditions + forcing); none was provided."
             )
-            input_list.append(("grid", kwargs))
-
-        # Initial conditions and forcing: use forcing_override when provided (authored
-        # via the wizard / ForcingSpec selection), otherwise fall back to model defaults.
-        if self.forcing_override is not None:
-            fo = self.forcing_override
-            if fo.get("initial_conditions"):
-                input_list.append(
-                    ("initial_conditions", dict(fo["initial_conditions"]))
-                )
-            for category, items in (fo.get("forcing") or {}).items():
-                for item in items or []:
-                    input_list.append((f"forcing.{category}", dict(item)))
-        else:
-            # Default: derive from model_spec.inputs
-            if model_inputs.initial_conditions:
-                kwargs = (
-                    model_inputs.initial_conditions.model_dump()
-                    if hasattr(model_inputs.initial_conditions, "model_dump")
-                    else {}
-                )
-                input_list.append(("initial_conditions", kwargs))
-            if model_inputs.forcing:
-                for category in model_inputs.forcing.model_fields.keys():
-                    items = getattr(model_inputs.forcing, category, None)
-                    if items is not None:
-                        for item in items:
-                            kwargs = (
-                                item.model_dump()
-                                if hasattr(item, "model_dump")
-                                else dict(item)
-                            )
-                            input_list.append((f"forcing.{category}", kwargs))
+        fo = self.forcing_override
+        if fo.get("initial_conditions"):
+            input_list.append(("initial_conditions", dict(fo["initial_conditions"])))
+        for category, items in (fo.get("forcing") or {}).items():
+            for item in items or []:
+                input_list.append((f"forcing.{category}", dict(item)))
 
         # Optional user-provided CDR forcing via builder kwarg.
         # Merge with model-specified cdr_list if that input already exists.
@@ -318,12 +294,12 @@ class RomsMarblInputData(InputData):
             if "boundary" not in forcing_dict:
                 raise ValueError(
                     "Missing required 'boundary' forcing category. "
-                    "Boundary forcing must be specified in model_spec.inputs."
+                    "Boundary forcing must be specified in forcing_override."
                 )
             if "surface" not in forcing_dict:
                 raise ValueError(
                     "Missing required 'surface' forcing category. "
-                    "Surface forcing must be specified in model_spec.inputs."
+                    "Surface forcing must be specified in forcing_override."
                 )
 
         # Create ForcingConfiguration if we have forcing categories
@@ -587,24 +563,12 @@ class RomsMarblInputData(InputData):
         """
         Merge per-input defaults with runtime arguments.
 
-        Uses base_kwargs if provided (from input_list), otherwise looks up in model_spec.inputs.
+        Uses base_kwargs (always provided from input_list).
         Resolves "source" and "bgc_source" through SourceData.
         Merges with extra, where extra overrides defaults.
         """
-        # Use base_kwargs if provided (this comes from input_list)
-        if base_kwargs is not None:
-            cfg = dict(base_kwargs)
-        else:
-            # Fallback: try to get from model_spec.inputs structure
-            # This shouldn't normally be needed since base_kwargs should be provided
-            cfg = {}
-            if key == "grid":
-                if self.model_spec.inputs.grid:
-                    cfg = self.model_spec.inputs.grid.model_dump()
-            elif key == "initial_conditions":
-                if self.model_spec.inputs.initial_conditions:
-                    cfg = self.model_spec.inputs.initial_conditions.model_dump()
-            # For forcing categories, base_kwargs should always be provided from input_list
+        # base_kwargs always comes from input_list entries.
+        cfg = dict(base_kwargs) if base_kwargs is not None else {}
 
         # Resolve source blocks (convert SourceSpec Pydantic models to dicts with paths).
         # Skip None values — optional bgc_source etc. are absent when not configured.

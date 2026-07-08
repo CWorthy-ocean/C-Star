@@ -11,7 +11,6 @@ import copy
 import os
 import sys
 import warnings
-from dataclasses import asdict as dataclass_asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -38,42 +37,10 @@ from cstar.orchestration.utils import (
 )
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from cstar_forge import config
 from cstar_forge import models as forge_models
 from cstar_forge.forge import input_data, source_data
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
-from cstar_forge.util import (
-    compute_timestep_from_cfl,
-    compute_v_sponge_from_grid,
-    roms_tools_default_nesting_period_seconds,
-)
-
-
-def resolve_catalog_dir(catalog_root: str | Path | None) -> Path:
-    """
-    Resolve the absolute inner *catalog* directory (direct parent of ``blueprints/``).
-
-    Parameters
-    ----------
-    catalog_root
-        - ``None``: use ``config.paths.catalog`` (default data-tree location).
-        - ``"default"`` (case-insensitive string): same as ``None``; uses the user's
-          writable catalog at ``config.paths.catalog`` but without suppressing validation.
-        - ``"local"`` (case-insensitive string): use the package layout
-          ``<cstar_forge>/catalog`` (same as ``config.paths.here / "catalog"``); no extra
-          ``/catalog`` suffix is applied.
-        - Any other ``str`` or ``Path``: *outer* catalog anchor; the inner directory is
-          ``<resolved_anchor>/catalog`` (i.e. blueprints live at ``.../catalog/blueprints``).
-    """
-    if catalog_root is None:
-        return config.paths.catalog
-    if isinstance(catalog_root, str) and catalog_root.strip().lower() in ("local",):
-        return config.paths.here / "catalog"
-    if isinstance(catalog_root, str) and catalog_root.strip().lower() == "default":
-        return config.paths.catalog
-    outer = Path(catalog_root).expanduser().resolve()
-    return outer / "catalog"
 
 
 def _schedule_coroutine(coro):
@@ -205,19 +172,11 @@ class ForgeExecutor(BaseModel):
        - Blueprint persisted with runtime parameters
        - Model executable runs
 
-    **Settings overrides via files:**
+    **Settings:**
 
-    Use the optional ``override`` argument to pass one or more YAML files with
-    settings overrides. Each file may be either:
-    - a direct mapping of settings keys for one settings tree, or
-    - a mapping with ``compile_time`` and/or ``run_time`` sections.
-
-    Files are merged after model defaults are loaded. Only top-level keys that
-    already exist in the model defaults are applied; unknown keys are ignored
-    with a warning. Nested dicts are deep-merged so sparse override files can
-    change subsets of settings. Run-time overrides are applied after dynamic
-    fields (case title, output paths, and default timestepping from CFL) are
-    set, so you can still tune e.g. ``ndtfast`` or ``dt``.
+    The compile-time (``cppdefs``) and run-time (namelist) settings are seeded from the
+    resolved ``resolved_settings`` (the SpecConfig ``model_settings``); ``configure_build``
+    can overlay further overrides on top.
 
     **Key Concepts:**
 
@@ -225,9 +184,8 @@ class ForgeExecutor(BaseModel):
     - Blueprint state is persisted to disk at each stage transition
     - Grid object is created during initialization and reused throughout
     - Source data can be prepared independently via `ensure_source_data()`
-    - Optional ``catalog_root`` selects an *outer* anchor so blueprints and builds live under
-      ``<catalog_root>/catalog/`` (or use ``catalog_root='local'`` for the in-repo
-      ``cstar_forge/catalog`` tree; default uses ``config.paths.catalog``).
+    - All produced artifacts (inputs, blueprints, builds, run output) live under the
+      injected ``host.working_dir``.
 
     .. warning::
         This functionality is under active development and not yet fully implemented.
@@ -279,10 +237,9 @@ class ForgeExecutor(BaseModel):
         validate_default=False,
         exclude=True,
         description=(
-            "Injected runtime location (working_dir + source_data_cache + machine). When "
-            "set, produced artifacts go under host.working_dir and no host paths are read "
-            "from cstar_forge.config. None keeps the legacy config-derived paths "
-            "(transitional; being phased out)."
+            "Injected runtime location (working_dir + source_data_cache + machine "
+            "identity). Required for all produced-artifact paths and source-data caching; "
+            "the executor reads no host paths from cstar_forge.config."
         ),
     )
     source_dataset_keys: list[str] | None = Field(
@@ -290,51 +247,31 @@ class ForgeExecutor(BaseModel):
         validate_default=False,
         description=(
             "Resolved source-dataset keys to prepare (from the SpecConfig ``datasets``). "
-            "When None, falls back to the catalog ModelSpec's datasets (transitional). "
             "Distinct from the ``datasets`` property, which returns the *loaded* datasets."
         ),
     )
-    override: list[str | Path] | None = Field(default=None, validate_default=False)
+    resolved_settings: dict[str, Any] | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "Fully-resolved, host-independent settings (the SpecConfig ``model_settings``): "
+            "a flat mapping with ``cppdefs`` (compile-time) alongside every namelist "
+            "(run-time) section. When set, it is the authoritative base for the compile-time "
+            "and run-time settings dictionaries (the executor no longer re-derives them from "
+            "the catalog ModelSpec). None keeps the legacy ModelSpec-derived base "
+            "(transitional; being phased out)."
+        ),
+    )
+    code_spec: Any | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "The SpecConfig ``code`` (roms + marbl repos and compile-/run-time template "
+            "refs). The blueprint code repository and the template render directories are "
+            "built from it. Required (fed by from_spec_config)."
+        ),
+    )
     ensemble_id: int | None = Field(default=None, validate_default=False)
-    catalog_root: str | Path | None = Field(
-        default=None,
-        validate_default=False,
-        description=(
-            "Optional *outer* catalog anchor. Blueprints live under "
-            "``<catalog_root>/catalog/blueprints/<machine>/<name>/``. "
-            "Omit (None) to use the bundled internal catalog for ModelSpec/MachineSpec. "
-            "Use ``'default'`` to open the user data-tree catalog at "
-            "``config.paths.catalog`` with full validation. "
-            "Use ``'local'`` for the in-repo ``cstar_forge/catalog`` package directory."
-        ),
-    )
-    initialize_catalog_from: str | Path | None = Field(
-        default=None,
-        validate_default=False,
-        description=(
-            "Merge Machines/, ModelSpec/, and DomainSpec/ from this source catalog "
-            "into the resolved catalog_root before use. "
-            "Pass ``'local'`` to merge from the built-in package catalog."
-        ),
-    )
-    initialize_catalog_clobber: bool = Field(
-        default=False,
-        validate_default=False,
-        description=(
-            "When merging via ``initialize_catalog_from``, silently overwrite "
-            "files that already exist at the destination. "
-            "If False (default) and conflicts are found, raises ValueError listing them."
-        ),
-    )
-    suppress_catalog_validation: bool = Field(
-        default=True,
-        validate_default=False,
-        description=(
-            "Skip the catalog structure validation check when opening the catalog. "
-            "Defaults to True so that ForgeExecutor can operate on an empty or "
-            "partially populated catalog without raising an error."
-        ),
-    )
     # Internal attributes (computed/loaded)
     blueprint: cstar_models.RomsMarblBlueprint | None = Field(
         default=None, init=False, validate_default=False, validate_assignment=False
@@ -354,7 +291,6 @@ class ForgeExecutor(BaseModel):
     metadata_child: dict[str, Any] | None = Field(
         default=None, init=False, validate_default=False, exclude=True
     )
-    _model_spec: forge_models.ModelSpec | None = PrivateAttr(default=None)
     _datasets: dict[str, xr.Dataset | list[xr.Dataset]] | None = PrivateAttr(
         default=None
     )
@@ -362,7 +298,6 @@ class ForgeExecutor(BaseModel):
     _cstar_simulation: Any | None = PrivateAttr(default=None)
     _settings_compile_time: dict[str, Any] = PrivateAttr(default_factory=dict)
     _settings_run_time: dict[str, Any] = PrivateAttr(default_factory=dict)
-    _catalog_instance: Any | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _validate_dates(self) -> ForgeExecutor:
@@ -371,15 +306,23 @@ class ForgeExecutor(BaseModel):
             raise ValueError("end_date must be after start_date")
         return self
 
+    def _require_host(self) -> HostPaths:
+        """Return the injected host, raising a clear error if it was not provided.
+
+        Every produced-artifact path routes under ``host.working_dir``; the executor
+        reads no host paths from ``cstar_forge.config``, so a host is mandatory.
+        """
+        if self.host is None:
+            raise ValueError(
+                "ForgeExecutor requires an injected host (HostPaths). Construct it via "
+                "ForgeExecutor.from_spec_config(cfg, host=...) or pass host=... directly."
+            )
+        return self.host
+
     @property
     def input_data_dir(self) -> Path:
         """Directory for generated input NetCDF files (grid, forcing, etc.)."""
-        if self.host is not None:
-            return self.host.working_dir / "input_data"
-        # Legacy config-derived fallback (host not injected). Match ``InputData`` /
-        # ``_forcing_filename`` dirname sanitization (no ``.`` except ``.nc``).
-        safe = input_data.netcdf_filename_component(self.name)
-        return config.paths.input_data / safe
+        return self._require_host().working_dir / "input_data"
 
     def model_post_init(self, __context: Any) -> None:
         """
@@ -394,14 +337,8 @@ class ForgeExecutor(BaseModel):
         After this method completes, the blueprint is in the **PRECONFIG** stage
         and has been persisted to disk.
         """
-        if self.catalog_root is None:
-            print(
-                "Note: No catalog_root specified. Using internal cstar-forge catalog for ModelSpec "
-                "and MachineSpec (default/example values).\n"
-                f"      Blueprints will be written to: {config.paths.catalog}\n"
-                "      To use a custom catalog, set catalog_root=<path> or catalog_root='default' "
-                "when creating ForgeExecutor."
-            )
+        # Fail fast if no host was injected — every artifact path needs it.
+        self._require_host()
 
         # Create grids, 4 cases:
         # has child and no parent, has child and parent, has parent and no child, no parent no child
@@ -463,10 +400,11 @@ class ForgeExecutor(BaseModel):
         self._print_output_paths()
 
     def _planned_netcdf_outputs(self) -> list[Path]:
-        """Return the list of NetCDF files expected from input generation."""
-        if self._model_spec is None:
-            self._load_model_spec()
+        """Return the list of NetCDF files expected from input generation.
 
+        Derived from the resolved ``forcing_override`` (the executor always generates
+        the grid from the injected grid object) — never from the catalog ModelSpec.
+        """
         input_data_dir = self.input_data_dir
         planned_paths: list[Path] = []
 
@@ -477,23 +415,13 @@ class ForgeExecutor(BaseModel):
             if path not in planned_paths:
                 planned_paths.append(path)
 
-        model_inputs = getattr(self._model_spec, "inputs", None)
-        if model_inputs is None:
-            return planned_paths
+        inputs_cfg: dict[str, Any] = dict(self.forcing_override or {})
 
-        inputs_cfg: dict[str, Any] = {}
-        if hasattr(model_inputs, "model_dump"):
-            dumped_inputs = model_inputs.model_dump(exclude_none=True)
-            if isinstance(dumped_inputs, dict):
-                inputs_cfg = dumped_inputs
-        elif isinstance(model_inputs, dict):
-            inputs_cfg = model_inputs
-
-        if inputs_cfg.get("grid"):
-            _add_nc("grid")
-            if self.grid_child is not None:
-                _add_nc("grid_child")
-                _add_nc("nesting")
+        # The grid is always generated from the injected grid object.
+        _add_nc("grid")
+        if self.grid_child is not None:
+            _add_nc("grid_child")
+            _add_nc("nesting")
 
         if inputs_cfg.get("initial_conditions"):
             _add_nc("initial_conditions")
@@ -537,7 +465,7 @@ class ForgeExecutor(BaseModel):
 
                 _add_nc(category)
 
-        if inputs_cfg.get("cdr_forcing"):
+        if self.cdr_forcing:
             _add_nc(input_data.CDR_FORCING_NETCDF_STEM)
 
         return planned_paths
@@ -575,14 +503,14 @@ class ForgeExecutor(BaseModel):
     @property
     def name(self) -> str:
         """
-        Return the name of this blueprint as '{model_spec.name}_{grid_name}'.
+        Return the name of this blueprint as '{model_name}_{grid_name}_{n_procs}procs'.
 
         This property sets blueprint.name when the blueprint is created.
         """
         ensemble_str = (
             f"_{self.ensemble_id:03d}" if self.ensemble_id is not None else ""
         )
-        return f"{self._model_spec.name}_{self.grid_name}_{self.n_procs}procs{ensemble_str}"
+        return f"{self.model_name}_{self.grid_name}_{self.n_procs}procs{ensemble_str}"
 
     @property
     def n_procs(self) -> int:
@@ -603,12 +531,10 @@ class ForgeExecutor(BaseModel):
 
     @property
     def run_output_dir(self) -> Path:
-        """Per-run output root — the injected ``host.working_dir`` (all produced artifacts
-        live under it), or the legacy ``config.paths.scratch/<casename>`` fallback.
+        """Per-run output root — the injected ``host.working_dir`` (all produced
+        artifacts live under it).
         """
-        if self.host is not None:
-            return self.host.working_dir
-        return config.paths.scratch / self.casename
+        return self._require_host().working_dir
 
     @property
     def default_runtime_params(self) -> cstar_models.RuntimeParameterSet:
@@ -624,49 +550,20 @@ class ForgeExecutor(BaseModel):
             output_dir=self.run_output_dir,
         )
 
-    def _get_catalog(self) -> Any:
-        """Return (and cache) a DomainCatalog for this builder's resolved catalog directory."""
-        if self._catalog_instance is None:
-            from cstar_forge.domain_catalog import DomainCatalog
-
-            self._catalog_instance = DomainCatalog(
-                catalog_root=self.resolved_catalog_dir,
-                initialize_catalog_from=self.initialize_catalog_from,
-                initialize_catalog_clobber=self.initialize_catalog_clobber,
-                suppress_validation=self.suppress_catalog_validation,
-            )
-        return self._catalog_instance
-
-    @property
-    def resolved_catalog_dir(self) -> Path:
-        """Absolute inner *catalog* directory (contains ``blueprints/``)."""
-        return resolve_catalog_dir(self.catalog_root)
-
     @property
     def blueprint_dir(self) -> Path:
-        """Return the blueprint directory path (under host.working_dir when injected)."""
-        if self.host is not None:
-            return self.host.working_dir / "blueprints"
-        return self._get_catalog().blueprint_dir_for(config.system_id, self.name)
+        """Return the blueprint directory path (under host.working_dir)."""
+        return self._require_host().working_dir / "blueprints"
 
     @property
     def compile_time_code_dir(self) -> Path:
-        """Compile-time rendered templates inside this blueprint's Build/ directory."""
-        if self.host is not None:
-            return self.host.working_dir / "builds" / "compile-time"
-        return (
-            self._get_catalog().build_dir_for(config.system_id, self.name)
-            / "compile-time"
-        )
+        """Compile-time rendered templates under host.working_dir/builds."""
+        return self._require_host().working_dir / "builds" / "compile-time"
 
     @property
     def run_time_code_dir(self) -> Path:
-        """Run-time rendered templates inside this blueprint's Build/ directory."""
-        if self.host is not None:
-            return self.host.working_dir / "builds" / "run-time"
-        return (
-            self._get_catalog().build_dir_for(config.system_id, self.name) / "run-time"
-        )
+        """Run-time rendered templates under host.working_dir/builds."""
+        return self._require_host().working_dir / "builds" / "run-time"
 
     def persist(self) -> None:
         """
@@ -969,16 +866,10 @@ class ForgeExecutor(BaseModel):
         # Start with grid and initial_conditions
         data_fields = ["grid", "initial_conditions"]
 
-        # Add forcing fields from model_spec.inputs.forcing
-
-        if (
-            self._model_spec
-            and self._model_spec.inputs
-            and self._model_spec.inputs.forcing
-        ):
-            # Loop over all fields in the forcing configuration
-            for field_name in self._model_spec.inputs.forcing.model_fields.keys():
-                data_fields.append(f"forcing.{field_name}")
+        # Add forcing categories present in the resolved forcing_override.
+        forcing_cfg = (self.forcing_override or {}).get("forcing") or {}
+        for field_name in forcing_cfg:
+            data_fields.append(f"forcing.{field_name}")
 
         # Add cdr_forcing (not part of inputs, but a separate blueprint field)
         data_fields.append("cdr_forcing")
@@ -1010,35 +901,73 @@ class ForgeExecutor(BaseModel):
         # Return as DatasetsDict to support both dict access and method call
         return DatasetsDict(self._datasets)
 
-    def _load_model_spec(self):
-        """Load ModelSpec from the builder's catalog when catalog_root is set, else from the default catalog."""
-        if self._uses_explicit_catalog:
-            self._model_spec = self._get_catalog().load_model_spec(self.model_name)
-        else:
-            from cstar_forge.domain_catalog import default_catalog
-
-            self._model_spec = default_catalog.load_model_spec(self.model_name)
-
-    @property
-    def _uses_explicit_catalog(self) -> bool:
-        """True when catalog_root routes to a user-managed catalog (not the bundled fallback)."""
-        return self.catalog_root is not None
-
     def _get_machine_config(self):
-        """Return MachineConfig from the builder's catalog when catalog_root is set, else from config."""
-        if self._uses_explicit_catalog:
-            from cstar_forge.config import MachineConfig
+        """Return the injected host's machine config (account / queues / pes_per_node)."""
+        return self._require_host().machine_config
 
-            try:
-                data = self._get_catalog().machine_data(config.system)
-                return MachineConfig(
-                    account=data.get("account"),
-                    pes_per_node=data.get("pes_per_node"),
-                    queues=data.get("queues"),
-                )
-            except KeyError:
-                return MachineConfig()
-        return config.machine_config
+    def _cstar_code_repository(self) -> cstar_models.ROMSCompositeCodeRepository:
+        """Build the blueprint's cstar ``ROMSCompositeCodeRepository`` from the resolved
+        ``code_spec`` (SpecConfig ``code``): roms + optional marbl repos, with placeholder
+        run_time/compile_time entries that ``configure_build`` overwrites with the rendered
+        code directories.
+        """
+        if self.code_spec is None:
+            raise ValueError(
+                "ForgeExecutor requires code_spec (the SpecConfig ``code``) to build the "
+                "blueprint code repository; construct via ForgeExecutor.from_spec_config."
+            )
+
+        def _repo(spec: Any) -> cstar_models.CodeRepository:
+            kwargs: dict[str, Any] = {"location": spec.location}
+            if spec.commit:
+                kwargs["commit"] = spec.commit
+            elif spec.branch:
+                kwargs["branch"] = spec.branch
+            else:
+                kwargs["branch"] = "main"
+            return cstar_models.CodeRepository(**kwargs)
+
+        return cstar_models.ROMSCompositeCodeRepository(
+            roms=_repo(self.code_spec.roms),
+            marbl=_repo(self.code_spec.marbl) if self.code_spec.marbl else None,
+            run_time=cstar_models.CodeRepository(
+                location="placeholder://run_time", branch="main"
+            ),
+            compile_time=cstar_models.CodeRepository(
+                location="placeholder://compile_time", branch="main"
+            ),
+        )
+
+    def _template_dir(self, stage: str) -> Path:
+        """Local directory holding the ``stage`` (``compile_time`` / ``run_time``)
+        templates, derived from ``code_spec``.
+
+        The SpecConfig carries the template repo (git ``location`` + ``commit``/``branch``)
+        plus an in-repo ``directory``; the template files ship inside this package's bundled
+        catalog, so the local render source is
+        ``<pkg>/catalog/ModelSpec/<model_name>/<directory>``.
+
+        (Judgment call / follow-up: this is the one spot that reads from the bundled
+        catalog directory rather than purely from cfg+host. Decision #4 in the plan is to
+        fetch the templates from ``code_spec.templates_*`` git refs at processing time;
+        that git-fetch is the remaining follow-up. The read uses a bare ``import
+        cstar_forge`` for ``__file__`` only — no authoring module is imported, so the
+        forge-app boundary stays clean.)
+        """
+        import cstar_forge
+
+        repo = getattr(self.code_spec, f"templates_{stage}")
+        return (
+            Path(cstar_forge.__file__).parent
+            / "catalog"
+            / "ModelSpec"
+            / self.model_name
+            / repo.directory
+        )
+
+    def _template_files(self, stage: str) -> list[str]:
+        """File list for the ``stage`` templates (from ``code_spec``)."""
+        return list(getattr(self.code_spec, f"templates_{stage}").files)
 
     def _initialize_blueprint(self) -> None:
         """
@@ -1049,23 +978,19 @@ class ForgeExecutor(BaseModel):
 
         **Process:**
 
-        1. Loads the model specification from models.yml
-        2. Initializes compile-time and run-time settings from defaults
-        3. Creates blueprint with:
+        1. Initializes compile-time and run-time settings from the resolved SpecConfig
+        2. Creates blueprint with:
            - Basic metadata (name, description, dates, partitioning)
-           - Code repository specifications from model_spec
+           - Code repository specifications from code_spec
            - Placeholder Resource objects for grid, initial_conditions, forcing
-        4. Sets `_stage` to PRECONFIG
-        5. Persists blueprint to disk
+        3. Sets `_stage` to PRECONFIG
+        4. Persists blueprint to disk
 
         The blueprint at this stage has the correct structure but contains
         placeholder data (None locations). Actual data files are added during
         the POSTCONFIG stage via `generate_inputs()`.
         """
-        # Load model spec
-        self._load_model_spec()
-
-        # Initialize settings from defaults
+        # Initialize settings from the resolved SpecConfig
         self._init_settings_compile_time()
         self._init_settings_run_time()
 
@@ -1092,7 +1017,7 @@ class ForgeExecutor(BaseModel):
             partitioning=self.partitioning,
             model_params=None,  # stored in sidecar files
             runtime_params=None,  # stored in sidecar files
-            code=self._model_spec.code,
+            code=self._cstar_code_repository(),
             grid=empty_dataset,
             initial_conditions=empty_dataset,
             forcing=forcing_config,
@@ -1364,25 +1289,20 @@ class ForgeExecutor(BaseModel):
                 "This should have been created during initialization."
             )
 
-        if self._model_spec is None:
-            self._load_model_spec()
+        if self.source_dataset_keys is None:
+            raise ValueError(
+                "source_dataset_keys is required (the resolved SpecConfig ``datasets``); "
+                "construct via ForgeExecutor.from_spec_config."
+            )
 
         self.src_data = source_data.SourceData(
-            datasets=(
-                self.source_dataset_keys
-                if self.source_dataset_keys is not None
-                else self._model_spec.datasets
-            ),
+            datasets=self.source_dataset_keys,
             clobber=False,
             grid=self.grid,
             grid_name=self.grid_name,
             start_time=self.start_date,
             end_time=self.end_date,
-            source_data_dir=(
-                self.host.source_data_cache
-                if self.host is not None
-                else config.paths.source_data
-            ),
+            source_data_dir=self._require_host().source_data_cache,
         ).prepare_all(include_streamable=include_streamable)
 
     def generate_inputs(
@@ -1450,7 +1370,6 @@ class ForgeExecutor(BaseModel):
                 start_date=self.start_date,
                 end_date=self.end_date,
                 input_data_dir=self.input_data_dir,
-                model_spec=self._model_spec,
                 grid=self.grid,
                 grid_parent=self.grid_parent,
                 grid_child=self.grid_child,
@@ -1472,9 +1391,11 @@ class ForgeExecutor(BaseModel):
                 "Set clobber=True to overwrite existing input files."
             )
 
-        # Apply settings from input data generation (deep merge to preserve existing settings).
-        self._update_settings_compile_time(settings_compile_time)
-        self._update_settings_run_time(settings_run_time)
+        # Apply settings from input data generation (deep merge to preserve existing
+        # settings). allow_new=True: the SpecConfig base omits the sections that input
+        # generation fills (grid/initial/forcing/s_coord), so they arrive as new keys.
+        self._update_settings_compile_time(settings_compile_time, allow_new=True)
+        self._update_settings_run_time(settings_run_time, allow_new=True)
 
         if test:
             return
@@ -1516,157 +1437,48 @@ class ForgeExecutor(BaseModel):
         self.persist()
         return self.blueprint
 
-    def _merge_settings_override_file(self, path: Path, kind: str) -> None:
-        r"""
-        Load a YAML override file and merge into compile- or run-time settings.
-
-        Parameters
-        ----------
-        path : Path
-            Path to an override YAML file.
-        kind : str
-            ``\"compile\"`` or ``\"run\"``.
-        """
-        if kind not in ("compile", "run"):
-            raise ValueError(f"kind must be 'compile' or 'run', got {kind!r}")
-        if not path.is_file():
-            warnings.warn(
-                f"Override file {path} does not exist; skipping.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return
-        try:
-            with path.open("r") as f:
-                raw = yaml.safe_load(f)
-        except OSError as exc:
-            warnings.warn(
-                f"Could not read settings override file {path}: {exc}",
-                UserWarning,
-                stacklevel=2,
-            )
-            return
-        if raw is None:
-            return
-        if not isinstance(raw, dict):
-            warnings.warn(
-                f"Override file {path} must contain a YAML mapping at the top level; ignoring.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return
-
-        section = "compile_time" if kind == "compile" else "run_time"
-        other_section = "run_time" if kind == "compile" else "compile_time"
-        payload: dict[str, Any]
-        if section in raw:
-            section_data = raw.get(section)
-            if section_data is None:
-                return
-            if not isinstance(section_data, dict):
-                warnings.warn(
-                    f"Override file {path} has non-mapping '{section}' section; ignoring.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                return
-            payload = section_data
-        elif other_section in raw:
-            # File is explicitly scoped to the opposite settings tree.
-            return
-        else:
-            payload = raw
-
-        target = (
-            self._settings_compile_time
-            if kind == "compile"
-            else self._settings_run_time
-        )
-        label = "compile-time" if kind == "compile" else "run-time"
-        merged: dict[str, Any] = {}
-        for key, value in payload.items():
-            if key in target:
-                merged[key] = value
-            else:
-                warnings.warn(
-                    f"Ignoring unknown {label} override top-level key {key!r} in {path}; "
-                    "it is not present in the model defaults.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        if not merged:
-            return
-        if kind == "compile":
-            self._update_settings_compile_time(merged)
-        else:
-            self._update_settings_run_time(merged)
-        print(f"ℹ️  Merged {label} settings from {path.resolve()}")
-
-    @property
-    def _override_paths(self) -> list[Path]:
-        if not self.override:
-            return []
-        return [Path(p).expanduser().resolve() for p in self.override]
-
-    def _merge_settings_override_files(self, kind: str) -> None:
-        for path in self._override_paths:
-            self._merge_settings_override_file(path, kind)
-
     def _init_settings_compile_time(self) -> None:
         """
-        Initialize compile-time settings dictionary from model defaults.
+        Initialize the compile-time settings dictionary from the resolved SpecConfig.
 
-        Loads default compile-time settings from the model specification and
-        stores them in `_settings_compile_time`. This dictionary is used as
-        the basis for template rendering during `configure_build()`.
-
-        Settings are deep-copied from the model spec to avoid modifying the
-        original defaults. User overrides can be applied via `_update_settings_compile_time()`
-        or by passing `compile_time_settings` to `configure_build()`.
+        ``cppdefs`` is the only compile-time section. It is used as the basis for
+        template rendering during `configure_build()`; user overrides can still be
+        applied via `_update_settings_compile_time()` or `configure_build()`.
 
         **Called by:** `_initialize_blueprint()` during initialization.
         """
-        # Initialize from defaults (deep copy to avoid modifying the original)
-        self._settings_compile_time = copy.deepcopy(
-            self._model_spec.settings.compile_time.settings_dict
-        )
+        if self.resolved_settings is None:
+            raise ValueError(
+                "resolved_settings is required (the SpecConfig ``model_settings``); "
+                "construct via ForgeExecutor.from_spec_config."
+            )
+        self._settings_compile_time = {
+            "cppdefs": copy.deepcopy(self.resolved_settings.get("cppdefs", {}))
+        }
 
-        self._merge_settings_override_files("compile")
-
-    def _init_settings_run_time(self, dt: float | None = None) -> None:
+    def _init_settings_run_time(self) -> None:
         """
-        Initialize run-time settings dictionary from model defaults.
+        Initialize the run-time settings dictionary from the resolved SpecConfig.
 
-        Loads default run-time settings from the model specification and stores
-        them in `_settings_run_time`. This dictionary is used as the basis for
-        template rendering during `configure_build()`.
-
-        **Dynamic Values:**
-
-        Some settings are set dynamically based on instance properties:
-        - `title.casename`: Set from `self.casename`
-        - `output_root_name.output_root_name`: Set from `self.run_output_dir`
-        - `time_stepping`: Calculated based on simulation dates and timestep
-        - `v_sponge.v_sponge`: Set from grid spacing (``size_x / nx`` in meters) / 10
-
-        Settings are deep-copied from the model spec to avoid modifying the
-        original defaults. User overrides can be applied via `_update_settings_run_time()`
-        or by passing `run_time_settings` to `configure_build()`.
-
-        Parameters
-        ----------
-        dt : Optional[float], optional
-            Timestep in seconds for time_stepping calculation. If None, computed
-            from CFL criterion using grid properties. Default is None.
+        The authoritative, host-independent base is ``resolved_settings`` (the SpecConfig
+        ``model_settings``): every non-``cppdefs`` section, deep-copied. The resolver
+        already carries the genuinely-computed numerics (``time_stepping``, ``v_sponge``,
+        ``extract_data``), so they are NOT re-derived here — that would clobber e.g. an
+        explicitly-resolved ``dt``. Only the sections the config deliberately omits because
+        they embed host/identity are ADDED: ``title`` and ``output_root_name``.
 
         **Called by:** `_initialize_blueprint()` during initialization.
         """
-        # Initialize from defaults (deep copy to avoid modifying the original)
-        self._settings_run_time = copy.deepcopy(
-            self._model_spec.settings.run_time.settings_dict
-        )
-
-        # Set dynamic values that depend on instance properties
+        if self.resolved_settings is None:
+            raise ValueError(
+                "resolved_settings is required (the SpecConfig ``model_settings``); "
+                "construct via ForgeExecutor.from_spec_config."
+            )
+        self._settings_run_time = {
+            k: copy.deepcopy(v)
+            for k, v in self.resolved_settings.items()
+            if k != "cppdefs"
+        }
         self._settings_run_time["title"] = dict(
             casename=self.casename,
         )
@@ -1674,43 +1486,8 @@ class ForgeExecutor(BaseModel):
             output_root_name=str(self.run_output_dir / "output" / self.casename),
         )
 
-        # Set timestepping defaults (will compute dt from CFL if dt is None)
-        self._set_run_time_settings_timestepping_defaults(dt=dt)
-
-        # Set extract_data.extract_period from child grid metadata (nesting case)
-        if self.grid_child is not None:
-            period_default = roms_tools_default_nesting_period_seconds()
-            if "metadata" in self.grid_kwargs_child:
-                if "period" in self.grid_kwargs_child["metadata"]:
-                    self._settings_run_time["extract_data"]["extract_period"] = (
-                        self.grid_kwargs_child["metadata"]["period"]
-                    )
-                else:
-                    self._settings_run_time["extract_data"]["extract_period"] = (
-                        period_default
-                    )
-            else:
-                self._settings_run_time["extract_data"]["extract_period"] = (
-                    period_default
-                )
-
-        self._apply_v_sponge_default_from_grid()
-
-        self._merge_settings_override_files("run")
-
-    def _apply_v_sponge_default_from_grid(self) -> None:
-        """
-        Set ``v_sponge.v_sponge`` from grid spacing.
-
-        Default: ``(size_x / nx)`` in meters, divided by 10. Values merged later
-        (override files or ``configure_build(run_time_settings=...)``) take
-        priority.
-        """
-        v_sponge = compute_v_sponge_from_grid(self.grid.size_x, self.grid.nx)
-        self._settings_run_time.setdefault("v_sponge", {})["v_sponge"] = v_sponge
-
     def _update_settings_compile_time(
-        self, settings_compile_time: dict[str, Any]
+        self, settings_compile_time: dict[str, Any], allow_new: bool = False
     ) -> None:
         """
         Update compile-time settings by recursively merging nested dictionaries.
@@ -1754,13 +1531,19 @@ class ForgeExecutor(BaseModel):
                         if not isinstance(value, (str, int, float, bool, type(None)))
                         else value
                     )
+            elif allow_new:
+                # Generation-overlay path: the SpecConfig base omits sections that are
+                # filled at processing time, so accept new top-level keys.
+                self._settings_compile_time[key] = copy.deepcopy(value)
             else:
                 raise ValueError(
                     f"Unknown compile-time setting key: '{key}'. "
                     f"Valid keys are: {sorted(self._settings_compile_time.keys())}"
                 )
 
-    def _update_settings_run_time(self, settings_run_time: dict[str, Any]) -> None:
+    def _update_settings_run_time(
+        self, settings_run_time: dict[str, Any], allow_new: bool = False
+    ) -> None:
         """
         Update run-time settings by recursively merging nested dictionaries.
 
@@ -1808,58 +1591,17 @@ class ForgeExecutor(BaseModel):
                         if not isinstance(value, (str, int, float, bool, type(None)))
                         else value
                     )
+            elif allow_new:
+                # Generation-overlay path: the SpecConfig base omits sections that are
+                # filled at processing time (grid/initial/forcing/s_coord), so accept
+                # new top-level keys instead of raising.
+                self._settings_run_time[key] = copy.deepcopy(value)
             else:
                 # Unknown key - raise error
                 raise ValueError(
                     f"Unknown run-time setting key: '{key}'. "
                     f"Valid keys are: {sorted(self._settings_run_time.keys())}"
                 )
-
-    def _set_run_time_settings_timestepping_defaults(self, dt: float | None = None):
-        """
-        Update run-time timestepping settings in the settings dictionary.
-
-        Sets the `time_stepping` section of `_settings_run_time` with
-        calculated values based on simulation dates and timestep.
-
-        **Timestep Calculation:**
-
-        If `dt` is not provided, it is computed from CFL criterion:
-        1. Computes minimum grid spacing (dx, dy) from size_x/nx and size_y/ny
-        2. Estimates fastest gravity wave speed: c = sqrt(g * H_max)
-        3. Applies CFL condition: dt = CFL * dx_min / c
-
-        **Values Set:**
-
-        - `ntimes`: Number of timesteps (calculated from simulation duration / dt)
-        - `dt`: Timestep in seconds (provided or computed)
-        - `ndtfast`: Number of fast timesteps per baroclinic timestep (default: 60)
-        - `ninfo`: Frequency of information output (default: 1)
-
-        Parameters
-        ----------
-        dt : Optional[float]
-            Timestep in seconds. If None, computed from CFL criterion using grid
-            properties. Default is None.
-
-        **Called by:** `_init_settings_run_time()` during initialization.
-        """
-        if dt is None:
-            dt = compute_timestep_from_cfl(
-                grid_size_x=self.grid.size_x,
-                grid_size_y=self.grid.size_y,
-                grid_nx=self.grid.nx,
-                grid_ny=self.grid.ny,
-                grid_ds=self.grid.ds,
-            )
-
-        ntimes = round((self.end_date - self.start_date).days * 24 * 3600 / dt)
-        self._settings_run_time["time_stepping"] = dict(
-            ntimes=ntimes,
-            dt=dt,
-            ndtfast=60,  # TODO: Think about if how to better NDTFAST based on this dt
-            ninfo=1,
-        )
 
     @classmethod
     def from_spec_config(cls, cfg: Any, host: HostPaths | None = None) -> ForgeExecutor:
@@ -1959,23 +1701,6 @@ class ForgeExecutor(BaseModel):
                 "Blueprint must be initialized before configuration. Call generate_inputs() first."
             )
 
-        # Validate template configuration
-        if (
-            self._model_spec.templates is None
-            or self._model_spec.templates.compile_time is None
-            or self._model_spec.templates.compile_time.filter is None
-        ):
-            raise ValueError(
-                "Model spec must have templates.compile_time.filter with files list"
-            )
-        if (
-            self._model_spec.templates.run_time is None
-            or self._model_spec.templates.run_time.filter is None
-        ):
-            raise ValueError(
-                "Model spec must have templates.run_time.filter with files list"
-            )
-
         # Initialize settings from defaults if not already initialized
         if (
             not hasattr(self, "_settings_compile_time")
@@ -1997,17 +1722,19 @@ class ForgeExecutor(BaseModel):
                 if isinstance(ntimes, float):
                     self._settings_run_time["time_stepping"]["ntimes"] = round(ntimes)
 
-        # Derive n_tracers: if the caller computed it from model_settings (Phase 2
-        # engine path), use that directly; otherwise fall back to model_spec.properties
-        # for back-compat with the legacy builder-only path.
+        # Derive n_tracers: prefer the value passed by the Phase-2 engine; otherwise
+        # derive it from the resolved settings (T + S + BGC ntrc_bio + passive).
         if "n_tracers" in kwargs:
             n_tracers = int(kwargs["n_tracers"])
-        elif self._model_spec.settings.properties is not None:
-            n_tracers = self._model_spec.settings.properties.n_tracers
+        elif self.resolved_settings is not None:
+            param = self.resolved_settings.get("param", {}) or {}
+            n_tracers = (
+                2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
+            )
         else:
             raise ValueError(
                 "n_tracers could not be determined: neither passed as a kwarg nor "
-                "available from model_spec.settings.properties."
+                "derivable from resolved_settings."
             )
 
         # Ensure build output directories exist before writing files.
@@ -2028,7 +1755,7 @@ class ForgeExecutor(BaseModel):
         }
         compile_time_code = render_roms_settings(
             template_files=["cppdefs.opt.j2"],
-            template_dir=self._model_spec.templates.compile_time.location,
+            template_dir=self._template_dir("compile_time"),
             settings_dict=cppdefs_render_dict,
             code_output_dir=self.compile_time_code_dir,
             n_tracers=n_tracers,
@@ -2040,15 +1767,13 @@ class ForgeExecutor(BaseModel):
         #    These are model-specific support files that aren't templated.
         # ------------------------------------------------------------------
         run_time_static_files = [
-            f
-            for f in self._model_spec.templates.run_time.filter.files
-            if not f.endswith(".j2")
+            f for f in self._template_files("run_time") if not f.endswith(".j2")
         ]
         copied_run_time_files: list[str] = []
         if run_time_static_files:
             _copied = render_roms_settings(
                 template_files=run_time_static_files,
-                template_dir=self._model_spec.templates.run_time.location,
+                template_dir=self._template_dir("run_time"),
                 settings_dict={},  # plain copy — no template variables needed
                 code_output_dir=self.run_time_code_dir,
             )
@@ -2164,7 +1889,7 @@ class ForgeExecutor(BaseModel):
                 del os.environ[ENV_CSTAR_NPROCS_POST]
         # implicit: elif n_procs_available is None, do nothing
 
-        if config.system == "RCAC_anvil":
+        if self._require_host().system == "RCAC_anvil":
             # find the right conda path to this environment and put it in the front of the path
             # otherwise, it might find the wrong cstar executable
             bin_dir = Path(sys.executable).parent
@@ -2201,199 +1926,3 @@ class ForgeExecutor(BaseModel):
         # Persist blueprint to file
         self._stage = BlueprintStage.RUN
         self.persist()
-
-    def dump(self, file_path: str | Path) -> None:
-        """
-        Dump the exact state of ForgeExecutor to a YAML file.
-
-        This method serializes all serializable fields including:
-        - Regular Pydantic model fields (description, model_name, grid_name, etc.)
-        - PrivateAttr fields (_model_spec, _stage, _settings_compile_time, _settings_run_time)
-        - Complex nested objects (blueprint, src_data)
-
-        Fields that cannot be serialized are excluded:
-        - grid (excluded from model, but grid_kwargs is saved)
-        - _datasets (xarray.Dataset objects - not directly YAML-serializable)
-        - _cstar_simulation (runtime object - not serializable)
-
-        Parameters
-        ----------
-        file_path : Union[str, Path]
-            Path to the YAML file where the state will be saved.
-
-        Notes
-        -----
-        - xarray.Dataset objects in _datasets are not serialized. They can be
-          reconstructed from the blueprint's data entries after loading.
-        - The grid object is not serialized, but grid_kwargs is saved, allowing
-          the grid to be reconstructed using rt.Grid(**grid_kwargs).
-        """
-        file_path = Path(file_path)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Start with Pydantic model dump (includes all regular fields)
-        state_dict = self.model_dump(mode="json", exclude_none=True)
-
-        # Add PrivateAttr fields that can be serialized
-        private_attrs = {}
-
-        # Serialize _model_spec if it exists (Pydantic model)
-        if self._model_spec is not None:
-            private_attrs["_model_spec"] = self._model_spec.model_dump(
-                mode="json", exclude_none=True
-            )
-
-        # Serialize _stage (simple string)
-        if self._stage is not None:
-            private_attrs["_stage"] = self._stage
-
-        # Serialize settings dictionaries
-        if self._settings_compile_time:
-            private_attrs["_settings_compile_time"] = self._convert_paths_to_strings(
-                self._settings_compile_time
-            )
-        if self._settings_run_time:
-            private_attrs["_settings_run_time"] = self._convert_paths_to_strings(
-                self._settings_run_time
-            )
-
-        # Serialize src_data if it exists (dataclass)
-        if self.src_data is not None:
-            # Convert dataclass to dict, but exclude grid object
-            src_data_dict = dataclass_asdict(self.src_data)
-            # Remove grid object if present (not serializable)
-            src_data_dict.pop("grid", None)
-            # Convert Path objects to strings
-            private_attrs["src_data"] = self._convert_paths_to_strings(src_data_dict)
-
-        # Note: _datasets and _cstar_simulation are intentionally excluded
-        # as they contain xarray.Dataset objects and runtime objects that
-        # cannot be easily serialized to YAML.
-
-        # Combine state with private attrs
-        state_dict["_private_attrs"] = private_attrs
-
-        # Convert all Path objects to strings for YAML serialization
-        state_dict = self._convert_paths_to_strings(state_dict)
-
-        # Write to YAML file
-        with file_path.open("w") as f:
-            yaml.safe_dump(
-                state_dict,
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
-
-    @classmethod
-    def load(cls, file_path: str | Path) -> ForgeExecutor:
-        """
-        Load ForgeExecutor state from a YAML file.
-
-        This method deserializes a previously saved state and reconstructs
-        the ForgeExecutor instance. After loading:
-        - Regular Pydantic fields are restored
-        - PrivateAttr fields are restored where possible
-        - The grid object is reconstructed from grid_kwargs
-        - The blueprint object is restored
-
-        Fields that cannot be deserialized remain uninitialized:
-        - _datasets: Will be populated when accessed (via datasets property)
-        - _cstar_simulation: Will be initialized when build() is called
-
-        Parameters
-        ----------
-        file_path : Union[str, Path]
-            Path to the YAML file containing the saved state.
-
-        Returns
-        -------
-        ForgeExecutor
-            A new ForgeExecutor instance with state restored from the file.
-
-        Notes
-        -----
-        - The grid object is automatically reconstructed from grid_kwargs
-          in model_post_init().
-        - xarray.Dataset objects in _datasets can be loaded later from
-          the blueprint's data entries if needed.
-        - Model validation and post-init hooks are executed, so the instance
-          will be fully initialized and validated.
-        """
-        file_path = Path(file_path)
-        if not file_path.exists():
-            raise FileNotFoundError(f"ForgeExecutor state file not found: {file_path}")
-
-        # Load YAML file
-        with file_path.open("r") as f:
-            state_dict = yaml.safe_load(f) or {}
-
-        # Extract private attributes
-        private_attrs = state_dict.pop("_private_attrs", {})
-
-        # Restore _model_spec if present
-        model_spec_dict = private_attrs.pop("_model_spec", None)
-
-        # Handle blueprint separately - use model_construct to handle None values
-        blueprint_dict = state_dict.pop("blueprint", None)
-
-        # Create instance using Pydantic model_validate
-        # This will trigger model_post_init which creates the grid
-        instance = cls.model_validate(state_dict)
-
-        # Restore blueprint using model_construct to handle None values
-        if blueprint_dict is not None:
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", category=UserWarning, module="pydantic"
-                )
-                warnings.filterwarnings(
-                    "ignore", message=".*Pydantic.*", category=UserWarning
-                )
-                warnings.filterwarnings(
-                    "ignore", message=".*serialization.*", category=UserWarning
-                )
-                instance.blueprint = cstar_models.RomsMarblBlueprint.model_construct(
-                    **blueprint_dict
-                )
-
-        # Restore PrivateAttr fields after instance creation
-        if model_spec_dict is not None:
-            # Use model_construct to handle None values and missing required fields
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", category=UserWarning, module="pydantic"
-                )
-                warnings.filterwarnings(
-                    "ignore", message=".*Pydantic.*", category=UserWarning
-                )
-                warnings.filterwarnings(
-                    "ignore", message=".*serialization.*", category=UserWarning
-                )
-                instance._model_spec = forge_models.ModelSpec.model_construct(
-                    **model_spec_dict
-                )
-
-        # Restore _stage
-        if "_stage" in private_attrs:
-            instance._stage = private_attrs["_stage"]
-
-        # Restore settings dictionaries
-        if "_settings_compile_time" in private_attrs:
-            instance._settings_compile_time = private_attrs["_settings_compile_time"]
-        if "_settings_run_time" in private_attrs:
-            instance._settings_run_time = private_attrs["_settings_run_time"]
-
-        # Restore src_data if present
-        if "src_data" in private_attrs:
-            src_data_dict = private_attrs["src_data"]
-            # Convert string paths back to Path objects where appropriate
-            # Note: grid object cannot be restored from src_data_dict
-            # as it was excluded during serialization
-            instance.src_data = source_data.SourceData(**src_data_dict)
-
-        # Note: _datasets and _cstar_simulation are not restored here.
-        # They will be initialized when accessed or when build() is called.
-
-        return instance

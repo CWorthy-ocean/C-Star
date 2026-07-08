@@ -6,7 +6,7 @@ and spawning reproducible C-Star workflows.
 from cstar_forge import catalog, config, diagnostics, models
 from cstar_forge.domain_catalog import DomainCatalog, default_catalog
 from cstar_forge.forge import settings, source_data
-from cstar_forge.forge.executor import ForgeExecutor, resolve_catalog_dir
+from cstar_forge.forge.executor import ForgeExecutor
 from cstar_forge.nb_engine import run_notebook, save_notebook_copy
 
 __all__ = [
@@ -17,7 +17,6 @@ __all__ = [
     "default_catalog",
     "diagnostics",
     "models",
-    "resolve_catalog_dir",
     "run_notebook",
     "save_notebook_copy",
     "settings",

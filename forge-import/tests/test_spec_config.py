@@ -287,12 +287,18 @@ def test_catalog_scans_forcingspec():
     assert "forcing" in data and "initial_conditions" in data
 
 
-def test_sources_to_forcing_override_returns_none_for_model_default():
+def test_sources_to_forcing_override_returns_dict_for_model_default():
     from cstar_forge.forge.spec_config_engine import sources_to_forcing_override
 
     cfg = _build()
     assert cfg.composition.forcing.origin == "model_default"
-    assert sources_to_forcing_override(cfg) is None
+    # The short-circuit is gone: the resolver fully resolves cfg.forcing (from the model
+    # default), so the bridge always returns a dict and the executor never reads
+    # model_spec.inputs.
+    ov = sources_to_forcing_override(cfg)
+    assert ov is not None
+    assert "initial_conditions" in ov and "forcing" in ov
+    assert ov["initial_conditions"]["source"]["name"] == "GLORYS"
 
 
 def test_sources_to_forcing_override_converts_custom_forcing():
@@ -1038,29 +1044,16 @@ class TestResolverBuilderParity:
         from datetime import datetime
 
         from cstar_forge.forge.executor import ForgeExecutor
+        from cstar_forge.forge.host import HostPaths
         from cstar_forge.spec_config_resolve import build_spec_config
 
         start, end = datetime(2012, 1, 1), datetime(2012, 1, 2)
 
-        # Real builder (no mocks): real ModelSpec defaults + real geometric grid;
-        # persistence isolated to a temp catalog copied from the bundled one.
-        builder = ForgeExecutor(
-            description="parity",
-            model_name="cson_roms-marbl_v0.1",
-            grid_name=grid_name,
-            grid_kwargs=grid_kwargs,
-            open_boundaries=boundaries,
-            partitioning=partitioning,
-            start_time=start,
-            end_time=end,
-            catalog_root=str(tmp_path / "catalog"),
-            initialize_catalog_from="local",
-        )
-        b_rt = builder._settings_run_time
-
-        # Resolver with dt=None -> the same CFL path the builder uses.
+        # The executor now consumes cfg.model_settings as its settings base; this guards
+        # that its settings-init faithfully reproduces the resolver's model_settings for
+        # every reviewable section (host-independent, catalog-free construction).
         cfg = build_spec_config(
-            model_dir=builder._get_catalog().model_dir("cson_roms-marbl_v0.1"),
+            model_dir=_MODEL_DIR,
             grid_name=grid_name,
             grid_kwargs=grid_kwargs,
             open_boundaries=boundaries,
@@ -1068,79 +1061,25 @@ class TestResolverBuilderParity:
             start_date=start,
             end_date=end,
         )
+        host = HostPaths(
+            working_dir=tmp_path / "wd",
+            source_data_cache=tmp_path / "cache",
+            system="test",
+            machine_config=None,
+        )
+        ex = ForgeExecutor.from_spec_config(cfg, host=host)
+        b_rt = ex._settings_run_time
         r_ms = cfg.model_settings
 
         # the genuinely-computed numerics must match exactly
         assert r_ms["time_stepping"] == b_rt["time_stepping"]
         assert r_ms["v_sponge"] == b_rt["v_sponge"]
 
-        # every shared default section must be identical between the two paths
+        # every shared reviewable section must be identical (the _PARITY_SKIP sections
+        # are filled later during generation / are host-derived)
         mismatches = {
             sec: (b_rt.get(sec), rval)
             for sec, rval in r_ms.items()
             if sec not in _PARITY_SKIP and b_rt.get(sec) != rval
         }
-        assert not mismatches, f"resolver/builder drift: {mismatches}"
-
-    @pytest.mark.parametrize(
-        "grid_name,grid_kwargs,boundaries,partitioning", _PARITY_DOMAINS
-    )
-    def test_from_spec_config_matches_direct_builder(
-        self, grid_name, grid_kwargs, boundaries, partitioning, tmp_path
-    ):
-        """Phase-B non-lossy gate: ``from_spec_config(build_spec_config(inputs))`` must
-        reproduce the same builder *inputs* as constructing ``ForgeExecutor`` directly.
-        This proves the SpecConfig->builder mapping drops nothing, so the direct
-        raw-kwargs / ``from_domain`` paths can be retired safely.
-        """
-        pytest.importorskip("roms_tools")
-        from datetime import datetime
-
-        from cstar_forge.forge.executor import ForgeExecutor
-        from cstar_forge.spec_config_resolve import build_spec_config
-
-        start, end = datetime(2012, 1, 1), datetime(2012, 1, 2)
-        direct = ForgeExecutor(
-            description="parity",
-            model_name="cson_roms-marbl_v0.1",
-            grid_name=grid_name,
-            grid_kwargs=grid_kwargs,
-            open_boundaries=boundaries,
-            partitioning=partitioning,
-            start_time=start,
-            end_time=end,
-            catalog_root=str(tmp_path / "catalog"),
-            initialize_catalog_from="local",
-        )
-        cfg = build_spec_config(
-            model_dir=direct._get_catalog().model_dir("cson_roms-marbl_v0.1"),
-            grid_name=grid_name,
-            grid_kwargs=grid_kwargs,
-            open_boundaries=boundaries,
-            partitioning=partitioning,
-            start_date=start,
-            end_date=end,
-            description="parity",
-        )
-        via_cfg = ForgeExecutor.from_spec_config(cfg)
-
-        # Results-affecting inputs must match exactly across the two construction paths.
-        assert via_cfg.model_name == direct.model_name
-        assert via_cfg.grid_name == direct.grid_name
-        assert via_cfg.description == direct.description
-        assert via_cfg.grid_kwargs == direct.grid_kwargs
-        assert via_cfg.grid_kwargs_parent == direct.grid_kwargs_parent
-        assert via_cfg.grid_kwargs_child == direct.grid_kwargs_child
-        assert via_cfg.open_boundaries.model_dump() == direct.open_boundaries.model_dump()
-        assert via_cfg.partitioning.model_dump() == direct.partitioning.model_dump()
-        assert (via_cfg.start_date, via_cfg.end_date) == (
-            direct.start_date,
-            direct.end_date,
-        )
-        assert via_cfg.cdr_forcing == direct.cdr_forcing
-        assert via_cfg.ensemble_id == direct.ensemble_id
-        # model-default forcing -> no forcing_override on either path
-        assert via_cfg.forcing_override is None and direct.forcing_override is None
-        # model_reference_date: from_spec_config forwards the run-level value; the direct
-        # path leaves it None (rt default 2000-01-01) — functionally the same t=0.
-        assert via_cfg.model_reference_date == cfg.run.model_reference_date
+        assert not mismatches, f"resolver/executor settings drift: {mismatches}"

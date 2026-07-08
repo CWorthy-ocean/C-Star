@@ -169,6 +169,29 @@ def sample_model_spec(tmp_path):
     )
 
 
+def _forcing_override_from_model_spec(model_spec):
+    """Mirror a ModelSpec's inputs into the forcing_override dict shape that
+    RomsMarblInputData now consumes (initial_conditions + flat forcing categories).
+    """
+    mi = model_spec.inputs
+    forcing = {}
+    if mi.forcing is not None:
+        for category in mi.forcing.model_fields.keys():
+            items = getattr(mi.forcing, category, None)
+            if items:
+                forcing[category] = [it.model_dump() for it in items]
+    override = {"forcing": forcing}
+    if mi.initial_conditions is not None:
+        override["initial_conditions"] = mi.initial_conditions.model_dump()
+    return override
+
+
+@pytest.fixture
+def sample_forcing_override(sample_model_spec):
+    """forcing_override mirroring the sample ModelSpec's inputs."""
+    return _forcing_override_from_model_spec(sample_model_spec)
+
+
 @pytest.fixture
 def sample_open_boundaries():
     """Sample open boundaries configuration."""
@@ -211,7 +234,7 @@ def sample_partitioning():
 def sample_roms_marbl_input_data(
     tmp_path,
     sample_grid,
-    sample_model_spec,
+    sample_forcing_override,
     sample_open_boundaries,
     sample_source_data,
     sample_partitioning
@@ -227,7 +250,7 @@ def sample_roms_marbl_input_data(
         domain_name="test_grid",
         start_date=datetime(2012, 1, 1),
         end_date=datetime(2012, 1, 2),
-        model_spec=sample_model_spec,
+        forcing_override=sample_forcing_override,
         grid=sample_grid,
         boundaries=sample_open_boundaries,
         source_data=sample_source_data,
@@ -456,7 +479,7 @@ class TestRomsMarblInputDataInitialization:
         self,
         tmp_path,
         sample_grid,
-        sample_model_spec,
+        sample_forcing_override,
         sample_open_boundaries,
         sample_source_data,
         sample_partitioning
@@ -464,12 +487,12 @@ class TestRomsMarblInputDataInitialization:
         """Test RomsMarblInputData initialization."""
         blueprint_dir = tmp_path / "blueprints"
         blueprint_dir.mkdir(parents=True, exist_ok=True)
-        
+
         data = RomsMarblInputData(
             domain_name="test_grid",
             start_date=datetime(2012, 1, 1),
             end_date=datetime(2012, 1, 2),
-            model_spec=sample_model_spec,
+            forcing_override=sample_forcing_override,
             grid=sample_grid,
             boundaries=sample_open_boundaries,
             source_data=sample_source_data,
@@ -481,7 +504,7 @@ class TestRomsMarblInputDataInitialization:
 
         assert data.domain_name == "test_grid"
         assert data.grid is not None
-        assert data.model_spec is not None
+        assert data.forcing_override is not None
         assert data.blueprint_elements is not None
         assert len(data.input_list) > 0
     
@@ -557,7 +580,7 @@ class TestRomsMarblInputDataInitialization:
             domain_name="test_grid",
             start_date=datetime(2012, 1, 1),
             end_date=datetime(2012, 1, 2),
-            model_spec=model_spec,
+            forcing_override=_forcing_override_from_model_spec(model_spec),
             grid=sample_grid,
             boundaries=open_boundaries,
             source_data=mock_source_data,

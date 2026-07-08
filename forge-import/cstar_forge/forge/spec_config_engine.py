@@ -86,16 +86,14 @@ PROCESSING_FILLED_SECTIONS = (
 )
 
 
-def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any] | None:
+def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any]:
     """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
 
-    Returns None when sources are model defaults (composition.forcing.origin ==
-    "model_default"), so the builder falls back to model_spec.inputs as before.
-    When the user has made a ForcingSpec selection or edits, returns a dict with
-    ``initial_conditions`` and ``forcing`` keys mirroring the model.yml inputs block.
+    Always returns a dict with ``initial_conditions`` and ``forcing`` keys mirroring
+    the model.yml inputs block. ``cfg.forcing`` is fully resolved by the Phase-1
+    resolver (from the model default or an authored/edited selection), so the executor
+    always drives input generation from this dict and never reads ``model_spec.inputs``.
     """
-    if cfg.composition.forcing.origin == "model_default":
-        return None
 
     def _src(spec) -> dict[str, Any]:
         d: dict[str, Any] = {"name": spec.name, "climatology": spec.climatology}
@@ -157,6 +155,8 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
         source_dataset_keys=list(cfg.datasets),
+        resolved_settings=copy.deepcopy(cfg.model_settings),
+        code_spec=cfg.code,
     )
     # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
     # block (which the SpecConfig stores separately) — re-embed it.

@@ -33,7 +33,6 @@ from cstar_forge.config import (
     with_catalog,
     default_catalog_inner_dir,
 )
-from cstar_forge.forge.executor import resolve_catalog_dir
 
 
 class TestDataPaths:
@@ -103,22 +102,9 @@ class TestDataPaths:
         assert moved.here == paths.here
 
 
-class TestResolveCatalogDir:
-    def test_resolve_none_uses_config_catalog(self):
-        from cstar_forge import config as cfg
+# NB: catalog_root anchoring (resolve_catalog_dir) was removed with the executor's
+# config/catalog decoupling — the forge app writes under the injected host.working_dir.
 
-        p = cfg.paths.catalog
-        assert resolve_catalog_dir(None) == p
-
-    def test_resolve_local_package_catalog(self):
-        from cstar_forge import config as cfg
-
-        assert resolve_catalog_dir("local") == cfg.paths.here / "catalog"
-        assert resolve_catalog_dir("LOCAL") == cfg.paths.here / "catalog"
-
-    def test_resolve_path(self, tmp_path):
-        outer = (tmp_path / "x").resolve()
-        assert resolve_catalog_dir(tmp_path / "x") == outer / "catalog"
 
 class TestDefaultCatalogInnerDir:
     def test_under_cstar_forge_data_base(self, tmp_path):
