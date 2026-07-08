@@ -451,6 +451,53 @@ def single_step_workplan(
 
 
 @pytest.fixture
+def two_step_workplan(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> Workplan:
+    """Generate a workplan that contains a single step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+
+    Returns
+    -------
+    Workplan
+    """
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    default_working_dir = "working_dir: ."
+
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_content = bp_tpl_path.read_text()
+    bp_content = bp_content.replace(
+        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
+    )
+    bp_content.replace(Application.SLEEP, Application.ROMS_MARBL)
+    bp_path.write_text(bp_content)
+
+    return Workplan(
+        name="single-step-workplan",
+        description="A workplan with a single step.",
+        steps=[
+            Step(
+                name="s-00",
+                application=Application.SLEEP,
+                blueprint=bp_path.as_posix(),
+            ),
+            Step(
+                name="s-01",
+                application=Application.SLEEP,
+                blueprint=bp_path.as_posix(),
+            ),
+        ],
+    )
+
+
+@pytest.fixture
 def remote_workplan_uri() -> str:
     """Fixture for returning a URL to a valid remote workplan for testing."""
     return "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"

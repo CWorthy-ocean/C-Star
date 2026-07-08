@@ -9,6 +9,7 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import (
+    ContinuanceAugmentation,
     ContinuanceDirective,
     RestartFile,
     RestartFileTrxAdapter,
@@ -19,7 +20,8 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.models import Application, BlueprintState, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import WorkplanRun
 from cstar.orchestration.transforms import (
     OverrideTransform,
     TemplateFillTransform,
@@ -319,6 +321,92 @@ def test_continuance_transform_happy_path(
 
     # confirm the overrides were removed after being applied
     assert not transformed.blueprint_overrides
+
+
+def test_continuance_augmentation(
+    tmp_path: Path,
+    # mocked_simulation_outputs: tuple[Path, Path, Path],
+    wp_templates_dir: Path,
+) -> None:
+    """Verify that applying a continuance augmentation on steps with a `continue-from`
+    directive specifying a step name results in the path being included in the directive.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    mocked_simulation_outputs : Path
+        Paths to mocked simulation outputs; used here to pass a valid path
+        to the continuance transform (containing files meeting glob pattern *_rst.nc)
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
+    """
+    # """Verify that compose creates a new workplan and blueprint in the expected
+    # output directory.
+
+    # Parameters
+    # ----------
+    # bp_templates_dir: Path
+    #     Fixture returning the path to the directory containing blueprint template files
+    # """
+    run_id = "fake-run-id"
+    output_path = tmp_path / run_id
+    workplan_name: str = "linear"
+    wp_template_file = f"{workplan_name}.yaml"
+    wp_template_path = wp_templates_dir / wp_template_file
+
+    wp = deserialize(wp_template_path, Workplan)
+
+    name1, name2, name3, name4 = "Step L1", "Step L2", "Step L3", "Step L4"
+
+    step_map = {
+        name1: next(s for s in wp.steps if s.name == name1),
+        name2: next(s for s in wp.steps if s.name == name2),
+        name3: next(s for s in wp.steps if s.name == name3),
+        name4: next(s for s in wp.steps if s.name == name4),
+    }
+
+    continue_pairs = [
+        (name2, name1),
+        (name3, name2),
+        (name4, name3),
+    ]
+    for s_to, s_from in continue_pairs:
+        step_map[s_to].directives["continue-from"] = {"name": s_from}
+
+    wp_path = tmp_path / wp_template_file
+    assert serialize(wp_path, wp)
+
+    trx_wp_path = (
+        Path()
+    )  # this makes no sense, since the aug is applied before trx wp exists
+    _ = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_wp_path,
+        output_path=output_path,
+        run_id=run_id,
+    )
+
+    augmenter = ContinuanceAugmentation()
+    augmented_steps = [augmenter(LiveStep.from_step(s))[0] for s in wp.steps]
+
+    augmented_step_map = {
+        name1: next(s for s in augmented_steps if s.name == name1),
+        name2: next(s for s in augmented_steps if s.name == name2),
+        name3: next(s for s in augmented_steps if s.name == name3),
+        name4: next(s for s in augmented_steps if s.name == name4),
+    }
+
+    for s_to, s_from in continue_pairs:
+        config = t.cast(
+            "dict[str, str]",
+            augmented_step_map[s_to].directives[ContinuanceDirective.key()],
+        )
+
+        # confirm that the name has not been modified
+        assert config["name"] == s_to
+        # confirm that the path to the dependency is found.
+        assert config["path"] == augmented_step_map[s_from].fsm.output_dir
 
 
 def test_workplan_transformer_applies_working_dir_overrides(
