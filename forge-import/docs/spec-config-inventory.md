@@ -180,8 +180,10 @@ Two choices that make "review here, process elsewhere" work:
    `CstarSpecBuilder` from the config's atomic inputs, run
    `ensure_source_data` → `generate_inputs`, and **overlay** the reviewed
    `model_settings` via `configure_build(...)` so config edits win over re-derived
-   defaults. CLI: `python -m cstar_forge.spec_config_engine spec_config.yml`
-   (`--host-only`, `--clobber`, `--no-{data,generate,configure,dask}`).
+   defaults. CLI: `python -m cstar_forge.run spec_config.yml`
+   (`--host-only`, `--clobber`, `--no-{data,generate,configure,dask}`). The Forge-side
+   `cstar_forge.run` auto-detects the host and injects it; the app engine
+   (`cstar_forge.forge.spec_config_engine`) is host-independent.
 2b. **[DONE — schema identity]** ``SpecConfig`` carries an ``application`` discriminator
    (default ``"roms_marbl"`` — the target C-Star app) and ``spec_config_version``;
    ``from_yaml`` rejects files declaring a newer version. A portability guard test keeps

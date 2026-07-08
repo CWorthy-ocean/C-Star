@@ -934,15 +934,20 @@ class TestSpecConfigEngine:
             )  # raises before any call
 
     def test_resolve_host_reads_config_not_file(self):
-        from cstar_forge.forge.spec_config_engine import resolve_host
+        # Forge's disposable host provider builds a HostPaths from auto-detected config;
+        # the host is NOT read from the spec file. (The app receives this HostPaths via
+        # process_spec_config(host=...); C-Star supplies its own equivalent on relocation.)
+        from cstar_forge import config
+        from cstar_forge.forge.host import HostPaths
 
-        h = resolve_host(self._cfg())
-        assert h["system"]
-        assert set(h["paths"]) == {"source_data", "input_data", "scratch", "catalog"}
-        # host-derived run paths use the resolved scratch + derived casename
-        assert h["casename"].endswith("20120101-20120102")
-        assert h["run_output_dir"].endswith(h["casename"])
-        assert h["output_root_name"].endswith(f"output/{h['casename']}")
+        h = config.resolve_host()
+        assert isinstance(h, HostPaths)
+        assert h.system
+        for attr in ("source_data", "input_data", "scratch", "catalog"):
+            assert getattr(h, attr) is not None
+        # host-derived run paths are computed from cfg + the resolved scratch, not stored
+        cfg = self._cfg()
+        assert str(cfg.run_output_dir(h.scratch)).endswith(cfg.casename)
 
 
 # ---------------------------------------------------------------------------

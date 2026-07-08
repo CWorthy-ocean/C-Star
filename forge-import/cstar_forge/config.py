@@ -519,5 +519,26 @@ machine_config = _load_machine_config_from_catalog(system)
 cluster_type = _default_cluster_type(system)
 
 
+def resolve_host():
+    """Build the forge application's ``HostPaths`` from auto-detected Forge config.
+
+    This is Forge's **disposable** host provider: it auto-detects the machine (NERSC /
+    RCAC / local) and packages the data dirs + machine identity that the app needs. When
+    the forge application relocates into C-Star, C-Star supplies an equivalent
+    ``HostPaths`` from its own host resolution and this function is not carried over.
+    """
+    from cstar_forge.forge.host import HostPaths
+
+    return HostPaths(
+        source_data=paths.source_data,
+        input_data=paths.input_data,
+        scratch=paths.scratch,
+        catalog=paths.catalog,
+        system=system,
+        system_id=system_id,
+        machine_config=machine_config,
+    )
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

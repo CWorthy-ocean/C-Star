@@ -29,7 +29,6 @@ ready for ``cstar blueprint run``.
 
 from __future__ import annotations
 
-import argparse
 import copy
 import logging
 import warnings
@@ -41,6 +40,7 @@ from typing import (
     runtime_checkable,
 )
 
+from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.spec_config import SpecConfig
 from cstar_forge.namelist_model import validate_run_time_sections
 
@@ -205,52 +205,6 @@ def verify_content_hash(cfg: SpecConfig) -> str | None:
     return None
 
 
-def resolve_host(cfg: SpecConfig | None = None) -> dict[str, Any]:
-    """Resolve the host (machine tag + data paths) from :mod:`cstar_forge.config`.
-
-    If ``cfg`` is given, also include the host-derived run paths
-    (``run_output_dir`` / namelist ``output_root_name``) computed from the scratch path.
-    """
-    from cstar_forge import config
-
-    p = config.paths
-    info: dict[str, Any] = {
-        "system": config.system,
-        "paths": {
-            k: str(getattr(p, k))
-            for k in ("source_data", "input_data", "scratch", "catalog")
-        },
-    }
-    mc = getattr(config, "machine_config", None)
-    if mc is not None:
-        info["machine"] = {
-            "account": getattr(mc, "account", None),
-            "pes_per_node": getattr(mc, "pes_per_node", None),
-            "queues": getattr(mc, "queues", None),
-        }
-    if cfg is not None:
-        info["run_output_dir"] = str(cfg.run_output_dir(p.scratch))
-        info["output_root_name"] = cfg.output_root_name(p.scratch)
-        info["casename"] = cfg.casename
-    return info
-
-
-def host_summary(cfg: SpecConfig | None = None) -> str:
-    """A human-readable one-block summary of the resolved host."""
-    h = resolve_host(cfg)
-    lines = [f"Host: {h['system']}"]
-    if "machine" in h and h["machine"].get("account"):
-        lines.append(
-            f"  account: {h['machine']['account']}  pes/node: {h['machine'].get('pes_per_node')}"
-        )
-    for k, v in h["paths"].items():
-        lines.append(f"  {k:11s} -> {v}")
-    if cfg is not None:
-        lines.append(f"  casename     -> {h['casename']}")
-        lines.append(f"  run_output   -> {h['run_output_dir']}")
-    return "\n".join(lines)
-
-
 def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
     """Forge's default executor: a ``ForgeExecutor`` built from the config's
     atomic inputs. Imported lazily so the lightweight bits above (host resolution,
@@ -264,6 +218,7 @@ def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
 def process_spec_config(
     spec: SpecConfig | str | Path,
     *,
+    host: HostPaths | None = None,
     ensure_data: bool = True,
     generate: bool = True,
     configure: bool = True,
@@ -275,15 +230,22 @@ def process_spec_config(
 ) -> SpecConfigExecutor:
     """Run Phase-2 processing for a ``SpecConfig`` (object or path to a YAML file).
 
-    Resolves the host from :mod:`cstar_forge.config`, then drives a
-    :class:`SpecConfigExecutor` through ``ensure_source_data`` → ``generate_inputs``
-    → ``configure_build`` (the reviewed ``model_settings`` overlaid via the last).
+    Drives a :class:`SpecConfigExecutor` through ``ensure_source_data`` →
+    ``generate_inputs`` → ``configure_build`` (the reviewed ``model_settings`` overlaid
+    via the last).
 
     Returns the executor (``ForgeExecutor`` by default), so callers can reach
     ``.path_blueprint('build')`` / ``.prep_cstar_environment(...)`` / ``.run()``.
 
     Parameters
     ----------
+    host :
+        The resolved ``HostPaths`` (data dirs + machine identity), *injected* by the
+        caller — this module does not resolve the host itself, so it carries no
+        ``cstar_forge.config`` dependency and relocates cleanly into C-Star. Forge's
+        entry points (``cstar_forge.run``) supply it via ``config.resolve_host()``;
+        C-Star will supply its own. Only used here for logging; the executor resolves
+        its own paths. When ``None``, the host line is not logged.
     validate :
         If True (default), fail fast — validate the config's ``model_settings``
         against the run-time schema *before* any downloads/generation.
@@ -307,7 +269,14 @@ def process_spec_config(
                 "processing):\n  " + "\n  ".join(problems)
             )
 
-    logger.info("Resolved host:\n%s", host_summary(cfg))
+    if host is not None:
+        logger.info(
+            "Resolved host:\n%s",
+            host.summary(
+                casename=cfg.casename,
+                run_output_dir=str(cfg.run_output_dir(host.scratch)),
+            ),
+        )
 
     factory = executor_factory or _default_executor_factory
     executor = factory(cfg)
@@ -332,54 +301,3 @@ def process_spec_config(
             n_tracers=cfg.n_tracers,
         )
     return executor
-
-
-def main(argv: list | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="python -m cstar_forge.forge.spec_config_engine",
-        description="Phase 2: process a spec_config.yml on this machine "
-        "(generate inputs + configure build).",
-    )
-    parser.add_argument("spec_config", help="path to a spec_config.yml")
-    parser.add_argument(
-        "--no-data", action="store_true", help="skip ensure_source_data"
-    )
-    parser.add_argument(
-        "--no-generate", action="store_true", help="skip generate_inputs"
-    )
-    parser.add_argument(
-        "--no-configure", action="store_true", help="skip configure_build"
-    )
-    parser.add_argument(
-        "--clobber", action="store_true", help="overwrite existing input files"
-    )
-    parser.add_argument(
-        "--no-dask", action="store_true", help="disable dask in input generation"
-    )
-    parser.add_argument(
-        "--host-only", action="store_true", help="just print the resolved host and exit"
-    )
-    args = parser.parse_args(argv)
-
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    cfg = SpecConfig.from_yaml(args.spec_config)
-    print(host_summary(cfg))
-    if args.host_only:
-        return 0
-
-    builder = process_spec_config(
-        cfg,
-        ensure_data=not args.no_data,
-        generate=not args.no_generate,
-        configure=not args.no_configure,
-        clobber=args.clobber,
-        use_dask=not args.no_dask,
-    )
-    if not args.no_configure:
-        print(f"\nBuild blueprint: {builder.path_blueprint(stage='build')}")
-        print("Run it with:  cstar blueprint run <path>")
-    return 0
-
-
-if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())

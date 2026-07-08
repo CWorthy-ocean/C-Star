@@ -55,12 +55,10 @@ _FORBIDDEN = {
 
 # Known, pre-existing violations to be resolved during the decomposition. Each entry is
 # ``(forge_app_module, forbidden_module)``. This set may only SHRINK — never add to it.
-# See docs/architecture-decomposition-plan.md.
-_KNOWN_VIOLATIONS = {
-    # resolve_host reads cstar_forge.config; that host-glue stays Forge-side / C-Star
-    # supplies its own at relocation — the last remaining relocation blocker.
-    ("spec_config_engine", "config"),
-}
+# EMPTY: the guarded forge-application modules are fully config/authoring-free. Host is
+# injected (HostPaths via process_spec_config); Forge's disposable resolver lives in
+# cstar_forge.config / cstar_forge.run. See docs/architecture-decomposition-plan.md.
+_KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 
 def _imported_forge_submodules(module_name: str) -> set[str]:
