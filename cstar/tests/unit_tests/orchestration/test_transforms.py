@@ -184,8 +184,8 @@ async def test_continuance_directive_path_resolution(
             assert ContinuanceDirective.key() in directives
 
             config = directives.get(ContinuanceDirective.key(), {})
-            assert "step" in config
-            assert "path" not in config
+            assert ContinuanceDirective.KEY_STEP in config
+            assert ContinuanceDirective.KEY_PATH not in config
 
             modifier = ContinuanceDirective(config)
             altered = modifier(step)[0]
@@ -196,8 +196,9 @@ async def test_continuance_directive_path_resolution(
             config = current_directives.get(ContinuanceDirective.key(), {})
 
             # confirm the path still doesn't exist in the directive
-            assert "step" in config
-            assert "path" not in config
+            assert not altered.blueprint_overrides
+            assert ContinuanceDirective.KEY_STEP in config
+            assert ContinuanceDirective.KEY_PATH not in config
 
             # confirm the initial conditions have been overridden to reference the named step
             bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
