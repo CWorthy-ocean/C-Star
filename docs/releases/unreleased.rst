@@ -9,7 +9,8 @@ Unreleased
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+
+- The return type of `Launcher.update_status` has been modified (`#579 <https://github.com/CWorthy-ocean/C-Star/pull/579>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -19,12 +20,15 @@ New features
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+
+- Fix failure to cache updated status during status checks (`#579 <https://github.com/CWorthy-ocean/C-Star/pull/579>`_)
 
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- Avoid unnecessary writes of run-state files with no changes (`#579 <https://github.com/CWorthy-ocean/C-Star/pull/579>`_)
+- Ensure status changes are tracked for non-terminal statuses (`#579 <https://github.com/CWorthy-ocean/C-Star/pull/579>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
