@@ -392,10 +392,10 @@ class WorkplanTransformer(LoggingMixin):
         -------
         bool
         """
-        dump_a = self.original.model_dump()
-        dump_b = self.transformed.model_dump()
+        lhs = self.original.model_dump()
+        rhs = self.transformed.model_dump() if self.transformed else {}
 
-        return dump_a != dump_b
+        return lhs != rhs
 
     @property
     def transformed(self) -> Workplan:
