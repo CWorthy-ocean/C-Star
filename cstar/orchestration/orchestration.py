@@ -353,7 +353,7 @@ class Planner(LoggingMixin):
     workplan: Workplan
     """The workplan to plan."""
 
-    graph: "DiGraph"
+    graph: "DiGraph[str]"
     """The graph used for task planning."""
 
     def __init__(
