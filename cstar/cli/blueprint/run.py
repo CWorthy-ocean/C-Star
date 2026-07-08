@@ -1,4 +1,5 @@
 import asyncio
+import os
 import typing as t
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from cstar.base.env import (
     ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
+    ENV_CSTAR_RUNID,
     get_env_item,
 )
 from cstar.base.feature import ENV_FF_CLI_BP_MIGRATE_AUTO, is_feature_enabled
@@ -208,7 +210,8 @@ def run(
         return
 
     if directive_uri:
-        uri = DirectiveConfig.apply_directives(directive_uri, uri)
+        run_id = os.getenv(ENV_CSTAR_RUNID, None)
+        uri = asyncio.run(DirectiveConfig.apply_directives(directive_uri, uri, run_id))
 
     request = RunnerRequest(uri, type(bp))
 

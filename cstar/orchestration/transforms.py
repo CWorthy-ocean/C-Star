@@ -25,6 +25,7 @@ from cstar.orchestration.models import (
 )
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
@@ -652,20 +653,29 @@ def apply_automatic_overrides(step: LiveStep) -> LiveStep:
 class Directive(Transform[LiveStep], t.Protocol):
     _config: Mapping[str, t.Any]
     """Contract of a transform that can be used as a directive."""
+    _context: WorkplanRun | None = None
+    """Run context information."""
 
-    def __init__(self, config: dict[str, t.Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, t.Any],
+        ctx: WorkplanRun | None = None,
+    ) -> None:
         """Initialize the instance.
 
         Parameters
         ----------
         config : dict[str, t.Any] | None
             A dictionary containing configuration for the directive.
+        ctx : WorkplanRun | None
+            The run instance the directive is running within.
         """
         if not config:
             msg = "Configuration must be provided"
             raise ValueError(msg)
 
         self._config = config
+        self._context = ctx
 
 
 class DirectiveConfig(BaseModel):
@@ -676,10 +686,11 @@ class DirectiveConfig(BaseModel):
     """Generic configuration container for an instance of a directive."""
 
     @classmethod
-    def apply_directives(
+    async def apply_directives(
         cls,
         directive_uri: str,
         blueprint_uri: str,
+        run_id: str | None = None,
     ) -> str:
         """Apply the specified directives to the blueprint and
         return the path to the final, transformed blueprint.
@@ -695,14 +706,19 @@ class DirectiveConfig(BaseModel):
         -------
         str
         """
+        run: WorkplanRun | None = None
+
+        if run_id:
+            tracking = TrackingRepository()
+            run = await tracking.get_workplan_run(run_id)
+
         with (
             local_copy(directive_uri) as local_path,
             local_copy(blueprint_uri) as local_bp,
         ):
             model = deserialize(local_path, DirectiveConfig)
 
-            directives = model.directives
-            if not directives:
+            if not model.directives:
                 return blueprint_uri
 
             step = LiveStep(
@@ -711,12 +727,14 @@ class DirectiveConfig(BaseModel):
                 blueprint=local_bp,
             )
             directive_map = DirectiveConfig.directive_map
-            transforms = {
-                directive_map[key](config=t.cast("dict[str, dict[str, t.Any]]", config))
-                for key, config in directives.items()
+            directives = {
+                directive_map[key](
+                    config=t.cast("dict[str, dict[str, t.Any]]", config), ctx=run
+                )
+                for key, config in model.directives.items()
             }
-            for transform in transforms:
-                step = transform(step)[0]
+            for directive in directives:
+                step = directive(step)[0]
 
         return str(step.blueprint_path)
 

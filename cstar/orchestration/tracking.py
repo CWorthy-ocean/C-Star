@@ -71,6 +71,24 @@ class WorkplanRun(BaseModel):
         """
         return StateDirectoryManager.run_state_dir(run_id=self.run_id)
 
+    def load_workplan(self) -> Workplan:
+        """Load the original workplan.
+
+        Returns
+        -------
+        Workplan
+        """
+        return deserialize(self.workplan_path, Workplan)
+
+    def load_trx_workplan(self) -> Workplan:
+        """Load the transformed workplan.
+
+        Returns
+        -------
+        Workplan
+        """
+        return deserialize(self.trx_workplan_path, Workplan)
+
 
 class TrackingRepository(LoggingMixin):
     """The API for persisting tracking data."""

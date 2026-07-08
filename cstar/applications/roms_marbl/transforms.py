@@ -29,6 +29,7 @@ from cstar.base.utils import (
 )
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import WorkplanRun
 from cstar.orchestration.transforms import (
     Directive,
     DirectiveConfig,
@@ -395,7 +396,9 @@ class ContinuanceTransform(Directive, OverrideTransform):
     time the task was scheduled.
     """
 
-    def __init__(self, config: dict[str, t.Any]) -> None:
+    def __init__(
+        self, config: dict[str, t.Any], ctx: WorkplanRun | None = None
+    ) -> None:
         """Initialize the instance.
 
 
@@ -404,7 +407,7 @@ class ContinuanceTransform(Directive, OverrideTransform):
         config : dict[str, t.Any] | None
             A dictionary containing configuration for the directive.
         """
-        Directive.__init__(self, config)
+        Directive.__init__(self, config, ctx)
         OverrideTransform.__init__(self, self._create_initial_condition_overrides())
 
     def _create_initial_condition_overrides(
@@ -422,12 +425,36 @@ class ContinuanceTransform(Directive, OverrideTransform):
         ValueError
             If unknown or invalid configuration is supplied.
         """
-        if "path" not in self._config:
-            msg = "Invalid continuance transform configuration. Only restart paths are supported."
+        found_keys = set(self._config.keys())
+        available_keys = {"path", "step"}
+
+        if found_keys and not found_keys.intersection(available_keys):
+            msg = (
+                "Invalid continuance transform configuration; supported configuration: "
+                f"{', '.join(available_keys)}, provided configuration: {', '.join(found_keys)}"
+            )
             raise NotImplementedError(msg)
 
-        search_path = Path(self._config["path"])
-        if restart_file := RestartFile.find(search_path, notfound_ok=False):
+        search_path: Path | None = None
+
+        if target_path := self._config.get("path", None):
+            search_path = Path(target_path)
+
+        if name := self._config.get("name", None):
+            if self._context is None:
+                msg = "Workplan context information was not supplied."
+                raise RuntimeError(msg)
+
+            wp = self._context.load_trx_workplan()
+            if step := next((s for s in wp.steps if s.name == name), None):
+                search_path = t.cast("LiveStep", step).fsm.output_dir
+            else:
+                msg = f"Unable to locate metadata for step {name!r} in runtime context."
+                raise RuntimeError(msg)
+
+        if search_path and (
+            restart_file := RestartFile.find(search_path, notfound_ok=False)
+        ):
             return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
