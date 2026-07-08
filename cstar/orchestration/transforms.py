@@ -665,6 +665,9 @@ class Directive(Transform[LiveStep], t.Protocol):
 
         self._config = config
 
+    @classmethod
+    def key(cls) -> str: ...
+
 
 class DirectiveConfig(BaseModel):
     directive_map: t.ClassVar[dict[str, type[Directive]]] = {}

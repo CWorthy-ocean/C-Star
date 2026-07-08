@@ -604,10 +604,13 @@ class BoundaryFileTrxAdapter:
         }
 
 
-class ContinuanceTransform(Directive, OverrideTransform):
+class ContinuanceDirective(Directive, OverrideTransform):
     """A transform that locates a restart file with an unknown path at the
     time the task was scheduled.
     """
+
+    KEY_PATH: t.Final[str] = "path"
+    """Key used to specify a path as the source for continuance."""
 
     def __init__(self, config: dict[str, t.Any]) -> None:
         """Initialize the instance.
@@ -619,6 +622,10 @@ class ContinuanceTransform(Directive, OverrideTransform):
         """
         Directive.__init__(self, config)
         OverrideTransform.__init__(self, self._create_initial_condition_overrides())
+
+    @classmethod
+    def key(cls) -> str:
+        return "continue-from"
 
     def _create_initial_condition_overrides(
         self,
@@ -660,7 +667,7 @@ class ContinuanceTransform(Directive, OverrideTransform):
         return "cfrom"
 
 
-class NestingTransform(Directive, OverrideTransform):
+class NestingDirective(Directive, OverrideTransform):
     """A transform that uses a restart file and boundary conditions from a previous parent simulation."""
 
     def __init__(self, config: dict[str, t.Any]) -> None:
@@ -675,6 +682,10 @@ class NestingTransform(Directive, OverrideTransform):
         OverrideTransform.__init__(
             self, self._create_initial_condition_and_bc_overrides()
         )
+
+    @classmethod
+    def key(cls) -> str:
+        return "nest-from"
 
     def _create_initial_condition_and_bc_overrides(self) -> dict[str, t.Any]:
         """Create an overrides dictionary that will result in the modified blueprint.
@@ -719,5 +730,5 @@ class NestingTransform(Directive, OverrideTransform):
         return "nfrom"
 
 
-DirectiveConfig.register("continue-from", ContinuanceTransform)
-DirectiveConfig.register("nest-from", NestingTransform)
+DirectiveConfig.register(ContinuanceDirective.key(), ContinuanceDirective)
+DirectiveConfig.register(NestingDirective.key(), NestingDirective)
