@@ -90,3 +90,59 @@ reads **only** the `SpecConfig` + an injected runtime location, so the entire
   (parity test covers derived settings; confirm forcing items match).
 - The `datasets` derivation includes topography and IC bgc sources, not just the forcing
   categories.
+
+## Session review (2026-07-08) — decision #4 landed; remaining to-dos
+
+Decision #4 (templates via git) is implemented and green (475 tests, ruff clean, boundary
+guard green, hash provably unchanged). Reviewed for consistency with the decisions above; no
+defects, only the to-dos below. Separated by origin so a later reader knows what this session
+introduced vs. what predates it.
+
+### Session-introduced — worth resolving
+1. **Flat-staging cross-repo contract is unguarded in CI (highest value).** The remote path
+   depends on C-Star's `AdditionalCode` staging filtered files *flat* into `local_dir`
+   (`dest/cppdefs.opt.j2`, not `dest/<subdir>/…`), because `render_roms_settings` reads
+   `template_dir/<file>`. Verified once manually against the real `REMOTE_REPOSITORY` path;
+   the offline seam forces `subdir=""`, so CI never exercises subdir-preserving behavior. If
+   C-Star changes its stager layout, rendering breaks with file-not-found and no test fails.
+   Documented as an explicit assumption in `ForgeExecutor._stage_templates`. TODO: add one
+   `@pytest.mark.slow`/network integration test that stages from the real remote once.
+2. **Template staging ignores the decision-#3 cache pattern.** Templates are immutable-per-
+   commit external refs — same category as source data and code — but `_stage_templates`
+   puts them in a per-run `working_dir/templates/<stage>` subdir that is `rmtree`'d and
+   re-fetched every `configure_build` (a branch-pinned remote fetch re-hits the network each
+   run). Decision #3 puts external fetches in a *shared, cross-run cache, not under
+   `working_dir`*. TODO (single fix collapses three concerns): a **commit-keyed template
+   cache** (à la `source_data_cache`) would align decision #3, remove the re-fetch, and set
+   up the reproducibility pin below.
+3. **Post-merge validation.** The production raw URL
+   (`raw.githubusercontent.com/CWorthy-ocean/cstar-forge/main/templates/compile-time/…`)
+   only resolves once `refactor` merges to `main` (that is where repo-root `templates/`
+   lands). TODO: after merge, confirm the real remote fetch serves the files.
+
+### Pre-existing tensions (not regressions) — decide deliberately
+4. **`code.location` is in `content_hash`.** Not a decision-#1 violation in practice: the
+   resolver only ever persists the GitHub URL (host-independent), and the local-path override
+   is transient/test-only (never saved, never asserted). But it isn't the principled end-
+   state — the hash should capture the template *version* (commit/directory/files), not the
+   fetch *location*. Ties to to-do #2: pin `templates.commit:` (hook already in model.yml)
+   and refine the hash to exclude `location`.
+5. **`examples/spec_config*.yml` carry stale `application: roms_marbl`** (should be `forge`).
+   Confirmed **not load-tested** and referenced only as a doc follow-up → dead docs. TODO:
+   regenerate or delete (low urgency). Their template blocks (`directory: templates/…`) are
+   already forward-compatible.
+6. **Stale `.ipynb_checkpoints/*.yml`** — `cstar_forge/.ipynb_checkpoints/models-checkpoint.yml`
+   references the deleted `models.yml`; `…/ModelSpec/…/.ipynb_checkpoints/model-checkpoint.yml`
+   has the pre-move template block. Not loaded by anything. TODO: delete + gitignore
+   `.ipynb_checkpoints/`.
+
+### Nits (no action needed)
+- `docs/overview.md` line 57 labels `catalog/ModelSpec/` as "Model templates and defaults" —
+  now only the `*-defaults.yml` live there (render templates moved out).
+- The offline test seam's `_local_args` omits the `or ""` guard the real `_template_repo_args`
+  has (test-only; resolver always sets `directory`).
+
+### Still-open larger items (unchanged from prior sessions)
+- SpecConfig → C-Star `forge` application migration (executor + engine + SpecConfig-as-
+  blueprint). Seams are in place (portability, executor factory, SpecConfigExecutor Protocol).
+- Detached: C-Star → catalog callback breadcrumbs (extend `composition`/`provenance`).

@@ -86,8 +86,9 @@ try:  # pragma: no cover - exercised both ways
 except ImportError:  # pragma: no cover
     from source_registry import resolve_dataset_key, resolve_source  # type: ignore
 
-# Default repo the bundled ModelSpec templates live in (until model.yml carries
-# explicit template repo coordinates).
+# Default repo serving the render templates (now at the forge repo root `templates/`,
+# decoupled from the ModelSpec). A ModelSpec pins the serving commit via
+# `templates.commit:`; until pinned we track branch `main`.
 DEFAULT_TEMPLATE_REPO = CodeRepo(
     location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
 )
