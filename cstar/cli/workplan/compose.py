@@ -135,7 +135,7 @@ def compose(
         wp_path = create_host_workplan(template, bp_path, working_path, run_id)
         print(f"Running workplan at `{wp_path}` with sample blueprint at `{bp_path}`")
 
-    if wp_path is None or not wp_path.exists():
+    if not wp_path.exists():
         raise ValueError("Workplan path is malformed.")
 
     if execute:
