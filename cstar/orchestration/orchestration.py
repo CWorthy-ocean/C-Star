@@ -326,6 +326,10 @@ class LiveStep(Step):
         return LiveStep(**step_attrs)
 
 
+class LiveWorkplan(Workplan):
+    steps: Sequence[LiveStep]
+
+
 class Task(BaseModel, t.Generic[_THandle]):
     """A task represents a live-execution of a step."""
 

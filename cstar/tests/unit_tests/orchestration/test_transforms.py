@@ -2,6 +2,7 @@
 import os
 import typing as t
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -24,8 +25,8 @@ from cstar.orchestration.models import (
     UserDefinedVariables,
     Workplan,
 )
-from cstar.orchestration.orchestration import LiveStep
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import (
     OverrideTransform,
     TemplateFillTransform,
@@ -122,6 +123,87 @@ def step_overiding_wp(
     wp = deserialize(test_wp_path, Workplan)
 
     return wp
+
+
+@pytest.mark.asyncio
+async def test_continuance_directive_path_resolution(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    wp_templates_dir: Path,
+    create_mocked_simulation_outputs: Callable[
+        [Path, Path, str], Awaitable[None]
+    ],  # tuple[Path, Path, Path]],
+    mock_run_id: str,
+) -> None:
+    """Verify that compose creates a new workplan and blueprint in the expected
+    output directory.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
+    mock_run_id
+        A unique run-id that has already been added to os.environ
+    """
+    run_id = mock_run_id
+
+    wp_template_file = "linear.yaml"
+    wp_template_path = wp_templates_dir / wp_template_file
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    local_bp = tmp_path / bp_template_file
+    local_bp.write_text(bp_template_path.read_text())
+
+    wp = deserialize(wp_template_path, Workplan)
+
+    # Prepare the templated workplan by adding directive configuration
+    live_steps = [LiveStep.from_step(s) for s in wp.steps]
+
+    for i, step in enumerate(live_steps):
+        step.blueprint_path = local_bp
+        step.working_dir = tmp_path / run_id / step.safe_name
+        if i > 0:
+            step.directives[ContinuanceDirective.key()] = {"step": wp.steps[i - 1].name}
+
+    live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    live_wp_path = tmp_path / wp_template_file
+    assert serialize(live_wp_path, live_plan)
+
+    await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
+
+    for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):
+        if i > 0:
+            prior_step = live_plan.steps[i - 1]
+            directives = t.cast("dict[str, dict[str, str]]", step.directives)
+            assert ContinuanceDirective.key() in directives
+
+            config = directives.get(ContinuanceDirective.key(), {})
+            assert "step" in config
+            assert "path" not in config
+
+            modifier = ContinuanceDirective(config)
+            altered = modifier(step)[0]
+
+            current_directives = t.cast("dict[str, dict[str, str]]", altered.directives)
+            assert ContinuanceDirective.key() in current_directives
+
+            config = current_directives.get(ContinuanceDirective.key(), {})
+
+            # confirm the path still doesn't exist in the directive
+            assert "step" in config
+            assert "path" not in config
+
+            # confirm the initial conditions have been overridden to reference the named step
+            bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+            assert Path(bp.initial_conditions.data[0].location).is_relative_to(
+                prior_step.fsm.output_dir
+            )
 
 
 def test_get_transforms() -> None:
@@ -311,6 +393,57 @@ def test_continuance_transform_happy_path(
     transform = ContinuanceDirective(
         {ContinuanceDirective.KEY_PATH: str(continue_from_dir)}
     )
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()  # ensure nothing existing
+
+    steps = transform(step)
+
+    transformed = steps[0]
+
+    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
+
+    # confirm the old blueprint has a different initial conditions location
+    assert str(continue_from_dir) not in str(bp_old.initial_conditions.data[0].location)
+    assert str(continue_from_dir) in str(bp_new.initial_conditions.data[0].location)
+
+    # confirm the overrides were removed after being applied
+    assert not transformed.blueprint_overrides
+
+
+@pytest.mark.parametrize("pad_size", range(1, 10))
+def test_continuance_transform_locate_path_for_step(
+    single_step_workplan: Workplan,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    pad_size: int,
+) -> None:
+    """Verify that applying a well-formed continuance transform that specifies a step
+    name results in resolution of the correct path.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    mocked_simulation_outputs : Path
+        Paths to mocked simulation outputs; used here to pass a valid path
+        to the continuance transform (containing files meeting glob pattern *_rst.nc)
+    pad_size : int
+        Used to vary the amount of zero padding in the partition segment of the file
+        name. This ensures that the restart file search can locate files regardless
+        of the number of partitions.
+    """
+    _, continue_from_dir, _ = mocked_simulation_outputs
+
+    for seg_id in ["000", "001", "002"]:
+        rf_glob = f"*_rst.*.{seg_id}.nc"
+        reset_file_path = next(continue_from_dir.rglob(rf_glob))
+        name = reset_file_path.name.replace(
+            f"{seg_id}.nc",
+            f"{str(int(seg_id)).zfill(pad_size)}.nc",
+        )
+        reset_file_path = reset_file_path.rename(reset_file_path.with_name(name))
+
+    transform = ContinuanceDirective({"path": str(continue_from_dir)})
     step = single_step_workplan.steps[0]
     step.blueprint_overrides.clear()  # ensure nothing existing
 

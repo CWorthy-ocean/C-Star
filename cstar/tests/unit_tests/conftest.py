@@ -2,12 +2,12 @@ import functools
 import logging
 import os
 import random
-from collections.abc import Callable, Generator
+from collections.abc import Awaitable, Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
 from subprocess import Popen
-from typing import Any
+from typing import Any, cast
 from unittest import mock
 
 import dotenv
@@ -41,7 +41,9 @@ from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -1905,6 +1907,84 @@ def mocked_simulation_outputs(
         file.write_text(info_msg)
 
     return user_data_dir, step_dir, bp_path
+
+
+@pytest.fixture
+def create_mocked_simulation_outputs(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    mock_run_id: str,
+) -> Callable[[Path, Path, str], Awaitable[None]]:
+    """This fixture creates a directory structure mocking a completed simulation.
+
+    It includes directoriess matching the expected convention for:
+    - work
+    - logs
+    - output
+    - joined output
+    - etc.
+
+    > See RomsFileSystemManager for the more information.
+
+    It includes mocked files for:
+    - a blueprint (yaml) file
+    - reset files matching glob pattern `*_rst*.nc`
+
+    Returns
+    -------
+    Callable[[Path, Path, str], Awaitable[None]]
+        Function that takes [original wp path, transformed wp path, run_id] and
+        creates the necessary on-disk side-effects for a mocked run.
+    """
+
+    async def _inner(wp_path: Path, trx_wp_path: Path, run_id: str) -> None:
+        info_msg = f"This file was created by the {__name__} fixture\n"
+
+        container_dir = tmp_path / run_id
+        user_data_dir = container_dir / "userdata"
+        user_data_dir.mkdir(parents=True, exist_ok=True)
+
+        wp = deserialize(trx_wp_path, LiveWorkplan)
+
+        # simulate a run occurring
+        repo = TrackingRepository()
+        await repo.put_workplan_run(
+            WorkplanRun(
+                workplan_path=wp_path,
+                trx_workplan_path=trx_wp_path,
+                output_path=container_dir,
+                run_id=run_id,
+            )
+        )
+
+        for step in cast("list[LiveStep]", wp.steps):
+            roms_fsm = RomsFileSystemManager(step.fsm.root_dir)
+            roms_fsm.prepare()
+            step.script_path.write_text("#!/bin/bash\necho 'fake script'")
+
+            log_path = step.fsm.logs_dir / "cstar.out"
+            log_path.write_text(info_msg)
+            log_path.write_text("Simulation completed successfully\n")
+
+            output_dir = step.fsm.output_dir
+
+            # create some mocked "partitioned" restart files
+            reset_files = [
+                output_dir / "output_rst.20120101000000.000.nc",
+                output_dir / "output_rst.20120110000000.001.nc",
+                output_dir / "output_rst.20120120000000.002.nc",
+            ]
+            for file in reset_files:
+                file.write_text(info_msg)
+
+            # create a joined restart file.
+            reset_files = [
+                roms_fsm.joined_output_dir / "output_rst.20120101000000.nc",
+            ]
+            for file in reset_files:
+                file.write_text(info_msg)
+
+    return _inner
 
 
 @pytest.fixture
