@@ -371,7 +371,7 @@ class Planner(LoggingMixin):
         self.graph = Planner._workplan_to_graph(workplan)
 
     @classmethod
-    def _workplan_to_graph(cls, workplan: Workplan) -> "DiGraph":
+    def _workplan_to_graph(cls, workplan: Workplan) -> "DiGraph[str]":
         """Convert a workplan into a graph for planning.
 
         Parameters
@@ -390,8 +390,8 @@ class Planner(LoggingMixin):
                 data[prereq].append(step.name)
 
         g = nx.DiGraph(data)
-        defaults = {
-            n.name: {
+        defaults: dict[str, dict[str, Status | Step | None]] = {
+            str(n.name): {
                 KEY_STATUS: Status.Unsubmitted,
                 KEY_STEP: LiveStep.from_step(n),
                 KEY_TASK: None,
