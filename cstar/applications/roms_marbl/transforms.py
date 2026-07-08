@@ -15,6 +15,7 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
@@ -27,8 +28,10 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
+from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     Directive,
     DirectiveConfig,
@@ -447,6 +450,62 @@ class ContinuanceDirective(Directive, OverrideTransform):
         str
         """
         return "cfrom"
+
+
+class ContinuanceAugmentation(Transform[LiveStep]):
+    """A transform that augments the configuration in a continuance directive
+    to include the step path when a step name is provided.
+    """
+
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
+        """Apply the transform to a step.
+
+        Parameters
+        ----------
+        step : Step
+            The step to be transformed
+
+        Returns
+        -------
+        Iterable[Step]
+            Zero-to-many steps resulting from applying the transform.
+        """
+        KEY = ContinuanceDirective.key()
+
+        if config := t.cast("dict[str, str]", step.directives.get(KEY, None)):
+            if name := config.get("name", ""):
+                run_id = os.getenv(ENV_CSTAR_RUNID, None)
+                run: WorkplanRun | None = None
+
+                if run_id:
+                    tracking = TrackingRepository()
+                    run = tracking.get_workplan_run_sync(run_id)
+
+                if not run:
+                    msg = "Workplan context information was not supplied."
+                    raise RuntimeError(msg)
+
+                wp = deserialize(run.trx_workplan_path, Workplan)
+                if target := next((s for s in wp.steps if s.name == name), None):
+                    search_path = t.cast("LiveStep", target).fsm.output_dir
+                    step_copy = LiveStep(**step.model_dump())
+                    step_copy.directives[KEY] = {**config, "path": search_path}
+                    return [step_copy]
+
+                msg = f"Unable to locate metadata for step {name!r} in runtime context."
+                raise RuntimeError(msg)
+
+        return [step]
+
+    @staticmethod
+    def suffix() -> str:
+        """Return a suffix used when persisting a resource modified by this transform.
+
+        Returns
+        -------
+        str
+        """
+        return "contrx"
 
 
 DirectiveConfig.register(ContinuanceDirective.key(), ContinuanceDirective)

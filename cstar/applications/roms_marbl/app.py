@@ -11,7 +11,10 @@ from cstar.applications.core import (
 )
 from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
+from cstar.applications.roms_marbl.transforms import (
+    ContinuanceAugmentation,
+    RomsMarblTimeSplitter,
+)
 from cstar.base.exceptions import CstarError
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
@@ -132,7 +135,7 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     long_name: str = _APP_NAME_LONG
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
-    applicable_transforms = (RomsMarblTimeSplitter,)
+    applicable_transforms = (RomsMarblTimeSplitter, ContinuanceAugmentation)
     migrations = (RomsMarblSchemaAdapter2025v1,)
 
 
