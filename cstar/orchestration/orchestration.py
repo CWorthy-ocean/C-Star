@@ -1,7 +1,7 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
@@ -325,6 +325,10 @@ class LiveStep(Step):
             step_attrs["parent"] = effective_parent
 
         return LiveStep(**step_attrs)
+
+
+class LiveWorkplan(Workplan):
+    steps: Sequence[LiveStep]
 
 
 class Task(BaseModel, t.Generic[_THandle]):

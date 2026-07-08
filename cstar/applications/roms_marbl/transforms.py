@@ -15,6 +15,7 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
@@ -26,8 +27,9 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     Directive,
     DirectiveConfig,
@@ -611,6 +613,8 @@ class ContinuanceDirective(Directive, OverrideTransform):
 
     KEY_PATH: t.Final[str] = "path"
     """Key used to specify a path as the source for continuance."""
+    KEY_STEP: t.Final[str] = "step"
+    """Key used to specify a step name as the source for continuance."""
 
     def __init__(self, config: dict[str, t.Any]) -> None:
         """Initialize the instance.
@@ -644,12 +648,43 @@ class ContinuanceDirective(Directive, OverrideTransform):
         ValueError
             If a restart file cannot be located with the supplied configuration.
         """
-        if "path" not in self._config:
-            msg = "Invalid continuance transform configuration. Only restart paths are supported."
+        found_keys = set(self._config.keys())
+        minimal_keys = {self.KEY_PATH, self.KEY_STEP}
+
+        if found_keys and not found_keys.intersection(minimal_keys):
+            msg = (
+                "Invalid continuance transform configuration; supported configuration: "
+                f"{', '.join(minimal_keys)}, provided configuration: {', '.join(found_keys)}"
+            )
             raise NotImplementedError(msg)
 
-        search_path = Path(self._config["path"])
-        if restart_file := RestartFile.find(search_path, notfound_ok=False):
+        search_path: Path | None = None
+
+        if target_path := self._config.get(self.KEY_PATH, None):
+            search_path = Path(target_path)
+
+        if name := self._config.get(self.KEY_STEP, None):
+            run_id = os.getenv(ENV_CSTAR_RUNID, None)
+            run: WorkplanRun | None = None
+
+            if run_id:
+                tracking = TrackingRepository()
+                run = tracking.get_workplan_run_sync(run_id)
+
+            if run is None:
+                msg = "Workplan context information was not supplied."
+                raise RuntimeError(msg)
+
+            wp = deserialize(run.trx_workplan_path, LiveWorkplan)
+            if step := next((s for s in wp.steps if s.name == name), None):
+                search_path = step.fsm.output_dir
+            else:
+                msg = f"Unable to locate metadata for step {name!r} in runtime context."
+                raise RuntimeError(msg)
+
+        if search_path and (
+            restart_file := RestartFile.find(search_path, notfound_ok=False)
+        ):
             return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
