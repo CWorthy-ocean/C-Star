@@ -270,13 +270,7 @@ def process_spec_config(
             )
 
     if host is not None:
-        logger.info(
-            "Resolved host:\n%s",
-            host.summary(
-                casename=cfg.casename,
-                run_output_dir=str(cfg.run_output_dir(host.scratch)),
-            ),
-        )
+        logger.info("Resolved host:\n%s", host.summary(casename=cfg.casename))
 
     factory = executor_factory or _default_executor_factory
     executor = factory(cfg)

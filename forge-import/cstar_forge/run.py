@@ -19,13 +19,16 @@ from cstar_forge.forge.spec_config import SpecConfig
 from cstar_forge.forge.spec_config_engine import process_spec_config
 
 
-def process(spec, **kwargs):
+def process(spec, *, working_dir=None, **kwargs):
     """Resolve this machine's host and run ``process_spec_config`` on it.
 
     Thin Forge convenience: deduces a ``HostPaths`` via ``config.resolve_host()`` and
-    injects it, so callers never supply paths by hand.
+    injects it, so callers never supply paths by hand. ``working_dir`` defaults to the
+    spec's stored ``working_dir`` (a per-host override may be passed here).
     """
-    return process_spec_config(spec, host=config.resolve_host(), **kwargs)
+    cfg = spec if isinstance(spec, SpecConfig) else SpecConfig.from_yaml(spec)
+    wd = working_dir if working_dir is not None else cfg.working_dir
+    return process_spec_config(cfg, host=config.resolve_host(wd), **kwargs)
 
 
 def main(argv: list | None = None) -> int:
@@ -53,17 +56,18 @@ def main(argv: list | None = None) -> int:
     parser.add_argument(
         "--host-only", action="store_true", help="just print the resolved host and exit"
     )
+    parser.add_argument(
+        "--working-dir",
+        default=None,
+        help="override the spec's working_dir (per-run artifact root) for this host",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     cfg = SpecConfig.from_yaml(args.spec_config)
-    host = config.resolve_host()
-    print(
-        host.summary(
-            casename=cfg.casename,
-            run_output_dir=str(cfg.run_output_dir(host.scratch)),
-        )
-    )
+    wd = args.working_dir if args.working_dir is not None else cfg.working_dir
+    host = config.resolve_host(wd)
+    print(host.summary(casename=cfg.casename))
     if args.host_only:
         return 0
 

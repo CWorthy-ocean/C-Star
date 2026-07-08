@@ -941,14 +941,14 @@ class TestSpecConfigEngine:
         from cstar_forge import config
         from cstar_forge.forge.host import HostPaths
 
-        h = config.resolve_host()
+        cfg = self._cfg()
+        h = config.resolve_host(cfg.working_dir)
         assert isinstance(h, HostPaths)
         assert h.system
-        for attr in ("source_data", "input_data", "scratch", "catalog"):
-            assert getattr(h, attr) is not None
-        # host-derived run paths are computed from cfg + the resolved scratch, not stored
-        cfg = self._cfg()
-        assert str(cfg.run_output_dir(h.scratch)).endswith(cfg.casename)
+        # working_dir is the injected per-run artifact root; source_data_cache is the
+        # shared host download cache. Both resolved from config, not the spec file.
+        assert str(h.working_dir).endswith("cstar-forge-data")
+        assert h.source_data_cache is not None
 
 
 # ---------------------------------------------------------------------------
