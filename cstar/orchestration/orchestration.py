@@ -614,7 +614,7 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
     async def update_status(
         cls,
         item: Task[_THandle] | _THandle,
-    ) -> Task[_THandle] | _THandle:
+    ) -> tuple[bool, _THandle]:
         """Query and update the status for a running task.
 
         Parameters
@@ -832,14 +832,12 @@ class Orchestrator(LoggingMixin):
         if task is None:
             return
 
+        self.planner.store(n, KEY_STATUS, Status.Done)
+
         if task.status == Status.Done:
             self.log.info(f"Closed node: {n}")
-            self.planner.store(n, KEY_STATUS, Status.Done)
-        elif task.status == Status.Failed:
-            self.log.warning(f"Failed node: {n}")
-            # TODO: on failure, cancel all jobs if anything depends on it
-            # - NOTE: this may occur naturally with SLURM but not local launch
-            self.planner.store(n, KEY_STATUS, Status.Failed)
+        elif Status.is_failure(task.status):
+            self.log.warning(f"Failed node: {n!r}, status: {task.status.name!r}")
             raise CstarExpectationFailed(f"Node {n} task failed.")
 
     async def run(self, mode: RunMode) -> Mapping[str, Status]:

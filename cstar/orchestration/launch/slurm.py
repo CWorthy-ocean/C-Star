@@ -170,7 +170,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         script_path.parent.mkdir(parents=True, exist_ok=True)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        run_id = os.getenv(ENV_CSTAR_RUNID)
+        run_id = os.getenv(ENV_CSTAR_RUNID, "")
         step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
         command = step.command
@@ -203,7 +203,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             return SlurmHandle(
                 pid=str(job.id),
                 name=step.name,
-                run_id=str(os.getenv(ENV_CSTAR_RUNID, "")),
+                run_id=run_id,
             )
 
         msg = f"Unable to retrieve job ID for step `{step.name}`. Job `{job}` failed"
@@ -293,8 +293,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                     active = set(x.pid for x in dependencies).difference(successes)
                     dependencies = list(filter(lambda x: x.pid in active, dependencies))
 
-        submitted = await submit_fn(step, dependencies)
-        handle = t.cast("SlurmHandle", await SlurmLauncher.update_status(submitted))
+        handle = await submit_fn(step, dependencies)
+        await SlurmLauncher.update_status(handle)
 
         return Task(
             step=step,
@@ -360,7 +360,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     async def update_status(
         cls,
         item: Task[SlurmHandle] | SlurmHandle,
-    ) -> Task[SlurmHandle] | SlurmHandle:
+    ) -> tuple[bool, SlurmHandle]:
         """Query and update the status for a running task.
 
         Parameters
@@ -376,10 +376,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         prior = handle.status
         current = await SlurmLauncher.query_status(item)
 
-        if prior != current:
+        if changed := (prior != current):
             handle.status = current
 
-        return item
+        return changed, handle
 
     @classmethod
     async def cancel(cls, item: Task[SlurmHandle]) -> Task[SlurmHandle]:

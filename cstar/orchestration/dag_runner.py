@@ -206,7 +206,7 @@ def incremental_delays() -> Generator[float, None, None]:
 
 async def load_run_state(
     run_id: str,
-    launcher: Launcher[t.Any],
+    launcher: Launcher[ProcessHandle],
 ) -> DagStatus:
     """Load the run state.
 
@@ -224,18 +224,13 @@ async def load_run_state(
     configure_environment(run_id=run_id)
     sentinels = await load_sentinels(launcher.handle_klass())
 
-    open_set: dict[str, Status] = {}
-    closed_set: dict[str, Status] = {}
-
     # ensure most recent status is retrieved in case of crash or system failure
-    updates = [launcher.update_status(sentinel) for sentinel in sentinels]
-    await asyncio.gather(*updates)
+    updates = await asyncio.gather(*map(launcher.update_status, sentinels))
+    changes = [h for (is_updated, h) in updates if is_updated]
+    await asyncio.gather(*map(on_status_changed, changes))
 
-    for sentinel in sentinels:
-        if Status.is_terminal(sentinel.status):
-            closed_set[sentinel.name] = sentinel.status
-        else:
-            open_set[sentinel.name] = sentinel.status
+    closed_set = {s.name: s.status for s in sentinels if Status.is_terminal(s.status)}
+    open_set = {s.name: s.status for s in sentinels if s.name not in closed_set}
 
     return DagStatus({**open_set, **closed_set})
 

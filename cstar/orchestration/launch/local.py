@@ -345,7 +345,7 @@ class LocalLauncher(Launcher[LocalHandle]):
     async def update_status(
         cls,
         item: Task[LocalHandle] | LocalHandle,
-    ) -> Task[LocalHandle] | LocalHandle:
+    ) -> tuple[bool, LocalHandle]:
         """Query and update the status for a running task.
 
         Parameters
@@ -361,10 +361,10 @@ class LocalLauncher(Launcher[LocalHandle]):
         prior = handle.status
         current = await LocalLauncher.query_status(item)
 
-        if prior != current:
+        if changed := prior != current:
             handle.status = current
 
-        return item
+        return changed, handle
 
     @classmethod
     async def cancel(cls, item: Task[LocalHandle]) -> Task[LocalHandle]:
