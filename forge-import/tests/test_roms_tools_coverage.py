@@ -174,15 +174,12 @@ def test_all_rt_params_are_exposed_or_skipped(cls_name, forge_cls_name):
     )
 
 
-# ── models.py ↔ spec_config.py lockstep ───────────────────────────────────────
-# The option knobs live in TWO parallel Forge schemas: the processing-side item
-# models in ``cstar_forge.models`` (consumed by ``RomsMarblInputData``) and the
-# authoring-side item models in ``cstar_forge.forge.spec_config`` (the SpecConfig / wizard).
-# The engine bridge (``sources_to_forcing_override``) ``model_dump``s the spec_config
-# item and feeds it to the models.py item, so a typed field added to one but not the
-# other silently breaks the round trip: a value set in the UI never reaches
-# ``input_data``, or a processing field is un-authorable. These pairs must expose
-# identical field sets. See docs/roms-tools-contributor-guide.md.
+# ── single-source item models (Phase D) ──────────────────────────────────────
+# The forcing/IC item models are now defined ONCE in ``cstar_forge.forge.spec_config``
+# and re-exported by ``cstar_forge.models`` (with ``InitialConditions`` aliased to the
+# legacy name ``InitialConditionsInput``). This guard asserts they are literally the same
+# class, so the "two parallel schemas" duplication cannot silently re-appear — adding a
+# roms-tools option field is a one-place edit. See docs/roms-tools-contributor-guide.md.
 _ITEM_MODEL_PAIRS = [
     ("InitialConditionsInput", "InitialConditions"),
     ("SurfaceForcingItem", "SurfaceForcingItem"),
@@ -193,26 +190,16 @@ _ITEM_MODEL_PAIRS = [
 
 
 @pytest.mark.parametrize("models_name,spec_name", _ITEM_MODEL_PAIRS)
-def test_forge_item_models_in_lockstep(models_name, spec_name):
-    """The processing-side (``models.py``) and authoring-side (``spec_config.py``)
-    item models must expose identical field sets, so every option knob is both
-    authorable in the SpecConfig/UI and forwarded to ``input_data``. Drift here means
-    a UI value is silently dropped by the bridge (or an ``input_data`` field is
-    un-authorable) — exactly the class of bug this guard exists to prevent.
+def test_forge_item_models_are_single_sourced(models_name, spec_name):
+    """``cstar_forge.models`` must re-export the exact ``forge.spec_config`` item class
+    (single source of truth) — not a divergent copy. If someone re-introduces a separate
+    definition in models.py, these stop being the same object and this guard fails.
     """
     from cstar_forge import models
     from cstar_forge.forge import spec_config
 
-    models_fields = set(getattr(models, models_name).model_fields.keys())
-    spec_fields = set(getattr(spec_config, spec_name).model_fields.keys())
-
-    missing_in_spec = models_fields - spec_fields
-    missing_in_models = spec_fields - models_fields
-    assert not (missing_in_spec or missing_in_models), (
-        "Forge item models drifted (add the field to BOTH, with a matching type):\n"
-        f"  models.{models_name} has fields absent from spec_config.{spec_name}: "
-        f"{sorted(missing_in_spec)}\n"
-        f"  spec_config.{spec_name} has fields absent from models.{models_name}: "
-        f"{sorted(missing_in_models)}\n"
-        "See docs/roms-tools-contributor-guide.md (promoting a roms-tools option)."
+    assert getattr(models, models_name) is getattr(spec_config, spec_name), (
+        f"models.{models_name} is not the same class as spec_config.{spec_name} — "
+        "the item models must be single-sourced in forge/spec_config.py and re-exported "
+        "by models.py. See docs/roms-tools-contributor-guide.md."
     )

@@ -51,10 +51,10 @@ import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ===========================================================================
 # Enums for roms-tools constrained string parameters.
@@ -325,7 +325,13 @@ class SourceSpec(_Section):
 
     name: str
     climatology: bool = False
-    glorys_layout: str | None = None  # "regional" | "global"
+    glorys_layout: Literal["global", "regional"] | None = None
+
+    @model_validator(mode="after")
+    def _glorys_layout_only_for_glorys(self) -> SourceSpec:
+        if self.glorys_layout is not None and self.name.upper() != "GLORYS":
+            raise ValueError("glorys_layout is only valid when name is GLORYS")
+        return self
 
 
 # The sanctioned escape hatch: raw roms-tools constructor kwargs that have NOT (yet)

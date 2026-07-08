@@ -500,25 +500,35 @@ class TestModelInputs:
             )
         assert "extra" in str(exc_info.value).lower() or "forbidden" in str(exc_info.value).lower()
 
-    def test_boundaryforcingitem_accepts_extra_fields(self):
-        """Test that BoundaryForcingItem passes extra fields through to roms-tools constructors."""
+    def test_boundaryforcingitem_rejects_extra_fields(self):
+        """Unknown fields are rejected (extra='forbid'); raw roms-tools kwargs go via the
+        sanctioned ``options`` passthrough instead. (Phase D single-sourced these item
+        models with forge.spec_config, which is strict.)"""
+        with pytest.raises(ValidationError):
+            BoundaryForcingItem(
+                source=SourceSpec(name="GLORYS"),
+                type="physics",
+                bypass_validation=True,
+            )
         item = BoundaryForcingItem(
             source=SourceSpec(name="GLORYS"),
             type="physics",
-            bypass_validation=True,
+            options={"bypass_validation": True},
         )
-        dumped = item.model_dump()
-        assert dumped["bypass_validation"] is True
-        assert dumped["type"] == "physics"
+        assert item.options["bypass_validation"] is True
 
-    def test_initialconditionsinput_accepts_extra_fields(self):
-        """Test that InitialConditionsInput passes extra fields through to roms-tools constructors."""
+    def test_initialconditionsinput_rejects_extra_fields(self):
+        """Unknown fields are rejected; use the ``options`` passthrough for raw rt kwargs."""
+        with pytest.raises(ValidationError):
+            InitialConditionsInput(
+                source=SourceSpec(name="GLORYS"),
+                bypass_validation=True,
+            )
         item = InitialConditionsInput(
             source=SourceSpec(name="GLORYS"),
-            bypass_validation=True,
+            options={"bypass_validation": True},
         )
-        dumped = item.model_dump()
-        assert dumped["bypass_validation"] is True
+        assert item.options["bypass_validation"] is True
 
 
 class TestModelInputsFromDict:

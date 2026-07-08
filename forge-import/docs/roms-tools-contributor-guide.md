@@ -84,12 +84,14 @@ authoring time. That's the tradeoff, and the reason for Tier 2.
 When a knob is stable and worth surfacing, promote it. Typed fields get Pydantic
 validation, enum dropdowns, tooltips, and discoverability. Checklist:
 
-1. **Add the field to *both* item models** — the two are kept in lockstep (see Guards):
-   - `cstar_forge/models.py` (processing-side, consumed by `input_data`)
-   - `cstar_forge/spec_config.py` (authoring-side, the SpecConfig / wizard)
-   Use a matching type. For a constrained set of values, define a `str, Enum` in
-   `spec_config.py` and reuse it (import direction is `models.py` → `spec_config.py`;
-   never the reverse — `spec_config.py` stays import-light and relocatable).
+1. **Add the field once, to the item model in `cstar_forge/forge/spec_config.py`.** The
+   item models (`SurfaceForcingItem`, `BoundaryForcingItem`, `TidalForcingItem`,
+   `RiverForcingItem`, `InitialConditions`, `SourceSpec`) are **single-sourced** there and
+   re-exported by `cstar_forge/models.py` (with `InitialConditions` aliased to the legacy
+   name `InitialConditionsInput`), so one edit covers both the authoring and processing
+   sides. For a constrained set of values, define a `str, Enum` in `spec_config.py` too
+   (it stays import-light and relocatable). Items are `extra="forbid"` — unknown kwargs
+   must go through `options`, not as loose fields.
 2. **Record it in the drift guard** — add the field name to the class's entry in
    `_FORGE_FIELDS` in `tests/test_roms_tools_coverage.py`.
 3. **Surface it in the wizard** — add a control in `spec_config_wizard.py`
@@ -108,11 +110,12 @@ Both run in CI (`pytest tests/` with no marker filter):
 | Guard | File | Fails when |
 |---|---|---|
 | **roms-tools coverage** | `test_roms_tools_coverage.py::test_all_rt_params_are_exposed_or_skipped` | A new rt constructor param is neither a typed Forge field, a data/run input, nor on the documented `_SKIP` list. Forces a decision on every new roms-tools parameter. |
-| **schema lockstep** | `test_roms_tools_coverage.py::test_forge_item_models_in_lockstep` | The `models.py` and `spec_config.py` item models drift — a field added to one but not the other. Prevents "UI value silently dropped by the bridge." |
+| **single-source** | `test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced` | `cstar_forge.models` stops re-exporting the exact `forge.spec_config` item class (i.e. someone re-introduced a divergent copy in `models.py`). |
 
 If the coverage guard fails on a param you don't want to type yet, add it to `_SKIP`
-with a one-line reason (it remains usable via `options`). If the lockstep guard fails,
-add the missing field to the other item model.
+with a one-line reason (it remains usable via `options`). If the single-source guard
+fails, delete the duplicate definition in `models.py` and re-export from
+`forge/spec_config.py` instead.
 
 ---
 
@@ -120,8 +123,8 @@ add the missing field to the other item model.
 
 - New roms-tools param, need it now → `options` (or `grid_kwargs`). Reproducible,
   unvalidated, invisible in the UI beyond the raw JSON editor.
-- Param is here to stay → promote to a typed field (both models + guard + wizard).
-  Validated, discoverable, first-class.
+- Param is here to stay → promote to a typed field (one edit in `forge/spec_config.py`
+  + drift guard + wizard). Validated, discoverable, first-class.
 - `options` is the pressure valve for the window between "roms-tools shipped it" and
   "Forge typed it" — in a healthy repo it stays near-empty, because the coverage guard
   won't let a new param hide there unnoticed.

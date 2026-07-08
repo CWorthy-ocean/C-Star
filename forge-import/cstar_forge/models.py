@@ -9,7 +9,7 @@ configurations.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import cstar.applications.roms_marbl.models as models
 import yaml
@@ -20,48 +20,16 @@ from cstar.applications.roms_marbl.models import (
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from cstar_forge.forge.spec_config import (
-    BgcInterpMethod,
-    BoundaryType,
-    ClimatologyMode,
-    CoarseGridMode,
-    ExtrapMethod,
-    Prefill,
-    RegridMethod,
-    RestoringForce,
-    SurfaceType,
+    BoundaryForcingItem,
+    RiverForcingItem,
+    SourceSpec,
+    SurfaceForcingItem,
+    TidalForcingItem,
     TopographySource,
 )
-
-
-class SourceSpec(BaseModel):
-    """
-    Specification for a data source.
-
-    Parameters
-    ----------
-    name : str
-        Name of the source (e.g., "GLORYS", "ERA5", "UNIFIED").
-    climatology : bool, optional
-        Whether to use climatology data. Default is False.
-    glorys_layout : str, optional
-        When ``name`` is ``GLORYS``, selects GLORYS_GLOBAL vs GLORYS_REGIONAL
-        preparation and paths. If omitted, defaults to ``regional``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    climatology: bool = Field(default=False, validate_default=False)
-    glorys_layout: Literal["global", "regional"] | None = Field(
-        default=None,
-        validate_default=False,
-    )
-
-    @model_validator(mode="after")
-    def _glorys_layout_only_for_glorys(self) -> SourceSpec:
-        if self.glorys_layout is not None and self.name.upper() != "GLORYS":
-            raise ValueError("glorys_layout is only valid when name is GLORYS")
-        return self
+from cstar_forge.forge.spec_config import (
+    InitialConditions as InitialConditionsInput,
+)
 
 
 class GridInput(BaseModel):
@@ -80,216 +48,6 @@ class GridInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     topography_source: TopographySource = TopographySource.ETOPO5
-
-
-class InitialConditionsInput(BaseModel):
-    """
-    Initial conditions input specification.
-
-    Parameters
-    ----------
-    source : SourceSpec
-        Source specification for physics initial conditions.
-    bgc_source : Optional[SourceSpec]
-        Source specification for biogeochemical initial conditions.
-
-    Any additional keyword arguments are passed directly to the roms-tools
-    InitialConditions constructor (e.g. ``bgc_interpolation_method="density"``).
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    source: SourceSpec
-    bgc_source: SourceSpec | None = Field(default=None, validate_default=False)
-    bgc_interpolation_method: BgcInterpMethod = Field(
-        default=BgcInterpMethod.DEPTH,
-        validate_default=False,
-        description="Vertical interpolation for BGC tracers: 'depth', 'density', or 'density_mld'.",
-    )
-    allow_flex_time: bool = Field(
-        default=False,
-        validate_default=False,
-        description="Allow a ±24h search window around ini_time when the exact timestamp is absent.",
-    )
-    options: dict[str, Any] = Field(
-        default_factory=dict,
-        validate_default=False,
-        description="Extra kwargs forwarded verbatim to the rt.InitialConditions constructor (forward-compat).",
-    )
-
-
-class SurfaceForcingItem(BaseModel):
-    """
-    Individual surface forcing item specification.
-
-    Parameters
-    ----------
-    source : SourceSpec
-        Source specification for this forcing item.
-    type : str
-        Type of forcing: "physics", "bgc", or "restoring".
-    correct_radiation : bool, optional
-        Whether to correct radiation. Default is False.
-    coarse_grid_mode : Optional[str], optional
-        Coarse grid mode for interpolation. Default is "auto".
-        Common values: "auto", "always", "never".
-    restoring_forces: Optional[list], optional
-        List of variables to create restoring forces data for.
-
-    Any additional keyword arguments are passed directly to the roms-tools
-    SurfaceForcing constructor.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    source: SourceSpec
-    type: SurfaceType = Field(default=SurfaceType.PHYSICS)
-    correct_radiation: bool = Field(default=False, validate_default=False)
-    coarse_grid_mode: CoarseGridMode = Field(
-        default=CoarseGridMode.AUTO, validate_default=False
-    )
-    restoring_forces: list[RestoringForce] | None = Field(
-        default=None, validate_default=False
-    )
-    wind_dropoff: bool = Field(
-        default=False,
-        validate_default=False,
-        description="Apply exponential coastal wind-speed reduction (12.5 km e-folding scale).",
-    )
-    options: dict[str, Any] = Field(
-        default_factory=dict,
-        validate_default=False,
-        description="Extra kwargs forwarded verbatim to rt.SurfaceForcing (forward-compat).",
-    )
-
-
-class BoundaryForcingItem(BaseModel):
-    """
-    Individual boundary forcing item specification.
-
-    Parameters
-    ----------
-    source : SourceSpec
-        Source specification for this forcing item.
-    type : str
-        Type of forcing: "physics" or "bgc".
-
-    Any additional keyword arguments are passed directly to the roms-tools
-    BoundaryForcing constructor (e.g. ``prefill="2d_lateral_fill"``).
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    source: SourceSpec
-    type: BoundaryType = Field(default=BoundaryType.PHYSICS)
-    bgc_interpolation_method: BgcInterpMethod = Field(
-        default=BgcInterpMethod.DEPTH,
-        validate_default=False,
-        description="Vertical interpolation for BGC tracers (type='bgc'): 'depth', 'density', or 'density_mld'.",
-    )
-    prefill: Prefill | None = Field(
-        default=None,
-        validate_default=False,
-        description="Fill NaN source cells before regridding; None applies no source prefill.",
-    )
-    prefill_kwargs: dict[str, Any] | None = Field(
-        default=None,
-        validate_default=False,
-        description="Method-specific options for the selected prefill.",
-    )
-    regrid_method: RegridMethod | None = Field(
-        default=None,
-        validate_default=False,
-        description="Horizontal regrid engine ('auto'/'xesmf'/'scipy'); None -> auto.",
-    )
-    extrap_method: ExtrapMethod | None = Field(
-        default=None,
-        validate_default=False,
-        description="Destination extrapolation on the default (prefill=None) path.",
-    )
-    extrap_kwargs: dict[str, Any] | None = Field(
-        default=None,
-        validate_default=False,
-        description="Method-specific options for extrap_method (e.g. num_src_pnts, dist_exponent).",
-    )
-    options: dict[str, Any] = Field(
-        default_factory=dict,
-        validate_default=False,
-        description="Extra kwargs forwarded verbatim to rt.BoundaryForcing (forward-compat).",
-    )
-
-
-class TidalForcingItem(BaseModel):
-    """
-    Individual tidal forcing item specification.
-
-    Parameters
-    ----------
-    source : SourceSpec
-        Source specification for tidal data.
-    ntides : int, optional
-        Number of tidal constituents. Default is None.
-
-    Any additional keyword arguments are passed directly to the roms-tools
-    TidalForcing constructor.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    source: SourceSpec
-    ntides: int | None = Field(default=None, validate_default=False)
-    options: dict[str, Any] = Field(
-        default_factory=dict,
-        validate_default=False,
-        description="Extra kwargs forwarded verbatim to rt.TidalForcing (forward-compat).",
-    )
-
-
-class RiverForcingItem(BaseModel):
-    """
-    Individual river forcing item specification.
-
-    Parameters
-    ----------
-    source : SourceSpec
-        Source specification for river data. Note: climatology can be
-        specified either in the source or at the top level (for backward compatibility).
-    include_bgc : bool, optional
-        Whether to include biogeochemical components. Default is False.
-
-    Any additional keyword arguments are passed directly to the roms-tools
-    RiverForcing constructor.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    source: SourceSpec
-    include_bgc: bool = Field(default=False, validate_default=False)
-    convert_to_climatology: ClimatologyMode = Field(
-        default=ClimatologyMode.IF_ANY_MISSING,
-        validate_default=False,
-        description="When to compute a river climatology.",
-    )
-    bgc_source: dict[str, Any] | None = Field(
-        default=None,
-        validate_default=False,
-        description="Separate river-BGC dataset config (name, optional path, optional fill).",
-    )
-    coast_snap_buffer_km: float | None = Field(
-        default=None,
-        validate_default=False,
-        description="Override the coastal snap buffer (km); None uses the dataset default.",
-    )
-    domain_edge_buffer: int = Field(
-        default=20,
-        validate_default=False,
-        description="Grid cells beyond the domain edge kept in the bounding-box pre-filter.",
-    )
-    options: dict[str, Any] = Field(
-        default_factory=dict,
-        validate_default=False,
-        description="Extra kwargs forwarded verbatim to rt.RiverForcing (forward-compat).",
-    )
 
 
 class ForcingInput(BaseModel):
