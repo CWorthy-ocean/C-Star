@@ -383,7 +383,6 @@ class WorkplanTransformer(LoggingMixin):
         """Initialize the instance."""
         self.original = Workplan(**wp.model_dump(by_alias=True))
         self.fill_transform = fill_transform
-        self._transformed: Workplan | None = None
 
     @property
     def is_modified(self) -> bool:
