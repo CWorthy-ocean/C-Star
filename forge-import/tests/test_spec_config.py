@@ -175,7 +175,7 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
 
     # the engine warns but still processes (uses a fake executor)
     class _Fake:
-        def __init__(self, cfg=None):
+        def __init__(self, cfg=None, host=None):
             self.calls = []
 
         def ensure_source_data(self, **k):
@@ -839,7 +839,7 @@ class TestSpecConfigWizard:
 class _FakeBuilder:
     """A SpecConfigExecutor stand-in: records calls instead of doing real work."""
 
-    def __init__(self, cfg=None):
+    def __init__(self, cfg=None, host=None):
         self.cfg = cfg
         self.calls = []
 
@@ -918,7 +918,7 @@ class TestSpecConfigEngine:
         assert isinstance(_FakeBuilder(), SpecConfigExecutor)
 
         class _Bad:  # missing the required methods
-            def __init__(self, cfg=None):
+            def __init__(self, cfg=None, host=None):
                 pass
 
         with pytest.raises(TypeError, match="SpecConfigExecutor"):

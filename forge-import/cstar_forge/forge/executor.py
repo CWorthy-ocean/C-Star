@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 from cstar_forge import config
 from cstar_forge import models as forge_models
 from cstar_forge.forge import input_data, source_data
+from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
 from cstar_forge.util import (
     compute_timestep_from_cfl,
@@ -273,6 +274,17 @@ class ForgeExecutor(BaseModel):
             "None uses the roms-tools default (2000-01-01)."
         ),
     )
+    host: HostPaths | None = Field(
+        default=None,
+        validate_default=False,
+        exclude=True,
+        description=(
+            "Injected runtime location (working_dir + source_data_cache + machine). When "
+            "set, produced artifacts go under host.working_dir and no host paths are read "
+            "from cstar_forge.config. None keeps the legacy config-derived paths "
+            "(transitional; being phased out)."
+        ),
+    )
     override: list[str | Path] | None = Field(default=None, validate_default=False)
     ensemble_id: int | None = Field(default=None, validate_default=False)
     catalog_root: str | Path | None = Field(
@@ -353,9 +365,10 @@ class ForgeExecutor(BaseModel):
     @property
     def input_data_dir(self) -> Path:
         """Directory for generated input NetCDF files (grid, forcing, etc.)."""
-        # Match ``InputData`` / ``_forcing_filename``: dirname uses the same sanitization
-        # as NetCDF basenames (no ``.`` except ``.nc``), so planned-output prints match
-        # paths on disk.
+        if self.host is not None:
+            return self.host.working_dir / "input_data"
+        # Legacy config-derived fallback (host not injected). Match ``InputData`` /
+        # ``_forcing_filename`` dirname sanitization (no ``.`` except ``.nc``).
         safe = input_data.netcdf_filename_component(self.name)
         return config.paths.input_data / safe
 
@@ -581,7 +594,11 @@ class ForgeExecutor(BaseModel):
 
     @property
     def run_output_dir(self) -> Path:
-        """Simulation scratch directory under ``config.paths.scratch`` (primary data tree)."""
+        """Per-run output root — the injected ``host.working_dir`` (all produced artifacts
+        live under it), or the legacy ``config.paths.scratch/<casename>`` fallback.
+        """
+        if self.host is not None:
+            return self.host.working_dir
         return config.paths.scratch / self.casename
 
     @property
@@ -618,12 +635,16 @@ class ForgeExecutor(BaseModel):
 
     @property
     def blueprint_dir(self) -> Path:
-        """Return the blueprint directory path."""
+        """Return the blueprint directory path (under host.working_dir when injected)."""
+        if self.host is not None:
+            return self.host.working_dir / "blueprints"
         return self._get_catalog().blueprint_dir_for(config.system_id, self.name)
 
     @property
     def compile_time_code_dir(self) -> Path:
         """Compile-time rendered templates inside this blueprint's Build/ directory."""
+        if self.host is not None:
+            return self.host.working_dir / "builds" / "compile-time"
         return (
             self._get_catalog().build_dir_for(config.system_id, self.name)
             / "compile-time"
@@ -632,6 +653,8 @@ class ForgeExecutor(BaseModel):
     @property
     def run_time_code_dir(self) -> Path:
         """Run-time rendered templates inside this blueprint's Build/ directory."""
+        if self.host is not None:
+            return self.host.working_dir / "builds" / "run-time"
         return (
             self._get_catalog().build_dir_for(config.system_id, self.name) / "run-time"
         )
@@ -1342,7 +1365,11 @@ class ForgeExecutor(BaseModel):
             grid_name=self.grid_name,
             start_time=self.start_date,
             end_time=self.end_date,
-            source_data_dir=config.paths.source_data,
+            source_data_dir=(
+                self.host.source_data_cache
+                if self.host is not None
+                else config.paths.source_data
+            ),
         ).prepare_all(include_streamable=include_streamable)
 
     def generate_inputs(
@@ -1822,9 +1849,9 @@ class ForgeExecutor(BaseModel):
         )
 
     @classmethod
-    def from_spec_config(cls, cfg: Any) -> ForgeExecutor:
+    def from_spec_config(cls, cfg: Any, host: HostPaths | None = None) -> ForgeExecutor:
         """Canonical constructor: build the executor directly from a resolved
-        ``SpecConfig`` (the forge application's blueprint).
+        ``SpecConfig`` (the forge application's blueprint) + the injected ``host``.
 
         This is the single derivation path from a SpecConfig to a runnable builder. The
         domain-catalog path routes through the Phase-1 resolver
@@ -1834,7 +1861,7 @@ class ForgeExecutor(BaseModel):
         """
         from cstar_forge.forge.spec_config_engine import spec_config_to_builder_kwargs
 
-        return cls(**spec_config_to_builder_kwargs(cfg))
+        return cls(**spec_config_to_builder_kwargs(cfg), host=host)
 
     def configure_build(
         self,

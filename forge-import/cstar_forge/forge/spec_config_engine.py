@@ -68,9 +68,9 @@ class SpecConfigExecutor(Protocol):
     def path_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-# A factory maps a host-independent SpecConfig to a ready-to-run executor. The
-# forge default builds a ForgeExecutor; a C-Star app would provide its own.
-ExecutorFactory = Callable[[SpecConfig], SpecConfigExecutor]
+# A factory maps a host-independent SpecConfig + the injected host to a ready-to-run
+# executor. The forge default builds a ForgeExecutor; a C-Star app would provide its own.
+ExecutorFactory = Callable[[SpecConfig, HostPaths | None], SpecConfigExecutor]
 
 logger = logging.getLogger(__name__)
 
@@ -205,14 +205,16 @@ def verify_content_hash(cfg: SpecConfig) -> str | None:
     return None
 
 
-def _default_executor_factory(cfg: SpecConfig) -> SpecConfigExecutor:
+def _default_executor_factory(
+    cfg: SpecConfig, host: HostPaths | None = None
+) -> SpecConfigExecutor:
     """Forge's default executor: a ``ForgeExecutor`` built from the config's
-    atomic inputs. Imported lazily so the lightweight bits above (host resolution,
-    settings split) stay importable without the full forge stack.
+    atomic inputs + the injected host. Imported lazily so the lightweight bits above
+    (settings split) stay importable without the full forge stack.
     """
     from cstar_forge.forge.executor import ForgeExecutor
 
-    return ForgeExecutor.from_spec_config(cfg)
+    return ForgeExecutor.from_spec_config(cfg, host=host)
 
 
 def process_spec_config(
@@ -273,7 +275,7 @@ def process_spec_config(
         logger.info("Resolved host:\n%s", host.summary(casename=cfg.casename))
 
     factory = executor_factory or _default_executor_factory
-    executor = factory(cfg)
+    executor = factory(cfg, host)
     if not isinstance(executor, SpecConfigExecutor):
         raise TypeError(
             f"executor_factory returned {type(executor).__name__}, which does not "
