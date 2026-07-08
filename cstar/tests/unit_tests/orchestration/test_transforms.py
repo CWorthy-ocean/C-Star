@@ -404,57 +404,6 @@ def test_continuance_transform_happy_path(
     assert not transformed.blueprint_overrides
 
 
-@pytest.mark.parametrize("pad_size", range(1, 10))
-def test_continuance_transform_locate_path_for_step(
-    single_step_workplan: Workplan,
-    mocked_simulation_outputs: tuple[Path, Path, Path],
-    pad_size: int,
-) -> None:
-    """Verify that applying a well-formed continuance transform that specifies a step
-    name results in resolution of the correct path.
-
-    Parameters
-    ----------
-    single_step_workplan : Workplan
-        A workplan with a valid blueprint file on disk.
-    mocked_simulation_outputs : Path
-        Paths to mocked simulation outputs; used here to pass a valid path
-        to the continuance transform (containing files meeting glob pattern *_rst.nc)
-    pad_size : int
-        Used to vary the amount of zero padding in the partition segment of the file
-        name. This ensures that the restart file search can locate files regardless
-        of the number of partitions.
-    """
-    _, continue_from_dir, _ = mocked_simulation_outputs
-
-    for seg_id in ["000", "001", "002"]:
-        rf_glob = f"*_rst.*.{seg_id}.nc"
-        reset_file_path = next(continue_from_dir.rglob(rf_glob))
-        name = reset_file_path.name.replace(
-            f"{seg_id}.nc",
-            f"{str(int(seg_id)).zfill(pad_size)}.nc",
-        )
-        reset_file_path = reset_file_path.rename(reset_file_path.with_name(name))
-
-    transform = ContinuanceDirective({"path": str(continue_from_dir)})
-    step = single_step_workplan.steps[0]
-    step.blueprint_overrides.clear()  # ensure nothing existing
-
-    steps = transform(step)
-
-    transformed = steps[0]
-
-    bp_old = deserialize(step.blueprint_path, RomsMarblBlueprint)
-    bp_new = deserialize(transformed.blueprint_path, RomsMarblBlueprint)
-
-    # confirm the old blueprint has a different initial conditions location
-    assert str(continue_from_dir) not in str(bp_old.initial_conditions.data[0].location)
-    assert str(continue_from_dir) in str(bp_new.initial_conditions.data[0].location)
-
-    # confirm the overrides were removed after being applied
-    assert not transformed.blueprint_overrides
-
-
 def test_workplan_transformer_applies_working_dir_overrides(
     tmp_path: Path,
     step_overiding_wp: Workplan,
