@@ -631,6 +631,36 @@ class ContinuanceDirective(Directive, OverrideTransform):
     def key(cls) -> str:
         return "continue-from"
 
+    def _find_step_path(self, name: str) -> Path:
+        """Identify the path to the output directory for another step.
+
+        Parameters
+        ----------
+        name : str
+            The name of the step to locate
+
+        Returns
+        -------
+        Path
+        """
+        run_id = os.getenv(ENV_CSTAR_RUNID, None)
+        run: WorkplanRun | None = None
+
+        if run_id:
+            tracking = TrackingRepository()
+            run = tracking.get_workplan_run_sync(run_id)
+
+        if run is None:
+            msg = "Workplan context information was not supplied."
+            raise RuntimeError(msg)
+
+        wp = deserialize(run.trx_workplan_path, LiveWorkplan)
+        if step := next((s for s in wp.steps if s.name == name), None):
+            return step.fsm.output_dir
+
+        msg = f"Unable to locate metadata for step {name!r} in runtime context."
+        raise RuntimeError(msg)
+
     def _create_initial_condition_overrides(
         self,
     ) -> dict[str, t.Any]:
@@ -664,23 +694,7 @@ class ContinuanceDirective(Directive, OverrideTransform):
             search_path = Path(target_path)
 
         if name := self._config.get(self.KEY_STEP, None):
-            run_id = os.getenv(ENV_CSTAR_RUNID, None)
-            run: WorkplanRun | None = None
-
-            if run_id:
-                tracking = TrackingRepository()
-                run = tracking.get_workplan_run_sync(run_id)
-
-            if run is None:
-                msg = "Workplan context information was not supplied."
-                raise RuntimeError(msg)
-
-            wp = deserialize(run.trx_workplan_path, LiveWorkplan)
-            if step := next((s for s in wp.steps if s.name == name), None):
-                search_path = step.fsm.output_dir
-            else:
-                msg = f"Unable to locate metadata for step {name!r} in runtime context."
-                raise RuntimeError(msg)
+            search_path = self._find_step_path(name)
 
         if search_path and (
             restart_file := RestartFile.find(search_path, notfound_ok=False)
