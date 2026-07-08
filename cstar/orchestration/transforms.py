@@ -337,7 +337,7 @@ class TemplateFillTransform:
                 "Some templated values were not filled or placeholders were malformed."
             )
 
-        return step.model_validate_json(content)
+        return LiveStep.model_validate_json(content)
 
     def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply template filling to a step's blueprint_overrides.
