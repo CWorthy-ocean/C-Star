@@ -9,7 +9,7 @@ so a UI backend or a user's laptop can assemble and review a config without ROMS
 C-Star / roms_tools installed. The only value that needs a grid (``dt`` via the CFL
 criterion, which needs the grid spacing ``ds``) is optional: pass ``dt=`` to stay
 fully lightweight, or leave it ``None`` to have it computed (lazily importing
-``roms_tools`` + ``cstar_forge.util``).
+``roms_tools`` + ``cstar_forge.forge.util``).
 
 What this does NOT do (by design — it is host- and artifact-independent):
 * no machine / path resolution (Phase 2, on the run host),
@@ -247,7 +247,7 @@ def build_spec_config(
     Parameters mirror the logical inputs a UI would collect. ``dt`` may be supplied
     directly (fully lightweight); if ``None`` it is computed from the CFL criterion,
     which lazily imports ``roms_tools`` (to build the grid for ``ds``) and
-    ``cstar_forge.util``.
+    ``cstar_forge.forge.util``.
     """
     spec = load_model_spec_data(model_dir)
     model = spec["model"]
@@ -274,7 +274,7 @@ def build_spec_config(
         dt = _compute_dt_from_cfl(grid_kwargs, grid)
     n_days = (end_date - start_date).days
     ntimes = round(n_days * 24 * 3600 / dt)
-    # v_sponge default = grid spacing (m) / 10  (== cstar_forge.util.compute_v_sponge_from_grid)
+    # v_sponge default = grid spacing (m) / 10  (== cstar_forge.forge.util.compute_v_sponge_from_grid)
     v_sponge = (size_x / nx) * 1000.0 / 10.0
 
     # ----- flat model_settings ----------------------------------------------
@@ -557,13 +557,13 @@ def _build_code(model: dict[str, Any], templates_repo: CodeRepo) -> Code:
 
 
 def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
-    """Lazily compute dt from the CFL criterion (needs roms_tools + cstar_forge.util)."""
+    """Lazily compute dt from the CFL criterion (needs roms_tools + cstar_forge.forge.util)."""
     try:
-        from cstar_forge.util import compute_timestep_from_cfl
+        from cstar_forge.forge.util import compute_timestep_from_cfl
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(
             "dt was not provided and could not be computed: importing "
-            "cstar_forge.util failed. Pass dt= explicitly to keep Phase 1 "
+            "cstar_forge.forge.util failed. Pass dt= explicitly to keep Phase 1 "
             f"dependency-light. ({exc})"
         ) from exc
     if grid is None:

@@ -41,8 +41,8 @@ from typing import (
 )
 
 from cstar_forge.forge.host import HostPaths
+from cstar_forge.forge.namelist_model import validate_run_time_sections
 from cstar_forge.forge.spec_config import SpecConfig
-from cstar_forge.namelist_model import validate_run_time_sections
 
 
 @runtime_checkable

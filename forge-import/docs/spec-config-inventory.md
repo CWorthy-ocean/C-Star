@@ -1,5 +1,16 @@
 # Inventory: inputs that drive `configure_build` and `generate_inputs`
 
+> **Historical / superseded.** This is the original planning document for the
+> SpecConfig/wizard refactor — the "planned refactor" it describes is now largely
+> implemented (`CstarSpecBuilder` → `SpecConfig` + `ForgeExecutor`; `cstar_forge/forge/`
+> is the relocatable processing engine). File paths and class names below (e.g.
+> `CstarSpecBuilder`, `cstar_forge/spec_config.py`, `sources.*`) reflect the design as
+> originally proposed and have since moved or been renamed (`SpecConfig` now lives at
+> `cstar_forge/forge/spec_config.py`; `sources` was renamed `forcing`). Kept for the
+> rationale behind the design (the six sources-of-truth model, the config/processing
+> boundary, the hardcoded-constants inventory) — for the current architecture and module
+> map, see `docs/developer-guide.md`.
+
 This document catalogs **every input, setting, and hardcoded value** that affects
 the results of `CstarSpecBuilder.generate_inputs()` and
 `CstarSpecBuilder.configure_build()`. It exists to support a planned refactor that

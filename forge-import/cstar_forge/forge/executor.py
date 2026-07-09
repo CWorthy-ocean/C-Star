@@ -39,10 +39,10 @@ from cstar.orchestration.utils import (
 )
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from cstar_forge import models as forge_models
 from cstar_forge.forge import input_data, source_data
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
+from cstar_forge.forge.spec_config import OpenBoundaries
 
 
 def _schedule_coroutine(coro):
@@ -217,7 +217,7 @@ class ForgeExecutor(BaseModel):
             "``grid_kwargs`` as ``{'name', 'path'}`` before the grid is constructed."
         ),
     )
-    open_boundaries: forge_models.OpenBoundaries
+    open_boundaries: OpenBoundaries
     partitioning: cstar_models.PartitioningParameterSet
     start_date: datetime = Field(alias="start_time")
     end_date: datetime = Field(alias="end_time")

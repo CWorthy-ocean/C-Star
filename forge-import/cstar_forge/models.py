@@ -30,6 +30,9 @@ from cstar_forge.forge.spec_config import (
 from cstar_forge.forge.spec_config import (
     InitialConditions as InitialConditionsInput,
 )
+from cstar_forge.forge.spec_config import (
+    OpenBoundaries as OpenBoundaries,
+)
 
 
 class GridInput(BaseModel):
@@ -414,17 +417,6 @@ class ModelSpec(BaseModel):
                     )
 
         return self
-
-
-class OpenBoundaries(BaseModel):
-    """Open boundary configuration."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    north: bool = False
-    south: bool = False
-    east: bool = False
-    west: bool = False
 
 
 def _extract_source_name(block: Any) -> str | None:

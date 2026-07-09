@@ -44,6 +44,8 @@ _FORGE_APP_MODULES = (
     "spec_config",
     "spec_config_engine",
     "executor",
+    "namelist_model",
+    "util",
 )
 
 # Forge modules the application must not depend on (authoring/curation + host/glue).

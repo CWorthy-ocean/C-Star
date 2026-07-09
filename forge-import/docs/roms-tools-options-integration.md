@@ -3,6 +3,13 @@
 > **Looking to add/operate a roms-tools parameter?** See the forward-looking contract in
 > [`roms-tools-contributor-guide.md`](roms-tools-contributor-guide.md). This document is
 > the *historical record* of how the seams below were built.
+>
+> **Note:** file paths below reflect the state at the time this was written and have
+> since moved: `cstar_forge/_core.py` was deleted (decomposed into `SpecConfig` +
+> `ForgeExecutor`); `cstar_forge/input_data.py` and `cstar_forge/spec_config_engine.py`
+> are now `cstar_forge/forge/input_data.py` and `cstar_forge/forge/spec_config_engine.py`;
+> `CstarSpecBuilder` is now `ForgeExecutor`. See `docs/developer-guide.md` for the current
+> module map.
 
 This document records the changes made to expose roms-tools constructor options through
 the Forge SpecConfig, resolver, processing engine, and wizard UI.

@@ -200,20 +200,21 @@ For example:
 ## Usage Pattern
 
 ```python
-from cstar_forge.input_data import RomsMarblInputData
+from cstar_forge.forge.input_data import RomsMarblInputData
 
-# Create input data generator
+# Create input data generator — host-independent: paths and the resolved forcing
+# selection are injected by the caller (ForgeExecutor), not derived from a model_spec.
 input_gen = RomsMarblInputData(
-    model_name="cson_roms-marbl_v0.1",
-    grid_name="test-tiny",
+    domain_name="test-tiny",
     start_date=datetime(2012, 1, 1),
     end_date=datetime(2012, 1, 2),
-    model_spec=model_spec,
+    forcing_override=forcing_override,  # from SpecConfig.forcing via sources_to_forcing_override
     grid=grid,
     boundaries=boundaries,
     source_data=source_data,
     blueprint_dir=blueprint_dir,
     partitioning=partitioning,
+    input_data_dir=input_data_dir,
 )
 
 # Generate all inputs
@@ -224,9 +225,11 @@ blueprint_elements, compile_time_settings, run_time_settings = input_gen.generat
 )
 ```
 
-## Integration with CstarSpecBuilder
+## Integration with ForgeExecutor
 
-The `RomsMarblInputData` class is used internally by `CstarSpecBuilder.generate_inputs()`:
+The `RomsMarblInputData` class is used internally by `ForgeExecutor.generate_inputs()`
+(`cstar_forge/forge/executor.py` — this was `CstarSpecBuilder.generate_inputs()` before the
+decomposition into `SpecConfig` + `ForgeExecutor`; see `docs/developer-guide.md`):
 
 1. Creates `RomsMarblInputData` instance
 2. Calls `generate_all()` to create input files

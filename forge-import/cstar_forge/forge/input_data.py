@@ -23,9 +23,9 @@ import yaml
 from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
 
-from cstar_forge import models as forge_models
 from cstar_forge.forge import source_data
-from cstar_forge.util import roms_tools_nesting_writer
+from cstar_forge.forge.spec_config import OpenBoundaries
+from cstar_forge.forge.util import roms_tools_nesting_writer
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the
 # substring ``cdr.nc`` so C-Star's ROMS build check on ``cdr_frc.opt`` passes.
@@ -207,7 +207,7 @@ class RomsMarblInputData(InputData):
     """
 
     grid: rt.Grid
-    boundaries: forge_models.OpenBoundaries
+    boundaries: OpenBoundaries
     source_data: source_data.SourceData
     blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet

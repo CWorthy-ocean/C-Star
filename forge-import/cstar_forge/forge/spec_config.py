@@ -1,12 +1,13 @@
 """
-``SpecConfig``: the single authoritative, fully-resolved input to processing.
-
-This is a **draft / starting point** for the planned refactor that splits
-``ForgeExecutor`` into two phases (see ``docs/spec-config-inventory.md``):
+``SpecConfig``: the single authoritative, fully-resolved input to processing — the
+forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
+``cstar_forge.forge.executor.ForgeExecutor.from_spec_config`` and
+``cstar_forge.forge.spec_config_engine.process_spec_config``), split into two phases
+(see ``docs/developer-guide.md``):
 
 1. **Collection / curation** — assemble every option from its source (constructor
    args, the ModelSpec, and the *pure* derived values), validate it, and write one
-   reviewable ``spec_config.yml``.
+   reviewable ``spec_config.yml`` (``cstar_forge.spec_config_resolve.build_spec_config``).
 2. **Processing** — ingest that file on any machine and run the heavy work
    (``generate_inputs`` + ``configure_build``).
 
@@ -39,9 +40,6 @@ be hand-edited before processing. Fixed implementation details (e.g. the ``cdr.n
 ``nesting.nc`` filenames, ``nrrec``, the tide flags set during generation) are NOT
 stored — they are deterministic and set by the processing step.
 
-NOTE: This module is not yet wired into ``ForgeExecutor``. It defines the target
-schema and the ``to_yaml``/``from_yaml`` round-trip so the resolver (Phase 1) and
-engine (Phase 2) can be built against a stable contract.
 """
 
 from __future__ import annotations
@@ -347,9 +345,9 @@ class SourceSpec(_Section):
 # ``RomsMarblInputData._build_input_args`` AFTER the typed defaults and BEFORE the
 # run-time injections (``extra``). Lets a new roms-tools parameter be operated
 # end-to-end with no schema change; promote it to a typed field later for validation,
-# UI, and discoverability. Mirrors the ``options`` field on the corresponding
-# ``cstar_forge.models`` item model — the two are kept in lockstep by
-# ``tests/test_roms_tools_coverage.py::test_forge_item_models_in_lockstep``.
+# UI, and discoverability. ``cstar_forge.models`` re-exports these item models rather
+# than redefining them; single-sourcing here is enforced by
+# ``tests/test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced``.
 _OPTIONS_HELP = (
     "Raw roms-tools constructor kwargs not promoted to typed fields; merged after the "
     "typed defaults and before run-time injections. The sanctioned escape hatch for "
@@ -538,7 +536,7 @@ class SpecConfig(_Section):
     ``title`` and ``output_root_name`` (derived from identity + host scratch path),
     ``s_coord`` (read from the generated grid), and ``grid`` / ``initial`` /
     ``forcing`` (artifact file paths). Validate ``model_settings`` through
-    ``cstar_forge.namelist_model.RunTimeSettings`` (after the processing step fills
+    ``cstar_forge.forge.namelist_model.RunTimeSettings`` (after the processing step fills
     the omitted sections) before writing the namelist.
     """
 
@@ -617,6 +615,22 @@ class SpecConfig(_Section):
         data = self.model_dump(mode="json")
         for key in _HASH_EXCLUDE:
             data.pop(key, None)
+        # ``location`` (the fetch address — a git URL or, in tests, a local path) is
+        # host/transport, not content: the same commit checked out from a different
+        # remote (or a local mirror) must hash identically. Only commit/branch/
+        # directory/files are results-affecting, so scrub `location` from each code
+        # repo before hashing.
+        code = data.get("code")
+        if code:
+            for repo_key in (
+                "roms",
+                "marbl",
+                "templates_compile_time",
+                "templates_run_time",
+            ):
+                repo = code.get(repo_key)
+                if repo:
+                    repo.pop("location", None)
         blob = json.dumps(data, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 

@@ -148,6 +148,41 @@ def test_content_hash_changes_with_results_affecting_data():
     assert c2.content_hash() != h
 
 
+def test_content_hash_ignores_code_repo_location():
+    """``location`` is the fetch address (git URL or, in tests, a local path) — host/
+    transport, not content. The same commit/branch fetched from a different remote (or a
+    local mirror) must hash identically; only commit/branch/directory/files are
+    results-affecting.
+    """
+    cfg = _build()
+    h = cfg.content_hash()
+    c2 = cfg.model_copy(
+        update={
+            "code": cfg.code.model_copy(
+                update={
+                    "roms": cfg.code.roms.model_copy(
+                        update={"location": "https://example.com/some/other/mirror.git"}
+                    ),
+                    "templates_compile_time": cfg.code.templates_compile_time.model_copy(
+                        update={"location": "https://example.com/other-templates.git"}
+                    ),
+                }
+            )
+        }
+    )
+    assert c2.content_hash() == h
+
+    # but a commit/branch change on the same repo IS results-affecting
+    c3 = cfg.model_copy(
+        update={
+            "code": cfg.code.model_copy(
+                update={"roms": cfg.code.roms.model_copy(update={"commit": "deadbeef"})}
+            )
+        }
+    )
+    assert c3.content_hash() != h
+
+
 def test_content_hash_round_trips_through_yaml(tmp_path):
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "spec_config.yml")

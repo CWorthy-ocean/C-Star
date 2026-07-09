@@ -561,5 +561,6 @@ input_args = {
 - `compile_time_settings`: Merged with template defaults, used to render `cppdefs.opt`
 - `run_time_settings`: Merged with template defaults, used to write `namelist.nml` (via `write_roms_namelist`)
 
-These are used by `CstarSpecBuilder.generate_inputs()` to update the blueprint and settings before persisting.
+These are used by `ForgeExecutor.generate_inputs()` (`cstar_forge/forge/executor.py`) to
+update the blueprint and settings before persisting.
 

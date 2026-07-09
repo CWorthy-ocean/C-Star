@@ -33,12 +33,21 @@ The tool produces **blueprint** YAML files that capture the complete configurati
 ```
 cstar-forge/
 ├── cstar_forge/                 # Main package directory
-│   ├── _core.py                # Core classes (CstarSpecBuilder, CstarSpecEngine)
+│   ├── spec_config_resolve.py  # Phase-1 resolver: build_spec_config(...)
+│   ├── spec_config_wizard.py   # SpecConfigWizard (ipywidgets UI)
 │   ├── models.py               # Model specification classes (ModelSpec, etc.)
-│   ├── source_data.py          # Dataset download and preparation
-│   ├── input_data.py           # Input file generation
-│   ├── settings.py             # Template rendering
+│   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors
 │   ├── config.py               # Path management and system detection
+│   ├── run.py                  # CLI entry point: python -m cstar_forge.run spec_config.yml
+│   ├── forge/                  # The forge application (execution engine; see
+│   │   │                       # docs/developer-guide.md — relocates into C-Star as one unit)
+│   │   ├── spec_config.py      # SpecConfig — the forge application's blueprint
+│   │   ├── spec_config_engine.py # process_spec_config(); SpecConfigExecutor Protocol
+│   │   ├── executor.py         # ForgeExecutor — the processing engine
+│   │   ├── input_data.py       # Input file generation
+│   │   ├── source_data.py      # Dataset download and preparation
+│   │   ├── settings.py         # Template rendering
+│   │   └── namelist_model.py   # RunTimeSettings + build_namelist
 │   ├── catalog/                # Package: blueprint catalog API + on-disk catalog layout
 │   │   ├── __init__.py         # BlueprintCatalog API (see also ``cstar_forge.catalog``)
 │   │   ├── blueprints/         # Generated blueprint YAML files
@@ -54,14 +63,14 @@ cstar-forge/
 │   │           └── run-time/       # ROMS-MARBL runtime files
 │   │               ├── namelist.nml # Run-time configuration (written via f90nml)
 │   │               └── marbl_*     # MARBL input files
-│   └── catalog/ModelSpec/      # Model templates and defaults (per-model)
+│   └── catalog/ModelSpec/      # Model settings defaults (per-model)
 │       └── {model}/
 │           ├── model.yml            # Code repos, templates, default input sources
-│           └── templates/
-│               ├── compile-time/        # Jinja2 templates (cppdefs.opt.j2)
-│               ├── compile-time-defaults.yml
-│               ├── run-time/            # Static run-time files (marbl_in)
-│               └── run-time-defaults.yml
+│           ├── compile-time-defaults.yml
+│           └── run-time-defaults.yml
+├── templates/                  # Render templates (cppdefs.opt.j2, marbl_in), decoupled
+│                                # from ModelSpec — fetched by ForgeExecutor via C-Star's
+│                                # AdditionalCode
 ├── workflows/                 # Example notebooks and workflows
 │   ├── computing-benchmarks/
 │   ├── generate-models/       # Domain generation notebooks
@@ -71,6 +80,9 @@ cstar-forge/
 ├── docs/                      # Documentation
 └── README.md
 ```
+
+See `docs/developer-guide.md` for the current module map, the authoring/execution split,
+and the end-to-end call chain (catalog pick → `SpecConfig` → `ForgeExecutor`).
 
 ## Blueprint System
 

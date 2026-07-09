@@ -1,5 +1,5 @@
 """
-Tests for the Pydantic namelist/settings models (``cstar_forge.namelist_model``):
+Tests for the Pydantic namelist/settings models (``cstar_forge.forge.namelist_model``):
 
 * settings dict -> RunTimeSettings -> build_namelist -> write
 * the read -> edit -> write round-trip (reusable by other repos)
@@ -15,12 +15,12 @@ from cstar.roms.namelist import RomsNamelist
 from pydantic import ValidationError
 
 import cstar_forge
-from cstar_forge.forge.settings import write_roms_namelist
-from cstar_forge.namelist_model import (
+from cstar_forge.forge.namelist_model import (
     RunTimeSettings,
     build_namelist,
     validate_run_time_sections,
 )
+from cstar_forge.forge.settings import write_roms_namelist
 
 _TPL = (
     Path(cstar_forge.__file__).parent
