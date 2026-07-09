@@ -35,6 +35,7 @@ def _populated_rt_dict():
     rt = yaml.safe_load((_TPL / "run-time-defaults.yml").read_text())
     rt["title"] = {"casename": "spike_case"}
     rt["output_root_name"] = {"output_root_name": "/run/out"}
+    rt["reference_date_settings"] = {"reference_date": [2000, 1, 1]}
     rt["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
     rt["grid"] = {"grid_file": "/in/grid.nc"}
     rt["initial"] = {"initial_file": "/in/init.nc"}

@@ -414,6 +414,46 @@ class TestForgeExecutorModelPostInit:
         # name must be a plain str, never the TopographySource enum (so grid.to_yaml is safe).
         assert type(kwargs["topography_source"]["name"]) is str
 
+    def test_model_post_init_custom_topography_path_used_verbatim(
+        self, minimal_cstar_spec_builder_args, mock_grid
+    ):
+        """An explicit ``topography_path`` is injected verbatim with no staging call —
+        it overrides the derive-from-SourceData behavior for any source name.
+        """
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            topography_path="/custom/my_topo.nc",
+            dt=7200,
+        )
+        cfg = cfg.model_copy(
+            update={
+                "domain": cfg.domain.model_copy(update={"topography_source": "SRTM15"})
+            }
+        )
+        assert cfg.domain.topography_path == "/custom/my_topo.nc"
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-topopath-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        # Staging must NOT be invoked when an explicit path is given.
+        with patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd:
+            builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+            mock_sd.assert_not_called()
+
+        assert builder.topography_path == "/custom/my_topo.nc"
+        _, kwargs = mock_grid.call_args
+        assert kwargs["topography_source"] == {
+            "name": "SRTM15",
+            "path": "/custom/my_topo.nc",
+        }
+
     def test_model_post_init_loads_roms_marbl_blueprint_from_file_when_exists(
         self, minimal_cstar_spec_builder_args
     ):

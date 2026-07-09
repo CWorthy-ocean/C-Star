@@ -304,6 +304,10 @@ class Domain(_Section):
     grid_kwargs: dict[str, Any]
     topography_source: TopographySource | str = TopographySource.ETOPO5
     # str fallback allows a custom path dict to be passed through grid_kwargs
+    topography_path: str | None = None
+    """Explicit path to a custom topography file. ``None`` (the default) means the
+    executor derives it: staged from :class:`SourceData` for non-ETOPO5 sources, or
+    fetched by roms-tools itself for ETOPO5. Set this to point at a non-default file."""
     open_boundaries: OpenBoundaries
     partitioning: Partitioning
     grid_kwargs_parent: dict[str, Any] | None = None

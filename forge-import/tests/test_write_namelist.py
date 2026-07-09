@@ -40,6 +40,7 @@ def _base_settings():
     rt = yaml.safe_load((_TPL / "run-time-defaults.yml").read_text())
     rt["title"] = {"casename": "test_case"}
     rt["output_root_name"] = {"output_root_name": "/run/out"}
+    rt["reference_date_settings"] = {"reference_date": [2000, 1, 1]}
     rt["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
     rt["grid"] = {"grid_file": "/in/grid.nc"}
     rt["initial"] = {"initial_file": "/in/init.nc"}
@@ -106,6 +107,13 @@ def test_key_renames(nml):
     # param dims
     assert nml["param_settings"]["np_xi"] == 16
     assert nml["param_settings"]["llm"] == 512
+
+
+def test_reference_date_round_trips(tmp_path):
+    rt = _base_settings()
+    rt["reference_date_settings"] = {"reference_date": [2012, 3, 15]}
+    nml = _write_and_read(tmp_path, rt)
+    assert nml["reference_date_settings"]["reference_date"] == [2012, 3, 15]
 
 
 def test_code_check_mode_in_stdout_diag_not_diagnostics(tmp_path):

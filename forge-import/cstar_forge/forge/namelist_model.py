@@ -45,6 +45,7 @@ from cstar.roms.namelist import (
     ParticlesSettings,
     PipeFrcSettings,
     RandomOutputSettings,
+    ReferenceDateSettings,
     Rho0Settings,
     RiverFrcSettings,
     RomsNamelist,
@@ -121,6 +122,12 @@ class TimeSteppingCfg(_SettingsSection):
     dt: float
     ndtfast: int
     ninfo: int
+
+
+class ReferenceDateCfg(_SettingsSection):
+    reference_date: list[int] = Field(
+        default_factory=lambda: [2000, 1, 1]
+    )  # set dynamically from the blueprint's model_reference_date
 
 
 class GridCfg(_SettingsSection):
@@ -431,6 +438,7 @@ class RunTimeSettings(_SettingsSection):
     title: TitleCfg
     output_root_name: OutputRootNameCfg
     time_stepping: TimeSteppingCfg
+    reference_date_settings: ReferenceDateCfg
     grid: GridCfg
     s_coord: SCoordCfg
     initial: InitialCfg
@@ -528,6 +536,9 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         surf_frc_settings=SurfFrcSettings(**{**grp(rt.blk_frc), **grp(rt.flux_frc)}),
         # ---- 1:1 groups (aliases handle the renames) ----
         time_stepping=TimeStepping(**grp(rt.time_stepping)),
+        reference_date_settings=ReferenceDateSettings(
+            **grp(rt.reference_date_settings)
+        ),
         grid_settings=GridSettings(**grp(rt.grid)),
         s_coord=SCoord(**grp(rt.s_coord)),
         param_settings=ParamSettings(**grp(rt.param)),

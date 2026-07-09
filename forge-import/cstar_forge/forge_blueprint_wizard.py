@@ -133,6 +133,12 @@ HELP_TEXT: dict[str, str] = {
         "mask_shapefile",
     ): "Path to a custom shapefile used to determine the land/sea mask instead of the "
     "default NaturalEarth 10 m coastlines. Leave blank to use the default.",
+    (
+        "grid",
+        "topography_path",
+    ): "Path to a custom topography file for the grid's topography source. Leave "
+    "blank to use the default: staged for non-ETOPO5 sources, fetched by roms-tools "
+    "for ETOPO5.",
     # ---- nesting ---------------------------------------------------------------
     (
         "nesting",
@@ -1366,6 +1372,14 @@ class ForgeBlueprintWizard:
             placeholder="path to custom land-mask shapefile (optional)",
             tooltip=_tip("grid", "mask_shapefile"),
         )
+        self.topo_path = W.Text(
+            value="",
+            description="topo path:",
+            style={"description_width": "120px"},
+            layout=W.Layout(width="380px"),
+            placeholder="(default)",
+            tooltip=_tip("grid", "topography_path"),
+        )
 
         # --- timestep ---
         self.dt = W.FloatText(
@@ -1481,6 +1495,7 @@ class ForgeBlueprintWizard:
             self.hmin,
             self.close_narrow_chk,
             self.mask_shapefile,
+            self.topo_path,
             self.nest_enable,
             self.nest_period,
             self.nest_pressure_fluxes,
@@ -1621,6 +1636,8 @@ class ForgeBlueprintWizard:
                 d["climatology"] = True
             if spec.glorys_layout:
                 d["glorys_layout"] = spec.glorys_layout
+            if getattr(spec, "path", None):
+                d["path"] = spec.path
             return d
 
         f = cfg.forcing
@@ -1806,6 +1823,7 @@ class ForgeBlueprintWizard:
                 w.value = bool(getattr(cfg.domain.open_boundaries, d))
             self.npx.value = cfg.domain.partitioning.n_procs_x
             self.npy.value = cfg.domain.partitioning.n_procs_y
+            self.topo_path.value = cfg.domain.topography_path or ""
             dt = (cfg.model_settings.get("time_stepping", {}) or {}).get("dt")
             if dt is not None:
                 self.dt.value = float(dt)
@@ -1872,6 +1890,8 @@ class ForgeBlueprintWizard:
             ensemble_id=int(ens) if ens else None,
             dt=float(self.dt.value),
         )
+        if self.topo_path.value.strip():  # blank = derive default topography path
+            kw["topography_path"] = self.topo_path.value.strip()
         if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
             kw["model_reference_date"] = datetime.combine(
                 self.model_ref_date.value, datetime.min.time()
@@ -2108,6 +2128,7 @@ class ForgeBlueprintWizard:
                                     self.scoord_chk,
                                     W.HBox([self.hmin, self.close_narrow_chk]),
                                     self.mask_shapefile,
+                                    self.topo_path,
                                 ]
                             ),
                             W.VBox(

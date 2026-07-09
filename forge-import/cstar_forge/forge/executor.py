@@ -217,6 +217,14 @@ class ForgeExecutor(BaseModel):
             "``grid_kwargs`` as ``{'name', 'path'}`` before the grid is constructed."
         ),
     )
+    topography_path: str | None = Field(
+        default=None,
+        description=(
+            "Explicit path to a custom topography file (from ForgeBlueprint "
+            "``domain.topography_path``). When set, it is used verbatim instead of "
+            "staging/fetching, for any source name."
+        ),
+    )
     open_boundaries: OpenBoundaries
     partitioning: cstar_models.PartitioningParameterSet
     start_date: datetime = Field(alias="start_time")
@@ -338,7 +346,8 @@ class ForgeExecutor(BaseModel):
     def _resolve_topography_source(self) -> dict[str, str] | None:
         """Stage a non-ETOPO5 topography file and return the roms-tools
         ``topography_source`` dict (``{'name', 'path'}``), or ``None`` for ETOPO5
-        (which roms-tools fetches itself at grid build).
+        (which roms-tools fetches itself at grid build). An explicit
+        ``topography_path`` short-circuits this and is used verbatim for any source.
 
         The topo file is a plain download requiring no grid, so it can be staged
         here — before grid construction — which resolves the ordering constraint
@@ -347,6 +356,9 @@ class ForgeExecutor(BaseModel):
         safe to serialize when the grid is later written to YAML.
         """
         name = getattr(self.topography_source, "value", self.topography_source)
+        # An explicit custom path overrides staging/fetch, regardless of source name.
+        if self.topography_path:
+            return {"name": name, "path": self.topography_path}
         if name == "ETOPO5":
             return None
         sd = source_data.SourceData(
@@ -1547,7 +1559,8 @@ class ForgeExecutor(BaseModel):
         already carries the genuinely-computed numerics (``time_stepping``, ``v_sponge``,
         ``extract_data``), so they are NOT re-derived here — that would clobber e.g. an
         explicitly-resolved ``dt``. Only the sections the config deliberately omits because
-        they embed host/identity are ADDED: ``title`` and ``output_root_name``.
+        they embed host/identity or a run-level value are ADDED: ``title``,
+        ``output_root_name``, and ``reference_date_settings`` (from ``model_reference_date``).
 
         **Called by:** `_initialize_roms_marbl_blueprint()` during initialization.
         """
@@ -1566,6 +1579,13 @@ class ForgeExecutor(BaseModel):
         )
         self._settings_run_time["output_root_name"] = dict(
             output_root_name=str(self.run_output_dir / "output" / self.casename),
+        )
+        # Emit the model reference date (t=0) into the namelist, derived from the
+        # same blueprint value passed to the roms-tools input objects. The namelist
+        # has no sub-day granularity, so only year/month/day are carried.
+        mrd = self.model_reference_date or datetime(2000, 1, 1)
+        self._settings_run_time["reference_date_settings"] = dict(
+            reference_date=[mrd.year, mrd.month, mrd.day],
         )
 
     def _update_settings_compile_time(

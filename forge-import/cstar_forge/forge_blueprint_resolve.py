@@ -231,6 +231,7 @@ def build_forge_blueprint(
     grid_kwargs_parent: dict[str, Any] | None = None,
     metadata_child: dict[str, Any] | None = None,
     nesting_include_pressure_fluxes: bool = False,
+    topography_path: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
     compile_time_overrides: dict[str, Any] | None = None,
     dt: float | None = None,
@@ -375,6 +376,7 @@ def build_forge_blueprint(
             topography_source=(inputs.get("grid", {}) or {}).get(
                 "topography_source", "ETOPO5"
             ),
+            topography_path=topography_path,
             open_boundaries=OpenBoundaries(
                 **{
                     k: bool(open_boundaries.get(k, False))

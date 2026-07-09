@@ -154,6 +154,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         topography_source=getattr(
             cfg.domain.topography_source, "value", cfg.domain.topography_source
         ),
+        topography_path=cfg.domain.topography_path,
         open_boundaries=cfg.domain.open_boundaries.model_dump(),
         partitioning=cfg.domain.partitioning.model_dump(),
         start_time=cfg.run.start_date,
