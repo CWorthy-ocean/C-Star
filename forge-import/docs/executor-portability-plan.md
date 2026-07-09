@@ -151,15 +151,30 @@ build; DAI is a streamed placeholder with no handler); `SourceData` validation a
 `prepare_all` skip these instead of rejecting them, while genuine typos still raise. Tests in
 `tests/test_source_data.py` exercise the unmocked path.
 
-**Still open (part b, task #16):** SRTM15 topography is *also* broken on this path —
-`SOURCE_ALIAS["SRTM15"]` and `DATASET_METADATA` use `SRTM15_V2.7`, but the handler is
-registered as `SRTM15`, so the resolver-emitted `SRTM15_V2.7` reaches no handler. It is kept
-**failing loudly** on purpose (NOT added to `UNSTAGED_DATASETS`) so it can't be silently
-skipped (which would run the grid with no bathymetry) — guarded by
-`test_srtm15_versioned_key_still_raises`. The fix reconciles to one canonical key (watch
-`content_hash`: `datasets` is hashed, so SRTM15-topo specs change; ETOPO5 specs don't), and
-must also confirm the staged SRTM15 path is injected into `grid_kwargs` (the executor's
-`rt.Grid(**grid_kwargs)` has no `srtm15_path`/`topography_source` reference — a likely 2nd gap).
+**RESOLVED (part b, task #16) — implemented 2026-07-09 via option (a).** SRTM15 topography
+had never been functional (the "fix" was a first implementation, not a key rename). Wired up
+as three coupled changes:
+1. **Key reconciliation** — `SOURCE_ALIAS["SRTM15"]` and the `DATASET_METADATA` key now use
+   the un-versioned `"SRTM15"` (matching the `@register_dataset("SRTM15")` handler); the
+   version stays in the URL/filename constant, mirroring GLORYS. Note `content_hash`: `datasets`
+   is hashed, so SRTM15-topo specs' key changed `SRTM15_V2.7`→`SRTM15` (intentional — no
+   functional SRTM15 specs existed to migrate); ETOPO5 specs are unaffected.
+2. **Injection** — `ForgeExecutor` gained a `topography_source: str` field (fed from
+   `cfg.domain.topography_source`, coerced enum→value at the `spec_config_engine` boundary). A
+   new `_resolve_topography_source()` stages the topo file and returns
+   `{"name":"SRTM15","path": <staged>}` (or `None` for ETOPO5). `name` is a plain string, never
+   the `TopographySource` enum, so the injected dict is safe when `grid.to_yaml` runs.
+3. **Ordering (option a)** — the topo dict is injected into every `grid_kwargs`/`_parent`/
+   `_child` at the top of `model_post_init`, before the `rt.Grid` calls. The chosen justification
+   (better than the doc's original framing): `rt.Grid` *already* downloads topography during
+   construction (ETOPO5 via pooch), so staging SRTM15 there introduces no new behavior class.
+   Option (b) (lazy grid-build) was rejected as a larger touch fighting the existing design.
+
+Tests: `test_srtm15_key_reconciles_to_handler` (replaces the old landmine guard),
+`test_model_post_init_srtm15_injects_topography_source` and
+`test_model_post_init_etopo5_leaves_grid_kwargs_untouched` prove the wiring at `rt.Grid`
+(the silent-failure point). 480 tests pass. NOT verified end-to-end against a live SRTM15
+download (multi-GB) — the rt.Grid call is asserted with staging mocked.
 
 ### Still-open larger items (unchanged from prior sessions)
 - SpecConfig → C-Star `forge` application migration (executor + engine + SpecConfig-as-

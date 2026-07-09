@@ -38,7 +38,10 @@ SOURCE_ALIAS: dict[str, str] = {
     "GLORYS_REGIONAL": "GLORYS_REGIONAL",
     "UNIFIED": "UNIFIED_BGC",
     "UNIFIED_BGC": "UNIFIED_BGC",
-    "SRTM15": f"SRTM15_{SRTM15_VERSION}".upper(),
+    # SRTM15 maps to the un-versioned handler key (the version lives in the URL/
+    # filename constant, mirroring how GLORYS keeps its version in metadata). This
+    # matches the ``@register_dataset("SRTM15")`` handler so the topo file actually stages.
+    "SRTM15": "SRTM15",
     "MBL_CO2": "MBL_CO2",
     "TPXO": "TPXO",
     "WOA": "WOA",
@@ -50,13 +53,11 @@ STREAMABLE_SOURCES = ["ERA5", "DAI"]
 
 # Recognized dataset keys that Forge does NOT stage locally — they have no SourceData
 # handler because something else provides them:
-#   - "ETOPO5": roms-tools fetches this topography itself at grid-build time (only the
-#               SRTM15 alternative is staged by Forge).
+#   - "ETOPO5": roms-tools fetches this topography itself at grid-build time (the
+#               SRTM15 alternative IS staged by Forge and injected into grid_kwargs).
 #   - "DAI":    river dataset streamed at run time (placeholder; no handler yet).
 # `SourceData` treats these as valid-but-skipped, distinct from a genuinely unknown key
-# (a typo), which still raises. NOTE: this is an *explicit* allowlist on purpose — it must
-# NOT swallow the SRTM15/SRTM15_V2.7 key-aliasing bug (tracked follow-up), which should keep
-# failing loudly until reconciled rather than being silently skipped.
+# (a typo), which still raises.
 UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 
 # Per-key provenance metadata (snapshotted into SpecConfig.sources.resolved_datasets).
@@ -64,7 +65,7 @@ DATASET_METADATA: dict[str, dict[str, str]] = {
     "GLORYS_REGIONAL": {"dataset_id": GLORYS_DATASET_ID},
     "GLORYS_GLOBAL": {"dataset_id": GLORYS_DATASET_ID},
     "UNIFIED_BGC": {"url": UNIFIED_BGC_URL},
-    f"SRTM15_{SRTM15_VERSION}".upper(): {"url": SRTM15_URL},
+    "SRTM15": {"url": SRTM15_URL},
     "MBL_CO2": {"url": MBL_CO2_URL},
     "WOA": {"url": WOA_DOWNLOAD_URL},
     "TPXO": {},

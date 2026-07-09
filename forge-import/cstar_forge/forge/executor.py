@@ -208,6 +208,15 @@ class ForgeExecutor(BaseModel):
     grid_kwargs_child: dict[str, Any] | None = Field(
         default=None, validate_default=False
     )
+    topography_source: str = Field(
+        default="ETOPO5",
+        description=(
+            "Topography data-source name (from SpecConfig ``domain.topography_source``). "
+            "``ETOPO5`` uses roms-tools' built-in fetch at grid build; any other supported "
+            "source (e.g. ``SRTM15``) is staged by Forge and injected into every "
+            "``grid_kwargs`` as ``{'name', 'path'}`` before the grid is constructed."
+        ),
+    )
     open_boundaries: forge_models.OpenBoundaries
     partitioning: cstar_models.PartitioningParameterSet
     start_date: datetime = Field(alias="start_time")
@@ -326,6 +335,27 @@ class ForgeExecutor(BaseModel):
         """Directory for generated input NetCDF files (grid, forcing, etc.)."""
         return self._require_host().working_dir / "input_data"
 
+    def _resolve_topography_source(self) -> dict[str, str] | None:
+        """Stage a non-ETOPO5 topography file and return the roms-tools
+        ``topography_source`` dict (``{'name', 'path'}``), or ``None`` for ETOPO5
+        (which roms-tools fetches itself at grid build).
+
+        The topo file is a plain download requiring no grid, so it can be staged
+        here — before grid construction — which resolves the ordering constraint
+        that topography is a prerequisite of the grid it is built into. ``name`` is
+        emitted as a plain string (never the ``TopographySource`` enum) so it is
+        safe to serialize when the grid is later written to YAML.
+        """
+        name = getattr(self.topography_source, "value", self.topography_source)
+        if name == "ETOPO5":
+            return None
+        sd = source_data.SourceData(
+            datasets=[name],
+            source_data_dir=self._require_host().source_data_cache,
+        )
+        sd.prepare_all()
+        return {"name": name, "path": str(sd.path_for_source(name))}
+
     def model_post_init(self, __context: Any) -> None:
         """
         Post-initialization hook called automatically after model validation.
@@ -341,6 +371,25 @@ class ForgeExecutor(BaseModel):
         """
         # Fail fast if no host was injected — every artifact path needs it.
         self._require_host()
+
+        # Topography is a prerequisite of grid construction: roms-tools requires a
+        # staged 'path' for any non-ETOPO5 source and silently falls back to ETOPO5
+        # otherwise. Stage the topo file (a plain download, no grid needed) and inject
+        # it into every grid_kwargs BEFORE the rt.Grid calls below. ETOPO5 is left
+        # untouched — roms-tools fetches it itself at grid build.
+        topo = self._resolve_topography_source()
+        if topo is not None:
+            self.grid_kwargs = {**self.grid_kwargs, "topography_source": topo}
+            if self.grid_kwargs_parent is not None:
+                self.grid_kwargs_parent = {
+                    **self.grid_kwargs_parent,
+                    "topography_source": topo,
+                }
+            if self.grid_kwargs_child is not None:
+                self.grid_kwargs_child = {
+                    **self.grid_kwargs_child,
+                    "topography_source": topo,
+                }
 
         # Create grids, 4 cases:
         # has child and no parent, has child and parent, has parent and no child, no parent no child

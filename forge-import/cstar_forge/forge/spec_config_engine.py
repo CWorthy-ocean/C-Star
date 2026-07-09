@@ -146,6 +146,9 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
         model_name=cfg.identity.model_name,
         grid_name=cfg.identity.grid_name,
         grid_kwargs=dict(cfg.domain.grid_kwargs),
+        topography_source=getattr(
+            cfg.domain.topography_source, "value", cfg.domain.topography_source
+        ),
         open_boundaries=cfg.domain.open_boundaries.model_dump(),
         partitioning=cfg.domain.partitioning.model_dump(),
         start_time=cfg.run.start_date,

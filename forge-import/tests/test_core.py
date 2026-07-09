@@ -355,6 +355,56 @@ class TestForgeExecutorModelPostInit:
         mock_grid.assert_called_once_with(**builder.grid_kwargs)
         assert builder.grid == mock_grid.return_value
 
+    def test_model_post_init_etopo5_leaves_grid_kwargs_untouched(
+        self, minimal_cstar_spec_builder_args, mock_grid
+    ):
+        """The default ETOPO5 source injects nothing — roms-tools fetches ETOPO5 itself,
+        so grid_kwargs must reach rt.Grid without a ``topography_source`` key."""
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        assert builder.topography_source == "ETOPO5"
+        _, kwargs = mock_grid.call_args
+        assert "topography_source" not in kwargs
+
+    def test_model_post_init_srtm15_injects_topography_source(
+        self, minimal_cstar_spec_builder_args, mock_grid
+    ):
+        """SRTM15 is staged and its {'name','path'} dict is injected into grid_kwargs
+        BEFORE rt.Grid is called. This is the load-bearing wiring whose failure is silent
+        (roms-tools would otherwise fall back to ETOPO5)."""
+        args = minimal_cstar_spec_builder_args
+        cfg = build_spec_config(
+            model_dir=_MODEL_DIR,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+        )
+        # Drive an SRTM15 spec (the bundled ModelSpec defaults to ETOPO5).
+        cfg = cfg.model_copy(
+            update={"domain": cfg.domain.model_copy(update={"topography_source": "SRTM15"})}
+        )
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-srtm15-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        staged = tmp / "SRTM15" / "SRTM15_V2.7.nc"
+        # Mock the staging download: prepare_all() is a no-op, path_for_source returns the path.
+        with patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd:
+            inst = mock_sd.return_value
+            inst.prepare_all.return_value = inst
+            inst.path_for_source.return_value = staged
+            builder = ForgeExecutor.from_spec_config(cfg, host=host)
+
+        assert builder.topography_source == "SRTM15"
+        _, kwargs = mock_grid.call_args
+        assert kwargs["topography_source"] == {"name": "SRTM15", "path": str(staged)}
+        # name must be a plain str, never the TopographySource enum (so grid.to_yaml is safe).
+        assert type(kwargs["topography_source"]["name"]) is str
+
     def test_model_post_init_loads_blueprint_from_file_when_exists(
         self, minimal_cstar_spec_builder_args
     ):

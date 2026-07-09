@@ -112,7 +112,7 @@ class TestMapSourceToDatasetKey:
         assert map_source_to_dataset_key("GLORYS") == "GLORYS_REGIONAL"
         assert map_source_to_dataset_key("UNIFIED") == "UNIFIED_BGC"
         assert map_source_to_dataset_key("ERA5") == "ERA5"
-        assert map_source_to_dataset_key("SRTM15") == f"SRTM15_{SRTM15_VERSION}".upper()
+        assert map_source_to_dataset_key("SRTM15") == "SRTM15"
         assert map_source_to_dataset_key("TPXO") == "TPXO"
     
     def test_map_source_case_insensitive(self):
@@ -186,12 +186,13 @@ class TestSourceDataInitialization:
         sd.prepare_all(include_streamable=False)
         assert sd.paths == {}
 
-    def test_srtm15_versioned_key_still_raises(self):
-        """Landmine guard: the resolver currently emits `SRTM15_V2.7` (no handler), which
-        must keep failing LOUDLY — not be silently skipped — until the SRTM15 key aliasing
-        is reconciled (tracked follow-up)."""
-        with pytest.raises(ValueError, match="Unknown dataset"):
-            SourceData(datasets=["SRTM15_V2.7"])
+    def test_srtm15_key_reconciles_to_handler(self):
+        """SRTM15 topography is wired end-to-end: the resolver's ``SRTM15`` key matches the
+        ``@register_dataset("SRTM15")`` handler, so construction is accepted (not rejected as
+        an unknown dataset) and normalizes to the un-versioned key."""
+        sd = SourceData(datasets=["SRTM15"])
+        assert "SRTM15" in sd.datasets
+        assert sd.dataset_key_for_source("SRTM15") == "SRTM15"
 
     def test_source_data_with_optional_attributes(self):
         """Test creating SourceData with optional attributes."""
@@ -224,7 +225,7 @@ class TestSourceDataMethods:
         assert sd.dataset_key_for_source("GLORYS") == "GLORYS_REGIONAL"
         assert sd.dataset_key_for_source("GLORYS", glorys_layout="global") == "GLORYS_GLOBAL"
         assert sd.dataset_key_for_source("UNIFIED") == "UNIFIED_BGC"
-        assert sd.dataset_key_for_source("SRTM15") == f"SRTM15_{SRTM15_VERSION}".upper()
+        assert sd.dataset_key_for_source("SRTM15") == "SRTM15"
     
     def test_path_for_source_not_prepared(self):
         """Test path_for_source when dataset hasn't been prepared."""
@@ -380,11 +381,6 @@ class TestRegistryConsistency:
         for source_name, dataset_key in SOURCE_ALIAS.items():
             # Skip streamable sources that might not be in registry
             if source_name not in STREAMABLE_SOURCES:
-                # SRTM15 has a known mismatch: alias maps to "SRTM15_V2.7" but registry has "SRTM15"
-                if source_name == "SRTM15":
-                    # The alias maps to versioned name, but registry uses base name
-                    # This is a known design choice - skip this check
-                    continue
                 assert dataset_key in DATASET_REGISTRY, (
                     f"SOURCE_ALIAS['{source_name}'] = '{dataset_key}' "
                     f"does not exist in DATASET_REGISTRY"
