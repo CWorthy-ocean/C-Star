@@ -294,7 +294,9 @@ HELP_TEXT: dict[str, str] = {
         "river",
         "name",
     ): "River dataset source name. 'DAI' uses the Dai-Trenberth global river discharge "
-    "climatology (streamable, no download required).",
+    "climatology (streamable, no download required). 'GLOFAS' uses the GloFAS v4.0 "
+    "daily discharge dataset (higher resolution, more rivers); the preprocessed file "
+    "must be manually placed at source_data/GLOFAS/ (see Copernicus CDS).",
     (
         "river",
         "climatology",

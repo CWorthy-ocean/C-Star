@@ -214,6 +214,7 @@ class RiverSource(str, Enum):
     """Source names accepted by RiverForcing."""
 
     DAI = "DAI"
+    GLOFAS = "GLOFAS"
 
 
 class TopographySource(str, Enum):

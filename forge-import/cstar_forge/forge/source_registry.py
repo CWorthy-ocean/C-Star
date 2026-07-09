@@ -27,6 +27,8 @@ WOA_DOWNLOAD_URL = (
     "https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/"
 )
 UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq"
+GLOFAS_CDS_URL = "https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical"
+GLOFAS_FILENAME = "glofas_v4_rivers_daily.nc"
 
 # --- logical source-name -> dataset key --------------------------------------
 SOURCE_ALIAS: dict[str, str] = {
@@ -46,6 +48,7 @@ SOURCE_ALIAS: dict[str, str] = {
     "TPXO": "TPXO",
     "WOA": "WOA",
     "DAI": "DAI",  # placeholder until a real DAI handler exists
+    "GLOFAS": "GLOFAS",  # alternative river-discharge dataset (roms-tools rt>=4, PR #625)
 }
 
 # Sources streamed at run time (not staged unless explicitly requested).
@@ -57,7 +60,9 @@ STREAMABLE_SOURCES = ["ERA5", "DAI"]
 #               SRTM15 alternative IS staged by Forge and injected into grid_kwargs).
 #   - "DAI":    river dataset streamed at run time (placeholder; no handler yet).
 # `SourceData` treats these as valid-but-skipped, distinct from a genuinely unknown key
-# (a typo), which still raises.
+# (a typo), which still raises. NOTE: "GLOFAS" (the other river source) is NOT here —
+# unlike DAI it has no roms-tools auto-download, so it IS staged (verified) by Forge via
+# a real @register_dataset("GLOFAS") handler, same as the TPXO/WOA user-provided pattern.
 UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 
 # Per-key provenance metadata (snapshotted into SpecConfig.sources.resolved_datasets).
@@ -72,6 +77,7 @@ DATASET_METADATA: dict[str, dict[str, str]] = {
     "ETOPO5": {},
     "ERA5": {},
     "DAI": {},
+    "GLOFAS": {"url": GLOFAS_CDS_URL},
 }
 
 _STREAMABLE_UPPER = {s.upper() for s in STREAMABLE_SOURCES}

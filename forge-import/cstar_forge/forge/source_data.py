@@ -62,6 +62,8 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
 # without the heavy acquisition deps). Re-exported here for existing consumers.
 # -----------------------------------------
 from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
+    GLOFAS_CDS_URL,
+    GLOFAS_FILENAME,
     GLORYS_DATASET_ID,
     MBL_CO2_URL,
     SOURCE_ALIAS,
@@ -644,3 +646,47 @@ def _prepare_woa(self: SourceData) -> Path:
     print(f"✔️  WOA dataset verified at: {woa_path}")
     self.paths["WOA"] = woa_path
     return woa_path / "woa*_decav_s*.nc"
+
+
+# ---------------------------
+# GLOFAS handler (user-provided dataset)
+# ---------------------------
+
+
+@register_dataset("GLOFAS")
+def _prepare_glofas(self: SourceData) -> Path:
+    """
+    Verify that the user has provided a preprocessed GloFAS v4.0 river discharge file.
+
+    Unlike DAI (streamed automatically by roms-tools), GloFAS requires manual access
+    to the Copernicus Climate Data Store and preprocessing with the GloFAS
+    Large-scale Drainage Direction (LDD) algorithm to place river mouths on coastal
+    cells, so Forge cannot download or build it. This is a USER_DATASET, like TPXO/WOA:
+    the file must already exist at the expected location.
+
+    Expected file: self.source_data_dir / "GLOFAS" / GLOFAS_FILENAME
+
+    Returns
+    -------
+    Path
+        Path to the preprocessed GloFAS NetCDF file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file is missing at the expected location.
+    """
+    glofas_path = self.source_data_dir / "GLOFAS" / GLOFAS_FILENAME
+
+    if not glofas_path.exists():
+        raise FileNotFoundError(
+            f"GloFAS river discharge dataset not found at: {glofas_path}\n"
+            "GloFAS v4.0 must be downloaded manually from the Copernicus Climate "
+            f"Data Store ({GLOFAS_CDS_URL}) and preprocessed with the GloFAS "
+            "Large-scale Drainage Direction (LDD) algorithm to place river mouths on "
+            f"coastal cells. Place the resulting file at {glofas_path}."
+        )
+
+    print(f"✔️  GloFAS dataset verified at: {glofas_path}")
+    self.paths["GLOFAS"] = glofas_path
+    return glofas_path

@@ -376,7 +376,7 @@ class TestRegistryConsistency:
 
     def test_registry_has_expected_datasets(self):
         """Test that registry contains expected datasets."""
-        expected = ["GLORYS_REGIONAL", "SRTM15", "UNIFIED_BGC", "TPXO"]
+        expected = ["GLORYS_REGIONAL", "SRTM15", "UNIFIED_BGC", "TPXO", "GLOFAS"]
 
         for dataset in expected:
             assert dataset in DATASET_REGISTRY, f"{dataset} not in registry"
@@ -406,6 +406,34 @@ class TestRegistryConsistency:
                     f"SOURCE_ALIAS['{source_name}'] = '{dataset_key}' "
                     f"does not exist in DATASET_REGISTRY"
                 )
+
+
+class TestPrepareGlofas:
+    """Tests for the GLOFAS user-provided dataset handler."""
+
+    def test_missing_file_raises_with_instructions(self, tmp_path):
+        """Missing GloFAS file raises FileNotFoundError pointing at the expected path."""
+        sd = SourceData(datasets=["GLOFAS"], source_data_dir=tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="GloFAS"):
+            sd.prepare_all()
+
+    def test_verified_when_file_present(self, tmp_path):
+        """Existing GloFAS file is accepted and recorded in sd.paths."""
+        glofas_dir = tmp_path / "GLOFAS"
+        glofas_dir.mkdir(parents=True)
+        glofas_file = glofas_dir / "glofas_v4_rivers_daily.nc"
+        glofas_file.touch()
+
+        sd = SourceData(datasets=["GLOFAS"], source_data_dir=tmp_path)
+        sd.prepare_all()
+
+        assert sd.paths["GLOFAS"] == glofas_file
+
+    def test_dataset_key_for_source(self):
+        """Logical name 'GLOFAS' resolves to the 'GLOFAS' dataset key."""
+        sd = SourceData(datasets=["GLOFAS"])
+        assert sd.dataset_key_for_source("GLOFAS") == "GLOFAS"
 
 
 class TestSourceDataHelperMethods:

@@ -122,7 +122,7 @@ inputs: # default keyword arguments to input generation functions
 Each `source` in the inputs can be:
 - A string (source name)
 - An object with:
-  - `name`: Source name (e.g., "GLORYS", "ERA5", "UNIFIED", "TPXO", "DAI")
+  - `name`: Source name (e.g., "GLORYS", "ERA5", "UNIFIED", "TPXO", "DAI", "GLOFAS")
   - `climatology`: Boolean indicating whether to use climatology data (default: `false`)
 
 You can add new models by creating a new directory under `cstar_forge/catalog/ModelSpec/<model>/` containing a `model.yml` with the schema above.

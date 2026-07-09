@@ -14,7 +14,7 @@ The tool produces **blueprint** YAML files that capture the complete configurati
   - ERA5 (atmospheric reanalysis)
   - UNIFIED_BGC (biogeochemical climatology)
   - SRTM15 (bathymetry)
-  - DAI (river discharge)
+  - DAI / GLOFAS (river discharge)
   - TPXO (tidal forcing)
 - **Blueprint System**: Automatically generates YAML blueprints that document:
   - Complete model specification (repositories, conda environments, input configurations)
