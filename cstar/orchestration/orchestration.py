@@ -808,8 +808,6 @@ class Orchestrator(LoggingMixin):
         if task is None:
             return
 
-        self.planner.store(n, KEY_STATUS, Status.Done)
-
         if task.status == Status.Done:
             self.log.info(f"Closed node: {n}")
         elif Status.is_failure(task.status):
