@@ -15,11 +15,11 @@ class RomsMarblInputData(InputData):
     grid: rt.Grid
     boundaries: forge_models.OpenBoundaries
     source_data: source_data.SourceData
-    blueprint_dir: Path
+    roms_marbl_blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     use_dask: bool = True
     
-    blueprint_elements: RomsMarblBlueprintInputData  # Auto-initialized
+    roms_marbl_blueprint_elements: RomsMarblBlueprintInputData  # Auto-initialized
     _settings_compile_time: dict  # Auto-initialized
     _settings_run_time: dict  # Auto-initialized
 ```
@@ -51,7 +51,7 @@ During `__post_init__()`, the class builds `input_list` from `model_spec.inputs`
 
 The class validates that all keys in `input_list` have registered handlers in `INPUT_REGISTRY`. Missing handlers raise a `ValueError`.
 
-### Blueprint Elements Initialization
+### ROMS-MARBL Blueprint Elements Initialization
 
 Creates `RomsMarblBlueprintInputData` instance with empty datasets:
 - `grid`: Empty dataset if "grid" in input_list
@@ -124,7 +124,7 @@ def generate_all(
     
     Returns
     -------
-    blueprint_elements: RomsMarblBlueprintInputData
+    roms_marbl_blueprint_elements: RomsMarblBlueprintInputData
         Blueprint subset with generated input file paths
     compile_time_settings: dict
         Compile-time settings dictionary
@@ -138,7 +138,7 @@ def generate_all(
 2. **Build Step List**: Creates list of `(step, kwargs)` tuples from `input_list`, sorted by order
 3. **Execute Handlers**: Calls each handler with `key` and `kwargs`
 4. **Partitioning**: Optionally partitions files across tiles if `partition_files=True`
-5. **Return**: Returns `blueprint_elements` and settings dictionaries
+5. **Return**: Returns `roms_marbl_blueprint_elements` and settings dictionaries
 
 ### Handler Function Signature
 
@@ -160,8 +160,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
     Side Effects
     ------------
     - Creates NetCDF file(s) in input_data_dir
-    - Creates YAML metadata file in blueprint_dir
-    - Appends Resource(s) to blueprint_elements
+    - Creates YAML metadata file in roms_marbl_blueprint_dir
+    - Appends Resource(s) to roms_marbl_blueprint_elements
     - Updates _settings_compile_time and/or _settings_run_time
     """
 ```
@@ -174,10 +174,10 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - Grid NetCDF file: `{model_name}_{grid_name}_grid.nc`
-- Grid YAML metadata: `_{grid_name}.yml` (in blueprint_dir)
+- Grid YAML metadata: `_{grid_name}.yml` (in roms_marbl_blueprint_dir)
 
-**Updates Blueprint:**
-- Appends `Resource` to `blueprint_elements.grid.data`
+**Updates ROMS-MARBL Blueprint:**
+- Appends `Resource` to `roms_marbl_blueprint_elements.grid.data`
 
 **Populates Settings:**
 - **Compile-time (`cppdefs`)**: Open boundary flags
@@ -212,8 +212,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Uses `source` and optional `bgc_source` from kwargs
 - Resolves paths via `_resolve_source_block()` → `SourceData.path_for_source()`
 
-**Updates Blueprint:**
-- Appends `Resource(s)` to `blueprint_elements.initial_conditions.data`
+**Updates ROMS-MARBL Blueprint:**
+- Appends `Resource(s)` to `roms_marbl_blueprint_elements.initial_conditions.data`
 
 **Populates Settings:**
 - **Run-time (`initial`)**: Initial conditions file path
@@ -241,8 +241,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Uses `source` from kwargs
 - Resolves path via `_resolve_source_block()`
 
-**Updates Blueprint:**
-- Appends `Resource(s)` to `blueprint_elements.forcing.surface.data`
+**Updates ROMS-MARBL Blueprint:**
+- Appends `Resource(s)` to `roms_marbl_blueprint_elements.forcing.surface.data`
 
 **Populates Settings:**
 - **Run-time (`forcing`)**: Surface forcing file paths
@@ -273,8 +273,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Uses `source` from kwargs
 - Resolves path via `_resolve_source_block()`
 
-**Updates Blueprint:**
-- Appends `Resource(s)` to `blueprint_elements.forcing.boundary.data`
+**Updates ROMS-MARBL Blueprint:**
+- Appends `Resource(s)` to `roms_marbl_blueprint_elements.forcing.boundary.data`
 
 **Populates Settings:**
 - **Run-time (`forcing`)**: Boundary forcing file paths
@@ -303,8 +303,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Uses `source` from kwargs (typically TPXO)
 - Resolves path via `_resolve_source_block()`
 
-**Updates Blueprint:**
-- Appends `Resource(s)` to `blueprint_elements.forcing.tidal.data`
+**Updates ROMS-MARBL Blueprint:**
+- Appends `Resource(s)` to `roms_marbl_blueprint_elements.forcing.tidal.data`
 
 **Populates Settings:**
 - **Compile-time (`tides`)**: Tidal forcing configuration
@@ -335,8 +335,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Uses `source` from kwargs (typically DAI)
 - Resolves path via `_resolve_source_block()`
 
-**Updates Blueprint:**
-- Appends `Resource(s)` to `blueprint_elements.forcing.river.data`
+**Updates ROMS-MARBL Blueprint:**
+- Appends `Resource(s)` to `roms_marbl_blueprint_elements.forcing.river.data`
 
 **Populates Settings:**
 - **Compile-time (`river_frc`)**: River forcing configuration
@@ -368,8 +368,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Optional input (only generates if `cdr_list` is provided)
 - Uses `releases` parameter for CDR release specifications
 
-**Updates Blueprint:**
-- Appends `Resource(s)` to `blueprint_elements.cdr_forcing.data`
+**Updates ROMS-MARBL Blueprint:**
+- Appends `Resource(s)` to `roms_marbl_blueprint_elements.cdr_forcing.data`
 
 **Populates Settings:**
 - Settings for CDR forcing are not yet implemented (TODO in code).
@@ -484,9 +484,9 @@ def _build_input_args(
 **Tidal Forcing:**
 - Run-time settings for tidal forcing are not yet populated (TODO in code).
 
-## Blueprint Element Updates
+## ROMS-MARBL Blueprint Element Updates
 
-Each handler appends `Resource` objects to the appropriate blueprint element:
+Each handler appends `Resource` objects to the appropriate roms_marbl_blueprint element:
 
 **Resource Creation:**
 ```python
@@ -497,14 +497,14 @@ resource = cstar_models.Resource(
 ```
 
 **Blueprint Updates:**
-- **Grid**: `blueprint_elements.grid.data.append(resource)`
-- **Initial Conditions**: `blueprint_elements.initial_conditions.data.append(resource)`
-- **Forcing Categories**: `blueprint_elements.forcing.{category}.data.append(resource)`
+- **Grid**: `roms_marbl_blueprint_elements.grid.data.append(resource)`
+- **Initial Conditions**: `roms_marbl_blueprint_elements.initial_conditions.data.append(resource)`
+- **Forcing Categories**: `roms_marbl_blueprint_elements.forcing.{category}.data.append(resource)`
   - `forcing.surface` → `forcing.surface.data`
   - `forcing.boundary` → `forcing.boundary.data`
   - `forcing.tidal` → `forcing.tidal.data`
   - `forcing.river` → `forcing.river.data`
-- **CDR Forcing**: `blueprint_elements.cdr_forcing.data.append(resource)`
+- **CDR Forcing**: `roms_marbl_blueprint_elements.cdr_forcing.data.append(resource)`
 
 ## File Partitioning
 
@@ -517,13 +517,13 @@ def _partition_files(self, **kwargs):
     """
     Partition whole input files across tiles using roms_tools.partition_netcdf.
     
-    Uses the paths stored in blueprint_elements to build the list of whole-field files,
+    Uses the paths stored in roms_marbl_blueprint_elements to build the list of whole-field files,
     and records the partitioned paths in the Resource objects.
     """
 ```
 
 **Process:**
-1. **Iterate over input_list**: For each input key, get corresponding dataset from `blueprint_elements`
+1. **Iterate over input_list**: For each input key, get corresponding dataset from `roms_marbl_blueprint_elements`
 2. **Partition each Resource**: Call `rt.partition_netcdf()` for each `Resource.location`
 3. **Create partitioned Resources**: Replace original resources with partitioned ones
 4. **Update partitioned flag**: Set `partitioned=True` on new resources
@@ -541,7 +541,7 @@ input_args = {
 **Result:**
 - Original whole-field files remain unchanged
 - Partitioned files created in `input_data_dir`
-- `blueprint_elements` updated with partitioned `Resource` objects
+- `roms_marbl_blueprint_elements` updated with partitioned `Resource` objects
 - `partitioned` flag set to `True`
 
 ## Return Values
@@ -550,14 +550,14 @@ input_args = {
 
 ```python
 (
-    blueprint_elements: RomsMarblBlueprintInputData,
+    roms_marbl_blueprint_elements: RomsMarblBlueprintInputData,
     compile_time_settings: dict,
     run_time_settings: dict
 )
 ```
 
 **Usage:**
-- `blueprint_elements`: Merged into main blueprint during POSTCONFIG stage
+- `roms_marbl_blueprint_elements`: Merged into main blueprint during POSTCONFIG stage
 - `compile_time_settings`: Merged with template defaults, used to render `cppdefs.opt`
 - `run_time_settings`: Merged with template defaults, used to write `namelist.nml` (via `write_roms_namelist`)
 

@@ -1,18 +1,18 @@
 """
-An ``ipywidgets`` wizard for assembling and reviewing a :class:`SpecConfig`.
+An ``ipywidgets`` wizard for assembling and reviewing a :class:`ForgeBlueprint`.
 
-This is a thin UI shell over :func:`cstar_forge.spec_config_resolve.build_spec_config`:
+This is a thin UI shell over :func:`cstar_forge.forge_blueprint_resolve.build_forge_blueprint`:
 the widgets only *collect inputs and display the resolved result* — all resolution
 and validation stay in the resolver. That keeps the notebook UI interchangeable with
 any future app/WASM front-end and lets the logic be tested without rendering.
 
 Usage (in a Jupyter notebook)::
 
-    from cstar_forge.spec_config_wizard import SpecConfigWizard
-    wiz = SpecConfigWizard()
+    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+    wiz = ForgeBlueprintWizard()
     wiz.display()
     # ... pick a model + domain, tweak fields, review the live YAML, Save ...
-    cfg = wiz.config            # the current resolved SpecConfig (or None if invalid)
+    cfg = wiz.config            # the current resolved ForgeBlueprint (or None if invalid)
 
 The wizard discovers Models from ``catalog/ModelSpec/`` and Domains from
 ``catalog/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
@@ -33,8 +33,7 @@ from typing import Any, get_args, get_origin
 import yaml
 from pydantic import BaseModel
 
-from cstar_forge.forge.namelist_model import RunTimeSettings, validate_run_time_sections
-from cstar_forge.forge.spec_config import (
+from cstar_forge.forge.forge_blueprint import (
     BgcBoundarySource,
     BgcInitialConditionsSource,
     BgcInterpMethod,
@@ -44,6 +43,7 @@ from cstar_forge.forge.spec_config import (
     CoarseGridMode,
     Composition,
     ExtrapMethod,
+    ForgeBlueprint,
     InitialConditionsSource,
     PhysicsBoundarySource,
     PhysicsSurfaceSource,
@@ -52,14 +52,14 @@ from cstar_forge.forge.spec_config import (
     RegridMethod,
     RestoringSurfaceSource,
     RiverSource,
-    SpecConfig,
     SurfaceType,
     TidalSource,
 )
-from cstar_forge.spec_config_resolve import (
+from cstar_forge.forge.namelist_model import RunTimeSettings, validate_run_time_sections
+from cstar_forge.forge_blueprint_resolve import (
     OUTPUT_MARBL_FIELDS,
     OUTPUT_SECTIONS,
-    build_spec_config,
+    build_forge_blueprint,
     load_model_spec_data,
 )
 
@@ -638,7 +638,7 @@ def _source_opts_for(cat: str, type_val: str | None) -> list[str]:
     return _SOURCE_OPTS.get((cat, type_val), _SOURCE_OPTS.get((cat, None), []))
 
 
-# The `options` passthrough (see spec_config.py `_OPTIONS_HELP`) is a free-form dict of
+# The `options` passthrough (see forge_blueprint.py `_OPTIONS_HELP`) is a free-form dict of
 # raw roms-tools kwargs, so it can't be rendered as typed controls. We surface it as a
 # small JSON editor per item — visible and round-tripped — rather than hidden. This is
 # the advanced/transitional hatch; promoting a knob to a typed field gives it a proper
@@ -1125,8 +1125,8 @@ def _get_catalog():
     return default_catalog
 
 
-class SpecConfigWizard:
-    """Build/curate a :class:`SpecConfig` interactively. ``self.config`` holds the
+class ForgeBlueprintWizard:
+    """Build/curate a :class:`ForgeBlueprint` interactively. ``self.config`` holds the
     latest successfully-resolved config (``None`` while inputs are invalid).
     """
 
@@ -1135,15 +1135,15 @@ class SpecConfigWizard:
 
         self.W = W
         self.catalog = catalog or _get_catalog()
-        self.config: SpecConfig | None = None
+        self.config: ForgeBlueprint | None = None
 
         models = list(self.catalog.model_names)
         domains = list(self.catalog.domain_names)
 
-        # --- load / import an existing spec_config.yml ---
+        # --- load / import an existing forge_blueprint.yml ---
         self.load_path = W.Text(
             value="",
-            placeholder="path to spec_config.yml",
+            placeholder="path to forge_blueprint.yml",
             description="Load file:",
             style={"description_width": "110px"},
             layout=W.Layout(width="420px"),
@@ -1404,7 +1404,7 @@ class SpecConfigWizard:
         self.download_link = W.HTML("")
         # Save to the server/working-dir filesystem (handy for local or HPC use)
         self.save_path = W.Text(
-            value="spec_config.yml",
+            value="forge_blueprint.yml",
             description="Save to:",
             style={"description_width": "110px"},
             layout=W.Layout(width="420px"),
@@ -1571,8 +1571,8 @@ class SpecConfigWizard:
         )
 
     @staticmethod
-    def _sources_to_inputs(cfg: SpecConfig) -> dict[str, Any]:
-        """Reconstruct an ``inputs``-shaped forcing dict from a SpecConfig's sources
+    def _sources_to_inputs(cfg: ForgeBlueprint) -> dict[str, Any]:
+        """Reconstruct an ``inputs``-shaped forcing dict from a ForgeBlueprint's sources
         (reverse of the resolver) so a loaded config seeds the forcing editor.
         """
 
@@ -1685,7 +1685,7 @@ class SpecConfigWizard:
             self.wiz._suspended = False
 
     def _suspend(self):
-        return SpecConfigWizard._Suspender(self)
+        return ForgeBlueprintWizard._Suspender(self)
 
     # ---- load / import an existing config ------------------------------------
     def _on_load_path(self, _):
@@ -1696,7 +1696,7 @@ class SpecConfigWizard:
             )
             return
         try:
-            cfg = SpecConfig.from_yaml(path)
+            cfg = ForgeBlueprint.from_yaml(path)
         except Exception as exc:
             self.load_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
@@ -1714,9 +1714,9 @@ class SpecConfigWizard:
         self._load_bytes(bytes(item["content"]))
 
     def _load_bytes(self, content: bytes):
-        """Parse + load a spec_config from raw YAML bytes (browser upload path)."""
+        """Parse + load a forge_blueprint from raw YAML bytes (browser upload path)."""
         try:
-            cfg = SpecConfig.model_validate(yaml.safe_load(content))
+            cfg = ForgeBlueprint.model_validate(yaml.safe_load(content))
         except Exception as exc:
             self.load_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
@@ -1724,7 +1724,7 @@ class SpecConfigWizard:
             return
         self._set_load_status(cfg, self._populate_from(cfg))
 
-    def _set_load_status(self, cfg: SpecConfig, loaded_problems):
+    def _set_load_status(self, cfg: ForgeBlueprint, loaded_problems):
         msg = f"<span style='color:#080'>Loaded {cfg.casename}</span>"
         if loaded_problems:
             msg += (
@@ -1733,8 +1733,8 @@ class SpecConfigWizard:
             )
         self.load_status.value = msg
 
-    def _populate_from(self, cfg: SpecConfig):
-        """Set the widgets from a loaded SpecConfig, then re-resolve once.
+    def _populate_from(self, cfg: ForgeBlueprint):
+        """Set the widgets from a loaded ForgeBlueprint, then re-resolve once.
 
         Round-trips the authoring inputs (identity / run / domain / partitioning /
         nesting / dt). Any value in the file that differs from what the composed pieces
@@ -1793,7 +1793,7 @@ class SpecConfigWizard:
         # captures every manual deviation regardless of the file's recorded provenance,
         # making load fully non-lossy.
         try:
-            composed = build_spec_config(**self._gather()).model_settings
+            composed = build_forge_blueprint(**self._gather()).model_settings
             self._overrides = _diff_overrides(cfg.model_settings, composed)
         except Exception:
             self._overrides = {}
@@ -1859,7 +1859,7 @@ class SpecConfigWizard:
         kw["composition"] = self._composition()
         return kw
 
-    def _populate_nesting(self, cfg: SpecConfig):
+    def _populate_nesting(self, cfg: ForgeBlueprint):
         """Set the nesting widgets from a loaded config (called inside _suspend)."""
         child = cfg.domain.grid_kwargs_child
         self.nest_enable.value = child is not None
@@ -1881,7 +1881,7 @@ class SpecConfigWizard:
             self.download_link.value = ""
             return
         try:
-            cfg = build_spec_config(**self._gather())
+            cfg = build_forge_blueprint(**self._gather())
         except Exception as exc:  # validation or input error → show, don't crash
             self.config = None
             self.derived.value = (
@@ -1938,13 +1938,13 @@ class SpecConfigWizard:
             print(cfg.to_yaml_str())
 
     @staticmethod
-    def _download_html(cfg: SpecConfig) -> str:
+    def _download_html(cfg: ForgeBlueprint) -> str:
         """A data-URI download link for the resolved YAML — works in the browser
         (Voilà / JupyterLab) with no server-side file access.
         """
         payload = cfg.to_yaml_str().encode("utf-8")
         b64 = base64.b64encode(payload).decode("ascii")
-        fname = f"{cfg.casename}.spec_config.yml"
+        fname = f"{cfg.casename}.forge_blueprint.yml"
         return (
             f'⬇ <a download="{fname}" href="data:text/yaml;base64,{b64}">'
             f"Download <code>{fname}</code></a>"
@@ -1956,7 +1956,7 @@ class SpecConfigWizard:
         try:
             kw = self._gather()
             kw["dt"] = None  # force CFL computation (builds the grid via roms_tools)
-            cfg = build_spec_config(**kw)
+            cfg = build_forge_blueprint(**kw)
             self.dt.value = float(cfg.model_settings["time_stepping"]["dt"])
             self.dt_status.value = (
                 f"<span style='color:#080'>dt = {self.dt.value:g} s (CFL)</span>"
@@ -2047,9 +2047,9 @@ class SpecConfigWizard:
         return W.VBox(
             [
                 W.HTML(
-                    "<h3>SpecConfig wizard</h3>"
+                    "<h3>ForgeBlueprint wizard</h3>"
                     "<i>Pick a Model and (optionally) a Domain, tweak fields, review, save. "
-                    "Or load an existing spec_config.yml to edit it. Fine-tune model "
+                    "Or load an existing forge_blueprint.yml to edit it. Fine-tune model "
                     "settings under “Advanced settings”.</i>"
                 ),
                 section(
@@ -2113,7 +2113,7 @@ class SpecConfigWizard:
                     self.editor_box,
                 ),
                 section(
-                    "Review (resolved SpecConfig)",
+                    "Review (resolved ForgeBlueprint)",
                     self.derived,
                     self.validation,
                     self.preview,

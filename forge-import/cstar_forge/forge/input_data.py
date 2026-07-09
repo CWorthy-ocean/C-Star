@@ -24,7 +24,7 @@ from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
 
 from cstar_forge.forge import source_data
-from cstar_forge.forge.spec_config import OpenBoundaries
+from cstar_forge.forge.forge_blueprint import OpenBoundaries
 from cstar_forge.forge.util import roms_tools_nesting_writer
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the
@@ -209,13 +209,13 @@ class RomsMarblInputData(InputData):
     grid: rt.Grid
     boundaries: OpenBoundaries
     source_data: source_data.SourceData
-    blueprint_dir: Path
+    roms_marbl_blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     cdr_forcing: dict | None = None
     forcing_override: dict[str, Any] | None = None
     """The fully-resolved initial-conditions + forcing selection driving input generation.
     Keys mirror the inputs block structure: 'initial_conditions', 'forcing' (with sub-keys
-    'surface', 'boundary', 'tidal', 'river'). Always supplied on the SpecConfig path (the
+    'surface', 'boundary', 'tidal', 'river'). Always supplied on the ForgeBlueprint path (the
     resolver fills it from the model default or an authored selection); the grid is generated
     from the injected ``grid`` object regardless."""
     model_reference_date: datetime | None = None
@@ -227,7 +227,7 @@ class RomsMarblInputData(InputData):
     use_dask: bool = True
 
     # Blueprint elements containing input data
-    blueprint_elements: RomsMarblBlueprintInputData = field(init=False)
+    roms_marbl_blueprint_elements: RomsMarblBlueprintInputData = field(init=False)
 
     # Settings dictionaries
     _settings_compile_time: dict = field(init=False)
@@ -279,7 +279,7 @@ class RomsMarblInputData(InputData):
                 f"have no registered handlers: {', '.join(missing)}"
             )
 
-        # Initialize blueprint_elements with empty datasets
+        # Initialize roms_marbl_blueprint_elements with empty datasets
         forcing_keys = {"boundary", "surface", "tidal", "river", "corrections"}
         forcing_dict = {}
         for key in unique_keys:
@@ -307,8 +307,8 @@ class RomsMarblInputData(InputData):
         if forcing_dict:
             forcing_config = cstar_models.ForcingConfiguration(**forcing_dict)
 
-        # Initialize blueprint_elements
-        self.blueprint_elements = RomsMarblBlueprintInputData(
+        # Initialize roms_marbl_blueprint_elements
+        self.roms_marbl_blueprint_elements = RomsMarblBlueprintInputData(
             grid=cstar_models.Dataset(data=[]) if "grid" in unique_keys else None,
             initial_conditions=cstar_models.Dataset(data=[])
             if "initial_conditions" in unique_keys
@@ -395,7 +395,7 @@ class RomsMarblInputData(InputData):
             print("\n✅ All input files generated.\n")
 
         return (
-            self.blueprint_elements,
+            self.roms_marbl_blueprint_elements,
             self._settings_compile_time,
             self._settings_run_time,
         )
@@ -517,8 +517,8 @@ class RomsMarblInputData(InputData):
 
     def _yaml_filename(self, input_name: str) -> Path:
         """Construct the YAML filename for a given input key."""
-        self.blueprint_dir.mkdir(parents=True, exist_ok=True)
-        return self.blueprint_dir / f"_{input_name}.yml"
+        self.roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
+        return self.roms_marbl_blueprint_dir / f"_{input_name}.yml"
 
     def _resolve_source_block(self, block: str | dict[str, Any]) -> dict[str, Any]:
         """
@@ -661,13 +661,13 @@ class RomsMarblInputData(InputData):
                     out_path_nesting,
                     **nesting_kwargs,
                 )
-            self.blueprint_elements.nesting_info = cstar_models.Dataset(
+            self.roms_marbl_blueprint_elements.nesting_info = cstar_models.Dataset(
                 data=[Resource(location=str(out_path_nesting), partitioned=False)]
             )
 
-        # Append Resource directly to blueprint_elements.grid
+        # Append Resource directly to roms_marbl_blueprint_elements.grid
         resource = Resource(location=str(out_path), partitioned=False)
-        self.blueprint_elements.grid.data.append(resource)
+        self.roms_marbl_blueprint_elements.grid.data.append(resource)
 
         self._settings_run_time["grid"] = dict(
             grid_file=out_path,
@@ -741,14 +741,16 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
 
-        # Append Resources directly to blueprint_elements.initial_conditions
+        # Append Resources directly to roms_marbl_blueprint_elements.initial_conditions
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                self.blueprint_elements.initial_conditions.data.append(resource)
+                self.roms_marbl_blueprint_elements.initial_conditions.data.append(
+                    resource
+                )
         else:
             resource = Resource(location=paths, partitioned=False)
-            self.blueprint_elements.initial_conditions.data.append(resource)
+            self.roms_marbl_blueprint_elements.initial_conditions.data.append(resource)
 
         self._settings_run_time["initial"] = dict(
             initial_file=paths[0],
@@ -830,15 +832,19 @@ class RomsMarblInputData(InputData):
                 self._settings_compile_time["cppdefs"] = {}
             self._settings_compile_time["cppdefs"]["co2_tvarying"] = True
 
-        # Append Resources directly to blueprint_elements.forcing[subkey]
+        # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
 
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                    resource
+                )
         else:
             resource = Resource(location=paths, partitioned=False)
-            getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+            getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                resource
+            )
 
         if frc is not None and hasattr(frc, "use_coarse_grid"):
             interp_frc = 1 if frc.use_coarse_grid else 0
@@ -1003,14 +1009,18 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
-        # Append Resources directly to blueprint_elements.forcing[subkey]
+        # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                    resource
+                )
         else:
             resource = Resource(location=paths, partitioned=False)
-            getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+            getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                resource
+            )
 
         if "forcing" not in self._settings_run_time:
             self._settings_run_time["forcing"] = {}
@@ -1082,14 +1092,18 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
 
-        # Append Resources directly to blueprint_elements.forcing[subkey]
+        # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                    resource
+                )
         else:
             resource = Resource(location=paths, partitioned=False)
-            getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+            getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                resource
+            )
 
         # Update settings_dict with tidal forcing parameters
         self._settings_run_time["tides"] = dict(
@@ -1149,7 +1163,9 @@ class RomsMarblInputData(InputData):
             )
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                    resource
+                )
             return
 
         try:
@@ -1160,8 +1176,8 @@ class RomsMarblInputData(InputData):
                 UserWarning,
                 stacklevel=2,
             )
-            if self.blueprint_elements.forcing is not None:
-                self.blueprint_elements.forcing.river = None
+            if self.roms_marbl_blueprint_elements.forcing is not None:
+                self.roms_marbl_blueprint_elements.forcing.river = None
             river = rt.RiverForcing.__new__(rt.RiverForcing)
             return river
         if existing_paths:
@@ -1176,8 +1192,8 @@ class RomsMarblInputData(InputData):
         else:
             paths = river.save(output_path)
         if isinstance(paths, (list, tuple)) and len(paths) == 0:
-            if self.blueprint_elements.forcing is not None:
-                self.blueprint_elements.forcing.river = None
+            if self.roms_marbl_blueprint_elements.forcing is not None:
+                self.roms_marbl_blueprint_elements.forcing.river = None
             return river
         try:
             river.to_yaml(yaml_path)
@@ -1187,14 +1203,18 @@ class RomsMarblInputData(InputData):
                 UserWarning,
                 stacklevel=2,
             )
-        # Append Resources directly to blueprint_elements.forcing[subkey]
+        # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
                 resource = Resource(location=path, partitioned=False)
-                getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+                getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                    resource
+                )
         else:
             resource = Resource(location=paths, partitioned=False)
-            getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
+            getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+                resource
+            )
 
         # updates settings_dict
         if "river_frc" not in self._settings_run_time:
@@ -1257,10 +1277,10 @@ class RomsMarblInputData(InputData):
         paths = normalized_paths
 
         cdr.to_yaml(yaml_path)
-        # Append Resources directly to blueprint_elements.cdr_forcing
+        # Append Resources directly to roms_marbl_blueprint_elements.cdr_forcing
         for path in paths:
             resource = Resource(location=path, partitioned=False)
-            self.blueprint_elements.cdr_forcing.data.append(resource)
+            self.roms_marbl_blueprint_elements.cdr_forcing.data.append(resource)
 
         if "cppdefs" not in self._settings_compile_time:
             self._settings_compile_time["cppdefs"] = {}
@@ -1293,7 +1313,7 @@ class RomsMarblInputData(InputData):
         """
         Partition whole input files across tiles using roms_tools.partition_netcdf.
 
-        Uses the paths stored in `blueprint_elements` to build the list of whole-field files,
+        Uses the paths stored in `roms_marbl_blueprint_elements` to build the list of whole-field files,
         and records the partitioned paths in the Resource objects.
         """
         input_args = dict(
@@ -1307,18 +1327,20 @@ class RomsMarblInputData(InputData):
             name = function_key
             dataset = None
 
-            # Get the appropriate dataset from blueprint_elements
+            # Get the appropriate dataset from roms_marbl_blueprint_elements
             if name == "grid":
-                dataset = self.blueprint_elements.grid
+                dataset = self.roms_marbl_blueprint_elements.grid
             elif name == "initial_conditions":
-                dataset = self.blueprint_elements.initial_conditions
+                dataset = self.roms_marbl_blueprint_elements.initial_conditions
             elif name.startswith("forcing."):
                 # Extract subkey from "forcing.surface" -> "surface"
                 subkey = name.split(".", 1)[1]
-                if self.blueprint_elements.forcing is not None:
-                    dataset = getattr(self.blueprint_elements.forcing, subkey, None)
+                if self.roms_marbl_blueprint_elements.forcing is not None:
+                    dataset = getattr(
+                        self.roms_marbl_blueprint_elements.forcing, subkey, None
+                    )
             elif name == "cdr_forcing":
-                dataset = self.blueprint_elements.cdr_forcing
+                dataset = self.roms_marbl_blueprint_elements.cdr_forcing
 
             if dataset is None or not dataset.data:
                 print(f"⚠️  Skipping {name} because it is empty")

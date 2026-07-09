@@ -7,7 +7,7 @@ This module holds ONLY pure data + functions (stdlib/typing) so it can be import
 by both:
   * ``cstar_forge.forge.source_data`` (the heavy acquisition layer — copernicusmarine /
     gdown / roms_tools), which re-exports these names for its existing consumers, and
-  * ``cstar_forge.spec_config_resolve`` (the dependency-light Phase-1 resolver),
+  * ``cstar_forge.forge_blueprint_resolve`` (the dependency-light Phase-1 resolver),
     which previously carried a hand-copied duplicate of this table.
 
 Single source of truth: edit dataset identifiers / URLs / aliases here. When the
@@ -65,7 +65,7 @@ STREAMABLE_SOURCES = ["ERA5", "DAI"]
 # a real @register_dataset("GLOFAS") handler, same as the TPXO/WOA user-provided pattern.
 UNSTAGED_DATASETS: set[str] = {"ETOPO5", "DAI"}
 
-# Per-key provenance metadata (snapshotted into SpecConfig.sources.resolved_datasets).
+# Per-key provenance metadata (snapshotted into ForgeBlueprint.sources.resolved_datasets).
 DATASET_METADATA: dict[str, dict[str, str]] = {
     "GLORYS_REGIONAL": {"dataset_id": GLORYS_DATASET_ID},
     "GLORYS_GLOBAL": {"dataset_id": GLORYS_DATASET_ID},

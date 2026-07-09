@@ -3,7 +3,7 @@
 **Status:** decided; executing. Follows the decomposition (Phases 0/B/C/D + host seam,
 allowlist 5→0). This closes the last coupling: `ForgeExecutor` still reads
 `cstar_forge.config` and the authoring `DomainCatalog`/`ModelSpec`. Goal: the executor
-reads **only** the `SpecConfig` + an injected runtime location, so the entire
+reads **only** the `ForgeBlueprint` + an injected runtime location, so the entire
 `cstar_forge/forge/` package relocates into C-Star untouched.
 
 ## Governing principle (from the design discussion)
@@ -12,15 +12,15 @@ reads **only** the `SpecConfig` + an injected runtime location, so the entire
   emitted roms_marbl blueprint, build artifacts) lands under one **`working_dir`** — the
   per-run artifact root, matching how C-Star defines where a run's outputs go.
 - **Everything the executor READS** (ModelSpec/catalog content) is **fully resolved into
-  the `SpecConfig`** by the Phase-1 resolver, so the executor never opens the catalog.
+  the `ForgeBlueprint`** by the Phase-1 resolver, so the executor never opens the catalog.
 - **Division:** the **resolver (Phase 1, authoring, Forge-side)** is the *only* thing that
-  reads the catalog/ModelSpec; it bakes everything into the `SpecConfig`. The **executor
-  (Phase 2)** reads only the `SpecConfig` + injected host. The catalog/ModelSpec is an
+  reads the catalog/ModelSpec; it bakes everything into the `ForgeBlueprint`. The **executor
+  (Phase 2)** reads only the `ForgeBlueprint` + injected host. The catalog/ModelSpec is an
   authoring-time input, never a processing-time one.
 
 ## Decisions (all settled)
 
-1. **`working_dir`** — a **stored** `SpecConfig` field with a wizard default
+1. **`working_dir`** — a **stored** `ForgeBlueprint` field with a wizard default
    (`~/cstar-forge-data`), **overridden at runtime** by C-Star / Forge's executor. It is
    host/location, not results-affecting → **excluded from `content_hash`** (a host-swapped
    `working_dir` must not change the hash). Today's split outputs (`config.paths.input_data`
@@ -50,7 +50,7 @@ reads **only** the `SpecConfig` + an injected runtime location, so the entire
 6. **`code`** — build the cstar `ROMSCompositeCodeRepository` from `cfg.code` at processing
    (shape-mapping, not new data).
 7. **Drop + delete**: `override` (settings-override files), `dump`/`load` (superseded by
-   `SpecConfig.to_yaml`/`from_yaml`), and the now-obsolete `catalog_root` /
+   `ForgeBlueprint.to_yaml`/`from_yaml`), and the now-obsolete `catalog_root` /
    `initialize_catalog_from` / `initialize_catalog_clobber` / `suppress_catalog_validation`.
 8. **Breadcrumbs** — the spec stays self-contained for producing results, **and** retains
    `composition` (PieceRefs: which model/domain/forcing/output catalog pieces + origin) and
@@ -62,10 +62,10 @@ reads **only** the `SpecConfig` + an injected runtime location, so the entire
 
 ## Phased steps (verify green at each)
 
-1. **Schema** (`forge/spec_config.py`): add `working_dir` (default `~/cstar-forge-data`) and
+1. **Schema** (`forge/forge_blueprint.py`): add `working_dir` (default `~/cstar-forge-data`) and
    `datasets: list[str]`; `working_dir` → `_HASH_EXCLUDE`; `datasets` stays hashed. Wizard
    seeds the `working_dir` default.
-2. **Resolver** (`spec_config_resolve.py`): emit `datasets` (forcing/IC sources +
+2. **Resolver** (`forge_blueprint_resolve.py`): emit `datasets` (forcing/IC sources +
    topography). Forcing/settings/code already resolved.
 3. **`HostPaths`** (`forge/host.py`): reduce to the 4-field shape; `config.resolve_host` +
    `run.py` build it (working_dir default, overridable).
@@ -74,7 +74,7 @@ reads **only** the `SpecConfig` + an injected runtime location, so the entire
    `SourceData(datasets=cfg.datasets, source_data_dir=host.source_data_cache)`; drop
    `_get_catalog`/`_load_model_spec`/`resolve_catalog_dir`/`config`; delete `override` /
    `dump` / `load` / `catalog_root` / `initialize_catalog_*` / `suppress_catalog_validation`.
-5. **Bridge** (`forge/spec_config_engine.py`): `sources_to_forcing_override` always returns
+5. **Bridge** (`forge/forge_blueprint_engine.py`): `sources_to_forcing_override` always returns
    the dict (drop the `model_default` short-circuit) so the executor never needs
    `model_spec.inputs`.
 6. **Guard** (`tests/test_forge_app_boundary.py`): add `executor` to `_FORGE_APP_MODULES`;
@@ -127,7 +127,7 @@ introduced vs. what predates it.
    state — the hash should capture the template *version* (commit/directory/files), not the
    fetch *location*. Ties to to-do #2: pin `templates.commit:` (hook already in model.yml)
    and refine the hash to exclude `location`.
-5. **`examples/spec_config*.yml` carry stale `application: roms_marbl`** (should be `forge`).
+5. **`examples/forge_blueprint*.yml` carry stale `application: roms_marbl`** (should be `forge`).
    Confirmed **not load-tested** and referenced only as a doc follow-up → dead docs. TODO:
    regenerate or delete (low urgency). Their template blocks (`directory: templates/…`) are
    already forward-compatible.
@@ -160,7 +160,7 @@ as three coupled changes:
    is hashed, so SRTM15-topo specs' key changed `SRTM15_V2.7`→`SRTM15` (intentional — no
    functional SRTM15 specs existed to migrate); ETOPO5 specs are unaffected.
 2. **Injection** — `ForgeExecutor` gained a `topography_source: str` field (fed from
-   `cfg.domain.topography_source`, coerced enum→value at the `spec_config_engine` boundary). A
+   `cfg.domain.topography_source`, coerced enum→value at the `forge_blueprint_engine` boundary). A
    new `_resolve_topography_source()` stages the topo file and returns
    `{"name":"SRTM15","path": <staged>}` (or `None` for ETOPO5). `name` is a plain string, never
    the `TopographySource` enum, so the injected dict is safe when `grid.to_yaml` runs.
@@ -177,6 +177,6 @@ Tests: `test_srtm15_key_reconciles_to_handler` (replaces the old landmine guard)
 download (multi-GB) — the rt.Grid call is asserted with staging mocked.
 
 ### Still-open larger items (unchanged from prior sessions)
-- SpecConfig → C-Star `forge` application migration (executor + engine + SpecConfig-as-
-  blueprint). Seams are in place (portability, executor factory, SpecConfigExecutor Protocol).
+- ForgeBlueprint → C-Star `forge` application migration (executor + engine + ForgeBlueprint-as-
+  blueprint). Seams are in place (portability, executor factory, ForgeBlueprintExecutor Protocol).
 - Detached: C-Star → catalog callback breadcrumbs (extend `composition`/`provenance`).

@@ -5,14 +5,14 @@
 > the *historical record* of how the seams below were built.
 >
 > **Note:** file paths below reflect the state at the time this was written and have
-> since moved: `cstar_forge/_core.py` was deleted (decomposed into `SpecConfig` +
-> `ForgeExecutor`); `cstar_forge/input_data.py` and `cstar_forge/spec_config_engine.py`
-> are now `cstar_forge/forge/input_data.py` and `cstar_forge/forge/spec_config_engine.py`;
+> since moved: `cstar_forge/_core.py` was deleted (decomposed into `ForgeBlueprint` +
+> `ForgeExecutor`); `cstar_forge/input_data.py` and `cstar_forge/forge_blueprint_engine.py`
+> are now `cstar_forge/forge/input_data.py` and `cstar_forge/forge/forge_blueprint_engine.py`;
 > `CstarSpecBuilder` is now `ForgeExecutor`. See `docs/developer-guide.md` for the current
 > module map.
 
 This document records the changes made to expose roms-tools constructor options through
-the Forge SpecConfig, resolver, processing engine, and wizard UI.
+the Forge ForgeBlueprint, resolver, processing engine, and wizard UI.
 
 ## Background
 
@@ -32,7 +32,7 @@ previously exposed. The main findings:
 
 ### Phase 0 — Propagate `cfg.sources` to `input_data` (the unlock)
 
-**Files:** `cstar_forge/input_data.py`, `cstar_forge/_core.py`, `cstar_forge/spec_config_engine.py`
+**Files:** `cstar_forge/input_data.py`, `cstar_forge/_core.py`, `cstar_forge/forge_blueprint_engine.py`
 
 - `RomsMarblInputData` gained `forcing_override: Optional[Dict]` and
   `model_reference_date: Optional[datetime]`. When `forcing_override` is provided,
@@ -40,10 +40,10 @@ previously exposed. The main findings:
   and forcing categories.
 - `CstarSpecBuilder` gained `forcing_override` and `model_reference_date` fields, both
   threaded through to `RomsMarblInputData`.
-- `spec_config_engine.py` gained `sources_to_forcing_override(cfg)`: returns `None`
+- `forge_blueprint_engine.py` gained `sources_to_forcing_override(cfg)`: returns `None`
   when `composition.forcing.origin == "model_default"` (no-op, preserves old behavior),
   otherwise converts `cfg.sources` → the `forcing_override` dict format. Called in
-  `spec_config_to_builder_kwargs`.
+  `forge_blueprint_to_builder_kwargs`.
 
 **Effect:** The wizard's `ForcingSpec` selection and per-item edits now actually reach
 input file generation instead of being silently ignored.
@@ -52,25 +52,25 @@ input file generation instead of being silently ignored.
 
 ### Phase 1a — `model_reference_date` as a run-level field
 
-**Files:** `cstar_forge/spec_config.py` (`RunWindow`), `cstar_forge/input_data.py`
+**Files:** `cstar_forge/forge_blueprint.py` (`RunWindow`), `cstar_forge/input_data.py`
 
 - Added `model_reference_date: datetime = datetime(2000, 1, 1)` to `RunWindow` in
-  `SpecConfig`. Default matches the roms-tools default.
+  `ForgeBlueprint`. Default matches the roms-tools default.
 - Added `_mrd_extra()` helper on `RomsMarblInputData` that returns
   `{"model_reference_date": self.model_reference_date}` when set. Injected into the
   `extra` dicts of all 5 handler methods (IC, surface, boundary, tidal, river), so it
   propagates to every rt object that accepts it.
 - `CstarSpecBuilder.model_reference_date` threads it from the engine's
-  `spec_config_to_builder_kwargs`.
+  `forge_blueprint_to_builder_kwargs`.
 
 ---
 
 ### Phase 1b — Typed option fields on item models
 
-**Files:** `cstar_forge/models.py`, `cstar_forge/spec_config.py`
+**Files:** `cstar_forge/models.py`, `cstar_forge/forge_blueprint.py`
 
 New validated fields added to **both** the legacy `models.py` item models (what
-`input_data` consumes) and the `spec_config.py` forcing item models (resolver/wizard):
+`input_data` consumes) and the `forge_blueprint.py` forcing item models (resolver/wizard):
 
 | Class | New fields |
 |---|---|
@@ -78,7 +78,7 @@ New validated fields added to **both** the legacy `models.py` item models (what
 | `SurfaceForcingItem` | `wind_dropoff` |
 | `BoundaryForcingItem` | `apply_2d_horizontal_fill`, `use_density_interpolation` |
 | `RiverForcingItem` | `convert_to_climatology`, `bgc_source` |
-| `Domain` (`spec_config.py`) | `nesting_include_pressure_fluxes` |
+| `Domain` (`forge_blueprint.py`) | `nesting_include_pressure_fluxes` |
 
 `nesting_include_pressure_fluxes` is injected by the engine into `metadata_child`
 (which the grid handler passes to the nesting writer as `**nesting_kwargs`).
@@ -106,7 +106,7 @@ model changes. Covers: `bypass_validation`, `chunks`, `initial_slice_bounds`,
 
 ### Phase 2 — Wizard UI updates
 
-**File:** `cstar_forge/spec_config_wizard.py`
+**File:** `cstar_forge/forge_blueprint_wizard.py`
 
 New controls surfaced in the wizard:
 

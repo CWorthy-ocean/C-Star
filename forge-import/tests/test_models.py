@@ -86,7 +86,7 @@ class TestGridInput:
 
     def test_gridinput_default_topography_source(self):
         """GridInput now has a default topography_source (TopographySource.ETOPO5)."""
-        from cstar_forge.forge.spec_config import TopographySource
+        from cstar_forge.forge.forge_blueprint import TopographySource
 
         assert GridInput().topography_source == TopographySource.ETOPO5
 
@@ -456,7 +456,7 @@ class TestModelInputs:
     def test_boundaryforcingitem_rejects_extra_fields(self):
         """Unknown fields are rejected (extra='forbid'); raw roms-tools kwargs go via the
         sanctioned ``options`` passthrough instead. (Phase D single-sourced these item
-        models with forge.spec_config, which is strict.)
+        models with forge.forge_blueprint, which is strict.)
         """
         with pytest.raises(ValidationError):
             BoundaryForcingItem(

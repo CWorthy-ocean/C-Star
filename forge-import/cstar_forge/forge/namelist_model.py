@@ -567,7 +567,7 @@ def validate_run_time_sections(settings: dict) -> list[str]:
     (empty if all good).
 
     Unlike ``RunTimeSettings.model_validate``, this does NOT require every section —
-    it checks only the sections that are present, so it works on a ``SpecConfig``'s
+    it checks only the sections that are present, so it works on a ``ForgeBlueprint``'s
     flat ``model_settings`` (which omits the processing-filled sections). Keys with no
     ``RunTimeSettings`` counterpart (e.g. ``cppdefs``, a compile-time section) are
     skipped. Use it for fail-fast feedback on hand-edited / loaded configs, where the

@@ -232,8 +232,8 @@ def sample_roms_marbl_input_data(
     sample_partitioning,
 ):
     """Create a RomsMarblInputData instance for testing."""
-    blueprint_dir = tmp_path / "blueprints"
-    blueprint_dir.mkdir(parents=True, exist_ok=True)
+    roms_marbl_blueprint_dir = tmp_path / "blueprints"
+    roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
 
     data_dir = tmp_path / "input_data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -246,7 +246,7 @@ def sample_roms_marbl_input_data(
         grid=sample_grid,
         boundaries=sample_open_boundaries,
         source_data=sample_source_data,
-        blueprint_dir=blueprint_dir,
+        roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
         partitioning=sample_partitioning,
         use_dask=False,
         input_data_dir=data_dir,
@@ -362,7 +362,7 @@ class TestInputData:
 class TestRomsMarblBlueprintInputData:
     """Tests for RomsMarblBlueprintInputData class."""
 
-    def test_romsmarblblueprintinputdata_creation_empty(self):
+    def test_roms_marbl_blueprint_input_data_creation_empty(self):
         """Test creating RomsMarblBlueprintInputData with all None."""
         data = RomsMarblBlueprintInputData()
         assert data.grid is None
@@ -371,7 +371,7 @@ class TestRomsMarblBlueprintInputData:
         assert data.cdr_forcing is None
         assert data.nesting_info is None
 
-    def test_romsmarblblueprintinputdata_creation_with_data(self):
+    def test_roms_marbl_blueprint_input_data_creation_with_data(self):
         """Test creating RomsMarblBlueprintInputData with data."""
         grid_dataset = cstar_models.Dataset(data=[])
         ic_dataset = cstar_models.Dataset(data=[])
@@ -393,7 +393,7 @@ class TestRomsMarblBlueprintInputData:
         assert data.forcing is not None
         assert data.cdr_forcing is not None
 
-    def test_romsmarblblueprintinputdata_creation_with_nesting_info(self):
+    def test_roms_marbl_blueprint_input_data_creation_with_nesting_info(self):
         """Test creating RomsMarblBlueprintInputData with nesting_info set."""
         nesting_dataset = cstar_models.Dataset(data=[])
         data = RomsMarblBlueprintInputData(nesting_info=nesting_dataset)
@@ -475,8 +475,8 @@ class TestRomsMarblInputDataInitialization:
         sample_partitioning,
     ):
         """Test RomsMarblInputData initialization."""
-        blueprint_dir = tmp_path / "blueprints"
-        blueprint_dir.mkdir(parents=True, exist_ok=True)
+        roms_marbl_blueprint_dir = tmp_path / "blueprints"
+        roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
 
         data = RomsMarblInputData(
             domain_name="test_grid",
@@ -486,7 +486,7 @@ class TestRomsMarblInputDataInitialization:
             grid=sample_grid,
             boundaries=sample_open_boundaries,
             source_data=sample_source_data,
-            blueprint_dir=blueprint_dir,
+            roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
             partitioning=sample_partitioning,
             input_data_dir=tmp_path,
             use_dask=False,
@@ -495,7 +495,7 @@ class TestRomsMarblInputDataInitialization:
         assert data.domain_name == "test_grid"
         assert data.grid is not None
         assert data.forcing_override is not None
-        assert data.blueprint_elements is not None
+        assert data.roms_marbl_blueprint_elements is not None
         assert len(data.input_list) > 0
 
     def test_romsmarblinputdata_missing_handler(
@@ -554,8 +554,8 @@ class TestRomsMarblInputDataInitialization:
             settings=SettingsSpec(),
         )
 
-        blueprint_dir = tmp_path / "blueprints"
-        blueprint_dir.mkdir(parents=True, exist_ok=True)
+        roms_marbl_blueprint_dir = tmp_path / "blueprints"
+        roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
 
         open_boundaries = forge_models.OpenBoundaries()
         mock_source_data = MagicMock()
@@ -570,7 +570,7 @@ class TestRomsMarblInputDataInitialization:
             grid=sample_grid,
             boundaries=open_boundaries,
             source_data=mock_source_data,
-            blueprint_dir=blueprint_dir,
+            roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
             partitioning=partitioning,
             input_data_dir=tmp_path,
             use_dask=False,
@@ -587,8 +587,8 @@ class TestRomsMarblInputDataHelperMethods:
         """Test _yaml_filename method."""
         yaml_path = sample_roms_marbl_input_data._yaml_filename("grid")
         assert yaml_path.name == "_grid.yml"
-        assert yaml_path.parent == sample_roms_marbl_input_data.blueprint_dir
-        assert sample_roms_marbl_input_data.blueprint_dir.exists()
+        assert yaml_path.parent == sample_roms_marbl_input_data.roms_marbl_blueprint_dir
+        assert sample_roms_marbl_input_data.roms_marbl_blueprint_dir.exists()
 
     def test_resolve_source_block_string(self, sample_roms_marbl_input_data):
         """Test _resolve_source_block with string input."""
@@ -696,8 +696,11 @@ class TestRomsMarblInputDataGeneration:
         mock_grid.save.assert_called_once()
         mock_grid.to_yaml.assert_called_once()
 
-        # Check that resource was added to blueprint_elements
-        assert len(sample_roms_marbl_input_data.blueprint_elements.grid.data) > 0
+        # Check that resource was added to roms_marbl_blueprint_elements
+        assert (
+            len(sample_roms_marbl_input_data.roms_marbl_blueprint_elements.grid.data)
+            > 0
+        )
 
     @patch("cstar_forge.forge.input_data.rt.InitialConditions")
     def test_generate_initial_conditions(
@@ -720,7 +723,9 @@ class TestRomsMarblInputDataGeneration:
 
         # Check that resource was added
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data)
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.initial_conditions.data
+            )
             > 0
         )
 
@@ -741,7 +746,9 @@ class TestRomsMarblInputDataGeneration:
 
         # Should have 2 resources
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.initial_conditions.data)
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.initial_conditions.data
+            )
             == 2
         )
 
@@ -766,7 +773,9 @@ class TestRomsMarblInputDataGeneration:
 
         # Check that resource was added to forcing.surface
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data)
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.surface.data
+            )
             > 0
         )
 
@@ -809,7 +818,9 @@ class TestRomsMarblInputDataGeneration:
 
         mock_sf_class.assert_not_called()
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data)
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.surface.data
+            )
             > 0
         )
 
@@ -834,7 +845,9 @@ class TestRomsMarblInputDataGeneration:
 
         # Check that resource was added to forcing.boundary
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.forcing.boundary.data)
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.boundary.data
+            )
             > 0
         )
 
@@ -872,7 +885,10 @@ class TestRomsMarblInputDataGeneration:
 
         # Check that resource was added to forcing.tidal
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.tidal.data
+            )
+            > 0
         )
 
     @patch("cstar_forge.forge.input_data.rt.TidalForcing")
@@ -896,7 +912,10 @@ class TestRomsMarblInputDataGeneration:
 
         mock_tf_class.assert_not_called()
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.forcing.tidal.data) > 0
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.tidal.data
+            )
+            > 0
         )
 
     @patch("cstar_forge.forge.input_data.rt.RiverForcing")
@@ -931,7 +950,10 @@ class TestRomsMarblInputDataGeneration:
 
         # Check that resource was added to forcing.river
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.river.data
+            )
+            > 0
         )
 
     @patch("cstar_forge.forge.input_data.rt.RiverForcing")
@@ -965,7 +987,10 @@ class TestRomsMarblInputDataGeneration:
 
         mock_rf_class.assert_not_called()
         assert (
-            len(sample_roms_marbl_input_data.blueprint_elements.forcing.river.data) > 0
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.river.data
+            )
+            > 0
         )
         assert (
             sample_roms_marbl_input_data._settings_run_time["river_frc"]["nriv"]
@@ -978,8 +1003,11 @@ class TestRomsMarblInputDataGeneration:
     ):
         """Test _generate_cdr_forcing method."""
         # Initialize cdr_forcing as a Dataset if it's None
-        if sample_roms_marbl_input_data.blueprint_elements.cdr_forcing is None:
-            sample_roms_marbl_input_data.blueprint_elements.cdr_forcing = (
+        if (
+            sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing
+            is None
+        ):
+            sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing = (
                 cstar_models.Dataset(data=[])
             )
 
@@ -998,7 +1026,12 @@ class TestRomsMarblInputDataGeneration:
         mock_cdr.to_yaml.assert_called_once()
 
         # Check that resource was added to cdr_forcing
-        assert len(sample_roms_marbl_input_data.blueprint_elements.cdr_forcing.data) > 0
+        assert (
+            len(
+                sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing.data
+            )
+            > 0
+        )
 
     def test_generate_cdr_forcing_empty_list(self, sample_roms_marbl_input_data):
         """Test _generate_cdr_forcing with empty cdr_list returns early."""
@@ -1064,9 +1097,12 @@ class TestRomsMarblInputDataGeneration:
             sample_roms_marbl_input_data._generate_grid()
 
         # nesting_info should be set as a Dataset pointing to the nesting file
-        assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is not None
+        assert (
+            sample_roms_marbl_input_data.roms_marbl_blueprint_elements.nesting_info
+            is not None
+        )
         nesting_resources = (
-            sample_roms_marbl_input_data.blueprint_elements.nesting_info.data
+            sample_roms_marbl_input_data.roms_marbl_blueprint_elements.nesting_info.data
         )
         assert len(nesting_resources) == 1
         assert str(out_path_nesting) in nesting_resources[0].location
@@ -1148,7 +1184,10 @@ class TestRomsMarblInputDataGeneration:
         with patch("xarray.open_dataset", return_value=mock_ds):
             sample_roms_marbl_input_data._generate_grid()
 
-        assert sample_roms_marbl_input_data.blueprint_elements.nesting_info is None
+        assert (
+            sample_roms_marbl_input_data.roms_marbl_blueprint_elements.nesting_info
+            is None
+        )
         assert not sample_roms_marbl_input_data._settings_run_time.get(
             "extract_data", {}
         ).get("do_extract", False)
@@ -1264,8 +1303,11 @@ class TestRomsMarblInputDataGenerateAll:
                 )
 
         assert result is not None
-        blueprint_elements, settings_compile_time, settings_run_time = result
-        assert blueprint_elements == sample_roms_marbl_input_data.blueprint_elements
+        roms_marbl_blueprint_elements, settings_compile_time, settings_run_time = result
+        assert (
+            roms_marbl_blueprint_elements
+            == sample_roms_marbl_input_data.roms_marbl_blueprint_elements
+        )
         # Settings should be populated (non-empty dicts)
         assert settings_compile_time is not None
         assert settings_run_time is not None
@@ -1412,8 +1454,8 @@ class TestRomsMarblInputDataGenerateAll:
 
         assert result is not None
         assert result != (None, {}, {})
-        blueprint_elements, settings_compile_time, settings_run_time = result
-        assert blueprint_elements is not None
+        roms_marbl_blueprint_elements, settings_compile_time, settings_run_time = result
+        assert roms_marbl_blueprint_elements is not None
         assert settings_compile_time is not None
         assert settings_run_time is not None
         assert (sample_roms_marbl_input_data.input_data_dir / "existing.nc").exists()
@@ -1494,10 +1536,10 @@ class TestRomsMarblInputDataGenerateAll:
             p.touch()
         mock_partition.return_value = partitioned_paths
 
-        # Create some resources in blueprint_elements
+        # Create some resources in roms_marbl_blueprint_elements
         surface_file = tmp_path / "surface.nc"
         surface_file.touch()
-        sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data.append(
+        sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.surface.data.append(
             Resource(location=str(surface_file), partitioned=False)
         )
 
@@ -1545,7 +1587,7 @@ class TestRomsMarblInputDataPartitionFiles:
         surface_file = tmp_path / "surface.nc"
         surface_file.touch()
         resource = Resource(location=str(surface_file), partitioned=False)
-        sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data.append(
+        sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.surface.data.append(
             resource
         )
 
@@ -1593,7 +1635,7 @@ class TestRomsMarblInputDataPartitionFiles:
         surface_file = tmp_path / "surface.nc"
         surface_file.touch()
         resource = Resource(location=str(surface_file), partitioned=False)
-        sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data.append(
+        sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.surface.data.append(
             resource
         )
 
@@ -1620,7 +1662,7 @@ class TestRomsMarblInputDataPartitionFiles:
         surface_file = tmp_path / "surface.nc"
         surface_file.touch()
         original_resource = Resource(location=str(surface_file), partitioned=False)
-        sample_roms_marbl_input_data.blueprint_elements.forcing.surface.data.append(
+        sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.surface.data.append(
             original_resource
         )
 
@@ -1638,7 +1680,9 @@ class TestRomsMarblInputDataPartitionFiles:
         # Need to set up input_list to include forcing.surface
         # The actual partitioning happens in a loop over input_list
         # For this test, we'll directly test the partitioning logic
-        dataset = sample_roms_marbl_input_data.blueprint_elements.forcing.surface
+        dataset = (
+            sample_roms_marbl_input_data.roms_marbl_blueprint_elements.forcing.surface
+        )
         new_resources = []
         for resource in dataset.data:
             if resource.location is None:

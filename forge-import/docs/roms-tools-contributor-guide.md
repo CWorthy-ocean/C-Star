@@ -5,8 +5,8 @@ drive that functionality. This is the contract for *how a roms-tools constructor
 parameter becomes usable through Forge* — first immediately, then (optionally) as a
 first-class, validated, UI-surfaced option.
 
-It is deliberately narrow: it does **not** cover authoring a whole SpecConfig, the
-catalog, or the execution engine. See `docs/spec-config-inventory.md` for the full
+It is deliberately narrow: it does **not** cover authoring a whole ForgeBlueprint, the
+catalog, or the execution engine. See `docs/forge-blueprint-inventory.md` for the full
 input model and `docs/roms-tools-options-integration.md` for the historical record of
 how these seams were built.
 
@@ -14,10 +14,10 @@ how these seams were built.
 
 ## The one principle
 
-**The SpecConfig is the single source of truth, and it stays reproducible.** Every
+**The ForgeBlueprint is the single source of truth, and it stays reproducible.** Every
 value that affects results — including the escape hatch below — lives *inside* the
-SpecConfig, is serialized to its YAML, and is covered by `content_hash()`. There is no
-side channel. The same SpecConfig always produces the same inputs.
+ForgeBlueprint, is serialized to its YAML, and is covered by `content_hash()`. There is no
+side channel. The same ForgeBlueprint always produces the same inputs.
 
 So the choice below is **not** "reproducible vs. not." It is "validated + discoverable
 (typed field) vs. quick + unvalidated (passthrough)." Both reproduce identically.
@@ -40,9 +40,9 @@ typed item-model fields   ←  options passthrough   ←  run-time injections (d
    (validated defaults)         (raw rt kwargs)              (hardcoded by Forge)
 ```
 
-An authored SpecConfig reaches this via the engine bridge
-(`spec_config_engine.sources_to_forcing_override`), which `model_dump()`s each
-`spec_config` forcing item into the dict `input_data` consumes. **The bridge is
+An authored ForgeBlueprint reaches this via the engine bridge
+(`forge_blueprint_engine.sources_to_forcing_override`), which `model_dump()`s each
+`forge_blueprint` forcing item into the dict `input_data` consumes. **The bridge is
 generic** — it forwards every field, so you never edit it when adding a knob.
 
 Grid is the one exception: grid parameters are not a typed item model but a free
@@ -56,7 +56,7 @@ Forge change — put them in `grid_kwargs`.
 You are never blocked waiting for a Forge release.
 
 **Forcing / initial conditions** — use the `options` passthrough on the item. In the
-SpecConfig YAML:
+ForgeBlueprint YAML:
 
 ```yaml
 forcing:
@@ -84,17 +84,17 @@ authoring time. That's the tradeoff, and the reason for Tier 2.
 When a knob is stable and worth surfacing, promote it. Typed fields get Pydantic
 validation, enum dropdowns, tooltips, and discoverability. Checklist:
 
-1. **Add the field once, to the item model in `cstar_forge/forge/spec_config.py`.** The
+1. **Add the field once, to the item model in `cstar_forge/forge/forge_blueprint.py`.** The
    item models (`SurfaceForcingItem`, `BoundaryForcingItem`, `TidalForcingItem`,
    `RiverForcingItem`, `InitialConditions`, `SourceSpec`) are **single-sourced** there and
    re-exported by `cstar_forge/models.py` (with `InitialConditions` aliased to the legacy
    name `InitialConditionsInput`), so one edit covers both the authoring and processing
-   sides. For a constrained set of values, define a `str, Enum` in `spec_config.py` too
+   sides. For a constrained set of values, define a `str, Enum` in `forge_blueprint.py` too
    (it stays import-light and relocatable). Items are `extra="forbid"` — unknown kwargs
    must go through `options`, not as loose fields.
 2. **Record it in the drift guard** — add the field name to the class's entry in
    `_FORGE_FIELDS` in `tests/test_roms_tools_coverage.py`.
-3. **Surface it in the wizard** — add a control in `spec_config_wizard.py`
+3. **Surface it in the wizard** — add a control in `forge_blueprint_wizard.py`
    (`_ForcingEditor._make_row` / `gather`, plus the load path `_sources_to_inputs` so it
    round-trips). Add a tooltip via `HELP_TEXT`.
 
@@ -110,12 +110,12 @@ Both run in CI (`pytest tests/` with no marker filter):
 | Guard | File | Fails when |
 |---|---|---|
 | **roms-tools coverage** | `test_roms_tools_coverage.py::test_all_rt_params_are_exposed_or_skipped` | A new rt constructor param is neither a typed Forge field, a data/run input, nor on the documented `_SKIP` list. Forces a decision on every new roms-tools parameter. |
-| **single-source** | `test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced` | `cstar_forge.models` stops re-exporting the exact `forge.spec_config` item class (i.e. someone re-introduced a divergent copy in `models.py`). |
+| **single-source** | `test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced` | `cstar_forge.models` stops re-exporting the exact `forge.forge_blueprint` item class (i.e. someone re-introduced a divergent copy in `models.py`). |
 
 If the coverage guard fails on a param you don't want to type yet, add it to `_SKIP`
 with a one-line reason (it remains usable via `options`). If the single-source guard
 fails, delete the duplicate definition in `models.py` and re-export from
-`forge/spec_config.py` instead.
+`forge/forge_blueprint.py` instead.
 
 ---
 
@@ -123,7 +123,7 @@ fails, delete the duplicate definition in `models.py` and re-export from
 
 - New roms-tools param, need it now → `options` (or `grid_kwargs`). Reproducible,
   unvalidated, invisible in the UI beyond the raw JSON editor.
-- Param is here to stay → promote to a typed field (one edit in `forge/spec_config.py`
+- Param is here to stay → promote to a typed field (one edit in `forge/forge_blueprint.py`
   + drift guard + wizard). Validated, discoverable, first-class.
 - `options` is the pressure valve for the window between "roms-tools shipped it" and
   "Forge typed it" — in a healthy repo it stays near-empty, because the coverage guard

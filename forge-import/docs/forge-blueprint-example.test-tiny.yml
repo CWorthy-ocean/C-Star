@@ -1,4 +1,4 @@
-spec_config_version: 2
+forge_blueprint_version: 2
 application: forge
 identity:
   model_name: cson_roms-marbl_v0.1
@@ -675,7 +675,7 @@ provenance:
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
   content_hash: 2baf8fcacccb1ec10efc8a4ad6b3a1247b013584c6b5e282714c3917e7328e43
-  notes: Built by cstar_forge.spec_config_resolve.build_spec_config from the demo
+  notes: Built by cstar_forge.forge_blueprint_resolve.build_forge_blueprint from the demo
     notebook inputs (test-tiny). Machine/paths and naming are NOT stored (resolved
     at processing / derived). s_coord + file paths are processing outputs. provenance.overrides
     records manual edits on top of the pieces.

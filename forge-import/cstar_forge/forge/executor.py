@@ -40,9 +40,9 @@ from cstar.orchestration.utils import (
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from cstar_forge.forge import input_data, source_data
+from cstar_forge.forge.forge_blueprint import OpenBoundaries
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
-from cstar_forge.forge.spec_config import OpenBoundaries
 
 
 def _schedule_coroutine(coro):
@@ -81,7 +81,7 @@ class DatasetsDict(dict):
         return self.get(key)
 
 
-class BlueprintStage:
+class RomsMarblBlueprintStage:
     """
     Blueprint stage constants and validation.
 
@@ -150,7 +150,7 @@ class ForgeExecutor(BaseModel):
     phase of the model configuration and execution pipeline:
 
     1. **PRECONFIG** (initialization):
-       - Created during `model_post_init()` via `_initialize_blueprint()`
+       - Created during `model_post_init()` via `_initialize_roms_marbl_blueprint()`
        - Blueprint structure initialized with placeholder data
        - Settings dictionaries initialized from model defaults
        - Blueprint persisted to disk
@@ -177,7 +177,7 @@ class ForgeExecutor(BaseModel):
     **Settings:**
 
     The compile-time (``cppdefs``) and run-time (namelist) settings are seeded from the
-    resolved ``resolved_settings`` (the SpecConfig ``model_settings``); ``configure_build``
+    resolved ``resolved_settings`` (the ForgeBlueprint ``model_settings``); ``configure_build``
     can overlay further overrides on top.
 
     **Key Concepts:**
@@ -211,7 +211,7 @@ class ForgeExecutor(BaseModel):
     topography_source: str = Field(
         default="ETOPO5",
         description=(
-            "Topography data-source name (from SpecConfig ``domain.topography_source``). "
+            "Topography data-source name (from ForgeBlueprint ``domain.topography_source``). "
             "``ETOPO5`` uses roms-tools' built-in fetch at grid build; any other supported "
             "source (e.g. ``SRTM15``) is staged by Forge and injected into every "
             "``grid_kwargs`` as ``{'name', 'path'}`` before the grid is constructed."
@@ -231,7 +231,7 @@ class ForgeExecutor(BaseModel):
         validate_default=False,
         description=(
             "When provided, overrides model_spec.inputs for initial_conditions and forcing "
-            "categories. Set by process_spec_config when cfg.sources contains an authored "
+            "categories. Set by process_forge_blueprint when cfg.sources contains an authored "
             "ForcingSpec selection; ignored when None (model defaults are used)."
         ),
     )
@@ -257,7 +257,7 @@ class ForgeExecutor(BaseModel):
         default=None,
         validate_default=False,
         description=(
-            "Resolved source-dataset keys to prepare (from the SpecConfig ``datasets``). "
+            "Resolved source-dataset keys to prepare (from the ForgeBlueprint ``datasets``). "
             "Distinct from the ``datasets`` property, which returns the *loaded* datasets."
         ),
     )
@@ -265,7 +265,7 @@ class ForgeExecutor(BaseModel):
         default=None,
         validate_default=False,
         description=(
-            "Fully-resolved, host-independent settings (the SpecConfig ``model_settings``): "
+            "Fully-resolved, host-independent settings (the ForgeBlueprint ``model_settings``): "
             "a flat mapping with ``cppdefs`` (compile-time) alongside every namelist "
             "(run-time) section. When set, it is the authoritative base for the compile-time "
             "and run-time settings dictionaries (the executor no longer re-derives them from "
@@ -277,14 +277,14 @@ class ForgeExecutor(BaseModel):
         default=None,
         validate_default=False,
         description=(
-            "The SpecConfig ``code`` (roms + marbl repos and compile-/run-time template "
+            "The ForgeBlueprint ``code`` (roms + marbl repos and compile-/run-time template "
             "refs). The blueprint code repository and the template render directories are "
-            "built from it. Required (fed by from_spec_config)."
+            "built from it. Required (fed by from_forge_blueprint)."
         ),
     )
     ensemble_id: int | None = Field(default=None, validate_default=False)
     # Internal attributes (computed/loaded)
-    blueprint: cstar_models.RomsMarblBlueprint | None = Field(
+    roms_marbl_blueprint: cstar_models.RomsMarblBlueprint | None = Field(
         default=None, init=False, validate_default=False, validate_assignment=False
     )
     src_data: source_data.SourceData | None = Field(
@@ -326,7 +326,7 @@ class ForgeExecutor(BaseModel):
         if self.host is None:
             raise ValueError(
                 "ForgeExecutor requires an injected host (HostPaths). Construct it via "
-                "ForgeExecutor.from_spec_config(cfg, host=...) or pass host=... directly."
+                "ForgeExecutor.from_forge_blueprint(cfg, host=...) or pass host=... directly."
             )
         return self.host
 
@@ -364,7 +364,7 @@ class ForgeExecutor(BaseModel):
         performs critical initialization:
 
         1. Creates the grid object from `grid_kwargs`
-        2. Initializes the blueprint structure (calls `_initialize_blueprint()`)
+        2. Initializes the blueprint structure (calls `_initialize_roms_marbl_blueprint()`)
 
         After this method completes, the blueprint is in the **PRECONFIG** stage
         and has been persisted to disk.
@@ -445,7 +445,7 @@ class ForgeExecutor(BaseModel):
             self.grid = rt.Grid(**self.grid_kwargs)
 
         # Initialize blueprint with basic structure
-        self._initialize_blueprint()
+        self._initialize_roms_marbl_blueprint()
 
         self._print_planned_netcdf_outputs()
         self._print_output_paths()
@@ -535,7 +535,7 @@ class ForgeExecutor(BaseModel):
     def _print_output_paths(self) -> None:
         """Print absolute paths where generated NetCDF and YAML files are stored."""
         netcdf_dir = self.input_data_dir.resolve()
-        yaml_dir = self.blueprint_dir.resolve()
+        yaml_dir = self.roms_marbl_blueprint_dir.resolve()
         lines = [
             "ForgeExecutor: output locations",
             f"  NetCDF files: {netcdf_dir}",
@@ -602,7 +602,7 @@ class ForgeExecutor(BaseModel):
         )
 
     @property
-    def blueprint_dir(self) -> Path:
+    def roms_marbl_blueprint_dir(self) -> Path:
         """Return the blueprint directory path (under host.working_dir)."""
         return self._require_host().working_dir / "blueprints"
 
@@ -645,26 +645,26 @@ class ForgeExecutor(BaseModel):
             runtime_params is not available, or if stage is not a valid
             blueprint stage.
         """
-        if self.blueprint is None:
+        if self.roms_marbl_blueprint is None:
             raise ValueError("Cannot persist: blueprint is not initialized")
 
         if self._stage is None:
             raise ValueError("Cannot persist: _stage is not set")
 
         # Validate stage
-        stage = BlueprintStage.validate_stage(self._stage)
+        stage = RomsMarblBlueprintStage.validate_stage(self._stage)
 
-        # Determine run_params for path_blueprint if stage is "run"
+        # Determine run_params for path_roms_marbl_blueprint if stage is "run"
         run_params = None
-        if stage == BlueprintStage.RUN:
-            if self.blueprint.runtime_params is None:
+        if stage == RomsMarblBlueprintStage.RUN:
+            if self.roms_marbl_blueprint.runtime_params is None:
                 raise ValueError(
                     "Cannot persist run blueprint: runtime_params is not set"
                 )
-            run_params = self.blueprint.runtime_params
+            run_params = self.roms_marbl_blueprint.runtime_params
 
-        # Get the file path using path_blueprint
-        bp_path = self.path_blueprint(stage=stage, run_params=run_params)
+        # Get the file path using path_roms_marbl_blueprint
+        bp_path = self.path_roms_marbl_blueprint(stage=stage, run_params=run_params)
 
         # Ensure directory exists
         bp_path.parent.mkdir(parents=True, exist_ok=True)
@@ -682,15 +682,19 @@ class ForgeExecutor(BaseModel):
             warnings.filterwarnings(
                 "ignore", message=".*serialization.*", category=UserWarning
             )
-            blueprint_dict = self.blueprint.model_dump(mode="json", exclude_none=True)
+            roms_marbl_blueprint_dict = self.roms_marbl_blueprint.model_dump(
+                mode="json", exclude_none=True
+            )
 
         with bp_path.open("w") as f:
-            yaml.safe_dump(blueprint_dict, f, default_flow_style=False, sort_keys=False)
+            yaml.safe_dump(
+                roms_marbl_blueprint_dict, f, default_flow_style=False, sort_keys=False
+            )
 
         # Write settings to sidecar file
         self._persist_settings(bp_path)
 
-    def _path_settings_file(self, blueprint_path: Path) -> Path:
+    def _path_settings_file(self, roms_marbl_blueprint_path: Path) -> Path:
         """
         Return the path to the settings sidecar file for a given blueprint path.
 
@@ -699,7 +703,7 @@ class ForgeExecutor(BaseModel):
 
         Parameters
         ----------
-        blueprint_path : Path
+        roms_marbl_blueprint_path : Path
             Path to the blueprint file.
 
         Returns
@@ -708,8 +712,8 @@ class ForgeExecutor(BaseModel):
             Path to the settings sidecar file.
         """
         # Get the directory and filename
-        directory = blueprint_path.parent
-        filename = blueprint_path.name
+        directory = roms_marbl_blueprint_path.parent
+        filename = roms_marbl_blueprint_path.name
 
         # Prepend "settings_" to the filename
         settings_filename = f"settings_{filename}"
@@ -744,7 +748,7 @@ class ForgeExecutor(BaseModel):
         else:
             return obj
 
-    def _persist_settings(self, blueprint_path: Path) -> None:
+    def _persist_settings(self, roms_marbl_blueprint_path: Path) -> None:
         """
         Persist settings dictionaries to a sidecar file.
 
@@ -753,10 +757,10 @@ class ForgeExecutor(BaseModel):
 
         Parameters
         ----------
-        blueprint_path : Path
+        roms_marbl_blueprint_path : Path
             Path to the blueprint file (used to determine settings file path).
         """
-        settings_path = self._path_settings_file(blueprint_path)
+        settings_path = self._path_settings_file(roms_marbl_blueprint_path)
 
         # Prepare settings dictionary
         settings_dict = {
@@ -774,7 +778,7 @@ class ForgeExecutor(BaseModel):
         with settings_path.open("w") as f:
             yaml.safe_dump(settings_dict, f, default_flow_style=False, sort_keys=False)
 
-    def _load_settings_from_file(self, blueprint_path: Path) -> None:
+    def _load_settings_from_file(self, roms_marbl_blueprint_path: Path) -> None:
         """
         Load settings dictionaries from a sidecar file.
 
@@ -785,10 +789,10 @@ class ForgeExecutor(BaseModel):
 
         Parameters
         ----------
-        blueprint_path : Path
+        roms_marbl_blueprint_path : Path
             Path to the blueprint file (used to determine settings file path).
         """
-        settings_path = self._path_settings_file(blueprint_path)
+        settings_path = self._path_settings_file(roms_marbl_blueprint_path)
 
         if not settings_path.exists():
             # Settings file doesn't exist, leave settings unchanged
@@ -812,7 +816,7 @@ class ForgeExecutor(BaseModel):
                 stacklevel=2,
             )
 
-    def path_blueprint(
+    def path_roms_marbl_blueprint(
         self,
         stage: str | None = None,
         run_params: cstar_models.RuntimeParameterSet | None = None,
@@ -841,22 +845,25 @@ class ForgeExecutor(BaseModel):
             If stage="run" and run_params is not provided, or if stage is None and blueprint is None.
         """
         if stage is None:
-            if self.blueprint is None:
+            if self.roms_marbl_blueprint is None:
                 raise ValueError(
                     "stage must be provided if blueprint is not initialized"
                 )
-            stage = self.blueprint.state
-        BlueprintStage.validate_stage(stage)
+            stage = self.roms_marbl_blueprint.state
+        RomsMarblBlueprintStage.validate_stage(stage)
 
-        if stage == BlueprintStage.RUN:
+        if stage == RomsMarblBlueprintStage.RUN:
             if run_params is None:
                 raise ValueError("run_params is required when stage='run'")
             # Generate a unique identifier from run_params for the filename
             # Using start_date and end_date to create a unique identifier
 
-            return self.blueprint_dir / f"B_{self.name}_{stage}_{self.datestr}.yml"
+            return (
+                self.roms_marbl_blueprint_dir
+                / f"B_{self.name}_{stage}_{self.datestr}.yml"
+            )
         else:
-            return self.blueprint_dir / f"B_{self.name}_{stage}.yml"
+            return self.roms_marbl_blueprint_dir / f"B_{self.name}_{stage}.yml"
 
     @property
     def datasets(self) -> DatasetsDict:
@@ -901,7 +908,7 @@ class ForgeExecutor(BaseModel):
         UserWarning
             If blueprint is not initialized. Returns empty DatasetsDict.
         """
-        if self.blueprint is None:
+        if self.roms_marbl_blueprint is None:
             warnings.warn(
                 "Blueprint is not initialized. Cannot retrieve datasets.",
                 UserWarning,
@@ -958,14 +965,14 @@ class ForgeExecutor(BaseModel):
 
     def _cstar_code_repository(self) -> cstar_models.ROMSCompositeCodeRepository:
         """Build the blueprint's cstar ``ROMSCompositeCodeRepository`` from the resolved
-        ``code_spec`` (SpecConfig ``code``): roms + optional marbl repos, with placeholder
+        ``code_spec`` (ForgeBlueprint ``code``): roms + optional marbl repos, with placeholder
         run_time/compile_time entries that ``configure_build`` overwrites with the rendered
         code directories.
         """
         if self.code_spec is None:
             raise ValueError(
-                "ForgeExecutor requires code_spec (the SpecConfig ``code``) to build the "
-                "blueprint code repository; construct via ForgeExecutor.from_spec_config."
+                "ForgeExecutor requires code_spec (the ForgeBlueprint ``code``) to build the "
+                "blueprint code repository; construct via ForgeExecutor.from_forge_blueprint."
             )
 
         def _repo(spec: Any) -> cstar_models.CodeRepository:
@@ -993,7 +1000,7 @@ class ForgeExecutor(BaseModel):
         """C-Star :class:`AdditionalCode` constructor args for the ``stage``
         (``compile_time`` / ``run_time``) templates, read purely from ``code_spec``.
 
-        The SpecConfig carries the template repo (git ``location`` + ``commit``/``branch``,
+        The ForgeBlueprint carries the template repo (git ``location`` + ``commit``/``branch``,
         an in-repo ``directory``, and the ``files`` filter). This is the single seam the
         offline test fixture overrides to point ``location`` at a local template directory
         (see ``tests/conftest.py``); production leaves the git ref intact.
@@ -1036,7 +1043,7 @@ class ForgeExecutor(BaseModel):
         """File list for the ``stage`` templates (from ``code_spec``)."""
         return list(getattr(self.code_spec, f"templates_{stage}").files)
 
-    def _initialize_blueprint(self) -> None:
+    def _initialize_roms_marbl_blueprint(self) -> None:
         """
         Initialize blueprint with basic structure and set stage to PRECONFIG.
 
@@ -1045,7 +1052,7 @@ class ForgeExecutor(BaseModel):
 
         **Process:**
 
-        1. Initializes compile-time and run-time settings from the resolved SpecConfig
+        1. Initializes compile-time and run-time settings from the resolved ForgeBlueprint
         2. Creates blueprint with:
            - Basic metadata (name, description, dates, partitioning)
            - Code repository specifications from code_spec
@@ -1057,7 +1064,7 @@ class ForgeExecutor(BaseModel):
         placeholder data (None locations). Actual data files are added during
         the POSTCONFIG stage via `generate_inputs()`.
         """
-        # Initialize settings from the resolved SpecConfig
+        # Initialize settings from the resolved ForgeBlueprint
         self._init_settings_compile_time()
         self._init_settings_run_time()
 
@@ -1076,7 +1083,7 @@ class ForgeExecutor(BaseModel):
         # Use model_construct to bypass validation during initialization
         # The blueprint will be validated later when data is populated
         # Use placeholder datasets to satisfy structure requirements
-        self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+        self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
             name=self.name,
             description=self.description,
             valid_start_date=self.start_date,
@@ -1090,10 +1097,10 @@ class ForgeExecutor(BaseModel):
             forcing=forcing_config,
             cdr_forcing=None,
         )
-        self._stage = BlueprintStage.PRECONFIG
+        self._stage = RomsMarblBlueprintStage.PRECONFIG
         self.persist()
 
-    def _load_blueprint_file(
+    def _load_roms_marbl_blueprint_file(
         self, stage: str | None = None, load_settings: bool = True
     ) -> cstar_models.RomsMarblBlueprint | None:
         """
@@ -1114,10 +1121,14 @@ class ForgeExecutor(BaseModel):
         """
         # Determine which stage to use
         if stage is None:
-            stage = self._stage if self._stage is not None else BlueprintStage.PRECONFIG
+            stage = (
+                self._stage
+                if self._stage is not None
+                else RomsMarblBlueprintStage.PRECONFIG
+            )
 
         # Get blueprint file path for this stage
-        bp_path = self.path_blueprint(stage=stage, run_params=None)
+        bp_path = self.path_roms_marbl_blueprint(stage=stage, run_params=None)
 
         if not bp_path.exists():
             return None
@@ -1140,16 +1151,18 @@ class ForgeExecutor(BaseModel):
                 warnings.filterwarnings(
                     "ignore", message=".*serializer.*", category=UserWarning
                 )
-                blueprint = deserialize(bp_path, cstar_models.RomsMarblBlueprint)
+                roms_marbl_blueprint = deserialize(
+                    bp_path, cstar_models.RomsMarblBlueprint
+                )
         except Exception as e:
             # If validation fails (e.g., files don't exist), try lenient loading
             try:
                 # Load YAML as dict and use model_construct to bypass validation
                 with bp_path.open("r") as f:
-                    blueprint_data = yaml.safe_load(f)
+                    roms_marbl_blueprint_data = yaml.safe_load(f)
                 # Use model_construct to bypass validation (files may not exist)
-                blueprint = cstar_models.RomsMarblBlueprint.model_construct(
-                    **blueprint_data
+                roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+                    **roms_marbl_blueprint_data
                 )
             except Exception as e2:
                 # If lenient loading also fails, issue a warning and return None
@@ -1163,13 +1176,13 @@ class ForgeExecutor(BaseModel):
                 return None
 
         # Load settings from sidecar file if blueprint was loaded and load_settings is True
-        if blueprint is not None and load_settings:
+        if roms_marbl_blueprint is not None and load_settings:
             self._load_settings_from_file(bp_path)
 
-        return blueprint
+        return roms_marbl_blueprint
 
     @property
-    def blueprint_from_file(self) -> cstar_models.RomsMarblBlueprint | None:
+    def roms_marbl_blueprint_from_file(self) -> cstar_models.RomsMarblBlueprint | None:
         """
         Load and return blueprint from file based on current stage.
 
@@ -1193,7 +1206,7 @@ class ForgeExecutor(BaseModel):
             warnings.filterwarnings(
                 "ignore", message=".*serializer.*", category=UserWarning
             )
-            return self._load_blueprint_file()
+            return self._load_roms_marbl_blueprint_file()
 
     def get_ds(self, field: str, from_file: bool = True) -> list[xr.Dataset] | None:
         """
@@ -1249,11 +1262,11 @@ class ForgeExecutor(BaseModel):
                 "ignore", message=".*serializer.*", category=UserWarning
             )
             if from_file:
-                blueprint = self.blueprint_from_file
+                roms_marbl_blueprint = self.roms_marbl_blueprint_from_file
             else:
-                blueprint = self.blueprint
+                roms_marbl_blueprint = self.roms_marbl_blueprint
 
-        if blueprint is None:
+        if roms_marbl_blueprint is None:
             return None
 
         # Navigate to the field (handle nested fields like "forcing.surface")
@@ -1271,7 +1284,7 @@ class ForgeExecutor(BaseModel):
                 "ignore", message=".*serializer.*", category=UserWarning
             )
             field_parts = field.split(".")
-            data = blueprint
+            data = roms_marbl_blueprint
             for part in field_parts:
                 # Convert model instances to dicts for easier navigation
                 if hasattr(data, "model_dump"):
@@ -1358,8 +1371,8 @@ class ForgeExecutor(BaseModel):
 
         if self.source_dataset_keys is None:
             raise ValueError(
-                "source_dataset_keys is required (the resolved SpecConfig ``datasets``); "
-                "construct via ForgeExecutor.from_spec_config."
+                "source_dataset_keys is required (the resolved ForgeBlueprint ``datasets``); "
+                "construct via ForgeExecutor.from_forge_blueprint."
             )
 
         self.src_data = source_data.SourceData(
@@ -1415,7 +1428,7 @@ class ForgeExecutor(BaseModel):
                 "Please set partition_files=False."
             )
 
-        if self.blueprint is None:
+        if self.roms_marbl_blueprint is None:
             raise RuntimeError("Blueprint must be initialized before generating inputs")
 
         # Ensure settings are initialized before generating inputs.
@@ -1431,7 +1444,7 @@ class ForgeExecutor(BaseModel):
         if self.src_data is None:
             self.ensure_source_data(include_streamable=False)
 
-        blueprint_elements, settings_compile_time, settings_run_time = (
+        roms_marbl_blueprint_elements, settings_compile_time, settings_run_time = (
             input_data.RomsMarblInputData(
                 domain_name=self.name,
                 start_date=self.start_date,
@@ -1445,21 +1458,21 @@ class ForgeExecutor(BaseModel):
                 source_data=self.src_data,
                 forcing_override=self.forcing_override,
                 model_reference_date=self.model_reference_date,
-                blueprint_dir=self.blueprint_dir,
+                roms_marbl_blueprint_dir=self.roms_marbl_blueprint_dir,
                 partitioning=self.partitioning,
                 cdr_forcing=self.cdr_forcing,
                 use_dask=use_dask,
             ).generate_all(partition_files=partition_files, clobber=clobber, test=test)
         )
 
-        if blueprint_elements is None:
+        if roms_marbl_blueprint_elements is None:
             raise RuntimeError(
                 "Blueprint mismatch detected, but input files exist. "
                 "Set clobber=True to overwrite existing input files."
             )
 
         # Apply settings from input data generation (deep merge to preserve existing
-        # settings). allow_new=True: the SpecConfig base omits the sections that input
+        # settings). allow_new=True: the ForgeBlueprint base omits the sections that input
         # generation fills (grid/initial/forcing/s_coord), so they arrive as new keys.
         self._update_settings_compile_time(settings_compile_time, allow_new=True)
         self._update_settings_run_time(settings_run_time, allow_new=True)
@@ -1468,56 +1481,58 @@ class ForgeExecutor(BaseModel):
             return
 
         # Update the blueprint with the generated input data.
-        blueprint_dict = self.blueprint.model_dump()
-        blueprint_dict["grid"] = (
-            blueprint_elements.grid.model_dump() if blueprint_elements.grid else None
-        )
-        blueprint_dict["initial_conditions"] = (
-            blueprint_elements.initial_conditions.model_dump()
-            if blueprint_elements.initial_conditions
+        roms_marbl_blueprint_dict = self.roms_marbl_blueprint.model_dump()
+        roms_marbl_blueprint_dict["grid"] = (
+            roms_marbl_blueprint_elements.grid.model_dump()
+            if roms_marbl_blueprint_elements.grid
             else None
         )
-        blueprint_dict["forcing"] = (
-            blueprint_elements.forcing.model_dump()
-            if blueprint_elements.forcing
+        roms_marbl_blueprint_dict["initial_conditions"] = (
+            roms_marbl_blueprint_elements.initial_conditions.model_dump()
+            if roms_marbl_blueprint_elements.initial_conditions
             else None
         )
-        blueprint_dict["cdr_forcing"] = (
-            blueprint_elements.cdr_forcing.model_dump()
-            if blueprint_elements.cdr_forcing
+        roms_marbl_blueprint_dict["forcing"] = (
+            roms_marbl_blueprint_elements.forcing.model_dump()
+            if roms_marbl_blueprint_elements.forcing
             else None
         )
-        blueprint_dict["nesting_info"] = (
-            blueprint_elements.nesting_info.model_dump()
-            if blueprint_elements.nesting_info
+        roms_marbl_blueprint_dict["cdr_forcing"] = (
+            roms_marbl_blueprint_elements.cdr_forcing.model_dump()
+            if roms_marbl_blueprint_elements.cdr_forcing
+            else None
+        )
+        roms_marbl_blueprint_dict["nesting_info"] = (
+            roms_marbl_blueprint_elements.nesting_info.model_dump()
+            if roms_marbl_blueprint_elements.nesting_info
             else None
         )
 
         # Settings are stored in a sidecar YAML, not in the blueprint itself.
-        blueprint_dict["model_params"] = None
-        blueprint_dict["runtime_params"] = None
+        roms_marbl_blueprint_dict["model_params"] = None
+        roms_marbl_blueprint_dict["runtime_params"] = None
 
-        self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(
-            **blueprint_dict
+        self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+            **roms_marbl_blueprint_dict
         )
-        self._stage = BlueprintStage.POSTCONFIG
+        self._stage = RomsMarblBlueprintStage.POSTCONFIG
         self.persist()
-        return self.blueprint
+        return self.roms_marbl_blueprint
 
     def _init_settings_compile_time(self) -> None:
         """
-        Initialize the compile-time settings dictionary from the resolved SpecConfig.
+        Initialize the compile-time settings dictionary from the resolved ForgeBlueprint.
 
         ``cppdefs`` is the only compile-time section. It is used as the basis for
         template rendering during `configure_build()`; user overrides can still be
         applied via `_update_settings_compile_time()` or `configure_build()`.
 
-        **Called by:** `_initialize_blueprint()` during initialization.
+        **Called by:** `_initialize_roms_marbl_blueprint()` during initialization.
         """
         if self.resolved_settings is None:
             raise ValueError(
-                "resolved_settings is required (the SpecConfig ``model_settings``); "
-                "construct via ForgeExecutor.from_spec_config."
+                "resolved_settings is required (the ForgeBlueprint ``model_settings``); "
+                "construct via ForgeExecutor.from_forge_blueprint."
             )
         self._settings_compile_time = {
             "cppdefs": copy.deepcopy(self.resolved_settings.get("cppdefs", {}))
@@ -1525,21 +1540,21 @@ class ForgeExecutor(BaseModel):
 
     def _init_settings_run_time(self) -> None:
         """
-        Initialize the run-time settings dictionary from the resolved SpecConfig.
+        Initialize the run-time settings dictionary from the resolved ForgeBlueprint.
 
-        The authoritative, host-independent base is ``resolved_settings`` (the SpecConfig
+        The authoritative, host-independent base is ``resolved_settings`` (the ForgeBlueprint
         ``model_settings``): every non-``cppdefs`` section, deep-copied. The resolver
         already carries the genuinely-computed numerics (``time_stepping``, ``v_sponge``,
         ``extract_data``), so they are NOT re-derived here — that would clobber e.g. an
         explicitly-resolved ``dt``. Only the sections the config deliberately omits because
         they embed host/identity are ADDED: ``title`` and ``output_root_name``.
 
-        **Called by:** `_initialize_blueprint()` during initialization.
+        **Called by:** `_initialize_roms_marbl_blueprint()` during initialization.
         """
         if self.resolved_settings is None:
             raise ValueError(
-                "resolved_settings is required (the SpecConfig ``model_settings``); "
-                "construct via ForgeExecutor.from_spec_config."
+                "resolved_settings is required (the ForgeBlueprint ``model_settings``); "
+                "construct via ForgeExecutor.from_forge_blueprint."
             )
         self._settings_run_time = {
             k: copy.deepcopy(v)
@@ -1599,7 +1614,7 @@ class ForgeExecutor(BaseModel):
                         else value
                     )
             elif allow_new:
-                # Generation-overlay path: the SpecConfig base omits sections that are
+                # Generation-overlay path: the ForgeBlueprint base omits sections that are
                 # filled at processing time, so accept new top-level keys.
                 self._settings_compile_time[key] = copy.deepcopy(value)
             else:
@@ -1659,7 +1674,7 @@ class ForgeExecutor(BaseModel):
                         else value
                     )
             elif allow_new:
-                # Generation-overlay path: the SpecConfig base omits sections that are
+                # Generation-overlay path: the ForgeBlueprint base omits sections that are
                 # filled at processing time (grid/initial/forcing/s_coord), so accept
                 # new top-level keys instead of raising.
                 self._settings_run_time[key] = copy.deepcopy(value)
@@ -1671,19 +1686,23 @@ class ForgeExecutor(BaseModel):
                 )
 
     @classmethod
-    def from_spec_config(cls, cfg: Any, host: HostPaths | None = None) -> ForgeExecutor:
+    def from_forge_blueprint(
+        cls, cfg: Any, host: HostPaths | None = None
+    ) -> ForgeExecutor:
         """Canonical constructor: build the executor directly from a resolved
-        ``SpecConfig`` (the forge application's blueprint) + the injected ``host``.
+        ``ForgeBlueprint`` (the forge application's blueprint) + the injected ``host``.
 
-        This is the single derivation path from a SpecConfig to a runnable builder. The
+        This is the single derivation path from a ForgeBlueprint to a runnable builder. The
         domain-catalog path routes through the Phase-1 resolver
-        (``spec_config_resolve.build_spec_config``) to produce the ``SpecConfig`` and then
+        (``forge_blueprint_resolve.build_forge_blueprint``) to produce the ``ForgeBlueprint`` and then
         here — so there is one place that maps blueprint → builder inputs
-        (``spec_config_engine.spec_config_to_builder_kwargs``).
+        (``forge_blueprint_engine.forge_blueprint_to_builder_kwargs``).
         """
-        from cstar_forge.forge.spec_config_engine import spec_config_to_builder_kwargs
+        from cstar_forge.forge.forge_blueprint_engine import (
+            forge_blueprint_to_builder_kwargs,
+        )
 
-        return cls(**spec_config_to_builder_kwargs(cfg), host=host)
+        return cls(**forge_blueprint_to_builder_kwargs(cfg), host=host)
 
     def configure_build(
         self,
@@ -1763,7 +1782,7 @@ class ForgeExecutor(BaseModel):
             run_time_settings = {}
 
         # Validate that blueprint is initialized
-        if self.blueprint is None:
+        if self.roms_marbl_blueprint is None:
             raise RuntimeError(
                 "Blueprint must be initialized before configuration. Call generate_inputs() first."
             )
@@ -1868,8 +1887,10 @@ class ForgeExecutor(BaseModel):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-            blueprint_dict = self.blueprint.model_dump(mode="json")
-            code_dict = blueprint_dict["code"]
+            roms_marbl_blueprint_dict = self.roms_marbl_blueprint.model_dump(
+                mode="json"
+            )
+            code_dict = roms_marbl_blueprint_dict["code"]
             # Convert dicts from render_roms_settings / write_roms_namelist to CodeRepository objects
             code_dict["compile_time"] = cstar_models.CodeRepository.model_construct(
                 **compile_time_code
@@ -1877,24 +1898,24 @@ class ForgeExecutor(BaseModel):
             code_dict["run_time"] = cstar_models.CodeRepository.model_construct(
                 **run_time_code
             )
-            blueprint_dict["code"] = (
+            roms_marbl_blueprint_dict["code"] = (
                 cstar_models.ROMSCompositeCodeRepository.model_construct(**code_dict)
             )
 
-            blueprint_dict["model_params"] = {
+            roms_marbl_blueprint_dict["model_params"] = {
                 "time_step": self._settings_run_time["time_stepping"]["dt"],
             }
-            blueprint_dict["runtime_params"] = {
+            roms_marbl_blueprint_dict["runtime_params"] = {
                 "start_date": self.start_date,
                 "end_date": self.end_date,
                 "output_dir": self.run_output_dir,
             }
-            blueprint_dict["working_dir"] = self.run_output_dir
+            roms_marbl_blueprint_dict["working_dir"] = self.run_output_dir
 
-            self.blueprint = cstar_models.RomsMarblBlueprint.model_construct(
-                **blueprint_dict
+            self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
+                **roms_marbl_blueprint_dict
             )
-            self._stage = BlueprintStage.BUILD
+            self._stage = RomsMarblBlueprintStage.BUILD
             self.persist()
 
         return
@@ -1979,7 +2000,9 @@ class ForgeExecutor(BaseModel):
         self.prep_cstar_environment()
 
         request = RunnerRequest(
-            uri=str(self.path_blueprint(stage=BlueprintStage.BUILD)),
+            uri=str(
+                self.path_roms_marbl_blueprint(stage=RomsMarblBlueprintStage.BUILD)
+            ),
             bp_type=RomsMarblBlueprint,
             name=self.casename,
         )
@@ -1991,5 +2014,5 @@ class ForgeExecutor(BaseModel):
         await runner.execute()
 
         # Persist blueprint to file
-        self._stage = BlueprintStage.RUN
+        self._stage = RomsMarblBlueprintStage.RUN
         self.persist()

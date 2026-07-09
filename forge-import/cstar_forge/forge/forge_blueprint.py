@@ -1,17 +1,17 @@
 """
-``SpecConfig``: the single authoritative, fully-resolved input to processing — the
+``ForgeBlueprint``: the single authoritative, fully-resolved input to processing — the
 forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
-``cstar_forge.forge.executor.ForgeExecutor.from_spec_config`` and
-``cstar_forge.forge.spec_config_engine.process_spec_config``), split into two phases
+``cstar_forge.forge.executor.ForgeExecutor.from_forge_blueprint`` and
+``cstar_forge.forge.forge_blueprint_engine.process_forge_blueprint``), split into two phases
 (see ``docs/developer-guide.md``):
 
 1. **Collection / curation** — assemble every option from its source (constructor
    args, the ModelSpec, and the *pure* derived values), validate it, and write one
-   reviewable ``spec_config.yml`` (``cstar_forge.spec_config_resolve.build_spec_config``).
+   reviewable ``forge_blueprint.yml`` (``cstar_forge.forge_blueprint_resolve.build_forge_blueprint``).
 2. **Processing** — ingest that file on any machine and run the heavy work
    (``generate_inputs`` + ``configure_build``).
 
-``SpecConfig`` is the contract between the two phases: plain, validated data with
+``ForgeBlueprint`` is the contract between the two phases: plain, validated data with
 **no** ``rt.Grid`` objects, **no** source downloads, and **no** file I/O.
 
 Single governing principle
@@ -226,23 +226,23 @@ class TopographySource(str, Enum):
 # schema version. Everything else (application, run, domain, sources, properties,
 # model_settings, code) is hashed.
 _HASH_EXCLUDE = {
-    "spec_config_version",
+    "forge_blueprint_version",
     "identity",
     "composition",
     "provenance",
     # host/location only — runtime-overridden per host; must not change the content hash.
     "working_dir",
 }
-# Note: "properties" is no longer a top-level SpecConfig field (removed); n_tracers
+# Note: "properties" is no longer a top-level ForgeBlueprint field (removed); n_tracers
 # and marbl are derived from model_settings at processing time.
 
 # Bumped only on a BREAKING schema change. Additive fields (with defaults) are
 # backward-compatible — old files still load — so they do NOT bump this. ``from_yaml``
 # rejects files declaring a *newer* version than this build understands.
-SPEC_CONFIG_VERSION = 2
+FORGE_BLUEPRINT_VERSION = 2
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
-# application (this processing engine), whose blueprint IS the SpecConfig. Do not confuse
+# application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
 # with the downstream roms_marbl application (whose blueprint this run *emits*). Stable
 # across schema/field iteration; used by C-Star to route the blueprint to its application.
 DEFAULT_APPLICATION = "forge"
@@ -259,7 +259,7 @@ class _Section(BaseModel):
 class Identity(_Section):
     """The *atomic* naming inputs. Everything else (``name``, ``casename``,
     namelist ``title``, ``output_root_name``, ``run_output_dir``) is derived from
-    these + the run dates + ``partitioning`` — see :class:`SpecConfig` properties.
+    these + the run dates + ``partitioning`` — see :class:`ForgeBlueprint` properties.
     """
 
     model_name: str  # the ModelSpec id, e.g. "cson_roms-marbl_v0.1"
@@ -515,7 +515,7 @@ class Provenance(_Section):
     forge_version: str | None = None
     roms_tools_version: str | None = None
     override_files_applied: list[str] = Field(default_factory=list)
-    # sha256 of the results-affecting data (set on save by SpecConfig.to_yaml*).
+    # sha256 of the results-affecting data (set on save by ForgeBlueprint.to_yaml*).
     # Processing recomputes and compares it to detect hand-edits since write-out.
     content_hash: str | None = None
     notes: str | None = None
@@ -524,10 +524,10 @@ class Provenance(_Section):
 # ===========================================================================
 # Top-level authoritative config
 # ===========================================================================
-class SpecConfig(_Section):
+class ForgeBlueprint(_Section):
     """The complete, sufficient, reviewable input to processing.
 
-    Round-trips to a single ``spec_config.yml`` via :meth:`to_yaml` / :meth:`from_yaml`.
+    Round-trips to a single ``forge_blueprint.yml`` via :meth:`to_yaml` / :meth:`from_yaml`.
 
     ``model_settings`` is a FLAT mapping of settings sections: ``cppdefs`` (compile
     time) sits at the same level as every namelist section (``lateral_visc``,
@@ -540,7 +540,7 @@ class SpecConfig(_Section):
     the omitted sections) before writing the namelist.
     """
 
-    spec_config_version: int = SPEC_CONFIG_VERSION
+    forge_blueprint_version: int = FORGE_BLUEPRINT_VERSION
     application: str = (
         DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
     )
@@ -655,13 +655,13 @@ class SpecConfig(_Section):
         return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> SpecConfig:
-        """Load and validate a ``spec_config.yml`` (Phase 2 entry point)."""
+    def from_yaml(cls, path: str | Path) -> ForgeBlueprint:
+        """Load and validate a ``forge_blueprint.yml`` (Phase 2 entry point)."""
         data = yaml.safe_load(Path(path).read_text())
-        version = (data or {}).get("spec_config_version")
-        if version is not None and version > SPEC_CONFIG_VERSION:
+        version = (data or {}).get("forge_blueprint_version")
+        if version is not None and version > FORGE_BLUEPRINT_VERSION:
             raise ValueError(
-                f"spec_config_version {version} is newer than this build supports "
-                f"({SPEC_CONFIG_VERSION}); upgrade cstar-forge to read this file."
+                f"forge_blueprint_version {version} is newer than this build supports "
+                f"({FORGE_BLUEPRINT_VERSION}); upgrade cstar-forge to read this file."
             )
         return cls.model_validate(data)

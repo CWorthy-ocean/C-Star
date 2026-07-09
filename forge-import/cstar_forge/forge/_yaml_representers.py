@@ -6,7 +6,7 @@ Forge hands its item configs to roms-tools, which serializes objects with its ow
 ``('cannot represent an object', <SurfaceType.PHYSICS: 'physics'>)``.
 
 The primary defense is coercing enums to their values at the Forge/roms-tools boundary
-(``spec_config_engine._item`` / ``_ic`` dump with ``mode="json"``). This module is the
+(``forge_blueprint_engine._item`` / ``_ic`` dump with ``mode="json"``). This module is the
 belt-and-suspenders: a global ``Enum`` representer registered on ``yaml.SafeDumper`` so any
 enum that reaches a SafeDumper by some *other* path still serializes as its value. Because
 ``add_multi_representer`` matches via the type's MRO, a subclass such as roms-tools'

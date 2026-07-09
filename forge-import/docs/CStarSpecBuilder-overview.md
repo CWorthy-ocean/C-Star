@@ -1,7 +1,7 @@
 # Domain generation overview
 
 > This page described `CstarSpecBuilder`, which no longer exists — it was decomposed
-> into `SpecConfig` (the input) + `ForgeExecutor` (the processing engine, in
+> into `ForgeBlueprint` (the input) + `ForgeExecutor` (the processing engine, in
 > `cstar_forge/forge/executor.py`). See `docs/developer-guide.md` for the current
 > architecture and module map; the stage-by-stage flow below is otherwise unchanged.
 
@@ -13,11 +13,11 @@ The C-STAR Forge workflow progresses through distinct stages, transforming a mod
 flowchart TD
     S[settings-defaults.yml] --> A[model.yml]
     T["templates:<br/>cppdefs.opt.j2"] --> A[model.yml]
-    A -->|build_spec_config| B[SpecConfig]
+    A -->|build_forge_blueprint| B[ForgeBlueprint]
 
     C["User input / wizard UI"] -->|domain, forcing, run window| B
 
-    B -->|from_spec_config| D[ForgeExecutor]
+    B -->|from_forge_blueprint| D[ForgeExecutor]
 
     D -->|model_post_init| E["PRECONFIG<br/>Create Grid<br/>Init Blueprint<br/>Load Default Settings<br/>."]
     E -->|persist| F[B_preconfig.yml]
@@ -48,11 +48,11 @@ flowchart TD
 
 1. **PRECONFIG** (Initialization)
    - Load `ModelSpec` from the model's `model.yml` (under `catalog/ModelSpec/<model>/`)
-   - Build a `SpecConfig` (`build_spec_config`) from the catalog pieces + domain/run
-     inputs, then construct a `ForgeExecutor` from it (`ForgeExecutor.from_spec_config`)
+   - Build a `ForgeBlueprint` (`build_forge_blueprint`) from the catalog pieces + domain/run
+     inputs, then construct a `ForgeExecutor` from it (`ForgeExecutor.from_forge_blueprint`)
    - Initialize grid object from `grid_kwargs`
    - Create blueprint structure with placeholder data
-   - Load default settings from the resolved `SpecConfig.model_settings`
+   - Load default settings from the resolved `ForgeBlueprint.model_settings`
    - Persist blueprint to `B_{name}_preconfig.yml`
 
 2. **POSTCONFIG** (Input Generation)

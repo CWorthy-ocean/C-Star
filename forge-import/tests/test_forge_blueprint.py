@@ -1,6 +1,6 @@
 """
-Tests for the SpecConfig schema (``cstar_forge.forge.spec_config``) and the Phase-1
-resolver (``cstar_forge.spec_config_resolve.build_spec_config``).
+Tests for the ForgeBlueprint schema (``cstar_forge.forge.forge_blueprint``) and the Phase-1
+resolver (``cstar_forge.forge_blueprint_resolve.build_forge_blueprint``).
 
 These validate that the resolver reproduces the known ``test-tiny`` demo values,
 flattens settings, keeps naming/host values out of the stored config, resolves
@@ -18,8 +18,8 @@ import pytest
 import yaml
 
 import cstar_forge
-from cstar_forge.forge.spec_config import SpecConfig
-from cstar_forge.spec_config_resolve import build_spec_config
+from cstar_forge.forge.forge_blueprint import ForgeBlueprint
+from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
 _MODEL_DIR = (
     Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
@@ -54,7 +54,7 @@ def _build(**over):
         dt=7200,  # pass dt -> stays dependency-light
     )
     kw.update(over)
-    return build_spec_config(**kw)
+    return build_forge_blueprint(**kw)
 
 
 def test_naming_is_derived_not_stored():
@@ -66,11 +66,11 @@ def test_naming_is_derived_not_stored():
     assert cfg.output_root_name("/scratch").startswith("/scratch/cson_roms-marbl")
 
 
-def test_spec_config_is_portable_no_forge_or_cstar_imports():
-    """spec_config.py is the C-Star-relocatable blueprint model: it must depend on
+def test_forge_blueprint_is_portable_no_forge_or_cstar_imports():
+    """forge_blueprint.py is the C-Star-relocatable blueprint model: it must depend on
     nothing from cstar_forge / cstar (only stdlib + pydantic + yaml).
     """
-    src = Path(cstar_forge.__file__).parent / "forge" / "spec_config.py"
+    src = Path(cstar_forge.__file__).parent / "forge" / "forge_blueprint.py"
     text = src.read_text()
     import re
 
@@ -79,11 +79,11 @@ def test_spec_config_is_portable_no_forge_or_cstar_imports():
         for ln in text.splitlines()
         if re.match(r"\s*(from|import)\s+(cstar_forge|cstar|\.)", ln)
     ]
-    assert not bad, f"spec_config.py must stay forge/cstar-free; found: {bad}"
+    assert not bad, f"forge_blueprint.py must stay forge/cstar-free; found: {bad}"
 
 
 def test_application_discriminator_default():
-    from cstar_forge.forge.spec_config import DEFAULT_APPLICATION
+    from cstar_forge.forge.forge_blueprint import DEFAULT_APPLICATION
 
     cfg = _build()
     assert cfg.application == DEFAULT_APPLICATION
@@ -91,21 +91,21 @@ def test_application_discriminator_default():
 
 def test_from_yaml_rejects_newer_version(tmp_path):
     cfg = _build()
-    p = tmp_path / "spec_config.yml"
+    p = tmp_path / "forge_blueprint.yml"
     cfg.to_yaml(p)
     import yaml as _yaml
 
     data = _yaml.safe_load(p.read_text())
-    data["spec_config_version"] = 9999
+    data["forge_blueprint_version"] = 9999
     p.write_text(_yaml.safe_dump(data))
     with pytest.raises(ValueError, match="newer than this build"):
-        SpecConfig.from_yaml(p)
+        ForgeBlueprint.from_yaml(p)
 
 
 def test_schema_round_trip_identity(tmp_path):
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "spec_config.yml")
-    back = SpecConfig.from_yaml(p)
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    back = ForgeBlueprint.from_yaml(p)
     # content_hash is stamped on write -> back carries it; otherwise identical
     assert back.provenance.content_hash == cfg.content_hash()
     assert back.model_copy(update={"provenance": cfg.provenance}) == cfg
@@ -113,7 +113,7 @@ def test_schema_round_trip_identity(tmp_path):
 
 
 def test_content_hash_ignores_excluded_sections():
-    from cstar_forge.forge.spec_config import _HASH_EXCLUDE, PieceRef
+    from cstar_forge.forge.forge_blueprint import _HASH_EXCLUDE, PieceRef
 
     cfg = _build()
     h = cfg.content_hash()
@@ -131,7 +131,7 @@ def test_content_hash_ignores_excluded_sections():
     )
     assert c2.content_hash() == h
     assert _HASH_EXCLUDE == {
-        "spec_config_version",
+        "forge_blueprint_version",
         "identity",
         "composition",
         "provenance",
@@ -185,29 +185,31 @@ def test_content_hash_ignores_code_repo_location():
 
 def test_content_hash_round_trips_through_yaml(tmp_path):
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "spec_config.yml")
-    back = SpecConfig.from_yaml(p)
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    back = ForgeBlueprint.from_yaml(p)
     # recomputed hash on the loaded config matches the stamped one (no edits)
     assert back.content_hash() == back.provenance.content_hash
 
 
 def test_engine_warns_on_hash_mismatch(tmp_path):
-    from cstar_forge.forge.spec_config_engine import (
-        process_spec_config,
+    from cstar_forge.forge.forge_blueprint_engine import (
+        process_forge_blueprint,
         verify_content_hash,
     )
 
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "spec_config.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
     data = yaml.safe_load(p.read_text())
     # hand-edit a results-affecting value WITHOUT updating the recorded hash
     data["model_settings"]["v_sponge"]["v_sponge"] = 12345.0
     p.write_text(yaml.safe_dump(data))
-    tampered = SpecConfig.from_yaml(p)
+    tampered = ForgeBlueprint.from_yaml(p)
     assert verify_content_hash(tampered) is not None  # mismatch detected
     # ... and a clean (re-saved) file does not warn
     assert (
-        verify_content_hash(SpecConfig.from_yaml(cfg.to_yaml(tmp_path / "clean.yml")))
+        verify_content_hash(
+            ForgeBlueprint.from_yaml(cfg.to_yaml(tmp_path / "clean.yml"))
+        )
         is None
     )
 
@@ -225,11 +227,11 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
         def configure_build(self, **k):
             self.calls.append("c")
 
-        def path_blueprint(self, stage=None):
+        def path_roms_marbl_blueprint(self, stage=None):
             return "/bp"
 
     with pytest.warns(UserWarning, match="integrity check FAILED"):
-        b = process_spec_config(tampered, validate=False, executor_factory=_Fake)
+        b = process_forge_blueprint(tampered, validate=False, executor_factory=_Fake)
     assert b.calls == ["e", "g", "c"]  # processing proceeded
 
 
@@ -312,7 +314,7 @@ def test_resolver_no_nesting_keeps_defaults():
 def test_resolver_restoring_sets_sal_restore():
     # the cson model.yml includes a WOA surface source with type=restoring and
     # restoring_forces=['sss'], so the resolver derives sal_restore=True
-    # (see spec_config_resolve.py: sal_restore = any restoring item with 'sss').
+    # (see forge_blueprint_resolve.py: sal_restore = any restoring item with 'sss').
     cfg = _build()
     assert cfg.model_settings["cppdefs"].get("sal_restore") is True
 
@@ -326,7 +328,7 @@ def test_catalog_scans_forcingspec():
 
 
 def test_sources_to_forcing_override_returns_dict_for_model_default():
-    from cstar_forge.forge.spec_config_engine import sources_to_forcing_override
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
 
     cfg = _build()
     assert cfg.composition.forcing.origin == "model_default"
@@ -341,7 +343,7 @@ def test_sources_to_forcing_override_returns_dict_for_model_default():
 
 def test_sources_to_forcing_override_converts_custom_forcing():
     from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge.spec_config_engine import sources_to_forcing_override
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
 
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
@@ -366,7 +368,7 @@ def test_forcing_override_coerces_enums_to_strings():
     import enum
 
     from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge.spec_config_engine import sources_to_forcing_override
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
 
     cfg = _build(forcing_inputs=cat.forcing_data("glorys-era5-unified"))
     ov = sources_to_forcing_override(cfg)
@@ -394,7 +396,7 @@ def test_global_enum_representer_handles_safedumper_subclass():
     serializes as its value rather than raising 'cannot represent an object'.
     """
     import cstar_forge.forge  # noqa: F401  (side effect: registers the representer)
-    from cstar_forge.forge.spec_config import SurfaceType
+    from cstar_forge.forge.forge_blueprint import SurfaceType
 
     class _NoAliasDumper(yaml.SafeDumper):  # mirrors roms-tools' dumper shape
         pass
@@ -494,7 +496,10 @@ def test_resolver_output_settings_override():
 
 
 def test_extract_output_settings_helper():
-    from cstar_forge.spec_config_resolve import OUTPUT_SECTIONS, extract_output_settings
+    from cstar_forge.forge_blueprint_resolve import (
+        OUTPUT_SECTIONS,
+        extract_output_settings,
+    )
 
     cfg = _build()
     out = extract_output_settings(cfg.model_settings)
@@ -619,22 +624,22 @@ def test_composition_records_piece_provenance():
 
 def test_yaml_round_trip(tmp_path):
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "spec_config.yml")
-    back = SpecConfig.from_yaml(p)
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    back = ForgeBlueprint.from_yaml(p)
     assert back.casename == cfg.casename
     assert back.model_settings["time_stepping"] == cfg.model_settings["time_stepping"]
 
 
 def test_committed_example_validates():
-    """The checked-in example must remain a valid SpecConfig."""
+    """The checked-in example must remain a valid ForgeBlueprint."""
     example = (
         Path(cstar_forge.__file__).parents[1]
         / "docs"
-        / "spec-config-example.test-tiny.yml"
+        / "forge-blueprint-example.test-tiny.yml"
     )
     if not example.exists():
         pytest.skip("example file not present")
-    cfg = SpecConfig.from_yaml(example)
+    cfg = ForgeBlueprint.from_yaml(example)
     assert cfg.identity.model_name == "cson_roms-marbl_v0.1"
     assert cfg.composition.model.origin == "catalog"
 
@@ -642,16 +647,16 @@ def test_committed_example_validates():
 # ---------------------------------------------------------------------------
 # Wizard (headless: ipywidgets value get/set/observe work without rendering)
 # ---------------------------------------------------------------------------
-class TestSpecConfigWizard:
+class TestForgeBlueprintWizard:
     def _wizard(self):
         pytest.importorskip("ipywidgets")
-        from cstar_forge.spec_config_wizard import SpecConfigWizard
+        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
 
-        return SpecConfigWizard()
+        return ForgeBlueprintWizard()
 
     def test_init_resolves_default_config(self):
         wiz = self._wizard()
-        assert isinstance(wiz.config, SpecConfig)
+        assert isinstance(wiz.config, ForgeBlueprint)
         assert wiz.config.casename  # derived, non-empty
 
     def test_selecting_catalog_domain_prefills_and_resolves(self):
@@ -685,9 +690,9 @@ class TestSpecConfigWizard:
 
     def test_save_writes_valid_yaml(self, tmp_path):
         wiz = self._wizard()
-        wiz.save_path.value = str(tmp_path / "spec_config.yml")
+        wiz.save_path.value = str(tmp_path / "forge_blueprint.yml")
         wiz._on_save(None)
-        cfg = SpecConfig.from_yaml(tmp_path / "spec_config.yml")
+        cfg = ForgeBlueprint.from_yaml(tmp_path / "forge_blueprint.yml")
         assert cfg.casename == wiz.config.casename
 
     def test_load_existing_config_round_trips(self, tmp_path):
@@ -698,10 +703,10 @@ class TestSpecConfigWizard:
         if "gulf-guinea-toy" in w1.domain_dd.options:
             w1.domain_dd.value = "gulf-guinea-toy"
         w1.ensemble.value = "7"
-        p = tmp_path / "spec_config.yml"
+        p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
-        saved = SpecConfig.from_yaml(p)
+        saved = ForgeBlueprint.from_yaml(p)
 
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -718,7 +723,7 @@ class TestSpecConfigWizard:
 
     def test_load_from_upload_bytes(self, tmp_path):
         w1 = self._wizard()
-        p = tmp_path / "spec_config.yml"
+        p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -774,7 +779,7 @@ class TestSpecConfigWizard:
         w1 = self._wizard()
         w1.editor._widgets[("param", "np_xi")][0].value = 99
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
-        p = tmp_path / "spec_config.yml"
+        p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -827,7 +832,7 @@ class TestSpecConfigWizard:
         if "standard" not in w1.output_dd.options:
             pytest.skip("example OutputSpec not in catalog")
         w1.output_dd.value = "standard"
-        p = tmp_path / "spec_config.yml"
+        p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -853,7 +858,7 @@ class TestSpecConfigWizard:
         row["type"].value = "restoring"
         row["name"].value = "WOA"
         row["restoring_forces"].value = "sss"
-        p = tmp_path / "spec_config.yml"
+        p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -886,7 +891,7 @@ class TestSpecConfigWizard:
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 7.25
         w1.nest_enable.value = True
         w1.child_w["N"].value = 18
-        p = tmp_path / "spec_config.yml"
+        p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -900,7 +905,7 @@ class TestSpecConfigWizard:
         import yaml
 
         w = self._wizard()
-        p = tmp_path / "spec_config.yml"
+        p = tmp_path / "forge_blueprint.yml"
         w.save_path.value = str(p)
         w._on_save(None)
         data = yaml.safe_load(p.read_text())
@@ -916,7 +921,7 @@ class TestSpecConfigWizard:
 
     def test_load_bad_input_shows_error_not_crash(self):
         w = self._wizard()
-        w.load_path.value = "/nonexistent/spec_config.yml"
+        w.load_path.value = "/nonexistent/forge_blueprint.yml"
         w._on_load_path(None)
         assert "color:#b00" in w.load_status.value
         w._load_bytes(b"not: [valid spec config")
@@ -932,7 +937,7 @@ class TestSpecConfigWizard:
         assert 'download="' in html and "data:text/yaml;base64," in html
         b64 = re.search(r"base64,([A-Za-z0-9+/=]+)", html).group(1)
         text = base64.b64decode(b64).decode("utf-8")
-        assert "spec_config_version" in text
+        assert "forge_blueprint_version" in text
         # casename is derived (not serialized) — it appears in the download filename
         assert wiz.config.casename in html
 
@@ -942,7 +947,7 @@ class TestSpecConfigWizard:
 # pipeline downloads data + runs roms_tools and is out of scope for unit tests)
 # ---------------------------------------------------------------------------
 class _FakeBuilder:
-    """A SpecConfigExecutor stand-in: records calls instead of doing real work."""
+    """A ForgeBlueprintExecutor stand-in: records calls instead of doing real work."""
 
     def __init__(self, cfg=None, host=None):
         self.cfg = cfg
@@ -957,18 +962,20 @@ class _FakeBuilder:
     def configure_build(self, **k):
         self.calls.append(("configure", k))
 
-    def path_blueprint(self, stage=None):
+    def path_roms_marbl_blueprint(self, stage=None):
         return f"/bp/{stage}.yml"
 
 
-class TestSpecConfigEngine:
+class TestForgeBlueprintEngine:
     def _cfg(self):
         return _build()
 
     def test_builder_kwargs_carry_atomic_inputs_not_host(self):
-        from cstar_forge.forge.spec_config_engine import spec_config_to_builder_kwargs
+        from cstar_forge.forge.forge_blueprint_engine import (
+            forge_blueprint_to_builder_kwargs,
+        )
 
-        kw = spec_config_to_builder_kwargs(self._cfg())
+        kw = forge_blueprint_to_builder_kwargs(self._cfg())
         assert kw["model_name"] == "cson_roms-marbl_v0.1"
         assert kw["grid_name"] == "test-tiny"
         assert kw["partitioning"] == {"n_procs_x": 1, "n_procs_y": 1}
@@ -977,7 +984,7 @@ class TestSpecConfigEngine:
         assert not any(k in kw for k in ("machine", "paths", "scratch", "source_data"))
 
     def test_split_model_settings(self):
-        from cstar_forge.forge.spec_config_engine import (
+        from cstar_forge.forge.forge_blueprint_engine import (
             PROCESSING_FILLED_SECTIONS,
             split_model_settings,
         )
@@ -989,9 +996,9 @@ class TestSpecConfigEngine:
             assert sec not in run_ov
 
     def test_process_orchestration_order_and_overlay(self):
-        from cstar_forge.forge.spec_config_engine import process_spec_config
+        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 
-        b = process_spec_config(
+        b = process_forge_blueprint(
             self._cfg(), clobber=True, use_dask=False, executor_factory=_FakeBuilder
         )
         assert [c[0] for c in b.calls] == ["ensure", "generate", "configure"]
@@ -1003,9 +1010,9 @@ class TestSpecConfigEngine:
         assert "grid" not in cfgk["run_time_settings"]
 
     def test_process_skip_flags(self):
-        from cstar_forge.forge.spec_config_engine import process_spec_config
+        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 
-        b = process_spec_config(
+        b = process_forge_blueprint(
             self._cfg(),
             ensure_data=False,
             generate=False,
@@ -1014,35 +1021,35 @@ class TestSpecConfigEngine:
         assert [c[0] for c in b.calls] == ["configure"]
 
     def test_executor_must_implement_interface(self):
-        from cstar_forge.forge.spec_config_engine import (
-            SpecConfigExecutor,
-            process_spec_config,
+        from cstar_forge.forge.forge_blueprint_engine import (
+            ForgeBlueprintExecutor,
+            process_forge_blueprint,
         )
 
         # _FakeBuilder satisfies the runtime-checkable Protocol
-        assert isinstance(_FakeBuilder(), SpecConfigExecutor)
+        assert isinstance(_FakeBuilder(), ForgeBlueprintExecutor)
 
         class _Bad:  # missing the required methods
             def __init__(self, cfg=None, host=None):
                 pass
 
-        with pytest.raises(TypeError, match="SpecConfigExecutor"):
-            process_spec_config(self._cfg(), executor_factory=_Bad)
+        with pytest.raises(TypeError, match="ForgeBlueprintExecutor"):
+            process_forge_blueprint(self._cfg(), executor_factory=_Bad)
 
     def test_invalid_model_settings_fail_fast(self):
-        from cstar_forge.forge.spec_config_engine import process_spec_config
+        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 
         cfg = self._cfg()
         cfg.model_settings["param"]["np_xi"] = "not-an-int"  # corrupt a value
         with pytest.raises(ValueError, match="invalid values"):
-            process_spec_config(
+            process_forge_blueprint(
                 cfg, executor_factory=_FakeBuilder
             )  # raises before any call
 
     def test_resolve_host_reads_config_not_file(self):
         # Forge's disposable host provider builds a HostPaths from auto-detected config;
         # the host is NOT read from the spec file. (The app receives this HostPaths via
-        # process_spec_config(host=...); C-Star supplies its own equivalent on relocation.)
+        # process_forge_blueprint(host=...); C-Star supplies its own equivalent on relocation.)
         from cstar_forge import config
         from cstar_forge.forge.host import HostPaths
 
@@ -1129,14 +1136,14 @@ class TestResolverBuilderParity:
 
         from cstar_forge.forge.executor import ForgeExecutor
         from cstar_forge.forge.host import HostPaths
-        from cstar_forge.spec_config_resolve import build_spec_config
+        from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
         start, end = datetime(2012, 1, 1), datetime(2012, 1, 2)
 
         # The executor now consumes cfg.model_settings as its settings base; this guards
         # that its settings-init faithfully reproduces the resolver's model_settings for
         # every reviewable section (host-independent, catalog-free construction).
-        cfg = build_spec_config(
+        cfg = build_forge_blueprint(
             model_dir=_MODEL_DIR,
             grid_name=grid_name,
             grid_kwargs=grid_kwargs,
@@ -1151,7 +1158,7 @@ class TestResolverBuilderParity:
             system="test",
             machine_config=None,
         )
-        ex = ForgeExecutor.from_spec_config(cfg, host=host)
+        ex = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         b_rt = ex._settings_run_time
         r_ms = cfg.model_settings
 

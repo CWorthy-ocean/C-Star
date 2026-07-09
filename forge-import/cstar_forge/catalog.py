@@ -30,10 +30,10 @@ class BlueprintCatalog:
     # ------------------------------------------------------------------
 
     def find_blueprint_files(self, stage: str | None = None) -> list[Path]:
-        return self._catalog._find_blueprint_stage_files(stage=stage)
+        return self._catalog._find_roms_marbl_blueprint_stage_files(stage=stage)
 
     def load_blueprint(self, blueprint_path: Path) -> dict[str, Any]:
-        return self._catalog._load_blueprint_yaml(blueprint_path)
+        return self._catalog._load_roms_marbl_blueprint_yaml(blueprint_path)
 
     def load_grid_kwargs(self, grid_yaml_path: Path) -> dict[str, Any]:
         return self._catalog._load_grid_kwargs(grid_yaml_path)
@@ -43,10 +43,10 @@ class BlueprintCatalog:
 
     def load(self, stage: str | None = "postconfig"):
         """Deprecated alias for blueprintDF()."""
-        return self._catalog.blueprintDF(stage=stage)
+        return self._catalog.roms_marbl_blueprint_df(stage=stage)
 
     def blueprintDF(self, stage: str | None = "postconfig"):
-        return self._catalog.blueprintDF(stage=stage)
+        return self._catalog.roms_marbl_blueprint_df(stage=stage)
 
 
 # Convenience instance

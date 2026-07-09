@@ -4,11 +4,11 @@
 know *where it is executing*: the per-run artifact root (``working_dir``), the shared
 source-data download cache, and the machine identity. It is **host-independent contract,
 not resolution** — the app never detects the machine itself; a provider builds a
-``HostPaths`` and injects it at the entry point (``process_spec_config(..., host=...)``).
+``HostPaths`` and injects it at the entry point (``process_forge_blueprint(..., host=...)``).
 
 - Everything the executor PRODUCES (input netCDFs, namelist, cppdefs, the emitted
   roms_marbl blueprint, build dirs) lands under ``working_dir``.
-- Everything it READS that isn't in the SpecConfig is a *cache* location:
+- Everything it READS that isn't in the ForgeBlueprint is a *cache* location:
   ``source_data_cache`` (big reference downloads, shared across runs).
 
 Providers: in this repo, Forge's disposable ``cstar_forge.config.resolve_host`` /

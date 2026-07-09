@@ -208,7 +208,7 @@ input_gen = RomsMarblInputData(
     domain_name="test-tiny",
     start_date=datetime(2012, 1, 1),
     end_date=datetime(2012, 1, 2),
-    forcing_override=forcing_override,  # from SpecConfig.forcing via sources_to_forcing_override
+    forcing_override=forcing_override,  # from ForgeBlueprint.forcing via sources_to_forcing_override
     grid=grid,
     boundaries=boundaries,
     source_data=source_data,
@@ -229,7 +229,7 @@ blueprint_elements, compile_time_settings, run_time_settings = input_gen.generat
 
 The `RomsMarblInputData` class is used internally by `ForgeExecutor.generate_inputs()`
 (`cstar_forge/forge/executor.py` — this was `CstarSpecBuilder.generate_inputs()` before the
-decomposition into `SpecConfig` + `ForgeExecutor`; see `docs/developer-guide.md`):
+decomposition into `ForgeBlueprint` + `ForgeExecutor`; see `docs/developer-guide.md`):
 
 1. Creates `RomsMarblInputData` instance
 2. Calls `generate_all()` to create input files

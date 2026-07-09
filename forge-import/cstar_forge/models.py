@@ -19,7 +19,7 @@ from cstar.applications.roms_marbl.models import (
 )
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-from cstar_forge.forge.spec_config import (
+from cstar_forge.forge.forge_blueprint import (
     BoundaryForcingItem,
     RiverForcingItem,
     SourceSpec,
@@ -27,10 +27,10 @@ from cstar_forge.forge.spec_config import (
     TidalForcingItem,
     TopographySource,
 )
-from cstar_forge.forge.spec_config import (
+from cstar_forge.forge.forge_blueprint import (
     InitialConditions as InitialConditionsInput,
 )
-from cstar_forge.forge.spec_config import (
+from cstar_forge.forge.forge_blueprint import (
     OpenBoundaries as OpenBoundaries,
 )
 

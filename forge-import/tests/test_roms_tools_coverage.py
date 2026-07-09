@@ -169,13 +169,13 @@ def test_all_rt_params_are_exposed_or_skipped(cls_name, forge_cls_name):
     uncovered = params - accounted_for
     assert not uncovered, (
         f"rt.{cls_name} has parameters NOT accounted for in Forge: {sorted(uncovered)}. "
-        "Either add them as typed fields in models.py/spec_config.py "
+        "Either add them as typed fields in models.py/forge_blueprint.py "
         "or add them to the SKIP_LIST in tests/test_roms_tools_coverage.py with a reason."
     )
 
 
 # ── single-source item models (Phase D) ──────────────────────────────────────
-# The forcing/IC item models are now defined ONCE in ``cstar_forge.forge.spec_config``
+# The forcing/IC item models are now defined ONCE in ``cstar_forge.forge.forge_blueprint``
 # and re-exported by ``cstar_forge.models`` (with ``InitialConditions`` aliased to the
 # legacy name ``InitialConditionsInput``). This guard asserts they are literally the same
 # class, so the "two parallel schemas" duplication cannot silently re-appear — adding a
@@ -191,15 +191,15 @@ _ITEM_MODEL_PAIRS = [
 
 @pytest.mark.parametrize("models_name,spec_name", _ITEM_MODEL_PAIRS)
 def test_forge_item_models_are_single_sourced(models_name, spec_name):
-    """``cstar_forge.models`` must re-export the exact ``forge.spec_config`` item class
+    """``cstar_forge.models`` must re-export the exact ``forge.forge_blueprint`` item class
     (single source of truth) — not a divergent copy. If someone re-introduces a separate
     definition in models.py, these stop being the same object and this guard fails.
     """
     from cstar_forge import models
-    from cstar_forge.forge import spec_config
+    from cstar_forge.forge import forge_blueprint
 
-    assert getattr(models, models_name) is getattr(spec_config, spec_name), (
-        f"models.{models_name} is not the same class as spec_config.{spec_name} — "
-        "the item models must be single-sourced in forge/spec_config.py and re-exported "
+    assert getattr(models, models_name) is getattr(forge_blueprint, spec_name), (
+        f"models.{models_name} is not the same class as forge_blueprint.{spec_name} — "
+        "the item models must be single-sourced in forge/forge_blueprint.py and re-exported "
         "by models.py. See docs/roms-tools-contributor-guide.md."
     )

@@ -161,13 +161,13 @@ class DomainCatalog:
         self._domains: dict[str, Path] = {}  # domain_name -> DomainSpec/<name>/ dir
         self._forcing: dict[str, Path] = {}  # forcing_name -> ForcingSpec/<name>/ dir
         self._output: dict[str, Path] = {}  # output_name -> OutputSpec/<name>/ dir
-        self._blueprints: dict[
+        self._roms_marbl_blueprints: dict[
             str, Path
-        ] = {}  # blueprint_name -> blueprints/<machine>/<name>/ dir
+        ] = {}  # roms_marbl_blueprint_name -> blueprints/<machine>/<name>/ dir
 
         self._scan_machines()
         self._scan_models()
-        self._scan_blueprints()
+        self._scan_roms_marbl_blueprints()
         self._scan_domains()
         self._scan_forcing()
         self._scan_output()
@@ -252,14 +252,14 @@ class DomainCatalog:
         except Exception:
             pass
 
-    def _scan_blueprints(self) -> None:
+    def _scan_roms_marbl_blueprints(self) -> None:
         """Scan blueprints/ (and Blueprints/) for blueprint directories.
 
         Expected layout: blueprints/<machine>/<name>/B_*.yml
         Uses _fs_iterdir_dirs to retrieve directory type from a single ls call,
         avoiding a separate isdir API call per entry.
         """
-        self._blueprints = {}
+        self._roms_marbl_blueprints = {}
         for subdir_name in ("blueprints", "Blueprints"):
             bp_root = self.catalog_root / subdir_name
             if not self._fs_exists(bp_root):
@@ -267,7 +267,7 @@ class DomainCatalog:
             try:
                 for machine_dir in sorted(self._fs_iterdir_dirs(bp_root)):
                     for bp_dir in sorted(self._fs_iterdir_dirs(machine_dir)):
-                        self._blueprints[bp_dir.name] = bp_dir
+                        self._roms_marbl_blueprints[bp_dir.name] = bp_dir
             except Exception:
                 pass
 
@@ -421,12 +421,12 @@ class DomainCatalog:
         return sorted(self._output.keys())
 
     @property
-    def blueprint_names(self) -> list[str]:
+    def roms_marbl_blueprint_names(self) -> list[str]:
         """Return a sorted list of available blueprint names."""
-        return sorted(self._blueprints.keys())
+        return sorted(self._roms_marbl_blueprints.keys())
 
     @property
-    def blueprints_dir(self) -> Path:
+    def roms_marbl_blueprints_dir(self) -> Path:
         """Path to the blueprints directory (catalog_root/blueprints)."""
         return self.catalog_root / "blueprints"
 
@@ -442,17 +442,24 @@ class DomainCatalog:
             entries = self._fs.find(str(self.catalog_root))
             print("\n".join(entries))
 
-    def blueprint_dir_for(self, machine_id: str, blueprint_name: str) -> Path:
+    def roms_marbl_blueprint_dir_for(
+        self, machine_id: str, roms_marbl_blueprint_name: str
+    ) -> Path:
         """Return the blueprint directory for a given machine and blueprint name."""
-        return self.blueprints_dir / machine_id / blueprint_name
+        return self.roms_marbl_blueprints_dir / machine_id / roms_marbl_blueprint_name
 
-    def build_dir_for(self, machine_id: str, blueprint_name: str) -> Path:
+    def build_dir_for(self, machine_id: str, roms_marbl_blueprint_name: str) -> Path:
         """Return the Build/ directory inside the blueprint folder.
 
-        Build artifacts live at ``blueprints/<machine_id>/<blueprint_name>/Build/``,
+        Build artifacts live at ``blueprints/<machine_id>/<roms_marbl_blueprint_name>/Build/``,
         co-located with the blueprint YAML files.
         """
-        return self.blueprints_dir / machine_id / blueprint_name / "Build"
+        return (
+            self.roms_marbl_blueprints_dir
+            / machine_id
+            / roms_marbl_blueprint_name
+            / "Build"
+        )
 
     # ------------------------------------------------------------------
     # Path accessors (raise KeyError if not found)
@@ -510,14 +517,14 @@ class DomainCatalog:
             )
         return self._domains[domain_name]
 
-    def blueprint_path(self, blueprint_name: str) -> Path:
+    def roms_marbl_blueprint_path(self, roms_marbl_blueprint_name: str) -> Path:
         """Return the directory path for a named blueprint."""
-        if blueprint_name not in self._blueprints:
+        if roms_marbl_blueprint_name not in self._roms_marbl_blueprints:
             raise KeyError(
-                f"Blueprint '{blueprint_name}' not found in catalog at {self.catalog_root}. "
-                f"Available blueprints: {self.blueprint_names}"
+                f"Blueprint '{roms_marbl_blueprint_name}' not found in catalog at {self.catalog_root}. "
+                f"Available blueprints: {self.roms_marbl_blueprint_names}"
             )
-        return self._blueprints[blueprint_name]
+        return self._roms_marbl_blueprints[roms_marbl_blueprint_name]
 
     # ------------------------------------------------------------------
     # Data accessors (return raw dicts)
@@ -609,26 +616,28 @@ class DomainCatalog:
         else:
             raise ValueError(f"model_id must be str or int, got {type(model_id)}")
 
-    def blueprint(self, blueprint_id: str | int) -> Path:
+    def roms_marbl_blueprint(self, roms_marbl_blueprint_id: str | int) -> Path:
         """Return a blueprint directory Path by name (str) or index (int).
 
         Parameters
         ----------
-        blueprint_id : str or int
-            Blueprint name or zero-based index into blueprint_names.
+        roms_marbl_blueprint_id : str or int
+            Blueprint name or zero-based index into roms_marbl_blueprint_names.
 
         Returns
         -------
         Path
             Path to the blueprint's directory (contains B_*.yml stage files).
         """
-        if isinstance(blueprint_id, str):
-            return self.blueprint_path(blueprint_id)
-        elif isinstance(blueprint_id, int):
-            return self._blueprints[self.blueprint_names[blueprint_id]]
+        if isinstance(roms_marbl_blueprint_id, str):
+            return self.roms_marbl_blueprint_path(roms_marbl_blueprint_id)
+        elif isinstance(roms_marbl_blueprint_id, int):
+            return self._roms_marbl_blueprints[
+                self.roms_marbl_blueprint_names[roms_marbl_blueprint_id]
+            ]
         else:
             raise ValueError(
-                f"blueprint_id must be str or int, got {type(blueprint_id)}"
+                f"roms_marbl_blueprint_id must be str or int, got {type(roms_marbl_blueprint_id)}"
             )
 
     # ------------------------------------------------------------------
@@ -805,18 +814,20 @@ class DomainCatalog:
     # Blueprint DataFrame methods (merged from BlueprintCatalog)
     # ------------------------------------------------------------------
 
-    def _find_blueprint_stage_files(self, stage: str | None = None) -> list[Path]:
+    def _find_roms_marbl_blueprint_stage_files(
+        self, stage: str | None = None
+    ) -> list[Path]:
         """Find B_*.yml files across all known blueprint directories."""
         pattern = f"B_*_{stage}.yml" if stage else "B_*.yml"
         files: list[Path] = []
-        for bp_dir in self._blueprints.values():
+        for bp_dir in self._roms_marbl_blueprints.values():
             files.extend(
                 f
                 for f in self._fs_glob(bp_dir, pattern)
                 if ".ipynb_checkpoints" not in str(f)
             )
         if not stage or stage == "run":
-            for bp_dir in self._blueprints.values():
+            for bp_dir in self._roms_marbl_blueprints.values():
                 files.extend(
                     f
                     for f in self._fs_glob(bp_dir, "B_*_run_*.yml")
@@ -824,11 +835,15 @@ class DomainCatalog:
                 )
         return sorted(set(files))
 
-    def _load_blueprint_yaml(self, blueprint_path: Path) -> dict[str, Any]:
+    def _load_roms_marbl_blueprint_yaml(
+        self, roms_marbl_blueprint_path: Path
+    ) -> dict[str, Any]:
         """Load a single B_*.yml file."""
-        if not self._fs_exists(blueprint_path):
-            raise FileNotFoundError(f"Blueprint file not found: {blueprint_path}")
-        with self._fs_open(blueprint_path) as f:
+        if not self._fs_exists(roms_marbl_blueprint_path):
+            raise FileNotFoundError(
+                f"Blueprint file not found: {roms_marbl_blueprint_path}"
+            )
+        with self._fs_open(roms_marbl_blueprint_path) as f:
             return yaml.safe_load(f) or {}
 
     def _load_grid_kwargs(self, grid_yaml_path: Path) -> dict[str, Any]:
@@ -847,16 +862,16 @@ class DomainCatalog:
         return grid_data["Grid"]
 
     def _extract_model_and_grid_name(
-        self, blueprint_name: str
+        self, roms_marbl_blueprint_name: str
     ) -> tuple[str | None, str | None]:
         """Extract (model_name, grid_name) from a blueprint name.
 
         Strips a trailing _NNprocs suffix, then tries to match against known
         model names (longest first). Falls back to splitting on the last underscore.
         """
-        if not blueprint_name:
+        if not roms_marbl_blueprint_name:
             return None, None
-        name = re.sub(r"_\d+procs$", "", blueprint_name)
+        name = re.sub(r"_\d+procs$", "", roms_marbl_blueprint_name)
         for model_name in sorted(self.model_names, key=len, reverse=True):
             if name.startswith(model_name + "_"):
                 return model_name, name[len(model_name) + 1 :]
@@ -865,7 +880,7 @@ class DomainCatalog:
             return parts[0], parts[1]
         return None, None
 
-    def blueprintDF(self, stage: str | None = None) -> pd.DataFrame:
+    def roms_marbl_blueprint_df(self, stage: str | None = None) -> pd.DataFrame:
         """Load all blueprints and return a pandas DataFrame.
 
         Parameters
@@ -883,19 +898,19 @@ class DomainCatalog:
         import pandas as pd
 
         records = []
-        for bp_file in self._find_blueprint_stage_files(stage=stage):
+        for bp_file in self._find_roms_marbl_blueprint_stage_files(stage=stage):
             try:
-                bp = self._load_blueprint_yaml(bp_file)
-                blueprint_name = bp.get("name")
-                if not blueprint_name:
+                bp = self._load_roms_marbl_blueprint_yaml(bp_file)
+                roms_marbl_blueprint_name = bp.get("name")
+                if not roms_marbl_blueprint_name:
                     print(f"Warning: skipping {bp_file}: missing 'name' field")
                     continue
                 model_name, grid_name = self._extract_model_and_grid_name(
-                    blueprint_name
+                    roms_marbl_blueprint_name
                 )
                 if not model_name or not grid_name:
                     print(
-                        f"Warning: skipping {bp_file}: could not parse model/grid from '{blueprint_name}'"
+                        f"Warning: skipping {bp_file}: could not parse model/grid from '{roms_marbl_blueprint_name}'"
                     )
                     continue
                 is_github = hasattr(self._fs, "org")
@@ -907,7 +922,7 @@ class DomainCatalog:
                     )
                 else:
                     grid_yaml_result = grid_yaml if grid_yaml_exists else None
-                blueprint_path_result: Path | str = (
+                roms_marbl_blueprint_path_result: Path | str = (
                     self._to_raw_github_url(bp_file) if is_github else bp_file
                 )
                 file_stage = next(
@@ -922,11 +937,11 @@ class DomainCatalog:
                     {
                         "model_name": model_name,
                         "grid_name": grid_name,
-                        "blueprint_name": blueprint_name,
+                        "blueprint_name": roms_marbl_blueprint_name,
                         "description": bp.get("description"),
                         "start_time": bp.get("valid_start_date"),
                         "end_time": bp.get("valid_end_date"),
-                        "blueprint_path": blueprint_path_result,
+                        "blueprint_path": roms_marbl_blueprint_path_result,
                         "grid_yaml_path": grid_yaml_result,
                         "stage": file_stage,
                     }

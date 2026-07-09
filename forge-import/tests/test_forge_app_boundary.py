@@ -1,13 +1,13 @@
 """
 Phase 0 dependency-direction guard for the forge-application boundary.
 
-The "forge application" (execution code — blueprint = ``SpecConfig``) is being carved
+The "forge application" (execution code — blueprint = ``ForgeBlueprint``) is being carved
 out of Forge so it can eventually relocate into C-Star as an application (see
 ``docs/architecture-decomposition-plan.md``). For that relocation to stay a mechanical
 move, the forge-application modules must NOT depend on Forge's *authoring / host* layer:
 
-- authoring / curation: ``catalog``, ``domain_catalog``, ``spec_config_resolve``,
-  ``spec_config_wizard``
+- authoring / curation: ``catalog``, ``domain_catalog``, ``forge_blueprint_resolve``,
+  ``forge_blueprint_wizard``
 - host resolution: ``config`` (paths/machine must be *injected* at execution time so
   C-Star can supply its own), and the transitional god-object ``_core``.
 
@@ -41,8 +41,8 @@ _FORGE_APP_MODULES = (
     "source_data",
     "source_registry",
     "settings",
-    "spec_config",
-    "spec_config_engine",
+    "forge_blueprint",
+    "forge_blueprint_engine",
     "executor",
     "namelist_model",
     "util",
@@ -52,8 +52,8 @@ _FORGE_APP_MODULES = (
 _FORBIDDEN = {
     "catalog",
     "domain_catalog",
-    "spec_config_resolve",
-    "spec_config_wizard",
+    "forge_blueprint_resolve",
+    "forge_blueprint_wizard",
     "config",
     "_core",
 }
@@ -61,7 +61,7 @@ _FORBIDDEN = {
 # Known, pre-existing violations to be resolved during the decomposition. Each entry is
 # ``(forge_app_module, forbidden_module)``. This set may only SHRINK — never add to it.
 # EMPTY: the guarded forge-application modules are fully config/authoring-free. Host is
-# injected (HostPaths via process_spec_config); Forge's disposable resolver lives in
+# injected (HostPaths via process_forge_blueprint); Forge's disposable resolver lives in
 # cstar_forge.config / cstar_forge.run. See docs/architecture-decomposition-plan.md.
 _KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
@@ -99,7 +99,7 @@ def test_forge_app_does_not_import_authoring_or_host():
     assert not new_violations, (
         "New forge-app boundary violation(s) — a forge-application module imports an "
         f"authoring/host module: {sorted(new_violations)}. Inject the dependency (e.g. "
-        "pass paths in) or move the shared piece onto SpecConfig instead. See "
+        "pass paths in) or move the shared piece onto ForgeBlueprint instead. See "
         "docs/architecture-decomposition-plan.md."
     )
 

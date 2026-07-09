@@ -1,13 +1,13 @@
 """
-Phase 2 processing engine: ingest a :class:`SpecConfig` and run the heavy work
+Phase 2 processing engine: ingest a :class:`ForgeBlueprint` and run the heavy work
 (``generate_inputs`` + ``configure_build``) on *this* machine.
 
-This is the counterpart to the Phase-1 resolver (``spec_config_resolve``). It runs
+This is the counterpart to the Phase-1 resolver (``forge_blueprint_resolve``). It runs
 on the user's machine of choice, where the **host** (machine config + data paths) is
 resolved from :mod:`cstar_forge.config` — nothing host-specific is read from the
-config file. The reviewed, host-independent ``SpecConfig`` provides everything else.
+config file. The reviewed, host-independent ``ForgeBlueprint`` provides everything else.
 
-Strategy (see ``docs/spec-config-inventory.md`` §3): the existing
+Strategy (see ``docs/forge-blueprint-inventory.md`` §3): the existing
 ``ForgeExecutor`` already performs host resolution, grid building, input
 generation, and namelist/cppdefs writing. So Phase 2:
 
@@ -40,22 +40,22 @@ from typing import (
     runtime_checkable,
 )
 
+from cstar_forge.forge.forge_blueprint import ForgeBlueprint
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.namelist_model import validate_run_time_sections
-from cstar_forge.forge.spec_config import SpecConfig
 
 
 @runtime_checkable
-class SpecConfigExecutor(Protocol):
-    """The execution surface that :func:`process_spec_config` drives.
+class ForgeBlueprintExecutor(Protocol):
+    """The execution surface that :func:`process_forge_blueprint` drives.
 
-    This is the seam between the host-independent ``SpecConfig`` and whatever
+    This is the seam between the host-independent ``ForgeBlueprint`` and whatever
     actually generates inputs / configures the build on the run machine. Today
     ``cstar_forge.forge.executor.ForgeExecutor`` satisfies it; when the engine moves into
     C-Star as an application, that app provides its own implementation and the only
     change here is the default factory.
 
-    (``runtime_checkable`` so ``process_spec_config`` can assert an executor exposes
+    (``runtime_checkable`` so ``process_forge_blueprint`` can assert an executor exposes
     these methods — name presence only; signatures are duck-typed.)
     """
 
@@ -65,12 +65,12 @@ class SpecConfigExecutor(Protocol):
 
     def configure_build(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def path_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
+    def path_roms_marbl_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-# A factory maps a host-independent SpecConfig + the injected host to a ready-to-run
+# A factory maps a host-independent ForgeBlueprint + the injected host to a ready-to-run
 # executor. The forge default builds a ForgeExecutor; a C-Star app would provide its own.
-ExecutorFactory = Callable[[SpecConfig, HostPaths | None], SpecConfigExecutor]
+ExecutorFactory = Callable[[ForgeBlueprint, HostPaths | None], ForgeBlueprintExecutor]
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ PROCESSING_FILLED_SECTIONS = (
 )
 
 
-def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any]:
+def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
 
     Always returns a dict with ``initial_conditions`` and ``forcing`` keys mirroring
@@ -117,7 +117,7 @@ def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any]:
         # (bgc_interpolation_method, allow_flex_time) and the options passthrough
         # here is what lets authored/UI IC choices actually reach input_data —
         # previously only source/bgc_source were propagated, so any other IC field
-        # set in the wizard was silently dropped on the SpecConfig path.
+        # set in the wizard was silently dropped on the ForgeBlueprint path.
         d = spec.model_dump(exclude={"source", "bgc_source"}, mode="json")
         d["source"] = _src(spec.source)
         if spec.bgc_source:
@@ -140,8 +140,8 @@ def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any]:
     return {"initial_conditions": ic, "forcing": forc}
 
 
-def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
-    """Map a ``SpecConfig``'s atomic inputs to ``ForgeExecutor`` constructor kwargs.
+def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
+    """Map a ``ForgeBlueprint``'s atomic inputs to ``ForgeExecutor`` constructor kwargs.
 
     Host/machine/path values are intentionally NOT passed — the builder resolves
     those from :mod:`cstar_forge.config` on the run host.
@@ -167,7 +167,7 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
         code_spec=cfg.code,
     )
     # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
-    # block (which the SpecConfig stores separately) — re-embed it.
+    # block (which the ForgeBlueprint stores separately) — re-embed it.
     if cfg.domain.grid_kwargs_child is not None:
         child = dict(cfg.domain.grid_kwargs_child)
         meta = dict(cfg.domain.metadata_child or {})
@@ -181,7 +181,7 @@ def spec_config_to_builder_kwargs(cfg: SpecConfig) -> dict[str, Any]:
     return kwargs
 
 
-def split_model_settings(cfg: SpecConfig) -> tuple[dict[str, Any], dict[str, Any]]:
+def split_model_settings(cfg: ForgeBlueprint) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split the flat ``model_settings`` into (run_time_overrides, compile_time_overrides).
 
     ``cppdefs`` is the only compile-time section; everything else is a namelist
@@ -196,7 +196,7 @@ def split_model_settings(cfg: SpecConfig) -> tuple[dict[str, Any], dict[str, Any
     return run_overrides, compile_overrides
 
 
-def verify_content_hash(cfg: SpecConfig) -> str | None:
+def verify_content_hash(cfg: ForgeBlueprint) -> str | None:
     """If the config carries a recorded integrity hash and it no longer matches the
     recomputed hash of the results-affecting data, return a warning message (the file
     appears hand-edited since write-out); otherwise None.
@@ -206,7 +206,7 @@ def verify_content_hash(cfg: SpecConfig) -> str | None:
         actual = cfg.content_hash()
         if recorded != actual:
             return (
-                "spec_config integrity check FAILED: the results-affecting data does "
+                "forge_blueprint integrity check FAILED: the results-affecting data does "
                 "not match the recorded hash — the file appears to have been hand-edited "
                 f"since it was written (recorded {recorded[:12]}…, computed {actual[:12]}…). "
                 "Processing will continue with the data as read."
@@ -215,19 +215,19 @@ def verify_content_hash(cfg: SpecConfig) -> str | None:
 
 
 def _default_executor_factory(
-    cfg: SpecConfig, host: HostPaths | None = None
-) -> SpecConfigExecutor:
+    cfg: ForgeBlueprint, host: HostPaths | None = None
+) -> ForgeBlueprintExecutor:
     """Forge's default executor: a ``ForgeExecutor`` built from the config's
     atomic inputs + the injected host. Imported lazily so the lightweight bits above
     (settings split) stay importable without the full forge stack.
     """
     from cstar_forge.forge.executor import ForgeExecutor
 
-    return ForgeExecutor.from_spec_config(cfg, host=host)
+    return ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
 
-def process_spec_config(
-    spec: SpecConfig | str | Path,
+def process_forge_blueprint(
+    spec: ForgeBlueprint | str | Path,
     *,
     host: HostPaths | None = None,
     ensure_data: bool = True,
@@ -238,15 +238,15 @@ def process_spec_config(
     partition_files: bool = False,
     validate: bool = True,
     executor_factory: ExecutorFactory | None = None,
-) -> SpecConfigExecutor:
-    """Run Phase-2 processing for a ``SpecConfig`` (object or path to a YAML file).
+) -> ForgeBlueprintExecutor:
+    """Run Phase-2 processing for a ``ForgeBlueprint`` (object or path to a YAML file).
 
-    Drives a :class:`SpecConfigExecutor` through ``ensure_source_data`` →
+    Drives a :class:`ForgeBlueprintExecutor` through ``ensure_source_data`` →
     ``generate_inputs`` → ``configure_build`` (the reviewed ``model_settings`` overlaid
     via the last).
 
     Returns the executor (``ForgeExecutor`` by default), so callers can reach
-    ``.path_blueprint('build')`` / ``.prep_cstar_environment(...)`` / ``.run()``.
+    ``.path_roms_marbl_blueprint('build')`` / ``.prep_cstar_environment(...)`` / ``.run()``.
 
     Parameters
     ----------
@@ -261,11 +261,11 @@ def process_spec_config(
         If True (default), fail fast — validate the config's ``model_settings``
         against the run-time schema *before* any downloads/generation.
     executor_factory :
-        Maps the ``SpecConfig`` to an executor; defaults to the forge
+        Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
-        (which supplies its own executor for the same ``SpecConfig`` blueprint).
+        (which supplies its own executor for the same ``ForgeBlueprint`` blueprint).
     """
-    cfg = spec if isinstance(spec, SpecConfig) else SpecConfig.from_yaml(spec)
+    cfg = spec if isinstance(spec, ForgeBlueprint) else ForgeBlueprint.from_yaml(spec)
 
     integrity = verify_content_hash(cfg)
     if integrity:
@@ -276,7 +276,7 @@ def process_spec_config(
         problems = validate_run_time_sections(cfg.model_settings)
         if problems:
             raise ValueError(
-                "spec_config.model_settings has invalid values (fix before "
+                "forge_blueprint.model_settings has invalid values (fix before "
                 "processing):\n  " + "\n  ".join(problems)
             )
 
@@ -285,11 +285,11 @@ def process_spec_config(
 
     factory = executor_factory or _default_executor_factory
     executor = factory(cfg, host)
-    if not isinstance(executor, SpecConfigExecutor):
+    if not isinstance(executor, ForgeBlueprintExecutor):
         raise TypeError(
             f"executor_factory returned {type(executor).__name__}, which does not "
-            "implement the SpecConfigExecutor interface (ensure_source_data / "
-            "generate_inputs / configure_build / path_blueprint)."
+            "implement the ForgeBlueprintExecutor interface (ensure_source_data / "
+            "generate_inputs / configure_build / path_roms_marbl_blueprint)."
         )
 
     if ensure_data:

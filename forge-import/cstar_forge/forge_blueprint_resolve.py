@@ -1,9 +1,9 @@
 """
-Phase 1 resolver: ``build_spec_config`` — assemble a validated :class:`SpecConfig`
+Phase 1 resolver: ``build_forge_blueprint`` — assemble a validated :class:`ForgeBlueprint`
 from the composable pieces (a ModelSpec + a domain selection + a run window).
 
 This is the *collection / curation* half of the planned split (see
-``docs/spec-config-inventory.md``). It is intentionally **dependency-light**: it
+``docs/forge-blueprint-inventory.md``). It is intentionally **dependency-light**: it
 reads the ModelSpec YAML directly and computes everything it can from plain inputs,
 so a UI backend or a user's laptop can assemble and review a config without ROMS /
 C-Star / roms_tools installed. The only value that needs a grid (``dt`` via the CFL
@@ -33,13 +33,14 @@ import yaml
 
 # Dual import: package context (production) or standalone file (lightweight / UI / test).
 try:  # pragma: no cover - exercised both ways
-    from cstar_forge.forge.spec_config import (
+    from cstar_forge.forge.forge_blueprint import (
         BoundaryForcingItem,
         Code,
         CodeRepo,
         Composition,
         Domain,
         Forcing,
+        ForgeBlueprint,
         Identity,
         InitialConditions,
         OpenBoundaries,
@@ -50,19 +51,19 @@ try:  # pragma: no cover - exercised both ways
         RiverForcingItem,
         RunWindow,
         SourceSpec,
-        SpecConfig,
         SurfaceForcingItem,
         TemplateRepo,
         TidalForcingItem,
     )
 except ImportError:  # pragma: no cover
-    from spec_config import (  # type: ignore
+    from forge_blueprint import (  # type: ignore
         BoundaryForcingItem,
         Code,
         CodeRepo,
         Composition,
         Domain,
         Forcing,
+        ForgeBlueprint,
         Identity,
         InitialConditions,
         OpenBoundaries,
@@ -73,7 +74,6 @@ except ImportError:  # pragma: no cover
         RiverForcingItem,
         RunWindow,
         SourceSpec,
-        SpecConfig,
         SurfaceForcingItem,
         TemplateRepo,
         TidalForcingItem,
@@ -213,7 +213,7 @@ def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def build_spec_config(
+def build_forge_blueprint(
     *,
     model_dir: str | Path,
     grid_name: str,
@@ -241,8 +241,8 @@ def build_spec_config(
     forge_version: str | None = None,
     roms_tools_version: str | None = None,
     notes: str | None = None,
-) -> SpecConfig:
-    """Resolve the composable pieces into a validated, host-independent ``SpecConfig``.
+) -> ForgeBlueprint:
+    """Resolve the composable pieces into a validated, host-independent ``ForgeBlueprint``.
 
     Parameters mirror the logical inputs a UI would collect. ``dt`` may be supplied
     directly (fully lightweight); if ``None`` it is computed from the CFL criterion,
@@ -362,7 +362,7 @@ def build_spec_config(
     # ----- code + templates --------------------------------------------------
     code = _build_code(model, templates_repo or DEFAULT_TEMPLATE_REPO)
 
-    return SpecConfig(
+    return ForgeBlueprint(
         identity=Identity(
             model_name=model_name,
             grid_name=grid_name,

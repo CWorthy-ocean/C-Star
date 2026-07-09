@@ -4,7 +4,7 @@ C-STAR Forge streamlines the creation of ROMS-MARBL domains by automating the ge
 The files include grids, initial conditions, boundary and surface forcing, rivers, and tidal forcing—from a variety of observational and reanalysis datasets. 
 
 
-The tool produces **blueprint** YAML files that capture the complete configuration and file paths for each domain, enabling reproducible model setups that can be integrated into C-Star workflows.
+The tool produces **ROMS-MARBL blueprint** YAML files that capture the complete configuration and file paths for each domain, enabling reproducible model setups that can be integrated into C-Star workflows.
 
 ## Key Features
 
@@ -16,7 +16,7 @@ The tool produces **blueprint** YAML files that capture the complete configurati
   - SRTM15 (bathymetry)
   - DAI / GLOFAS (river discharge)
   - TPXO (tidal forcing)
-- **Blueprint System**: Automatically generates YAML blueprints that document:
+- **ROMS-MARBL Blueprint System**: Automatically generates YAML blueprints that document:
   - Complete model specification (repositories, conda environments, input configurations)
   - All generated input file paths (both full and partitioned)
   - Domain configuration (grid name, time ranges, boundaries, processor layout)
@@ -33,16 +33,16 @@ The tool produces **blueprint** YAML files that capture the complete configurati
 ```
 cstar-forge/
 ├── cstar_forge/                 # Main package directory
-│   ├── spec_config_resolve.py  # Phase-1 resolver: build_spec_config(...)
-│   ├── spec_config_wizard.py   # SpecConfigWizard (ipywidgets UI)
+│   ├── forge_blueprint_resolve.py  # Phase-1 resolver: build_forge_blueprint(...)
+│   ├── forge_blueprint_wizard.py   # ForgeBlueprintWizard (ipywidgets UI)
 │   ├── models.py               # Model specification classes (ModelSpec, etc.)
 │   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors
 │   ├── config.py               # Path management and system detection
-│   ├── run.py                  # CLI entry point: python -m cstar_forge.run spec_config.yml
+│   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yml
 │   ├── forge/                  # The forge application (execution engine; see
 │   │   │                       # docs/developer-guide.md — relocates into C-Star as one unit)
-│   │   ├── spec_config.py      # SpecConfig — the forge application's blueprint
-│   │   ├── spec_config_engine.py # process_spec_config(); SpecConfigExecutor Protocol
+│   │   ├── forge_blueprint.py      # ForgeBlueprint — the forge application's blueprint
+│   │   ├── forge_blueprint_engine.py # process_forge_blueprint(); ForgeBlueprintExecutor Protocol
 │   │   ├── executor.py         # ForgeExecutor — the processing engine
 │   │   ├── input_data.py       # Input file generation
 │   │   ├── source_data.py      # Dataset download and preparation
@@ -82,11 +82,11 @@ cstar-forge/
 ```
 
 See `docs/developer-guide.md` for the current module map, the authoring/execution split,
-and the end-to-end call chain (catalog pick → `SpecConfig` → `ForgeExecutor`).
+and the end-to-end call chain (catalog pick → `ForgeBlueprint` → `ForgeExecutor`).
 
-## Blueprint System
+## ROMS-MARBL Blueprint System
 
-Blueprints are YAML files that capture the complete state of a domain configuration. Blueprints enable:
+ROMS-MARBL blueprints (`RomsMarblBlueprint`) are YAML files that capture the complete state of a domain configuration. Blueprints enable:
 1. **Reproducibility**: Exact recreation of model setups from a single YAML file
 2. **C-Star Integration**: Blueprints can be consumed by C-Star workflows to orchestrate model runs
 3. **Documentation**: Self-documenting domain configurations with full provenance

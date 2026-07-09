@@ -171,7 +171,7 @@ def test_model_reads_production_namelist(tmp_path):
 # validate_run_time_sections — partial/per-section validation (fail-fast)
 # ---------------------------------------------------------------------------
 def test_validate_run_time_sections_accepts_good_partial():
-    # only some sections present (as in SpecConfig.model_settings) -> no error
+    # only some sections present (as in ForgeBlueprint.model_settings) -> no error
     assert (
         validate_run_time_sections(
             {"time_stepping": {"ntimes": 12, "dt": 7200, "ndtfast": 60, "ninfo": 1}}
