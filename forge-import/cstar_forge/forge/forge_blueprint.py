@@ -332,6 +332,10 @@ class SourceSpec(_Section):
     name: str
     climatology: bool = False
     glorys_layout: Literal["global", "regional"] | None = None
+    path: str | None = None
+    """Explicit dataset path override. ``None`` (the default) means the path is
+    derived from :class:`SourceData` at processing time (the standard staged/streamed
+    location). Set this only to point at a non-default local file."""
 
     @model_validator(mode="after")
     def _glorys_layout_only_for_glorys(self) -> SourceSpec:

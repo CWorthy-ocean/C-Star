@@ -536,6 +536,12 @@ class RomsMarblInputData(InputData):
         else:
             raise TypeError(f"Unsupported source block type: {type(block)}")
 
+        # A blank/None path means "derive it" — SourceSpec.model_dump() always emits
+        # path=None, so drop the empty key here to let the streamable/setdefault logic
+        # below either inject the derived path or omit it (streamable) correctly.
+        if out.get("path") in (None, ""):
+            out.pop("path", None)
+
         glorys_layout = out.get("glorys_layout") if name.upper() == "GLORYS" else None
 
         # Get the mapped dataset key to check if it's streamable

@@ -163,6 +163,9 @@ HELP_TEXT: dict[str, str] = {
         "domain",
         "npy",
     ): "Number of MPI tiles in the y-direction (eta). Total MPI tasks = npx × npy.",
+    # Generic (context-independent) fallback for any source's path box.
+    "path": "Explicit path to a custom dataset file for this source. "
+    "Leave blank to use the default derived path (staged/streamed location).",
     # ---- IC --------------------------------------------------------------------
     (
         "ic",
@@ -721,6 +724,14 @@ class _ForcingEditor:
             style={"description_width": "110px"},
             tooltip=_tip("ic", "ic_layout"),
         )
+        self.ic_path = W.Text(
+            value=str((ic.get("source") or {}).get("path") or ""),
+            description="IC path:",
+            placeholder="(default)",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            tooltip=_tip("ic", "path"),
+        )
         bgc = ic.get("bgc_source") or {}
         _ic_bgc_val = str(bgc.get("name", "") or "")
         if _ic_bgc_val not in _IC_BGC_SOURCE_OPTS:
@@ -737,6 +748,14 @@ class _ForcingEditor:
             description="bgc climatology",
             indent=False,
             tooltip=_tip("ic", "ic_bgc_clim"),
+        )
+        self.ic_bgc_path = W.Text(
+            value=str(bgc.get("path") or ""),
+            description="bgc path:",
+            placeholder="(default)",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            tooltip=_tip("ic", "path"),
         )
         _ic_bgc_interp = str(
             ic.get("bgc_interpolation_method", BgcInterpMethod.DEPTH.value)
@@ -760,8 +779,10 @@ class _ForcingEditor:
         for _w in (
             self.ic_name,
             self.ic_layout,
+            self.ic_path,
             self.ic_bgc_name,
             self.ic_bgc_clim,
+            self.ic_bgc_path,
             self.ic_bgc_interp,
             self.ic_flex_time,
             self.ic_options,
@@ -800,6 +821,16 @@ class _ForcingEditor:
             style=small,
             layout=W.Layout(width="160px"),
             tooltip=_tip(cat, "name"),
+        )
+
+        # Optional custom dataset path; blank -> backend derives the default path.
+        w["path"] = W.Text(
+            value=str(src.get("path") or ""),
+            description="path:",
+            placeholder="(default)",
+            style=small,
+            layout=W.Layout(width="260px"),
+            tooltip=_tip(cat, "path"),
         )
 
         if cat in ("surface", "boundary"):
@@ -1008,6 +1039,8 @@ class _ForcingEditor:
             src["climatology"] = True
         if "glorys_layout" in w and w["glorys_layout"].value:  # Dropdown: "" = omit
             src["glorys_layout"] = w["glorys_layout"].value
+        if "path" in w and w["path"].value.strip():  # blank = derive default path
+            src["path"] = w["path"].value.strip()
         item: dict[str, Any] = {"source": src}
         if "type" in w:
             item["type"] = w["type"].value
@@ -1055,12 +1088,16 @@ class _ForcingEditor:
         ic_source = {"name": self.ic_name.value}
         if self.ic_layout.value:  # Dropdown: "" means not specified
             ic_source["glorys_layout"] = self.ic_layout.value
+        if self.ic_path.value.strip():  # blank = derive default path
+            ic_source["path"] = self.ic_path.value.strip()
         ic: dict[str, Any] = {"source": ic_source}
         if self.ic_bgc_name.value:  # Dropdown: "" means no bgc source
             ic["bgc_source"] = {
                 "name": self.ic_bgc_name.value,
                 "climatology": bool(self.ic_bgc_clim.value),
             }
+            if self.ic_bgc_path.value.strip():  # blank = derive default path
+                ic["bgc_source"]["path"] = self.ic_bgc_path.value.strip()
         if (
             self.ic_bgc_interp.value
             and self.ic_bgc_interp.value != BgcInterpMethod.DEPTH.value
@@ -1088,7 +1125,9 @@ class _ForcingEditor:
             [
                 W.HTML("<i>initial conditions</i>"),
                 W.HBox([self.ic_name, self.ic_layout]),
+                self.ic_path,
                 W.HBox([self.ic_bgc_name, self.ic_bgc_clim]),
+                self.ic_bgc_path,
                 W.HBox([self.ic_bgc_interp, self.ic_flex_time]),
                 self.ic_options,
             ]

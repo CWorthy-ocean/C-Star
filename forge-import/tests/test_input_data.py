@@ -625,6 +625,38 @@ class TestRomsMarblInputDataHelperMethods:
             # Should not add path for streamable sources if not explicitly provided
             assert result["name"] == "ERA5"
 
+    def test_resolve_source_block_none_path_derives(self, sample_roms_marbl_input_data):
+        """A None path (as SourceSpec.model_dump emits) must not block the derived path."""
+        result = sample_roms_marbl_input_data._resolve_source_block(
+            {"name": "GLORYS", "path": None}
+        )
+        # Derived path from source_data is injected despite the explicit None key.
+        assert result[
+            "path"
+        ] == sample_roms_marbl_input_data.source_data.path_for_source("GLORYS")
+
+    def test_resolve_source_block_explicit_path_survives(
+        self, sample_roms_marbl_input_data
+    ):
+        """An explicit custom path overrides the derived path."""
+        result = sample_roms_marbl_input_data._resolve_source_block(
+            {"name": "GLORYS", "path": "/custom/glofas_v4_rivers_daily.nc"}
+        )
+        assert result["path"] == "/custom/glofas_v4_rivers_daily.nc"
+
+    def test_resolve_source_block_streamable_none_path_omitted(
+        self, sample_roms_marbl_input_data
+    ):
+        """A streamable source with a None path stays path-less (no path=None leaked)."""
+        with patch(
+            "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES", {"ERA5"}
+        ):
+            sample_roms_marbl_input_data.source_data.dataset_key_for_source.return_value = "ERA5"
+            result = sample_roms_marbl_input_data._resolve_source_block(
+                {"name": "ERA5", "path": None}
+            )
+            assert "path" not in result
+
     def test_build_input_args_with_base_kwargs(self, sample_roms_marbl_input_data):
         """Test _build_input_args with base_kwargs."""
         base_kwargs = {"source": {"name": "GLORYS"}, "type": "physics"}
