@@ -27,17 +27,6 @@ ENV_CSTAR_ORCH_TRX_FREQ: t.Annotated[
 ] = "CSTAR_ORCH_TRX_FREQ"
 """Environment variable containing the time span for time-splitting transforms."""
 
-ENV_CSTAR_CMD_CONVERTER_OVERRIDE: t.Annotated[
-    t.Literal["CSTAR_CMD_CONVERTER_OVERRIDE"],
-    EnvVar(
-        "Overridden mapping key to apply when converting applications into CLI commands.",
-        _GROUP_DEV,
-        "",
-    ),
-] = "CSTAR_CMD_CONVERTER_OVERRIDE"
-"""Environment variable containing an overridden mapping key to apply when
-converting applications into CLI commands."""
-
 ENV_CSTAR_SLURM_ACCOUNT: t.Annotated[
     t.Literal["CSTAR_SLURM_ACCOUNT"],
     EnvVar(
