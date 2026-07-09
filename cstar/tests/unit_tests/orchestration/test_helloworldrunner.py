@@ -18,10 +18,10 @@ from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.converter.converter import convert_step_to_placeholder
 from cstar.orchestration.models import Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import (
-    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_DELAYS,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -277,7 +277,6 @@ def test_hello_world_workplan_dry_run(
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
-        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
 
     run_id = str(uuid.uuid4())
@@ -286,6 +285,10 @@ def test_hello_world_workplan_dry_run(
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
             mock.PropertyMock(return_value=None),
+        ),
+        mock.patch(
+            "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
+            convert_step_to_placeholder,
         ),
     ):
         args = [hw_single_step_wp_path.as_posix(), "--run-id", run_id]
@@ -333,7 +336,6 @@ def test_heterogeneous_workplan(
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
-        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
     run_id = str(uuid.uuid4())
     with (
@@ -341,6 +343,10 @@ def test_heterogeneous_workplan(
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
             mock.PropertyMock(return_value=None),
+        ),
+        mock.patch(
+            "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
+            convert_step_to_placeholder,
         ),
     ):
         args = [heterogeneous_workplan_path.as_posix(), "--run-id", run_id]
@@ -377,13 +383,16 @@ def test_hw_runner_bp_only(
         ENV_CSTAR_ORCH_DELAYS: "0.01",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
         ENV_CSTAR_SLURM_QUEUE: "debug",
-        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
     with (
         mock.patch.dict(os.environ, custom_env),
         mock.patch(
             "cstar.system.manager.CStarSystemManager.scheduler",
             mock.PropertyMock(return_value=None),
+        ),
+        mock.patch(
+            "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
+            convert_step_to_placeholder,
         ),
     ):
         args = [str(hello_world_bp_path)]

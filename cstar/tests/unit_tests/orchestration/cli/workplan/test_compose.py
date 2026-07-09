@@ -12,13 +12,13 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
+from cstar.orchestration.converter.converter import convert_step_to_placeholder
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import check_environment, configure_environment
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.orchestration.utils import (
-    ENV_CSTAR_CMD_CONVERTER_OVERRIDE,
     ENV_CSTAR_ORCH_TRX_FREQ,
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -348,7 +348,6 @@ async def test_run_composed_dag(
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
         ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
         ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
-        ENV_CSTAR_CMD_CONVERTER_OVERRIDE: "sleep",
     }
 
     mock_run_cmd = mock.Mock(return_code=0, stderr="", stdout="mock-run-output")
@@ -356,6 +355,10 @@ async def test_run_composed_dag(
     with (
         mock.patch.dict(os.environ, mock_env, clear=True),
         mock.patch("cstar.base.utils._run_cmd", mock_run_cmd),
+        mock.patch(
+            "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
+            convert_step_to_placeholder,
+        ),
     ):
         generated_wp_path = compose(
             wp_template_path.as_posix(),

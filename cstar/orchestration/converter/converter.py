@@ -1,19 +1,14 @@
-import os
 import random
 import textwrap
 import typing as t
-from collections import defaultdict
 from pathlib import Path
 
 import yaml
 
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
-from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
-from cstar.orchestration.models import Application
-from cstar.orchestration.utils import ENV_CSTAR_CMD_CONVERTER_OVERRIDE
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable
@@ -124,48 +119,3 @@ def convert_step_to_placeholder(step: "LiveStep") -> str:
     script_path.write_text(script)
 
     return f"sh {script_path}"
-
-
-app_to_cmd_map: dict[str, StepToCommandConversionFn] = defaultdict(
-    lambda: convert_step_to_blueprint_run_command,
-    {
-        Application.SLEEP.value: convert_step_to_placeholder,
-        Application.ROMS_MARBL.value: convert_step_to_blueprint_run_command,
-    },
-)
-"""Map application types to a function that converts a step to a CLI command."""
-
-
-def register_command_mapping(
-    application: Application | str,
-    mapping_func: StepToCommandConversionFn,
-) -> None:
-    if isinstance(application, Application):
-        application = application.value
-    app_to_cmd_map[application] = mapping_func
-
-
-def get_command_mapping(
-    application: str,
-) -> StepToCommandConversionFn:
-    if isinstance(application, Application):
-        application = application.value
-
-    step_converter = app_to_cmd_map[application]
-    if step_converter is None:
-        msg = f"No command converter found for application: {application!r}"
-        raise CstarExpectationFailed(msg)
-
-    if converter_override := os.getenv(ENV_CSTAR_CMD_CONVERTER_OVERRIDE, ""):
-        if converter_override not in app_to_cmd_map:
-            msg = f"Override in env var `{ENV_CSTAR_CMD_CONVERTER_OVERRIDE}` has invalid value: {converter_override}"
-            raise ValueError(msg)
-
-        converter = app_to_cmd_map[converter_override]
-        msg = f"Overriding step converter `{step_converter}` with `{converter}` for `{application}` commands."
-        step_converter = converter
-    else:
-        msg = f"Using `{step_converter}` for `{application}` commands."
-
-    log.trace(msg)
-    return step_converter

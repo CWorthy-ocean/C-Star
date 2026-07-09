@@ -19,7 +19,9 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
 )
-from cstar.orchestration.converter.converter import get_command_mapping
+from cstar.orchestration.converter.converter import (
+    convert_step_to_blueprint_run_command,
+)
 from cstar.orchestration.models import Blueprint, Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
@@ -275,8 +277,7 @@ class LiveStep(Step):
         -------
         str
         """
-        step_converter = get_command_mapping(self.application)
-        return step_converter(self)
+        return convert_step_to_blueprint_run_command(self)
 
     @property
     def script_path(self) -> Path:
