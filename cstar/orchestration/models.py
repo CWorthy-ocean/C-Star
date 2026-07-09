@@ -161,7 +161,7 @@ class BlueprintMeta(BaseModel):
     name: RequiredString
     """A unique, user-friendly name for this blueprint."""
 
-    application: str
+    application: RequiredString
     """The process type to be executed by the blueprint."""
 
     schema_version: str = "1.0.0"
@@ -180,7 +180,7 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: str
+    application: RequiredString
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet
