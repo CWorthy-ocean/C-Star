@@ -14,7 +14,7 @@ import pytest
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.roms_marbl.app import RomsMarblRunner, main
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import ContinuanceTransform
+from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
 from cstar.entrypoint.config import (
     JobConfig,
@@ -936,7 +936,7 @@ def test_worker_main_exec_continue_from(
         attribute is updated.
         """
         self.add_state(ExecutionStatus.COMPLETED)
-        assert ContinuanceTransform.suffix() in str(self.request.blueprint_uri)
+        assert ContinuanceDirective.suffix() in str(self.request.blueprint_uri)
         return self.result
 
     # don't let it perform any real work; mock out RomsMarblRunner
@@ -1055,7 +1055,7 @@ def test_worker_main_preprocessor_args_parsed(
 
     # verify the blueprint uri was modified by preprocessing prior to invocation
     assert modified_uri != str(bp_path)
-    assert ContinuanceTransform.suffix() in modified_uri
+    assert ContinuanceDirective.suffix() in modified_uri
 
     # verify initial conditions now point to the --continue-from location
     blueprint = deserialize(modified_uri, RomsMarblBlueprint)
