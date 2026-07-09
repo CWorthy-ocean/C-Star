@@ -840,7 +840,6 @@ class RomsMarblInputData(InputData):
             resource = Resource(location=paths, partitioned=False)
             getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
 
-        # TODO: Update self._settings_compile_time with related forcing parameter sets and cppdefs for surface forcing
         if frc is not None and hasattr(frc, "use_coarse_grid"):
             interp_frc = 1 if frc.use_coarse_grid else 0
         else:
@@ -1012,8 +1011,6 @@ class RomsMarblInputData(InputData):
         else:
             resource = Resource(location=paths, partitioned=False)
             getattr(self.blueprint_elements.forcing, subkey).data.append(resource)
-
-        # TODO: Update self._settings_compile_time with related forcing parameter sets and cppdefs
 
         if "forcing" not in self._settings_run_time:
             self._settings_run_time["forcing"] = {}

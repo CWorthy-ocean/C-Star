@@ -204,9 +204,17 @@ Ranked roughly by what's worth doing next:
    audit). The raw-URL template-fetch path
    (`raw.githubusercontent.com/.../main/templates/...`) only resolves post-merge and is
    unverified against the real remote.
-6. **Two compile-time-settings TODOs in `input_data.py`** (~L843, ~L1016): surface and
-   boundary forcing generation don't yet update `self._settings_compile_time` with their
-   related cppdefs — flagged in-code as real unfinished wiring, not just a note.
+6. ~~Two compile-time-settings TODOs in `input_data.py`~~ **INVESTIGATED AND REMOVED
+   (2026-07-09):** both comments predated (2026-01-12/21) the code that resolves them.
+   The surface-forcing one sits directly above code (added 2026-06-05) that already sets
+   `cppdefs.sal_restore`/`co2_tvarying` for the only two cases that exist today — the
+   comment was just never deleted. The boundary-forcing one has no evident target: every
+   boundary-related cppdefs flag in `templates/compile-time/cppdefs.opt.j2` (`OBC_*`,
+   `M2_FRC_BRY`, `M3_FRC_BRY`, `T_FRC_BRY`, `Z_FRC_BRY`) is either a static default or
+   driven by `open_boundaries` at the domain level, not by boundary-forcing type
+   (physics/bgc) — inferred from the current template, not confirmed with a ROMS-MARBL
+   domain expert, but no missing wiring was found. Both comments deleted; 488 tests still
+   green.
 7. **Stale docstring** in `forge/spec_config.py` (L42-44) still says "this module is not
    yet wired into `ForgeExecutor`" — it has been for a while now; delete/update.
 8. **`examples/spec_config.yml` / `spec_config2.yml` / `spec_config3.yml`** still stamp
