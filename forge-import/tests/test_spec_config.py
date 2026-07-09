@@ -157,7 +157,10 @@ def test_content_hash_round_trips_through_yaml(tmp_path):
 
 
 def test_engine_warns_on_hash_mismatch(tmp_path):
-    from cstar_forge.forge.spec_config_engine import process_spec_config, verify_content_hash
+    from cstar_forge.forge.spec_config_engine import (
+        process_spec_config,
+        verify_content_hash,
+    )
 
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "spec_config.yml")
@@ -319,14 +322,62 @@ def test_sources_to_forcing_override_converts_custom_forcing():
     assert ov["forcing"]["tidal"][0]["ntides"] == 15
 
 
+def test_forcing_override_coerces_enums_to_strings():
+    """Regression: enum-typed item fields (SurfaceType, BoundaryType, BgcInterpMethod,
+    ClimatologyMode, …) must be dumped as plain strings, not enum instances. Enum
+    instances leaked into output filenames (f"{key}-{type}") and into roms-tools'
+    SafeDumper (→ 'cannot represent an object'). The bridge dumps with mode="json".
+    """
+    import enum
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar_forge.forge.spec_config_engine import sources_to_forcing_override
+
+    cfg = _build(forcing_inputs=cat.forcing_data("glorys-era5-unified"))
+    ov = sources_to_forcing_override(cfg)
+
+    def _assert_no_enums(obj, path="ov"):
+        assert not isinstance(obj, enum.Enum), (
+            f"enum instance leaked at {path}: {obj!r}"
+        )
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                _assert_no_enums(v, f"{path}[{k!r}]")
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                _assert_no_enums(v, f"{path}[{i}]")
+
+    _assert_no_enums(ov)
+    # Spot-check the field that produced the original warning.
+    assert ov["forcing"]["surface"][0]["type"] == "physics"
+    assert type(ov["forcing"]["surface"][0]["type"]) is str
+
+
+def test_global_enum_representer_handles_safedumper_subclass():
+    """Insurance: importing cstar_forge.forge registers a global Enum representer so any
+    Forge enum reaching a SafeDumper (or a subclass, as roms-tools' NoAliasDumper is)
+    serializes as its value rather than raising 'cannot represent an object'.
+    """
+    import cstar_forge.forge  # noqa: F401  (side effect: registers the representer)
+    from cstar_forge.forge.spec_config import SurfaceType
+
+    class _NoAliasDumper(yaml.SafeDumper):  # mirrors roms-tools' dumper shape
+        pass
+
+    assert (
+        yaml.dump({"type": SurfaceType.PHYSICS}, Dumper=_NoAliasDumper).strip()
+        == "type: physics"
+    )
+
+
 def test_forcing_override_used_by_input_data(tmp_path):
     """When forcing_override is provided, RomsMarblInputData uses it instead of
     model_spec.inputs — the input_list reflects the override, not the defaults.
     """
     from unittest.mock import MagicMock, patch
 
-    from cstar_forge.forge import input_data as id_mod
     from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar_forge.forge import input_data as id_mod
 
     fdata = cat.forcing_data("glorys-era5-unified")
     override = {

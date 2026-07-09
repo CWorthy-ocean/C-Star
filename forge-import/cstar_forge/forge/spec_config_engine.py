@@ -102,7 +102,12 @@ def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any]:
         return d
 
     def _item(item) -> dict[str, Any]:
-        d = item.model_dump(exclude={"source"})
+        # mode="json" coerces enum-typed fields (SurfaceType, BoundaryType, …) to their
+        # string values. Plain model_dump() would leave them as enum *instances*, which
+        # then leak into output filenames (f"{key}-{type}") and into roms-tools' SafeDumper
+        # (which cannot represent a Forge enum) → the "cannot represent an object" warning.
+        # Dates are NOT carried here (injected later via `extra`), so json-coercion is safe.
+        d = item.model_dump(exclude={"source"}, mode="json")
         d["source"] = _src(item.source)
         return {k: v for k, v in d.items() if v is not None}
 
@@ -113,7 +118,7 @@ def sources_to_forcing_override(cfg: SpecConfig) -> dict[str, Any]:
         # here is what lets authored/UI IC choices actually reach input_data —
         # previously only source/bgc_source were propagated, so any other IC field
         # set in the wizard was silently dropped on the SpecConfig path.
-        d = spec.model_dump(exclude={"source", "bgc_source"})
+        d = spec.model_dump(exclude={"source", "bgc_source"}, mode="json")
         d["source"] = _src(spec.source)
         if spec.bgc_source:
             d["bgc_source"] = _src(spec.bgc_source)

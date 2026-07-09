@@ -17,25 +17,24 @@ Tests cover:
 - configure_build / build
 - deep-merge helper and BlueprintStage
 """
+
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import cstar.applications.roms_marbl.models as cstar_models
 import pytest
 import xarray as xr
 import yaml
-from pydantic import ValidationError
-
-import cstar.applications.roms_marbl.models as cstar_models
 from cstar.orchestration.models import Resource
+from pydantic import ValidationError
 
 import cstar_forge
 from cstar_forge import models as forge_models
 from cstar_forge.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.spec_config_resolve import build_spec_config
-
 
 _MODEL_DIR = (
     Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
@@ -44,7 +43,8 @@ _MODEL_DIR = (
 
 def _make_builder(args, **overrides):
     """Single construction point: build a resolved SpecConfig from the bundled ModelSpec
-    plus a temp host, then construct the executor the canonical way."""
+    plus a temp host, then construct the executor the canonical way.
+    """
     merged = {**args, **overrides}
     ob = merged["open_boundaries"]
     part = merged["partitioning"]
@@ -110,7 +110,8 @@ def _create_grid_mock():
 @pytest.fixture(autouse=True)
 def mock_grid():
     """Autouse: the executor still builds the grid in model_post_init via rt.Grid,
-    so keep it mocked. Tests that need the mock can request it by name."""
+    so keep it mocked. Tests that need the mock can request it by name.
+    """
     with patch("cstar_forge.forge.executor.rt.Grid") as mg:
         mg.return_value = _create_grid_mock()
         yield mg
@@ -204,18 +205,20 @@ class TestForgeExecutorInitialization:
         capsys,
     ):
         """Test initialization prints planned NetCDF output list (from the resolved
-        forcing_override, not the catalog ModelSpec)."""
+        forcing_override, not the catalog ModelSpec).
+        """
         _make_builder(minimal_cstar_spec_builder_args)
 
         stdout = capsys.readouterr().out
         assert "ForgeExecutor: planned NetCDF outputs" in stdout
         assert "_grid.nc" in stdout
         assert "_initial_conditions.nc" in stdout
-        # Forcing stems come from the resolved forcing categories/types (enum reprs,
-        # dots normalized to underscores by netcdf_filename_component).
-        assert "_surface-SurfaceType_PHYSICS.nc" in stdout
-        assert "_surface-SurfaceType_BGC.nc" in stdout
-        assert "_boundary-BoundaryType_PHYSICS.nc" in stdout
+        # Forcing stems come from the resolved forcing categories/types. The type is the
+        # enum *value* (e.g. "physics"/"bgc"), not the enum repr — the bridge dumps with
+        # mode="json", so filenames no longer leak "SurfaceType.PHYSICS".
+        assert "_surface-physics.nc" in stdout
+        assert "_surface-bgc.nc" in stdout
+        assert "_boundary-physics.nc" in stdout
         assert "_tidal.nc" in stdout
         planned_section = stdout.split("ForgeExecutor: planned NetCDF outputs", 1)[
             1
@@ -233,10 +236,9 @@ class TestForgeExecutorInitialization:
 
         with pytest.raises(ValidationError) as exc_info:
             _make_builder(minimal_cstar_spec_builder_args)
-        assert (
-            "start_date must precede end_date" in str(exc_info.value)
-            or "end_date must be after start_date" in str(exc_info.value)
-        )
+        assert "start_date must precede end_date" in str(
+            exc_info.value
+        ) or "end_date must be after start_date" in str(exc_info.value)
 
     def test_validation_end_date_equals_start_date(
         self, minimal_cstar_spec_builder_args
@@ -247,10 +249,9 @@ class TestForgeExecutorInitialization:
 
         with pytest.raises(ValidationError) as exc_info:
             _make_builder(minimal_cstar_spec_builder_args)
-        assert (
-            "start_date must precede end_date" in str(exc_info.value)
-            or "end_date must be after start_date" in str(exc_info.value)
-        )
+        assert "start_date must precede end_date" in str(
+            exc_info.value
+        ) or "end_date must be after start_date" in str(exc_info.value)
 
 
 class TestVSpongeDefault:
@@ -359,7 +360,8 @@ class TestForgeExecutorModelPostInit:
         self, minimal_cstar_spec_builder_args, mock_grid
     ):
         """The default ETOPO5 source injects nothing — roms-tools fetches ETOPO5 itself,
-        so grid_kwargs must reach rt.Grid without a ``topography_source`` key."""
+        so grid_kwargs must reach rt.Grid without a ``topography_source`` key.
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         assert builder.topography_source == "ETOPO5"
@@ -371,7 +373,8 @@ class TestForgeExecutorModelPostInit:
     ):
         """SRTM15 is staged and its {'name','path'} dict is injected into grid_kwargs
         BEFORE rt.Grid is called. This is the load-bearing wiring whose failure is silent
-        (roms-tools would otherwise fall back to ETOPO5)."""
+        (roms-tools would otherwise fall back to ETOPO5).
+        """
         args = minimal_cstar_spec_builder_args
         cfg = build_spec_config(
             model_dir=_MODEL_DIR,
@@ -385,7 +388,9 @@ class TestForgeExecutorModelPostInit:
         )
         # Drive an SRTM15 spec (the bundled ModelSpec defaults to ETOPO5).
         cfg = cfg.model_copy(
-            update={"domain": cfg.domain.model_copy(update={"topography_source": "SRTM15"})}
+            update={
+                "domain": cfg.domain.model_copy(update={"topography_source": "SRTM15"})
+            }
         )
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-srtm15-"))
         host = HostPaths(
@@ -413,9 +418,7 @@ class TestForgeExecutorModelPostInit:
 
         # The preconfig blueprint was persisted during initialization, so it loads back.
         assert builder.blueprint_from_file is not None
-        assert isinstance(
-            builder.blueprint_from_file, cstar_models.RomsMarblBlueprint
-        )
+        assert isinstance(builder.blueprint_from_file, cstar_models.RomsMarblBlueprint)
 
 
 class TestForgeExecutorGetDs:
@@ -612,18 +615,17 @@ class TestForgeExecutorGenerateInputs:
 class TestForgeExecutorBuildAndRun:
     """Tests for configure_build."""
 
-    def test_build_updates_compile_time_location(
-        self, minimal_cstar_spec_builder_args
-    ):
+    def test_build_updates_compile_time_location(self, minimal_cstar_spec_builder_args):
         """Test that configure_build() updates compile_time.location in blueprint."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         expected_code_output_dir = builder.compile_time_code_dir
         expected_location = str(expected_code_output_dir.resolve())
 
-        with patch(
-            "cstar_forge.forge.executor.render_roms_settings"
-        ) as mock_render, patch("cstar_forge.forge.executor.write_roms_namelist"):
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
             mock_render.return_value = {
                 "location": expected_location,
                 "filter": {"files": ["test.opt"]},
@@ -643,9 +645,10 @@ class TestForgeExecutorBuildAndRun:
 
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        with patch(
-            "cstar_forge.forge.executor.render_roms_settings"
-        ) as mock_render, patch("cstar_forge.forge.executor.write_roms_namelist"):
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
                 "filter": {"files": ["test.opt"]},
@@ -662,9 +665,10 @@ class TestForgeExecutorBuildAndRun:
 
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        with patch(
-            "cstar_forge.forge.executor.render_roms_settings"
-        ) as mock_render, patch("cstar_forge.forge.executor.write_roms_namelist"):
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
                 "filter": {"files": ["test.opt"]},
@@ -683,16 +687,16 @@ class TestForgeExecutorBuildAndRun:
                 assert "compile_time" in blueprint_data["code"]
                 assert "location" in blueprint_data["code"]["compile_time"]
 
-    def test_build_stages_compile_time_templates(
-        self, minimal_cstar_spec_builder_args
-    ):
+    def test_build_stages_compile_time_templates(self, minimal_cstar_spec_builder_args):
         """configure_build() stages the compile-time templates (via C-Star
-        AdditionalCode) and renders from that staged directory."""
+        AdditionalCode) and renders from that staged directory.
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        with patch(
-            "cstar_forge.forge.executor.render_roms_settings"
-        ) as mock_render, patch("cstar_forge.forge.executor.write_roms_namelist"):
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
                 "filter": {"files": ["test.opt"]},
@@ -720,7 +724,8 @@ class TestForgeExecutorBuildAndRun:
         self, minimal_cstar_spec_builder_args
     ):
         """The (unpatched) cfg->AdditionalCode-args mapping forwards the git ref from
-        code.templates_* verbatim — the Forge side of the fetch that CI can't run live."""
+        code.templates_* verbatim — the Forge side of the fetch that CI can't run live.
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         for stage in ("compile_time", "run_time"):
@@ -794,9 +799,7 @@ class TestForgeExecutorPathBlueprint:
             builder.path_blueprint(stage="invalid_stage")
         assert "stage must be one of" in str(exc_info.value)
 
-    def test_path_blueprint_uses_blueprint_state(
-        self, minimal_cstar_spec_builder_args
-    ):
+    def test_path_blueprint_uses_blueprint_state(self, minimal_cstar_spec_builder_args):
         """Test path_blueprint uses blueprint state when stage is None."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
         builder.blueprint.state = "postconfig"
@@ -983,10 +986,9 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
             with pytest.raises(RuntimeError) as exc_info:
                 builder.generate_inputs(clobber=True)
-            assert (
-                "_settings_compile_time" in str(exc_info.value)
-                or "Blueprint mismatch" in str(exc_info.value)
-            )
+            assert "_settings_compile_time" in str(
+                exc_info.value
+            ) or "Blueprint mismatch" in str(exc_info.value)
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_nesting_info_serialized_to_blueprint_dict(
