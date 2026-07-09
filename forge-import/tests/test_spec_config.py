@@ -376,10 +376,8 @@ def test_forcing_override_used_by_input_data(tmp_path):
     """
     from unittest.mock import MagicMock, patch
 
-    from cstar_forge.domain_catalog import default_catalog as cat
     from cstar_forge.forge import input_data as id_mod
 
-    fdata = cat.forcing_data("glorys-era5-unified")
     override = {
         "initial_conditions": {"source": {"name": "GLORYS", "climatology": False}},
         "forcing": {

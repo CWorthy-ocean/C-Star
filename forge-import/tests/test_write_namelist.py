@@ -7,29 +7,36 @@ run-time settings dict is written to ``namelist.nml`` and read back with
 ``f90nml`` to assert the key renames, per-tracer array expansion, forcing-file
 assembly, MARBL string-array emission, and the array-bounds warning.
 """
-from pathlib import Path
-import warnings
 
+import warnings
+from pathlib import Path
+
+import f90nml
 import pytest
 import yaml
-import f90nml
+from cstar.roms.namelist import (
+    MARBL_DIAGNOSTICS_TO_WRITE_MAX,
+    MARBL_TRACERS_TO_WRITE_MAX,
+    _namelist_str_list,
+)
 
 import cstar_forge
 from cstar_forge.forge.settings import write_roms_namelist
-from cstar.roms.namelist import (
-    _namelist_str_list,
-    MARBL_TRACERS_TO_WRITE_MAX,
-    MARBL_DIAGNOSTICS_TO_WRITE_MAX,
-)
 
-_TPL = (Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec"
-        / "cson_roms-marbl_v0.1" / "templates")
+_TPL = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "cson_roms-marbl_v0.1"
+    / "templates"
+)
 
 
 def _base_settings():
     """Load the real run-time defaults and fill the dynamic fields that
     ``generate_inputs()`` / ``_init_settings_run_time`` would populate, yielding
-    a complete run-time settings dict ready for ``write_roms_namelist``."""
+    a complete run-time settings dict ready for ``write_roms_namelist``.
+    """
     rt = yaml.safe_load((_TPL / "run-time-defaults.yml").read_text())
     rt["title"] = {"casename": "test_case"}
     rt["output_root_name"] = {"output_root_name": "/run/out"}
@@ -63,9 +70,16 @@ def test_namelist_file_written(tmp_path):
 
 
 def test_core_groups_present(nml):
-    for group in ("simulation_name_settings", "time_stepping", "s_coord",
-                  "param_settings", "initial_conditions", "forcing_files",
-                  "bgc_settings", "marbl_biogeochemistry_settings"):
+    for group in (
+        "simulation_name_settings",
+        "time_stepping",
+        "s_coord",
+        "param_settings",
+        "initial_conditions",
+        "forcing_files",
+        "bgc_settings",
+        "marbl_biogeochemistry_settings",
+    ):
         assert group in nml, f"missing &{group}"
 
 
@@ -73,9 +87,11 @@ def test_core_groups_present(nml):
 # Key renames (dict/YAML key -> namelist key)
 # ---------------------------------------------------------------------------
 def test_key_renames(nml):
-    assert nml["s_coord"]["hc"] == 250.0                       # tcline -> hc
-    assert nml["grid_settings"]["grdname"] == "/in/grid.nc"    # grid_file -> grdname
-    assert nml["initial_conditions"]["inifile"] == "/in/init.nc"  # initial_file -> inifile
+    assert nml["s_coord"]["hc"] == 250.0  # tcline -> hc
+    assert nml["grid_settings"]["grdname"] == "/in/grid.nc"  # grid_file -> grdname
+    assert (
+        nml["initial_conditions"]["inifile"] == "/in/init.nc"
+    )  # initial_file -> inifile
     assert nml["simulation_name_settings"]["title"] == "test_case"  # casename -> title
     # blk_frc.interp_frc (0) -> interp_bulk_frc (logical False) in merged surf_frc_settings
     assert nml["surf_frc_settings"]["interp_bulk_frc"] is False
@@ -127,7 +143,10 @@ def test_per_tracer_arrays_expand_to_n_tracers(tmp_path):
 def test_frcfile_canonical_order_non_none(nml):
     # surface, boundary, river set (surface_bgc/boundary_bgc/tidal left None)
     assert nml["forcing_files"]["frcfiles"] == [
-        "/in/surf.nc", "/in/bry.nc", "/in/river.nc"]
+        "/in/surf.nc",
+        "/in/bry.nc",
+        "/in/river.nc",
+    ]
 
 
 def test_frcfile_omitted_when_all_none(tmp_path):
@@ -158,14 +177,18 @@ def test_marbl_empty_list_renders_as_empty_string(tmp_path):
 
 def test_marbl_over_bounds_warns(tmp_path):
     rt = _base_settings()
-    rt["marbl_bgc"]["marbl_tracers_to_write"] = [f"T{i}" for i in range(MARBL_TRACERS_TO_WRITE_MAX + 1)]
+    rt["marbl_bgc"]["marbl_tracers_to_write"] = [
+        f"T{i}" for i in range(MARBL_TRACERS_TO_WRITE_MAX + 1)
+    ]
     with pytest.warns(UserWarning, match="marbl_tracers_to_write.*overflow"):
         write_roms_namelist(rt, tmp_path, n_tracers=34)
 
 
 def test_marbl_within_bounds_does_not_warn(tmp_path):
     rt = _base_settings()
-    rt["marbl_bgc"]["marbl_diagnostics_to_write"] = [f"D{i}" for i in range(MARBL_DIAGNOSTICS_TO_WRITE_MAX)]
+    rt["marbl_bgc"]["marbl_diagnostics_to_write"] = [
+        f"D{i}" for i in range(MARBL_DIAGNOSTICS_TO_WRITE_MAX)
+    ]
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
         write_roms_namelist(rt, tmp_path, n_tracers=34)  # must not raise

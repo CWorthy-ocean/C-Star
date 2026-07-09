@@ -49,7 +49,7 @@ test_fail() {
 setup_test_env() {
   echo "Setting up test environment in $TEST_DIR"
   cd "$TEST_DIR"
-  
+
   # Create minimal environment.yml
   cat > environment.yml << 'EOF'
 name: test-cstar-forge
@@ -99,7 +99,7 @@ test_script_exists() {
 test_parse_env_file() {
   test_start "Script can parse environment.yml"
   setup_test_env
-  
+
   KERNEL_NAME=$(awk -F': *' '$1=="name"{print $2; exit}' environment.yml 2>/dev/null)
   if [[ "$KERNEL_NAME" == "test-cstar-forge" ]]; then
     test_pass "Successfully parsed environment name from environment.yml"
@@ -112,7 +112,7 @@ test_parse_env_file() {
 test_os_detection() {
   test_start "OS detection works"
   setup_test_env
-  
+
   # Source the relevant part of the script to test OS detection
   OS_TYPE=""
   case "$(uname -s)" in
@@ -126,7 +126,7 @@ test_os_detection() {
       OS_TYPE="linux"
       ;;
   esac
-  
+
   if [[ -n "$OS_TYPE" ]]; then
     test_pass "OS detection works (detected: $OS_TYPE)"
   else
@@ -138,18 +138,18 @@ test_os_detection() {
 test_missing_package_manager() {
   test_start "Script handles missing package manager gracefully"
   setup_test_env
-  
+
   # Temporarily hide conda and micromamba
   export PATH_SAVE="$PATH"
   export PATH="/usr/bin:/bin"
-  
+
   # Run script and check for appropriate error message
   if ./dev-setup.sh 2>&1 | grep -q "Neither micromamba nor conda is available"; then
     test_pass "Script correctly detects missing package managers"
   else
     test_fail "Script did not detect missing package managers"
   fi
-  
+
   export PATH="$PATH_SAVE"
 }
 
@@ -157,7 +157,7 @@ test_missing_package_manager() {
 test_clean_flag() {
   test_start "--clean flag parsing"
   setup_test_env
-  
+
   # Check if script accepts --clean flag
   if ./dev-setup.sh --clean --help 2>&1 | grep -q "clean" || true; then
     test_pass "--clean flag is accepted"
@@ -171,7 +171,7 @@ test_clean_flag() {
 test_mock_package() {
   test_start "Mock package structure"
   setup_test_env
-  
+
   if [[ -f "cstar_forge/__init__.py" ]] && [[ -f "setup.py" ]]; then
     test_pass "Mock package structure is correct"
   else
@@ -183,7 +183,7 @@ test_mock_package() {
 test_env_file_valid() {
   test_start "environment.yml is valid"
   setup_test_env
-  
+
   # Try to parse with Python (if available) or just check structure
   if command -v python3 >/dev/null 2>&1; then
     if python3 -c "import yaml; yaml.safe_load(open('environment.yml'))" 2>/dev/null; then

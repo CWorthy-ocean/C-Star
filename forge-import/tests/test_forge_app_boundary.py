@@ -27,11 +27,13 @@ _PKG = Path(cstar_forge.__file__).parent
 
 def _module_path(short_name: str) -> Path:
     """Resolve a forge-app module wherever it currently lives (top-level or under the
-    ``forge/`` package), so this guard survives the incremental Phase-C relocation."""
+    ``forge/`` package), so this guard survives the incremental Phase-C relocation.
+    """
     for cand in (_PKG / "forge" / f"{short_name}.py", _PKG / f"{short_name}.py"):
         if cand.exists():
             return cand
     raise FileNotFoundError(f"forge-app module not found: {short_name}")
+
 
 # Modules that make up (or will make up) the relocatable forge application.
 _FORGE_APP_MODULES = (

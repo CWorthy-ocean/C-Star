@@ -60,7 +60,9 @@ def test_github_catalog_uses_org_and_repo():
             catalog_root=url,
             suppress_validation=True,
         )
-    mock_fs.assert_called_once_with("github", org="CWorthy-ocean", repo="cstar-forge", sha="main")
+    mock_fs.assert_called_once_with(
+        "github", org="CWorthy-ocean", repo="cstar-forge", sha="main"
+    )
     assert catalog.catalog_root == Path(".")
     assert catalog._fs is instance
 

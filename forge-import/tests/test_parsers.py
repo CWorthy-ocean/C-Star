@@ -10,11 +10,11 @@ from cstar_forge.parsers import (
     NotebookEntry,
     NotebookList,
     NotebookSection,
+    _parse_notebook_entries,
     load_app_config,
     load_roms_tools_object,
     load_yaml_params,
     normalize_file_type,
-    _parse_notebook_entries,
 )
 
 
@@ -98,7 +98,9 @@ def test_load_roms_tools_object_grid_only(tmp_path):
 
 def test_load_roms_tools_object_other_class(tmp_path):
     yaml_path = tmp_path / "forcing.yml"
-    yaml_path.write_text("---\nGrid:\n  nx: 10\nTidalForcing:\n  source: test\n", encoding="utf-8")
+    yaml_path.write_text(
+        "---\nGrid:\n  nx: 10\nTidalForcing:\n  source: test\n", encoding="utf-8"
+    )
 
     called = {}
 
@@ -129,7 +131,9 @@ def test_load_roms_tools_object_multiple_sections(tmp_path):
         "---\nGrid:\n  nx: 10\nTidalForcing:\n  source: test\nSurfaceForcing:\n  source: test\n",
         encoding="utf-8",
     )
-    module = SimpleNamespace(TidalForcing=object(), SurfaceForcing=object(), Grid=object())
+    module = SimpleNamespace(
+        TidalForcing=object(), SurfaceForcing=object(), Grid=object()
+    )
     with pytest.raises(ValueError, match="only one non-Grid section"):
         load_roms_tools_object(yaml_path, roms_tools_module=module)
 
@@ -193,7 +197,10 @@ def test_parameters_config_model():
         notebook_list=notebook_list,
     )
     assert params.dask_cluster_kwargs.account == "m4632"
-    assert next(params.notebook_list.iter_entries()).notebook_name == "regional-domain-sizing"
+    assert (
+        next(params.notebook_list.iter_entries()).notebook_name
+        == "regional-domain-sizing"
+    )
 
 
 def test_load_app_config(tmp_path):

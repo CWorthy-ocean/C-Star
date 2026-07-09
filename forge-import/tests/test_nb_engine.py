@@ -4,7 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 from cstar_forge import nb_engine
-from cstar_forge import parsers
 
 
 def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
@@ -12,8 +11,12 @@ def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
 
     calls = []
 
-    def fake_execute_notebook(input_path, output_path, parameters, kernel_name=None, **kwargs):
-        calls.append((input_path, output_path, parameters, kernel_name, kwargs.get("cwd")))
+    def fake_execute_notebook(
+        input_path, output_path, parameters, kernel_name=None, **kwargs
+    ):
+        calls.append(
+            (input_path, output_path, parameters, kernel_name, kwargs.get("cwd"))
+        )
 
     monkeypatch.setitem(
         __import__("sys").modules,
@@ -47,6 +50,7 @@ def test_run_notebook_calls_papermill(monkeypatch, tmp_path):
 
 def test_run_notebook_requires_papermill(monkeypatch, tmp_path):
     import builtins
+
     import nbformat
 
     notebook_path = tmp_path / "a.ipynb"
@@ -81,9 +85,15 @@ def test_run_notebook_replaces_markdown_placeholders(monkeypatch, tmp_path):
 
     captured = {}
 
-    def fake_execute_notebook(input_path, output_path_arg, parameters, kernel_name=None, **kwargs):
+    def fake_execute_notebook(
+        input_path, output_path_arg, parameters, kernel_name=None, **kwargs
+    ):
         cwd = kwargs.get("cwd")
-        read_path = Path(cwd) / input_path if cwd and not Path(input_path).is_absolute() else Path(input_path)
+        read_path = (
+            Path(cwd) / input_path
+            if cwd and not Path(input_path).is_absolute()
+            else Path(input_path)
+        )
         rendered = nbformat.read(str(read_path), as_version=4)
         captured["input_path"] = input_path
         captured["markdown"] = rendered.cells[0]["source"]

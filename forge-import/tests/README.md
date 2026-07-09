@@ -38,4 +38,3 @@ Tests are automatically run on:
 - Manual workflow dispatch
 
 See `.github/workflows/tests.yml` for CI configuration.
-
