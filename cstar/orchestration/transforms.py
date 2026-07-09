@@ -337,7 +337,7 @@ class TemplateFillTransform:
                 "Some templated values were not filled or placeholders were malformed."
             )
 
-        return step.model_validate_json(content)
+        return LiveStep.model_validate_json(content)
 
     def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
         """Apply template filling to a step's blueprint_overrides.
@@ -353,6 +353,14 @@ class TemplateFillTransform:
             A single-element iterable containing the updated step.
         """
         return (LiveStep.from_step(self._fill(step)),)
+
+    @property
+    def variable_resolver(self) -> Callable[[str], str] | None:
+        return self._variable_resolver
+
+    @property
+    def scoped_resolver(self) -> Callable[[str, str], str] | None:
+        return self._scoped_resolver
 
 
 class WorkplanTransformer(LoggingMixin):
@@ -375,7 +383,6 @@ class WorkplanTransformer(LoggingMixin):
         """Initialize the instance."""
         self.original = Workplan(**wp.model_dump(by_alias=True))
         self.fill_transform = fill_transform
-        self._transformed: Workplan | None = None
 
     @property
     def is_modified(self) -> bool:
@@ -385,10 +392,10 @@ class WorkplanTransformer(LoggingMixin):
         -------
         bool
         """
-        dump_a = self.original.model_dump()
-        dump_b = self.transformed.model_dump()
+        lhs = self.original.model_dump()
+        rhs = self.transformed.model_dump() if self.transformed else {}
 
-        return dump_a != dump_b
+        return lhs != rhs
 
     @property
     def transformed(self) -> Workplan:
@@ -553,8 +560,7 @@ class OverrideTransform(Transform[LiveStep]):
         Blueprint
             The blueprint with all overrides applied.
         """
-        overrides = overrides or {}
-        overrides = overrides.copy()
+        overrides = overrides.copy() if overrides else {}
 
         model = bp.model_dump(exclude_defaults=True, exclude_unset=True)
 

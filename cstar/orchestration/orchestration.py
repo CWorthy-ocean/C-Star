@@ -1,7 +1,7 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
@@ -353,7 +353,7 @@ class Planner(LoggingMixin):
     workplan: Workplan
     """The workplan to plan."""
 
-    graph: "DiGraph"
+    graph: "DiGraph[str]"
     """The graph used for task planning."""
 
     def __init__(
@@ -371,7 +371,7 @@ class Planner(LoggingMixin):
         self.graph = Planner._workplan_to_graph(workplan)
 
     @classmethod
-    def _workplan_to_graph(cls, workplan: Workplan) -> "DiGraph":
+    def _workplan_to_graph(cls, workplan: Workplan) -> "DiGraph[str]":
         """Convert a workplan into a graph for planning.
 
         Parameters
@@ -390,8 +390,8 @@ class Planner(LoggingMixin):
                 data[prereq].append(step.name)
 
         g = nx.DiGraph(data)
-        defaults = {
-            n.name: {
+        defaults: dict[str, dict[str, Status | Step | None]] = {
+            str(n.name): {
                 KEY_STATUS: Status.Unsubmitted,
                 KEY_STEP: LiveStep.from_step(n),
                 KEY_TASK: None,
@@ -401,7 +401,7 @@ class Planner(LoggingMixin):
         nx.set_node_attributes(g, values=defaults)
         return g
 
-    def flatten(self) -> Iterable[Step]:
+    def flatten(self) -> Sequence[Step]:
         """Return the planned steps in execution order.
 
         Returns
@@ -416,7 +416,7 @@ class Planner(LoggingMixin):
 
         keys = nx.topological_sort(self.graph)
         steps = self.retrieve_all(KEY_STEP, filter_fn=f)
-        return [steps[k] for k in keys]
+        return tuple(steps[k] for k in keys)
 
     @t.overload
     def store(self, n: str, key: t.Literal["status"], value: Status) -> None: ...

@@ -126,8 +126,10 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
                 succ_init_cond = successor.blueprint_overrides.get(
                     "initial_conditions", {}
                 )
-                ic_loc_successor = succ_init_cond.get("data", [{}])[0].get(  # type: ignore[union-attr,index,operator]
-                    "location", ""
+                ic_loc_successor = str(
+                    succ_init_cond.get("data", [{}])[0].get(  # type: ignore[union-attr,index,operator]
+                        "location", ""
+                    )
                 )
 
                 assert str(working_dir) in ic_loc_successor  # type: ignore[union-attr,index,operator]

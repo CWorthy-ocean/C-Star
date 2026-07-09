@@ -70,7 +70,6 @@ def preload_step(context: typer.Context, step_name: str) -> str:
             param_hint="step_name",
         )
 
-    set_ctxmap(context, "step", step)
     set_ctxmap(context, "live_step", LiveStep.from_step(step))
 
     return step_name

@@ -527,9 +527,9 @@ def test_template_fill_with_path_resolver_returns_new_instance(
     bound = original.with_scoped_resolver(_resolve)
 
     assert bound is not original
-    assert bound._scoped_resolver is not None
-    assert original._scoped_resolver is None
-    assert bound._variable_resolver is original._variable_resolver
+    assert bound.scoped_resolver is not None
+    assert original.scoped_resolver is None
+    assert bound.variable_resolver is original.variable_resolver
 
 
 def test_template_fill_with_path_resolver_unknown_purpose(
