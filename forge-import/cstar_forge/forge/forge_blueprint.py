@@ -247,6 +247,12 @@ FORGE_BLUEPRINT_VERSION = 2
 # across schema/field iteration; used by C-Star to route the blueprint to its application.
 DEFAULT_APPLICATION = "forge"
 
+# Default per-run artifact root. The bare root (no run-name subdirectory) is the
+# spec-default sentinel: ForgeBlueprint expands it to ``<root>/<name>`` on validation,
+# and host providers (Forge's ``config.resolve_host``; eventually C-Star) may rebase
+# default-form paths onto host scratch at run time.
+DEFAULT_WORKING_ROOT = "~/cstar-forge-data"
+
 
 class _Section(BaseModel):
     # Strict by default: an unknown key is a bug in the resolver or a stale file.
@@ -556,7 +562,9 @@ class ForgeBlueprint(_Section):
     # cppdefs, the emitted roms_marbl blueprint, build dirs) lands under here. Stored with a
     # sensible default but OVERRIDDEN at runtime by C-Star / the Forge executor for the host.
     # Host/location only -> excluded from content_hash (see _HASH_EXCLUDE).
-    working_dir: str = "~/cstar-forge-data"
+    # The bare root is a sentinel: a validator expands it to ``<root>/<name>`` so each
+    # run gets its own subdirectory (see ``_default_working_dir_includes_name``).
+    working_dir: str = DEFAULT_WORKING_ROOT
     identity: Identity
     run: RunWindow
     domain: Domain
@@ -573,6 +581,18 @@ class ForgeBlueprint(_Section):
     code: Code
     composition: Composition = Field(default_factory=Composition)
     provenance: Provenance = Field(default_factory=Provenance)
+
+    @model_validator(mode="after")
+    def _default_working_dir_includes_name(self) -> ForgeBlueprint:
+        """Expand a bare default ``working_dir`` to include the run name.
+
+        Only the sentinel (the bare ``DEFAULT_WORKING_ROOT``, as stored by older files
+        or an unset field) is expanded to ``<root>/<name>``; any other value is a
+        deliberate choice and passes through untouched.
+        """
+        if self.working_dir.rstrip("/") == DEFAULT_WORKING_ROOT:
+            self.working_dir = f"{DEFAULT_WORKING_ROOT}/{self.name}"
+        return self
 
     # ---- derived naming (single source of truth: identity + dates + n_procs) ----
     @property

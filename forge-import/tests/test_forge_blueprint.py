@@ -66,6 +66,26 @@ def test_naming_is_derived_not_stored():
     assert cfg.output_root_name("/scratch").startswith("/scratch/cson_roms-marbl")
 
 
+def test_default_working_dir_includes_run_name():
+    from cstar_forge.forge.forge_blueprint import DEFAULT_WORKING_ROOT
+
+    cfg = _build()
+    assert cfg.working_dir == f"{DEFAULT_WORKING_ROOT}/{cfg.name}"
+
+
+def test_bare_default_working_dir_expands_and_explicit_survives():
+    from cstar_forge.forge.forge_blueprint import DEFAULT_WORKING_ROOT
+
+    cfg = _build()
+    # an old file storing the bare default root gains the run-name layer on load
+    data = cfg.model_dump(mode="json")
+    data["working_dir"] = DEFAULT_WORKING_ROOT
+    assert ForgeBlueprint(**data).working_dir == f"{DEFAULT_WORKING_ROOT}/{cfg.name}"
+    # a deliberate non-default path passes through untouched
+    data["working_dir"] = "/custom/spot"
+    assert ForgeBlueprint(**data).working_dir == "/custom/spot"
+
+
 def test_forge_blueprint_is_portable_no_forge_or_cstar_imports():
     """forge_blueprint.py is the C-Star-relocatable blueprint model: it must depend on
     nothing from cstar_forge / cstar (only stdlib + pydantic + yaml).
@@ -1059,7 +1079,9 @@ class TestForgeBlueprintEngine:
         assert h.system
         # working_dir is the injected per-run artifact root; source_data_cache is the
         # shared host download cache. Both resolved from config, not the spec file.
-        assert str(h.working_dir).endswith("cstar-forge-data")
+        # The spec default carries a per-run subdirectory: <root>/<name>.
+        assert "cstar-forge-data" in str(h.working_dir)
+        assert str(h.working_dir).endswith(cfg.name)
         assert h.source_data_cache is not None
 
 

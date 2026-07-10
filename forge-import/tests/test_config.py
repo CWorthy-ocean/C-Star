@@ -307,6 +307,87 @@ class TestSystemLayoutRegistry:
         assert scratch == tmp_path / "scratch" / "cstar-forge-data" / "cstar-forge-run"
 
 
+class TestRelocateWorkingDir:
+    """Tests for relocate_working_dir (default-form paths rebase onto HPC scratch)."""
+
+    def test_default_path_rebases_to_scratch_on_perlmutter(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        env = {"SCRATCH": str(tmp_path / "scratch")}
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="NERSC_perlmutter",
+            env=env,
+            home=home,
+        )
+        assert wd == tmp_path / "scratch" / "cstar-forge-data" / "my-run"
+
+    def test_default_path_rebases_to_scratch_on_anvil(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="RCAC_anvil",
+            env=env,
+            home=home,
+        )
+        assert wd == tmp_path / "scratch" / "cstar-forge-data" / "my-run"
+
+    def test_anvil_falls_back_to_work_scratch(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        env = {"WORK": str(tmp_path / "work")}
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="RCAC_anvil",
+            env=env,
+            home=home,
+        )
+        assert wd == tmp_path / "work" / "scratch" / "cstar-forge-data" / "my-run"
+
+    def test_non_hpc_leaves_path_alone(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="MacOS",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == home / "cstar-forge-data" / "my-run"
+
+    def test_custom_path_passes_through_on_hpc(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        custom = tmp_path / "elsewhere" / "my-run"
+        wd = relocate_working_dir(
+            custom,
+            system_tag="NERSC_perlmutter",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == custom
+
+    def test_tilde_default_expands_then_rebases(self, tmp_path, monkeypatch):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        monkeypatch.setenv("HOME", str(home))
+        wd = relocate_working_dir(
+            "~/cstar-forge-data/my-run",
+            system_tag="NERSC_perlmutter",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == tmp_path / "scratch" / "cstar-forge-data" / "my-run"
+
+
 class TestGetDataPaths:
     """Tests for get_data_paths function."""
 

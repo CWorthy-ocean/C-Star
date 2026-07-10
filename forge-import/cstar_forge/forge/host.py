@@ -12,9 +12,10 @@ not resolution** — the app never detects the machine itself; a provider builds
   ``source_data_cache`` (big reference downloads, shared across runs).
 
 Providers: in this repo, Forge's disposable ``cstar_forge.config.resolve_host`` /
-``cstar_forge.run`` build it (``working_dir`` seeded from the spec's default, overridable
-per host). C-Star builds an equivalent on relocation. This module travels with the app;
-the resolver does not. Kept dependency-light (stdlib only).
+``cstar_forge.run`` build it (``working_dir`` seeded from the spec's default, rebased
+onto host scratch on HPC systems, overridable per host). C-Star builds an equivalent on
+relocation. This module travels with the app; the resolver does not. Kept
+dependency-light (stdlib only).
 """
 
 from __future__ import annotations

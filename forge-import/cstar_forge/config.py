@@ -519,11 +519,61 @@ machine_config = _load_machine_config_from_catalog(system)
 cluster_type = _default_cluster_type(system)
 
 
+def _hpc_scratch_data_root(system_tag: str, env: dict, home: Path) -> Path | None:
+    """Scratch-rooted ``cstar-forge-data`` base for HPC systems, ``None`` elsewhere.
+
+    Mirrors the env-var conventions of the system layouts above ($SCRATCH on
+    Perlmutter; $SCRATCH falling back to $WORK/scratch on Anvil). $SCRATCH is
+    per-user on both machines, so no extra username layer is inserted.
+    """
+    if system_tag == "NERSC_perlmutter":
+        return Path(env.get("SCRATCH", home / "scratch")) / "cstar-forge-data"
+    if system_tag == "RCAC_anvil":
+        work = Path(env.get("WORK", home / "work"))
+        return Path(env.get("SCRATCH", work / "scratch")) / "cstar-forge-data"
+    return None
+
+
+def relocate_working_dir(
+    working_dir,
+    *,
+    system_tag: str | None = None,
+    env: dict | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Rebase a default-form ``working_dir`` onto the host's scratch data root.
+
+    The ForgeBlueprint stores ``working_dir`` with a home-rooted default
+    (``~/cstar-forge-data/<name>``). On HPC systems that path belongs on scratch, so
+    any path under ``~/cstar-forge-data`` is rebased to
+    ``$SCRATCH/cstar-forge-data/<same relative part>``. Paths outside the default
+    root are a deliberate user choice and pass through untouched (expanded only).
+
+    This is a stand-in for C-Star's eventual runtime override of the spec's
+    ``working_dir``; keyword args exist for tests and default to the live host.
+    """
+    env = dict(os.environ) if env is None else env
+    home = Path.home() if home is None else Path(home)
+    system_tag = system if system_tag is None else system_tag
+
+    wd = Path(working_dir).expanduser()
+    scratch_root = _hpc_scratch_data_root(system_tag, env, home)
+    if scratch_root is None:
+        return wd
+    try:
+        rel = wd.relative_to(home / "cstar-forge-data")
+    except ValueError:
+        return wd
+    return scratch_root / rel
+
+
 def resolve_host(working_dir):
     """Build the forge application's ``HostPaths`` from auto-detected Forge config.
 
     ``working_dir`` is the per-run artifact root (typically the spec's ``working_dir``,
     expanded, or a host override); everything the executor produces lands under it.
+    Default-form paths (under ``~/cstar-forge-data``) are rebased onto host scratch on
+    HPC systems via :func:`relocate_working_dir`.
 
     This is Forge's **disposable** host provider: it auto-detects the machine (NERSC /
     RCAC / local) for the source-data cache + machine identity. When the forge
@@ -533,7 +583,7 @@ def resolve_host(working_dir):
     from cstar_forge.forge.host import HostPaths
 
     return HostPaths(
-        working_dir=Path(working_dir).expanduser(),
+        working_dir=relocate_working_dir(working_dir),
         source_data_cache=paths.source_data,
         system=system,
         machine_config=machine_config,
