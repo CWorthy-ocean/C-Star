@@ -16,7 +16,6 @@ from pydantic import (
     PlainSerializer,
     PrivateAttr,
     SerializationInfo,
-    SerializeAsAny,
     StringConstraints,
     ValidationInfo,
     WithJsonSchema,
@@ -253,8 +252,11 @@ class WorkplanState(StrEnum):
     """A workflow that has been validated."""
 
 
-class Step(BaseModel):
+class Step(ConfiguredBaseModel):
     """An individual unit of execution within a workplan."""
+
+    resolver: t.ClassVar[dict[str, type["Step"]]] = {}
+    """Subclass registry for type resolution during deserialization."""
 
     name: RequiredString
     """The user-friendly name of the step."""
@@ -312,8 +314,27 @@ class Step(BaseModel):
         """
         return slugify(self.name)
 
+    def __init_subclass__(cls, **kwargs: t.Any):
+        """Register `Step` subclasses with a unique _kind_ value that will be used
+        for discrimination during deserialization.
+        """
+        super().__init_subclass__(**kwargs)
+        resolution_field: t.Final[str] = "kind"
+        if hasattr(cls, resolution_field):
+            cls.resolver[cls._resolve_on_value()] = cls
 
-class Workplan(BaseModel):
+    @classmethod
+    def _resolve_on_value(cls) -> str:
+        """The unique discriminator value identifying a step subclass.
+
+        Returns
+        -------
+        str
+        """
+        return "step"
+
+
+class Workplan(PolymorphicBaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
@@ -322,7 +343,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: Sequence[SerializeAsAny[Step]] = Field(
+    steps: Sequence[Step] = Field(
         min_length=1,
         frozen=True,
     )
@@ -430,13 +451,28 @@ class Workplan(BaseModel):
 
         return value
 
-    @model_validator(mode="after")
-    def _model_validator(self) -> "Workplan":
+    @model_validator(mode="before")
+    @classmethod
+    def _model_validator(cls, data: t.Any) -> t.Any:
         """Validate attribute relationships."""
-        return self
+        if (
+            isinstance(data, dict)
+            and isinstance(data.get("steps"), list)
+            and len(data.get("steps", [])) > 0
+            and isinstance(data.get("steps", [None])[0], dict)
+        ):
+            step_data = t.cast("list[dict[str, t.Any]]", data["steps"])
+            if "kind" not in step_data[0]:
+                return data
+
+            data["steps"] = [
+                Step.resolver.get(s.get("kind", "step"), Step).model_validate(s)
+                for s in step_data
+            ]
+        return data
 
 
-class UserDefinedVariables(BaseModel):
+class UserDefinedVariables(ConfiguredBaseModel):
     """A collection of key-value pairs that provides validation of the static
     keys specified at design time and dynamically configured keys at runtime.
 

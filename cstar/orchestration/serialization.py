@@ -245,7 +245,11 @@ def model_to_yaml(model: SerializableModel) -> str:
     str
         The serialized model
     """
-    dumped = model.model_dump(exclude_unset=True, by_alias=True)
+    dumped = model.model_dump(
+        exclude_defaults=False,
+        by_alias=True,
+        polymorphic_serialization=True,
+    )
 
     # 'application' is required by the base Blueprint type for deserialization
     # routing; always include it even when it equals the subclass default.

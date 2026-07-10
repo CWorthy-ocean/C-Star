@@ -862,13 +862,13 @@ def test_workplan_yaml_serialize(
     assert "description" in yaml_doc
     assert "steps" in yaml_doc
     assert "state" in yaml_doc
-    assert "compute_environment" not in yaml_doc
+    assert "compute_environment" in yaml_doc
     assert "application" in yaml_doc
     assert "blueprint" in yaml_doc
-    assert "depends_on" not in yaml_doc
-    assert "blueprint_overrides" not in yaml_doc
-    assert "compute_overrides" not in yaml_doc
-    assert "workflow_overrides" not in yaml_doc
+    assert "depends_on" in yaml_doc
+    assert "blueprint_overrides" in yaml_doc
+    assert "compute_overrides" in yaml_doc
+    assert "workflow_overrides" in yaml_doc
 
 
 def test_workplan_yaml_deserialize(

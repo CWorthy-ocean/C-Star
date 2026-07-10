@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field, ValidationError
 
 from cstar.applications.plotter_app import PlotterBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
-from cstar.orchestration.models import Application, Workplan
+from cstar.orchestration.models import Application, Step, Workplan
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -156,6 +157,58 @@ def test_serialization_workplan_happy_path(
     assert workplan.steps[0].compute_overrides["num_nodes"] == 4
 
 
+def test_serialization_polymorphic_workplan_deserialization(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    bp_templates_dir: Path,
+    default_blueprint_path: str,
+) -> None:
+    """Verify that a workplan serialized with steps of a subclass of `Step` results
+    in deserialization to the correct subclass/type.
+    """
+    template_file = "workplan.yaml"
+    template_path = wp_templates_dir / template_file
+
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    bp_path.write_text(bp_tpl_path.read_text())
+
+    wp_content = template_path.read_text()
+    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
+
+    wp_path = tmp_path / template_file
+    wp_path.write_text(wp_content)
+
+    wp = deserialize(wp_path, Workplan)
+
+    # convert steps to live-steps and store on a workplan
+    all_steps: list[Step | LiveStep] = [
+        LiveStep(**wp.steps[0].model_dump(by_alias=True)),
+        LiveStep.from_step(wp.steps[1]),
+        LiveStep.model_validate(wp.steps[2].model_dump(by_alias=True)),
+        wp.steps[3],
+    ]
+
+    poly_path = tmp_path / "live_workplan.yaml"
+    # NOTE: we shouldn't have intermingled step types, but the deserialization should
+    # support correctly identifying each individual item in the list
+    poly_wp = Workplan(**wp.model_dump(exclude={"steps"}), steps=all_steps)
+
+    assert serialize(poly_path, poly_wp)
+
+    # confirm that the subclass LiveStep was serialized
+    wp_content = poly_path.read_text()
+    print(wp_content)
+    assert "working_dir" in wp_content
+
+    # now, deserialize and confirm the workplan contains LiveStep
+    result = deserialize(poly_path, Workplan)
+
+    for step in result.steps[:3]:
+        assert isinstance(step, LiveStep)
+    assert not isinstance(result.steps[-1], LiveStep)
+
+
 def test_serialization_workplan_compute_env(
     tmp_path: Path,
     fill_workplan_template: Callable[[dict[str, t.Any]], str],
@@ -241,11 +294,12 @@ def test_serialization_workplan_steps_with_directives(
     wp = deserialize(write_to, Workplan)
 
     step = wp.steps[-1]
+    directives = t.cast("dict[str, dict[str, str]]", step.directives)
 
     # confirm the directive has been loaded
-    assert step.directives
-    assert "continue-from" in step.directives
-    assert "path" in step.directives["continue-from"]
+    assert directives
+    assert "continue-from" in directives
+    assert "path" in directives["continue-from"]
 
     # confirm the directives can be written
     serialize_to = tmp_path / "reserialized.yaml"

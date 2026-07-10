@@ -563,7 +563,7 @@ class OverrideTransform(Transform[LiveStep]):
         overrides = overrides.copy() if overrides else {}
 
         model = bp.model_dump(
-            exclude_defaults=True, exclude_unset=True, exclude={"$schema"}
+            exclude={"$schema"},
         )
 
         # system-level overrides take precedence over step-level overrides

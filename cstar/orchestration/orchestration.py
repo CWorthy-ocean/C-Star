@@ -229,6 +229,8 @@ class LiveStep(Step):
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager | None = None
     """Manages the structure of outputs from the step."""
+    kind: str = "live"
+    """Unique identifier for step subclass used for discrimination during deserialization."""
 
     @property
     def get_working_dir(self) -> Path:
@@ -320,6 +322,11 @@ class LiveStep(Step):
             step_attrs["parent"] = effective_parent
 
         return LiveStep(**step_attrs)
+
+    @t.override
+    @classmethod
+    def _resolve_on_value(cls) -> str:
+        return "live"
 
 
 class Task(BaseModel, t.Generic[_THandle]):
