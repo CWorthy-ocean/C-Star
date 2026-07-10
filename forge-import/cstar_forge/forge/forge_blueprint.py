@@ -480,6 +480,7 @@ class TemplateRepo(CodeRepo):
 class Code(_Section):
     roms: CodeRepo
     marbl: CodeRepo | None = None
+    pio: CodeRepo | None = None
     templates_compile_time: TemplateRepo
     templates_run_time: TemplateRepo
 
@@ -653,6 +654,7 @@ class ForgeBlueprint(_Section):
             for repo_key in (
                 "roms",
                 "marbl",
+                "pio",
                 "templates_compile_time",
                 "templates_run_time",
             ):

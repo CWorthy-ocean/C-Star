@@ -225,6 +225,10 @@ class RomsMarblInputData(InputData):
     grid_child: rt.Grid | None = None
     metadata_child: dict[str, Any] | None = None
     use_dask: bool = True
+    netcdf_format: str = "NETCDF4"
+    """NetCDF format forwarded to every roms-tools save (grid, IC, forcing,
+    nesting, partitioning). At the default ("NETCDF4") no ``format=`` kwarg is
+    passed, so released roms-tools (no such kwarg) keeps working."""
 
     # Blueprint elements containing input data
     roms_marbl_blueprint_elements: RomsMarblBlueprintInputData = field(init=False)
@@ -322,6 +326,13 @@ class RomsMarblInputData(InputData):
         # Initialize settings dictionaries to empty dicts
         self._settings_compile_time = {}
         self._settings_run_time = {}
+
+    @property
+    def _save_kwargs(self) -> dict[str, Any]:
+        """``format=`` for roms-tools save calls; omitted at the default so released
+        roms-tools (no format kwarg) keeps working when PIO is off.
+        """
+        return {} if self.netcdf_format == "NETCDF4" else {"format": self.netcdf_format}
 
     def generate_all(
         self, clobber: bool = False, partition_files: bool = False, test: bool = False
@@ -612,7 +623,7 @@ class RomsMarblInputData(InputData):
         if self._should_reuse_existing_output(out_path):
             print(f"   ↪ Reusing existing file: {out_path}")
         else:
-            self.grid.save(out_path)
+            self.grid.save(out_path, **self._save_kwargs)
 
         try:
             self.grid.to_yaml(yaml_path)
@@ -629,7 +640,7 @@ class RomsMarblInputData(InputData):
             if self._should_reuse_existing_output(out_path_child):
                 print(f"   ↪ Reusing existing file: {out_path_child}")
             else:
-                self.grid_child.save(out_path_child)
+                self.grid_child.save(out_path_child, **self._save_kwargs)
             yaml_path_child = self._yaml_filename(key + "_child")
 
             try:
@@ -650,6 +661,7 @@ class RomsMarblInputData(InputData):
                 # save the BGC variables.
                 nesting_writer = roms_tools_nesting_writer()
                 nesting_kwargs = dict(self.metadata_child or {})
+                nesting_kwargs.update(self._save_kwargs)
                 has_marbl = bool(
                     (self._settings_compile_time.get("cppdefs") or {}).get(
                         "marbl", False
@@ -734,7 +746,7 @@ class RomsMarblInputData(InputData):
             ic = None
         else:
             ic = rt.InitialConditions(grid=self.grid, **input_args)
-            paths = ic.save(output_path)
+            paths = ic.save(output_path, **self._save_kwargs)
 
         # See here: https://github.com/CWorthy-ocean/roms-tools/issues/553
         if ic is not None:
@@ -820,7 +832,7 @@ class RomsMarblInputData(InputData):
                     )
         else:
             frc = rt.SurfaceForcing(grid=self.grid, **input_args)
-            paths = frc.save(output_path)
+            paths = frc.save(output_path, **self._save_kwargs)
             try:
                 frc.to_yaml(yaml_path)
             except Exception as e:
@@ -1006,7 +1018,7 @@ class RomsMarblInputData(InputData):
                     )
         else:
             bry = rt.BoundaryForcing(grid=self.grid, **input_args)
-            paths = bry.save(output_path)
+            paths = bry.save(output_path, **self._save_kwargs)
             try:
                 bry.to_yaml(yaml_path)
             except Exception as e:
@@ -1088,7 +1100,7 @@ class RomsMarblInputData(InputData):
                 )
         else:
             tidal = rt.TidalForcing(grid=self.grid, **input_args)
-            paths = tidal.save(output_path)
+            paths = tidal.save(output_path, **self._save_kwargs)
             try:
                 tidal.to_yaml(yaml_path)
             except Exception as e:
@@ -1196,7 +1208,7 @@ class RomsMarblInputData(InputData):
                 stacklevel=2,
             )
         else:
-            paths = river.save(output_path)
+            paths = river.save(output_path, **self._save_kwargs)
         if isinstance(paths, (list, tuple)) and len(paths) == 0:
             if self.roms_marbl_blueprint_elements.forcing is not None:
                 self.roms_marbl_blueprint_elements.forcing.river = None
@@ -1266,7 +1278,7 @@ class RomsMarblInputData(InputData):
             print(f"   ↪ Reusing existing file: {output_path}")
             paths = [str(output_path)]
         else:
-            paths = cdr.save(output_path)
+            paths = cdr.save(output_path, **self._save_kwargs)
 
         # Normalize output paths to absolute strings so downstream template
         # settings can reliably embed full file locations.
@@ -1327,6 +1339,7 @@ class RomsMarblInputData(InputData):
             np_xi=self.partitioning.n_procs_x,
             output_dir=self.input_data_dir,
             include_coarse_dims=self.include_coarse_dims,
+            **self._save_kwargs,
         )
 
         for function_key, _ in self.input_list:

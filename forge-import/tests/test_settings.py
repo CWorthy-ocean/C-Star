@@ -9,6 +9,7 @@ Tests cover:
 """
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -361,6 +362,37 @@ class TestRenderRomsSettings:
         )
 
         assert (output_dir / "test").read_text() == "Tracers: 34, Value: 42"
+
+
+class TestCppdefsTemplate:
+    """Render the real repo cppdefs.opt.j2 (templates/compile-time) and assert on
+    the flag-controlled CPP keys.
+    """
+
+    _TEMPLATE_DIR = Path(__file__).parent.parent / "templates" / "compile-time"
+
+    def _render(self, tmp_path, cppdefs):
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        render_roms_settings(
+            template_files=["cppdefs.opt.j2"],
+            template_dir=self._TEMPLATE_DIR,
+            # upscale_output / cdr_frc are referenced at template top level; empty
+            # dicts let their |default(false) attribute lookups resolve to false.
+            settings_dict={"cppdefs": cppdefs, "upscale_output": {}, "cdr_frc": {}},
+            code_output_dir=output_dir,
+        )
+        return (output_dir / "cppdefs.opt").read_text()
+
+    def test_use_pio_true_defines_parallel_io(self, tmp_path):
+        text = self._render(tmp_path, {"use_pio": True})
+        assert "#define PARALLEL_IO" in text
+        assert "#undef PARALLEL_IO" not in text
+
+    def test_use_pio_false_undefs_parallel_io(self, tmp_path):
+        text = self._render(tmp_path, {"use_pio": False})
+        assert "#undef PARALLEL_IO" in text
+        assert "#define PARALLEL_IO" not in text
 
 
 class TestROMSTemplateRenderer:

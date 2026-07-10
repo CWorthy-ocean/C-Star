@@ -691,6 +691,21 @@ class TestRomsMarblInputDataHelperMethods:
 
         assert result["correct_radiation"] is True  # Extra should override
 
+    def test_save_kwargs_empty_at_default_format(self, sample_roms_marbl_input_data):
+        """At the default format no format= kwarg is passed, so released
+        roms-tools (no such kwarg) keeps working when PIO is off.
+        """
+        assert sample_roms_marbl_input_data.netcdf_format == "NETCDF4"
+        assert sample_roms_marbl_input_data._save_kwargs == {}
+
+    def test_save_kwargs_forwards_non_default_format(
+        self, sample_roms_marbl_input_data
+    ):
+        sample_roms_marbl_input_data.netcdf_format = "NETCDF3_64BIT_DATA"
+        assert sample_roms_marbl_input_data._save_kwargs == {
+            "format": "NETCDF3_64BIT_DATA"
+        }
+
 
 class TestRomsMarblInputDataGeneration:
     """Tests for input generation methods."""
@@ -724,8 +739,9 @@ class TestRomsMarblInputDataGeneration:
         with patch("xarray.open_dataset", return_value=mock_ds):
             sample_roms_marbl_input_data._generate_grid()
 
-        # Check that grid.save was called
+        # Check that grid.save was called (without format= at the default)
         mock_grid.save.assert_called_once()
+        assert "format" not in mock_grid.save.call_args.kwargs
         mock_grid.to_yaml.assert_called_once()
 
         # Check that resource was added to roms_marbl_blueprint_elements
@@ -733,6 +749,31 @@ class TestRomsMarblInputDataGeneration:
             len(sample_roms_marbl_input_data.roms_marbl_blueprint_elements.grid.data)
             > 0
         )
+
+    @patch("cstar_forge.forge.input_data.rt.Grid")
+    def test_generate_grid_forwards_netcdf_format(
+        self, mock_grid_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """A non-default netcdf_format is forwarded to grid.save as format=."""
+        mock_grid = MagicMock()
+        mock_grid_class.return_value = sample_roms_marbl_input_data.grid
+        sample_roms_marbl_input_data.grid = mock_grid
+        sample_roms_marbl_input_data.netcdf_format = "NETCDF3_64BIT_DATA"
+
+        sample_roms_marbl_input_data.input_data_dir = (
+            tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
+        )
+        sample_roms_marbl_input_data.input_data_dir.mkdir(parents=True, exist_ok=True)
+
+        out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.touch()
+
+        mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
+        with patch("xarray.open_dataset", return_value=mock_ds):
+            sample_roms_marbl_input_data._generate_grid()
+
+        assert mock_grid.save.call_args.kwargs["format"] == "NETCDF3_64BIT_DATA"
 
     @patch("cstar_forge.forge.input_data.rt.InitialConditions")
     def test_generate_initial_conditions(
@@ -801,6 +842,7 @@ class TestRomsMarblInputDataGeneration:
 
         mock_sf_class.assert_called_once()
         mock_sf.save.assert_called_once()
+        assert "format" not in mock_sf.save.call_args.kwargs
         mock_sf.to_yaml.assert_called_once()
 
         # Check that resource was added to forcing.surface
@@ -810,6 +852,24 @@ class TestRomsMarblInputDataGeneration:
             )
             > 0
         )
+
+    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    def test_generate_surface_forcing_forwards_netcdf_format(
+        self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """A non-default netcdf_format is forwarded to save as format=."""
+        mock_sf = MagicMock()
+        surface_path = tmp_path / "surface.nc"
+        surface_path.touch()
+        mock_sf.save.return_value = surface_path
+        mock_sf_class.return_value = mock_sf
+        sample_roms_marbl_input_data.netcdf_format = "NETCDF3_64BIT_DATA"
+
+        sample_roms_marbl_input_data._generate_surface_forcing(
+            key="forcing.surface", source={"name": "ERA5"}, type="physics"
+        )
+
+        assert mock_sf.save.call_args.kwargs["format"] == "NETCDF3_64BIT_DATA"
 
     @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_missing_type(

@@ -58,6 +58,7 @@ def _make_builder(args, **overrides):
         end_date=merged["end_date"],
         description=merged.get("description", "Generated blueprint"),
         ensemble_id=merged.get("ensemble_id"),
+        use_pio=merged.get("use_pio", False),
         dt=7200,
     )
     tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-"))
@@ -770,6 +771,67 @@ class TestForgeExecutorBuildAndRun:
             # was materialized into the staged directory.
             assert (Path(template_dir) / "cppdefs.opt.j2").exists()
 
+    def test_build_with_use_pio_emits_code_pio_and_model_param(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """With use_pio, the emitted RomsMarblBlueprint carries code.pio and
+        model_params.use_pio: true.
+        """
+        from cstar_forge.forge.executor import RomsMarblBlueprintStage
+
+        builder = _make_builder(minimal_cstar_spec_builder_args, use_pio=True)
+
+        assert builder._use_pio is True
+
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+
+            builder.configure_build()
+
+        bp_path = builder.path_roms_marbl_blueprint(stage=RomsMarblBlueprintStage.BUILD)
+        with open(bp_path) as f:
+            data = yaml.safe_load(f)
+        assert data["model_params"]["use_pio"] is True
+        assert data["code"]["pio"]["location"] == (
+            "https://github.com/NCAR/ParallelIO.git"
+        )
+        assert data["code"]["pio"]["commit"] == "pio2_7_0"
+
+    def test_build_without_use_pio_omits_pio(self, minimal_cstar_spec_builder_args):
+        """Without use_pio, model_params has no use_pio key and code.pio is unset
+        (keeps non-PIO blueprints loadable by main-branch C-Star).
+        """
+        from cstar_forge.forge.executor import RomsMarblBlueprintStage
+
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        assert builder._use_pio is False
+
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+
+            builder.configure_build()
+
+        bp_path = builder.path_roms_marbl_blueprint(stage=RomsMarblBlueprintStage.BUILD)
+        with open(bp_path) as f:
+            data = yaml.safe_load(f)
+        assert "use_pio" not in data["model_params"]
+        assert data["code"].get("pio") is None
+
     @pytest.mark.real_template_staging
     def test_template_repo_args_map_from_code_spec(
         self, minimal_cstar_spec_builder_args
@@ -786,11 +848,15 @@ class TestForgeExecutorBuildAndRun:
             assert args["subdir"] == (repo.directory or "")
             assert args["checkout_target"] == (repo.commit or repo.branch or "")
             assert args["files"] == list(repo.files)
-        # Resolver default: github repo + branch main, repo-root-relative directory.
+        # Resolver default: github repo pinned at the ModelSpec templates.commit,
+        # repo-root-relative directory.
+        pinned = yaml.safe_load((_MODEL_DIR / "model.yml").read_text())["templates"][
+            "commit"
+        ]
         ct = builder._template_repo_args("compile_time")
         assert ct["location"].endswith("cstar-forge.git")
         assert ct["subdir"] == "templates/compile-time"
-        assert ct["checkout_target"] == "main"
+        assert ct["checkout_target"] == pinned
         assert ct["files"] == ["cppdefs.opt.j2"]
 
 
@@ -1004,6 +1070,34 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert call_kwargs["domain_name"] == builder.name
             assert call_kwargs["start_date"] == builder.start_date
             assert call_kwargs["end_date"] == builder.end_date
+            assert call_kwargs["netcdf_format"] == "NETCDF4"
+
+    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    def test_generate_inputs_use_pio_sets_classic_netcdf_format(
+        self,
+        mock_input_data_class,
+        minimal_cstar_spec_builder_args,
+    ):
+        """With use_pio, inputs are written classic-format (CDF-5) for PnetCDF."""
+        mock_input_data_instance = MagicMock()
+        mock_roms_marbl_blueprint_elements = MagicMock()
+        mock_roms_marbl_blueprint_elements.grid = MagicMock()
+        mock_roms_marbl_blueprint_elements.initial_conditions = MagicMock()
+        mock_roms_marbl_blueprint_elements.forcing = MagicMock()
+        mock_roms_marbl_blueprint_elements.cdr_forcing = None
+        mock_input_data_instance.generate_all.return_value = (
+            mock_roms_marbl_blueprint_elements,
+            {},
+            {},
+        )
+        mock_input_data_class.return_value = mock_input_data_instance
+
+        with patch.object(ForgeExecutor, "ensure_source_data"):
+            builder = _make_builder(minimal_cstar_spec_builder_args, use_pio=True)
+            builder.generate_inputs(clobber=True, test=True)
+
+            call_kwargs = mock_input_data_class.call_args[1]
+            assert call_kwargs["netcdf_format"] == "NETCDF3_64BIT_DATA"
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_test_mode_does_not_persist(

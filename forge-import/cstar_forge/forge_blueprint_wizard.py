@@ -1269,6 +1269,13 @@ class ForgeBlueprintWizard:
             layout=W.Layout(width="200px"),
             tooltip=_tip("domain", "npy"),
         )
+        self.use_pio_chk = W.Checkbox(
+            value=False,
+            description="use ParallelIO (PIO)",
+            indent=False,
+            tooltip="Build ROMS against the ParallelIO library: inputs are written as "
+            "classic-format (CDF-5) netCDF and ROMS reads/writes joined files.",
+        )
 
         # --- nesting (optional child grid) ---
         self.nest_enable = W.Checkbox(
@@ -1486,6 +1493,7 @@ class ForgeBlueprintWizard:
             self.scoord_chk,
             self.npx,
             self.npy,
+            self.use_pio_chk,
             self.start,
             self.end,
             self.model_ref_date,
@@ -1823,6 +1831,9 @@ class ForgeBlueprintWizard:
                 w.value = bool(getattr(cfg.domain.open_boundaries, d))
             self.npx.value = cfg.domain.partitioning.n_procs_x
             self.npy.value = cfg.domain.partitioning.n_procs_y
+            self.use_pio_chk.value = bool(
+                (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
+            )
             self.topo_path.value = cfg.domain.topography_path or ""
             dt = (cfg.model_settings.get("time_stepping", {}) or {}).get("dt")
             if dt is not None:
@@ -1892,6 +1903,8 @@ class ForgeBlueprintWizard:
         )
         if self.topo_path.value.strip():  # blank = derive default topography path
             kw["topography_path"] = self.topo_path.value.strip()
+        if self.use_pio_chk.value:
+            kw["use_pio"] = True
         if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
             kw["model_reference_date"] = datetime.combine(
                 self.model_ref_date.value, datetime.min.time()
@@ -2150,7 +2163,7 @@ class ForgeBlueprintWizard:
                 ),
                 section("Open boundaries", W.HBox(list(self.bnd.values()))),
                 section("Forcing", self.forcing_dd, self.forcing_box),
-                section("Partitioning", W.HBox([self.npx, self.npy])),
+                section("Partitioning", W.HBox([self.npx, self.npy, self.use_pio_chk])),
                 section(
                     "Run window",
                     self.start,

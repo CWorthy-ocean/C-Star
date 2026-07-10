@@ -401,6 +401,13 @@
 ! Usage notes: Hardcoded in ana_grid.h
 #undef ANA_PIPES
 
+! Use the ParallelIO (PIO) library for model input/output
+! Usage notes: Requires the ParallelIO library (code.pio in the blueprint). ROMS reads and
+! writes joined (unpartitioned) CDF-5 netCDF files; inputs must be classic-format.
+{% if cppdefs.use_pio %}#define PARALLEL_IO
+{% else %}#undef PARALLEL_IO
+{% endif %}
+
 
 
 !---------- Do not delete anything below this line! --------

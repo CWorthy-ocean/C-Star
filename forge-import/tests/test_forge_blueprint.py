@@ -203,6 +203,42 @@ def test_content_hash_ignores_code_repo_location():
     assert c3.content_hash() != h
 
 
+def test_content_hash_ignores_pio_repo_location():
+    cfg = _build(use_pio=True)
+    h = cfg.content_hash()
+    c2 = cfg.model_copy(
+        update={
+            "code": cfg.code.model_copy(
+                update={
+                    "pio": cfg.code.pio.model_copy(
+                        update={"location": "https://example.com/mirror/pio.git"}
+                    )
+                }
+            )
+        }
+    )
+    assert c2.content_hash() == h
+
+    c3 = cfg.model_copy(
+        update={
+            "code": cfg.code.model_copy(
+                update={"pio": cfg.code.pio.model_copy(update={"commit": "deadbeef"})}
+            )
+        }
+    )
+    assert c3.content_hash() != h
+
+
+def test_code_pio_round_trips_through_yaml(tmp_path):
+    cfg = _build(use_pio=True)
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    back = ForgeBlueprint.from_yaml(p)
+    assert back.code.pio is not None
+    assert back.code.pio.location == cfg.code.pio.location
+    assert back.code.pio.commit == "pio2_7_0"
+    assert back.model_settings["cppdefs"]["use_pio"] is True
+
+
 def test_content_hash_round_trips_through_yaml(tmp_path):
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
@@ -572,6 +608,33 @@ def test_cppdefs_obc_from_boundaries_and_cdr_flag():
     assert c["obc_west"] is False and c["obc_east"] is True
     assert c["obc_north"] is True and c["obc_south"] is False
     assert c["cdr_forcing"] is True and c["marbl"] is True
+
+
+def test_resolver_use_pio_sets_cppdefs_and_code_pio():
+    cfg = _build(use_pio=True)
+    assert cfg.model_settings["cppdefs"]["use_pio"] is True
+    assert cfg.code.pio is not None
+    assert cfg.code.pio.location == "https://github.com/NCAR/ParallelIO.git"
+    assert cfg.code.pio.commit == "pio2_7_0"
+
+
+def test_resolver_use_pio_default_off():
+    cfg = _build()
+    assert cfg.model_settings["cppdefs"]["use_pio"] is False
+    assert cfg.code.pio is None
+
+
+def test_resolver_use_pio_requires_model_yml_pin():
+    from cstar_forge.forge.forge_blueprint import CodeRepo
+    from cstar_forge.forge_blueprint_resolve import _build_code
+
+    model = {
+        "code": {"roms": {"location": "https://example.com/roms.git", "commit": "x"}},
+        "templates": {},
+    }
+    templates_repo = CodeRepo(location="https://example.com/forge.git", branch="main")
+    with pytest.raises(ValueError, match="code.pio"):
+        _build_code(model, templates_repo, use_pio=True)
 
 
 def test_settings_is_flat_and_omits_processing_filled_sections():

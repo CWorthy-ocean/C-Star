@@ -67,7 +67,8 @@
     "obc_north": true,
     "obc_south": false,
     "obc_west": false,
-    "sal_restore": true
+    "sal_restore": true,
+    "use_pio": false
   },
   "diagnostics": {
     "diag_avg": false,

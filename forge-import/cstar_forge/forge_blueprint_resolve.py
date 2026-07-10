@@ -232,6 +232,7 @@ def build_forge_blueprint(
     metadata_child: dict[str, Any] | None = None,
     nesting_include_pressure_fluxes: bool = False,
     topography_path: str | None = None,
+    use_pio: bool = False,
     run_time_overrides: dict[str, Any] | None = None,
     compile_time_overrides: dict[str, Any] | None = None,
     dt: float | None = None,
@@ -305,6 +306,7 @@ def build_forge_blueprint(
     cppdefs["obc_north"] = bool(open_boundaries.get("north", False))
     cppdefs["obc_south"] = bool(open_boundaries.get("south", False))
     cppdefs["cdr_forcing"] = cdr_forcing is not None
+    cppdefs["use_pio"] = bool(use_pio)
     surface_items = (inputs.get("forcing", {}) or {}).get("surface", []) or []
     cppdefs["co2_tvarying"] = any(
         (it.get("type") == "bgc")
@@ -361,7 +363,7 @@ def build_forge_blueprint(
     )  # kept as `sources` locally for brevity
 
     # ----- code + templates --------------------------------------------------
-    code = _build_code(model, templates_repo or DEFAULT_TEMPLATE_REPO)
+    code = _build_code(model, templates_repo or DEFAULT_TEMPLATE_REPO, use_pio=use_pio)
 
     return ForgeBlueprint(
         identity=Identity(
@@ -517,7 +519,9 @@ def _build_forcing(
 _build_sources = _build_forcing
 
 
-def _build_code(model: dict[str, Any], templates_repo: CodeRepo) -> Code:
+def _build_code(
+    model: dict[str, Any], templates_repo: CodeRepo, use_pio: bool = False
+) -> Code:
     code_block = model.get("code", {}) or {}
 
     def _repo(name) -> CodeRepo | None:
@@ -550,9 +554,18 @@ def _build_code(model: dict[str, Any], templates_repo: CodeRepo) -> Code:
     roms = _repo("roms")
     if roms is None:
         raise ValueError("ModelSpec model.yml is missing a code.roms repository")
+    pio = None
+    if use_pio:
+        pio = _repo("pio")
+        if pio is None:
+            raise ValueError(
+                "use_pio=True but the ModelSpec model.yml has no code.pio repository "
+                "(Forge pins codebases for reproducibility)"
+            )
     return Code(
         roms=roms,
         marbl=_repo("marbl"),
+        pio=pio,
         templates_compile_time=_template("compile_time"),
         templates_run_time=_template("run_time"),
     )

@@ -628,6 +628,13 @@ class ForgeExecutor(BaseModel):
         """Run-time rendered templates under host.working_dir/builds."""
         return self._require_host().working_dir / "builds" / "run-time"
 
+    @property
+    def _use_pio(self) -> bool:
+        """Whether ROMS is built against ParallelIO, read from compile-time cppdefs."""
+        return bool(
+            (self._settings_compile_time.get("cppdefs") or {}).get("use_pio", False)
+        )
+
     def persist(self) -> None:
         """
         Persist the current blueprint state to a YAML file.
@@ -1000,6 +1007,7 @@ class ForgeExecutor(BaseModel):
         return cstar_models.ROMSCompositeCodeRepository(
             roms=_repo(self.code_spec.roms),
             marbl=_repo(self.code_spec.marbl) if self.code_spec.marbl else None,
+            pio=_repo(self.code_spec.pio) if self.code_spec.pio else None,
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time", branch="main"
             ),
@@ -1474,6 +1482,7 @@ class ForgeExecutor(BaseModel):
                 partitioning=self.partitioning,
                 cdr_forcing=self.cdr_forcing,
                 use_dask=use_dask,
+                netcdf_format="NETCDF3_64BIT_DATA" if self._use_pio else "NETCDF4",
             ).generate_all(partition_files=partition_files, clobber=clobber, test=test)
         )
 
@@ -1925,6 +1934,8 @@ class ForgeExecutor(BaseModel):
             roms_marbl_blueprint_dict["model_params"] = {
                 "time_step": self._settings_run_time["time_stepping"]["dt"],
             }
+            if self._use_pio:
+                roms_marbl_blueprint_dict["model_params"]["use_pio"] = True
             roms_marbl_blueprint_dict["runtime_params"] = {
                 "start_date": self.start_date,
                 "end_date": self.end_date,

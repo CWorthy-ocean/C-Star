@@ -11,3 +11,4 @@ cppdefs:
   marbl: true
   cdr_forcing: false
   co2_tvarying: false  # Set to true when using time-varying CO2 atmospheric forcing (MBL_co2)
+  use_pio: false  # Set to true to build ROMS against the ParallelIO (PIO) library

@@ -36,6 +36,10 @@ code:
     location: https://github.com/marbl-ecosys/MARBL.git
     commit: marbl0.45.0
 
+  pio:
+    location: https://github.com/NCAR/ParallelIO.git
+    commit: pio2_7_0
+
 inputs:
   grid:
     topography_source: ETOPO5

@@ -112,6 +112,14 @@ _SKIP = {
         "chunks",
         "initial_slice_bounds",
         "bypass_validation",
+        # regrid/fill knobs newly added to SurfaceForcing in installed roms-tools
+        # (mirroring BoundaryForcing); not yet exposed as typed Forge fields —
+        # available via the options passthrough until deliberately surfaced.
+        "prefill",
+        "prefill_kwargs",
+        "regrid_method",
+        "extrap_method",
+        "extrap_kwargs",
     },
     "BoundaryForcing": {
         "chunks",
