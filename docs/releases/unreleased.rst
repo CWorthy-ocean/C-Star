@@ -16,7 +16,8 @@ Breaking Changes
 New features
 ~~~~~~~~~~~~
 
-- N/A
+
+- Add model_reference_data to namelist pydantic model (not used in this repo, but needed by Forge) (`#586 <https://github.com/CWorthy-ocean/C-Star/pull/586>`_)
 
 Bug Fixes
 ~~~~~~~~~
