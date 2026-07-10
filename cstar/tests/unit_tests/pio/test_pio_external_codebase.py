@@ -135,6 +135,54 @@ class TestPIOExternalCodeBaseConfigure:
         assert f"-DCMAKE_Fortran_COMPILER={mpi_home}/bin/mpif90" in configure_cmd
 
     @pytest.mark.parametrize(
+        "system_name, expected_clause",
+        [
+            # On macOS, CMake pairs conda clang with llvm-ranlib, which rejects
+            # the Apple-style flags CMake passes; the PATH ranlib is pinned instead
+            ("darwin_arm64", "-DCMAKE_RANLIB:FILEPATH=/fake/bin/ranlib"),
+            ("linux_x86_64", None),
+            ("perlmutter", None),
+        ],
+    )
+    def test_configure_pins_ranlib_on_darwin(
+        self,
+        pioexternalcodebase_staged,
+        system_name: str,
+        expected_clause: str | None,
+    ):
+        """Test that the cmake configure command pins CMAKE_RANLIB to the PATH
+        ranlib on Darwin systems only.
+        """
+        env_vars = {
+            "NETCDFHOME": "/netcdf/home/",
+            "PNETCDFHOME": "/pnetcdf/home/",
+        }
+        with (
+            mock.patch(
+                "cstar.system.environment.CStarEnvironment.environment_variables",
+                new_callable=mock.PropertyMock,
+                return_value=env_vars,
+            ),
+            mock.patch(
+                "cstar.system.manager.CStarSystemManager.name",
+                new_callable=mock.PropertyMock,
+                return_value=system_name,
+            ),
+            mock.patch(
+                "cstar.pio.external_codebase.shutil.which",
+                return_value="/fake/bin/ranlib",
+            ),
+            mock.patch("cstar.pio.external_codebase._run_cmd") as mock_run_cmd,
+        ):
+            pioexternalcodebase_staged._configure()
+
+        configure_cmd = mock_run_cmd.call_args_list[0].args[0]
+        if expected_clause:
+            assert expected_clause in configure_cmd
+        else:
+            assert "CMAKE_RANLIB" not in configure_cmd
+
+    @pytest.mark.parametrize(
         "env_vars, missing",
         [
             ({"NETCDFHOME": "/netcdf/home/"}, "PNETCDFHOME"),

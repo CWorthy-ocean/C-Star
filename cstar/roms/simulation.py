@@ -147,6 +147,50 @@ def _extract_data_join_wildcard(
     logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
 
 
+def _pio_input_file_problems(path: Path) -> list[str]:
+    """Check a netCDF file for properties that ROMS with ParallelIO cannot read.
+
+    ROMS with `use_pio` reads inputs through PnetCDF, which requires classic-format
+    files (CDF-1/2/5, e.g. netCDF-4/HDF5 files are unreadable). Additionally, PIO
+    only supports 64-bit and unsigned variable types when built against a
+    parallel-enabled netCDF-C library, which is not available in all environments
+    (e.g. conda), so these types are also rejected.
+
+    Parameters
+    ----------
+    path : Path
+        Location of the netCDF file to check.
+
+    Returns
+    -------
+    list of str
+        A description of each problem found; empty if the file is compatible.
+    """
+    # Lazy import: only needed on the use_pio path
+    import xarray as xr
+
+    with open(path, "rb") as f:
+        magic = f.read(4)
+    if magic[:3] != b"CDF":
+        detected = "netCDF-4/HDF5" if magic == b"\x89HDF" else "unrecognized"
+        return [
+            f"{path}: not a classic-format netCDF file (detected: {detected}). "
+            "Rewrite it in CDF-5 format, e.g. with "
+            "xarray's to_netcdf(format='NETCDF3_64BIT_DATA')."
+        ]
+
+    problems = []
+    with xr.open_dataset(path, decode_times=False) as ds:
+        for name, var in ds.variables.items():
+            if var.dtype.name.startswith(("int64", "uint")):
+                problems.append(
+                    f"{path}: variable {name!r} has dtype '{var.dtype}', which "
+                    "ParallelIO cannot read on all systems. Cast it to a signed "
+                    "32-bit integer or a float type."
+                )
+    return problems
+
+
 class ROMSSimulation(Simulation):
     """A specialized `Simulation` subclass for configuring and running ROMS (Regional
     Ocean Modeling System) simulations.
@@ -776,7 +820,11 @@ class ROMSSimulation(Simulation):
         forcing_paths: list[Path] = []
 
         for forcing in filter(None, input_forcings):
-            paths = forcing.path_for_roms
+            paths = (
+                forcing.path_for_roms_unpartitioned
+                if self.use_pio
+                else forcing.path_for_roms
+            )
             if not paths:
                 raise ValueError(
                     f"{forcing.__class__.__name__} does not have "
@@ -852,11 +900,17 @@ class ROMSSimulation(Simulation):
 
         if self.initial_conditions:
             nml.initial_conditions.inifile = str(
-                self.initial_conditions.path_for_roms[0]
+                self.initial_conditions.path_for_roms_unpartitioned[0]
+                if self.use_pio
+                else self.initial_conditions.path_for_roms[0]
             )
 
         if self.model_grid:
-            nml.grid_settings.grdname = str(self.model_grid.path_for_roms[0])
+            nml.grid_settings.grdname = str(
+                self.model_grid.path_for_roms_unpartitioned[0]
+                if self.use_pio
+                else self.model_grid.path_for_roms[0]
+            )
 
         nml.forcing_files.frcfiles = [str(p) for p in self._forcing_paths]
 
@@ -1610,6 +1664,7 @@ class ROMSSimulation(Simulation):
         post_run : Performs post-processing steps after execution.
         """
         if self.use_pio:
+            self._validate_pio_inputs()
             self.log.info(
                 "use_pio is True: skipping input-dataset partitioning "
                 "(ParallelIO reads joined files directly)"
@@ -1628,6 +1683,38 @@ class ROMSSimulation(Simulation):
             )
 
         self.persist()
+
+    def _validate_pio_inputs(self) -> None:
+        """Ensure all locally staged input datasets are readable by ROMS with
+        ParallelIO.
+
+        Incompatible files (non-classic netCDF formats, 64-bit or unsigned variable
+        types, or datasets staged from partitioned sources) otherwise surface as
+        opaque MPI aborts inside the PIO library at run time.
+
+        Raises
+        ------
+        ValueError
+            If any staged input dataset is incompatible, listing every offending
+            file and the reason.
+        """
+        problems: list[str] = []
+        for dataset in self.input_datasets:
+            if not dataset.exists_locally:
+                continue
+            try:
+                paths = dataset.path_for_roms_unpartitioned
+            except ValueError as exc:
+                problems.append(str(exc))
+                continue
+            for path in paths:
+                problems.extend(_pio_input_file_problems(path))
+
+        if problems:
+            raise ValueError(
+                "use_pio is True but the following input datasets cannot be "
+                "read by ROMS with ParallelIO:\n- " + "\n- ".join(problems)
+            )
 
     def run(
         self,

@@ -2178,13 +2178,14 @@ class TestROMSSimulationUsePIO:
         sim.pio_codebase = pioexternalcodebase
         assert sim.codebases[-1] is pioexternalcodebase
 
+    @mock.patch("cstar.roms.ROMSSimulation._validate_pio_inputs")
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(ROMSInputDataset, "partition")
     def test_pre_run_skips_partitioning(
-        self, mock_partition, mock_persist, stub_romssimulation
+        self, mock_partition, mock_persist, mock_validate, stub_romssimulation
     ):
-        """Test that `pre_run` is a no-op (besides persisting) when `use_pio` is
-        True.
+        """Test that `pre_run` validates inputs but skips partitioning when
+        `use_pio` is True.
         """
         sim = stub_romssimulation
         sim.use_pio = True
@@ -2198,7 +2199,93 @@ class TestROMSSimulationUsePIO:
             sim.pre_run()
 
         dataset.partition.assert_not_called()
+        mock_validate.assert_called_once()
         mock_persist.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "file_format, dtype, expected_problem",
+        [
+            ("NETCDF3_64BIT_DATA", "f8", None),
+            ("NETCDF3_CLASSIC", "f8", None),
+            ("NETCDF4", "f8", "not a classic-format netCDF file"),
+            ("NETCDF3_64BIT_DATA", "i8", "which ParallelIO cannot read"),
+            ("NETCDF3_64BIT_DATA", "u2", "which ParallelIO cannot read"),
+        ],
+    )
+    def test_pio_input_file_problems(
+        self,
+        tmp_path: Path,
+        file_format: str,
+        dtype: str,
+        expected_problem: str | None,
+    ):
+        """Test that `_pio_input_file_problems` flags non-classic formats and
+        64-bit/unsigned variable types, and passes compatible files.
+        """
+        # netCDF4 is used directly as xarray coerces int64 when writing
+        # classic formats, while tools like nccopy preserve it
+        import netCDF4
+
+        from cstar.roms.simulation import _pio_input_file_problems
+
+        path = tmp_path / "input.nc"
+        with netCDF4.Dataset(path, "w", format=file_format) as nc:
+            nc.createDimension("x", 3)
+            var = nc.createVariable("myvar", dtype, ("x",))
+            var[:] = [0, 1, 2]
+
+        problems = _pio_input_file_problems(path)
+        if expected_problem is None:
+            assert problems == []
+        else:
+            assert len(problems) == 1
+            assert expected_problem in problems[0]
+            assert str(path) in problems[0]
+
+    def test_validate_pio_inputs_raises_with_all_problems(
+        self, stub_romssimulation, tmp_path: Path
+    ):
+        """Test that `_validate_pio_inputs` aggregates problems across datasets
+        into a single error.
+        """
+        import numpy as np
+        import xarray as xr
+
+        good_path = tmp_path / "good.nc"
+        bad_path = tmp_path / "bad.nc"
+        xr.Dataset({"a": ("x", np.zeros(3))}).to_netcdf(
+            good_path, format="NETCDF3_64BIT_DATA"
+        )
+        xr.Dataset({"abs_time": ("x", np.arange(3, dtype="int64"))}).to_netcdf(
+            bad_path, format="NETCDF4"
+        )
+
+        sim = stub_romssimulation
+        sim.use_pio = True
+        good = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            path_for_roms_unpartitioned=[good_path],
+        )
+        bad = mock.MagicMock(
+            spec=ROMSInputDataset,
+            exists_locally=True,
+            path_for_roms_unpartitioned=[bad_path],
+        )
+        unstaged = mock.MagicMock(spec=ROMSInputDataset, exists_locally=False)
+
+        with mock.patch.object(
+            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+        ) as mock_input_datasets:
+            mock_input_datasets.return_value = [good, bad, unstaged]
+
+            with pytest.raises(
+                ValueError, match="cannot be\\s+read by ROMS with ParallelIO"
+            ) as exc_info:
+                sim._validate_pio_inputs()
+
+        assert str(bad_path) in str(exc_info.value)
+        assert str(good_path) not in str(exc_info.value)
 
     @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch("subprocess.run")
@@ -2365,3 +2452,40 @@ class TestROMSSimulationUsePIO:
         assert sim2.use_pio is True
         assert isinstance(sim2.pio_codebase, PIOExternalCodeBase)
         assert sim2.to_dict() == sim_dict
+
+    @mock.patch.object(ROMSInputDataset, "path_for_roms_unpartitioned")
+    def test_forcing_paths_use_unpartitioned(
+        self, mock_path_for_roms_unpartitioned, stub_romssimulation
+    ):
+        """Test that `_forcing_paths` with `use_pio` returns the unpartitioned
+        (joined) dataset paths without requiring partitioning.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True
+        fake_paths = [
+            Path("tidal.nc"),
+            [Path("surface.nc"), Path("surface2.nc")],
+            Path("boundary.nc"),
+            Path("sw_corr.nc"),
+        ]
+        datasets = [
+            sim.tidal_forcing,
+            sim.surface_forcing,
+            sim.boundary_forcing,
+            sim.forcing_corrections,
+        ]
+
+        sim.river_forcing = None
+
+        # `path_for_roms` is left untouched: were it consulted, it would raise
+        # FileNotFoundError as these datasets are never partitioned
+        for ds, fake_path in zip(datasets, fake_paths):
+            for d in ds if isinstance(ds, list) else [ds]:
+                d.path_for_roms_unpartitioned = fake_path
+
+        flat_paths = [
+            i
+            for item in fake_paths
+            for i in (item if isinstance(item, list) else [item])
+        ]
+        assert sim._forcing_paths == flat_paths
