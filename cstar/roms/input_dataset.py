@@ -458,6 +458,35 @@ class ROMSInputDataset(InputDataset, ABC):
         )
         raise FileNotFoundError(msg)
 
+    @property
+    def path_for_roms_unpartitioned(self) -> list[Path]:
+        """Returns a list of Paths to the unpartitioned (joined) files of this
+        ROMSInputDataset.
+
+        When ROMS is built with ParallelIO (`use_pio`), it reads the joined files
+        staged by `get()` directly, without partitioning.
+
+        Raises
+        ------
+        ValueError
+            If this dataset was staged from an already-partitioned source, which
+            has no local joined file for ROMS to read.
+        """
+        if self.source_partitioning:
+            msg = (
+                f"{self.__class__.__name__} was staged from a partitioned source, "
+                "but ROMS with ParallelIO (use_pio) reads unpartitioned files. "
+                "Provide an unpartitioned source for this dataset "
+                "(`partitioned: false` in the blueprint) and try again."
+            )
+            raise ValueError(msg)
+
+        if not self.working_copy:
+            return []
+        if isinstance(self.working_copy, StagedDataCollection):
+            return list(self.working_copy.paths)
+        return [self.working_copy.path]
+
 
 class ROMSModelGrid(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model grid files."""

@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
@@ -83,6 +84,16 @@ class PIOExternalCodeBase(ExternalCodeBase):
         if mpi_home and (Path(mpi_home) / "bin/mpif90").exists():
             mpifc = str(Path(mpi_home) / "bin/mpif90")
 
+        # On macOS, CMake finishes static archives with Apple-style ranlib flags
+        # (`-c`) but pairs conda's clang with llvm-ranlib, which rejects them.
+        # Pin CMAKE_RANLIB to the `ranlib` on PATH (cctools in a conda env,
+        # Apple's outside one), which accepts those flags.
+        ranlib_clause = ""
+        if cstar_sysmgr.name.startswith("darwin"):
+            ranlib = shutil.which("ranlib")
+            if ranlib:
+                ranlib_clause = f"-DCMAKE_RANLIB:FILEPATH={ranlib} "
+
         # Configure. The build directory must be named `build` and the library must
         # not be installed elsewhere: ROMS' Makedefs.inc hardcodes both.
         _run_cmd(
@@ -92,6 +103,7 @@ class PIOExternalCodeBase(ExternalCodeBase):
             f"-DNetCDF_C_PATH={netcdf_home} "
             f"-DNetCDF_Fortran_PATH={netcdf_home} "
             f"-DPnetCDF_PATH={pnetcdf_home} "
+            f"{ranlib_clause}"
             "-DPIO_ENABLE_TIMING=OFF "
             "-DPIO_ENABLE_TESTS=OFF "
             "-DPIO_ENABLE_EXAMPLES=OFF "
