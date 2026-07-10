@@ -5,7 +5,7 @@
 # Pin the serving forge commit with `commit:` (until pinned, the resolver defaults to
 # branch `main`).
 templates:
-  commit: c61d654f4b3d5708d5ba3eee3fa07fe90474cee6   # pin the forge commit that serves these templates
+  commit: a2167c72ddc265203c9a3af69952e12469c640ec   # pin the forge commit that serves these templates
   compile_time:
     directory: "templates/compile-time"
     filter:
