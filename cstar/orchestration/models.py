@@ -60,10 +60,22 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
         extra="forbid",
         from_attributes=True,
         str_strip_whitespace=True,
+    )
+    """Pydantic ConfigDict with options we want changed."""
+
+
+class PolymorphicBaseModel(BaseModel):
+    """Model base class configured for polymorphic serialization."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+        polymorphic_serialization=True,
     )
     """Pydantic ConfigDict with options we want changed."""
 
@@ -167,7 +179,9 @@ class BlueprintMeta(BaseModel):
     schema_version: str = "1.0.0"
     """The schema version for the document."""
 
-    model_config = ConfigDict(extra="allow", from_attributes=True)
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="allow", from_attributes=True
+    )
     """Configuration allowing extra field data."""
 
 
@@ -447,9 +461,6 @@ class UserDefinedVariables(BaseModel):
     """The set of keys that are declared but not configured."""
     _error: str | None = PrivateAttr(None)
     """An error message for the collection."""
-
-    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
-    """Configure the model to strip whitespace off inputs."""
 
     @property
     def unknown_keys(self) -> set[str]:
