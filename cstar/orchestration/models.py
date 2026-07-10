@@ -60,8 +60,11 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(extra="allow", from_attributes=True)
-    """Pydantic ConfigDict with options we want changed."""
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="allow",
+        from_attributes=True,
+    )
+    """Configures the behavior of the pydantic model."""
 
 
 class Resource(ConfiguredBaseModel):
@@ -400,7 +403,7 @@ class Workplan(BaseModel):
         return self
 
 
-class UserDefinedVariables(BaseModel):
+class UserDefinedVariables(ConfiguredBaseModel):
     """A collection of key-value pairs that provides validation of the static
     keys specified at design time and dynamically configured keys at runtime.
 
