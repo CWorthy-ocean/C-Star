@@ -182,6 +182,10 @@
     output_period_random = 3600.0
 /
 
+&reference_date_settings
+    reference_date = 2005, 6, 15
+/
+
 &rho0_settings
     rho0 = 1000.0
 /
