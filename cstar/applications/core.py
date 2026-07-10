@@ -10,7 +10,7 @@ from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import BlueprintMeta
+from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import SerializableModel, deserialize
 
 if t.TYPE_CHECKING:
@@ -335,7 +335,7 @@ def get_application_name(path: Path) -> str:
     -------
     str
     """
-    base_bp = deserialize(path, BlueprintMeta)
+    base_bp = deserialize(path, BlueprintCore)
     return base_bp.application
 
 

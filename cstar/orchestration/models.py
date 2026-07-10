@@ -167,7 +167,7 @@ class Application(StrEnum):
     """Application performing an upscaled simulation run."""
 
 
-class BlueprintMeta(BaseModel):
+class BlueprintCore(BaseModel):
     """Model used for metadata-only loading of blueprints"""
 
     name: RequiredString

@@ -3,7 +3,7 @@ import typing as t
 import typer
 
 from cstar.applications.core import get_application
-from cstar.orchestration.models import Blueprint, BlueprintMeta
+from cstar.orchestration.models import Blueprint, BlueprintCore
 from cstar.orchestration.serialization import validate_serialized_entity
 
 app = typer.Typer()
@@ -23,7 +23,7 @@ def check(
     bool
         `True` if valid
     """
-    result = validate_serialized_entity(path, BlueprintMeta)
+    result = validate_serialized_entity(path, BlueprintCore)
     if result.item is None:
         raise typer.BadParameter(result.error_msg)
 
