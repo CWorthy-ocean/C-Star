@@ -106,6 +106,17 @@ class TimeStepping(_NmlGroup):
     """Number of steps between runtime diagnostics (STDOUT)"""
 
 
+class ReferenceDateSettings(_NmlGroup):
+    reference_date: list[int] = Field(default_factory=lambda: [2000, 1, 1])
+    """Model reference date (t=0): year, month, day"""
+
+    @field_validator("reference_date", mode="before")
+    @classmethod
+    def _wrap(cls, v: Any) -> list:
+        """Re-wrap a scalar `reference_date` value into a list (f90nml read collapse)."""
+        return _as_list(v)
+
+
 class GridSettings(_NmlGroup):
     grdname: str
     """Grid file path"""
@@ -628,6 +639,9 @@ class RomsNamelist(BaseModel):
 
     simulation_name_settings: SimulationNameSettings
     time_stepping: TimeStepping
+    reference_date_settings: ReferenceDateSettings = Field(
+        default_factory=ReferenceDateSettings
+    )
     grid_settings: GridSettings
     s_coord: SCoord
     param_settings: ParamSettings
