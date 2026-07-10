@@ -2,9 +2,11 @@ name: cstar_env
 channels:
   - conda-forge
 dependencies:
+  - cmake
   - compilers
   - ipykernel
   - jupyterlab
+  - libpnetcdf
   - mpich
   - netCDF4
   - netcdf-fortran

@@ -36,6 +36,10 @@ code:
         - river_frc.opt
         - tides.opt
         - Makefile
+  # Optional: pin the ParallelIO library source (requires model_params.use_pio: true)
+  # pio:
+  #   location: https://github.com/NCAR/ParallelIO.git
+  #   branch: pio2_7_0
 forcing:
   boundary:
     data:
@@ -80,6 +84,7 @@ model_params:
   hash: null
   locked: false
   time_step: 1
+  use_pio: false
 runtime_params:
   documentation: http://mockdoc.com/runtime-params
   hash: null

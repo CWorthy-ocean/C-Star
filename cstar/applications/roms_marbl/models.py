@@ -95,6 +95,9 @@ class ROMSCompositeCodeRepository(ConfiguredBaseModel):
     marbl: CodeRepository | None = Field(default=None, validate_default=False)
     """Codebase used to add MARBL to the simulation."""
 
+    pio: CodeRepository | None = Field(default=None, validate_default=False)
+    """Codebase used to add the ParallelIO library to the simulation."""
+
 
 class ParameterSet(DocLocMixin, ConfiguredBaseModel):
     """A base class for parameter sets exposed on a blueprint."""
@@ -194,6 +197,14 @@ class ModelParameterSet(ParameterSet):
     time_step: PositiveInt
     """The time step the model integrates over."""
 
+    use_pio: bool = False
+    """Use the ParallelIO library for model input/output.
+
+    Requires `#define PARALLEL_IO` in the compile-time `cppdefs.opt`. When active,
+    ROMS reads and writes joined files directly, so input datasets are not
+    partitioned and outputs are not joined.
+    """
+
 
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
     """Blueprint schema for running a ROMS-MARBL simulation."""
@@ -250,6 +261,10 @@ class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
 
         if self.runtime_params.start_date < self.valid_start_date:
             msg = "start_date is outside the valid range"
+            raise ValueError(msg)
+
+        if self.code.pio is not None and not self.model_params.use_pio:
+            msg = "code.pio was supplied but model_params.use_pio is false"
             raise ValueError(msg)
 
         return self

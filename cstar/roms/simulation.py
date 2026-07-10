@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -44,10 +45,12 @@ from cstar.orchestration.adapter import (
     InitialConditionAdapter,
     MARBLAdapter,
     NestingInfoAdapter,
+    PIOAdapter,
     RiverForcingAdapter,
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
+from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -170,6 +173,10 @@ class ROMSSimulation(Simulation):
         The repository containing the base source code for this simulation.
     marbl_codebase : MARBLExternalCodeBase
         The repository containing the base source code for MARBL (Marine Biogeochemistry Library).
+    use_pio : bool
+        Whether ROMS uses the ParallelIO library for input/output.
+    pio_codebase : PIOExternalCodeBase
+        The repository containing the source code for the ParallelIO library (if use_pio is True).
     runtime_code : AdditionalCode
         Additional code needed by ROMS at runtime (e.g. a `.nml` Fortran namelist)
     roms_runtime_settings : RomsNamelist
@@ -248,6 +255,8 @@ class ROMSSimulation(Simulation):
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
+        use_pio: bool = False,
+        pio_codebase: Optional["PIOExternalCodeBase"] = None,
     ):
         """Initializes a `ROMSSimulation` instance.
 
@@ -295,6 +304,15 @@ class ROMSSimulation(Simulation):
             List of surface forcing datasets (e.g., wind stress, heat flux).
         forcing_corrections : list[ROMSForcingCorrections], optional
             List of surface forcing correction datasets.
+        use_pio : bool, optional
+            If True, ROMS uses the ParallelIO library for input/output, reading and
+            writing joined files directly: input datasets are not partitioned and
+            outputs are not joined. Requires `#define PARALLEL_IO` in the
+            compile-time `cppdefs.opt`.
+        pio_codebase : PIOExternalCodeBase, optional
+            External codebase for the ParallelIO library. Only valid alongside
+            `use_pio=True`; if `use_pio` is True and no codebase is provided, a
+            default ParallelIO codebase is used.
 
         Raises
         ------
@@ -302,6 +320,8 @@ class ROMSSimulation(Simulation):
             If `surface_forcing` is not a list of `ROMSSurfaceForcing` instances.
             If `boundary_forcing` is not a list of `ROMSBoundaryForcing` instances.
             If `forcing_corrections` is not a list of `ROMSForcingCorrections` instances.
+        ValueError
+            If `pio_codebase` is provided but `use_pio` is False.
         """
         if discretization is None:
             raise ValueError(
@@ -365,6 +385,14 @@ class ROMSSimulation(Simulation):
         )
 
         self.marbl_codebase = marbl_codebase
+
+        if pio_codebase is not None and not use_pio:
+            raise ValueError(
+                "A 'pio_codebase' was provided but 'use_pio' is False. "
+                "Set use_pio=True to run ROMS with the ParallelIO library."
+            )
+        self.use_pio = use_pio
+        self.pio_codebase = pio_codebase or PIOExternalCodeBase() if use_pio else None
 
         self._find_namelist_file()
         # roms-specific
@@ -586,6 +614,10 @@ class ROMSSimulation(Simulation):
         if self.marbl_codebase is not None:
             base_str += f"\nMARBL Codebase: {self.marbl_codebase.__class__.__name__} instance (query using {class_name}.marbl_codebase)\n"
 
+        # PIO Codebase
+        if self.pio_codebase is not None:
+            base_str += f"\nPIO Codebase: {self.pio_codebase.__class__.__name__} instance (query using {class_name}.pio_codebase)\n"
+
         # Input Datasets:
         base_str += "\nInput Datasets:\n"
         if self.model_grid is not None:
@@ -708,6 +740,8 @@ class ROMSSimulation(Simulation):
         items = [self.codebase]
         if self.marbl_codebase:
             items.append(self.marbl_codebase)
+        if self.pio_codebase:
+            items.append(self.pio_codebase)
 
         return items
 
@@ -941,6 +975,13 @@ class ROMSSimulation(Simulation):
 
         simulation_kwargs["marbl_codebase"] = marbl_codebase
 
+        simulation_kwargs["use_pio"] = simulation_dict.get("use_pio", False)
+        pio_codebase_kwargs = simulation_dict.get("pio_codebase", {})
+        if pio_codebase_kwargs:
+            simulation_kwargs["pio_codebase"] = PIOExternalCodeBase(
+                **pio_codebase_kwargs
+            )
+
         # Construct the Discretization instance
         discretization_kwargs = simulation_dict.get("discretization")
         if discretization_kwargs is not None:
@@ -1067,6 +1108,13 @@ class ROMSSimulation(Simulation):
         if self.marbl_codebase:
             simulation_dict["marbl_codebase"] = self.marbl_codebase.to_dict()
 
+        # PIOExternalCodeBase (emitted only when active, so existing dicts are
+        # unchanged for non-PIO simulations)
+        if self.use_pio:
+            simulation_dict["use_pio"] = True
+        if self.pio_codebase:
+            simulation_dict["pio_codebase"] = self.pio_codebase.to_dict()
+
         # InputDatasets:
         if self.model_grid is not None:
             simulation_dict["model_grid"] = self.model_grid.to_dict()
@@ -1143,6 +1191,8 @@ class ROMSSimulation(Simulation):
             valid_start_date=bp.valid_start_date,
             valid_end_date=bp.valid_end_date,
             marbl_codebase=(MARBLAdapter(bp).adapt() if bp.code.marbl else None),
+            use_pio=bp.model_params.use_pio,
+            pio_codebase=(PIOAdapter(bp).adapt() if bp.model_params.use_pio else None),
             model_grid=GridAdapter(bp).adapt(),
             initial_conditions=InitialConditionAdapter(bp).adapt(),
             tidal_forcing=TidalForcingAdapter(bp).adapt(),
@@ -1338,6 +1388,8 @@ class ROMSSimulation(Simulation):
             return False
         if self.marbl_codebase and not self.marbl_codebase.is_configured:
             return False
+        if self.pio_codebase and not self.pio_codebase.is_configured:
+            return False
         if (self.runtime_code is not None) and (not self.runtime_code.exists_locally):
             return False
         if (self.compile_time_code is not None) and (
@@ -1417,6 +1469,8 @@ class ROMSSimulation(Simulation):
 
         build_dir = self.compile_time_code.working_copy.common_parent
 
+        self._validate_pio_cppdefs(build_dir)
+
         exe_path = build_dir / "roms"
         if (
             (exe_path.exists())
@@ -1462,6 +1516,51 @@ class ROMSSimulation(Simulation):
         self._exe_hash = _get_sha256_hash(exe_path)
 
         self.persist()
+
+    def _validate_pio_cppdefs(self, build_dir: Path) -> None:
+        """Ensure `use_pio` agrees with the compile-time `cppdefs.opt`.
+
+        The ROMS Makedefs.inc enables ParallelIO by detecting `#define PARALLEL_IO`
+        in `cppdefs.opt` (this method uses the same per-line detection), so a
+        mismatch with `use_pio` would either produce partitioned outputs that
+        `post_run` will not join, or fail to compile against an unbuilt library.
+
+        Parameters
+        ----------
+        build_dir : Path
+            Location of the staged compile-time code, containing `cppdefs.opt`.
+
+        Raises
+        ------
+        ValueError
+            If `use_pio` and the presence of `#define PARALLEL_IO` disagree.
+        """
+        cppdefs = build_dir / "cppdefs.opt"
+        try:
+            cppdefs_text = cppdefs.read_text()
+        except FileNotFoundError:
+            return
+
+        parallel_io_defined = any(
+            re.search(r"^[^!]*#\s*define\s+PARALLEL_IO\b", line)
+            for line in cppdefs_text.splitlines()
+        )
+
+        if self.use_pio and not parallel_io_defined:
+            raise ValueError(
+                "use_pio is True but 'PARALLEL_IO' is not defined in "
+                f"{cppdefs}. ROMS would run without ParallelIO and produce "
+                "partitioned outputs that post_run will not join. Either add "
+                "'#define PARALLEL_IO' to cppdefs.opt or set "
+                "model_params.use_pio to false."
+            )
+        if parallel_io_defined and not self.use_pio:
+            raise ValueError(
+                f"'PARALLEL_IO' is defined in {cppdefs} but use_pio is False, "
+                "so the ParallelIO library has not been built. Either set "
+                "model_params.use_pio to true or remove '#define PARALLEL_IO' "
+                "from cppdefs.opt."
+            )
 
     def _ensure_makefile(self, build_dir: Path):
         """If a Makefile was not supplied, copy the correct one from the ROMS repo.
@@ -1510,6 +1609,14 @@ class ROMSSimulation(Simulation):
         run : Executes the compiled ROMS model.
         post_run : Performs post-processing steps after execution.
         """
+        if self.use_pio:
+            self.log.info(
+                "use_pio is True: skipping input-dataset partitioning "
+                "(ParallelIO reads joined files directly)"
+            )
+            self.persist()
+            return
+
         datasets_to_partition = [
             d for d in self.input_datasets if d.exists_locally and d.partitionable
         ]
@@ -1733,6 +1840,26 @@ class ROMSSimulation(Simulation):
             )
 
         output_dir = self.fs_manager.output_dir
+
+        if self.use_pio:
+            # ParallelIO writes already-joined files (no partition-index segment in
+            # the name), so there is nothing to join; move outputs to the joined
+            # output directory for compatibility with downstream workflow steps.
+            files = list(output_dir.glob("*.nc"))
+            if not files:
+                self.log.warning(f"No suitable output found in `{output_dir}`")
+                self.persist()
+                return
+            self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
+            for f in files:
+                f.rename(self.fs_manager.joined_output_dir / f.name)
+            self.log.info(
+                f"use_pio is True: moved {len(files)} joined output files to "
+                f"`{self.fs_manager.joined_output_dir}` without joining"
+            )
+            self.persist()
+            return
+
         files = list(output_dir.glob("*.??????????????.*.nc"))
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
@@ -1819,7 +1946,13 @@ class ROMSSimulation(Simulation):
         """
         new_sim = cast("ROMSSimulation", super().restart(new_end_date=new_end_date))
 
-        restart_dir = self.fs_manager.output_dir
+        # With PIO, post_run moves the (already-joined) restart file to the joined
+        # output directory rather than leaving it in the output directory.
+        restart_dir = (
+            self.fs_manager.joined_output_dir
+            if self.use_pio
+            else self.fs_manager.output_dir
+        )
 
         new_start_date = new_sim.start_date
         restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")

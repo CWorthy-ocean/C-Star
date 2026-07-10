@@ -1,30 +1,25 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.0.0.json
 name: roms_marbl_example_wales_new_bp
 description: toy domain near wales, for fast laptop/CI runs
 application: roms_marbl
 schema_version: 2.0.0
-working_dir: "temp_out_dir"
+working_dir: temp_out_dir
 state: draft
 valid_start_date: 2012-01-01 00:00:00
 valid_end_date: 2012-01-31 12:00:00
-
-
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    branch: main
-    documentation: cworthy fork
+    commit: 041040aea3236ff48b166ba1933ffd6e07a30028
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
     branch: marbl0.45.0
-
   run_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
     branch: main
     filter:
       files:
-        - namelist.nml
-        - marbl_in
+      - namelist.nml
+      - marbl_in
       directory: wales-toy-domain/roms_runtime_code
   compile_time:
     location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example.git
@@ -41,24 +36,23 @@ code:
       - tracers.opt
       - Makefile
       - Make.depend
-
+  pio:
+    location: https://github.com/NCAR/ParallelIO.git
+    branch: pio2_7_0
 grid:
   documentation: my favorite grid
   data:
-    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_grd.nc
-      hash: 41397c80fd00536dc414f6b8039b08fbe5d9f234aec66c3fc9b5a8e13353502a
-
-
+  - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_grd.nc
+    hash: 41397c80fd00536dc414f6b8039b08fbe5d9f234aec66c3fc9b5a8e13353502a
 initial_conditions:
   data:
-    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_ini.nc
-      hash: c8eda3bab223d8f247055da5afe6a69234833733c75cba7dc6b5a85b06263d52
-
+  - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_ini.nc
+    hash: c8eda3bab223d8f247055da5afe6a69234833733c75cba7dc6b5a85b06263d52
 forcing:
   tidal:
     data:
-      - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_tides.nc
-        hash: 9466a6cacf33f3b3cbfaa87044c70cc8ef12e963f42ce3e72e30b564541afef1
+    - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_tides.nc
+      hash: 9466a6cacf33f3b3cbfaa87044c70cc8ef12e963f42ce3e72e30b564541afef1
   surface:
     documentation: best forcing ever
     locked: true
@@ -73,15 +67,12 @@ forcing:
       hash: 3b51a46b1bd50d8a0e7c7f96c7b153c9d2c7fb26a8e9d97ce957d43210944909
     - location: https://github.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/raw/refs/heads/main/wales-toy-domain/input_datasets_netcdf/roms_bry_bgc.nc
       hash: 366af33acf309c7644fab8f7bd5385c99123634c82d5c15f09d2033ec7103a6e
-
 partitioning:
   n_procs_x: 3
   n_procs_y: 3
-
 model_params:
   time_step: 360
-  use_pio: false
-
+  use_pio: true
 runtime_params:
-  start_date: "2012-01-01 00:00:00"
-  end_date: "2012-01-01 00:30:00"
+  start_date: '2012-01-01 00:00:00'
+  end_date: '2012-01-01 00:30:00'

@@ -14,6 +14,7 @@ from cstar.base.external_codebase import ExternalCodeBase
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -2102,3 +2103,265 @@ class TestROMSSimulationRestart:
 
         with pytest.raises(ValueError, match="Found multiple distinct restart files"):
             sim.restart(new_end_date=new_end_date)
+
+
+class TestROMSSimulationUsePIO:
+    """Tests for `ROMSSimulation` behaviour when `use_pio` is enabled.
+
+    With ParallelIO, ROMS reads and writes joined files directly, so `pre_run`
+    skips partitioning, `post_run` moves outputs without joining them, and the
+    ParallelIO library is managed as an additional external codebase.
+    """
+
+    def test_init_raises_if_pio_codebase_without_use_pio(
+        self, stub_romssimulation, pioexternalcodebase
+    ):
+        """Test that supplying a `pio_codebase` with `use_pio=False` raises a
+        `ValueError`.
+        """
+        sim = stub_romssimulation
+        with pytest.raises(
+            ValueError, match="'pio_codebase' was provided but 'use_pio' is False"
+        ):
+            ROMSSimulation(
+                name=sim.name,
+                directory=sim.directory / "pio_sim",
+                discretization=sim.discretization,
+                codebase=sim.codebase,
+                runtime_code=sim.runtime_code,
+                compile_time_code=sim.compile_time_code,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+                valid_start_date=sim.valid_start_date,
+                valid_end_date=sim.valid_end_date,
+                pio_codebase=pioexternalcodebase,
+            )
+
+    def test_init_use_pio_creates_default_pio_codebase(
+        self, stub_romssimulation, mocksourcedata_remote_repo
+    ):
+        """Test that `use_pio=True` without a `pio_codebase` creates a default
+        `PIOExternalCodeBase`.
+        """
+        sim = stub_romssimulation
+        source_data = mocksourcedata_remote_repo(
+            location="https://github.com/NCAR/ParallelIO.git", identifier="pio2_7_0"
+        )
+        with mock.patch(
+            "cstar.base.external_codebase.SourceData", return_value=source_data
+        ):
+            pio_sim = ROMSSimulation(
+                name=sim.name,
+                directory=sim.directory / "pio_sim",
+                discretization=sim.discretization,
+                codebase=sim.codebase,
+                runtime_code=sim.runtime_code,
+                compile_time_code=sim.compile_time_code,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+                valid_start_date=sim.valid_start_date,
+                valid_end_date=sim.valid_end_date,
+                use_pio=True,
+            )
+
+        assert pio_sim.use_pio is True
+        assert isinstance(pio_sim.pio_codebase, PIOExternalCodeBase)
+
+    def test_codebases_includes_pio_codebase(
+        self, stub_romssimulation, pioexternalcodebase
+    ):
+        """Test that the `codebases` property includes the PIO codebase when set."""
+        sim = stub_romssimulation
+        assert pioexternalcodebase not in sim.codebases
+
+        sim.use_pio = True
+        sim.pio_codebase = pioexternalcodebase
+        assert sim.codebases[-1] is pioexternalcodebase
+
+    @mock.patch("cstar.roms.ROMSSimulation.persist")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_pre_run_skips_partitioning(
+        self, mock_partition, mock_persist, stub_romssimulation
+    ):
+        """Test that `pre_run` is a no-op (besides persisting) when `use_pio` is
+        True.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True
+
+        dataset = mock.MagicMock(spec=ROMSInputDataset, exists_locally=True)
+        with mock.patch.object(
+            ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock
+        ) as mock_input_datasets:
+            mock_input_datasets.return_value = [dataset]
+
+            sim.pre_run()
+
+        dataset.partition.assert_not_called()
+        mock_persist.assert_called_once()
+
+    @mock.patch("cstar.roms.ROMSSimulation.persist")
+    @mock.patch("subprocess.run")
+    def test_post_run_moves_files_without_joining(
+        self, mock_subprocess, mock_persist, stub_romssimulation: ROMSSimulation
+    ) -> None:
+        """Test that `post_run` with `use_pio` moves the (already-joined) outputs to
+        the joined output directory without calling any joining tools.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True
+        sim.fs_manager.prepare()
+        output_dir = sim.fs_manager.output_dir
+
+        # PIO output files are already joined (no partition-index segment)
+        (output_dir / "ocean_his.20240101000000.nc").touch()
+        (output_dir / "ocean_rst.20240101000000.nc").touch()
+
+        sim._execution_handler = mock.MagicMock()
+        sim._execution_handler.status = ExecutionStatus.COMPLETED
+
+        sim.post_run()
+
+        mock_subprocess.assert_not_called()
+
+        joined_dir = sim.fs_manager.joined_output_dir
+        assert (joined_dir / "ocean_his.20240101000000.nc").exists()
+        assert (joined_dir / "ocean_rst.20240101000000.nc").exists()
+        assert not (output_dir / "ocean_his.20240101000000.nc").exists()
+        assert not (output_dir / "ocean_rst.20240101000000.nc").exists()
+
+        mock_persist.assert_called_once()
+
+    @mock.patch("cstar.roms.ROMSSimulation.persist")
+    def test_post_run_prints_message_if_no_files(
+        self,
+        mock_persist,
+        stub_romssimulation,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Test that `post_run` with `use_pio` warns and exits early if no output
+        files are found.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True
+        sim.fs_manager.prepare()
+        sim._execution_handler = mock.MagicMock()
+        sim._execution_handler.status = ExecutionStatus.COMPLETED
+        caplog.set_level(logging.WARNING)
+
+        sim.post_run()
+
+        assert "No suitable output found" in caplog.text
+        mock_persist.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "use_pio, cppdefs_content, should_raise",
+        [
+            # Flag and cppdefs agree
+            (True, "#define PARALLEL_IO\n#define MARBL\n", False),
+            (False, "#define MARBL\n", False),
+            # use_pio without the define
+            (True, "#define MARBL\n", True),
+            # define without use_pio
+            (False, "#define PARALLEL_IO\n", True),
+            # a commented-out define does not count (Fortran '!' comment)
+            (True, "! #define PARALLEL_IO\n", True),
+            (False, "! #define PARALLEL_IO\n", False),
+            # whitespace variations are detected, as in the ROMS Makedefs.inc
+            (True, "  #  define   PARALLEL_IO\n", False),
+        ],
+    )
+    def test_validate_pio_cppdefs(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        use_pio: bool,
+        cppdefs_content: str,
+        should_raise: bool,
+    ):
+        """Test that `_validate_pio_cppdefs` raises when `use_pio` and the presence
+        of `#define PARALLEL_IO` in cppdefs.opt disagree, in either direction.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = use_pio
+        build_dir = tmp_path / "cppdefs_test"
+        build_dir.mkdir()
+        (build_dir / "cppdefs.opt").write_text(cppdefs_content)
+
+        if should_raise:
+            with pytest.raises(ValueError, match="PARALLEL_IO"):
+                sim._validate_pio_cppdefs(build_dir)
+        else:
+            sim._validate_pio_cppdefs(build_dir)
+
+    def test_validate_pio_cppdefs_skips_if_no_cppdefs(
+        self, stub_romssimulation: ROMSSimulation, tmp_path: Path
+    ):
+        """Test that `_validate_pio_cppdefs` is a no-op when cppdefs.opt is absent."""
+        sim = stub_romssimulation
+        sim.use_pio = True
+        sim._validate_pio_cppdefs(tmp_path)  # Should not raise
+
+    @mock.patch.object(Path, "glob")
+    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
+    def test_restart_searches_joined_output_dir(
+        self,
+        mock_glob,
+        stub_romssimulation: ROMSSimulation,
+        mocksourcedata_local_file,
+    ) -> None:
+        """Test that `restart` with `use_pio` searches the joined output directory,
+        where `post_run` moves the restart file.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True
+        new_end_date = datetime(2026, 6, 1)
+
+        restart_file = (
+            sim.fs_manager.joined_output_dir / "restart_rst.20251231000000.nc"
+        )
+        mock_glob.return_value = [restart_file]
+
+        restart_source = mocksourcedata_local_file(location=restart_file)
+        with mock.patch(
+            "cstar.roms.input_dataset.SourceData", return_value=restart_source
+        ):
+            new_sim = sim.restart(new_end_date=new_end_date)
+
+        assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
+
+    def test_dict_roundtrip_with_pio(
+        self,
+        stub_romssimulation,
+        pioexternalcodebase,
+        patch_romssimulation_init_sourcedata,
+    ):
+        """Test that `use_pio` and `pio_codebase` survive a to_dict/from_dict round
+        trip, and are only emitted by `to_dict` when active.
+        """
+        sim = stub_romssimulation
+
+        # Inactive: keys are not emitted
+        assert "use_pio" not in sim.to_dict()
+        assert "pio_codebase" not in sim.to_dict()
+
+        sim.use_pio = True
+        sim.pio_codebase = pioexternalcodebase
+        sim_dict = sim.to_dict()
+        assert sim_dict["use_pio"] is True
+        assert sim_dict["pio_codebase"] == {
+            "source_repo": pioexternalcodebase.source.location,
+            "checkout_target": pioexternalcodebase.source.checkout_target,
+        }
+
+        with patch_romssimulation_init_sourcedata():
+            sim2 = ROMSSimulation.from_dict(
+                sim_dict,
+                directory=sim.directory,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+            )
+
+        assert sim2.use_pio is True
+        assert isinstance(sim2.pio_codebase, PIOExternalCodeBase)
+        assert sim2.to_dict() == sim_dict
