@@ -239,6 +239,9 @@ class WorkplanState(StrEnum):
 class Step(PolymorphicBaseModel):
     """An individual unit of execution within a workplan."""
 
+    resolver: t.ClassVar[dict[str, type["Step"]]] = {}
+    """Subclass registry for type resolution during deserialization."""
+
     name: RequiredString
     """The user-friendly name of the step."""
 
@@ -294,6 +297,18 @@ class Step(PolymorphicBaseModel):
         str
         """
         return slugify(self.name)
+
+    @classmethod
+    def discriminator(cls) -> str:
+        """Return the sub-type discriminator."""
+        raise NotImplementedError("Subclasses must implement")
+
+    def __init_subclass__(cls, **kwargs: t.Any):
+        """Register `Step` subclasses with a unique _kind_ value that will be used
+        for discrimination during deserialization.
+        """
+        super().__init_subclass__(**kwargs)
+        cls.resolver[cls.discriminator()] = cls
 
 
 class Workplan(PolymorphicBaseModel):
@@ -413,10 +428,25 @@ class Workplan(PolymorphicBaseModel):
 
         return value
 
-    @model_validator(mode="after")
-    def _model_validator(self) -> "Workplan":
+    @model_validator(mode="before")
+    @classmethod
+    def _model_validator(cls, data: t.Any) -> t.Any:
         """Validate attribute relationships."""
-        return self
+        if (
+            isinstance(data, dict)
+            and isinstance(data.get("steps"), list)
+            and len(data.get("steps", [])) > 0
+            and isinstance(data.get("steps", [None])[0], dict)
+        ):
+            step_data = t.cast("list[dict[str, t.Any]]", data["steps"])
+            if "kind" not in step_data[0]:
+                return data
+
+            data["steps"] = [
+                Step.resolver.get(s.get("kind", ""), Step).model_validate(s)
+                for s in step_data
+            ]
+        return data
 
 
 class UserDefinedVariables(ConfiguredBaseModel):
