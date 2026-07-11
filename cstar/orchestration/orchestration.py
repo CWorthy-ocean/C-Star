@@ -235,6 +235,8 @@ class LiveStep(Step):
     """The root directory where this step can write outputs."""
     _fsm: JobFileSystemManager = PrivateAttr()
     """Manages the structure of outputs from the step."""
+    kind: str = Field(default="", frozen=True, init=False)
+    """The instance discriminator."""
 
     @staticmethod
     def get_root_fsm() -> JobFileSystemManager:
@@ -315,6 +317,7 @@ class LiveStep(Step):
         name = str(data.get("name", ""))
         wd = t.cast("Path | str | None", data.get("working_dir", None))
         parent = t.cast("Step | None", data.get("parent", None))
+        data["kind"] = "live"
 
         if parent and not isinstance(parent, LiveStep):
             parent = LiveStep(**parent.model_dump(by_alias=True))
@@ -348,6 +351,12 @@ class LiveStep(Step):
         )
         object.__setattr__(self, "blueprint_path", Path(self.blueprint_path))
         return self
+
+    @t.override
+    @classmethod
+    def discriminator(cls) -> str:
+        """Return the sub-type discriminator."""
+        return "live"
 
 
 class LiveWorkplan(Workplan):

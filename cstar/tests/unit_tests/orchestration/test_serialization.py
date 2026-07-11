@@ -194,6 +194,12 @@ def test_serialization_polymorphic_workplan(
     print(wp_content)
     assert "working_dir" in wp_content
 
+    # now, deserialize and confirm the workplan contains LiveStep
+    result = deserialize(poly_path, Workplan)
+
+    for step in result.steps:
+        assert isinstance(step, LiveStep)
+
 
 def test_serialization_workplan_compute_env(
     tmp_path: Path,
