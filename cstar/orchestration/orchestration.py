@@ -21,7 +21,7 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
-from cstar.orchestration.models import Blueprint, ConfiguredBaseModel, Step, Workplan
+from cstar.orchestration.models import Blueprint, BlueprintCore, Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
     intenum_representer,
