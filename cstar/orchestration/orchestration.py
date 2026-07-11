@@ -9,7 +9,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    PrivateAttr,
     ValidationError,
     model_validator,
 )
@@ -233,8 +232,6 @@ class LiveStep(Step):
     """The step for which this step is a sub-task."""
     working_dir: Path | None = Field(default=None, frozen=True)
     """The root directory where this step can write outputs."""
-    _fsm: JobFileSystemManager = PrivateAttr()
-    """Manages the structure of outputs from the step."""
     kind: str = Field(default="", frozen=True, init=False)
     """The instance discriminator."""
 
