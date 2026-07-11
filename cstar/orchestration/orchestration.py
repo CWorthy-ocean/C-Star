@@ -239,7 +239,6 @@ class LiveStep(Step):
     _fsm: JobFileSystemManager = PrivateAttr()
     """Manages the structure of outputs from the step."""
 
-
     @staticmethod
     def get_root_fsm() -> JobFileSystemManager:
         """Return the default, run-aware job file-system manager.
