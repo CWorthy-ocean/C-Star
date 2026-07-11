@@ -324,8 +324,6 @@ class LiveStep(Step):
             wd = fsm.root_dir
             data["parent"] = parent
 
-        data["blueprint"] = data.get("blueprint")
-
         if wd:
             data["working_dir"] = wd
             fsm = JobFileSystemManager(Path(wd))
