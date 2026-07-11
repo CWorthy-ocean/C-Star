@@ -149,8 +149,9 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                 "blueprint_overrides": overrides,
                 "depends_on": depends_on,
                 "name": child_step_name,
+                "parent": step,
             }
-            child_step = LiveStep.from_step(step, parent=step, update=updates)
+            child_step = LiveStep.from_step(step, update=updates)
             results.append(child_step)
 
             if i == len(time_slices) - 1:
