@@ -282,9 +282,10 @@ def test_serialization_workplan_steps_with_directives(
     step = wp.steps[-1]
 
     # confirm the directive has been loaded
-    assert step.directives
-    assert "continue-from" in step.directives
-    assert "path" in step.directives["continue-from"]
+    directives = t.cast("dict[str, dict[str, str]]", step.directives)
+    assert directives
+    assert "continue-from" in directives
+    assert "path" in directives["continue-from"]
 
     # confirm the directives can be written
     serialize_to = tmp_path / "reserialized.yaml"
