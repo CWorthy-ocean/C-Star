@@ -486,7 +486,10 @@ def local_copy(uri: str) -> Generator[Path, None, None]:
             bp_path = write_local_copy(uri, Path(tmp_dir))
             yield bp_path
     else:
-        yield Path(uri).expanduser().resolve()
+        bp_path = Path(uri).expanduser().resolve()
+        if not bp_path.exists():
+            raise FileNotFoundError(f"File not found at path: {bp_path}")
+        yield bp_path
 
 
 @asynccontextmanager

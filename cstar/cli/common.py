@@ -18,7 +18,7 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, reset_log_level
 from cstar.execution.file_system import DirectoryManager, is_remote_resource
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     PersistenceMode,
     serialize,
@@ -342,7 +342,7 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     CStarMigrationNotRegisteredError
         If there are no registered migrations for the requested schema.
     """
-    validation_result = validate_serialized_entity(request.source, Blueprint)
+    validation_result = validate_serialized_entity(request.source, BlueprintCore)
     if validation_result.item is None:
         raise typer.BadParameter(validation_result.error_msg)
 

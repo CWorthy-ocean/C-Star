@@ -60,7 +60,7 @@ class ConfiguredBaseModel(BaseModel):
     """
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(
-        extra="allow",
+        extra="forbid",
         from_attributes=True,
         str_strip_whitespace=True,
         use_attribute_docstrings=True,
@@ -74,7 +74,7 @@ class PolymorphicBaseModel(BaseModel):
     """
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(
-        extra="allow",
+        extra="forbid",
         from_attributes=True,
         str_strip_whitespace=True,
         use_attribute_docstrings=True,
@@ -170,6 +170,24 @@ class Application(StrEnum):
     """Application performing an upscaled simulation run."""
 
 
+class BlueprintCore(ConfiguredBaseModel):
+    """Model used for metadata-only loading of blueprints"""
+
+    name: RequiredString
+    """A unique, user-friendly name for this blueprint."""
+
+    application: RequiredString
+    """The process type to be executed by the blueprint."""
+
+    schema_version: str = "1.0.0"
+    """The schema version for the document."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="allow", from_attributes=True
+    )
+    """Configuration allowing extra field data."""
+
+
 class Blueprint(ConfiguredBaseModel, ABC):
     """Common elements of all blueprints."""
 
@@ -179,13 +197,13 @@ class Blueprint(ConfiguredBaseModel, ABC):
     description: RequiredString
     """A user-friendly description of the scenario to be executed by the blueprint."""
 
-    application: str
+    application: RequiredString
     """The process type to be executed by the blueprint."""
 
     state: BlueprintState = BlueprintState.NotSet
     """The current validation status of the blueprint."""
 
-    schema_version: str = Field("1.0.0", frozen=True)
+    schema_version: str = "1.0.0"
     """The schema version for the document."""
 
     working_dir: TargetDirectoryPath = Path()
@@ -215,13 +233,15 @@ class Blueprint(ConfiguredBaseModel, ABC):
         info: "SerializationInfo",
     ) -> dict[str, t.Any]:
         data = handler(self)
-        return {
-            "$schema": generate_schema_ref(
-                self.application,
-                self.schema_version,
-            ),
-            **data,
-        }
+        if not info.exclude or "$schema" not in info.exclude:
+            return {
+                "$schema": generate_schema_ref(
+                    self.application,
+                    self.schema_version,
+                ),
+                **data,
+            }
+        return data
 
 
 class WorkplanState(StrEnum):
