@@ -252,6 +252,7 @@ class BlueprintMigration(Migration):
 
         for klass in plan.adapters:
             if model := klass(model).adapt():
+                model[KEY_SV] = klass.target()
                 continue
 
             msg = f"Schema migration from {plan.source!r} to {plan.target!r} failed."

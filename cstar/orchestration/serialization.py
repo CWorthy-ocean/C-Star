@@ -163,6 +163,8 @@ def _read_json(path: Path, klass: type[_T]) -> _T:
     _T
     """
     model_dict = read_json_to_raw(path)
+    if model_dict:
+        model_dict.pop("$schema", None)
     return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
@@ -181,6 +183,8 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
     _T
     """
     model_dict = read_yaml_to_raw(path)
+    if model_dict:
+        model_dict.pop("$schema", None)
     return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
 
 
