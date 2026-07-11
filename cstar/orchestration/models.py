@@ -168,7 +168,7 @@ class BlueprintCore(ConfiguredBaseModel):
     """The schema version for the document."""
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(
-        extra="allow", from_attributes=True
+        extra="allow",
     )
     """Configuration allowing extra field data."""
 
