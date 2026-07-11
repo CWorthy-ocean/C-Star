@@ -895,7 +895,7 @@ def test_workplan_yaml_deserialize(
     yaml_path = tmp_path / "test.yaml"
     _ = serialize(yaml_path, plan)
 
-    plan2 = t.cast("Workplan", deserialize(yaml_path, Workplan))
+    plan2 = deserialize(yaml_path, Workplan)
     # todo: fix so this str conversion isn't required.
     for step in plan.steps:
         step.blueprint_path = str(step.blueprint_path)
