@@ -68,16 +68,12 @@ class ConfiguredBaseModel(BaseModel):
     """Configures the behavior of the pydantic model."""
 
 
-class PolymorphicBaseModel(BaseModel):
+class PolymorphicBaseModel(ConfiguredBaseModel):
     """Base-model configuring common instantiation and validation behavior
     for serialization of covariant references.
     """
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(
-        extra="forbid",
-        from_attributes=True,
-        str_strip_whitespace=True,
-        use_attribute_docstrings=True,
         polymorphic_serialization=True,
     )
     """Configures the behavior of the pydantic model."""
@@ -183,7 +179,7 @@ class BlueprintCore(ConfiguredBaseModel):
     """The schema version for the document."""
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(
-        extra="allow", from_attributes=True
+        extra="allow",
     )
     """Configuration allowing extra field data."""
 
