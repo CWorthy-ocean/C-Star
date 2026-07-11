@@ -133,21 +133,11 @@ def test_live_step(tmp_path: Path) -> None:
     bp.touch()
 
     data_home = tmp_path / "data"
+    run_id = "fake-run-id"
 
     step_1 = Step(name="A", application="roms_marbl", blueprint=bp.as_posix())
     step_2 = Step(name="B", application="roms_marbl", blueprint=bp.as_posix())
     step_3 = Step(name="C", application="roms_marbl", blueprint=bp.as_posix())
-
-    ls_1 = LiveStep.from_step(step_1)
-    ls_2 = LiveStep.from_step(step_2, step_1)  # use plan "Step" as parent
-    ls_3 = LiveStep.from_step(step_3, ls_2)  # use "LiveStep" as parent
-    ls_4 = LiveStep.from_step(ls_3)  # step from another live step
-
-    ls_5_name = "child of ls 2"
-    ls_5 = LiveStep.from_step(ls_1, update={"name": ls_5_name})  # override attributes
-
-    run_id = "fake-run-id"
-    task_dir_name = JobFileSystemManager._TASKS_NAME  # type: ignore # noqa: SLF001
 
     with mock.patch.dict(
         os.environ,
@@ -157,24 +147,39 @@ def test_live_step(tmp_path: Path) -> None:
         },
         clear=True,
     ):
-        actual = ls_1.get_working_dir
-        expected = data_home / run_id / task_dir_name / ls_1.safe_name
+        # use plan "Step" as parent (expect step_1 parent dir to step_2)
+        ls_1 = LiveStep.from_step(step_1)
+        # use "LiveStep" as parent
+        ls_2 = LiveStep.from_step(step_2, update={"parent": step_1})
+        # step from another live step (one with parent, one as base task)
+        ls_3 = LiveStep.from_step(step_3, update={"parent": ls_2})
+        ls_4 = LiveStep.from_step(ls_3)
+
+        # updating name should change the dir name
+        ls_5_name = "child of ls 2"
+        ls_5 = LiveStep.from_step(
+            ls_1, update={"name": ls_5_name}
+        )  # override attributes
+
+        task_dir_name = JobFileSystemManager._TASKS_NAME  # type: ignore
+        actual = ls_1.working_dir
+        expected = data_home / run_id / task_dir_name / ls_1.safe_name  # noqa: SLF001
         assert actual == expected
 
-        actual = ls_2.get_working_dir
-        expected = ls_1.get_working_dir / task_dir_name / ls_2.safe_name
+        actual = ls_2.working_dir
+        expected = ls_1.working_dir / task_dir_name / ls_2.safe_name  # type: ignore # noqa: SLF001
         assert actual == expected
 
-        actual = ls_3.get_working_dir
-        expected = ls_2.get_working_dir / task_dir_name / ls_3.safe_name
+        actual = ls_3.working_dir
+        expected = ls_2.working_dir / task_dir_name / ls_3.safe_name  # type: ignore # noqa: SLF001
         assert actual == expected
 
-        actual = ls_4.get_working_dir
+        actual = ls_4.working_dir
         # confirm the parent carries over and ls4 is a child of ls2
-        expected = ls_2.get_working_dir / task_dir_name / ls_4.safe_name
+        expected = ls_2.working_dir / task_dir_name / ls_4.safe_name
         assert actual == expected
 
-        actual = ls_5.get_working_dir
+        actual = ls_5.working_dir
         expected = data_home / run_id / task_dir_name / ls_5.safe_name
         assert actual == expected
         assert ls_5.name == ls_5_name  # confirm the update was honored

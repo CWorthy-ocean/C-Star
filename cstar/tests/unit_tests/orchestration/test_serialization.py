@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 from cstar.applications.plotter import PlotterBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -154,6 +155,44 @@ def test_serialization_workplan_happy_path(
     assert workplan.steps[0].workflow_overrides["segment_length"] in {16, 16.0}
     assert workplan.steps[0].compute_overrides["walltime"] == "00:10:00"
     assert workplan.steps[0].compute_overrides["num_nodes"] == 4
+
+
+def test_serialization_polymorphic_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    bp_templates_dir: Path,
+    default_blueprint_path: str,
+) -> None:
+    """Verify that a workplan serialized with steps of a subclass of `Step` results
+    in deserialization to the correct subclass/type.
+    """
+    template_file = "workplan.yaml"
+    template_path = wp_templates_dir / template_file
+
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    bp_path.write_text(bp_tpl_path.read_text())
+
+    wp_content = template_path.read_text()
+    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
+
+    wp_path = tmp_path / template_file
+    wp_path.write_text(wp_content)
+
+    wp = deserialize(wp_path, Workplan)
+
+    # convert steps to live-steps and store on a workplan
+    all_steps = [LiveStep.from_step(s) for s in wp.steps]
+
+    poly_path = tmp_path / "live_workplan.yaml"
+    poly_wp = Workplan(**wp.model_dump(exclude={"steps"}), steps=all_steps)
+
+    assert serialize(poly_path, poly_wp)
+
+    # confirm that the subclass LiveStep was serialized
+    wp_content = poly_path.read_text()
+    print(wp_content)
+    assert "working_dir" in wp_content
 
 
 def test_serialization_workplan_compute_env(
