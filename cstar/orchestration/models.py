@@ -16,7 +16,6 @@ from pydantic import (
     PlainSerializer,
     PrivateAttr,
     SerializationInfo,
-    SerializeAsAny,
     StringConstraints,
     ValidationInfo,
     WithJsonSchema,
@@ -63,6 +62,23 @@ class ConfiguredBaseModel(BaseModel):
     model_config: t.ClassVar[ConfigDict] = ConfigDict(
         extra="allow",
         from_attributes=True,
+        str_strip_whitespace=True,
+        use_attribute_docstrings=True,
+    )
+    """Configures the behavior of the pydantic model."""
+
+
+class PolymorphicBaseModel(BaseModel):
+    """Base-model configuring common instantiation and validation behavior
+    for serialization of covariant references.
+    """
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="allow",
+        from_attributes=True,
+        str_strip_whitespace=True,
+        use_attribute_docstrings=True,
+        polymorphic_serialization=True,
     )
     """Configures the behavior of the pydantic model."""
 
@@ -220,7 +236,7 @@ class WorkplanState(StrEnum):
     """A workflow that has been validated."""
 
 
-class Step(BaseModel):
+class Step(PolymorphicBaseModel):
     """An individual unit of execution within a workplan."""
 
     name: RequiredString
@@ -280,7 +296,7 @@ class Step(BaseModel):
         return slugify(self.name)
 
 
-class Workplan(BaseModel):
+class Workplan(PolymorphicBaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
@@ -289,7 +305,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: Sequence[SerializeAsAny[Step]] = Field(
+    steps: Sequence[Step] = Field(
         min_length=1,
         frozen=True,
     )
