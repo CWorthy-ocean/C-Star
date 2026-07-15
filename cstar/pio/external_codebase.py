@@ -96,13 +96,23 @@ class PIOExternalCodeBase(ExternalCodeBase):
 
         # Configure. The build directory must be named `build` and the library must
         # not be installed elsewhere: ROMS' Makedefs.inc hardcodes both.
+        #
+        # pio2_7_0 ships no FindNetCDF.cmake: find_package(NetCDF) resolves via
+        # CONFIG mode / pkg-config, and PnetCDF via `pnetcdf-config` on PATH — the
+        # NetCDF_*_PATH/PnetCDF_PATH cache variables are never read. Pin
+        # CMAKE_PREFIX_PATH and PKG_CONFIG_PATH to NETCDFHOME/PNETCDFHOME so PIO
+        # cannot latch onto an unrelated netCDF (e.g. a conda env's): PIO compiles
+        # in calls to whatever nc_* API the netcdf_meta.h it sees advertises, and
+        # ROMS links $(NETCDFHOME)'s libnetcdf — a mismatch surfaces as undefined
+        # nc_* references (e.g. nc_inq_filter_avail) at ROMS link time.
+        netcdf_pkgconfig = Path(netcdf_home) / "lib/pkgconfig"
+        pnetcdf_pkgconfig = Path(pnetcdf_home) / "lib/pkgconfig"
         _run_cmd(
+            f'PKG_CONFIG_PATH="{netcdf_pkgconfig}:{pnetcdf_pkgconfig}:${{PKG_CONFIG_PATH:-}}" '
             "cmake -S . -B build "
             f"-DCMAKE_C_COMPILER={mpicc} "
             f"-DCMAKE_Fortran_COMPILER={mpifc} "
-            f"-DNetCDF_C_PATH={netcdf_home} "
-            f"-DNetCDF_Fortran_PATH={netcdf_home} "
-            f"-DPnetCDF_PATH={pnetcdf_home} "
+            f"-DCMAKE_PREFIX_PATH='{netcdf_home};{pnetcdf_home}' "
             f"{ranlib_clause}"
             "-DPIO_ENABLE_TIMING=OFF "
             "-DPIO_ENABLE_TESTS=OFF "

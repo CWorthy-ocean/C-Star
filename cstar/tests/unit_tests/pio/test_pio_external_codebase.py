@@ -91,10 +91,11 @@ class TestPIOExternalCodeBaseConfigure:
         configure_call, build_call = mock_run_cmd.call_args_list
 
         configure_cmd = configure_call.args[0]
-        assert configure_cmd.startswith("cmake -S . -B build ")
-        assert "-DNetCDF_C_PATH=/netcdf/home/" in configure_cmd
-        assert "-DNetCDF_Fortran_PATH=/netcdf/home/" in configure_cmd
-        assert "-DPnetCDF_PATH=/pnetcdf/home/" in configure_cmd
+        assert configure_cmd.startswith(
+            'PKG_CONFIG_PATH="/netcdf/home/lib/pkgconfig:/pnetcdf/home/lib/pkgconfig'
+            ':${PKG_CONFIG_PATH:-}" cmake -S . -B build '
+        )
+        assert "-DCMAKE_PREFIX_PATH='/netcdf/home/;/pnetcdf/home/'" in configure_cmd
         assert "-DPIO_ENABLE_TIMING=OFF" in configure_cmd
         assert "-DBUILD_SHARED_LIBS=OFF" in configure_cmd
         assert configure_call.kwargs["cwd"] == pio_path
