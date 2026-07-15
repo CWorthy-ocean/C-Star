@@ -147,7 +147,7 @@ def _extract_data_join_wildcard(
     logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
 
 
-def _pio_input_file_problems(path: Path) -> list[str]:
+def _check_nc_pio_compatible(path: Path) -> list[str]:
     """Check a netCDF file for properties that ROMS with ParallelIO cannot read.
 
     ROMS with `use_pio` reads inputs through PnetCDF, which requires classic-format
@@ -170,9 +170,9 @@ def _pio_input_file_problems(path: Path) -> list[str]:
     import xarray as xr
 
     with open(path, "rb") as f:
-        magic = f.read(4)
-    if magic[:3] != b"CDF":
-        detected = "netCDF-4/HDF5" if magic == b"\x89HDF" else "unrecognized"
+        header = f.read(4)
+    if header[:3] != b"CDF":
+        detected = "netCDF-4/HDF5" if header == b"\x89HDF" else "unrecognized"
         return [
             f"{path}: not a classic-format netCDF file (detected: {detected}). "
             "Rewrite it in CDF-5 format, e.g. with "
@@ -1708,7 +1708,7 @@ class ROMSSimulation(Simulation):
                 problems.append(str(exc))
                 continue
             for path in paths:
-                problems.extend(_pio_input_file_problems(path))
+                problems.extend(_check_nc_pio_compatible(path))
 
         if problems:
             raise ValueError(

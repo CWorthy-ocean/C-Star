@@ -2226,7 +2226,7 @@ class TestROMSSimulationUsePIO:
         # classic formats, while tools like nccopy preserve it
         import netCDF4
 
-        from cstar.roms.simulation import _pio_input_file_problems
+        from cstar.roms.simulation import _check_nc_pio_compatible
 
         path = tmp_path / "input.nc"
         with netCDF4.Dataset(path, "w", format=file_format) as nc:
@@ -2234,7 +2234,7 @@ class TestROMSSimulationUsePIO:
             var = nc.createVariable("myvar", dtype, ("x",))
             var[:] = [0, 1, 2]
 
-        problems = _pio_input_file_problems(path)
+        problems = _check_nc_pio_compatible(path)
         if expected_problem is None:
             assert problems == []
         else:
@@ -2415,7 +2415,7 @@ class TestROMSSimulationUsePIO:
         ):
             new_sim = sim.restart(new_end_date=new_end_date)
 
-        assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
+        assert new_sim.initial_conditions.source.location == str(restart_file.resolve())  # type: ignore[union-attr]
 
     def test_dict_roundtrip_with_pio(
         self,
