@@ -647,7 +647,7 @@ def test_resolver_roms_ref_overrides_commit_and_clears_branch():
 
 def test_resolver_roms_ref_default_uses_model_yml_pin():
     cfg = _build()
-    assert cfg.code.roms.commit == "83f40f2121bbfc5a7740c5560c8b36b315f2f2cd"
+    assert cfg.code.roms.commit == "0.2.0"
 
 
 def test_content_hash_changes_with_roms_ref():

@@ -96,8 +96,8 @@ def test_key_renames(nml):
     assert nml["simulation_name_settings"]["title"] == "test_case"  # casename -> title
     # blk_frc.interp_frc (0) -> interp_bulk_frc (logical False) in merged surf_frc_settings
     assert nml["surf_frc_settings"]["interp_bulk_frc"] is False
-    # bgc.interp_frc (1) -> interp_bgc_frc (logical True); wrt_his -> wrt_bgc_his
-    assert nml["bgc_settings"]["interp_bgc_frc"] is True
+    # bgc.interp_frc (0) -> interp_bgc_frc (logical False); wrt_his -> wrt_bgc_his
+    assert nml["bgc_settings"]["interp_bgc_frc"] is False
     assert nml["bgc_settings"]["wrt_bgc_his"] is False
     # river_frc.analytical -> river_analytical
     assert nml["river_frc_settings"]["river_analytical"] is False
