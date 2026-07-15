@@ -114,6 +114,13 @@ class PIOExternalCodeBase(ExternalCodeBase):
             f"-DCMAKE_Fortran_COMPILER={mpifc} "
             f"-DCMAKE_PREFIX_PATH='{netcdf_home};{pnetcdf_home}' "
             f"{ranlib_clause}"
+            # Preseeding HAVE_PAR_FILTERS skips PIO's filter feature test, which
+            # keys off netcdf_meta.h's NC_HAS_PAR_FILTERS. That macro appears in
+            # netcdf-c 4.7.4 but the inquiry API PIO then compiles against
+            # (nc_inq_var_filter_ids: 4.8+, nc_inq_filter_avail: 4.9+) does not,
+            # leaving undefined references at ROMS link time. ROMS never calls
+            # the gated PIO filter/quantize wrappers, so disable them everywhere.
+            "-DHAVE_PAR_FILTERS=FALSE "
             "-DPIO_ENABLE_TIMING=OFF "
             "-DPIO_ENABLE_TESTS=OFF "
             "-DPIO_ENABLE_EXAMPLES=OFF "

@@ -96,6 +96,7 @@ class TestPIOExternalCodeBaseConfigure:
             ':${PKG_CONFIG_PATH:-}" cmake -S . -B build '
         )
         assert "-DCMAKE_PREFIX_PATH='/netcdf/home/;/pnetcdf/home/'" in configure_cmd
+        assert "-DHAVE_PAR_FILTERS=FALSE" in configure_cmd
         assert "-DPIO_ENABLE_TIMING=OFF" in configure_cmd
         assert "-DBUILD_SHARED_LIBS=OFF" in configure_cmd
         assert configure_call.kwargs["cwd"] == pio_path

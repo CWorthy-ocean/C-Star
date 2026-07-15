@@ -1,4 +1,4 @@
 gcc/11.2.0
 openmpi/4.0.6
 netcdf-fortran/4.5.3
-parallel-netcdf
+parallel-netcdf/1.11.2
