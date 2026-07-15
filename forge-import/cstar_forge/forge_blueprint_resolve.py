@@ -233,6 +233,7 @@ def build_forge_blueprint(
     nesting_include_pressure_fluxes: bool = False,
     topography_path: str | None = None,
     use_pio: bool = False,
+    roms_ref: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
     compile_time_overrides: dict[str, Any] | None = None,
     dt: float | None = None,
@@ -363,7 +364,12 @@ def build_forge_blueprint(
     )  # kept as `sources` locally for brevity
 
     # ----- code + templates --------------------------------------------------
-    code = _build_code(model, templates_repo or DEFAULT_TEMPLATE_REPO, use_pio=use_pio)
+    code = _build_code(
+        model,
+        templates_repo or DEFAULT_TEMPLATE_REPO,
+        use_pio=use_pio,
+        roms_ref=roms_ref,
+    )
 
     return ForgeBlueprint(
         identity=Identity(
@@ -520,7 +526,10 @@ _build_sources = _build_forcing
 
 
 def _build_code(
-    model: dict[str, Any], templates_repo: CodeRepo, use_pio: bool = False
+    model: dict[str, Any],
+    templates_repo: CodeRepo,
+    use_pio: bool = False,
+    roms_ref: str | None = None,
 ) -> Code:
     code_block = model.get("code", {}) or {}
 
@@ -554,6 +563,12 @@ def _build_code(
     roms = _repo("roms")
     if roms is None:
         raise ValueError("ModelSpec model.yml is missing a code.roms repository")
+    if roms_ref:
+        # User override: commit/branch/tag are all valid `git checkout` targets and
+        # collapse to the same checkout_target downstream (C-Star CodeRepository), so
+        # store the override in `commit` and clear `branch` to satisfy C-Star's
+        # "exactly one of commit/branch" validator.
+        roms = CodeRepo(location=roms.location, commit=roms_ref, branch=None)
     pio = None
     if use_pio:
         pio = _repo("pio")

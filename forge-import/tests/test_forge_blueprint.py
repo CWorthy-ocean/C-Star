@@ -637,6 +637,34 @@ def test_resolver_use_pio_requires_model_yml_pin():
         _build_code(model, templates_repo, use_pio=True)
 
 
+def test_resolver_roms_ref_overrides_commit_and_clears_branch():
+    cfg = _build(roms_ref="pio-refdate")
+    assert cfg.code.roms.commit == "pio-refdate"
+    assert cfg.code.roms.branch is None
+    # location is untouched -- only the checkout target changes
+    assert cfg.code.roms.location == "https://github.com/CWorthy-ocean/ucla-roms.git"
+
+
+def test_resolver_roms_ref_default_uses_model_yml_pin():
+    cfg = _build()
+    assert cfg.code.roms.commit == "83f40f2121bbfc5a7740c5560c8b36b315f2f2cd"
+
+
+def test_content_hash_changes_with_roms_ref():
+    cfg = _build()
+    h = cfg.content_hash()
+    cfg_override = _build(roms_ref="pio-refdate")
+    assert cfg_override.content_hash() != h
+
+
+def test_roms_ref_round_trips_through_yaml(tmp_path):
+    cfg = _build(roms_ref="pio-refdate")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    back = ForgeBlueprint.from_yaml(p)
+    assert back.code.roms.commit == "pio-refdate"
+    assert back.code.roms.branch is None
+
+
 def test_settings_is_flat_and_omits_processing_filled_sections():
     cfg = _build()
     ms = cfg.model_settings
@@ -983,6 +1011,35 @@ class TestForgeBlueprintWizard:
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 7.25
         assert w2.nest_enable.value is True
         assert w2.config.model_settings["extract_data"]["n_chd"] == 18
+
+    def test_roms_ref_gather_and_default_round_trip(self, tmp_path):
+        w1 = self._wizard()
+        w1.roms_ref.value = "pio-refdate"
+        assert w1.config.code.roms.commit == "pio-refdate"
+        p = tmp_path / "forge_blueprint.yml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.roms_ref.value == "pio-refdate"
+        assert w2.config.code.roms.commit == "pio-refdate"
+
+    def test_roms_ref_blank_when_loaded_value_matches_model_default(self, tmp_path):
+        """A blueprint using the ModelSpec's pinned default (no override) must reload
+        with the field blank -- otherwise the resolved default gets carried forward as
+        a spurious override (e.g. mis-pinning ROMS after switching models).
+        """
+        w1 = self._wizard()
+        assert w1.roms_ref.value == ""  # untouched -> no override
+        p = tmp_path / "forge_blueprint.yml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.roms_ref.value = "stale-value-from-a-prior-load"
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.roms_ref.value == ""
 
     def test_loading_file_with_bad_settings_is_flagged(self, tmp_path):
         import yaml

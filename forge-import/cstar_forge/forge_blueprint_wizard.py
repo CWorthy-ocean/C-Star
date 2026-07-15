@@ -1276,6 +1276,15 @@ class ForgeBlueprintWizard:
             tooltip="Build ROMS against the ParallelIO library: inputs are written as "
             "classic-format (CDF-5) netCDF and ROMS reads/writes joined files.",
         )
+        self.roms_ref = W.Text(
+            value="",
+            description="ucla-roms ref:",
+            style={"description_width": "120px"},
+            layout=W.Layout(width="380px"),
+            placeholder="commit / tag / branch (blank = ModelSpec default)",
+            tooltip="Override the ucla-roms checkout target (commit hash, tag, or "
+            "branch). Leave blank to use the ModelSpec's pinned default.",
+        )
 
         # --- nesting (optional child grid) ---
         self.nest_enable = W.Checkbox(
@@ -1494,6 +1503,7 @@ class ForgeBlueprintWizard:
             self.npx,
             self.npy,
             self.use_pio_chk,
+            self.roms_ref,
             self.start,
             self.end,
             self.model_ref_date,
@@ -1834,6 +1844,21 @@ class ForgeBlueprintWizard:
             self.use_pio_chk.value = bool(
                 (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
             )
+            # only populate when it differs from the ModelSpec's pinned default --
+            # otherwise every load would carry the resolved default forward as an
+            # "override" and silently mis-pin it after a later model switch.
+            stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
+            default_roms = (
+                load_model_spec_data(self.catalog.model_dir(self.model_dd.value))[
+                    "model"
+                ]
+                .get("code", {})
+                .get("roms", {})
+                if self.model_dd.value in self.catalog.model_names
+                else {}
+            )
+            default_ref = default_roms.get("commit") or default_roms.get("branch") or ""
+            self.roms_ref.value = "" if stored_ref == default_ref else stored_ref
             self.topo_path.value = cfg.domain.topography_path or ""
             dt = (cfg.model_settings.get("time_stepping", {}) or {}).get("dt")
             if dt is not None:
@@ -1905,6 +1930,8 @@ class ForgeBlueprintWizard:
             kw["topography_path"] = self.topo_path.value.strip()
         if self.use_pio_chk.value:
             kw["use_pio"] = True
+        if self.roms_ref.value.strip():
+            kw["roms_ref"] = self.roms_ref.value.strip()
         if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
             kw["model_reference_date"] = datetime.combine(
                 self.model_ref_date.value, datetime.min.time()
@@ -2163,7 +2190,11 @@ class ForgeBlueprintWizard:
                 ),
                 section("Open boundaries", W.HBox(list(self.bnd.values()))),
                 section("Forcing", self.forcing_dd, self.forcing_box),
-                section("Partitioning", W.HBox([self.npx, self.npy, self.use_pio_chk])),
+                section(
+                    "Partitioning",
+                    W.HBox([self.npx, self.npy, self.use_pio_chk]),
+                    self.roms_ref,
+                ),
                 section(
                     "Run window",
                     self.start,
