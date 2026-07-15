@@ -1214,6 +1214,21 @@ def _get_catalog():
     return default_catalog
 
 
+def _schedule_coroutine(coro):
+    """Schedule a coroutine on the running loop (returns a Task), or run it to
+    completion directly if there is no running loop. Mirrors
+    ``cstar_forge.forge.executor._schedule_coroutine`` -- needed for seamless
+    execution of async code (like streaming a subprocess) from a synchronous
+    ipywidgets ``on_click`` handler, both inside and outside Jupyter.
+    """
+    import asyncio
+
+    try:
+        return asyncio.get_running_loop().create_task(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
 class ForgeBlueprintWizard:
     """Build/curate a :class:`ForgeBlueprint` interactively. ``self.config`` holds the
     latest successfully-resolved config (``None`` while inputs are invalid).
@@ -1538,6 +1553,29 @@ class ForgeBlueprintWizard:
         self.save_btn = W.Button(description="Save to disk", icon="save")
         self.save_status = W.HTML("")
 
+        # --- run (invokes the executor CLI on the just-saved blueprint) ---
+        from cstar_forge.config import system as _detected_system
+
+        self.run_warning = W.HTML(
+            "<b style='color:#b58900'>⚠ Processing a blueprint can use substantial "
+            "memory and CPU depending on grid size.</b> Run this from a compute node "
+            "(or another host) with resources appropriate for your domain — this is "
+            f"not checked automatically. Detected host: <code>{_detected_system}</code>."
+            "<br><span style='color:#666'>ℹ This interface is likely to change in the "
+            "near future (e.g. once the executor moves into C-Star, this may become a "
+            "<code>cstar blueprint run</code> command).</span>"
+        )
+        self.run_btn = W.Button(description="Run", icon="play")
+        self.run_status = W.HTML("")
+        self.run_output = W.Output(
+            layout=W.Layout(
+                border="1px solid #ccc",
+                padding="6px",
+                max_height="380px",
+                overflow="auto",
+            )
+        )
+
         self.roms_ref.value = self._model_default_roms_ref()
         self._build_forcing_editor(self._model_default_inputs())
         self._wire()
@@ -1551,6 +1589,7 @@ class ForgeBlueprintWizard:
         self.plot_btn.on_click(self._on_plot)
         self.nest_plot_btn.on_click(self._on_nest_plot)
         self.save_btn.on_click(self._on_save)
+        self.run_btn.on_click(self._on_run)
         self.load_btn.on_click(self._on_load_path)
         self.upload.observe(self._on_upload, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
@@ -2247,6 +2286,61 @@ class ForgeBlueprintWizard:
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
+    def _build_run_command(self, blueprint_path: str) -> list[str]:
+        """Command the Run button invokes. Isolated here so swapping this for a
+        future ``cstar blueprint run <path>`` (once the executor moves into the
+        C-Star repo) is a one-line change.
+        """
+        import sys
+
+        return [sys.executable, "-m", "cstar_forge.run", blueprint_path]
+
+    def _on_run(self, _):
+        if self.config is None:
+            self.run_status.value = (
+                "<span style='color:#b00'>Nothing to run — config is invalid.</span>"
+            )
+            return
+        _schedule_coroutine(self._run_async())
+
+    async def _run_async(self):
+        """Save the current blueprint, then launch the executor CLI as a
+        subprocess and stream its combined stdout/stderr into ``run_output`` line
+        by line as it arrives (not all at once at the end).
+        """
+        import asyncio
+
+        self.run_btn.disabled = True
+        self.run_output.clear_output(wait=True)
+        self.run_status.value = "<i>saving blueprint…</i>"
+        try:
+            path = self.config.to_yaml(Path(self.save_path.value))
+            cmd = self._build_run_command(str(path))
+            self.run_status.value = f"<i>running: {' '.join(cmd)}</i>"
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            # append_stdout (not `with self.run_output: print(...)`) appends
+            # directly to the widget's output list -- it works whether or not a
+            # live Jupyter kernel is routing stdout via iopub messaging, so lines
+            # land in the log both in a real notebook and in tests.
+            async for line in proc.stdout:
+                self.run_output.append_stdout(line.decode(errors="replace"))
+            code = await proc.wait()
+            self.run_status.value = (
+                "<span style='color:#080'>✓ finished</span>"
+                if code == 0
+                else f"<span style='color:#b00'>exited with code {code}</span>"
+            )
+        except Exception as exc:
+            self.run_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+        finally:
+            self.run_btn.disabled = False
+
     # ---- layout / display ----------------------------------------------------
     @property
     def widget(self):
@@ -2374,6 +2468,12 @@ class ForgeBlueprintWizard:
                     self.download_link,
                     W.HBox([self.save_path, self.save_btn]),
                     self.save_status,
+                ),
+                section(
+                    "Run",
+                    self.run_warning,
+                    W.HBox([self.run_btn, self.run_status]),
+                    self.run_output,
                 ),
             ]
         )

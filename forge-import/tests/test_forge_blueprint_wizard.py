@@ -310,3 +310,112 @@ def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
     # the real drawn figure has one axis with the plotted line.
     assert captured.get("axes"), "expected the drawn figure's axes, got a blank figure"
     assert captured["axes"][0].lines, "the plotted line did not survive plt.show()"
+
+
+def test_build_run_command_uses_current_interpreter():
+    """The Run button invokes `sys.executable -m cstar_forge.run <path>` -- the
+    interpreter already running the wizard's kernel -- not a bare `python` or
+    `conda run` invocation (avoids conda/micromamba env-discovery issues).
+    """
+    import sys
+
+    wiz = ForgeBlueprintWizard()
+    cmd = wiz._build_run_command("/tmp/some_blueprint.yml")
+    assert cmd == [sys.executable, "-m", "cstar_forge.run", "/tmp/some_blueprint.yml"]
+
+
+def test_on_run_guards_on_invalid_config(monkeypatch):
+    """Clicking Run with no resolved config shows an error and spawns nothing."""
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.config = None
+
+    def _boom(*a, **kw):
+        raise AssertionError("must not spawn a subprocess for an invalid config")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
+    wiz._on_run(None)
+    assert "invalid" in wiz.run_status.value
+    assert wiz.run_output.outputs == ()
+
+
+class _FakeStdout:
+    """Minimal async-iterable mimicking asyncio.StreamReader's line iteration."""
+
+    def __init__(self, lines):
+        self._lines = iter(lines)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._lines)
+        except StopIteration:
+            raise StopAsyncIteration
+
+
+class _FakeProcess:
+    def __init__(self, lines, returncode=0):
+        self.stdout = _FakeStdout(lines)
+        self._returncode = returncode
+
+    async def wait(self):
+        return self._returncode
+
+
+def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_path):
+    """Run auto-saves the current blueprint, launches the built command with
+    stderr merged into stdout, and streams each line into run_output. There's no
+    running event loop in a plain test function, so _schedule_coroutine's
+    asyncio.run(...) fallback runs the whole thing to completion synchronously --
+    no pytest.mark.asyncio needed.
+    """
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yml")
+
+    captured_cmd = {}
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        captured_cmd["args"] = args
+        captured_cmd["kwargs"] = kwargs
+        return _FakeProcess([b"line one\n", b"line two\n"], returncode=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+
+    wiz._on_run(None)
+
+    assert (tmp_path / "bp.yml").exists()  # auto-saved before running
+    assert captured_cmd["kwargs"]["stderr"] == asyncio.subprocess.STDOUT
+    text = "".join(o["text"] for o in wiz.run_output.outputs)
+    assert "line one" in text
+    assert "line two" in text
+    assert wiz.run_status.value == "<span style='color:#080'>✓ finished</span>"
+    assert wiz.run_btn.disabled is False
+
+
+def test_on_run_reports_nonzero_exit_code(monkeypatch, tmp_path):
+    """A failing subprocess is reported as an error status, not a silent success."""
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yml")
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        return _FakeProcess([b"uh oh\n"], returncode=1)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+
+    wiz._on_run(None)
+
+    assert "exited with code 1" in wiz.run_status.value
+    assert wiz.run_btn.disabled is False
