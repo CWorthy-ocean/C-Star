@@ -76,8 +76,7 @@ class DomainCatalog:
         │   └── RCAC_anvil.yml
         ├── ModelSpec/
         │   └── cson_roms-marbl_v0.1/
-        │       ├── model.yml
-        │       └── templates/
+        │       └── model.yml    (single consolidated file: code + model_settings)
         ├── DomainSpec/
         │   ├── ccs-12km/
         │   │   ├── Domain.yml
@@ -475,29 +474,13 @@ class DomainCatalog:
         return self._models[model_name] / "model.yml"
 
     def model_dir(self, model_name: str) -> Path:
-        """Return the directory containing model.yml and templates/ for a named model."""
+        """Return the directory containing model.yml for a named model."""
         if model_name not in self._models:
             raise KeyError(
                 f"Model '{model_name}' not found in catalog at {self.catalog_root}. "
                 f"Available models: {self.model_names}"
             )
         return self._models[model_name]
-
-    def compile_time_template_dir(self, model_name: str) -> Path:
-        """Return the compile-time template directory for a named model."""
-        return self.model_dir(model_name) / "templates" / "compile-time"
-
-    def run_time_template_dir(self, model_name: str) -> Path:
-        """Return the run-time template directory for a named model."""
-        return self.model_dir(model_name) / "templates" / "run-time"
-
-    def compile_time_defaults_path(self, model_name: str) -> Path:
-        """Return the path to compile-time-defaults.yml for a named model."""
-        return self.model_dir(model_name) / "templates" / "compile-time-defaults.yml"
-
-    def run_time_defaults_path(self, model_name: str) -> Path:
-        """Return the path to run-time-defaults.yml for a named model."""
-        return self.model_dir(model_name) / "templates" / "run-time-defaults.yml"
 
     def machine_path(self, machine_name: str) -> Path:
         """Return the path to the YAML file for a named machine."""
@@ -794,7 +777,7 @@ class DomainCatalog:
         catalog._scan_domains()
 
     def copy_model(self, model_name: str, catalog: DomainCatalog) -> None:
-        """Copy a model directory (model.yml + templates/) to another DomainCatalog.
+        """Copy a model directory (model.yml) to another DomainCatalog.
 
         Parameters
         ----------

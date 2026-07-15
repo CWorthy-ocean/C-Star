@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 import cstar_forge
+from cstar_forge.domain_catalog import default_catalog as _CATALOG
 from cstar_forge.forge.forge_blueprint import ForgeBlueprint
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
@@ -52,6 +53,10 @@ def _build(**over):
         end_date=datetime(2012, 1, 2),
         description="Test tiny",
         dt=7200,  # pass dt -> stays dependency-light
+        # ModelSpec no longer embeds a default forcing/output selection -- supply the
+        # bundled catalog entries by default; callers can still override either.
+        forcing_inputs=_CATALOG.forcing_data("glorys-era5-unified"),
+        output_settings=_CATALOG.output_data("standard"),
     )
     kw.update(over)
     return build_forge_blueprint(**kw)
@@ -383,14 +388,14 @@ def test_catalog_scans_forcingspec():
     assert "forcing" in data and "initial_conditions" in data
 
 
-def test_sources_to_forcing_override_returns_dict_for_model_default():
+def test_sources_to_forcing_override_returns_dict_by_default():
     from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
 
     cfg = _build()
-    assert cfg.composition.forcing.origin == "model_default"
-    # The short-circuit is gone: the resolver fully resolves cfg.forcing (from the model
-    # default), so the bridge always returns a dict and the executor never reads
-    # model_spec.inputs.
+    # ModelSpec no longer provides a default forcing -- _build()'s own default
+    # forcing_inputs (a ForcingSpec dict, not composition= tracking) resolves via the
+    # generic fallback Composition, which always records origin="custom".
+    assert cfg.composition.forcing.origin == "custom"
     ov = sources_to_forcing_override(cfg)
     assert ov is not None
     assert "initial_conditions" in ov and "forcing" in ov
@@ -411,6 +416,8 @@ def test_sources_to_forcing_override_converts_custom_forcing():
     assert [i["source"]["name"] for i in ov["forcing"]["surface"]] == [
         "ERA5",
         "UNIFIED",
+        "MBL_co2",
+        "WOA",
     ]
     assert ov["forcing"]["tidal"][0]["ntides"] == 15
 
@@ -572,11 +579,27 @@ def test_resolver_forcing_inputs_override():
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
     assert cfg.composition.forcing.origin == "custom"
-    assert [i.source.name for i in cfg.forcing.surface] == ["ERA5", "UNIFIED"]
-    # an edited forcing with a restoring SSS source -> sal_restore
-    edited = dict(fdata)
-    edited["forcing"] = dict(fdata["forcing"])
-    edited["forcing"]["surface"] = fdata["forcing"]["surface"] + [
+    assert [i.source.name for i in cfg.forcing.surface] == [
+        "ERA5",
+        "UNIFIED",
+        "MBL_co2",
+        "WOA",
+    ]
+    # glorys-era5-unified already includes a restoring SSS source -> sal_restore
+    assert cfg.model_settings["cppdefs"]["sal_restore"] is True
+    # stripping it back out -> sal_restore goes False; adding it back -> True again
+    # (isolates the derivation's causality rather than relying on the bundled default)
+    without_restoring = dict(fdata)
+    without_restoring["forcing"] = dict(fdata["forcing"])
+    without_restoring["forcing"]["surface"] = [
+        it for it in fdata["forcing"]["surface"] if it.get("type") != "restoring"
+    ]
+    cfg_bare = _build(forcing_inputs=without_restoring)
+    assert cfg_bare.model_settings["cppdefs"]["sal_restore"] is False
+
+    edited = dict(without_restoring)
+    edited["forcing"] = dict(without_restoring["forcing"])
+    edited["forcing"]["surface"] = without_restoring["forcing"]["surface"] + [
         {
             "source": {"name": "WOA", "climatology": True},
             "type": "restoring",
@@ -648,6 +671,30 @@ def test_resolver_roms_ref_overrides_commit_and_clears_branch():
 def test_resolver_roms_ref_default_uses_model_yml_pin():
     cfg = _build()
     assert cfg.code.roms.commit == "0.2.0"
+
+
+def test_build_code_coerces_numeric_commit_to_string():
+    """A bare numeric commit in model.yml (e.g. `commit: 123456`, parsed by PyYAML
+    as an int) must be coerced to str -- CodeRepo.commit is str-typed and rejects
+    an int outright.
+    """
+    from cstar_forge.forge.forge_blueprint import CodeRepo
+    from cstar_forge.forge_blueprint_resolve import _build_code
+
+    model = {
+        "code": {
+            "roms": {"location": "https://example.com/roms.git", "commit": 123456},
+            "templates_compile_time": {
+                "directory": "templates/compile-time",
+                "files": [],
+            },
+            "templates_run_time": {"directory": "templates/run-time", "files": []},
+        },
+    }
+    templates_repo = CodeRepo(location="https://example.com/forge.git", branch="main")
+    code = _build_code(model, templates_repo)
+    assert code.roms.commit == "123456"
+    assert isinstance(code.roms.commit, str)
 
 
 def test_content_hash_changes_with_roms_ref():
@@ -902,15 +949,20 @@ class TestForgeBlueprintWizard:
 
     def test_forcing_spec_selection_and_edit(self):
         w = self._wizard()
-        assert w.forcing_dd.value == "<model default>"
-        assert w.config.composition.forcing.origin == "model_default"
+        # ForcingSpec must always be an explicit catalog selection now -- no more
+        # "<model default>" fallback -- so the default-selected entry is already
+        # origin="catalog" from construction.
         if "glorys-era5-unified" not in w.forcing_dd.options:
             pytest.skip("example ForcingSpec not in catalog")
-        # select cataloged forcing -> origin catalog
-        w.forcing_dd.value = "glorys-era5-unified"
+        assert w.forcing_dd.value == "glorys-era5-unified"
         assert w.config.composition.forcing.origin == "catalog"
-        assert [i.source.name for i in w.config.forcing.surface] == ["ERA5", "UNIFIED"]
-        # add + edit a restoring surface item -> sal_restore + custom origin
+        assert [i.source.name for i in w.config.forcing.surface] == [
+            "ERA5",
+            "UNIFIED",
+            "MBL_co2",
+            "WOA",
+        ]
+        # add + edit a restoring surface item -> custom origin
         fe = w._forcing_editor
         fe._add("surface")
         row = fe._rows["surface"][-1]
@@ -919,14 +971,15 @@ class TestForgeBlueprintWizard:
         row["restoring_forces"].value = "sss"
         assert w.config.composition.forcing.origin == "custom"
         assert w.config.model_settings["cppdefs"]["sal_restore"] is True
-        assert "WOA" in [i.source.name for i in w.config.forcing.surface]
+        assert [i.source.name for i in w.config.forcing.surface].count("WOA") == 2
 
     def test_output_spec_selection_and_clear_on_select(self):
         w = self._wizard()
-        assert w.config.composition.output.origin == "model_default"
+        # OutputSpec must always be an explicit catalog selection now -- no more
+        # "<model default>" fallback.
         if "standard" not in w.output_dd.options:
             pytest.skip("example OutputSpec not in catalog")
-        w.output_dd.value = "standard"
+        assert w.output_dd.value == "standard"
         assert w.config.composition.output.origin == "catalog"
         assert (
             "marbl_config_file" in w.config.model_settings["marbl_bgc"]
@@ -934,8 +987,9 @@ class TestForgeBlueprintWizard:
         # edit an output section in Advanced -> override recorded; selection unchanged
         w.editor._widgets[("ts_output", "wrt_temp")][0].value = True
         assert w.config.composition.overrides["ts_output"]["wrt_temp"] is True
-        # re-selecting an output piece clears output-section overrides
-        w.output_dd.value = "<model default>"
+        # re-selecting the output piece clears output-section overrides (the handler
+        # doesn't key off which value it changed to, only that a selection happened)
+        w._on_output_spec(None)
         assert "ts_output" not in w.config.composition.overrides
 
     def test_output_spec_round_trips_through_load(self, tmp_path):
@@ -1305,6 +1359,8 @@ class TestResolverBuilderParity:
             partitioning=partitioning,
             start_date=start,
             end_date=end,
+            forcing_inputs=_CATALOG.forcing_data("glorys-era5-unified"),
+            output_settings=_CATALOG.output_data("standard"),
         )
         host = HostPaths(
             working_dir=tmp_path / "wd",

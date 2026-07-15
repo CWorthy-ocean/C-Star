@@ -36,7 +36,6 @@ from cstar_forge.forge.input_data import (
     RomsMarblInputData,
     register_input,
 )
-from cstar_forge.models import SettingsSpec
 
 
 @contextmanager
@@ -99,30 +98,33 @@ def sample_grid(sample_grid_kwargs):
     return rt.Grid(**sample_grid_kwargs)
 
 
+def _build_forcing_override(ic, surface=(), boundary=(), tidal=(), river=()):
+    """Build the forcing_override dict shape RomsMarblInputData consumes
+    (initial_conditions + flat forcing categories) directly from item objects.
+
+    ModelSpec no longer carries embedded forcing data (that's a ForcingSpec's job),
+    so this builds the dict straight from the roms-tools item models instead of
+    deriving it from a ModelSpec.inputs block.
+    """
+    forcing = {}
+    for category, items in (
+        ("surface", surface),
+        ("boundary", boundary),
+        ("tidal", tidal),
+        ("river", river),
+    ):
+        if items:
+            forcing[category] = [it.model_dump() for it in items]
+    return {"forcing": forcing, "initial_conditions": ic.model_dump()}
+
+
 @pytest.fixture
-def sample_model_spec(tmp_path):
-    """Create a sample ModelSpec for testing."""
-    code_repo = cstar_models.ROMSCompositeCodeRepository(
-        roms=cstar_models.CodeRepository(
-            location="https://github.com/test/roms.git", branch="main"
-        ),
-        run_time=cstar_models.CodeRepository(
-            location="placeholder://run_time",
-            branch="main",
-            filter=cstar_models.PathFilter(files=["namelist.nml"]),
-        ),
-        compile_time=cstar_models.CodeRepository(
-            location="placeholder://compile_time",
-            branch="main",
-            filter=cstar_models.PathFilter(files=["Makefile"]),
-        ),
+def sample_forcing_override():
+    """forcing_override covering all four categories + initial conditions."""
+    ic = forge_models.InitialConditionsInput(
+        source=forge_models.SourceSpec(name="GLORYS"),
+        bgc_source=forge_models.SourceSpec(name="UNIFIED", climatology=True),
     )
-
-    grid_input = forge_models.GridInput(topography_source="ETOPO5")
-    source = forge_models.SourceSpec(name="GLORYS")
-    bgc_source = forge_models.SourceSpec(name="UNIFIED", climatology=True)
-    ic_input = forge_models.InitialConditionsInput(source=source, bgc_source=bgc_source)
-
     surface_item = forge_models.SurfaceForcingItem(
         source=forge_models.SourceSpec(name="ERA5"), type="physics"
     )
@@ -141,48 +143,13 @@ def sample_model_spec(tmp_path):
     river_item = forge_models.RiverForcingItem(
         source=forge_models.SourceSpec(name="DAI")
     )
-
-    forcing_input = forge_models.ForcingInput(
+    return _build_forcing_override(
+        ic,
         surface=[surface_item, surface_bgc_item],
         boundary=[boundary_item, boundary_bgc_item],
         tidal=[tidal_item],
         river=[river_item],
     )
-
-    model_inputs = forge_models.ModelInputs(
-        grid=grid_input, initial_conditions=ic_input, forcing=forcing_input
-    )
-
-    return forge_models.ModelSpec(
-        name="test_model",
-        code=code_repo,
-        inputs=model_inputs,
-        datasets=["GLORYS_REGIONAL", "UNIFIED_BGC", "ERA5", "TPXO", "DAI"],
-        settings=SettingsSpec(),
-    )
-
-
-def _forcing_override_from_model_spec(model_spec):
-    """Mirror a ModelSpec's inputs into the forcing_override dict shape that
-    RomsMarblInputData now consumes (initial_conditions + flat forcing categories).
-    """
-    mi = model_spec.inputs
-    forcing = {}
-    if mi.forcing is not None:
-        for category in mi.forcing.model_fields.keys():
-            items = getattr(mi.forcing, category, None)
-            if items:
-                forcing[category] = [it.model_dump() for it in items]
-    override = {"forcing": forcing}
-    if mi.initial_conditions is not None:
-        override["initial_conditions"] = mi.initial_conditions.model_dump()
-    return override
-
-
-@pytest.fixture
-def sample_forcing_override(sample_model_spec):
-    """forcing_override mirroring the sample ModelSpec's inputs."""
-    return _forcing_override_from_model_spec(sample_model_spec)
 
 
 @pytest.fixture
@@ -498,60 +465,19 @@ class TestRomsMarblInputDataInitialization:
         assert data.roms_marbl_blueprint_elements is not None
         assert len(data.input_list) > 0
 
-    def test_romsmarblinputdata_missing_handler(
-        self, tmp_path, sample_grid, sample_model_spec
-    ):
+    def test_romsmarblinputdata_missing_handler(self, tmp_path, sample_grid):
         """Test RomsMarblInputData raises error for missing handler."""
-        # Create a model spec with an input that's not registered
-        code_repo = cstar_models.ROMSCompositeCodeRepository(
-            roms=cstar_models.CodeRepository(
-                location="https://github.com/test/roms.git", branch="main"
-            ),
-            run_time=cstar_models.CodeRepository(
-                location="placeholder://run_time",
-                branch="main",
-                filter=cstar_models.PathFilter(files=["namelist.nml"]),
-            ),
-            compile_time=cstar_models.CodeRepository(
-                location="placeholder://compile_time",
-                branch="main",
-                filter=cstar_models.PathFilter(files=["Makefile"]),
-            ),
+        ic = forge_models.InitialConditionsInput(
+            source=forge_models.SourceSpec(name="GLORYS")
         )
-
-        grid_input = forge_models.GridInput(topography_source="ETOPO5")
-        source = forge_models.SourceSpec(name="GLORYS")
-        ic_input = forge_models.InitialConditionsInput(source=source)
-
-        # Create forcing with a non-existent input type
         surface_item = forge_models.SurfaceForcingItem(
             source=forge_models.SourceSpec(name="ERA5"), type="physics"
         )
         boundary_item = forge_models.BoundaryForcingItem(
             source=forge_models.SourceSpec(name="GLORYS"), type="physics"
         )
-        forcing_input = forge_models.ForcingInput(
-            surface=[surface_item], boundary=[boundary_item]
-        )
-
-        model_inputs = forge_models.ModelInputs(
-            grid=grid_input, initial_conditions=ic_input, forcing=forcing_input
-        )
-
-        # This should work since grid, initial_conditions, and forcing are registered
-        # But we can test with a custom input that's not registered by temporarily
-        # modifying the model spec to include an invalid input
-
-        # Actually, the input_list is built from model_spec.inputs, so we can't
-        # easily test this without modifying the registry. Let's test the validation
-        # that happens when a handler is missing.
-
-        model_spec = forge_models.ModelSpec(
-            name="test_model",
-            code=code_repo,
-            inputs=model_inputs,
-            datasets=[],
-            settings=SettingsSpec(),
+        forcing_override = _build_forcing_override(
+            ic, surface=[surface_item], boundary=[boundary_item]
         )
 
         roms_marbl_blueprint_dir = tmp_path / "blueprints"
@@ -566,7 +492,7 @@ class TestRomsMarblInputDataInitialization:
             domain_name="test_grid",
             start_date=datetime(2012, 1, 1),
             end_date=datetime(2012, 1, 2),
-            forcing_override=_forcing_override_from_model_spec(model_spec),
+            forcing_override=forcing_override,
             grid=sample_grid,
             boundaries=open_boundaries,
             source_data=mock_source_data,

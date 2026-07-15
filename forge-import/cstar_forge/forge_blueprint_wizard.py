@@ -1499,14 +1499,16 @@ class ForgeBlueprintWizard:
 
         # --- output / preview ---
         # --- forcing piece (ForcingSpec selection + add/remove/edit editor) ---
+        # A ForcingSpec must always be explicitly selected -- ModelSpec no longer
+        # embeds a default forcing.
+        _forcing_names = list(self.catalog.forcing_names)
         self.forcing_dd = W.Dropdown(
-            options=["<model default>", *list(self.catalog.forcing_names)],
-            value="<model default>",
+            options=_forcing_names,
+            value=(_forcing_names[0] if _forcing_names else None),
             description="Forcing:",
             style={"description_width": "110px"},
             tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
-            "fields, or keep '<model default>' to use the model's defaults. "
-            "Edit individual items in the Forcing section below.",
+            "fields. Edit individual items in the Forcing section below.",
         )
         self.forcing_box = W.VBox([])
         self._forcing_editor: _ForcingEditor | None = None
@@ -1514,10 +1516,13 @@ class ForgeBlueprintWizard:
 
         # --- output settings piece (OutputSpec selection) ---
         # The output sections themselves are edited in the Advanced settings accordion;
-        # this dropdown selects a named OutputSpec that seeds those sections.
+        # this dropdown selects a named OutputSpec that seeds those sections. An
+        # OutputSpec must always be explicitly selected -- ModelSpec no longer embeds
+        # default output settings.
+        _output_names = list(self.catalog.output_names)
         self.output_dd = W.Dropdown(
-            options=["<model default>", *list(self.catalog.output_names)],
-            value="<model default>",
+            options=_output_names,
+            value=(_output_names[0] if _output_names else None),
             description="Output:",
             style={"description_width": "110px"},
             tooltip=_tip("output", "output_dd"),
@@ -1577,7 +1582,7 @@ class ForgeBlueprintWizard:
         )
 
         self.roms_ref.value = self._model_default_roms_ref()
-        self._build_forcing_editor(self._model_default_inputs())
+        self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         self._wire()
         self._rebuild()
 
@@ -1623,16 +1628,13 @@ class ForgeBlueprintWizard:
             w.observe(self._rebuild, names="value")
 
     def _on_model_change(self, _change):
-        # a different model has different defaults -> existing overrides no longer apply
+        # a different model has different defaults -> existing overrides no longer apply.
+        # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
+        # OutputSpec doesn't reference a model), so switching models never touches them.
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
         self.roms_ref.value = self._model_default_roms_ref()
-        if (
-            self.forcing_dd.value == "<model default>"
-        ):  # reseed default forcing for new model
-            self._forcing_edited = False
-            self._build_forcing_editor(self._model_default_inputs())
         self._rebuild()
 
     def _on_editor_edit(self, section, field):
@@ -1657,14 +1659,6 @@ class ForgeBlueprintWizard:
         self._on_nest_plot(None)
 
     # ---- forcing piece -------------------------------------------------------
-    def _model_default_inputs(self) -> dict[str, Any]:
-        """The selected model's default forcing inputs (from its model.yml)."""
-        try:
-            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
-            return data["model"].get("inputs", {}) or {}
-        except Exception:
-            return {}
-
     def _model_default_roms_ref(self) -> str:
         """The selected model's pinned ucla-roms checkout target (commit or branch)."""
         try:
@@ -1681,17 +1675,11 @@ class ForgeBlueprintWizard:
         self.forcing_box.children = [self._forcing_editor.widget]
 
     def _on_forcing_spec(self, _change):
-        """Selecting a ForcingSpec (or <model default>) reseeds the forcing editor."""
+        """Selecting a ForcingSpec reseeds the forcing editor."""
         if getattr(self, "_suspended", False):
             return
-        name = self.forcing_dd.value
-        base = (
-            self._model_default_inputs()
-            if name == "<model default>"
-            else self.catalog.forcing_data(name)
-        )
         self._forcing_edited = False
-        self._build_forcing_editor(base)
+        self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         self._rebuild()
 
     def _on_forcing_change(self):
@@ -1715,10 +1703,8 @@ class ForgeBlueprintWizard:
         }
         self._rebuild()
 
-    def _output_settings(self) -> dict[str, Any] | None:
-        """The selected OutputSpec's settings (None = use the model default)."""
-        if self.output_dd.value == "<model default>":
-            return None
+    def _output_settings(self) -> dict[str, Any]:
+        """The selected OutputSpec's settings."""
         return self.catalog.output_data(self.output_dd.value)
 
     def _composition(self) -> Composition:
@@ -1727,23 +1713,15 @@ class ForgeBlueprintWizard:
             if self.domain_dd.value != "<custom>"
             else PieceRef(name=self.grid_name.value, origin="custom")
         )
+        # forcing/output are always an explicit catalog selection now (no more
+        # "model_default" origin -- ModelSpec no longer provides either as a fallback).
         if self._forcing_edited:
             forcing = PieceRef(
-                name=None
-                if self.forcing_dd.value == "<model default>"
-                else self.forcing_dd.value,
-                origin="custom",
-                modified=True,
+                name=self.forcing_dd.value, origin="custom", modified=True
             )
-        elif self.forcing_dd.value != "<model default>":
-            forcing = PieceRef(name=self.forcing_dd.value, origin="catalog")
         else:
-            forcing = PieceRef(name=None, origin="model_default")
-        output = (
-            PieceRef(name=self.output_dd.value, origin="catalog")
-            if self.output_dd.value != "<model default>"
-            else PieceRef(name=None, origin="model_default")
-        )
+            forcing = PieceRef(name=self.forcing_dd.value, origin="catalog")
+        output = PieceRef(name=self.output_dd.value, origin="catalog")
         return Composition(
             model=PieceRef(name=self.model_dd.value, origin="catalog"),
             domain=dom,
@@ -1965,24 +1943,24 @@ class ForgeBlueprintWizard:
             if dt is not None:
                 self.dt.value = float(dt)
             self._populate_nesting(cfg)
-            # forcing: reconstruct the editor from the loaded sources
+            # forcing: reconstruct the editor from the loaded sources. Forcing/output
+            # dropdowns always need a valid catalog selection (no more "model_default"
+            # fallback value); fall back to the first available option for an older
+            # file recorded with origin="model_default" or an unknown/missing name.
             forig = cfg.composition.forcing.origin
             fname = cfg.composition.forcing.name
             self._forcing_edited = forig == "custom"
-            self.forcing_dd.value = (
-                fname
-                if forig == "catalog" and fname in self.forcing_dd.options
-                else "<model default>"
-            )
+            if fname in self.forcing_dd.options:
+                self.forcing_dd.value = fname
+            elif self.forcing_dd.options:
+                self.forcing_dd.value = self.forcing_dd.options[0]
             self._build_forcing_editor(self._sources_to_inputs(cfg))
             # output piece selection
             oname = cfg.composition.output.name
-            self.output_dd.value = (
-                oname
-                if cfg.composition.output.origin == "catalog"
-                and oname in self.output_dd.options
-                else "<model default>"
-            )
+            if oname in self.output_dd.options:
+                self.output_dd.value = oname
+            elif self.output_dd.options:
+                self.output_dd.value = self.output_dd.options[0]
         # Reconstruct the overrides layer = diff(loaded model_settings, composed). This
         # captures every manual deviation regardless of the file's recorded provenance,
         # making load fully non-lossy.
@@ -2047,15 +2025,9 @@ class ForgeBlueprintWizard:
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
             if self.nest_pressure_fluxes.value:
                 kw["nesting_include_pressure_fluxes"] = True
-        # forcing: <model default> & unedited -> None (resolver uses model.yml inputs);
-        # otherwise pass the editor's selection/edits.
-        if self._forcing_editor is not None and not (
-            self.forcing_dd.value == "<model default>" and not self._forcing_edited
-        ):
-            kw["forcing_inputs"] = self._forcing_editor.gather()
-        output_settings = self._output_settings()
-        if output_settings is not None:
-            kw["output_settings"] = output_settings
+        # forcing/output are always required now (no more model-default fallback).
+        kw["forcing_inputs"] = self._forcing_editor.gather()
+        kw["output_settings"] = self._output_settings()
         kw["composition"] = self._composition()
         return kw
 

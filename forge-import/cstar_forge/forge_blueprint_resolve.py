@@ -131,34 +131,23 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 
 
 def load_model_spec_data(model_dir: str | Path) -> dict[str, Any]:
-    """Read a ModelSpec directory into plain dicts (no heavy deps).
+    """Read a ModelSpec directory into a plain dict (no heavy deps).
 
-    Returns ``{"model": <model.yml dict>, "compile_defaults": {...},
-    "run_defaults": {...}, "model_name": <dir name>}``. Resolves the
-    ``_default_config_yaml`` paths relative to ``model_dir``.
+    A ModelSpec is a single ``model.yml`` with two top-level sections: ``code``
+    (roms/marbl/pio + template refs) and ``model_settings`` (flat, mirrors
+    ``ForgeBlueprint.model_settings`` 1:1 -- no separate compile/run-time defaults
+    files to resolve). Returns ``{"model_name": <dir name>, "model": <model.yml dict>}``.
     """
     model_dir = Path(model_dir)
     model = yaml.safe_load((model_dir / "model.yml").read_text())
     # single-model file: sections at top level; else unwrap a single named block
-    if not any(k in model for k in ("templates", "settings", "code", "inputs")):
+    if not any(k in model for k in ("code", "model_settings")):
         if len(model) == 1:
             model = next(iter(model.values()))
-
-    def _load_defaults(stage: str) -> dict[str, Any]:
-        ref = model.get("settings", {}).get(stage, {}) or {}
-        rel = ref.get("_default_config_yaml") or ref.get("default_config_yaml")
-        if not rel:
-            return {}
-        p = Path(rel)
-        if not p.is_absolute():
-            p = model_dir / rel
-        return yaml.safe_load(Path(p).read_text()) or {}
 
     return {
         "model_name": model_dir.name,
         "model": model,
-        "compile_defaults": _load_defaults("compile_time"),
-        "run_defaults": _load_defaults("run_time"),
     }
 
 
@@ -255,15 +244,19 @@ def build_forge_blueprint(
     spec = load_model_spec_data(model_dir)
     model = spec["model"]
     model_name = spec["model_name"]
-    run_defaults = copy.deepcopy(spec["run_defaults"])
-    compile_defaults = copy.deepcopy(spec["compile_defaults"])
-    # forcing inputs: an explicit selection (a ForcingSpec or UI-edited dict) overrides
-    # the model's default `inputs`; both share the same shape.
-    inputs = (
-        forcing_inputs
-        if forcing_inputs is not None
-        else (model.get("inputs", {}) or {})
-    )
+    # ModelSpec no longer embeds a default forcing/output selection -- a ForcingSpec and
+    # an OutputSpec must always be supplied explicitly (from the catalog or hand-authored).
+    if forcing_inputs is None:
+        raise ValueError(
+            "forcing_inputs is required: ModelSpec no longer provides a default "
+            "forcing -- select or supply a ForcingSpec (e.g. catalog.forcing_data(name))."
+        )
+    if not output_settings:
+        raise ValueError(
+            "output_settings is required: ModelSpec no longer provides default output "
+            "settings -- select or supply an OutputSpec (e.g. catalog.output_data(name))."
+        )
+    inputs = forcing_inputs
 
     nx = grid_kwargs["nx"]
     ny = grid_kwargs["ny"]
@@ -281,7 +274,7 @@ def build_forge_blueprint(
     v_sponge = (size_x / nx) * 1000.0 / 10.0
 
     # ----- flat model_settings ----------------------------------------------
-    settings: dict[str, Any] = copy.deepcopy(run_defaults)
+    settings: dict[str, Any] = copy.deepcopy(model.get("model_settings", {}) or {})
     for sec in _PROCESSING_FILLED_SECTIONS:
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
@@ -301,7 +294,7 @@ def build_forge_blueprint(
     settings["param"] = param
 
     # cppdefs (compile-time) sits at the same flat level as the namelist sections
-    cppdefs = dict(compile_defaults.get("cppdefs", {}))
+    cppdefs = dict(settings.get("cppdefs", {}))
     cppdefs["obc_west"] = bool(open_boundaries.get("west", False))
     cppdefs["obc_east"] = bool(open_boundaries.get("east", False))
     cppdefs["obc_north"] = bool(open_boundaries.get("north", False))
@@ -362,8 +355,7 @@ def build_forge_blueprint(
 
     # OutputSpec piece: deep-merge the output-settings selection over the model
     # defaults (before manual overrides, so a hand override still wins).
-    if output_settings:
-        _deep_merge(settings, output_settings)
+    _deep_merge(settings, output_settings)
 
     # overrides win (mirror ForgeExecutor.configure_build precedence)
     if compile_time_overrides:
@@ -429,14 +421,12 @@ def build_forge_blueprint(
         or Composition(
             model=PieceRef(name=model_name, origin="catalog"),
             domain=PieceRef(name=grid_name, origin="custom"),
-            forcing=PieceRef(
-                name=None,
-                origin="custom" if forcing_inputs is not None else "model_default",
-            ),
-            output=PieceRef(
-                name=None,
-                origin="custom" if output_settings is not None else "model_default",
-            ),
+            # forcing_inputs/output_settings are always supplied now (no more
+            # "model_default" fallback); a caller not tracking finer-grained
+            # catalog/custom provenance (e.g. direct/test callers -- the wizard
+            # builds its own Composition via _composition()) gets "custom".
+            forcing=PieceRef(name=None, origin="custom"),
+            output=PieceRef(name=None, origin="custom"),
         ),
         provenance=Provenance(
             generated_at=generated_at,
@@ -553,20 +543,21 @@ def _build_code(
         b = code_block.get(name)
         if not b:
             return None
+        commit = b.get("commit")
         return CodeRepo(
-            location=b.get("location"), commit=b.get("commit"), branch=b.get("branch")
+            location=b.get("location"),
+            commit=str(commit) if commit is not None else None,
+            branch=b.get("branch"),
         )
-
-    templates = model.get("templates", {}) or {}
 
     # Optional per-ModelSpec pin of the forge commit serving the templates. When set it
     # overrides the default branch (main); until pinned, template edits change build
     # output without a content_hash bump (see docs/executor-portability-plan.md).
-    pinned_commit = templates.get("commit")
+    pinned_commit = code_block.get("templates_commit")
 
     def _template(stage) -> TemplateRepo:
-        t = templates.get(stage, {}) or {}
-        files = (t.get("filter", {}) or {}).get("files", []) or []
+        t = code_block.get(f"templates_{stage}", {}) or {}
+        files = t.get("files", []) or []
         return TemplateRepo(
             location=templates_repo.location,
             commit=pinned_commit or templates_repo.commit,

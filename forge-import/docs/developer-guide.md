@@ -49,8 +49,8 @@ cstar_forge/
   domain_catalog_sketch.py    dead prototype, unreferenced anywhere — candidate for deletion
   forge_blueprint_resolve.py      Phase-1 resolver: build_forge_blueprint(...)
   forge_blueprint_wizard.py       ForgeBlueprintWizard (ipywidgets UI), thin shell over the resolver
-  models.py                   Pydantic wrappers for model.yml (ModelSpec, GridInput,
-                               ForcingInput, load_models_yaml); imports its forcing/IC/
+  models.py                   Pydantic wrappers for model.yml (ModelSpec, ModelCode,
+                               ModelTemplates, load_models_yaml); imports its forcing/IC/
                                OpenBoundaries item models FROM forge.forge_blueprint (single
                                source, no duplicates — see §5)
   config.py                   DataPaths / MachineConfig / resolve_host() — authoring-side
@@ -119,9 +119,11 @@ repo refs) · `composition` (which catalog pieces produced this + overrides laye
 2. User picks a domain → `_on_domain()` prefills grid/boundaries/partitioning/dates from
    `catalog.domain_data(name)`.
 3. Every edit → `_rebuild()` → `build_forge_blueprint(**self._gather())`
-   (forge_blueprint_resolve.py) — reads `model.yml` + `*-defaults.yml` directly as dicts (no
-   Pydantic here), resolves dataset keys via `source_registry`, computes pure-derived
-   settings (CFL `dt`, `v_sponge`, etc.), returns a `ForgeBlueprint`.
+   (forge_blueprint_resolve.py) — reads the single consolidated `model.yml` directly as a
+   dict (no Pydantic here; `code` + flat `model_settings`, no embedded forcing/output
+   defaults — a ForcingSpec and OutputSpec must always be supplied explicitly), resolves
+   dataset keys via `source_registry`, computes pure-derived settings (CFL `dt`,
+   `v_sponge`, etc.), returns a `ForgeBlueprint`.
 4. `wiz.config.to_yaml(path)` writes the portable `forge_blueprint.yml`.
 
 **Execution (Phase 2), same machine or a different one:**
@@ -153,9 +155,13 @@ Earlier project memory described two parallel item-model schemas kept in sync by
 forcing/IC item models (`BoundaryForcingItem`, `SurfaceForcingItem`, `InitialConditions`,
 etc.) directly from `forge.forge_blueprint` — single source of truth, no duplication, no
 drift guard needed for item models. What `models.py` still owns is the `model.yml`
-*wrapper* shape (`ModelSpec`, `GridInput`, `ForcingInput`, `load_models_yaml`) used by
+*wrapper* shape (`ModelSpec`, `ModelCode`, `ModelTemplates`, `load_models_yaml`) used by
 `domain_catalog.load_model_spec()` for full Pydantic validation at catalog-registration
 time — a heavier, separate path from the resolver's plain-dict read of the same file.
+ModelSpec no longer has an `inputs`/split `templates`+`settings` shape (consolidated,
+2026-07; see the catalog's `ModelSpec/*/model.yml` for the current `code` +
+`model_settings` shape) — `GridInput`/`ForcingInput`/`ModelInputs`/`SettingsStage`/
+`SettingsSpec`/`TemplatesSpec` etc. were removed.
 
 What does still guard drift: `tests/test_roms_tools_coverage.py` (roms-tools option
 coverage) and a resolver/executor settings-parity assertion in `test_forge_blueprint.py` —
@@ -193,12 +199,10 @@ Ranked roughly by what's worth doing next:
    (`code.roms`, `code.marbl`, `code.templates_compile_time`, `code.templates_run_time`)
    before hashing — only `commit`/`branch`/`directory`/`files` are results-affecting, so a
    mirror/local-path change no longer perturbs the hash (test:
-   `test_content_hash_ignores_code_repo_location`). **Still open:** templates are still
-   pinned by `branch` (`main`), not commit — `_build_code` in `forge_blueprint_resolve.py`
-   already reads a `templates.commit:` hook from `model.yml` when set (the wiring exists),
-   but no ModelSpec has actually set it yet; that's a data/coordination decision for
-   post-merge (a real commit SHA can't be pinned before `refactor` lands on `main`), not a
-   code gap.
+   `test_content_hash_ignores_code_repo_location`). **DONE:** `_build_code` in
+   `forge_blueprint_resolve.py` reads a `code.templates_commit:` pin from `model.yml`
+   when set, and the bundled `cson_roms-marbl_v0.1` ModelSpec now sets it to a real
+   commit SHA (post-`refactor`-merge) rather than tracking branch `main`.
 5. **`refactor` has not been merged to `main` yet** (currently `main`+38 commits, 0 behind
    — a clean fast-forward candidate per `docs/executor-portability-plan.md` and prior
    audit). The raw-URL template-fetch path

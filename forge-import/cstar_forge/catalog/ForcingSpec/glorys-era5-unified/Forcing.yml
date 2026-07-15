@@ -1,7 +1,7 @@
-description: "GLORYS physics + UNIFIED BGC + ERA5 surface + TPXO tides + DAI rivers"
+description: "GLORYS physics + UNIFIED BGC + ERA5 surface (+MBL_co2, WOA sss-restoring) + TPXO tides + DAI rivers"
 # A ForcingSpec is a selectable forcing configuration (initial conditions + surface/
-# boundary/tidal/river forcing). It mirrors the `inputs` block of a model.yml and can
-# be chosen in place of a model's default forcing. Topography source lives here too.
+# boundary/tidal/river forcing). Every domain must explicitly pick one -- there is no
+# "model default" fallback. Topography source lives here too.
 grid:
   topography_source: ETOPO5
 
@@ -24,6 +24,16 @@ forcing:
         name: UNIFIED
         climatology: true
       type: bgc
+      coarse_grid_mode: "never"
+    - source:
+        name: MBL_co2
+      type: bgc
+      coarse_grid_mode: "never"
+    - source:
+        name: WOA
+        climatology: true
+      restoring_forces: ['sss']
+      type: restoring
       coarse_grid_mode: "never"
   boundary:
     - source:

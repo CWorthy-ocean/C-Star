@@ -15,33 +15,56 @@ from cstar.roms.namelist import RomsNamelist
 from pydantic import ValidationError
 
 import cstar_forge
+from cstar_forge.domain_catalog import default_catalog
 from cstar_forge.forge.namelist_model import (
     RunTimeSettings,
     build_namelist,
     validate_run_time_sections,
 )
 from cstar_forge.forge.settings import write_roms_namelist
+from cstar_forge.forge_blueprint_resolve import load_model_spec_data
 
-_TPL = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "cson_roms-marbl_v0.1"
-    / "templates"
+_MODEL_DIR = (
+    Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
 )
 
 
 def _populated_rt_dict():
-    rt = yaml.safe_load((_TPL / "run-time-defaults.yml").read_text())
+    """A complete flat run-time settings dict: the ModelSpec's model_settings
+    (physics/numerics defaults) deep-merged with the bundled 'standard' OutputSpec's
+    output sections, plus the "processing-filled" placeholder sections (title/
+    s_coord/grid/forcing/initial/output_root_name) that generate_inputs() populates
+    dynamically at generation time. These tests exercise RunTimeSettings/
+    write_roms_namelist directly (bypassing the resolver), so they need the full
+    namelist shape assembled by hand.
+    """
+    model = load_model_spec_data(_MODEL_DIR)["model"]
+    rt = yaml.safe_load(yaml.safe_dump(model["model_settings"]))  # deep copy
+    output = default_catalog.output_data("standard")
+    for k, v in output.items():
+        if isinstance(v, dict) and isinstance(rt.get(k), dict):
+            rt[k].update(v)
+        else:
+            rt[k] = v
     rt["title"] = {"casename": "spike_case"}
     rt["output_root_name"] = {"output_root_name": "/run/out"}
     rt["reference_date_settings"] = {"reference_date": [2000, 1, 1]}
     rt["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
     rt["grid"] = {"grid_file": "/in/grid.nc"}
     rt["initial"] = {"initial_file": "/in/init.nc"}
-    rt["forcing"]["surface_forcing_path"] = "/in/surf.nc"
-    rt["forcing"]["boundary_forcing_path"] = "/in/bry.nc"
-    rt["forcing"]["river_path"] = "/in/river.nc"
+    # time_stepping/v_sponge are always resolver-derived (from dt/run-window and
+    # grid spacing respectively), so they're intentionally absent from ModelSpec's
+    # model_settings -- fill in representative values for these direct-model tests.
+    rt["time_stepping"] = {"ntimes": 12, "dt": 7200, "ndtfast": 60, "ninfo": 1}
+    rt["v_sponge"] = {"v_sponge": 8333.33}
+    rt["forcing"] = {
+        "surface_forcing_path": "/in/surf.nc",
+        "surface_forcing_bgc_path": None,
+        "boundary_forcing_path": "/in/bry.nc",
+        "boundary_forcing_bgc_path": None,
+        "tidal_forcing_path": None,
+        "river_path": "/in/river.nc",
+    }
     return rt
 
 

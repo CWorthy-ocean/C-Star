@@ -32,6 +32,7 @@ from pydantic import ValidationError
 
 import cstar_forge
 from cstar_forge import models as forge_models
+from cstar_forge.domain_catalog import default_catalog as _CATALOG
 from cstar_forge.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
@@ -39,6 +40,10 @@ from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 _MODEL_DIR = (
     Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
 )
+# ModelSpec no longer embeds a default forcing/output selection -- these tests just
+# need a valid, representative pair from the bundled catalog.
+_FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
+_OUTPUT_SETTINGS = _CATALOG.output_data("standard")
 
 
 def _make_builder(args, **overrides):
@@ -60,6 +65,8 @@ def _make_builder(args, **overrides):
         ensemble_id=merged.get("ensemble_id"),
         use_pio=merged.get("use_pio", False),
         dt=7200,
+        forcing_inputs=merged.get("forcing_inputs", _FORCING_INPUTS),
+        output_settings=merged.get("output_settings", _OUTPUT_SETTINGS),
     )
     tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-"))
     host = HostPaths(
@@ -390,6 +397,8 @@ class TestForgeExecutorModelPostInit:
             start_date=args["start_date"],
             end_date=args["end_date"],
             dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
         )
         # Drive an SRTM15 spec (the bundled ModelSpec defaults to ETOPO5).
         cfg = cfg.model_copy(
@@ -432,6 +441,8 @@ class TestForgeExecutorModelPostInit:
             end_date=args["end_date"],
             topography_path="/custom/my_topo.nc",
             dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
         )
         cfg = cfg.model_copy(
             update={
@@ -848,10 +859,10 @@ class TestForgeExecutorBuildAndRun:
             assert args["subdir"] == (repo.directory or "")
             assert args["checkout_target"] == (repo.commit or repo.branch or "")
             assert args["files"] == list(repo.files)
-        # Resolver default: github repo pinned at the ModelSpec templates.commit,
+        # Resolver default: github repo pinned at the ModelSpec code.templates_commit,
         # repo-root-relative directory.
-        pinned = yaml.safe_load((_MODEL_DIR / "model.yml").read_text())["templates"][
-            "commit"
+        pinned = yaml.safe_load((_MODEL_DIR / "model.yml").read_text())["code"][
+            "templates_commit"
         ]
         ct = builder._template_repo_args("compile_time")
         assert ct["location"].endswith("cstar-forge.git")

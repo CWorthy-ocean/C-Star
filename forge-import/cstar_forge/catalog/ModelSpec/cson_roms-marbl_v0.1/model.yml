@@ -1,31 +1,21 @@
-# Render templates live at the forge repo root (templates/), decoupled from this
-# ModelSpec: they track a ROMS version, change infrequently, and may move into the
-# ucla-roms repo later. `directory` is relative to the repo root. At processing time
-# the executor fetches these via C-Star's AdditionalCode from the forge git ref.
-# Pin the serving forge commit with `commit:` (until pinned, the resolver defaults to
-# branch `main`).
-templates:
-  commit: a2167c72ddc265203c9a3af69952e12469c640ec   # pin the forge commit that serves these templates
-  compile_time:
-    directory: "templates/compile-time"
-    filter:
-      files:
-      - cppdefs.opt.j2
-
-  run_time:
-    directory: "templates/run-time"
-    filter:
-      files:
-      - marbl_in
-
-settings:
-  properties:
-    n_tracers: 34
-    marbl: true
-  compile_time:
-    _default_config_yaml: "templates/compile-time-defaults.yml"
-  run_time:
-    _default_config_yaml: "templates/run-time-defaults.yml"
+# ModelSpec: code refs, template refs, and model-specific physics/numerics defaults.
+#
+# This intentionally holds nothing that a Domain/Forcing/Output spec already provides:
+# no grid/IC/forcing source selection (that's a ForcingSpec's job -- pick one from the
+# catalog; there is no more "model default" forcing) and no ocean_vars/surf_flux/
+# diagnostics/stdout_diag/ts_output/frc_output/cdr_output/upscale_output/zslice/
+# random_output sections or marbl_bgc write-lists (those are an OutputSpec's job -- pick
+# one from the catalog; there is no more "model default" output either).
+#
+# `model_settings` is flat and mirrors ForgeBlueprint.model_settings 1:1 (cppdefs sits
+# at the same level as the namelist sections, matching how the resolver treats them).
+# A few sections here are fully overwritten by the resolver at build time regardless of
+# what's written below (time_stepping, v_sponge from grid/run-window; param's
+# llm/mmm/n/np_xi/np_eta/nsub_x/nsub_e from grid/partitioning; cppdefs.obc_* from open
+# boundaries; cppdefs.cdr_forcing/use_pio, tides.ntides from forcing/direct input) --
+# they're included below only where the remaining fields in that same section
+# (nt_passive/ntrc_bio in param; bry_tides/pot_tides/ana_tides in tides) are real,
+# still-relevant model defaults.
 
 code:
   roms:
@@ -40,59 +30,197 @@ code:
     location: https://github.com/NCAR/ParallelIO.git
     commit: pio2_7_0
 
-inputs:
-  grid:
-    topography_source: ETOPO5
+  # Render templates live at the forge repo root (templates/), decoupled from this
+  # ModelSpec: they track a ROMS version, change infrequently, and may move into the
+  # ucla-roms repo later. `directory` is relative to the repo root. At processing time
+  # the executor fetches these via C-Star's AdditionalCode from the forge git ref.
+  # Pin the serving forge commit with `templates_commit:` (until pinned, the resolver
+  # defaults to branch `main`).
+  templates_commit: a2167c72ddc265203c9a3af69952e12469c640ec
+  templates_compile_time:
+    directory: "templates/compile-time"
+    files:
+    - cppdefs.opt.j2
+  templates_run_time:
+    directory: "templates/run-time"
+    files:
+    - marbl_in
 
-  initial_conditions:
-    source:
-      name: GLORYS
-      glorys_layout: regional
-    bgc_source:
-      name: UNIFIED
-      climatology: true
+model_settings:
+  cppdefs:
+    # Boundary condition flags (always overwritten from the domain's open_boundaries)
+    obc_west: true
+    obc_east: true
+    obc_north: true
+    obc_south: true
+    marbl: true
+    cdr_forcing: false
+    co2_tvarying: false  # Set to true when using time-varying CO2 atmospheric forcing (MBL_co2)
+    use_pio: false  # Set to true to build ROMS against the ParallelIO (PIO) library
 
-  forcing:
-    surface:
-      - source:
-          name: ERA5
-        type: physics
-        correct_radiation: true
-        coarse_grid_mode: "never"
-      - source:
-          name: UNIFIED
-          climatology: true
-        type: bgc
-        coarse_grid_mode: "never"
-      - source:
-          name: MBL_co2
-        type: bgc
-        coarse_grid_mode: "never"
+  lateral_visc:
+    visc2: 0.0  # m^2/sec
+    rho0: 1000.0
 
-      - source:
-           name: WOA
-           climatology: true
-        restoring_forces: ['sss']
-        type: restoring
-        coarse_grid_mode: "never"
+  vertical_mixing:
+    akv: 0.0  # m^2/sec
+    # akt is a list of values, one per tracer (NT tracers)
+    # Default is all zeros - will be generated in template
+    akt_default: 0.0
 
-    boundary:
-      - source:
-          name: GLORYS
-          glorys_layout: regional
-        type: physics
-      - source:
-          name: UNIFIED
-          climatology: true
-        type: bgc
+  tracer_diff2:
+    # tnu2 is a list of values, one per tracer (NT tracers)
+    # Default is all zeros - will be generated in template
+    tnu2_default: 0.0
 
-    tidal:
-      - source:
-          name: TPXO
-        ntides: 15
+  bottom_drag:
+    rdrg: 0.0E-4  # m/s
+    rdrg2: 1.0E-3
+    zob: 1.0E-2  # meters
 
-    river:
-      - source:
-          name: DAI
-          climatology: false
-        include_bgc: true
+  gamma2: 1.0  # Slipperiness parameter
+
+  ubind: 0.1  # m/s, OBC binding velocity scale
+
+  param:
+    # llm/mmm/n/np_xi/np_eta/nsub_x/nsub_e are always overwritten by the resolver from
+    # the domain's grid_kwargs/partitioning -- only nt_passive/ntrc_bio are read from here.
+    llm: 512
+    mmm: 512
+    n: 60
+    np_xi: 16
+    np_eta: 16
+    nt_passive: 0
+    ntrc_bio: 32
+
+  bgc:
+    wrt_his: false
+    output_period_his: 86400  # 3600*24 seconds
+    nrpf_his: 7
+    wrt_avg: false
+    output_period_avg: 86400  # 60*60*24 seconds
+    nrpf_avg: 7
+    wrt_his_dia: false
+    output_period_his_dia: 86400  # 60*60*24 seconds
+    nrpf_his_dia: 7
+    wrt_avg_dia: false
+    output_period_avg_dia: 60  # seconds
+    nrpf_avg_dia: 1
+    nbgc_flx: 2
+    interp_frc: 0
+    xco2air_default: 284.7  # Atmospheric xCO2 (ppm) when PCO2AIR_FORCING is off
+
+  blk_frc:
+    interp_frc: 0
+    check_bulk_frc_units: false
+
+  tides:
+    ntides: 10  # overwritten by the tidal forcing item's ntides, if set
+    bry_tides: true
+    pot_tides: true
+    ana_tides: false
+
+  river_frc:
+    river_source: false
+    analytical: false
+    nriv: 0
+    rvol_vname: 'river_volume'
+    rvol_tname: 'river_time'
+    rtrc_vname: 'river_tracer'
+    rtrc_tname: 'river_time'
+
+  cdr_frc:
+    cdr_source: false
+    cdr_file: 'cdr.nc'
+    ncdr_parm: 1
+    forcing_depth_profiles: false
+    forcing_3d: false
+    forcing_parameterized: true
+    time_interpolation: false
+    relocate_to_wet_pts: true
+    cdr_volume: false
+    cdrvol_vname: 'cdr_volume'
+    cdrvol_tname: 'cdr_time'
+    cdrtrc_vname: 'cdr_tracer'
+    cdrtrc_tname: 'cdr_time'
+    cdrflx_vname: 'cdr_trcflx'
+    cdrflx_tname: 'cdr_time'
+    cdr_loc_lon: 'cdr_lon'
+    cdr_loc_lat: 'cdr_lat'
+    cdr_loc_dep: 'cdr_dep'
+    cdr_scl_hor: 'cdr_hsc'
+    cdr_scl_vrt: 'cdr_vsc'
+    nz_chd: 50
+
+  extract_data:
+    # Nesting (child-grid extraction). Overwritten (do_extract=true + child s-coord/
+    # period) only when this domain has a child grid; otherwise stays disabled.
+    do_extract: false
+    extract_file: 'sample_edata.nc'
+    nrpf: 24
+    n_chd: 90
+    theta_s_chd: 5.0
+    theta_b_chd: 2.0
+    hc_chd: 250.0
+    extract_period: 3600.0
+
+  sponge_tune:
+    pflx_w_vname: 'up_west'
+    pflx_w_tname: 'bry_time'
+    pflx_e_vname: 'up_east'
+    pflx_e_tname: 'bry_time'
+    pflx_s_vname: 'vp_south'
+    pflx_s_tname: 'bry_time'
+    pflx_n_vname: 'vp_north'
+    pflx_n_tname: 'bry_time'
+    ub_tune: false
+    spn_avg: true
+    sp_timscale: 86400  # 24*3600 seconds
+    wrt_sponge: false
+    nrpf: 7
+    output_period: 86400  # 24*3600 seconds
+
+  flux_frc:
+    interp_flux_frc: true
+
+  # calc_pflx absorbs diag_pflx and its timescale from the old diagnostics.opt
+  calc_pflx:
+    calc_pflx: true
+    timescale: 86400  # timescale for filtering pressure fluxes (s)
+
+  pipe_frc:
+    pipe_source: false
+    p_analytical: false
+    npip: 1
+
+  particles:
+    floats: false
+    np: 50
+    extra_space_fac: 1.5
+    exchange_facx: 0.1
+    exchange_facy: 0.1
+    exchange_facc: 0.01
+    output_period: 400
+    nrpf: 100
+    ppm3: 1.0e-6
+    pmin: 200
+
+  lin_rho_eos:
+    tcoef: 0.2    # Thermal expansion coefficient (kg/m2/K); unused if NONLIN_EOS active
+    t0: 1.0       # Reference temperature (*C)
+    scoef: 0.822  # Saline contraction coefficient (kg/m3/psu)
+    s0: 1.0       # Reference salinity (psu)
+
+  sss_correction:
+    dsssdt: 7.777  # SSS correction piston velocity (cm/day); requires SFLX_CORR + SALINITY
+
+  sst_correction:
+    dsstdt: 7.777  # SST correction piston velocity (cm/day); requires QCORRECTION
+
+  dic_alk_correction:
+    dcdt: 7.777  # DIC/ALK correction piston velocity (cm/day); requires CFLX_CORR + MARBL
+
+  marbl_bgc:
+    marbl_config_file: "marbl_in"
+    marbl_timestep: 3600.0
+    # marbl_tracers_to_write / marbl_diagnostics_to_write are OutputSpec's (see Output.yml)
