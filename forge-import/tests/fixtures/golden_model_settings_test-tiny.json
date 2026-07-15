@@ -255,7 +255,7 @@
   "tides": {
     "ana_tides": false,
     "bry_tides": true,
-    "ntides": 10,
+    "ntides": 15,
     "pot_tides": true
   },
   "time_stepping": {

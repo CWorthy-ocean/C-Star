@@ -795,6 +795,15 @@ class _ForcingEditor:
         ):
             _w.observe(lambda _ch: on_change(), names="value")
 
+        # "glorys_layout" only applies to a GLORYS source (item 7).
+        def _sync_ic_layout_visibility(_change=None):
+            self.ic_layout.layout.display = (
+                "" if self.ic_name.value == "GLORYS" else "none"
+            )
+
+        self.ic_name.observe(_sync_ic_layout_visibility, names="value")
+        _sync_ic_layout_visibility()
+
         # per-category item rows: list of dicts of widgets
         self._rows: dict[str, list] = {c: [] for c in _FORCING_CATEGORIES}
         self._containers: dict[str, Any] = {}
@@ -806,6 +815,30 @@ class _ForcingEditor:
             self._render(cat)
 
     # ---- one item row --------------------------------------------------------
+    @staticmethod
+    def _apply_row_visibility(w: dict[str, Any]) -> None:
+        """Show/hide widgets whose relevance depends on the row's `type`/source name.
+
+        No field is ever removed from the gathered dict by this — it only toggles
+        display so the form doesn't show options that don't apply to the current
+        selection (e.g. "restore:" only for type=restoring, "layout:" only for a
+        GLORYS source, corr_rad/wind_dropoff only for type=physics surface rows).
+        """
+
+        def show(widget, on):
+            widget.layout.display = "" if on else "none"
+
+        t = w["type"].value if "type" in w else None
+        name = w["name"].value if "name" in w else None
+        if "restoring_forces" in w:
+            show(w["restoring_forces"], t == SurfaceType.RESTORING.value)
+        if "correct_radiation" in w:
+            show(w["correct_radiation"], t == SurfaceType.PHYSICS.value)
+        if "wind_dropoff" in w:
+            show(w["wind_dropoff"], t == SurfaceType.PHYSICS.value)
+        if "glorys_layout" in w:
+            show(w["glorys_layout"], name == "GLORYS")
+
     def _make_row(self, cat: str, item: dict[str, Any]):
         W = self.W
         src = item.get("source") or {}
@@ -852,11 +885,12 @@ class _ForcingEditor:
             )
 
             # When type changes → update the source name dropdown to the valid options.
-            def _on_type_change(change, name_dd=w["name"], c=cat):
+            def _on_type_change(change, name_dd=w["name"], c=cat, ws=w):
                 new_opts = _source_opts_for(c, change["new"])
                 name_dd.options = new_opts or [""]
                 if name_dd.value not in name_dd.options:
                     name_dd.value = name_dd.options[0]
+                self._apply_row_visibility(ws)
                 self.on_change()
 
             w["type"].observe(_on_type_change, names="value")
@@ -878,6 +912,12 @@ class _ForcingEditor:
                 layout=W.Layout(width="150px"),
                 tooltip=_tip(cat, "glorys_layout"),
             )
+
+            # When the source name changes → the "layout:" box only applies to GLORYS.
+            def _on_name_change(_change, ws=w):
+                self._apply_row_visibility(ws)
+
+            w["name"].observe(_on_name_change, names="value")
         if cat == "surface":
             w["correct_radiation"] = W.Checkbox(
                 value=bool(item.get("correct_radiation", False)),
@@ -1012,11 +1052,15 @@ class _ForcingEditor:
         for widget in w.values():
             widget.observe(lambda _ch: self.on_change(), names="value")
         w["_remove_btn"] = remove
+        self._apply_row_visibility(w)
         return w
 
     def _row_box(self, w):
-        widgets = [v for k, v in w.items() if k != "_remove_btn"]
-        return self.W.HBox([*widgets, w["_remove_btn"]])
+        # `type` (when present) drives the other options in the row, so show it first.
+        keys = [k for k in w if k != "_remove_btn"]
+        if "type" in keys:
+            keys = ["type", *[k for k in keys if k != "type"]]
+        return self.W.HBox([*(w[k] for k in keys), w["_remove_btn"]])
 
     def _render(self, cat: str):
         W = self.W
@@ -1277,13 +1321,13 @@ class ForgeBlueprintWizard:
             "classic-format (CDF-5) netCDF and ROMS reads/writes joined files.",
         )
         self.roms_ref = W.Text(
-            value="",
+            value="",  # populated from the selected Model's pinned default below
             description="ucla-roms ref:",
             style={"description_width": "120px"},
-            layout=W.Layout(width="380px"),
-            placeholder="commit / tag / branch (blank = ModelSpec default)",
-            tooltip="Override the ucla-roms checkout target (commit hash, tag, or "
-            "branch). Leave blank to use the ModelSpec's pinned default.",
+            layout=W.Layout(width="260px"),
+            placeholder="commit / tag / branch",
+            tooltip="ucla-roms checkout target (commit hash, tag, or branch). "
+            "Prefilled from the selected Model's pinned default; edit to override.",
         )
 
         # --- nesting (optional child grid) ---
@@ -1329,6 +1373,19 @@ class ForgeBlueprintWizard:
             description="include pressure fluxes",
             indent=False,
             tooltip=_tip("nesting", "nest_pressure_fluxes"),
+        )
+        # --- nesting plot (parent+child boundary overlay, separate from the Grid
+        # section's parent-only plot) ---
+        self.nest_plot_btn = W.Button(
+            description="Refresh plot",
+            icon="refresh",
+            tooltip="Build the parent and child grids from current settings and "
+            "render both via plot_nesting (parent+child boundary overlay).",
+        )
+        self.nest_plot_status = W.HTML("")
+        self.nest_plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px"),
         )
 
         # --- run window ---
@@ -1481,6 +1538,7 @@ class ForgeBlueprintWizard:
         self.save_btn = W.Button(description="Save to disk", icon="save")
         self.save_status = W.HTML("")
 
+        self.roms_ref.value = self._model_default_roms_ref()
         self._build_forcing_editor(self._model_default_inputs())
         self._wire()
         self._rebuild()
@@ -1491,6 +1549,7 @@ class ForgeBlueprintWizard:
         self.forcing_dd.observe(self._on_forcing_spec, names="value")
         self.dt_btn.on_click(self._on_compute_dt)
         self.plot_btn.on_click(self._on_plot)
+        self.nest_plot_btn.on_click(self._on_nest_plot)
         self.save_btn.on_click(self._on_save)
         self.load_btn.on_click(self._on_load_path)
         self.upload.observe(self._on_upload, names="value")
@@ -1529,6 +1588,7 @@ class ForgeBlueprintWizard:
         if getattr(self, "_suspended", False):
             return
         self._overrides = {}
+        self.roms_ref.value = self._model_default_roms_ref()
         if (
             self.forcing_dd.value == "<model default>"
         ):  # reseed default forcing for new model
@@ -1555,6 +1615,7 @@ class ForgeBlueprintWizard:
                 if k in gk:
                     w.value = gk[k]
         self._rebuild()
+        self._on_nest_plot(None)
 
     # ---- forcing piece -------------------------------------------------------
     def _model_default_inputs(self) -> dict[str, Any]:
@@ -1564,6 +1625,15 @@ class ForgeBlueprintWizard:
             return data["model"].get("inputs", {}) or {}
         except Exception:
             return {}
+
+    def _model_default_roms_ref(self) -> str:
+        """The selected model's pinned ucla-roms checkout target (commit or branch)."""
+        try:
+            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
+            roms = data["model"].get("code", {}).get("roms", {}) or {}
+            return roms.get("commit") or roms.get("branch") or ""
+        except Exception:
+            return ""
 
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
@@ -1844,21 +1914,13 @@ class ForgeBlueprintWizard:
             self.use_pio_chk.value = bool(
                 (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
             )
-            # only populate when it differs from the ModelSpec's pinned default --
-            # otherwise every load would carry the resolved default forward as an
-            # "override" and silently mis-pin it after a later model switch.
+            # Show the file's actual pinned ref, falling back to the (now-selected)
+            # model's default when the file matches it exactly.
             stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
-            default_roms = (
-                load_model_spec_data(self.catalog.model_dir(self.model_dd.value))[
-                    "model"
-                ]
-                .get("code", {})
-                .get("roms", {})
-                if self.model_dd.value in self.catalog.model_names
-                else {}
+            default_ref = self._model_default_roms_ref()
+            self.roms_ref.value = (
+                default_ref if stored_ref == default_ref else stored_ref
             )
-            default_ref = default_roms.get("commit") or default_roms.get("branch") or ""
-            self.roms_ref.value = "" if stored_ref == default_ref else stored_ref
             self.topo_path.value = cfg.domain.topography_path or ""
             dt = (cfg.model_settings.get("time_stepping", {}) or {}).get("dt")
             if dt is not None:
@@ -2108,6 +2170,69 @@ class ForgeBlueprintWizard:
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
+    def _on_nest_plot(self, _):
+        """Build the parent+child roms_tools Grids and render ``plot_nesting``
+        (parent+child boundary overlay) into the Nesting section's own plot,
+        separate from the parent-only plot in the Grid section.
+        """
+        self.nest_plot_status.value = "<i>building grids…</i>"
+        try:
+            import io
+
+            import matplotlib.pyplot as plt
+            from roms_tools import Grid, plot_nesting
+
+            gk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                gk[k] = int(self.grid_w[k].value)
+            for k in _GRID_FLOAT:
+                gk[k] = float(self.grid_w[k].value)
+            if self.scoord_chk.value:
+                for k in _SCOORD:
+                    gk[k] = float(self.grid_w[k].value)
+            if self.hmin.value != 5.0:
+                gk["hmin"] = float(self.hmin.value)
+            if self.close_narrow_chk.value:
+                gk["close_narrow_channels"] = True
+            if self.mask_shapefile.value.strip():
+                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+
+            ck: dict[str, Any] = {}
+            for k in _GRID_INT:
+                ck[k] = int(self.child_w[k].value)
+            for k in _GRID_FLOAT + _SCOORD:
+                ck[k] = float(self.child_w[k].value)
+
+            plt.ioff()
+            try:
+                parent = Grid(**gk)
+                child = Grid(**ck)
+                # plot_nesting calls plt.show() internally (no way to suppress it,
+                # no return value); under Jupyter's inline backend that renders-
+                # and-closes the figure immediately, so plt.gcf() right after
+                # would return a fresh blank figure instead of the one just
+                # drawn. Neutralize show() for the duration so we can grab and
+                # save the actual figure ourselves.
+                _real_show, plt.show = plt.show, lambda *a, **k: None
+                try:
+                    plot_nesting(parent, child)
+                finally:
+                    plt.show = _real_show
+                fig = plt.gcf()
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+                plt.close(fig)
+            finally:
+                plt.ion()
+
+            buf.seek(0)
+            self.nest_plot_img.value = buf.read()
+            self.nest_plot_status.value = "<span style='color:#080'>✓</span>"
+        except Exception as exc:
+            self.nest_plot_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
     def _on_save(self, _):
         if self.config is None:
             self.save_status.value = (
@@ -2157,7 +2282,14 @@ class ForgeBlueprintWizard:
                     self.upload,
                     self.load_status,
                 ),
-                section("Pieces", self.model_dd, self.domain_dd, self.grid_name),
+                section(
+                    "Pieces",
+                    W.HBox([self.model_dd, self.roms_ref]),
+                    self.forcing_dd,
+                    self.output_dd,
+                    self.domain_dd,
+                    self.grid_name,
+                ),
                 section(
                     "Grid",
                     W.HBox(
@@ -2181,19 +2313,35 @@ class ForgeBlueprintWizard:
                         ]
                     ),
                 ),
+                section("Open boundaries", W.HBox(list(self.bnd.values()))),
                 section(
                     "Nesting (optional)",
-                    self.nest_enable,
-                    self.nest_domain_dd,
-                    child_box,
-                    W.HBox([self.nest_period, self.nest_pressure_fluxes]),
+                    W.HBox(
+                        [
+                            W.VBox(
+                                [
+                                    self.nest_enable,
+                                    self.nest_domain_dd,
+                                    child_box,
+                                    W.HBox(
+                                        [self.nest_period, self.nest_pressure_fluxes]
+                                    ),
+                                ]
+                            ),
+                            W.VBox(
+                                [
+                                    W.HBox([self.nest_plot_btn, self.nest_plot_status]),
+                                    self.nest_plot_img,
+                                ],
+                                layout=W.Layout(padding="0 0 0 20px"),
+                            ),
+                        ]
+                    ),
                 ),
-                section("Open boundaries", W.HBox(list(self.bnd.values()))),
-                section("Forcing", self.forcing_dd, self.forcing_box),
+                section("Forcing", self.forcing_box),
                 section(
                     "Partitioning",
                     W.HBox([self.npx, self.npy, self.use_pio_chk]),
-                    self.roms_ref,
                 ),
                 section(
                     "Run window",
@@ -2207,10 +2355,9 @@ class ForgeBlueprintWizard:
                 section(
                     "Output settings",
                     W.HTML(
-                        "<i>Select an OutputSpec to seed the output sections; "
-                        "fine-tune them under Advanced settings.</i>"
+                        "<i>Select an OutputSpec above (in Pieces) to seed the output "
+                        "sections; fine-tune them under Advanced settings.</i>"
                     ),
-                    self.output_dd,
                 ),
                 section(
                     "Advanced settings (model defaults — collapsed; click to edit)",

@@ -1025,13 +1025,17 @@ class TestForgeBlueprintWizard:
         assert w2.roms_ref.value == "pio-refdate"
         assert w2.config.code.roms.commit == "pio-refdate"
 
-    def test_roms_ref_blank_when_loaded_value_matches_model_default(self, tmp_path):
-        """A blueprint using the ModelSpec's pinned default (no override) must reload
-        with the field blank -- otherwise the resolved default gets carried forward as
-        a spurious override (e.g. mis-pinning ROMS after switching models).
+    def test_roms_ref_prefilled_with_model_default_and_editable(self, tmp_path):
+        """ucla-roms ref is prefilled from the selected Model's pinned default (shown
+        next to the Model dropdown) rather than left blank, and stays editable. A
+        blueprint using the unmodified default must reload showing that same default
+        (not blank); an actual edit/override round-trips through save/reload too.
         """
         w1 = self._wizard()
-        assert w1.roms_ref.value == ""  # untouched -> no override
+        default_ref = w1._model_default_roms_ref()
+        assert default_ref  # this model.yml pins a commit
+        assert w1.roms_ref.value == default_ref
+
         p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
@@ -1039,7 +1043,15 @@ class TestForgeBlueprintWizard:
         w2.roms_ref.value = "stale-value-from-a-prior-load"
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.roms_ref.value == ""
+        assert w2.roms_ref.value == default_ref
+
+        # An actual override round-trips through save/reload unchanged.
+        w1.roms_ref.value = "my-custom-branch"
+        w1._on_save(None)
+        w3 = self._wizard()
+        w3.load_path.value = str(p)
+        w3._on_load_path(None)
+        assert w3.roms_ref.value == "my-custom-branch"
 
     def test_loading_file_with_bad_settings_is_flagged(self, tmp_path):
         import yaml

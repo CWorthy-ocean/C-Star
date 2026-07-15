@@ -323,6 +323,22 @@ def build_forge_blueprint(
     )
     settings["cppdefs"] = cppdefs
 
+    # tidal forcing's ntides drives the run-time tides.ntides (else it's left at the
+    # run-time-defaults placeholder, out of sync with the actual generated constituent
+    # count -- see input_data._generate_tidal_forcing, which re-derives the same value
+    # at generation time).
+    tidal_items = (inputs.get("forcing", {}) or {}).get("tidal", []) or []
+    _ntides = next(
+        (
+            it.get("ntides")
+            for it in tidal_items
+            if isinstance(it, dict) and it.get("ntides")
+        ),
+        None,
+    )
+    if _ntides is not None:
+        settings.setdefault("tides", {})["ntides"] = int(_ntides)
+
     # ----- nesting (child domain) -------------------------------------------
     # A child grid means this domain's parent extracts data for it: enable the
     # extract_data block. Child s-coord/levels come from grid_kwargs_child; the
