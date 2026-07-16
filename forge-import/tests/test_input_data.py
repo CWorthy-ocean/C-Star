@@ -1064,6 +1064,57 @@ class TestRomsMarblInputDataGeneration:
             # Should not create CDRForcing if list is empty
             mock_cdr_class.assert_not_called()
 
+    def test_generate_cdr_forcing_end_to_end_real_construction(
+        self, sample_roms_marbl_input_data
+    ):
+        """End-to-end (no mocked rt.CDRForcing): a real params dict extracted from a
+        roms-tools CDRForcing.to_yaml() dump (the wizard-upload shape) must construct,
+        save a real NetCDF, and flip the same toggles the mocked unit test only
+        asserts were *called*. This is the "grid-less construction really works"
+        guarantee the resolver/wizard's "no grid injection" design decision depends on.
+        """
+        import cstar_forge
+        from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+
+        sample = (
+            Path(cstar_forge.__file__).parent
+            / "catalog"
+            / "blueprints"
+            / "MacOS"
+            / "cson_roms-marbl_v0.1_test-tiny_1procs"
+            / "_cdr_forcing.yml"
+        )
+        cdr_kwargs = read_cdr_forcing_yaml(sample)
+
+        sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing = (
+            cstar_models.Dataset(data=[])
+        )
+
+        sample_roms_marbl_input_data._generate_cdr_forcing(
+            key="cdr_forcing", cdr_kwargs=cdr_kwargs
+        )
+
+        resources = (
+            sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing.data
+        )
+        assert resources, "expected at least one Resource registered"
+        nc_path = Path(resources[0].location)
+        assert nc_path.exists() and nc_path.stat().st_size > 0
+        assert (
+            sample_roms_marbl_input_data._settings_compile_time["cppdefs"][
+                "cdr_forcing"
+            ]
+            is True
+        )
+        assert (
+            sample_roms_marbl_input_data._settings_run_time["cdr_frc"]["cdr_file"]
+            == "cdr.nc"
+        )
+        assert (
+            sample_roms_marbl_input_data._settings_run_time["cdr_output"]["do_cdr"]
+            is True
+        )
+
     def test_generate_corrections_not_implemented(self, sample_roms_marbl_input_data):
         """Test _generate_corrections raises NotImplementedError."""
         with pytest.raises(NotImplementedError):

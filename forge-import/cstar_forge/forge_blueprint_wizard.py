@@ -61,6 +61,7 @@ from cstar_forge.forge_blueprint_resolve import (
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
     load_model_spec_data,
+    read_cdr_forcing_yaml,
 )
 
 # ===========================================================================
@@ -1558,6 +1559,23 @@ class ForgeBlueprintWizard:
         self._forcing_editor: _ForcingEditor | None = None
         self._forcing_edited = False
 
+        # --- CDR (Carbon Dioxide Removal) forcing: uploaded roms-tools YAML ---
+        # Parsed dict lives on the instance (not a widget) since FileUpload can't be
+        # repopulated with the original file on load; _gather()/_populate_from read
+        # and write this directly.
+        self._cdr_forcing: dict[str, Any] | None = None
+        self.cdr_upload = W.FileUpload(
+            accept=".yml,.yaml",
+            multiple=False,
+            description="Upload CDR YAML",
+            tooltip=(
+                "A roms-tools CDRForcing.to_yaml(...) dump. Validated immediately on "
+                "upload; toggles the CDR compile/run-time settings on when accepted."
+            ),
+        )
+        self.cdr_clear_btn = W.Button(description="Clear CDR", icon="times")
+        self.cdr_status = W.HTML("")
+
         # --- output settings piece (OutputSpec selection) ---
         # The output sections themselves are edited in the Advanced settings accordion;
         # this dropdown selects a named OutputSpec that seeds those sections. An
@@ -1641,6 +1659,8 @@ class ForgeBlueprintWizard:
         self.run_btn.on_click(self._on_run)
         self.load_btn.on_click(self._on_load_path)
         self.upload.observe(self._on_upload, names="value")
+        self.cdr_upload.observe(self._on_cdr_upload, names="value")
+        self.cdr_clear_btn.on_click(self._on_cdr_clear)
         self.model_dd.observe(self._on_model_change, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
         self.output_dd.observe(self._on_output_spec, names="value")
@@ -1942,6 +1962,45 @@ class ForgeBlueprintWizard:
             )
         self.load_status.value = msg
 
+    # ---- CDR forcing upload ----------------------------------------------------
+    def _on_cdr_upload(self, change):
+        items = change["new"]
+        if not items:
+            return
+        item = (
+            items[0] if isinstance(items, (list, tuple)) else next(iter(items.values()))
+        )
+        content = bytes(item["content"])
+        try:
+            parsed = read_cdr_forcing_yaml(content.decode("utf-8"))
+            # Eager-validate against the real roms-tools class -- the resolver never
+            # constructs a CDRForcing, so a structurally-valid-but-semantically-broken
+            # upload (empty releases, bad time ordering, unknown tracer, an
+            # incompatible roms-tools version) would otherwise pass silently through
+            # _rebuild() and only fail much later, during Phase-2 execution.
+            import roms_tools as rt
+
+            cdr = rt.CDRForcing(**parsed)
+        except Exception as exc:
+            self._cdr_forcing = None
+            self.cdr_status.value = (
+                f"<span style='color:#b00'>CDR invalid: {type(exc).__name__}: "
+                f"{exc}</span>"
+            )
+            self._rebuild()
+            return
+        self._cdr_forcing = parsed
+        self.cdr_status.value = (
+            f"<span style='color:#080'>✓ CDR: {len(cdr.releases)} release(s)</span>"
+        )
+        self._rebuild()
+
+    def _on_cdr_clear(self, _):
+        self._cdr_forcing = None
+        self.cdr_upload.value = ()
+        self.cdr_status.value = ""
+        self._rebuild()
+
     def _populate_from(self, cfg: ForgeBlueprint):
         """Set the widgets from a loaded ForgeBlueprint, then re-resolve once.
 
@@ -1995,6 +2054,17 @@ class ForgeBlueprintWizard:
                 cfg.domain.topography_source, "value", cfg.domain.topography_source
             )
             self.topo_path.value = cfg.domain.topography_path or ""
+            # CDR: FileUpload can't be repopulated with the original file, but the
+            # parsed dict persists on the instance and re-emits via _gather(), so
+            # load stays non-lossy.
+            self._cdr_forcing = cfg.forcing.cdr_forcing or None
+            self.cdr_upload.value = ()
+            self.cdr_status.value = (
+                f"<span style='color:#080'>✓ CDR loaded: "
+                f"{len(self._cdr_forcing.get('releases', []))} release(s)</span>"
+                if self._cdr_forcing
+                else ""
+            )
             dt = (cfg.model_settings.get("time_stepping", {}) or {}).get("dt")
             if dt is not None:
                 self.dt.value = float(dt)
@@ -2087,6 +2157,8 @@ class ForgeBlueprintWizard:
         kw["forcing_inputs"] = self._forcing_editor.gather()
         kw["output_settings"] = self._output_settings()
         kw["composition"] = self._composition()
+        if self._cdr_forcing:
+            kw["cdr_forcing"] = self._cdr_forcing
         return kw
 
     def _populate_nesting(self, cfg: ForgeBlueprint):
@@ -2464,6 +2536,11 @@ class ForgeBlueprintWizard:
                     ),
                 ),
                 section("Forcing", self.forcing_box),
+                section(
+                    "CDR forcing (optional)",
+                    W.HBox([self.cdr_upload, self.cdr_clear_btn]),
+                    self.cdr_status,
+                ),
                 section(
                     "Partitioning",
                     W.HBox([self.npx, self.npy, self.use_pio_chk]),

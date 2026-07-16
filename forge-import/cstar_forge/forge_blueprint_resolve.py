@@ -219,6 +219,42 @@ def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def read_cdr_forcing_yaml(source: str | Path) -> dict[str, Any]:
+    """Read a roms-tools ``CDRForcing.to_yaml(...)`` dump into a plain kwargs dict.
+
+    ``source`` may be a filesystem path to the YAML file, or the raw YAML text itself
+    (e.g. content read from an uploaded file). The roms-tools dump is multi-document
+    (a version-header doc, then a ``CDRForcing:`` doc); this pulls out the inner
+    mapping and strips ``_tracer_metadata`` (written by ``to_yaml`` for human
+    readability, not a ``CDRForcing`` constructor field). Dates are left as-is (ISO
+    strings or YAML-native datetimes) — roms-tools coerces either.
+
+    Deliberately pure-``yaml`` (no ``roms_tools`` import) to keep this module's
+    dependency-light guarantee; validating the result as an actual ``CDRForcing``
+    is the caller's job (the wizard does this eagerly on upload).
+    """
+    path = Path(source)
+    try:
+        is_path = path.exists()
+    except OSError:  # pragma: no cover - defensive (e.g. NUL bytes in "path")
+        is_path = False
+    text = path.read_text() if is_path else str(source)
+
+    docs = [d for d in yaml.safe_load_all(text) if d]
+    block = next(
+        (d["CDRForcing"] for d in docs if isinstance(d, dict) and "CDRForcing" in d),
+        None,
+    )
+    if block is None:
+        raise ValueError(
+            "Uploaded file is not a roms-tools CDRForcing YAML dump (no top-level "
+            "'CDRForcing:' document found)."
+        )
+    block = dict(block)
+    block.pop("_tracer_metadata", None)
+    return block
+
+
 def build_forge_blueprint(
     *,
     model_dir: str | Path,
@@ -231,6 +267,7 @@ def build_forge_blueprint(
     ensemble_id: int | None = None,
     description: str = "Generated blueprint",
     cdr_forcing: dict[str, Any] | None = None,
+    cdr_forcing_yaml: str | Path | None = None,
     forcing_inputs: dict[str, Any] | None = None,
     output_settings: dict[str, Any] | None = None,
     grid_kwargs_child: dict[str, Any] | None = None,
@@ -266,7 +303,19 @@ def build_forge_blueprint(
     ``bgc_mode="none"`` raises if the resolved forcing selection still requests BGC
     forcing (a bgc-type surface/boundary item, an IC bgc_source, or a river with
     ``include_bgc=True``).
+
+    ``cdr_forcing_yaml``, if given, takes precedence over ``cdr_forcing``: it is a
+    path to (or the raw text of) a roms-tools ``CDRForcing.to_yaml(...)`` dump, read
+    via :func:`read_cdr_forcing_yaml`. This is the wizard's upload path made
+    resolver-native; a caller may pass either kwarg, not both meaningfully at once.
     """
+    if cdr_forcing_yaml is not None:
+        cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
+    elif cdr_forcing is not None:
+        # defensive strip -- a caller may hand us a dict copied straight from a
+        # to_yaml() dump (which still carries the human-readable metadata block).
+        cdr_forcing = {k: v for k, v in cdr_forcing.items() if k != "_tracer_metadata"}
+
     spec = load_model_spec_data(model_dir)
     model = spec["model"]
     model_name = spec["model_name"]

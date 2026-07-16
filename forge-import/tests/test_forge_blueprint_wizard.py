@@ -8,9 +8,11 @@ as fast unit tests.
 """
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
+import cstar_forge
 from cstar_forge.forge_blueprint_wizard import (
     ForgeBlueprintWizard,
     _ForcingEditor,
@@ -223,6 +225,124 @@ def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
     wiz._rebuild()
     assert wiz.config is None
     assert "Invalid" in wiz.derived.value
+
+
+_CDR_SAMPLE_YAML = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "blueprints"
+    / "MacOS"
+    / "cson_roms-marbl_v0.1_test-tiny_1procs"
+    / "_cdr_forcing.yml"
+)
+
+
+def _upload_change(content: bytes):
+    """Build an ipywidgets FileUpload-style ``change`` dict for a single file."""
+    return {"new": ({"name": "cdr.yml", "content": content},)}
+
+
+def test_cdr_upload_valid_yaml_gathers_into_config():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+
+    assert wiz._cdr_forcing is not None
+    assert "✓ CDR" in wiz.cdr_status.value
+    assert "cdr_forcing" in wiz._gather()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cppdefs"]["cdr_forcing"] is True
+    assert wiz.config.forcing.cdr_forcing["releases"]
+
+
+def test_cdr_upload_invalid_yaml_surfaces_error_and_does_not_set_config():
+    """Not a roms-tools CDRForcing document at all -- caught by
+    ``read_cdr_forcing_yaml``'s own parse check, before roms-tools is ever imported.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz._on_cdr_upload(_upload_change(b"---\nSomeOtherThing:\n  foo: bar\n"))
+
+    assert wiz._cdr_forcing is None
+    assert "invalid" in wiz.cdr_status.value.lower()
+    # no CDR was gathered -- the rest of the config still resolves fine
+    assert "cdr_forcing" not in wiz._gather()
+    assert wiz.config is not None
+
+
+def test_cdr_upload_semantically_broken_yaml_caught_by_eager_rt_construction():
+    """A structurally-valid CDRForcing document (parses fine, has the right keys)
+    but with start_time >= end_time. ``read_cdr_forcing_yaml`` has no opinion on
+    this -- only the eager ``rt.CDRForcing(**parsed)`` construction in
+    ``_on_cdr_upload`` catches it (roms-tools' own validator raises). This is the
+    scenario the eager-validation design exists for: without it, this would embed
+    silently into the blueprint and only fail much later, during Phase-2 execution.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    text = _CDR_SAMPLE_YAML.read_text()
+    # swap start_time/end_time so parsing succeeds but roms-tools' own
+    # `start_time < end_time` validator raises.
+    swapped = text.replace(
+        "start_time: '2012-01-01T00:00:00'\n  end_time: '2012-01-02T00:00:00'",
+        "start_time: '2012-01-02T00:00:00'\n  end_time: '2012-01-01T00:00:00'",
+    )
+    assert swapped != text, "fixture format changed -- update this test's replace()"
+
+    wiz._on_cdr_upload(_upload_change(swapped.encode("utf-8")))
+
+    assert wiz._cdr_forcing is None
+    assert "invalid" in wiz.cdr_status.value.lower()
+    assert "cdr_forcing" not in wiz._gather()
+
+
+def test_cdr_clear_resets_state():
+    wiz = ForgeBlueprintWizard()
+    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+    assert wiz._cdr_forcing is not None
+
+    wiz._on_cdr_clear(None)
+
+    assert wiz._cdr_forcing is None
+    assert wiz.cdr_status.value == ""
+    assert "cdr_forcing" not in wiz._gather()
+
+
+def test_cdr_forcing_round_trips_through_load(tmp_path):
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+    assert wiz.config is not None
+    saved = tmp_path / "forge_blueprint.yml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2._cdr_forcing is not None
+
+    # cdr_forcing is stored as a plain dict (no typed CDR model, by design -- see the
+    # plan's "no typed CDR Pydantic model" note), so a bare YAML timestamp parses to
+    # an in-memory datetime but re-serializes to an ISO string on the blueprint's own
+    # to_yaml/from_yaml round trip. Compare with that normalized away.
+    def _iso(t):
+        return t.isoformat() if hasattr(t, "isoformat") else str(t)
+
+    orig = [dict(r) for r in wiz._cdr_forcing["releases"]]
+    back = [dict(r) for r in wiz2._cdr_forcing["releases"]]
+    for r in (orig, back):
+        for release in r:
+            release["times"] = [_iso(t) for t in release["times"]]
+    assert back == orig
+    assert "✓ CDR loaded" in wiz2.cdr_status.value
 
 
 def test_ntides_syncs_from_tidal_forcing_into_model_settings():

@@ -635,6 +635,71 @@ def test_cppdefs_obc_from_boundaries_and_cdr_flag():
     assert c["cdr_forcing"] is True and c["marbl"] is True
 
 
+_CDR_SAMPLE_YAML = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "blueprints"
+    / "MacOS"
+    / "cson_roms-marbl_v0.1_test-tiny_1procs"
+    / "_cdr_forcing.yml"
+)
+
+
+def test_read_cdr_forcing_yaml_from_sample():
+    from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+
+    block = read_cdr_forcing_yaml(_CDR_SAMPLE_YAML)
+    assert block["releases"], "sample must carry at least one release"
+    assert "_tracer_metadata" not in block
+    assert block["start_time"] == "2012-01-01T00:00:00"
+
+
+def test_read_cdr_forcing_yaml_accepts_raw_text():
+    from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+
+    text = _CDR_SAMPLE_YAML.read_text()
+    block = read_cdr_forcing_yaml(text)
+    assert block["releases"]
+    assert "_tracer_metadata" not in block
+
+
+def test_read_cdr_forcing_yaml_rejects_non_cdr():
+    from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+
+    with pytest.raises(ValueError, match="CDRForcing"):
+        read_cdr_forcing_yaml("---\nSomeOtherThing:\n  foo: bar\n")
+
+
+def test_build_with_cdr_forcing_yaml():
+    cfg = _build(cdr_forcing_yaml=_CDR_SAMPLE_YAML)
+    assert cfg.forcing.cdr_forcing["releases"]
+    assert "_tracer_metadata" not in cfg.forcing.cdr_forcing
+    assert cfg.model_settings["cppdefs"]["cdr_forcing"] is True
+
+
+def test_build_forge_blueprint_strips_tracer_metadata():
+    cfg = _build(
+        cdr_forcing={"releases": [], "_tracer_metadata": {"temp": {"units": "C"}}}
+    )
+    assert "_tracer_metadata" not in cfg.forcing.cdr_forcing
+
+
+def test_cdr_forcing_content_hash_stable_across_yaml_round_trip(tmp_path):
+    """cdr_forcing's ``times`` field is a bare YAML timestamp on first parse (a
+    Python ``datetime``) but re-serializes as an ISO string once the blueprint has
+    been saved/reloaded (there is no typed CDR model to normalize it, by design).
+    ``content_hash()`` must still be stable across that round trip -- the whole
+    resolved_datasets/ForgeBlueprint determinism goal depends on identical content
+    hashing identically regardless of how many times it's been saved and reloaded.
+    """
+    cfg = _build(cdr_forcing_yaml=_CDR_SAMPLE_YAML)
+    h1 = cfg.content_hash()
+
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    back = ForgeBlueprint.from_yaml(p)
+    assert back.content_hash() == h1
+
+
 def test_resolver_use_pio_sets_cppdefs_and_code_pio():
     cfg = _build(use_pio=True)
     assert cfg.model_settings["cppdefs"]["use_pio"] is True
