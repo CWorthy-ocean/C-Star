@@ -60,6 +60,29 @@ async def test_tracking_create(tmp_path: Path) -> None:
     assert found_files
 
 
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "",
+        " ",
+        "\t \n",
+    ],
+)
+@pytest.mark.asyncio
+async def test_tracking_retrieve_no_runid(run_id: str) -> None:
+    """Verify that run-tracking reports an invalid run-id.
+
+    Parameters
+    ----------
+    run_id : str
+        Parameterized "bad values" for the run-id that should result in exceptions.
+    """
+    repo = TrackingRepository()
+
+    with pytest.raises(ValueError, match="run-id was not provided"):
+        await repo.get_workplan_run(run_id=run_id)
+
+
 @pytest.mark.asyncio
 async def test_tracking_retrieve(tmp_path: Path) -> None:
     """Verify that run-tracking retrieves a persisted record and deserializes it
