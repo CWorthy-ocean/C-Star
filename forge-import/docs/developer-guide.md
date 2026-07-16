@@ -232,15 +232,18 @@ Ranked roughly by what's worth doing next:
     actually complete. Worth a status update so a new reader isn't misled.
 
 **Good news / already resolved that older memory implied was still open:**
-- A **settings-level** golden test exists now: `test_golden_model_settings_test_tiny`
+- A **settings-level** golden test exists: `test_golden_model_settings_test_tiny`
   (test_forge_blueprint.py:201) diffs resolved `model_settings` against a committed JSON
-  fixture (`tests/fixtures/golden_model_settings_test-tiny.json`). This is a real,
-  currently-running behavior-preservation check. **It is not** the specifically deferred
-  *byte-exact `namelist.nml`* golden that `docs/forge-blueprint-inventory.md` and
-  `docs/architecture-decomposition-plan.md` describe (that one was explicitly deferred
-  "until the C-Star migration" to avoid churn) — no skipped stub for it was found, and no
-  test writes/diffs an actual `namelist.nml` file byte-for-byte. Treat the namelist-level
-  golden as **still open**, with a lighter-weight settings-level proxy already in place.
+  fixture (`tests/fixtures/golden_model_settings_test-tiny.json`).
+- The specifically deferred **byte-exact `namelist.nml`** golden (2026-07-16) is now also
+  in place: `tests/test_core.py::TestGoldenNamelist::test_golden_namelist_test_tiny`
+  drives the real `generate_inputs()` → `configure_build()` chain (real
+  `write_roms_namelist`; only roms-tools construction classes are mocked) and diffs the
+  rendered `namelist.nml` against `tests/fixtures/golden_namelist_test-tiny.nml`
+  (host-rooted absolute paths normalized to a `<WORKDIR>` token). Regenerate via
+  `UPDATE_GOLDEN=1 pytest tests/test_core.py -k golden_namelist_test_tiny`. Still open:
+  a real-generated-data integration test (actual GLORYS/ERA5/TPXO/DAI network fetch, no
+  roms-tools mocking) — a heavier test that doesn't exist yet.
 - `.gitignore` now excludes `.ipynb_checkpoints` (untracked stale checkpoint files still
   exist on disk locally but aren't committed — harmless, can delete opportunistically).
 - Full test suite: **487 passed, 0 failed** as of this audit.

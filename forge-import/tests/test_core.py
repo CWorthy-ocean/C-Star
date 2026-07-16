@@ -18,12 +18,15 @@ Tests cover:
 - deep-merge helper and RomsMarblBlueprintStage
 """
 
+import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import cstar.applications.roms_marbl.models as cstar_models
+import numpy as np
 import pytest
 import xarray as xr
 import yaml
@@ -1535,3 +1538,235 @@ class TestRomsMarblBlueprintStage:
         with pytest.raises(ValueError) as exc_info:
             RomsMarblBlueprintStage.validate_stage("invalid")
         assert "stage must be one of" in str(exc_info.value)
+
+
+class TestGoldenNamelist:
+    """Byte-level golden test for the rendered ``namelist.nml``.
+
+    This is the deterministic, mocked-forcing golden referenced in the Follow-ups
+    section of ``docs/forge-blueprint-parameter-audit.md`` and in
+    ``docs/developer-guide.md`` Sec 6 — it is NOT the real-generated-data integration
+    test those docs separately name as still deferred (this one mocks every
+    roms-tools construction class; a real run against GLORYS/ERA5/TPXO/DAI data is a
+    different, heavier test that doesn't exist yet).
+
+    It drives the real ``ForgeExecutor.generate_inputs()`` -> ``configure_build()``
+    chain (real ``write_roms_namelist``), mocking out only the roms-tools
+    construction classes (grid geometry + river/tidal/CDR derived counts are given
+    concrete, non-placeholder values via the mocks). That means it exercises exactly
+    the settings-merge path the §3a fix (``GENERATION_DERIVED_LEAF_KEYS`` /
+    ``split_model_settings`` in ``forge_blueprint_engine.py``) protects: river/CDR/tides
+    values must reach the namelist as their *generated* values, not the resolver's
+    placeholders — so this test doubles as the byte-level proof of that fix.
+
+    To regenerate the fixture after an intentional schema/default/template change,
+    rerun with ``UPDATE_GOLDEN=1`` set, review the resulting diff, and commit it.
+    """
+
+    _GRID_KWARGS: ClassVar[dict] = dict(
+        nx=6,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    _BOUNDARIES: ClassVar[dict] = {
+        "south": False,
+        "east": True,
+        "north": True,
+        "west": False,
+    }
+    _PARTITIONING: ClassVar[dict] = {"n_procs_x": 1, "n_procs_y": 1}
+    _CDR_FORCING: ClassVar[dict] = {"enabled": True}
+
+    @staticmethod
+    def _touch_save(path, **_kw):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).touch()
+        return path
+
+    @staticmethod
+    def _touch_save_list(path, **_kw):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).touch()
+        return [path]
+
+    @staticmethod
+    def _mock_source_data(tmp_path):
+        """A SourceData stand-in covering every source name the glorys-era5-unified
+        ForcingSpec references (GLORYS/UNIFIED/ERA5/TPXO/DAI/MBL_co2/WOA); mirrors
+        ``sample_source_data`` in tests/test_input_data.py.
+        """
+        mock_sd = MagicMock()
+        source_file = tmp_path / "source.nc"
+        source_file.touch()
+
+        def _dks(name, glorys_layout=None):
+            if name == "GLORYS":
+                return (
+                    "GLORYS_GLOBAL" if glorys_layout == "global" else "GLORYS_REGIONAL"
+                )
+            return {
+                "UNIFIED": "UNIFIED_BGC",
+                "ERA5": "ERA5",
+                "TPXO": "TPXO",
+                "DAI": "DAI",
+            }.get(name, name.upper())
+
+        mock_sd.path_for_source = MagicMock(return_value=source_file)
+        mock_sd.dataset_key_for_source = MagicMock(side_effect=_dks)
+        return mock_sd
+
+    def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-tiny",
+            grid_kwargs=self._GRID_KWARGS,
+            open_boundaries=self._BOUNDARIES,
+            partitioning=self._PARTITIONING,
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            description="Golden namelist test",
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+            cdr_forcing=self._CDR_FORCING,
+        )
+
+        grid_mock = _create_grid_mock()
+        grid_mock.nx = self._GRID_KWARGS["nx"]
+        grid_mock.ny = self._GRID_KWARGS["ny"]
+        grid_mock.N = self._GRID_KWARGS["N"]
+        grid_mock.theta_s = self._GRID_KWARGS["theta_s"]
+        grid_mock.theta_b = self._GRID_KWARGS["theta_b"]
+        grid_mock.hc = self._GRID_KWARGS["hc"]
+        grid_mock.save.side_effect = self._touch_save
+        mock_grid.return_value = grid_mock
+
+        run_dir = tmp_path / "run"
+        host = HostPaths(
+            working_dir=run_dir,
+            source_data_cache=run_dir,
+            system="test",
+            machine_config=None,
+        )
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        builder.src_data = self._mock_source_data(tmp_path)
+
+        with (
+            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
+            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
+            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
+            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch(
+                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                {"ERA5"},
+            ),
+        ):
+            mock_ic_instance = MagicMock()
+            mock_ic_instance.save.side_effect = self._touch_save_list
+            mock_ic.return_value = mock_ic_instance
+
+            mock_surface_instance = MagicMock()
+            mock_surface_instance.save.side_effect = self._touch_save
+            mock_surface_instance.use_coarse_grid = False
+            mock_surface.return_value = mock_surface_instance
+
+            mock_boundary_instance = MagicMock()
+            mock_boundary_instance.save.side_effect = self._touch_save
+            mock_boundary.return_value = mock_boundary_instance
+
+            mock_tidal_instance = MagicMock()
+            mock_tidal_instance.save.side_effect = self._touch_save
+            mock_tidal_instance.ntides = 15
+            mock_tidal.return_value = mock_tidal_instance
+
+            mock_river_instance = MagicMock()
+            mock_river_instance.save.side_effect = self._touch_save
+            mock_river_instance.ds = xr.Dataset(
+                {
+                    "river_volume": (["nriver", "time"], np.zeros((3, 2))),
+                    "river_tracer": (
+                        ["nriver", "time", "tracer"],
+                        np.zeros((3, 2, 2)),
+                    ),
+                }
+            )
+            mock_river.return_value = mock_river_instance
+
+            mock_cdr_instance = MagicMock()
+            mock_cdr_instance.save.side_effect = self._touch_save
+            mock_releases = MagicMock()
+            mock_releases.__len__.return_value = 2
+            mock_releases.release_type = "volume"
+            mock_cdr_instance.releases = mock_releases
+            mock_cdr.return_value = mock_cdr_instance
+
+            builder.generate_inputs(clobber=True, use_dask=False, test=False)
+
+        # The §3a fix's whole point: these generation-derived values must survive
+        # configure_build's overlay, not get reverted to resolver-time placeholders.
+        assert builder._settings_run_time["river_frc"]["nriv"] == 3
+        assert builder._settings_run_time["tides"]["ntides"] == 15
+        assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
+        assert builder._settings_run_time["cdr_output"]["do_cdr"] is True
+
+        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+
+        run_ov, compile_ov = split_model_settings(cfg)
+        with patch("cstar_forge.forge.executor.render_roms_settings") as mock_render:
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["cppdefs.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+        assert builder._settings_run_time["river_frc"]["nriv"] == 3
+        assert builder._settings_run_time["tides"]["ntides"] == 15
+        assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
+
+        namelist_path = builder.run_time_code_dir / "namelist.nml"
+        assert namelist_path.exists()
+        raw = namelist_path.read_text()
+
+        # Host-rooted absolute paths (grdname/inifile/frcfiles/output_root_name/...)
+        # are the only non-deterministic content; normalize both the raw and the
+        # OS-resolved (e.g. macOS /private-prefixed) forms of the working dir.
+        normalized = raw.replace(str(run_dir.resolve()), "<WORKDIR>").replace(
+            str(run_dir), "<WORKDIR>"
+        )
+
+        golden_path = (
+            Path(cstar_forge.__file__).parents[1]
+            / "tests"
+            / "fixtures"
+            / "golden_namelist_test-tiny.nml"
+        )
+
+        if os.environ.get("UPDATE_GOLDEN"):
+            golden_path.write_text(normalized)
+            pytest.fail(
+                f"UPDATE_GOLDEN=1: wrote {golden_path}. Review the diff and commit "
+                "it, then rerun without UPDATE_GOLDEN to confirm the test passes."
+            )
+
+        golden = golden_path.read_text()
+        assert normalized == golden, (
+            "Rendered namelist.nml drifted from "
+            "tests/fixtures/golden_namelist_test-tiny.nml. If this is an intentional "
+            "schema/default/template change, regenerate with "
+            "UPDATE_GOLDEN=1 pytest tests/test_core.py -k golden_namelist_test_tiny, "
+            "review the diff, and commit the updated fixture; otherwise this is a "
+            "regression."
+        )

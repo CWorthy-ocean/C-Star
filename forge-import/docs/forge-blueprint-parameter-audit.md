@@ -50,12 +50,17 @@ Each table below covers one section of `ForgeBlueprint`. Columns:
      *live* roms-tools object, independent of what Phase 1 stored
    - **(E)** `ForgeExecutor.configure_build` (Phase 2b) overlays the *stored*
      `ForgeBlueprint.model_settings` back on top of whatever Phase 2a just derived, via a
-     **per-leaf-key deep merge** (`_deep_merge_settings_dict`, executor.py:126) — confirmed:
-     for any section present in `model_settings`, every leaf key the resolver set wins over
-     whatever `generate_inputs` just computed live. This is silent and usually harmless
-     (Phase 1 and Phase 2a often compute the identical value from the identical domain
-     description — e.g. `param.llm`), but for a few sections it is a real, confirmed
-     behavior bug — **see §3a**.
+     **per-leaf-key deep merge** (`_deep_merge_settings_dict`, executor.py:126): for any
+     section present in `model_settings`, every leaf key the resolver set wins over
+     whatever `generate_inputs` just computed live — usually harmless, since Phase 1 and
+     Phase 2a typically compute the identical value from the identical domain description
+     (e.g. `param.llm`). The exception is the handful of leaf keys that are only ever
+     meaningfully known post-generation (`river_frc.*`, `cdr_frc.{cdr_source,cdr_file,
+     ncdr_parm,forcing_parameterized,cdr_volume}`, `cdr_output.do_cdr`,
+     `tides.{ntides,bry_tides,pot_tides,ana_tides}`): `split_model_settings`
+     (`GENERATION_DERIVED_LEAF_KEYS`, `forge_blueprint_engine.py`) excludes these from the
+     overlay, so the live-generated value is what actually lands in the namelist. See the
+     appendix at the end of this document for how that was found and fixed.
 
 ---
 
@@ -79,11 +84,11 @@ Each table below covers one section of `ForgeBlueprint`. Columns:
 
 | Field | Piece(s) | Wizard UI | Executor destination | Overridden? |
 |---|---|---|---|---|
-| `domain.grid_kwargs` (`nx,ny,size_x,size_y,center_lon,center_lat,rot,N,hc,theta_s,theta_b,verbose,hmin`) | DomainSpec (`Domain.yml`) | **two places**: typed `IntText`/`FloatText` widgets in `self.grid_w` (1282-1298) + `self.hmin` (1442), `theta_s/theta_b/hc` gated by `self.scoord_chk` (1299) — AND catalog prefill via `domain_dd` → `_on_domain` (1812), which does not lock the fields (still hand-editable after). `verbose` is **not exposed** anywhere in the wizard. `close_narrow_channels`/`mask_shapefile` are separate widgets (`self.close_narrow_chk` 1449, `self.mask_shapefile` 1455) injected into `grid_kwargs` in `_gather()` (1986-1992) | `rt.Grid(**grid_kwargs)` directly in `ForgeExecutor.model_post_init` (executor.py ~L410-457); `hc`/`theta_s`/`theta_b` round-trip back out as the *generated* `s_coord` namelist group (read from `self.grid.hc/theta_b/theta_s`, not from the stored kwargs — see §7 processing-filled sections) | (G) `s_coord.{theta_s,theta_b,tcline}` is always re-read from the live `rt.Grid` object, not copied from `grid_kwargs` |
+| `domain.grid_kwargs` (`nx, ny, size_x, size_y, center_lon, center_lat, rot, N, hc, theta_s, theta_b, verbose, hmin`) | DomainSpec (`Domain.yml`) | **two places**: typed `IntText`/`FloatText` widgets in `self.grid_w` (1282-1298) + `self.hmin` (1442), `theta_s/theta_b/hc` gated by `self.scoord_chk` (1299) — AND catalog prefill via `domain_dd` → `_on_domain` (1812), which does not lock the fields (still hand-editable after). `verbose` is **not exposed** anywhere in the wizard. `close_narrow_channels`/`mask_shapefile` are separate widgets (`self.close_narrow_chk` 1449, `self.mask_shapefile` 1455) injected into `grid_kwargs` in `_gather()` (1986-1992) | `rt.Grid(**grid_kwargs)` directly in `ForgeExecutor.model_post_init` (executor.py ~L410-457); `hc`/`theta_s`/`theta_b` round-trip back out as the *generated* `s_coord` namelist group (read from `self.grid.hc/theta_b/theta_s`, not from the stored kwargs — see §7 processing-filled sections) | (G) `s_coord.{theta_s,theta_b,tcline}` is always re-read from the live `rt.Grid` object, not copied from `grid_kwargs` |
 | `domain.topography_source` | **ForcingSpec**, not DomainSpec — surprising: lives in `Forcing.yml`'s `grid.topography_source` (e.g. `ETOPO5`), not `Domain.yml` | **no dedicated widget** — rides along inside `_ForcingEditor`'s stored `self._topo` (seeded from the picked ForcingSpec's `forcing_inputs["grid"]["topography_source"]`), not independently editable in the wizard | merged into `grid_kwargs["topography_source"]` as `{"name":…, "path":…}` before `rt.Grid()` construction (executor.py `_resolve_topography_source`, ~L346-403) | — |
 | `domain.topography_path` | per-run override (explicit custom file) | `self.topo_path` Text (1463) | short-circuits `_resolve_topography_source` — used verbatim for any source, not just non-ETOPO5 | — |
 | `domain.open_boundaries` (n/s/e/w bools) | DomainSpec (`Domain.yml`) | **two places**: `self.bnd` dict of Checkboxes (1308) + catalog prefill via `_on_domain` (1825) | (1) `cppdefs.obc_{west,east,north,south}` → `cppdefs.opt.j2` `#define OBC_*`; (2) `self.boundaries` passed to `rt.BoundaryForcing(boundaries=...)` | (R) resolver sets `cppdefs.obc_*` from this at config time; **(G)** input_data.py sets the *same* keys again from `self.boundaries` at generation time (executor.py/input_data.py ~L696-699) — same value, redundant not conflicting |
-| `domain.partitioning` (`n_procs_x`,`n_procs_y`) | DomainSpec (`Domain.yml`) | **two places**: `self.npx`/`self.npy` IntText (1317, 1324) + catalog prefill via `_on_domain` (1827-1829) | `param.{np_xi,np_eta}` (namelist); `n_procs` property (`n_procs_x*n_procs_y`, used only for blueprint/output **naming**, e.g. `..._{n}procs` — confirmed **no** queue-selection or PEs-per-node logic in executor.py is keyed on partitioning; `prep_cstar_environment` resolves `account`/`queue`/`walltime` from machine config with precedence `explicit arg > env var > mc.account/mc.queues.get("default") > hardcoded default`, never reading `n_procs`/`pes_per_node` — MPI-rank/PEs-per-node reconciliation is delegated downstream to C-Star, not validated by Forge); `rt.partition_netcdf(np_eta=…, np_xi=…)` | (R) resolver sets `param.np_xi/np_eta` at config time; **(G)** input_data.py re-sets identically from `self.partitioning` at generation |
+| `domain.partitioning` (`n_procs_x`, `n_procs_y`) | DomainSpec (`Domain.yml`) | **two places**: `self.npx`/`self.npy` IntText (1317, 1324) + catalog prefill via `_on_domain` (1827-1829) | `param.{np_xi,np_eta}` (namelist); `n_procs` property (`n_procs_x*n_procs_y`, used only for blueprint/output **naming**, e.g. `..._{n}procs` — confirmed **no** queue-selection or PEs-per-node logic in executor.py is keyed on partitioning; `prep_cstar_environment` resolves `account`/`queue`/`walltime` from machine config with precedence `explicit arg > env var > mc.account/mc.queues.get("default") > hardcoded default`, never reading `n_procs`/`pes_per_node` — MPI-rank/PEs-per-node reconciliation is delegated downstream to C-Star, not validated by Forge); `rt.partition_netcdf(np_eta=…, np_xi=…)` | (R) resolver sets `param.np_xi/np_eta` at config time; **(G)** input_data.py re-sets identically from `self.partitioning` at generation |
 | `domain.grid_kwargs_parent` / `grid_kwargs_child` / `metadata_child` | per-run (nesting setup, not cataloged) | **two places** for the child grid kwargs: Nesting section widgets (`self.nest_enable` checkbox, `self.child_w` grid widgets 1362, `self.nest_period` 1379) + catalog prefill via `self.nest_domain_dd` → `_on_nest_domain` (1647) | `rt.Grid(...)` for parent/child; child metadata → `extract_data.*` + nesting-file kwargs | (R) child presence forces `extract_data.do_extract=True` + copies `N`/`theta_s`/`theta_b`/`hc` → `*_chd` fields; **(G)** input_data.py re-derives the same `extract_data.*` fields again from the live `self.grid_child` (input_data.py ~L709-721) |
 | `domain.nesting_include_pressure_fluxes` | per-run | `self.nest_pressure_fluxes` checkbox (1386) | merged into nesting-writer kwargs as `include_pressure_fluxes` (only if MARBL/BGC enabled — see `has_marbl` gate, input_data.py ~L665-675) | — |
 
@@ -99,126 +104,13 @@ wins, `options` wins over typed defaults but loses to `extra`.
 
 | Field group | Piece(s) | Wizard UI | Executor destination | Overridden? |
 |---|---|---|---|---|
-| `forcing.initial_conditions` (`source`,`bgc_source`,`bgc_interpolation_method`,`allow_flex_time`,`options`) | ForcingSpec (`Forcing.yml` `initial_conditions:`) | Dedicated typed widgets in `_ForcingEditor` (`ic_name`,`ic_layout`,`ic_path`,`ic_bgc_name`,`ic_bgc_clim`,`ic_bgc_path`,`ic_bgc_interp`,`ic_flex_time`, ~L712-796) + a free-form JSON `ic_options` Textarea for the `options` passthrough | `rt.InitialConditions(grid=self.grid, **input_args)` → `initial.initial_file` (namelist `inifile`) | — |
-| `forcing.surface[]` (`source`,`type`,`correct_radiation`,`coarse_grid_mode`,`restoring_forces`,`wind_dropoff`,`options`) | ForcingSpec (`Forcing.yml` `forcing.surface:`) | Per-item row via `_make_row` (842) with dedicated typed widgets (`type`,`name`,`climatology`,`glorys_layout`,`correct_radiation`,`wind_dropoff`,`coarse_grid_mode`,`restoring_forces`) + per-item JSON `options` Textarea; add/remove via `_add`/`_remove` (1075/1080) | `rt.SurfaceForcing(grid=self.grid, **input_args)` → `forcing.surface_forcing_path` / `surface_forcing_bgc_path`; also derives `blk_frc.interp_frc` or `bgc.interp_frc` from `frc.use_coarse_grid` | (R)+(G) **double-derived, same logic twice**: resolver computes `cppdefs.co2_tvarying`/`cppdefs.sal_restore` from the item list at config time (forge_blueprint_resolve.py ~L305-316); input_data.py re-derives the identical flags at generation time from which items actually got built (input_data.py ~L845-851) |
-| `forcing.boundary[]` (`source`,`type`,`bgc_interpolation_method`,`prefill`,`prefill_kwargs`,`regrid_method`,`extrap_method`,`extrap_kwargs`,`options`) | ForcingSpec (`Forcing.yml` `forcing.boundary:`) | Per-item row, typed widgets for `bgc_interpolation_method`,`prefill`,`regrid_method`,`extrap_method` (+ shared `type`/`name` etc.) + JSON `options` Textarea; `prefill_kwargs`/`extrap_kwargs` are **not** individually widgeted — only reachable via `options` | `rt.BoundaryForcing(grid=self.grid, **input_args)` → `forcing.boundary_forcing_path`/`boundary_forcing_bgc_path`; when `bgc_interpolation_method` is `density`/`density_mld`, a companion physics `BoundaryForcing` is built first and passed as `physics_forcing=` (input_data.py `_build_physics_boundary_companion`, ~L919-949) | if density-space BGC interpolation is requested but no physics boundary item exists, silently falls back to depth-space interpolation (warns only) |
-| `forcing.tidal[]` (`source`,`ntides`,`options`) | ForcingSpec (`Forcing.yml` `forcing.tidal:`) | Per-item row, `ntides` typed widget + JSON `options` | `rt.TidalForcing(grid=self.grid, **input_args)` → `forcing.tidal_forcing_path`; `tides.ntides` | (R) resolver sets `tides.ntides` from the item's *declared* `ntides` field, **if set** (else stays at the ModelSpec placeholder); **(G)** input_data.py *unconditionally* overwrites `tides.{ntides,bry_tides,pot_tides,ana_tides}` at generation from the *actual* generated `rt.TidalForcing.ntides`; **(E) CONFIRMED — see §3a**: `configure_build` overlays the stored, declared (R) value back over the generated (G) value — unlike river/CDR this is not unconditionally broken, only harmful *if* the declared and actually-generated constituent counts differ (e.g. the ForcingSpec asks for `ntides:15` but the real TPXO extraction yields fewer) |
-| `forcing.river[]` (`source`,`include_bgc`,`convert_to_climatology`,`bgc_source`,`coast_snap_buffer_km`,`domain_edge_buffer`,`options`) | ForcingSpec (`Forcing.yml` `forcing.river:`) | Per-item row, typed widgets for `climatology`,`include_bgc`,`convert_to_climatology`,`coast_snap_buffer_km`,`domain_edge_buffer` + JSON `options`; `bgc_source` (a nested dict, not a `SourceSpec`) has **no dedicated widget** — reachable only via `options` | `rt.RiverForcing(grid=self.grid, **input_args)` → `forcing.river_path`; `river_frc.{river_source,analytical,nriv,rvol_vname,rvol_tname,rtrc_vname,rtrc_tname}` | (G) all of `river_frc`'s generation-relevant fields are set at generation time from the actual `rt.RiverForcing` dataset; **(E) CONFIRMED clobber — see §3a**: `configure_build` then resets them all back to the ModelSpec's disabled placeholder (`river_source:false`, `nriv:0`) |
-| `forcing.cdr_forcing` (raw `dict`, e.g. `start_time`/`end_time`/`model_reference_date`/`releases[]` with `name,lat,lon,depth,hsc,vsc,times,release_type,tracer_fluxes`) | **per-run only** — not part of any ForcingSpec catalog piece (`Forcing.yml` never has a `cdr_forcing` key; it's a separate `build_forge_blueprint(cdr_forcing=...)` argument) | **not exposed anywhere in the wizard** — confirmed absent from `_gather()`'s kwargs; must be hand-set in the YAML or via a direct `build_forge_blueprint(cdr_forcing=...)` call | `rt.CDRForcing(**input_args)` → `cdr_frc.{cdr_file,cdr_source,ncdr_parm,forcing_parameterized,cdr_volume}`, `cdr_output.do_cdr` | **untyped**: `dict[str, Any]`, no Pydantic validation at the `ForgeBlueprint` level — validated only implicitly by the `rt.CDRForcing` constructor at generation time. `cppdefs.cdr_forcing` is set correctly at both (R) and (G) (no bug there — see §4); but `cdr_frc.*`/`cdr_output.do_cdr` hit the same **CONFIRMED (E) clobber as river_frc — see §3a** |
+| `forcing.initial_conditions` (`source`, `bgc_source`, `bgc_interpolation_method`, `allow_flex_time`, `options`) | ForcingSpec (`Forcing.yml` `initial_conditions:`) | Dedicated typed widgets in `_ForcingEditor` (`ic_name`, `ic_layout`, `ic_path`, `ic_bgc_name`, `ic_bgc_clim`, `ic_bgc_path`, `ic_bgc_interp`, `ic_flex_time`, ~L712-796) + a free-form JSON `ic_options` Textarea for the `options` passthrough | `rt.InitialConditions(grid=self.grid, **input_args)` → `initial.initial_file` (namelist `inifile`) | — |
+| `forcing.surface[]` (`source`, `type`, `correct_radiation`, `coarse_grid_mode`, `restoring_forces`, `wind_dropoff`, `options`) | ForcingSpec (`Forcing.yml` `forcing.surface:`) | Per-item row via `_make_row` (842) with dedicated typed widgets (`type`, `name`, `climatology`, `glorys_layout`, `correct_radiation`, `wind_dropoff`, `coarse_grid_mode`, `restoring_forces`) + per-item JSON `options` Textarea; add/remove via `_add`/`_remove` (1075/1080) | `rt.SurfaceForcing(grid=self.grid, **input_args)` → `forcing.surface_forcing_path` / `surface_forcing_bgc_path`; also derives `blk_frc.interp_frc` or `bgc.interp_frc` from `frc.use_coarse_grid` | (R)+(G) **double-derived, same logic twice**: resolver computes `cppdefs.co2_tvarying`/`cppdefs.sal_restore` from the item list at config time (forge_blueprint_resolve.py ~L305-316); input_data.py re-derives the identical flags at generation time from which items actually got built (input_data.py ~L845-851) |
+| `forcing.boundary[]` (`source`, `type`, `bgc_interpolation_method`, `prefill`, `prefill_kwargs`, `regrid_method`, `extrap_method`, `extrap_kwargs`, `options`) | ForcingSpec (`Forcing.yml` `forcing.boundary:`) | Per-item row, typed widgets for `bgc_interpolation_method`, `prefill`, `regrid_method`, `extrap_method` (+ shared `type`/`name` etc.) + JSON `options` Textarea; `prefill_kwargs`/`extrap_kwargs` are **not** individually widgeted — only reachable via `options` | `rt.BoundaryForcing(grid=self.grid, **input_args)` → `forcing.boundary_forcing_path`/`boundary_forcing_bgc_path`; when `bgc_interpolation_method` is `density`/`density_mld`, a companion physics `BoundaryForcing` is built first and passed as `physics_forcing=` (input_data.py `_build_physics_boundary_companion`, ~L919-949) | if density-space BGC interpolation is requested but no physics boundary item exists, silently falls back to depth-space interpolation (warns only) |
+| `forcing.tidal[]` (`source`, `ntides`, `options`) | ForcingSpec (`Forcing.yml` `forcing.tidal:`) | Per-item row, `ntides` typed widget + JSON `options` | `rt.TidalForcing(grid=self.grid, **input_args)` → `forcing.tidal_forcing_path`; `tides.ntides` | (R) resolver sets `tides.ntides` from the item's *declared* `ntides` field, **if set** (else stays at the ModelSpec placeholder); **(G)** input_data.py *unconditionally* overwrites `tides.{ntides,bry_tides,pot_tides,ana_tides}` at generation from the *actual* generated `rt.TidalForcing.ntides`. These 4 leaf keys are excluded from `configure_build`'s overlay (`GENERATION_DERIVED_LEAF_KEYS`), so the actually-generated constituent count is what lands in the namelist, not the merely-declared one |
+| `forcing.river[]` (`source`, `include_bgc`, `convert_to_climatology`, `bgc_source`, `coast_snap_buffer_km`, `domain_edge_buffer`, `options`) | ForcingSpec (`Forcing.yml` `forcing.river:`) | Per-item row, typed widgets for `climatology`, `include_bgc`, `convert_to_climatology`, `coast_snap_buffer_km`, `domain_edge_buffer` + JSON `options`; `bgc_source` (a nested dict, not a `SourceSpec`) has **no dedicated widget** — reachable only via `options` | `rt.RiverForcing(grid=self.grid, **input_args)` → `forcing.river_path`; `river_frc.{river_source,analytical,nriv,rvol_vname,rvol_tname,rtrc_vname,rtrc_tname}` | (G) all of `river_frc`'s generation-relevant fields are set at generation time from the actual `rt.RiverForcing` dataset; these leaves are excluded from `configure_build`'s overlay (`GENERATION_DERIVED_LEAF_KEYS`), so the generated values (not the ModelSpec's disabled placeholder) land in the namelist |
+| `forcing.cdr_forcing` (raw `dict`, e.g. `start_time`/`end_time`/`model_reference_date`/`releases[]` with `name,lat,lon,depth,hsc,vsc,times,release_type,tracer_fluxes`) | **per-run only** — not part of any ForcingSpec catalog piece (`Forcing.yml` never has a `cdr_forcing` key; it's a separate `build_forge_blueprint(cdr_forcing=...)` argument) | **not exposed anywhere in the wizard** — confirmed absent from `_gather()`'s kwargs; must be hand-set in the YAML or via a direct `build_forge_blueprint(cdr_forcing=...)` call | `rt.CDRForcing(**input_args)` → `cdr_frc.{cdr_file,cdr_source,ncdr_parm,forcing_parameterized,cdr_volume}`, `cdr_output.do_cdr` | **untyped**: `dict[str, Any]`, no Pydantic validation at the `ForgeBlueprint` level — validated only implicitly by the `rt.CDRForcing` constructor at generation time. `cppdefs.cdr_forcing` is set correctly at both (R) and (G) (see §4); `cdr_frc.*`/`cdr_output.do_cdr`'s generation-derived leaves are likewise excluded from `configure_build`'s overlay, so the generated values land in the namelist |
 | `forcing.resolved_datasets` | derived (snapshot of `source_registry` at resolve time) | not directly editable | not itself consumed at processing — `datasets` (§1) is derived from its keys, and `SourceData`/`source_registry` re-resolve the same names independently at processing time | (R) recomputed by the resolver on every build; not writable by a user |
-
----
-
-## 3a. FIXED: `configure_build`'s overlay silently disabled generated rivers/CDR and could misstate tidal constituent count
-
-**Status: fixed.** `forge_blueprint_engine.py` now defines `GENERATION_DERIVED_LEAF_KEYS`
-(section → tuple of leaf keys) and `split_model_settings` strips those specific leaf
-keys — `river_frc.{river_source,analytical,nriv,rvol_vname,rvol_tname,rtrc_vname,
-rtrc_tname}`, `cdr_frc.{cdr_source,cdr_file,ncdr_parm,forcing_parameterized,cdr_volume}`,
-`cdr_output.do_cdr`, `tides.{ntides,bry_tides,pot_tides,ana_tides}` — from the overlay
-dict it hands to `configure_build`, so the post-generation (real) values in
-`self._settings_run_time` survive instead of being reverted to the pre-generation
-resolver snapshot. Sibling fields in the same sections that `generate_inputs` never
-touches (e.g. `cdr_frc.relocate_to_wet_pts`) are untouched by the fix and still flow
-through normally. Regression coverage: `tests/test_forge_blueprint.py::
-TestForgeBlueprintEngine::test_split_model_settings_excludes_generation_derived_leaves`
-(unit-level, asserts the overlay dict) and `tests/test_core.py::
-TestForgeExecutorBuildAndRun::test_configure_build_does_not_clobber_generated_river_and_tidal_settings`
-(full-chain: real `build_forge_blueprint` → real `ForgeExecutor.configure_build` with
-`split_model_settings`'s real output, simulated `generate_inputs` values, both
-verified to fail before the fix and pass after).
-
-**Mechanism** (traced end-to-end in `executor.py` + `forge_blueprint_engine.py`, branch `refactor`,
-verified by direct code reading, not test output — no existing test exercises this path,
-see below):
-
-1. `ForgeExecutor._init_settings_run_time()` (executor.py:1562) seeds `self._settings_run_time`
-   as a full deep-copy of `ForgeBlueprint.model_settings` (minus `cppdefs`) — this includes
-   `river_frc`, `cdr_frc`, `cdr_output`, and `tides` **exactly as the resolver stored them**,
-   i.e. the ModelSpec's disabled placeholders (`river_frc.river_source: false`, `cdr_frc.cdr_source:
-   false`, `cdr_output.do_cdr: false`) for `river_frc`/`cdr_frc`/`cdr_output` — because
-   **`forge_blueprint_resolve.py` never touches these three sections at all** (confirmed by
-   grep: no `river_frc`/`cdr_frc` reference in that file), regardless of whether real rivers or
-   CDR are configured in `forcing.river[]`/`forcing.cdr_forcing`.
-2. `generate_inputs()` → `input_data.py` builds the real `rt.RiverForcing`/`rt.CDRForcing`/
-   `rt.TidalForcing` objects and overlays the *true* values (`river_source=True`, the real
-   `nriv`, `cdr_source=True`, the real `ncdr_parm`/`cdr_volume`, `cdr_output.do_cdr=True`, the
-   true `tides.ntides`) via `_update_settings_run_time(..., allow_new=True)` — a leaf-level
-   deep merge (`_deep_merge_settings_dict`, executor.py:126) into the *same* dict from step 1.
-3. `configure_build(compile_time_settings, run_time_settings)` receives `run_time_settings =
-   split_model_settings(cfg)`'s `run_overrides` — **the entire, untouched `cfg.model_settings`**
-   from step 1 (`forge_blueprint_engine.py` `split_model_settings`) — and calls
-   `_update_settings_run_time(run_time_settings)` **with `allow_new=False`** (the default).
-   Because `river_frc`/`cdr_frc`/`cdr_output`/`tides` are top-level keys that already exist
-   (from step 1), `_deep_merge_settings_dict` recurses into them and overwrites **every leaf
-   key present** — which is *all* of them, since `cfg.model_settings` carries the full section.
-   This silently restores the step-1 (disabled/placeholder) values, undoing step 2.
-
-**Net effect**: whenever a domain configures real river forcing or CDR forcing, the final
-`namelist.nml` written by `write_roms_namelist` (called at the end of `configure_build`) has
-`river_frc.river_source=False`/`nriv=0` and `cdr_frc.cdr_source=False`/`cdr_output.do_cdr=False`
-— **even though the river/CDR NetCDF forcing files were correctly generated and referenced in
-`forcing.river_path`/the CDR resource list.** ROMS would run without ever reading the
-generated river/CDR forcing. For `tides.ntides`, if the true generated tidal-constituent count
-(from the real TPXO extraction) differs from whatever the resolver stored (either the
-ForcingSpec's declared `ntides:` or the ModelSpec placeholder), the *stale* stored count
-silently wins in the final namelist.
-
-**Empirically verified, in two parts (not just read):**
-
-1. **The load-bearing precondition** — that a *real*, river-configured domain actually
-   produces a stored placeholder — was checked by running Phase 1 only (no network, no
-   grid build: `build_forge_blueprint(dt=60.0, ...)`) on the real catalog inputs
-   (`DomainSpec/ccs-12km` + `ForcingSpec/glorys-era5-unified`, whose `forcing.river`
-   has a real configured `DAI` river item). Result: `cfg.forcing.river` is non-empty
-   (`RiverForcingItem(source=SourceSpec(name='DAI', ...), include_bgc=True, ...)`) while
-   `cfg.model_settings["river_frc"]` is `{'river_source': False, 'nriv': 0, ...}` — the
-   disabled ModelSpec placeholder, verbatim, despite the configured river. Same check on
-   `cdr_frc` (no CDR configured in this ForcingSpec, so it's expected-disabled there —
-   still confirms the *mechanism*: `cdr_frc` carries the same untouched ModelSpec dict
-   regardless). `tides` resolved to `{'ntides': 15, ...}` (from the ForcingSpec's declared
-   `ntides: 15`) — the value that would clobber back over whatever TPXO actually
-   generates if the two ever differ.
-2. **The merge mechanics** — calling the actual, imported
-   `cstar_forge.forge.executor._deep_merge_settings_dict` with a synthetic `river_frc`
-   dict reproduces the full sequence: seed disabled (step 1's real value, from above) →
-   merge in generation-derived enabled values (`river_source=True, nriv=3`, step 2) →
-   merge the original resolver snapshot back on top (step 3) → **result reverts to
-   `river_source=False, nriv=0`**.
-
-Together these close the gap between "the code reads this way" and "this is what a real
-river-configured domain does" — both ends of the claim are now observed, not just
-inferred.
-
-**Why existing tests don't catch this**: the `test-tiny` domain used by
-`test_golden_model_settings_test_tiny` and the resolver/builder parity test has no rivers, no
-CDR, and (need to verify) may or may not exercise a tidal item — and in any case those tests
-check the *resolver's* `model_settings` output or `ForgeBlueprint` construction, not the final
-namelist produced by a full `process_forge_blueprint()` run. No test in `tests/` currently
-asserts on `river_frc`/`cdr_frc`/`cdr_output` values in a post-`configure_build` namelist for a
-domain that actually has rivers/CDR configured (confirmed by grep — see `tests/fixtures/
-golden_model_settings_test-tiny.json`, which shows `river_frc.river_source: false`,
-`cdr_frc.cdr_source: false`, `cdr_output.do_cdr: false`, consistent with test-tiny having none
-configured, so the bug is invisible to it either way).
-
-**Contrast with `param`/`cppdefs.obc_*`**: the same (E)-overlay-wins mechanism applies to these
-too, but is harmless there because the resolver (R) already computes the *same* value from the
-*same* domain description that `input_data.py` (G) later re-derives from the live grid object —
-so clobbering back to the resolver's value is a no-op. The bug is specific to sections where (R)
-cannot know the true generation-time answer at all (`river_frc`, `cdr_frc`, `cdr_output.do_cdr`)
-or only knows a *declared*, not *actual*, answer (`tides.ntides`).
-
-**Fix applied**: option (b) from the original three candidates — `split_model_settings`
-now excludes the specific generation-derived leaf keys from the overlay dict it builds
-(rather than (a) changing what the resolver stores, or (c) reordering
-`generate_inputs`/`configure_build`, both of which would have touched more surface area
-for the same result). See the "Status: fixed" note above for the exact keys and the new
-regression tests. A true byte-level `namelist.nml` end-to-end test (real rivers + CDR +
-tides through `process_forge_blueprint` against a real generated file) is still not
-implemented — deliberately deferred, same as the pre-existing golden-namelist gap noted
-in `docs/developer-guide.md` §6 — but the fix is covered at both the unit
-(`split_model_settings`) and full-chain (`ForgeExecutor.configure_build` with the real
-overlay) levels, both verified to fail before the fix and pass after.
 
 ---
 
@@ -266,27 +158,27 @@ One row per section — individual fields diverge only where noted.
 
 | Section | Piece(s) | Wizard UI | Executor destination | Overridden? |
 |---|---|---|---|---|
-| `lateral_visc` (`visc2`,`rho0`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `lateral_visc_settings` namelist group; `rho0` is cross-section-read into `rho0_settings` separately (`build_namelist`) | — |
-| `vertical_mixing` (`akv`,`akt_default`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `vertical_mixing_settings`; `akt_default` scalar → expanded to a per-tracer array (`akt_bak = [akt_default] * n_tracers`) in `build_namelist` | (structural, not an override — a scalar→array expansion) |
+| `lateral_visc` (`visc2`, `rho0`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `lateral_visc_settings` namelist group; `rho0` is cross-section-read into `rho0_settings` separately (`build_namelist`) | — |
+| `vertical_mixing` (`akv`, `akt_default`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `vertical_mixing_settings`; `akt_default` scalar → expanded to a per-tracer array (`akt_bak = [akt_default] * n_tracers`) in `build_namelist` | (structural, not an override — a scalar→array expansion) |
 | `tracer_diff2` (`tnu2_default`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `tracer_diff2` namelist group; scalar → `tnu2 = [tnu2_default] * n_tracers` | same structural expansion |
-| `bottom_drag` (`rdrg`,`rdrg2`,`zob`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `bottom_drag_settings` | — |
+| `bottom_drag` (`rdrg`, `rdrg2`, `zob`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `bottom_drag_settings` | — |
 | `gamma2` (bare scalar) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `gamma2_settings` | — |
 | `ubind` (bare scalar) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `ubind_settings` | — |
-| `param` (`llm`,`mmm`,`n`,`np_xi`,`np_eta`,`nt_passive`,`ntrc_bio`; resolver also injects `nsub_x`,`nsub_e`) | **splits field-by-field**: `llm`/`mmm`/`n` ← DomainSpec grid; `np_xi`/`np_eta` ← DomainSpec partitioning; `nt_passive`/`ntrc_bio` ← ModelSpec (real defaults, not overwritten); `nsub_x`/`nsub_e` ← hardcoded `1`/`1` in the resolver, never read from ModelSpec at all | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `param_settings` namelist group (`nz`,`nt_bgc` aliases); `n_tracers` property computed as `2 + ntrc_bio + nt_passive` | (R)+(G): `llm,mmm,n,np_xi,np_eta` overwritten twice (config-time from `grid_kwargs`/`partitioning`, generation-time from the live `rt.Grid`/partitioning) — see §2; `nt_passive`/`ntrc_bio` are the only two `param` fields that are genuine, un-overridden ModelSpec defaults |
+| `param` (`llm`, `mmm`, `n`, `np_xi`, `np_eta`, `nt_passive`, `ntrc_bio`; resolver also injects `nsub_x`, `nsub_e`) | **splits field-by-field**: `llm`/`mmm`/`n` ← DomainSpec grid; `np_xi`/`np_eta` ← DomainSpec partitioning; `nt_passive`/`ntrc_bio` ← ModelSpec (real defaults, not overwritten); `nsub_x`/`nsub_e` ← hardcoded `1`/`1` in the resolver, never read from ModelSpec at all | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `param_settings` namelist group (`nz`, `nt_bgc` aliases); `n_tracers` property computed as `2 + ntrc_bio + nt_passive` | (R)+(G): `llm,mmm,n,np_xi,np_eta` overwritten twice (config-time from `grid_kwargs`/`partitioning`, generation-time from the live `rt.Grid`/partitioning) — see §2; `nt_passive`/`ntrc_bio` are the only two `param` fields that are genuine, un-overridden ModelSpec defaults |
 | `v_sponge` (`v_sponge`) | derived — no catalog piece | not exposed (pure-derived) | `v_sponge_settings` | (R) `= (size_x/nx)*1000/10`, computed fresh every resolve; a stored value is never read back from ModelSpec |
-| `time_stepping` (`ntimes`,`dt`,`ndtfast`,`ninfo`) | `dt`/`ntimes` derived (CFL + run window); `ndtfast=60`,`ninfo=1` hardcoded in the resolver (ModelSpec's own `model.yml` doesn't define this section) | `dt` has its own dedicated widgets (§1: `self.dt` manual FloatText + `self.dt_btn` CFL-compute button); `ntimes`/`ndtfast`/`ninfo` only reachable via the generic Advanced-settings editor | `TimeStepping` namelist group | (R) `ntimes`/`dt` always computed, never taken from ModelSpec; `ndtfast`/`ninfo` are resolver-level hardcoded literals, not overridable via any Spec (only via `run_time_overrides`) |
-| `tides` (`bry_tides`,`pot_tides`,`ana_tides`) non-`ntides` fields | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `tidal_frc_settings` | **(G)** force-set to `True,True,False` at generation (input_data.py ~L1129-1131); **(E) then wins anyway** since `tides` is present in `model_settings` — see §3a. In practice harmless for these 3 fields since ModelSpec's stored values are the same `True,True,False`; the real risk in this section is `ntides` (§3) |
-| `river_frc` (`river_source`,`analytical`,`nriv`,`rvol_vname`,`rvol_tname`,`rtrc_vname`,`rtrc_tname`) | ModelSpec (all-disabled placeholder) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `river_frc_settings` | (G) set correctly at generation once any river item is configured; **(E) CONFIRMED clobber — see §3a**: `configure_build` resets every leaf back to the ModelSpec's disabled placeholder regardless |
-| `blk_frc` (`interp_frc`,`check_bulk_frc_units`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `surf_frc_settings` (merged with `flux_frc`) | **(G)** `interp_frc` derived from `frc.use_coarse_grid` at generation; `check_bulk_frc_units` stays a real ModelSpec default |
+| `time_stepping` (`ntimes`, `dt`, `ndtfast`, `ninfo`) | `dt`/`ntimes` derived (CFL + run window); `ndtfast=60`, `ninfo=1` hardcoded in the resolver (ModelSpec's own `model.yml` doesn't define this section) | `dt` has its own dedicated widgets (§1: `self.dt` manual FloatText + `self.dt_btn` CFL-compute button); `ntimes`/`ndtfast`/`ninfo` only reachable via the generic Advanced-settings editor | `TimeStepping` namelist group | (R) `ntimes`/`dt` always computed, never taken from ModelSpec; `ndtfast`/`ninfo` are resolver-level hardcoded literals, not overridable via any Spec (only via `run_time_overrides`) |
+| `tides` (`bry_tides`, `pot_tides`, `ana_tides`) non-`ntides` fields | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `tidal_frc_settings` | **(G)** force-set to `True,True,False` at generation (input_data.py ~L1129-1131); these 3 fields plus `ntides` are excluded from `configure_build`'s overlay (`GENERATION_DERIVED_LEAF_KEYS`), so the generated values land in the namelist |
+| `river_frc` (`river_source`, `analytical`, `nriv`, `rvol_vname`, `rvol_tname`, `rtrc_vname`, `rtrc_tname`) | ModelSpec (all-disabled placeholder) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `river_frc_settings` | (G) set correctly at generation once any river item is configured; excluded from `configure_build`'s overlay (`GENERATION_DERIVED_LEAF_KEYS`), so the generated values land in the namelist |
+| `blk_frc` (`interp_frc`, `check_bulk_frc_units`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `surf_frc_settings` (merged with `flux_frc`) | **(G)** `interp_frc` derived from `frc.use_coarse_grid` at generation; `check_bulk_frc_units` stays a real ModelSpec default |
 | `flux_frc` (`interp_flux_frc`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `surf_frc_settings` | — |
-| `bgc` (`interp_frc`,`wrt_his`,`output_period_his`,`nrpf_his`,`wrt_avg`,`output_period_avg`,`nrpf_avg`,`wrt_his_dia`,...,`nbgc_flx`,`xco2air_default`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `bgc_settings` namelist group | **(G)** `interp_frc` derived like `blk_frc.interp_frc`, only touched at all `if has_bgc_compile` (gated on `cppdefs.marbl`); the `wrt_*`/`output_period_*`/`nrpf_*` write-control-looking fields here are **ModelSpec**, not OutputSpec (OutputSpec only owns `ocean_vars`/etc., see §6) — a naming trap since they read like output settings |
-| `cdr_frc` (`cdr_source`,`cdr_file`,`ncdr_parm`,`forcing_depth_profiles`,`forcing_3d`,`forcing_parameterized`,`time_interpolation`,`relocate_to_wet_pts`,`cdr_volume`,+ vnames,`nz_chd`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `cdr_frc_settings` | (G) `cdr_source`,`cdr_file`,`ncdr_parm`,`forcing_parameterized`,`cdr_volume` set correctly at generation once CDR builds; **(E) CONFIRMED clobber — see §3a**: `configure_build` resets these back to the ModelSpec placeholder (`cdr_source:false`, etc.); `forcing_depth_profiles`,`forcing_3d`,`time_interpolation`,`relocate_to_wet_pts`, vnames, `nz_chd` are never touched by (G) at all — genuine ModelSpec defaults |
-| `extract_data` (`do_extract`,`extract_file`,`nrpf`,`n_chd`,`theta_s_chd`,`theta_b_chd`,`hc_chd`,`extract_period`) | ModelSpec default (`do_extract:false`); overwritten wholesale when a child grid exists | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `extract_data_settings` | (R)+(G) double-derived when nesting is configured, see §2; `nrpf` is the only field never overwritten (stays ModelSpec) |
-| `sponge_tune` (`ub_tune`,`spn_avg`,`sp_timscale`,`wrt_sponge`,`nrpf`,`output_period`,+ `pflx_*_vname`/`tname`) | ModelSpec — **not** part of OutputSpec despite looking like output config (`wrt_sponge`,`output_period`) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `sponge_tune_settings` | — |
-| `calc_pflx` (`calc_pflx`,`timescale`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `calc_pflx_settings` | — |
-| `pipe_frc` (`pipe_source`,`p_analytical`,`npip`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `pipe_frc_settings` | — |
-| `particles` (`floats`,`np`,`extra_space_fac`,`exchange_facx/y/c`,`output_period`,`nrpf`,`ppm3`,`pmin`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `particles_settings` | — |
-| `lin_rho_eos` (`tcoef`,`t0`,`scoef`,`s0`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `lin_rho_eos_settings` | — |
+| `bgc` (`interp_frc`, `wrt_his`, `output_period_his`, `nrpf_his`, `wrt_avg`, `output_period_avg`, `nrpf_avg`, `wrt_his_dia`,...,`nbgc_flx`, `xco2air_default`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `bgc_settings` namelist group | **(G)** `interp_frc` derived like `blk_frc.interp_frc`, only touched at all `if has_bgc_compile` (gated on `cppdefs.marbl`); the `wrt_*`/`output_period_*`/`nrpf_*` write-control-looking fields here are **ModelSpec**, not OutputSpec (OutputSpec only owns `ocean_vars`/etc., see §6) — a naming trap since they read like output settings |
+| `cdr_frc` (`cdr_source`, `cdr_file`, `ncdr_parm`, `forcing_depth_profiles`, `forcing_3d`, `forcing_parameterized`, `time_interpolation`, `relocate_to_wet_pts`, `cdr_volume`,+ vnames,`nz_chd`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `cdr_frc_settings` | (G) `cdr_source`, `cdr_file`, `ncdr_parm`, `forcing_parameterized`, `cdr_volume` set correctly at generation once CDR builds — excluded from `configure_build`'s overlay (`GENERATION_DERIVED_LEAF_KEYS`), so the generated values land in the namelist; `forcing_depth_profiles`, `forcing_3d`, `time_interpolation`, `relocate_to_wet_pts`, vnames, `nz_chd` are never touched by (G) at all — genuine ModelSpec defaults, still overlaid normally |
+| `extract_data` (`do_extract`, `extract_file`, `nrpf`, `n_chd`, `theta_s_chd`, `theta_b_chd`, `hc_chd`, `extract_period`) | ModelSpec default (`do_extract:false`); overwritten wholesale when a child grid exists | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `extract_data_settings` | (R)+(G) double-derived when nesting is configured, see §2; `nrpf` is the only field never overwritten (stays ModelSpec) |
+| `sponge_tune` (`ub_tune`, `spn_avg`, `sp_timscale`, `wrt_sponge`, `nrpf`, `output_period`,+ `pflx_*_vname`/`tname`) | ModelSpec — **not** part of OutputSpec despite looking like output config (`wrt_sponge`, `output_period`) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `sponge_tune_settings` | — |
+| `calc_pflx` (`calc_pflx`, `timescale`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `calc_pflx_settings` | — |
+| `pipe_frc` (`pipe_source`, `p_analytical`, `npip`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `pipe_frc_settings` | — |
+| `particles` (`floats`, `np`, `extra_space_fac`, `exchange_facx/y/c`, `output_period`, `nrpf`, `ppm3`, `pmin`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `particles_settings` | — |
+| `lin_rho_eos` (`tcoef`, `t0`, `scoef`, `s0`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `lin_rho_eos_settings` | — |
 | `sss_correction` (`dsssdt`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `sss_correction` group | — |
 | `sst_correction` (`dsstdt`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `sst_correction` group | — |
 | `dic_alk_correction` (`dcdt`) | ModelSpec | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `dic_alk_correction` group | — |
@@ -305,16 +197,16 @@ wins over the OutputSpec selection).
 | Section | Piece(s) | Wizard UI | Executor destination | Overridden? |
 |---|---|---|---|---|
 | `ocean_vars` (~33 `wrt_*`/`output_period_*`/`nrpf_*` restart/history/average write flags) | **OutputSpec** (`Output.yml`) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `basic_output_settings` namelist group | (O) deep-merged over ModelSpec (which has none of these — `model.yml` doesn't define `ocean_vars` at all, it's 100% OutputSpec-sourced) |
-| `surf_flux` (`wrt_smflx`,`wrt_stflx`,`wrt_rstflx`,`wrt_swflx`,`sflx_avg`,`output_period`,`nrpf`,+ `sst_vname`/`tname`,`sss_vname`/`tname`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `surf_flx_output_settings` | (O) |
-| `diagnostics` (`diag_avg`,`output_period`,`nrpf`,`diag_uv`,`diag_trc`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `diagnostics_settings` | (O) |
+| `surf_flux` (`wrt_smflx`, `wrt_stflx`, `wrt_rstflx`, `wrt_swflx`, `sflx_avg`, `output_period`, `nrpf`,+ `sst_vname`/`tname`, `sss_vname`/`tname`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `surf_flx_output_settings` | (O) |
+| `diagnostics` (`diag_avg`, `output_period`, `nrpf`, `diag_uv`, `diag_trc`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `diagnostics_settings` | (O) |
 | `stdout_diag` (`code_check_mode`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `stdout_diag_settings` | (O) |
-| `ts_output` (`wrt_temp`,`wrt_salt`,`wrt_temp_dia`,`wrt_salt_dia`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `ts_output_settings` | (O) |
-| `frc_output` (`wrt_frc`,`wrt_frc_avg`,`output_period`,`nrpf`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `frc_output_settings` | (O) |
-| `cdr_output` (`do_cdr`,`do_avg`,`monthly_averages`,`output_period`,`nrpf`) | **OutputSpec** default (`do_cdr:false`) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `cdr_output_settings`; `do_upscale` cross-read by `cppdefs.opt.j2` (see §4) | (O) then (G) sets `do_cdr=True` once CDR forcing actually builds (input_data.py ~L1319); **(E) CONFIRMED clobber — see §3a**: `configure_build` resets `do_cdr` back to the OutputSpec's `false` since `cdr_output` is in `model_settings` |
-| `upscale_output` (`do_upscale`,`nrpf_uscl`,`output_period_uscl`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `upscale_settings`; `do_upscale` also feeds `cppdefs.opt.j2`'s `#define UPSCALING` (§4) | (O) |
-| `zslice` (`do_zslice`,`zslice_avg`,`wrt_t_zsl`,`wrt_u_zsl`,`wrt_v_zsl`,`output_period`,`nrpf`,`ndep`,`vecdep`,`nt_z`,`trc2zsc`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `zslice_settings` | (O) |
-| `random_output` (`do_random`,`output_period`,`nrpf`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `random_output_settings` | (O) |
-| `marbl_bgc.{marbl_tracers_to_write,marbl_diagnostics_to_write}` | **OutputSpec** (`OUTPUT_MARBL_FIELDS`) — **spans two pieces**: the rest of `marbl_bgc` (`marbl_config_file`,`marbl_timestep`) is ModelSpec (§5) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `marbl_biogeochemistry_settings` write-lists | (O) merged onto the *same* `marbl_bgc` dict that ModelSpec partially populates — the prime "belongs to multiple pieces" example in this schema |
+| `ts_output` (`wrt_temp`, `wrt_salt`, `wrt_temp_dia`, `wrt_salt_dia`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `ts_output_settings` | (O) |
+| `frc_output` (`wrt_frc`, `wrt_frc_avg`, `output_period`, `nrpf`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `frc_output_settings` | (O) |
+| `cdr_output` (`do_cdr`, `do_avg`, `monthly_averages`, `output_period`, `nrpf`) | **OutputSpec** default (`do_cdr:false`) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `cdr_output_settings`; `do_upscale` cross-read by `cppdefs.opt.j2` (see §4) | (O) then (G) sets `do_cdr=True` once CDR forcing actually builds (input_data.py ~L1319); `do_cdr` is excluded from `configure_build`'s overlay (`GENERATION_DERIVED_LEAF_KEYS`), so the generated value lands in the namelist |
+| `upscale_output` (`do_upscale`, `nrpf_uscl`, `output_period_uscl`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `upscale_settings`; `do_upscale` also feeds `cppdefs.opt.j2`'s `#define UPSCALING` (§4) | (O) |
+| `zslice` (`do_zslice`, `zslice_avg`, `wrt_t_zsl`, `wrt_u_zsl`, `wrt_v_zsl`, `output_period`, `nrpf`, `ndep`, `vecdep`, `nt_z`, `trc2zsc`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `zslice_settings` | (O) |
+| `random_output` (`do_random`, `output_period`, `nrpf`) | **OutputSpec** | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `random_output_settings` | (O) |
+| `marbl_bgc.{marbl_tracers_to_write,marbl_diagnostics_to_write}` | **OutputSpec** (`OUTPUT_MARBL_FIELDS`) — **spans two pieces**: the rest of `marbl_bgc` (`marbl_config_file`, `marbl_timestep`) is ModelSpec (§5) | Advanced-settings accordion — generic `_SettingsEditor` (auto one-widget-per-field; see note after §4's table) | `marbl_biogeochemistry_settings` write-lists | (O) merged onto the *same* `marbl_bgc` dict that ModelSpec partially populates — the prime "belongs to multiple pieces" example in this schema |
 
 ---
 
@@ -322,26 +214,21 @@ wins over the OutputSpec selection).
 
 | Field | Piece(s) | Wizard UI | Executor destination | Overridden? |
 |---|---|---|---|---|
-| `code.roms` (`location`,`commit`) | ModelSpec | `self.roms_ref` Text (`forge_blueprint_wizard.py`:1338, prefilled per-model from `model.yml` via `_model_default_roms_ref()`:1662), overrides `commit`/`branch` only — `location` itself is **not exposed** | `_cstar_code_repository()` (executor.py:985-1017) builds a `cstar_models.ROMSCompositeCodeRepository` from `self.code_spec`; consumed once at PRECONFIG (`_initialize_roms_marbl_blueprint`) | (R) if `roms_ref` passed, replaces ModelSpec's pinned commit/branch |
-| `code.marbl` (`location`,`commit`) | ModelSpec | **not exposed at all** — always taken verbatim from the selected model's `model.yml`; no wizard override kwarg exists | same `_cstar_code_repository()` path — `marbl=_repo(...) if code_spec.marbl else None` | — |
-| `code.pio` (`location`,`commit`) | ModelSpec | only indirectly gated by `self.use_pio_chk` (on/off); the repo location/commit itself is **not editable** in the wizard | same `_cstar_code_repository()` path. **Confirmed: `code.pio`'s presence in the blueprint is unconditional of `cppdefs.use_pio`** — `_use_pio` (executor.py:631-636, reads `cppdefs.use_pio`) does NOT gate `_cstar_code_repository()`; it only gates two things: `netcdf_format` passed to `RomsMarblInputData` in `generate_inputs` (`"NETCDF3_64BIT_DATA"` vs `"NETCDF4"`, ~L1485) and whether `model_params["use_pio"]=True` is added in `configure_build` (~L1937-1938) | (R) resolver raises if `use_pio=True` and ModelSpec has no `code.pio` |
-| `code.templates_compile_time` / `templates_run_time` (`directory`,`files`) | ModelSpec (`model.yml` `code.templates_compile_time/_run_time`, decoupled repo = forge's own `templates/` dir) | not exposed (infra-level); a `templates_repo` kwarg exists on `build_forge_blueprint`'s signature but the wizard's `_gather()` never passes it | `_template_repo_args(stage)` (executor.py:1019-1034) feeds C-Star's `AdditionalCode` constructor; `_stage_templates(stage)` (~1036-1060) materializes the filtered files under `host.working_dir/templates/{stage}` — **no CI coverage for the cross-repo flat-staging contract** per developer-guide §6 item 2. `configure_build` later overwrites `roms_marbl_blueprint.code.compile_time`/`code.run_time` with the *rendered* locations (~1919-1932), replacing the PRECONFIG placeholders | (R) `templates_commit:` pin in ModelSpec overrides tracking branch `main` |
+| `code.roms` (`location`, `commit`) | ModelSpec | `self.roms_ref` Text (`forge_blueprint_wizard.py`:1338, prefilled per-model from `model.yml` via `_model_default_roms_ref()`:1662), overrides `commit`/`branch` only — `location` itself is **not exposed** | `_cstar_code_repository()` (executor.py:985-1017) builds a `cstar_models.ROMSCompositeCodeRepository` from `self.code_spec`; consumed once at PRECONFIG (`_initialize_roms_marbl_blueprint`) | (R) if `roms_ref` passed, replaces ModelSpec's pinned commit/branch |
+| `code.marbl` (`location`, `commit`) | ModelSpec | **not exposed at all** — always taken verbatim from the selected model's `model.yml`; no wizard override kwarg exists | same `_cstar_code_repository()` path — `marbl=_repo(...) if code_spec.marbl else None` | — |
+| `code.pio` (`location`, `commit`) | ModelSpec | only indirectly gated by `self.use_pio_chk` (on/off); the repo location/commit itself is **not editable** in the wizard | same `_cstar_code_repository()` path. **Confirmed: `code.pio`'s presence in the blueprint is unconditional of `cppdefs.use_pio`** — `_use_pio` (executor.py:631-636, reads `cppdefs.use_pio`) does NOT gate `_cstar_code_repository()`; it only gates two things: `netcdf_format` passed to `RomsMarblInputData` in `generate_inputs` (`"NETCDF3_64BIT_DATA"` vs `"NETCDF4"`, ~L1485) and whether `model_params["use_pio"]=True` is added in `configure_build` (~L1937-1938) | (R) resolver raises if `use_pio=True` and ModelSpec has no `code.pio` |
+| `code.templates_compile_time` / `templates_run_time` (`directory`, `files`) | ModelSpec (`model.yml` `code.templates_compile_time/_run_time`, decoupled repo = forge's own `templates/` dir) | not exposed (infra-level); a `templates_repo` kwarg exists on `build_forge_blueprint`'s signature but the wizard's `_gather()` never passes it | `_template_repo_args(stage)` (executor.py:1019-1034) feeds C-Star's `AdditionalCode` constructor; `_stage_templates(stage)` (~1036-1060) materializes the filtered files under `host.working_dir/templates/{stage}` — **no CI coverage for the cross-repo flat-staging contract** per developer-guide §6 item 2. `configure_build` later overwrites `roms_marbl_blueprint.code.compile_time`/`code.run_time` with the *rendered* locations (~1919-1932), replacing the PRECONFIG placeholders | (R) `templates_commit:` pin in ModelSpec overrides tracking branch `main` |
 | `composition.model` | derived | always `PieceRef(name=model_dd.value, origin="catalog")` | not consumed by processing — pure UI/review metadata | n/a; `modified` is never set for this piece (no "edit" concept beyond `model_settings` overrides, which live in `composition.overrides`) |
 | `composition.domain` | derived | `PieceRef(name=grid_name, origin="custom")` if `domain_dd == "<custom>"`, else `origin="catalog"` (`_composition()`:1710-1730) | not consumed by processing | n/a; **`modified` is never set to `True`** even though a user can pick a catalog Domain and then hand-edit `grid_w`/`bnd`/`npx`/`npy` afterward — that edit is invisible at the `PieceRef` level |
 | `composition.forcing` | derived | the **only** piece where `modified` tracking is actually implemented: `self._forcing_edited` flag set `True` in `_on_forcing_change` (1685, fired by any `_ForcingEditor` widget edit), reset on a fresh catalog pick (`_on_forcing_spec`:1677) | not consumed by processing | n/a; single `modified=True` occurrence in the entire wizard file (confirmed by grep) |
 | `composition.output` | derived | always `PieceRef(name=output_dd.value, origin="catalog")` | not consumed by processing | n/a; **`modified` never set**, even though Advanced-settings edits to `OUTPUT_SECTIONS`/`OUTPUT_MARBL_FIELDS` are tracked generically via `composition.overrides`, not via `output.modified` — same asymmetry as `domain` |
 | `composition.overrides` | derived — sparse `{section:{field:value}}` layer | populated from `_on_editor_edit`'s override map (see note after §4's table), applied in `_rebuild()` via `_overrides_nested` (1640/2086-2089/506) | not consumed by processing — mirrors `run_time_overrides`/`compile_time_overrides` for review purposes only | n/a |
-| `provenance.*` (`generated_at`,`forge_version`,`roms_tools_version`,`override_files_applied`,`content_hash`,`notes`) | derived; `generated_at`/`forge_version`/`roms_tools_version`/`notes` are real `build_forge_blueprint` kwargs | **none appear in the wizard's `_gather()`** — the wizard never supplies them, so they resolve to `None`/defaults; `override_files_applied` is hardcoded to `[]` by the resolver | `content_hash` is verified (warn-only) by `verify_content_hash` at the start of `process_forge_blueprint`; excluded from its own hash | n/a |
+| `provenance.*` (`generated_at`, `forge_version`, `roms_tools_version`, `override_files_applied`, `content_hash`, `notes`) | derived; `generated_at`/`forge_version`/`roms_tools_version`/`notes` are real `build_forge_blueprint` kwargs | **none appear in the wizard's `_gather()`** — the wizard never supplies them, so they resolve to `None`/defaults; `override_files_applied` is hardcoded to `[]` by the resolver | `content_hash` is verified (warn-only) by `verify_content_hash` at the start of `process_forge_blueprint`; excluded from its own hash | n/a |
 
 **Asymmetry to flag** (from the wizard research pass): only `composition.forcing`'s
 `modified` flag is ever flipped to `True` after a catalog pick is hand-edited;
 `composition.{model,domain,output}` never get `modified=True` regardless of user edits —
 a UI/data-model inconsistency worth fixing alongside any `composition` rework.
-
-**§3a cross-reference resolved**: the `(E)` clobber mechanism above (`configure_build`
-always winning over `generate_inputs` for any section present in `model_settings`) is
-now confirmed end-to-end — see **§3a** for the mechanism and the concrete
-river/CDR/tides bug it produces.
 
 ---
 
@@ -355,8 +242,8 @@ The emitted downstream blueprint (`B_{name}_{stage}.yml`, a *different* blueprin
 
 | Stage | Method | Fields populated |
 |---|---|---|
-| **PRECONFIG** | `_initialize_roms_marbl_blueprint` (1066-1121) | `name`,`description`,`valid_start_date`/`end_date`,`partitioning`,`code` (roms/marbl/pio repos + placeholder run_time/compile_time locations), placeholder `grid`/`initial_conditions`/`forcing`, `cdr_forcing=None`; `model_params=None`,`runtime_params=None` |
-| **POSTCONFIG** | `generate_inputs` (1504-1540) | `grid`,`initial_conditions`,`forcing`,`cdr_forcing`,`nesting_info` populated with real file `Resource` locations; `model_params`/`runtime_params` still `None` (settings live only in the sidecar at this point) |
+| **PRECONFIG** | `_initialize_roms_marbl_blueprint` (1066-1121) | `name`, `description`, `valid_start_date`/`end_date`, `partitioning`, `code` (roms/marbl/pio repos + placeholder run_time/compile_time locations), placeholder `grid`/`initial_conditions`/`forcing`, `cdr_forcing=None`; `model_params=None`, `runtime_params=None` |
+| **POSTCONFIG** | `generate_inputs` (1504-1540) | `grid`, `initial_conditions`, `forcing`, `cdr_forcing`, `nesting_info` populated with real file `Resource` locations; `model_params`/`runtime_params` still `None` (settings live only in the sidecar at this point) |
 | **BUILD** | `configure_build` (1915-1950) | `code.compile_time`/`code.run_time` replaced with rendered file locations; `model_params={"time_step": dt, "use_pio": True (iff enabled)}`; `runtime_params={start_date,end_date,output_dir=run_output_dir}`; `working_dir=run_output_dir` |
 | **RUN** | `run()` (2027-2049) | no new blueprint fields — calls `prep_cstar_environment()`, drives `RomsMarblRunner`, re-persists with a `_{datestr}` filename suffix |
 
@@ -405,16 +292,133 @@ machine-specific code path in `executor.py` itself.
 
 - [x] Wizard-UI field mapping — done (see per-row citations throughout).
 - [x] Executor override precedence, PIO gating, code/template consumption,
-  partitioning consumption, blueprint-stage mapping — done (§3a, §7, §8).
-- [x] **Fix the §3a bug** — `split_model_settings` (forge_blueprint_engine.py) now
-  excludes `GENERATION_DERIVED_LEAF_KEYS` from the `configure_build` overlay; unit test
-  (`test_split_model_settings_excludes_generation_derived_leaves`) + full-chain
-  regression test (`test_configure_build_does_not_clobber_generated_river_and_tidal_settings`
-  in `tests/test_core.py`) added, both confirmed to fail pre-fix / pass post-fix. Still
-  open: a byte-level `namelist.nml` end-to-end test against real generated data (see the
-  §3a "Fix applied" note) — deliberately deferred alongside the pre-existing
-  golden-namelist gap.
+  partitioning consumption, blueprint-stage mapping — done (§7, §8).
+- [x] `configure_build`'s overlay clobbering generated river/CDR/tidal values back to
+  resolver-time placeholders — fixed; see the Appendix for the history and the
+  `GENERATION_DERIVED_LEAF_KEYS` exclusion now baked into every relevant row above.
 - [ ] Decide whether to wire in or delete `marbl_from_model_settings()` (§9).
 - [ ] Consider fixing the `composition.{model,domain,output}.modified` asymmetry
   flagged in §7 (only `forcing` ever gets `modified=True`), if `composition` is meant
   to reliably answer "did the user touch this catalog piece after selecting it."
+- [x] Byte-level `namelist.nml` golden test — done:
+  `tests/test_core.py::TestGoldenNamelist::test_golden_namelist_test_tiny` drives the
+  real `generate_inputs()` → `configure_build()` chain (real `write_roms_namelist`,
+  only roms-tools construction classes mocked) and diffs the rendered `namelist.nml`
+  against `tests/fixtures/golden_namelist_test-tiny.nml` (host-rooted paths
+  normalized). It doubles as the byte-level proof of the Appendix fix: river/CDR/tides
+  land in the golden with their generated values (`nriv=3`, `cdr_ncdr_parm=2`,
+  `river_source=.true.`), not resolver placeholders. Still open: a real-generated-data
+  integration test (actual GLORYS/ERA5/TPXO/DAI network fetch through
+  `process_forge_blueprint`) — a heavier, separate test that doesn't exist yet.
+
+---
+
+## Appendix: the `configure_build` overlay-clobber bug (found and fixed 2026-07-16)
+
+Kept for historical record — this is no longer a live issue; the tables above already
+reflect the fixed behavior and don't call it out further.
+
+**What it was**: whenever a domain configured real river forcing or CDR forcing, the
+final `namelist.nml` had `river_frc.river_source=False`/`nriv=0` and
+`cdr_frc.cdr_source=False`/`cdr_output.do_cdr=False` — even though the river/CDR NetCDF
+forcing files were correctly generated and referenced in `forcing.river_path`/the CDR
+resource list. ROMS would have run without ever reading the generated river/CDR forcing.
+For `tides.ntides`, if the true generated tidal-constituent count (from the real TPXO
+extraction) differed from whatever the resolver stored (either the ForcingSpec's
+declared `ntides:` or the ModelSpec placeholder), the stale stored count would silently
+win in the final namelist.
+
+**Mechanism** (traced end-to-end in `executor.py` + `forge_blueprint_engine.py`, branch
+`refactor`):
+
+1. `ForgeExecutor._init_settings_run_time()` (executor.py:1562) seeds
+   `self._settings_run_time` as a full deep-copy of `ForgeBlueprint.model_settings`
+   (minus `cppdefs`) — this includes `river_frc`, `cdr_frc`, `cdr_output`, and `tides`
+   **exactly as the resolver stored them**, i.e. the ModelSpec's disabled placeholders
+   (`river_frc.river_source: false`, `cdr_frc.cdr_source: false`, `cdr_output.do_cdr:
+   false`) for `river_frc`/`cdr_frc`/`cdr_output` — because `forge_blueprint_resolve.py`
+   never touches these three sections at all (confirmed by grep: no
+   `river_frc`/`cdr_frc` reference in that file), regardless of whether real rivers or
+   CDR are configured in `forcing.river[]`/`forcing.cdr_forcing`.
+2. `generate_inputs()` → `input_data.py` builds the real `rt.RiverForcing`/
+   `rt.CDRForcing`/`rt.TidalForcing` objects and overlays the *true* values
+   (`river_source=True`, the real `nriv`, `cdr_source=True`, the real
+   `ncdr_parm`/`cdr_volume`, `cdr_output.do_cdr=True`, the true `tides.ntides`) via
+   `_update_settings_run_time(..., allow_new=True)` — a leaf-level deep merge
+   (`_deep_merge_settings_dict`, executor.py:126) into the *same* dict from step 1.
+3. `configure_build(compile_time_settings, run_time_settings)` received `run_time_settings
+   = split_model_settings(cfg)`'s `run_overrides` — **the entire, untouched
+   `cfg.model_settings`** from step 1 — and called `_update_settings_run_time(
+   run_time_settings)` **with `allow_new=False`** (the default). Because
+   `river_frc`/`cdr_frc`/`cdr_output`/`tides` are top-level keys that already exist
+   (from step 1), `_deep_merge_settings_dict` recursed into them and overwrote **every
+   leaf key present** — which was *all* of them, since `cfg.model_settings` carries the
+   full section. This silently restored the step-1 (disabled/placeholder) values,
+   undoing step 2.
+
+**Why the same overlay-wins mechanism doesn't bite `param`/`cppdefs.obc_*`**: the
+resolver (R) already computes the *same* value from the *same* domain description that
+`input_data.py` (G) later re-derives from the live grid object, so clobbering back to
+the resolver's value is a no-op there. The bug was specific to sections where (R)
+cannot know the true generation-time answer at all (`river_frc`, `cdr_frc`,
+`cdr_output.do_cdr`) or only knows a *declared*, not *actual*, answer (`tides.ntides`).
+
+**Verified empirically, in two parts, before fixing (not just read):**
+
+1. **The load-bearing precondition** — that a *real*, river-configured domain actually
+   produced a stored placeholder — was checked by running Phase 1 only (no network, no
+   grid build: `build_forge_blueprint(dt=60.0, ...)`) on the real catalog inputs
+   (`DomainSpec/ccs-12km` + `ForcingSpec/glorys-era5-unified`, whose `forcing.river` has
+   a real configured `DAI` river item). Result: `cfg.forcing.river` was non-empty while
+   `cfg.model_settings["river_frc"]` was `{'river_source': False, 'nriv': 0, ...}` — the
+   disabled ModelSpec placeholder, verbatim, despite the configured river. `tides`
+   resolved to `{'ntides': 15, ...}` (the ForcingSpec's declared value) — the value that
+   would have clobbered back over whatever TPXO actually generated if the two ever
+   differed.
+2. **The merge mechanics** — calling the actual, imported
+   `cstar_forge.forge.executor._deep_merge_settings_dict` with a synthetic `river_frc`
+   dict reproduced the full sequence: seed disabled (step 1's real value) → merge in
+   generation-derived enabled values (`river_source=True, nriv=3`, step 2) → merge the
+   original resolver snapshot back on top (step 3) → result reverted to
+   `river_source=False, nriv=0`.
+
+**Why existing tests didn't catch this**: the `test-tiny` domain used by
+`test_golden_model_settings_test_tiny` and the resolver/builder parity test has no
+rivers or CDR configured — and in any case those tests check the *resolver's*
+`model_settings` output or `ForgeBlueprint` construction, not the final namelist
+produced by a full `process_forge_blueprint()` run. No test asserted on
+`river_frc`/`cdr_frc`/`cdr_output` values in a post-`configure_build` namelist for a
+domain that actually had rivers/CDR configured.
+
+**The fix**: `forge_blueprint_engine.py` now defines `GENERATION_DERIVED_LEAF_KEYS`
+(section → tuple of leaf keys) and `split_model_settings` strips those specific leaf
+keys — `river_frc.{river_source,analytical,nriv,rvol_vname,rvol_tname,rtrc_vname,
+rtrc_tname}`, `cdr_frc.{cdr_source,cdr_file,ncdr_parm,forcing_parameterized,
+cdr_volume}`, `cdr_output.do_cdr`, `tides.{ntides,bry_tides,pot_tides,ana_tides}` — from
+the overlay dict it hands to `configure_build`, so the post-generation (real) values
+survive instead of being reverted to the pre-generation resolver snapshot. Sibling
+fields in the same sections that `generate_inputs` never touches (e.g.
+`cdr_frc.relocate_to_wet_pts`) are untouched by the fix and still flow through
+normally. This was chosen over two other candidates: changing what the resolver stores
+(would have touched the schema/resolver), or reordering `generate_inputs`/
+`configure_build` (larger surface area for the same result).
+
+**Regression coverage**, both verified to fail before the fix and pass after:
+- `tests/test_forge_blueprint.py::TestForgeBlueprintEngine::
+  test_split_model_settings_excludes_generation_derived_leaves` (unit-level, asserts
+  the overlay dict excludes the right leaf keys).
+- `tests/test_core.py::TestForgeExecutorBuildAndRun::
+  test_configure_build_does_not_clobber_generated_river_and_tidal_settings`
+  (full-chain: real `build_forge_blueprint` → real `ForgeExecutor.configure_build` with
+  `split_model_settings`'s real output, `generate_inputs`'s river/tidal derivation
+  simulated the way `input_data.py` does it).
+
+- `tests/test_core.py::TestGoldenNamelist::test_golden_namelist_test_tiny` (byte-level:
+  real `generate_inputs()` → `configure_build()` → real `write_roms_namelist`, diffed
+  against `tests/fixtures/golden_namelist_test-tiny.nml`; mocks only the roms-tools
+  construction classes, so river/CDR/tides reach the namelist with concrete
+  generation-derived values rather than placeholders).
+
+Still open: a real-generated-data integration test (actual GLORYS/ERA5/TPXO/DAI data
+through `process_forge_blueprint`, no roms-tools mocking) — a heavier test that doesn't
+exist yet.
