@@ -117,6 +117,14 @@ class SourceData:
     # Host-independent: source_data no longer resolves paths from cstar_forge.config,
     # so this can be supplied by C-Star when the forge application relocates.
     source_data_dir: Path | None = None
+    # Authoritative logical-name -> {dataset_key, dataset_id, url, streamable} snapshot
+    # (ForgeBlueprint.forcing.resolved_datasets, frozen at blueprint-build time). When
+    # present, key/streamable resolution in dataset_key_for_source/streamable_for_source
+    # reads this first; source_registry.resolve_dataset_key is the fallback for names
+    # not in the snapshot (e.g. a hand-built SourceData outside the ForgeBlueprint path).
+    # This is what makes the executor behave deterministically across hosts/forge
+    # versions even if source_registry's tables drift after the blueprint was built.
+    resolved_datasets: dict[str, dict] | None = None
 
     def __post_init__(self):
         # Normalize dataset names through SOURCE_ALIAS (if not found, use uppercased name)
@@ -125,6 +133,12 @@ class SourceData:
             ds_upper = ds.upper()
             normalized.append(SOURCE_ALIAS.get(ds_upper, ds_upper))
         self.datasets = normalized
+
+        # Case-normalize snapshot keys so lookups by logical name (any case) match.
+        if self.resolved_datasets:
+            self.resolved_datasets = {
+                k.upper(): v for k, v in self.resolved_datasets.items()
+            }
 
         # Validate requested datasets. `known` = datasets Forge stages (have a handler);
         # `UNSTAGED_DATASETS` = recognized keys Forge legitimately does not stage (ETOPO5 is
@@ -207,10 +221,44 @@ class SourceData:
 
         For logical "GLORYS", pass ``glorys_layout`` from SourceSpec
         (``"global"`` or ``"regional"``). If omitted, defaults to regional.
+
+        Prefers the injected ``resolved_datasets`` snapshot (frozen at ForgeBlueprint
+        build time) over live ``source_registry`` resolution, so a blueprint resolves
+        the same dataset key regardless of registry drift on the processing host.
+        GLORYS with an explicit ``glorys_layout`` is the one exception: that
+        resolution is a hardcoded, per-item branch (not a table lookup) and the
+        snapshot is keyed by logical name only (one entry per name, see
+        ``forge_blueprint_resolve._build_forcing``), so it can't disambiguate two
+        GLORYS items with different layouts -- always resolve that case live.
         """
         from cstar_forge.forge.source_registry import resolve_dataset_key
 
+        if not (logical_name.upper() == "GLORYS" and glorys_layout is not None):
+            entry = (self.resolved_datasets or {}).get(logical_name.upper())
+            if entry and entry.get("dataset_key"):
+                return entry["dataset_key"]
         return resolve_dataset_key(logical_name, glorys_layout)
+
+    def streamable_for_source(
+        self,
+        logical_name: str,
+        glorys_layout: str | None = None,
+    ) -> bool:
+        """
+        Whether ``logical_name`` is a streamable source (not staged locally unless
+        explicitly requested). Prefers the ``resolved_datasets`` snapshot (see
+        ``dataset_key_for_source``) so streamability is pinned alongside the dataset
+        key; falls back to the live ``STREAMABLE_SOURCES`` check.
+        """
+        if not (logical_name.upper() == "GLORYS" and glorys_layout is not None):
+            entry = (self.resolved_datasets or {}).get(logical_name.upper())
+            if entry is not None and "streamable" in entry:
+                return bool(entry["streamable"])
+        key = self.dataset_key_for_source(logical_name, glorys_layout=glorys_layout)
+        upper_streamable = {s.upper() for s in STREAMABLE_SOURCES}
+        return (
+            logical_name.upper() in upper_streamable or key.upper() in upper_streamable
+        )
 
     def path_for_source(
         self,
@@ -243,7 +291,7 @@ class SourceData:
         try:
             return self.paths[key]
         except KeyError:
-            if key in STREAMABLE_SOURCES:
+            if self.streamable_for_source(logical_name, glorys_layout=glorys_layout):
                 return None
             else:
                 raise KeyError(

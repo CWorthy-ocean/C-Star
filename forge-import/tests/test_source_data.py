@@ -241,6 +241,28 @@ class TestSourceDataMethods:
         assert sd.dataset_key_for_source("UNIFIED") == "UNIFIED_BGC"
         assert sd.dataset_key_for_source("SRTM15") == "SRTM15"
 
+    def test_snapshot_overrides_live_registry(self, monkeypatch):
+        """Regression: a ForgeBlueprint's resolved_datasets snapshot must win over a
+        live source_registry lookup, so processing stays pinned to what the
+        blueprint resolved even if source_registry's tables drift afterward (e.g. a
+        different forge version/checkout on the processing host).
+
+        Uses a non-GLORYS name deliberately -- GLORYS-with-explicit-layout is the
+        one case that intentionally always resolves live (see
+        SourceData.dataset_key_for_source's docstring).
+        """
+        import cstar_forge.forge.source_registry as reg
+
+        monkeypatch.setitem(reg.SOURCE_ALIAS, "UNIFIED", "WRONG_KEY")
+
+        snap = {"UNIFIED": {"dataset_key": "UNIFIED_BGC", "streamable": False}}
+        sd = SourceData(datasets=["UNIFIED_BGC"], resolved_datasets=snap)
+        assert sd.dataset_key_for_source("UNIFIED") == "UNIFIED_BGC"  # snapshot wins
+        assert sd.streamable_for_source("UNIFIED") is False
+
+        sd2 = SourceData(datasets=["UNIFIED_BGC"])  # no snapshot -> live fallback
+        assert sd2.dataset_key_for_source("UNIFIED") == "WRONG_KEY"
+
     def test_path_for_source_not_prepared(self):
         """Test path_for_source when dataset hasn't been prepared."""
         # Use UNIFIED_BGC which is in registry and not streamable

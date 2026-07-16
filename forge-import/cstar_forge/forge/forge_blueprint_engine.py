@@ -204,6 +204,9 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
         source_dataset_keys=list(cfg.datasets),
+        resolved_datasets={
+            name: rd.model_dump() for name, rd in cfg.forcing.resolved_datasets.items()
+        },
         resolved_settings=copy.deepcopy(cfg.model_settings),
         code_spec=cfg.code,
     )

@@ -101,6 +101,19 @@ random_output:
   do_random: false
   output_period: 3600
   nrpf: 10
+bgc:
+  wrt_his: false
+  output_period_his: 86400
+  nrpf_his: 7
+  wrt_avg: false
+  output_period_avg: 86400
+  nrpf_avg: 7
+  wrt_his_dia: false
+  output_period_his_dia: 86400
+  nrpf_his_dia: 7
+  wrt_avg_dia: false
+  output_period_avg_dia: 60
+  nrpf_avg_dia: 1
 marbl_bgc:
   marbl_tracers_to_write:
   - PO4

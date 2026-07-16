@@ -269,6 +269,16 @@ class ForgeExecutor(BaseModel):
             "Distinct from the ``datasets`` property, which returns the *loaded* datasets."
         ),
     )
+    resolved_datasets: dict[str, dict] | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "Snapshot of ForgeBlueprint.forcing.resolved_datasets (logical name -> "
+            "{dataset_key, dataset_id, url, streamable}). Authoritative for key/"
+            "streamable resolution at processing time (fed into SourceData); "
+            "source_registry is the fallback for names not in the snapshot."
+        ),
+    )
     resolved_settings: dict[str, Any] | None = Field(
         default=None,
         validate_default=False,
@@ -1403,6 +1413,7 @@ class ForgeExecutor(BaseModel):
             start_time=self.start_date,
             end_time=self.end_date,
             source_data_dir=self._require_host().source_data_cache,
+            resolved_datasets=self.resolved_datasets,
         ).prepare_all(include_streamable=include_streamable)
 
     def generate_inputs(

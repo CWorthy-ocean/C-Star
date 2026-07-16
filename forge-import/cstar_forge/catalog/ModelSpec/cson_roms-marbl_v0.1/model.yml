@@ -11,8 +11,8 @@
 # at the same level as the namelist sections, matching how the resolver treats them).
 # A few sections here are fully overwritten by the resolver at build time regardless of
 # what's written below (time_stepping, v_sponge from grid/run-window; param's
-# llm/mmm/n/np_xi/np_eta/nsub_x/nsub_e from grid/partitioning; cppdefs.obc_* from open
-# boundaries; cppdefs.cdr_forcing/use_pio, tides.ntides from forcing/direct input) --
+# llm/mmm/n/np_xi/np_eta/nsub_x/nsub_e from grid/partitioning; cppdefs.obc_*/marbl/
+# cdr_forcing/use_pio, tides.ntides from open boundaries/bgc_mode/forcing/direct input) --
 # they're included below only where the remaining fields in that same section
 # (nt_passive/ntrc_bio in param; bry_tides/pot_tides/ana_tides in tides) are real,
 # still-relevant model defaults.
@@ -53,7 +53,7 @@ model_settings:
     obc_east: true
     obc_north: true
     obc_south: true
-    marbl: true
+    marbl: true  # always overwritten by the resolver from bgc_mode (marbl|none)
     cdr_forcing: false
     co2_tvarying: false  # Set to true when using time-varying CO2 atmospheric forcing (MBL_co2)
     use_pio: false  # Set to true to build ROMS against the ParallelIO (PIO) library
@@ -93,19 +93,10 @@ model_settings:
     nt_passive: 0
     ntrc_bio: 32
 
+  # Output-write-control fields (wrt_*/output_period_*/nrpf_*) are an OutputSpec's
+  # job (Output.yml's own `bgc:` block) and are deep-merged on top of these at
+  # resolve time -- only the physics defaults stay here.
   bgc:
-    wrt_his: false
-    output_period_his: 86400  # 3600*24 seconds
-    nrpf_his: 7
-    wrt_avg: false
-    output_period_avg: 86400  # 60*60*24 seconds
-    nrpf_avg: 7
-    wrt_his_dia: false
-    output_period_his_dia: 86400  # 60*60*24 seconds
-    nrpf_his_dia: 7
-    wrt_avg_dia: false
-    output_period_avg_dia: 60  # seconds
-    nrpf_avg_dia: 1
     nbgc_flx: 2
     interp_frc: 0
     xco2air_default: 284.7  # Atmospheric xCO2 (ppm) when PCO2AIR_FORCING is off

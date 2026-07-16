@@ -555,13 +555,10 @@ class RomsMarblInputData(InputData):
 
         glorys_layout = out.get("glorys_layout") if name.upper() == "GLORYS" else None
 
-        # Get the mapped dataset key to check if it's streamable
-        dataset_key = self.source_data.dataset_key_for_source(
-            name, glorys_layout=glorys_layout
-        )
-
-        # If streamable and no path was explicitly provided in YAML, don't add path field
-        if dataset_key in source_data.STREAMABLE_SOURCES:
+        # If streamable and no path was explicitly provided in YAML, don't add path field.
+        # streamable_for_source prefers the pinned ForgeBlueprint resolved_datasets
+        # snapshot over a live source_registry check (see SourceData.streamable_for_source).
+        if self.source_data.streamable_for_source(name, glorys_layout=glorys_layout):
             if "path" not in out:
                 return out
             return out

@@ -177,6 +177,9 @@ def sample_source_data(tmp_path):
 
     mock_source_data.path_for_source = MagicMock(return_value=source_file)
     mock_source_data.dataset_key_for_source = MagicMock(side_effect=_dks)
+    mock_source_data.streamable_for_source = MagicMock(
+        side_effect=lambda name, glorys_layout=None: name.upper() in {"ERA5", "DAI"}
+    )
 
     # Mock STREAMABLE_SOURCES
     with patch("cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES", {"ERA5"}):

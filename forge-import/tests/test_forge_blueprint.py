@@ -560,6 +560,7 @@ def test_resolver_output_settings_override():
 
 def test_extract_output_settings_helper():
     from cstar_forge.forge_blueprint_resolve import (
+        OUTPUT_BGC_FIELDS,
         OUTPUT_SECTIONS,
         extract_output_settings,
     )
@@ -571,6 +572,7 @@ def test_extract_output_settings_helper():
         "marbl_tracers_to_write",
         "marbl_diagnostics_to_write",
     }
+    assert set(out["bgc"]) == set(OUTPUT_BGC_FIELDS)
 
 
 def test_resolver_forcing_inputs_override():
@@ -660,6 +662,57 @@ def test_resolver_use_pio_requires_model_yml_pin():
         _build_code(model, templates_repo, use_pio=True)
 
 
+def test_resolver_bgc_mode_default_marbl():
+    cfg = _build()
+    assert cfg.model_settings["cppdefs"]["marbl"] is True
+    assert cfg.code.marbl is not None
+    assert cfg.code.marbl.location == "https://github.com/marbl-ecosys/MARBL.git"
+    assert cfg.code.marbl.commit == "marbl0.45.0"
+
+
+def test_resolver_bgc_mode_none_raises_with_bgc_forcing():
+    """The default fixture (glorys-era5-unified) carries BGC signals (IC bgc_source
+    + river include_bgc + bgc-type surface items) -- bgc_mode="none" must catch it
+    and name the offending items.
+    """
+    with pytest.raises(ValueError) as exc_info:
+        _build(bgc_mode="none")
+    msg = str(exc_info.value)
+    assert "bgc_mode" in msg
+    assert "initial_conditions.bgc_source" in msg
+    assert "river[0]" in msg
+    assert "surface[" in msg
+
+
+# A minimal physics-only forcing selection (no bgc_source/include_bgc/bgc-type
+# items) -- no catalog ForcingSpec is physics-only today, so this is hand-authored.
+_PHYSICS_ONLY_FORCING = {
+    "initial_conditions": {"source": {"name": "GLORYS", "glorys_layout": "regional"}},
+    "forcing": {
+        "surface": [{"source": {"name": "ERA5"}, "type": "physics"}],
+    },
+}
+
+
+def test_resolver_bgc_mode_none_with_physics_only_forcing():
+    cfg = _build(bgc_mode="none", forcing_inputs=_PHYSICS_ONLY_FORCING)
+    assert cfg.model_settings["cppdefs"]["marbl"] is False
+    assert cfg.code.marbl is None
+
+
+def test_resolver_bgc_mode_marbl_requires_model_yml_pin():
+    from cstar_forge.forge.forge_blueprint import CodeRepo
+    from cstar_forge.forge_blueprint_resolve import _build_code
+
+    model = {
+        "code": {"roms": {"location": "https://example.com/roms.git", "commit": "x"}},
+        "templates": {},
+    }
+    templates_repo = CodeRepo(location="https://example.com/forge.git", branch="main")
+    with pytest.raises(ValueError, match="code.marbl"):
+        _build_code(model, templates_repo, bgc_mode="marbl")
+
+
 def test_resolver_roms_ref_overrides_commit_and_clears_branch():
     cfg = _build(roms_ref="pio-refdate")
     assert cfg.code.roms.commit == "pio-refdate"
@@ -692,7 +745,7 @@ def test_build_code_coerces_numeric_commit_to_string():
         },
     }
     templates_repo = CodeRepo(location="https://example.com/forge.git", branch="main")
-    code = _build_code(model, templates_repo)
+    code = _build_code(model, templates_repo, bgc_mode="none")
     assert code.roms.commit == "123456"
     assert isinstance(code.roms.commit, str)
 
@@ -909,6 +962,27 @@ class TestForgeBlueprintWizard:
         } <= sections
         assert w.config.composition.overrides == {}
 
+    def test_advanced_editor_excludes_dedicated_widget_fields(self):
+        """Fields with a dedicated wizard widget elsewhere (PIO, open boundaries,
+        BGC mode, grid dims, partitioning, dt) must not also appear in the generic
+        Advanced-settings accordion -- but their resolved value still flows through.
+        """
+        w = self._wizard()
+        assert "use_pio" not in w.editor._section_fields["cppdefs"]
+        assert "marbl" not in w.editor._section_fields["cppdefs"]
+        for d in ("west", "east", "north", "south"):
+            assert f"obc_{d}" not in w.editor._section_fields["cppdefs"]
+        for f in ("llm", "mmm", "n", "np_xi", "np_eta"):
+            assert f not in w.editor._section_fields["param"]
+        assert "dt" not in w.editor._section_fields["time_stepping"]
+
+        # No widget for these fields, but the resolver-composed value still lands
+        # in the final config -- hiding the widget can't drop/reset the value.
+        assert (
+            w.config.model_settings["param"]["llm"] == w.config.domain.grid_kwargs["nx"]
+        )
+        assert w.config.model_settings["cppdefs"]["marbl"] is True
+
     def test_editing_advanced_setting_reflects_in_config(self):
         w = self._wizard()
         wid = w.editor._widgets[("ocean_vars", "wrt_z")][0]
@@ -923,19 +997,25 @@ class TestForgeBlueprintWizard:
         assert w.config.model_settings["param"]["llm"] == 8  # derived refreshed
 
     def test_editing_derived_value_records_override_and_wins(self):
+        """param.np_xi/np_eta now have a dedicated widget (self.npx/self.npy) and are
+        excluded from the accordion (see _ACCORDION_EXCLUDED_FIELDS); use
+        time_stepping.ntimes instead -- still resolver-derived (from dt/run window)
+        and still accordion-editable -- to exercise the same override-wins-over-
+        re-derivation mechanic.
+        """
         w = self._wizard()
-        w.editor._widgets[("param", "np_xi")][0].value = 99
-        assert w.config.composition.overrides == {"param": {"np_xi": 99}}
-        # override persists and wins over the composed value when partitioning changes
-        w.npx.value = 4
-        assert w.config.model_settings["param"]["np_xi"] == 99
+        w.editor._widgets[("time_stepping", "ntimes")][0].value = 999
+        assert w.config.composition.overrides == {"time_stepping": {"ntimes": 999}}
+        # override persists and wins over the composed value when dt changes
+        w.dt.value = 3600.0
+        assert w.config.model_settings["time_stepping"]["ntimes"] == 999
         assert (
-            w.config.model_settings["param"]["np_eta"] == 1
-        )  # non-overridden refreshes
+            w.config.model_settings["time_stepping"]["ndtfast"] == 60
+        )  # non-overridden sibling unaffected
 
     def test_override_layer_round_trips_through_load(self, tmp_path):
         w1 = self._wizard()
-        w1.editor._widgets[("param", "np_xi")][0].value = 99
+        w1.editor._widgets[("time_stepping", "ntimes")][0].value = 999
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
         p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
@@ -943,8 +1023,11 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.config.model_settings["param"]["np_xi"] == 99
-        assert w2.config.composition.overrides.get("param", {}).get("np_xi") == 99
+        assert w2.config.model_settings["time_stepping"]["ntimes"] == 999
+        assert (
+            w2.config.composition.overrides.get("time_stepping", {}).get("ntimes")
+            == 999
+        )
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 3.3
 
     def test_forcing_spec_selection_and_edit(self):
@@ -1188,6 +1271,38 @@ class TestForgeBlueprintEngine:
         assert kw["open_boundaries"]["east"] is True
         # host/machine/paths must NOT be passed (builder resolves them)
         assert not any(k in kw for k in ("machine", "paths", "scratch", "source_data"))
+
+    def test_builder_kwargs_carry_resolved_datasets_snapshot(self, tmp_path):
+        """End-to-end check for the resolved_datasets pinning: the blueprint's
+        forcing.resolved_datasets snapshot must actually reach the executor, not
+        just be accepted as a same-named kwarg.
+        """
+        from cstar_forge.forge.executor import ForgeExecutor
+        from cstar_forge.forge.forge_blueprint_engine import (
+            forge_blueprint_to_builder_kwargs,
+        )
+        from cstar_forge.forge.host import HostPaths
+
+        cfg = self._cfg()
+        assert cfg.forcing.resolved_datasets, (
+            "fixture must resolve at least one dataset"
+        )
+
+        kw = forge_blueprint_to_builder_kwargs(cfg)
+        assert kw["resolved_datasets"]["GLORYS"]["dataset_key"] == "GLORYS_REGIONAL"
+        assert (
+            kw["resolved_datasets"]["GLORYS"]["dataset_id"]
+            == "cmems_mod_glo_phy_my_0.083deg_P1D-m"
+        )
+
+        host = HostPaths(
+            working_dir=tmp_path / "wd",
+            source_data_cache=tmp_path / "cache",
+            system="test",
+            machine_config=None,
+        )
+        ex = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        assert ex.resolved_datasets["GLORYS"]["dataset_key"] == "GLORYS_REGIONAL"
 
     def test_split_model_settings(self):
         from cstar_forge.forge.forge_blueprint_engine import (

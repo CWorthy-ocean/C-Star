@@ -182,6 +182,49 @@ def test_co2_tvarying_is_not_user_editable():
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is True
 
 
+def test_bgc_dd_default_and_placement():
+    """BGC mode defaults to 'marbl' and lives in the same Pieces row as Model."""
+    wiz = ForgeBlueprintWizard()
+    assert wiz.bgc_dd.value == "marbl"
+    assert set(wiz.bgc_dd.options) == {"marbl", "none"}
+
+    pieces_box = _find_section(wiz.widget, "<b>Pieces</b>")
+    assert pieces_box is not None
+    model_row = next(
+        c for c in pieces_box.children if wiz.model_dd in getattr(c, "children", [])
+    )
+    assert wiz.bgc_dd in model_row.children
+
+
+def test_bgc_dd_marbl_gathers_into_cppdefs():
+    """The default 'marbl' choice flows through _gather()/build_forge_blueprint into
+    cppdefs.marbl -- the happy path (the bundled ForcingSpec carries BGC forcing, so
+    switching to 'none' without changing forcing is expected to raise; that's
+    covered at the resolver level, see test_resolver_bgc_mode_none_raises_with_bgc_forcing).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cppdefs"]["marbl"] is True
+    assert wiz.config.code.marbl is not None
+
+
+def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
+    """Flipping to 'none' while the bundled (BGC-carrying) ForcingSpec is still
+    selected must not crash the wizard -- _rebuild()'s existing exception handling
+    should catch the resolver's ValueError and surface it in the status area.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.bgc_dd.value = "none"
+    wiz._rebuild()
+    assert wiz.config is None
+    assert "Invalid" in wiz.derived.value
+
+
 def test_ntides_syncs_from_tidal_forcing_into_model_settings():
     """Item 6: the tidal forcing item's ntides drives model_settings['tides']['ntides'],
     not just the run-time-defaults placeholder (10).

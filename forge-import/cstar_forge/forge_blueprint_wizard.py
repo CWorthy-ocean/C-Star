@@ -57,8 +57,8 @@ from cstar_forge.forge.forge_blueprint import (
 )
 from cstar_forge.forge.namelist_model import RunTimeSettings, validate_run_time_sections
 from cstar_forge.forge_blueprint_resolve import (
-    OUTPUT_MARBL_FIELDS,
     OUTPUT_SECTIONS,
+    PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
     load_model_spec_data,
 )
@@ -521,17 +521,38 @@ def _diff_overrides(
 ) -> dict[Any, Any]:
     """Every field in ``effective`` that differs from ``composed`` becomes an override
     (used on load to reconstruct the layer from a saved/edited config).
+
+    Skips fields in ``_ACCORDION_EXCLUDED_FIELDS`` -- those have a dedicated widget
+    (or are resolver-derived with none), never an accordion override, so a stale or
+    hand-edited saved file must not silently reintroduce one with no widget to
+    display or clear it.
     """
     ov: dict[Any, Any] = {}
     for section, val in effective.items():
         cval = composed.get(section)
         if isinstance(val, dict):
+            excluded = _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset())
             for field, v in val.items():
+                if field in excluded:
+                    continue
                 if not isinstance(cval, dict) or cval.get(field) != v:
                     ov[(section, field)] = v
         elif cval != val:
             ov[(section, None)] = val
     return ov
+
+
+# Fields shown by dedicated wizard widgets elsewhere -> hidden from the generic
+# Advanced-settings accordion to avoid duplicate/competing editors (e.g. the PIO
+# checkbox and open-boundary checkboxes already edit these; letting the accordion
+# edit them too would silently record a competing override, see _diff_overrides).
+_ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
+    "cppdefs": frozenset(
+        {"use_pio", "obc_west", "obc_east", "obc_north", "obc_south", "marbl"}
+    ),
+    "param": frozenset({"llm", "mmm", "n", "np_xi", "np_eta"}),
+    "time_stepping": frozenset({"dt"}),
+}
 
 
 class _SettingsEditor:
@@ -540,7 +561,10 @@ class _SettingsEditor:
     Auto-generates typed widgets per field using the ``RunTimeSettings`` sub-model
     schema (falling back to value-type inference, e.g. for ``cppdefs``). All panes are
     collapsed by default. ``gather()`` returns the edited sections; ``set_from()``
-    pushes values in (used on load).
+    pushes values in (used on load). Fields listed in ``_ACCORDION_EXCLUDED_FIELDS``
+    are skipped entirely -- their value still flows through from the resolver-composed
+    settings dict (this editor never authors that dict, only a sparse overrides
+    layer), so hiding the widget cannot drop or reset the value.
     """
 
     def __init__(
@@ -556,6 +580,8 @@ class _SettingsEditor:
                 continue
             value = model_settings[section]
             box, fields = self._build_section(section, value)
+            if not fields:
+                continue
             panes.append(box)
             titles.append(section)
             self._section_fields[section] = fields
@@ -600,8 +626,11 @@ class _SettingsEditor:
             w = _make_field_widget(W, section, base, value, tooltip=tip)
             self._widgets[(section, None)] = (w, base)
             return W.VBox([w]), [None]
+        excluded = _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset())
         rows, fields = [], []
         for key, val in value.items():
+            if key in excluded:
+                continue
             ann = (
                 sub.model_fields[key].annotation
                 if (sub and key in sub.model_fields)
@@ -705,7 +734,6 @@ class _ForcingEditor:
         self.W = W
         self.on_change = on_change
         fi = forcing_inputs or {}
-        self._topo = (fi.get("grid", {}) or {}).get("topography_source", "ETOPO5")
         ic = fi.get("initial_conditions", {}) or {}
         forc = fi.get("forcing", {}) or {}
 
@@ -1163,7 +1191,6 @@ class _ForcingEditor:
             for cat in _FORCING_CATEGORIES
         }
         return {
-            "grid": {"topography_source": self._topo},
             "initial_conditions": ic,
             "forcing": forcing,
         }
@@ -1264,6 +1291,16 @@ class ForgeBlueprintWizard:
             description="Model:",
             value=(models[0] if models else None),
             style={"description_width": "110px"},
+        )
+        self.bgc_dd = W.Dropdown(
+            options=["marbl", "none"],
+            value="marbl",
+            description="BGC:",
+            style={"description_width": "110px"},
+            tooltip=(
+                "Biogeochemistry mode. 'marbl' builds ROMS-MARBL and includes the "
+                "MARBL codebase; 'none' builds physics-only (no MARBL, no BGC forcing)."
+            ),
         )
         self.domain_dd = W.Dropdown(
             options=["<custom>", *domains],
@@ -1460,6 +1497,13 @@ class ForgeBlueprintWizard:
             placeholder="path to custom land-mask shapefile (optional)",
             tooltip=_tip("grid", "mask_shapefile"),
         )
+        self.topo_source = W.Dropdown(
+            options=["ETOPO5", "SRTM15"],
+            value="ETOPO5",
+            description="topo source:",
+            style={"description_width": "120px"},
+            tooltip=_tip("grid", "topography_source"),
+        )
         self.topo_path = W.Text(
             value="",
             description="topo path:",
@@ -1606,6 +1650,7 @@ class ForgeBlueprintWizard:
             self.npx,
             self.npy,
             self.use_pio_chk,
+            self.bgc_dd,
             self.roms_ref,
             self.start,
             self.end,
@@ -1616,6 +1661,7 @@ class ForgeBlueprintWizard:
             self.hmin,
             self.close_narrow_chk,
             self.mask_shapefile,
+            self.topo_source,
             self.topo_path,
             self.nest_enable,
             self.nest_period,
@@ -1698,7 +1744,8 @@ class ForgeBlueprintWizard:
             (s, f): v
             for (s, f), v in self._overrides.items()
             if not (
-                s in OUTPUT_SECTIONS or (s == "marbl_bgc" and f in OUTPUT_MARBL_FIELDS)
+                s in OUTPUT_SECTIONS
+                or (s in PARTIAL_OUTPUT_SECTIONS and f in PARTIAL_OUTPUT_SECTIONS[s])
             )
         }
         self._rebuild()
@@ -1804,7 +1851,6 @@ class ForgeBlueprintWizard:
                 out.append(d)
             forcing[cat] = out
         return {
-            "grid": {"topography_source": cfg.domain.topography_source},
             "initial_conditions": ic,
             "forcing": forcing,
         }
@@ -1832,6 +1878,8 @@ class ForgeBlueprintWizard:
                     picker.value = datetime.fromisoformat(str(data[key])).date()
             if data.get("model_name") in self.model_dd.options:
                 self.model_dd.value = data["model_name"]
+            self.topo_source.value = data.get("topography_source", "ETOPO5")
+            self.topo_path.value = data.get("topography_path", "") or ""
         self._rebuild()
         self._on_plot(None)
 
@@ -1931,12 +1979,20 @@ class ForgeBlueprintWizard:
             self.use_pio_chk.value = bool(
                 (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
             )
+            self.bgc_dd.value = (
+                "marbl"
+                if bool((cfg.model_settings.get("cppdefs") or {}).get("marbl", True))
+                else "none"
+            )
             # Show the file's actual pinned ref, falling back to the (now-selected)
             # model's default when the file matches it exactly.
             stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
             default_ref = self._model_default_roms_ref()
             self.roms_ref.value = (
                 default_ref if stored_ref == default_ref else stored_ref
+            )
+            self.topo_source.value = getattr(
+                cfg.domain.topography_source, "value", cfg.domain.topography_source
             )
             self.topo_path.value = cfg.domain.topography_path or ""
             dt = (cfg.model_settings.get("time_stepping", {}) or {}).get("dt")
@@ -2007,8 +2063,10 @@ class ForgeBlueprintWizard:
         )
         if self.topo_path.value.strip():  # blank = derive default topography path
             kw["topography_path"] = self.topo_path.value.strip()
+        kw["topography_source"] = self.topo_source.value
         if self.use_pio_chk.value:
             kw["use_pio"] = True
+        kw["bgc_mode"] = self.bgc_dd.value
         if self.roms_ref.value.strip():
             kw["roms_ref"] = self.roms_ref.value.strip()
         if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
@@ -2350,7 +2408,7 @@ class ForgeBlueprintWizard:
                 ),
                 section(
                     "Pieces",
-                    W.HBox([self.model_dd, self.roms_ref]),
+                    W.HBox([self.model_dd, self.roms_ref, self.bgc_dd]),
                     self.forcing_dd,
                     self.output_dd,
                     self.domain_dd,
@@ -2366,6 +2424,7 @@ class ForgeBlueprintWizard:
                                     self.scoord_chk,
                                     W.HBox([self.hmin, self.close_narrow_chk]),
                                     self.mask_shapefile,
+                                    self.topo_source,
                                     self.topo_path,
                                 ]
                             ),

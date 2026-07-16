@@ -27,7 +27,7 @@ from __future__ import annotations
 import copy
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -54,6 +54,7 @@ try:  # pragma: no cover - exercised both ways
         SurfaceForcingItem,
         TemplateRepo,
         TidalForcingItem,
+        TopographySource,
     )
 except ImportError:  # pragma: no cover
     from forge_blueprint import (  # type: ignore
@@ -77,6 +78,7 @@ except ImportError:  # pragma: no cover
         SurfaceForcingItem,
         TemplateRepo,
         TidalForcingItem,
+        TopographySource,
     )
 
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
@@ -177,14 +179,28 @@ OUTPUT_SECTIONS = (
     "random_output",
 )
 OUTPUT_MARBL_FIELDS = ("marbl_tracers_to_write", "marbl_diagnostics_to_write")
-
-
-def marbl_from_model_settings(model_settings: dict[str, Any]) -> bool:
-    """Return whether MARBL is enabled, read from ``model_settings["cppdefs"]["marbl"]``.
-
-    Replaces reads of ``model_spec.settings.properties.marbl`` in input generation.
-    """
-    return bool((model_settings.get("cppdefs") or {}).get("marbl", False))
+# BGC output-write-control fields: OutputSpec's partial of the `bgc` section (the
+# rest -- nbgc_flx/interp_frc/xco2air_default -- are ModelSpec physics defaults).
+OUTPUT_BGC_FIELDS = (
+    "wrt_his",
+    "output_period_his",
+    "nrpf_his",
+    "wrt_avg",
+    "output_period_avg",
+    "nrpf_avg",
+    "wrt_his_dia",
+    "output_period_his_dia",
+    "nrpf_his_dia",
+    "wrt_avg_dia",
+    "output_period_avg_dia",
+    "nrpf_avg_dia",
+)
+# Sections OutputSpec owns only *partially* (the rest of the section stays a
+# ModelSpec default): section name -> the fields OutputSpec supplies.
+PARTIAL_OUTPUT_SECTIONS: dict[str, tuple[str, ...]] = {
+    "marbl_bgc": OUTPUT_MARBL_FIELDS,
+    "bgc": OUTPUT_BGC_FIELDS,
+}
 
 
 def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
@@ -195,10 +211,11 @@ def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
     for sec in OUTPUT_SECTIONS:
         if sec in model_settings:
             out[sec] = copy.deepcopy(model_settings[sec])
-    marbl = model_settings.get("marbl_bgc", {}) or {}
-    marbl_out = {f: marbl[f] for f in OUTPUT_MARBL_FIELDS if f in marbl}
-    if marbl_out:
-        out["marbl_bgc"] = copy.deepcopy(marbl_out)
+    for sec, fields in PARTIAL_OUTPUT_SECTIONS.items():
+        src = model_settings.get(sec, {}) or {}
+        partial = {f: src[f] for f in fields if f in src}
+        if partial:
+            out[sec] = copy.deepcopy(partial)
     return out
 
 
@@ -221,7 +238,9 @@ def build_forge_blueprint(
     metadata_child: dict[str, Any] | None = None,
     nesting_include_pressure_fluxes: bool = False,
     topography_path: str | None = None,
+    topography_source: str | TopographySource = TopographySource.ETOPO5,
     use_pio: bool = False,
+    bgc_mode: Literal["marbl", "none"] = "marbl",
     roms_ref: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
     compile_time_overrides: dict[str, Any] | None = None,
@@ -240,6 +259,13 @@ def build_forge_blueprint(
     directly (fully lightweight); if ``None`` it is computed from the CFL criterion,
     which lazily imports ``roms_tools`` (to build the grid for ``ds``) and
     ``cstar_forge.forge.util``.
+
+    ``bgc_mode`` is a per-run toggle mirroring ``use_pio``: it overwrites
+    ``cppdefs.marbl`` and gates whether ``code.marbl`` is populated (raising if
+    ``"marbl"`` is requested but the ModelSpec has no ``code.marbl`` repository).
+    ``bgc_mode="none"`` raises if the resolved forcing selection still requests BGC
+    forcing (a bgc-type surface/boundary item, an IC bgc_source, or a river with
+    ``include_bgc=True``).
     """
     spec = load_model_spec_data(model_dir)
     model = spec["model"]
@@ -301,6 +327,7 @@ def build_forge_blueprint(
     cppdefs["obc_south"] = bool(open_boundaries.get("south", False))
     cppdefs["cdr_forcing"] = cdr_forcing is not None
     cppdefs["use_pio"] = bool(use_pio)
+    cppdefs["marbl"] = bgc_mode == "marbl"
     surface_items = (inputs.get("forcing", {}) or {}).get("surface", []) or []
     cppdefs["co2_tvarying"] = any(
         (it.get("type") == "bgc")
@@ -368,14 +395,44 @@ def build_forge_blueprint(
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
     sources = _build_forcing(
-        inputs, cdr_forcing
+        inputs, cdr_forcing, topography_source
     )  # kept as `sources` locally for brevity
+
+    # ----- bgc_mode consistency check ----------------------------------------
+    # A BGC-disabled build can't carry BGC-type forcing -- catch it here, before
+    # code/settings resolution, with a message naming every offending item.
+    if bgc_mode == "none":
+        bgc_signals: list[str] = []
+        for i, it in enumerate(sources.surface):
+            if it.type == "bgc":
+                src_name = it.source.name if it.source else "?"
+                bgc_signals.append(f"surface[{i}] (source={src_name}, type=bgc)")
+        for i, it in enumerate(sources.boundary):
+            if it.type == "bgc":
+                src_name = it.source.name if it.source else "?"
+                bgc_signals.append(f"boundary[{i}] (source={src_name}, type=bgc)")
+        if sources.initial_conditions.bgc_source is not None:
+            bgc_signals.append(
+                "initial_conditions.bgc_source (source="
+                f"{sources.initial_conditions.bgc_source.name})"
+            )
+        for i, it in enumerate(sources.river):
+            if it.include_bgc:
+                bgc_signals.append(f"river[{i}] (include_bgc=True)")
+        if bgc_signals:
+            raise ValueError(
+                'bgc_mode="none" but the ForcingSpec requests BGC forcing:\n  - '
+                + "\n  - ".join(bgc_signals)
+                + '\nSet bgc_mode="marbl" or remove these BGC forcing items from '
+                "the ForcingSpec."
+            )
 
     # ----- code + templates --------------------------------------------------
     code = _build_code(
         model,
         templates_repo or DEFAULT_TEMPLATE_REPO,
         use_pio=use_pio,
+        bgc_mode=bgc_mode,
         roms_ref=roms_ref,
     )
 
@@ -389,9 +446,7 @@ def build_forge_blueprint(
         run=RunWindow(start_date=start_date, end_date=end_date),
         domain=Domain(
             grid_kwargs=grid_kwargs,
-            topography_source=(inputs.get("grid", {}) or {}).get(
-                "topography_source", "ETOPO5"
-            ),
+            topography_source=topography_source,
             topography_path=topography_path,
             open_boundaries=OpenBoundaries(
                 **{
@@ -439,7 +494,9 @@ def build_forge_blueprint(
 
 
 def _build_forcing(
-    inputs: dict[str, Any], cdr_forcing: dict[str, Any] | None
+    inputs: dict[str, Any],
+    cdr_forcing: dict[str, Any] | None,
+    topography_source: str | TopographySource | None = None,
 ) -> Forcing:
     """Build the flat ``Forcing`` object from model inputs + CDR config.
 
@@ -511,8 +568,8 @@ def _build_forcing(
     for grp in (surface, boundary, tidal, river):
         for it in grp:
             _note(it.source)
-    # topography source
-    topo = (inputs.get("grid", {}) or {}).get("topography_source")
+    # topography source (now a Domain-level input, not read from ForcingSpec)
+    topo = getattr(topography_source, "value", topography_source)
     if topo:
         resolved.setdefault(topo, _resolved_dataset(topo))
 
@@ -535,6 +592,7 @@ def _build_code(
     model: dict[str, Any],
     templates_repo: CodeRepo,
     use_pio: bool = False,
+    bgc_mode: str = "marbl",
     roms_ref: str | None = None,
 ) -> Code:
     code_block = model.get("code", {}) or {}
@@ -584,9 +642,17 @@ def _build_code(
                 "use_pio=True but the ModelSpec model.yml has no code.pio repository "
                 "(Forge pins codebases for reproducibility)"
             )
+    marbl = None
+    if bgc_mode == "marbl":
+        marbl = _repo("marbl")
+        if marbl is None:
+            raise ValueError(
+                'bgc_mode="marbl" but the ModelSpec model.yml has no code.marbl '
+                "repository (Forge pins codebases for reproducibility)"
+            )
     return Code(
         roms=roms,
-        marbl=_repo("marbl"),
+        marbl=marbl,
         pio=pio,
         templates_compile_time=_template("compile_time"),
         templates_run_time=_template("run_time"),

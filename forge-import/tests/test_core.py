@@ -1621,6 +1621,9 @@ class TestGoldenNamelist:
 
         mock_sd.path_for_source = MagicMock(return_value=source_file)
         mock_sd.dataset_key_for_source = MagicMock(side_effect=_dks)
+        mock_sd.streamable_for_source = MagicMock(
+            side_effect=lambda name, glorys_layout=None: name.upper() in {"ERA5", "DAI"}
+        )
         return mock_sd
 
     def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
