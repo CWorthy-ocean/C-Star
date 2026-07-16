@@ -157,7 +157,7 @@ async def test_cli_admin_clean_perform_actions(
 
 
 @pytest.mark.parametrize(
-    "num_assets",
+    "num_actions",
     range(5),
 )
 async def test_cli_admin_clean_perform_actions_dryrun(
