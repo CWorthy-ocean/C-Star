@@ -1201,6 +1201,39 @@ class TestForgeBlueprintEngine:
         for sec in PROCESSING_FILLED_SECTIONS:
             assert sec not in run_ov
 
+    def test_split_model_settings_excludes_generation_derived_leaves(self):
+        """Regression for the §3a bug (docs/forge-blueprint-parameter-audit.md): the
+        overlay passed to ``configure_build`` must not carry the leaf keys that
+        ``generate_inputs`` derives from the *actual* generated forcing objects
+        (river/CDR "is configured" flags + counts, the true tidal constituent count) —
+        otherwise it silently reverts a correctly-generated configuration back to the
+        resolver's pre-generation placeholder/declared value.
+        """
+        from cstar_forge.forge.forge_blueprint_engine import (
+            GENERATION_DERIVED_LEAF_KEYS,
+            split_model_settings,
+        )
+
+        cfg = (
+            self._cfg()
+        )  # test-tiny + glorys-era5-unified: a real DAI river is configured
+        assert cfg.forcing.river, "fixture must have a configured river for this test"
+
+        run_ov, _ = split_model_settings(cfg)
+
+        for section, leaf_keys in GENERATION_DERIVED_LEAF_KEYS.items():
+            sub = run_ov.get(section, {})
+            for key in leaf_keys:
+                assert key not in sub, (
+                    f"{section}.{key} is generation-derived and must be excluded "
+                    "from the configure_build overlay"
+                )
+
+        # Sibling fields in the same section that generate_inputs never touches must
+        # still pass through untouched, so a genuine ModelSpec/hand-edit override still
+        # reaches configure_build.
+        assert run_ov["cdr_frc"]["relocate_to_wet_pts"] is True
+
     def test_process_orchestration_order_and_overlay(self):
         from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 

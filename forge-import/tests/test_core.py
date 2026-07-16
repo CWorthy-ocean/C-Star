@@ -843,6 +843,93 @@ class TestForgeExecutorBuildAndRun:
         assert "use_pio" not in data["model_params"]
         assert data["code"].get("pio") is None
 
+    def test_configure_build_does_not_clobber_generated_river_and_tidal_settings(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """Regression for the §3a bug (docs/forge-blueprint-parameter-audit.md): before
+        the fix, ``configure_build``'s overlay applied the *entire* stored
+        ``ForgeBlueprint.model_settings`` snapshot on top of whatever ``generate_inputs``
+        had just derived from the real generated forcing objects — silently reverting a
+        correctly-generated river configuration back to "disabled" and a real tidal
+        constituent count back to the merely-declared one.
+
+        Drives the exact real call chain ``process_forge_blueprint`` uses
+        (``split_model_settings(cfg)`` -> ``ForgeExecutor.configure_build``), with the
+        ``generate_inputs`` step simulated (as input_data.py's ``_generate_river_forcing``/
+        ``_generate_tidal_forcing`` would) rather than actually downloading/generating
+        real forcing data.
+        """
+        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+        from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
+
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-grid",
+            grid_kwargs=sample_grid_kwargs,
+            open_boundaries=sample_open_boundaries.model_dump(),
+            partitioning=sample_partitioning.model_dump(),
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        assert cfg.forcing.river, "fixture must have a configured river for this test"
+        # The ForcingSpec declares ntides=15; simulate a real TPXO extraction that
+        # actually yields a different constituent count, to prove the *real* value wins.
+        assert cfg.model_settings["tides"]["ntides"] == 15
+
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-clobber-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+        # Before the fix, this pre-generation snapshot is exactly what configure_build's
+        # overlay would clobber the post-generation values back to.
+        assert builder._settings_run_time["river_frc"]["river_source"] is False
+        assert builder._settings_run_time["river_frc"]["nriv"] == 0
+
+        # Simulate generate_inputs having derived the *actual* generated values.
+        builder._update_settings_run_time(
+            {
+                "river_frc": {
+                    "river_source": True,
+                    "analytical": False,
+                    "nriv": 3,
+                    "rvol_vname": "river_volume",
+                    "rvol_tname": "river_time",
+                    "rtrc_vname": "river_tracer",
+                    "rtrc_tname": "river_time",
+                },
+                "tides": {
+                    "ntides": 7,
+                    "bry_tides": True,
+                    "pot_tides": True,
+                    "ana_tides": False,
+                },
+            },
+            allow_new=True,
+        )
+
+        run_ov, compile_ov = split_model_settings(cfg)
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+        assert builder._settings_run_time["river_frc"]["river_source"] is True
+        assert builder._settings_run_time["river_frc"]["nriv"] == 3
+        assert builder._settings_run_time["tides"]["ntides"] == 7
+
     @pytest.mark.real_template_staging
     def test_template_repo_args_map_from_code_spec(
         self, minimal_cstar_spec_builder_args

@@ -85,6 +85,46 @@ PROCESSING_FILLED_SECTIONS = (
     "output_root_name",
 )
 
+# Leaf keys that ``generate_inputs`` (Phase 2a, in ``input_data.py``) derives from the
+# *actual* generated forcing/tidal objects — never from ``ForgeBlueprint.model_settings``.
+# The resolver (Phase 1) never computes real values for these: it leaves them at
+# whatever the ModelSpec's disabled placeholder says (``river_frc``/``cdr_frc``/
+# ``cdr_output``) or at a merely *declared*, not actually-generated, value (``tides``'
+# ``ntides`` from a tidal item, if the item set one). Unlike ``PROCESSING_FILLED_SECTIONS``,
+# these sections DO exist in ``model_settings`` (so ``configure_build``'s ``allow_new=False``
+# path finds them and deep-merges into them) and carry some fields with real, reviewable
+# ModelSpec defaults (e.g. ``cdr_frc.relocate_to_wet_pts``) — so only the specific
+# generation-derived leaves are excluded from the overlay, not the whole section.
+#
+# Without this exclusion, ``configure_build``'s overlay (which applies the *entire*
+# stored ``model_settings`` snapshot on top of whatever ``generate_inputs`` just derived)
+# silently reverts a correctly-generated river/CDR configuration back to "disabled" and
+# can restore a stale tidal constituent count — see docs/forge-blueprint-parameter-audit.md
+# §3a for the full trace, and ``tests/test_forge_blueprint.py::TestForgeBlueprintEngine
+# ::test_split_model_settings_excludes_generation_derived_leaves`` /
+# ``test_configure_build_does_not_clobber_generated_river_and_cdr_settings`` for the
+# regression coverage.
+GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
+    "river_frc": (
+        "river_source",
+        "analytical",
+        "nriv",
+        "rvol_vname",
+        "rvol_tname",
+        "rtrc_vname",
+        "rtrc_tname",
+    ),
+    "cdr_frc": (
+        "cdr_source",
+        "cdr_file",
+        "ncdr_parm",
+        "forcing_parameterized",
+        "cdr_volume",
+    ),
+    "cdr_output": ("do_cdr",),
+    "tides": ("ntides", "bry_tides", "pot_tides", "ana_tides"),
+}
+
 
 def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
@@ -188,12 +228,22 @@ def split_model_settings(cfg: ForgeBlueprint) -> tuple[dict[str, Any], dict[str,
     ``cppdefs`` is the only compile-time section; everything else is a namelist
     (run-time) section. These are passed to ``configure_build`` as overrides so the
     reviewed config wins over the builder's re-derived defaults.
+
+    Excludes the leaf keys in ``GENERATION_DERIVED_LEAF_KEYS`` from the run-time
+    overrides: those are only ever meaningfully known once ``generate_inputs`` has run
+    against the real forcing data, so the stored (pre-generation) snapshot must not
+    overwrite them. See ``GENERATION_DERIVED_LEAF_KEYS`` for why.
     """
     run_overrides = {k: copy.deepcopy(v) for k, v in cfg.model_settings.items()}
     cppdefs = run_overrides.pop("cppdefs", None)
     compile_overrides = (
         {"cppdefs": copy.deepcopy(cppdefs)} if cppdefs is not None else {}
     )
+    for section, leaf_keys in GENERATION_DERIVED_LEAF_KEYS.items():
+        sub = run_overrides.get(section)
+        if isinstance(sub, dict):
+            for key in leaf_keys:
+                sub.pop(key, None)
     return run_overrides, compile_overrides
 
 
