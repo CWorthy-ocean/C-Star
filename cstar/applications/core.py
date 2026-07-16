@@ -1,3 +1,4 @@
+import importlib
 import typing as t
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -343,6 +344,9 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     ValueError
         if no registered application is associated with this classification
     """
+    if name not in _registry:
+        importlib.import_module(f"cstar.applications.{name}")
+
     if application := _registry.get(name):
         log.trace(f"Located application context {application.__name__!r} for {name!r}")
         return application()

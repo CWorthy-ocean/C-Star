@@ -5,12 +5,12 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.hello_world_app import (
+from cstar.applications.hello_world import (
     APP_HW_SCHEMA_1_0_0,
     HelloWorldBlueprint,
     HelloWorldSchemaAdapterV1V1,
 )
-from cstar.applications.plotter_app import (
+from cstar.applications.plotter import (
     APP_PLOTTER_SCHEMA_1_0_0,
     APP_PLOTTER_SCHEMA_2_0_0,
     PlotterSchemaAdapterV1V2,

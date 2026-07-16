@@ -7,7 +7,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.applications.hello_world_app import HelloWorldBlueprint
+from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
 from cstar.orchestration.dag_runner import get_status_detail_map, load_run_state

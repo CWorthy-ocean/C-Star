@@ -7,10 +7,7 @@ from cstar.base.feature import (
     is_feature_enabled,
 )
 from cstar.cli.workplan.check import app as app_check
-from cstar.cli.workplan.compose import app as app_compose
-from cstar.cli.workplan.generate import app as app_gen
 from cstar.cli.workplan.log import app as app_log
-from cstar.cli.workplan.plan import app as app_plan
 from cstar.cli.workplan.run import app as app_run
 from cstar.cli.workplan.status import app as app_status
 
@@ -23,13 +20,19 @@ app.add_typer(app_check)
 app.add_typer(app_log)
 
 if is_feature_enabled(ENV_FF_CLI_WORKPLAN_GEN):
+    from cstar.cli.workplan.generate import app as app_gen
+
     app.add_typer(app_gen)
 
 if is_feature_enabled(ENV_FF_CLI_WORKPLAN_PLAN):
+    from cstar.cli.workplan.plan import app as app_plan
+
     app.add_typer(app_plan)
 
 app.add_typer(app_run)
 app.add_typer(app_status)
 
 if is_feature_enabled(ENV_FF_CLI_WORKPLAN_COMPOSE):
+    from cstar.cli.workplan.compose import app as app_compose
+
     app.add_typer(app_compose)
