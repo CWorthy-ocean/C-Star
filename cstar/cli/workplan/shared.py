@@ -349,6 +349,7 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     Returns
     -------
     str
+        The run-id for the loaded run
 
     Raises
     ------
@@ -363,7 +364,7 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     wp_run = asyncio.run(repo.get_workplan_run(run_id))
     if not wp_run:
         raise typer.BadParameter(
-            f"Unable to monitor logs for unknown run-id: {run_id}",
+            f"Unable to locate run with unknown run-id: {run_id}",
             param_hint="run_id",
         )
     set_ctxmap(context, "run", wp_run)

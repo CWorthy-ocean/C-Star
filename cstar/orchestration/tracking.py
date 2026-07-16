@@ -1,12 +1,13 @@
 import asyncio
+import os
 import typing as t
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from cstar.base.log import LoggingMixin
+from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     StateDirectoryManager,
@@ -14,6 +15,8 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+
+log = get_logger(__name__)
 
 
 class WorkplanRun(BaseModel):
@@ -160,6 +163,21 @@ class TrackingRepository(LoggingMixin):
         runfile_name = self._runfile_name(run_id)
         return self.latest_dir / runfile_name
 
+    def _run_root_dir(self, run_id: str) -> Path:
+        """Generate the path to the directory used to store tracking information
+        related to a run-id.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+
+        Returns
+        -------
+        Path
+        """
+        return self.history_dir / run_id
+
     def _history_path(self, run_id: str, run_date: datetime) -> Path:
         """Generate the full path for persisting a `WorkplanRun` to disk as
         a history record.
@@ -177,7 +195,7 @@ class TrackingRepository(LoggingMixin):
         """
         formatted_dt = self._format_run_date(run_date)
         runfile_name = self._runfile_name(formatted_dt)
-        return self.history_dir / run_id / runfile_name
+        return self._run_root_dir(run_id) / runfile_name
 
     def _find_run_path(self, run_id: str, run_date: datetime | None) -> Path:
         """Identify a path where a `WorkplanRun` is persisted to disk.
@@ -209,6 +227,49 @@ class TrackingRepository(LoggingMixin):
             self.log.trace(msg)
 
         return path
+
+    def list_run_paths(
+        self,
+        run_id: str,
+        all_history: bool = False,
+    ) -> Sequence[Path]:
+        """Identify all paths to state information for a specific run-id.
+
+        Returns all paths previously used with the run-id, regardless of the
+        associated workplan.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+        all_history : bool
+            Pass `True` to return the paths for any run that shares the run-id. Otherwise,
+            only the latest path from the history collection is returned.
+
+        Returns
+        -------
+        Sequence[Path]
+        """
+        run_paths: list[Path] = []
+
+        latest = self._latest_path(run_id)
+        if latest.exists():
+            run_paths.append(latest)
+
+        root_dir = self._run_root_dir(run_id)
+        all_runs = root_dir.iterdir()
+
+        if all_history:
+            run_paths.extend(all_runs)
+        else:
+            if ordered_runs := sorted(
+                all_runs,
+                key=lambda p: os.path.getctime(p),
+                reverse=True,
+            ):
+                run_paths.append(ordered_runs[0])
+
+        return tuple(filter(lambda p: p.exists(), run_paths))
 
     async def get_workplan_run(
         self, run_id: str, run_date: datetime | None = None
@@ -272,7 +333,7 @@ class TrackingRepository(LoggingMixin):
         self.log.debug(msg)
         return run_path
 
-    async def list_latest_runs(self, run_id_filter: str) -> list[WorkplanRun]:
+    async def list_latest_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
 
         run_id_filter : str
@@ -280,7 +341,7 @@ class TrackingRepository(LoggingMixin):
 
         Returns
         -------
-        list[WorkplanRun]
+        Sequence[WorkplanRun]
         """
         run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
         coros = [
@@ -289,15 +350,15 @@ class TrackingRepository(LoggingMixin):
         ]
         return await asyncio.gather(*coros)
 
-    async def list_history_runs(self, run_id_filter: str) -> list[WorkplanRun]:
-        """Retrieve a list of the latest WorkplanRun for all known run-id's.
+    async def list_history_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
+        """Retrieve a list of all WorkplanRun instances executed with a given run-id.
 
         run_id_filter : str
             A run-id used to filter records. Matches will be included in results.
 
         Returns
         -------
-        list[WorkplanRun]
+        Sequence[WorkplanRun]
         """
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
         glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"

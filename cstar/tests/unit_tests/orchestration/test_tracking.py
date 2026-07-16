@@ -335,3 +335,74 @@ async def test_tracking_list_history_run_id(
 
         # confirm 2 separate run-ids had the same number of runs inserted.
         assert len(base_matches) == num_unique * num_runs
+
+
+@pytest.mark.parametrize(
+    ("num_runs", "all_history"),
+    [
+        (1, True),
+        (1, False),
+        (2, True),
+        (2, False),
+        (4, True),
+        (4, False),
+        (8, True),
+        (8, False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tracking_get_run_paths(
+    tmp_path: Path,
+    num_runs: int,
+    all_history: bool,
+) -> None:
+    """Verify that using the `get_run_paths` method locates
+    all directories for the specified run-id
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    num_runs : int
+        The number of runs to insert for a given run id
+    all_history : bool
+        Pass `True` to test retrieval of all historical run paths.
+    """
+    state_dir = tmp_path / "state"
+    output_path = tmp_path / "output"
+    wp_path = tmp_path / "fake_workplan.yaml"
+    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
+    run_id = "test-get-run-paths-run-id"
+    captured_env = {"foo": "foo-value"}
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+        expected_paths = [repo._latest_path(run_id=run_id)]  # type: ignore
+
+        # insert some runs that re-use the same run-id
+        for _ in range(num_runs):
+            expected_paths.append(
+                await repo.put_workplan_run(
+                    WorkplanRun(
+                        workplan_path=wp_path,
+                        trx_workplan_path=wp_trx_path,
+                        output_path=output_path,
+                        run_id=run_id,
+                        environment=captured_env,
+                    )
+                )
+            )
+
+        # retrieve the list of run paths
+        actual_paths = repo.list_run_paths(run_id, all_history)
+
+    if all_history:
+        # run path for latest plus each history entry
+        exp_num_paths = num_runs + 1
+    else:
+        # only the latest history entry and corresponding symlink, e.g. latest/<run-id>
+        exp_num_paths = 2
+        expected_paths = [expected_paths[0], expected_paths[-1]]
+
+    assert len(actual_paths) == exp_num_paths
+    assert set(actual_paths).issuperset(expected_paths)
