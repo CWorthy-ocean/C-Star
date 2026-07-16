@@ -368,6 +368,145 @@ def test_ntides_syncs_from_tidal_forcing_into_model_settings():
     assert wiz.config.model_settings["tides"]["ntides"] == 42
 
 
+def test_domain_modified_reflects_deviation_from_catalog_pick():
+    """composition.domain.modified follows "deviate" semantics: editing a
+    domain-defining widget after a catalog Domain pick sets it True; reverting the
+    edit exactly clears it back to False (audit follow-up: domain never used to
+    track modification at all).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.domain_dd.value = wiz.domain_dd.options[1]  # first real catalog domain
+    assert wiz.config.composition.domain.origin == "catalog"
+    assert wiz.config.composition.domain.modified is False
+
+    orig_npx = wiz.npx.value
+    wiz.npx.value = orig_npx + 1
+    assert wiz.config.composition.domain.modified is True
+    assert wiz.config.composition.domain.origin == "catalog"  # never flips to custom
+
+    wiz.npx.value = orig_npx  # revert exactly -> deviation clears
+    assert wiz.config.composition.domain.modified is False
+
+
+def test_domain_modified_false_when_hand_authored():
+    """A from-scratch (non-catalog) domain has nothing to deviate from -> never
+    modified, regardless of what its widgets hold.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.domain_dd.value == "<custom>"
+    wiz.npx.value = wiz.npx.value + 1
+    assert wiz.config.composition.domain.origin == "custom"
+    assert wiz.config.composition.domain.modified is False
+
+
+def test_forcing_modified_reflects_deviation_from_catalog_pick():
+    """composition.forcing.modified follows the same "deviate" semantics, and
+    (post-unification) origin no longer flips to "custom" on edit.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is False
+    assert wiz.config.composition.forcing.origin == "catalog"
+
+    tidal_rows = wiz._forcing_editor._rows["tidal"]
+    orig_ntides = tidal_rows[0]["ntides"].value
+    tidal_rows[0]["ntides"].value = orig_ntides + 1
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is True
+    assert wiz.config.composition.forcing.origin == "catalog"  # never flips to custom
+
+    tidal_rows[0]["ntides"].value = orig_ntides  # revert exactly -> deviation clears
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is False
+
+
+def test_model_and_output_modified_from_accordion_overrides():
+    """Model/output share the accordion overrides layer; modified is derived per-
+    piece by whether a deviating override key belongs to OUTPUT_SECTIONS/
+    PARTIAL_OUTPUT_SECTIONS (audit follow-up: these two pieces never set `modified`
+    at all before this fix).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is False
+    assert wiz.config.composition.output.modified is False
+
+    # A non-output section override -> model.modified only.
+    wiz._overrides[("lateral_visc", "visc2")] = 99.0
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is True
+    assert wiz.config.composition.output.modified is False
+
+    # An OUTPUT_SECTIONS override -> output.modified only.
+    del wiz._overrides[("lateral_visc", "visc2")]
+    wiz._overrides[("ocean_vars", "wrt_z")] = False
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is False
+    assert wiz.config.composition.output.modified is True
+
+
+def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
+    """A saved deviation on model/output/domain/forcing must reload with the same
+    `modified` flags (composition is meant to reliably answer "did the user touch
+    this catalog piece" even after a save/load cycle).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.domain_dd.value = wiz.domain_dd.options[1]
+    wiz.npx.value = wiz.npx.value + 1  # deviate domain
+    wiz._overrides[("lateral_visc", "visc2")] = 99.0  # deviate model
+    wiz._rebuild()
+    assert wiz.config.composition.domain.modified is True
+    assert wiz.config.composition.model.modified is True
+
+    saved = tmp_path / "forge_blueprint.yml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    # Domain always loads as origin="custom" (the file, not a catalog entry, is
+    # authoritative) so domain.modified is moot on load; model.modified must survive
+    # via the reconstructed overrides layer.
+    assert wiz2.config.composition.domain.origin == "custom"
+    assert wiz2.config.composition.model.modified is True
+
+
+def test_composition_modified_all_false_on_pristine_save_and_load_round_trip(
+    tmp_path,
+):
+    """A file saved with no edits must reload with every piece unmodified -- the
+    forcing comparison in particular round-trips through `_sources_to_inputs` /
+    `build_forge_blueprint` before being re-gathered, so a lossy resolve/reconstruct
+    cycle (e.g. an omitted-vs-null field) could otherwise report a false positive
+    for a file the user never touched.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is False
+    assert wiz.config.composition.model.modified is False
+    assert wiz.config.composition.output.modified is False
+
+    saved = tmp_path / "forge_blueprint.yml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.config.composition.forcing.modified is False
+    assert wiz2.config.composition.model.modified is False
+    assert wiz2.config.composition.output.modified is False
+
+
 def test_parent_plot_is_always_grid_plot_only(monkeypatch):
     """The Grid section's plot is parent-only regardless of nesting state -- the
     parent+child overlay lives in its own Nesting-section plot (see _on_nest_plot).

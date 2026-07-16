@@ -228,17 +228,20 @@ carries the full set; this is a requirement to check when authoring a new Output
 | `code.marbl` (`location`, `commit`) | ModelSpec (repo pin) — **presence now gated per-run** (as of 2026-07-16) by `bgc_mode`, the same mechanism as `code.pio`/`use_pio` | only indirectly gated by `self.bgc_dd` ("marbl"/"none"); the repo location/commit itself is **not editable** in the wizard — mirrors `code.pio`/`use_pio_chk` exactly | same `_cstar_code_repository()` path — `marbl=_repo(...) if code_spec.marbl else None` (needed no change: it already no-ops on `None`) | (R) resolver includes `code.marbl` iff `bgc_mode=="marbl"`, raising if the ModelSpec has no `code.marbl` block; omits it (sets `None`) iff `bgc_mode=="none"` |
 | `code.pio` (`location`, `commit`) | ModelSpec | only indirectly gated by `self.use_pio_chk` (on/off); the repo location/commit itself is **not editable** in the wizard | same `_cstar_code_repository()` path. `code.pio`'s presence in the blueprint IS conditional on `use_pio` (gated in `_build_code`, not in the executor) — `_use_pio` (executor.py, reads `cppdefs.use_pio`) separately gates two unrelated things: `netcdf_format` passed to `RomsMarblInputData` in `generate_inputs` (`"NETCDF3_64BIT_DATA"` vs `"NETCDF4"`) and whether `model_params["use_pio"]=True` is added in `configure_build` | (R) resolver raises if `use_pio=True` and ModelSpec has no `code.pio` |
 | `code.templates_compile_time` / `templates_run_time` (`directory`, `files`) | ModelSpec (`model.yml` `code.templates_compile_time/_run_time`, decoupled repo = forge's own `templates/` dir) | not exposed (infra-level); a `templates_repo` kwarg exists on `build_forge_blueprint`'s signature but the wizard's `_gather()` never passes it | `_template_repo_args(stage)` (executor.py:1019-1034) feeds C-Star's `AdditionalCode` constructor; `_stage_templates(stage)` (~1036-1060) materializes the filtered files under `host.working_dir/templates/{stage}` — **no CI coverage for the cross-repo flat-staging contract** per developer-guide §6 item 2. `configure_build` later overwrites `roms_marbl_blueprint.code.compile_time`/`code.run_time` with the *rendered* locations (~1919-1932), replacing the PRECONFIG placeholders | (R) `templates_commit:` pin in ModelSpec overrides tracking branch `main` |
-| `composition.model` | derived | always `PieceRef(name=model_dd.value, origin="catalog")` | not consumed by processing — pure UI/review metadata | n/a; `modified` is never set for this piece (no "edit" concept beyond `model_settings` overrides, which live in `composition.overrides`) |
-| `composition.domain` | derived | `PieceRef(name=grid_name, origin="custom")` if `domain_dd == "<custom>"`, else `origin="catalog"` (`_composition()`:1710-1730) | not consumed by processing | n/a; **`modified` is never set to `True`** even though a user can pick a catalog Domain and then hand-edit `grid_w`/`bnd`/`npx`/`npy` afterward — that edit is invisible at the `PieceRef` level |
-| `composition.forcing` | derived | the **only** piece where `modified` tracking is actually implemented: `self._forcing_edited` flag set `True` in `_on_forcing_change` (1685, fired by any `_ForcingEditor` widget edit), reset on a fresh catalog pick (`_on_forcing_spec`:1677) | not consumed by processing | n/a; single `modified=True` occurrence in the entire wizard file (confirmed by grep) |
-| `composition.output` | derived | always `PieceRef(name=output_dd.value, origin="catalog")` | not consumed by processing | n/a; **`modified` never set**, even though Advanced-settings edits to `OUTPUT_SECTIONS`/`OUTPUT_MARBL_FIELDS` are tracked generically via `composition.overrides`, not via `output.modified` — same asymmetry as `domain` |
+| `composition.model` | derived | always `PieceRef(name=model_dd.value, origin="catalog")` from `_composition()`; `modified` is computed afterward in `_rebuild()` **(fixed 2026-07-16)** | not consumed by processing — pure UI/review metadata | n/a; `modified=True` iff any deviating key in `_diff_overrides(effective, composed)` is *not* output-owned (`_is_output_key`) |
+| `composition.domain` | derived | `PieceRef(name=grid_name, origin="custom")` if `domain_dd == "<custom>"`, else `origin="catalog"` (`_composition()`); `modified` computed in `_rebuild()` **(fixed 2026-07-16)** | not consumed by processing | n/a; `modified=True` iff a catalog Domain is selected *and* the current `_domain_snapshot()` (grid_w/bnd/npx/npy/grid_name/topo_*) differs from the snapshot captured at the moment of that pick (`_domain_seed`, set in `_on_domain`) — edit-then-revert clears it |
+| `composition.forcing` | derived | `PieceRef(name=forcing_dd.value, origin="catalog")`; `modified` computed in `_rebuild()` by comparing `_forcing_editor.gather()` to a snapshot taken at the last catalog pick (`_forcing_seed`, set in `_on_forcing_spec`) **(unified 2026-07-16 — origin no longer flips to `"custom"` on edit)** | not consumed by processing | n/a |
+| `composition.output` | derived | always `PieceRef(name=output_dd.value, origin="catalog")`; `modified` computed in `_rebuild()` **(fixed 2026-07-16)** | not consumed by processing | n/a; `modified=True` iff any deviating key in `_diff_overrides(effective, composed)` *is* output-owned (`OUTPUT_SECTIONS`/`PARTIAL_OUTPUT_SECTIONS`, via `_is_output_key`) |
 | `composition.overrides` | derived — sparse `{section:{field:value}}` layer | populated from `_on_editor_edit`'s override map (see note after §4's table), applied in `_rebuild()` via `_overrides_nested` (1640/2086-2089/506) | not consumed by processing — mirrors `run_time_overrides`/`compile_time_overrides` for review purposes only | n/a |
 | `provenance.*` (`generated_at`, `forge_version`, `roms_tools_version`, `override_files_applied`, `content_hash`, `notes`) | derived; `generated_at`/`forge_version`/`roms_tools_version`/`notes` are real `build_forge_blueprint` kwargs | **none appear in the wizard's `_gather()`** — the wizard never supplies them, so they resolve to `None`/defaults; `override_files_applied` is hardcoded to `[]` by the resolver | `content_hash` is verified (warn-only) by `verify_content_hash` at the start of `process_forge_blueprint`; excluded from its own hash | n/a |
 
-**Asymmetry to flag** (from the wizard research pass): only `composition.forcing`'s
-`modified` flag is ever flipped to `True` after a catalog pick is hand-edited;
-`composition.{model,domain,output}` never get `modified=True` regardless of user edits —
-a UI/data-model inconsistency worth fixing alongside any `composition` rework.
+**Asymmetry — fixed 2026-07-16**: previously only `composition.forcing`'s
+`modified` flag was ever flipped to `True` after a catalog pick was hand-edited;
+`composition.{model,domain,output}` never got `modified=True` regardless of user
+edits. All four pieces now compute `modified` centrally in `_rebuild()` with
+"deviate" semantics (see rows above), and the `origin` convention is unified:
+every piece keeps `origin="catalog"` + `modified=True` on edit (forcing no
+longer flips to `origin="custom"`).
 
 ---
 
@@ -308,9 +311,16 @@ machine-specific code path in `executor.py` itself.
   resolver-time placeholders — fixed; see the Appendix for the history and the
   `GENERATION_DERIVED_LEAF_KEYS` exclusion now baked into every relevant row above.
 - [x] `marbl_from_model_settings()` — deleted (§9), 2026-07-16.
-- [ ] Consider fixing the `composition.{model,domain,output}.modified` asymmetry
-  flagged in §7 (only `forcing` ever gets `modified=True`), if `composition` is meant
-  to reliably answer "did the user touch this catalog piece after selecting it."
+- [x] `composition.{model,domain,output}.modified` asymmetry flagged in §7 —
+  **fixed 2026-07-16**. All four pieces now report `modified` with "deviate"
+  semantics (true iff the current value differs from what the catalog pick
+  seeded; edit-then-revert clears it), computed centrally in `_rebuild()`:
+  model/output derive from `_diff_overrides(effective, composed)` partitioned by
+  `OUTPUT_SECTIONS`/`PARTIAL_OUTPUT_SECTIONS` ownership (`_is_output_key`);
+  domain/forcing compare a widget-snapshot taken at the last catalog pick
+  (`_domain_seed`/`_forcing_seed`) against the current values. The convention is
+  also unified: every piece keeps `origin="catalog"` + `modified=True` on edit
+  (forcing no longer flips to `origin="custom"`).
 - [x] `resolved_datasets` made authoritative at processing time (2026-07-16) —
   `SourceData`/`input_data.py` now prefer the ForgeBlueprint's frozen
   `forcing.resolved_datasets` snapshot over a live `source_registry` lookup for

@@ -1110,14 +1110,17 @@ class TestForgeBlueprintWizard:
             "MBL_co2",
             "WOA",
         ]
-        # add + edit a restoring surface item -> custom origin
+        # add + edit a restoring surface item -> deviates from the catalog pick.
+        # origin stays "catalog" (unified with model/domain/output); `modified`
+        # is what signals the edit.
         fe = w._forcing_editor
         fe._add("surface")
         row = fe._rows["surface"][-1]
         row["type"].value = "restoring"
         row["name"].value = "WOA"
         row["restoring_forces"].value = "sss"
-        assert w.config.composition.forcing.origin == "custom"
+        assert w.config.composition.forcing.origin == "catalog"
+        assert w.config.composition.forcing.modified is True
         assert w.config.model_settings["cppdefs"]["sal_restore"] is True
         assert [i.source.name for i in w.config.forcing.surface].count("WOA") == 2
 
@@ -1179,7 +1182,8 @@ class TestForgeBlueprintWizard:
         w2._on_load_path(None)
         assert "WOA" in [i.source.name for i in w2.config.forcing.surface]
         assert w2.config.model_settings["cppdefs"]["sal_restore"] is True
-        assert w2.config.composition.forcing.origin == "custom"
+        assert w2.config.composition.forcing.origin == "catalog"
+        assert w2.config.composition.forcing.modified is True
 
     def test_nest_from_domain_dropdown_prefills_child(self):
         w = self._wizard()

@@ -517,6 +517,17 @@ def _overrides_nested(overrides: dict[Any, Any]) -> dict[str, Any]:
     return out
 
 
+def _is_output_key(section: str, field: Any) -> bool:
+    """True if an (section, field) override key belongs to the Output piece
+    (vs. the Model piece) -- shared by `_on_output_spec` (clearing stale overrides
+    on a fresh OutputSpec pick) and `_rebuild` (deriving `composition.output.modified`
+    / `composition.model.modified` from the same override map).
+    """
+    return section in OUTPUT_SECTIONS or (
+        section in PARTIAL_OUTPUT_SECTIONS and field in PARTIAL_OUTPUT_SECTIONS[section]
+    )
+
+
 def _diff_overrides(
     effective: dict[str, Any], composed: dict[str, Any]
 ) -> dict[Any, Any]:
@@ -1557,7 +1568,9 @@ class ForgeBlueprintWizard:
         )
         self.forcing_box = W.VBox([])
         self._forcing_editor: _ForcingEditor | None = None
-        self._forcing_edited = False
+        # snapshot of the forcing editor's gather() at the last catalog pick;
+        # compared in _rebuild() to detect a deviation (composition.forcing.modified)
+        self._forcing_seed: dict[str, Any] | None = None
 
         # --- CDR (Carbon Dioxide Removal) forcing: uploaded roms-tools YAML ---
         # Parsed dict lives on the instance (not a widget) since FileUpload can't be
@@ -1597,6 +1610,10 @@ class ForgeBlueprintWizard:
         # sparse manual overrides layer: (section, field|None) -> value
         self._overrides: dict[Any, Any] = {}
         self._syncing = False  # True while pushing composed values into editor widgets
+        # snapshot of the domain-defining widgets at the last catalog Domain pick;
+        # compared in _rebuild() to detect a deviation (composition.domain.modified).
+        # None means no catalog domain has been picked yet (or domain_dd == "<custom>").
+        self._domain_seed: dict[str, Any] | None = None
 
         self.derived = W.HTML("")
         self.validation = W.HTML("")
@@ -1645,6 +1662,7 @@ class ForgeBlueprintWizard:
 
         self.roms_ref.value = self._model_default_roms_ref()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
+        self._forcing_seed = self._forcing_editor.gather()
         self._wire()
         self._rebuild()
 
@@ -1744,14 +1762,15 @@ class ForgeBlueprintWizard:
         """Selecting a ForcingSpec reseeds the forcing editor."""
         if getattr(self, "_suspended", False):
             return
-        self._forcing_edited = False
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
+        self._forcing_seed = self._forcing_editor.gather()
         self._rebuild()
 
     def _on_forcing_change(self):
+        # composition.forcing.modified is derived in _rebuild() by comparing the
+        # current gather() to self._forcing_seed -- no flag to set here.
         if getattr(self, "_suspended", False):
             return
-        self._forcing_edited = True
         self._rebuild()
 
     def _on_output_spec(self, _change):
@@ -1763,10 +1782,7 @@ class ForgeBlueprintWizard:
         self._overrides = {
             (s, f): v
             for (s, f), v in self._overrides.items()
-            if not (
-                s in OUTPUT_SECTIONS
-                or (s in PARTIAL_OUTPUT_SECTIONS and f in PARTIAL_OUTPUT_SECTIONS[s])
-            )
+            if not _is_output_key(s, f)
         }
         self._rebuild()
 
@@ -1775,6 +1791,11 @@ class ForgeBlueprintWizard:
         return self.catalog.output_data(self.output_dd.value)
 
     def _composition(self) -> Composition:
+        # Every piece keeps origin="catalog" when picked from the catalog (never
+        # flips to "custom" on edit) -- `modified` is what signals a deviation.
+        # `modified` itself is computed afterward in `_rebuild()`, where the
+        # composed baseline, effective settings, and per-piece seeds are all
+        # available; the base PieceRefs built here always start `modified=False`.
         dom = (
             PieceRef(name=self.domain_dd.value, origin="catalog")
             if self.domain_dd.value != "<custom>"
@@ -1782,12 +1803,7 @@ class ForgeBlueprintWizard:
         )
         # forcing/output are always an explicit catalog selection now (no more
         # "model_default" origin -- ModelSpec no longer provides either as a fallback).
-        if self._forcing_edited:
-            forcing = PieceRef(
-                name=self.forcing_dd.value, origin="custom", modified=True
-            )
-        else:
-            forcing = PieceRef(name=self.forcing_dd.value, origin="catalog")
+        forcing = PieceRef(name=self.forcing_dd.value, origin="catalog")
         output = PieceRef(name=self.output_dd.value, origin="catalog")
         return Composition(
             model=PieceRef(name=self.model_dd.value, origin="catalog"),
@@ -1879,6 +1895,7 @@ class ForgeBlueprintWizard:
         """Prefill from a cataloged Domain.yml when one is selected."""
         name = self.domain_dd.value
         if name == "<custom>":
+            self._domain_seed = None
             return
         data = self.catalog.domain_data(name)
         gk = data.get("grid_kwargs", {}) or {}
@@ -1900,8 +1917,25 @@ class ForgeBlueprintWizard:
                 self.model_dd.value = data["model_name"]
             self.topo_source.value = data.get("topography_source", "ETOPO5")
             self.topo_path.value = data.get("topography_path", "") or ""
+        self._domain_seed = self._domain_snapshot()
         self._rebuild()
         self._on_plot(None)
+
+    def _domain_snapshot(self) -> dict[str, Any]:
+        """The domain-defining widget values at the moment of a catalog Domain pick.
+        Compared against the current values in `_rebuild()` to detect an edit made
+        after selection (`composition.domain.modified`).
+        """
+        return {
+            "grid_name": self.grid_name.value,
+            "grid_w": {k: w.value for k, w in self.grid_w.items()},
+            "scoord_chk": self.scoord_chk.value,
+            "bnd": {d: w.value for d, w in self.bnd.items()},
+            "npx": self.npx.value,
+            "npy": self.npy.value,
+            "topo_source": self.topo_source.value,
+            "topo_path": self.topo_path.value,
+        }
 
     class _Suspender:
         def __init__(self, wiz):
@@ -2073,14 +2107,24 @@ class ForgeBlueprintWizard:
             # dropdowns always need a valid catalog selection (no more "model_default"
             # fallback value); fall back to the first available option for an older
             # file recorded with origin="model_default" or an unknown/missing name.
-            forig = cfg.composition.forcing.origin
             fname = cfg.composition.forcing.name
-            self._forcing_edited = forig == "custom"
             if fname in self.forcing_dd.options:
                 self.forcing_dd.value = fname
             elif self.forcing_dd.options:
                 self.forcing_dd.value = self.forcing_dd.options[0]
             self._build_forcing_editor(self._sources_to_inputs(cfg))
+            # Seed forcing.modified against the *catalog* piece (not the just-loaded
+            # sources) so a deviation is detected the same way as during authoring --
+            # a file that matches its recorded catalog forcing loads as unmodified;
+            # one that was hand-edited before saving loads as modified.
+            try:
+                self._forcing_seed = _ForcingEditor(
+                    self.W,
+                    self.catalog.forcing_data(self.forcing_dd.value),
+                    on_change=lambda: None,
+                ).gather()
+            except Exception:
+                self._forcing_seed = None
             # output piece selection
             oname = cfg.composition.output.name
             if oname in self.output_dd.options:
@@ -2213,8 +2257,40 @@ class ForgeBlueprintWizard:
         finally:
             self._syncing = False
 
+        # composition.*.modified: "did the user deviate from what the catalog piece
+        # seeded" -- editing then reverting clears the flag. Model/output share the
+        # accordion overrides layer (a true value-diff via _diff_overrides, so a
+        # no-op edit never counts); domain/forcing are widget-based pieces compared
+        # against a snapshot captured at the moment of the last catalog pick.
+        deviations = _diff_overrides(effective, composed)
+        model_modified = any(not _is_output_key(s, f) for s, f in deviations)
+        output_modified = any(_is_output_key(s, f) for s, f in deviations)
+        domain_modified = (
+            self.domain_dd.value != "<custom>"
+            and self._domain_seed is not None
+            and self._domain_snapshot() != self._domain_seed
+        )
+        forcing_modified = (
+            self._forcing_seed is not None
+            and self._forcing_editor.gather() != self._forcing_seed
+        )
+
         comp = cfg.composition.model_copy(
-            update={"overrides": _overrides_nested(self._overrides)}
+            update={
+                "overrides": _overrides_nested(self._overrides),
+                "model": cfg.composition.model.model_copy(
+                    update={"modified": model_modified}
+                ),
+                "domain": cfg.composition.domain.model_copy(
+                    update={"modified": domain_modified}
+                ),
+                "forcing": cfg.composition.forcing.model_copy(
+                    update={"modified": forcing_modified}
+                ),
+                "output": cfg.composition.output.model_copy(
+                    update={"modified": output_modified}
+                ),
+            }
         )
         cfg = cfg.model_copy(update={"model_settings": effective, "composition": comp})
 
