@@ -63,7 +63,7 @@ def main(argv: list | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
     cfg = ForgeBlueprint.from_yaml(args.forge_blueprint)
     wd = args.working_dir if args.working_dir is not None else cfg.working_dir
     host = config.resolve_host(wd)
