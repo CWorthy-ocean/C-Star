@@ -184,6 +184,94 @@ def test_co2_tvarying_is_not_user_editable():
     assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is True
 
 
+def test_resolver_derived_cppdefs_fields_have_no_accordion_widget():
+    """obc_*/marbl/use_pio/cdr_forcing/co2_tvarying/sal_restore/tides are all fully
+    resolver-derived (like co2_tvarying above) -- the advanced settings accordion
+    must never expose a competing editor for any of them.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    for field in (
+        "obc_west",
+        "obc_east",
+        "obc_north",
+        "obc_south",
+        "marbl",
+        "use_pio",
+        "cdr_forcing",
+        "co2_tvarying",
+        "sal_restore",
+        "tides",
+    ):
+        assert ("cppdefs", field) not in wiz.editor._widgets
+
+
+def test_sponge_tune_editable_via_advanced_settings_accordion():
+    """Unlike co2_tvarying, SPONGE_TUNE has no resolver-side derivation -- it's a
+    plain ModelSpec default (False) reachable only through the advanced settings
+    accordion's generic (section, field) override mechanism.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is False
+    assert ("cppdefs", "sponge_tune") in wiz.editor._widgets
+
+    wiz._overrides[("cppdefs", "sponge_tune")] = True
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is True
+
+
+def test_nhy_nox_forcing_editable_in_bgc_advanced_settings_pane():
+    """NHY_FORCING/NOX_FORCING default True from the ModelSpec and are editable as
+    checkboxes in the Biogeochemistry (BGC / MARBL) advanced settings pane.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is True
+    assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is True
+    assert ("cppdefs", "nhy_forcing") in wiz.editor._widgets
+    assert ("cppdefs", "nox_forcing") in wiz.editor._widgets
+
+    wiz._overrides[("cppdefs", "nhy_forcing")] = False
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
+    assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is True  # untouched
+
+
+def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
+    """Flipping BGC mode to 'none' in the wizard must force NHY_FORCING/NOX_FORCING
+    off through the real compose -> override -> sync pipeline, not just at the
+    resolver. Strip every BGC signal from the bundled ForcingSpec's widgets first
+    (mirrors _PHYSICS_ONLY_FORCING in test_forge_blueprint.py) so bgc_mode="none"
+    doesn't raise.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    fe = wiz._forcing_editor
+    for cat in ("surface", "boundary"):
+        for ws in list(fe._rows[cat]):
+            if ws.get("type") is not None and ws["type"].value == "bgc":
+                fe._remove(cat, ws)
+    for ws in list(fe._rows["river"]):
+        if "include_bgc" in ws:
+            ws["include_bgc"].value = False
+    fe.ic_bgc_name.value = ""
+
+    wiz.bgc_dd.value = "none"
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
+    assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is False
+
+
 def test_bgc_dd_default_and_placement():
     """BGC mode defaults to 'marbl' and lives in the same Pieces row as Model."""
     wiz = ForgeBlueprintWizard()

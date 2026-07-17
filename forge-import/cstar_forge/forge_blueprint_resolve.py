@@ -302,7 +302,8 @@ def build_forge_blueprint(
     ``"marbl"`` is requested but the ModelSpec has no ``code.marbl`` repository).
     ``bgc_mode="none"`` raises if the resolved forcing selection still requests BGC
     forcing (a bgc-type surface/boundary item, an IC bgc_source, or a river with
-    ``include_bgc=True``).
+    ``include_bgc=True``); it also forces ``cppdefs.nhy_forcing``/``nox_forcing``
+    off regardless of the ModelSpec/advanced-settings default.
 
     ``cdr_forcing_yaml``, if given, takes precedence over ``cdr_forcing``: it is a
     path to (or the raw text of) a roms-tools ``CDRForcing.to_yaml(...)`` dump, read
@@ -377,6 +378,14 @@ def build_forge_blueprint(
     cppdefs["cdr_forcing"] = cdr_forcing is not None
     cppdefs["use_pio"] = bool(use_pio)
     cppdefs["marbl"] = bgc_mode == "marbl"
+    # nhy_forcing/nox_forcing default from the ModelSpec (advanced-settings editable)
+    # but are always forced off when BGC is disabled.
+    cppdefs["nhy_forcing"] = (
+        bool(cppdefs.get("nhy_forcing", True)) and bgc_mode != "none"
+    )
+    cppdefs["nox_forcing"] = (
+        bool(cppdefs.get("nox_forcing", True)) and bgc_mode != "none"
+    )
     surface_items = (inputs.get("forcing", {}) or {}).get("surface", []) or []
     cppdefs["co2_tvarying"] = any(
         (it.get("type") == "bgc")
@@ -390,13 +399,15 @@ def build_forge_blueprint(
         for it in surface_items
         if isinstance(it, dict)
     )
+    # TIDES tracks whether any tidal forcing item is actually being generated.
+    tidal_items = (inputs.get("forcing", {}) or {}).get("tidal", []) or []
+    cppdefs["tides"] = bool(tidal_items)
     settings["cppdefs"] = cppdefs
 
     # tidal forcing's ntides drives the run-time tides.ntides (else it's left at the
     # run-time-defaults placeholder, out of sync with the actual generated constituent
     # count -- see input_data._generate_tidal_forcing, which re-derives the same value
     # at generation time).
-    tidal_items = (inputs.get("forcing", {}) or {}).get("tidal", []) or []
     _ntides = next(
         (
             it.get("ntides")

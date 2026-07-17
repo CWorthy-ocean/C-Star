@@ -57,6 +57,10 @@ model_settings:
     cdr_forcing: false
     co2_tvarying: false  # Set to true when using time-varying CO2 atmospheric forcing (MBL_co2)
     use_pio: false  # Set to true to build ROMS against the ParallelIO (PIO) library
+    tides: true  # always overwritten by the resolver from whether tidal forcing is generated
+    sponge_tune: false  # advanced setting only (nested-domain pressure flux forcing); not resolver-derived
+    nhy_forcing: true  # ammonia atmospheric forcing; forced off by the resolver when bgc_mode="none"
+    nox_forcing: true  # nitrogen oxide atmospheric forcing; forced off by the resolver when bgc_mode="none"
 
   lateral_visc:
     visc2: 0.0  # m^2/sec

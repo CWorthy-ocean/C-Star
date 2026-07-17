@@ -574,13 +574,19 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # and the output/model "modified" tracking are all unaffected by the grouping.
 #
 # Sections deliberately absent (time_stepping, reference_date_settings, grid,
-# s_coord, param, title, output_root_name, initial, forcing, cppdefs) are filled
+# s_coord, param, title, output_root_name, initial, forcing) are filled
 # dynamically at resolve/run time (ntimes from the run duration, grid/IC/forcing
-# paths from generated files, cppdefs flags from the resolver) or edited by a
-# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, np_xi/np_eta,
-# reference date, PIO/open-boundary checkboxes). Their resolver-composed value
-# still flows through untouched -- omitting the pane only removes an editor that
-# would be clobbered or duplicated, never the value.
+# paths from generated files) or edited by a dedicated widget elsewhere in the
+# wizard (theta_s/theta_b/hc, dt, np_xi/np_eta, reference date, PIO/open-boundary
+# checkboxes). Their resolver-composed value still flows through untouched --
+# omitting the pane only removes an editor that would be clobbered or duplicated,
+# never the value.
+#
+# ``cppdefs`` is almost entirely resolver-derived (obc_*/marbl/use_pio/cdr_forcing/
+# co2_tvarying/sal_restore/tides) and stays out of the accordion for those fields --
+# only the handful with no other UI (``sponge_tune``, ``nhy_forcing``/``nox_forcing``)
+# are opted in, via ``_CPPDEFS_PANE_FIELDS``, so a user override can never collide
+# with a resolver-owned flag.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -599,6 +605,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "gamma2",
             "ubind",
             "lin_rho_eos",
+            "cppdefs",
         ),
     ),
     (
@@ -615,7 +622,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Biogeochemistry (BGC / MARBL)",
-        ("bgc", "marbl_bgc", "dic_alk_correction"),
+        ("bgc", "marbl_bgc", "dic_alk_correction", "cppdefs"),
     ),
     (
         "Carbon dioxide removal (CDR)",
@@ -643,6 +650,16 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+# cppdefs fields exposed per accordion pane -- everything else in cppdefs (obc_*/
+# marbl/use_pio/cdr_forcing/co2_tvarying/sal_restore/tides) is resolver-derived and
+# has no widget anywhere; leaving it out of both sets keeps it that way even if a
+# future pane adds "cppdefs" without remembering to scope it down.
+_CPPDEFS_PANE_FIELDS: dict[str, frozenset[str]] = {
+    "Physics & subgrid tuning": frozenset({"sponge_tune"}),
+    "Biogeochemistry (BGC / MARBL)": frozenset({"nhy_forcing", "nox_forcing"}),
+}
+
+
 def _split_fields(
     category_title: str, section: str
 ) -> tuple[frozenset | None, frozenset]:
@@ -651,8 +668,12 @@ def _split_fields(
     ``include=None`` means "all fields"; otherwise only those in ``include`` are
     shown. ``exclude`` is always dropped. Sections split across panes (``bgc`` /
     ``marbl_bgc`` via :data:`PARTIAL_OUTPUT_SECTIONS`) keep their output write-
-    controls under Output and the rest under their feature pane.
+    controls under Output and the rest under their feature pane. ``cppdefs`` is
+    split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
+    handful of compile-time flags it owns.
     """
+    if section == "cppdefs":
+        return _CPPDEFS_PANE_FIELDS.get(category_title, frozenset()), frozenset()
     parts = PARTIAL_OUTPUT_SECTIONS.get(section)
     if parts is None:
         return None, frozenset()

@@ -408,6 +408,40 @@ class TestCppdefsTemplate:
         assert "#define MARBL\n" not in text
         assert "#define MARBL_DIAGS" not in text
 
+    def test_tides_true_defines_tides(self, tmp_path):
+        text = self._render(tmp_path, {"tides": True})
+        assert "#define TIDES" in text
+        assert "#undef TIDES" not in text
+
+    def test_tides_false_undefs_tides(self, tmp_path):
+        text = self._render(tmp_path, {"tides": False})
+        assert "#undef TIDES" in text
+        assert "#define TIDES" not in text
+
+    def test_sponge_tune_true_defines_sponge_tune(self, tmp_path):
+        text = self._render(tmp_path, {"sponge_tune": True})
+        assert "#define SPONGE_TUNE" in text
+        assert "#undef SPONGE_TUNE" not in text
+
+    def test_sponge_tune_false_undefs_sponge_tune(self, tmp_path):
+        text = self._render(tmp_path, {"sponge_tune": False})
+        assert "#undef SPONGE_TUNE" in text
+        assert "#define SPONGE_TUNE" not in text
+
+    def test_nhy_nox_forcing_true_defines_both(self, tmp_path):
+        text = self._render(tmp_path, {"nhy_forcing": True, "nox_forcing": True})
+        assert "#define NHY_FORCING" in text
+        assert "#define NOX_FORCING" in text
+        assert "#undef NHY_FORCING" not in text
+        assert "#undef NOX_FORCING" not in text
+
+    def test_nhy_nox_forcing_false_undefs_both(self, tmp_path):
+        text = self._render(tmp_path, {"nhy_forcing": False, "nox_forcing": False})
+        assert "#undef NHY_FORCING" in text
+        assert "#undef NOX_FORCING" in text
+        assert "#define NHY_FORCING" not in text
+        assert "#define NOX_FORCING" not in text
+
 
 class TestROMSTemplateRenderer:
     """Tests for ROMSTemplateRenderer class."""

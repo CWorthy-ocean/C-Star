@@ -63,11 +63,15 @@
     "cdr_forcing": false,
     "co2_tvarying": true,
     "marbl": true,
+    "nhy_forcing": true,
+    "nox_forcing": true,
     "obc_east": true,
     "obc_north": true,
     "obc_south": false,
     "obc_west": false,
     "sal_restore": true,
+    "sponge_tune": false,
+    "tides": true,
     "use_pio": false
   },
   "diagnostics": {

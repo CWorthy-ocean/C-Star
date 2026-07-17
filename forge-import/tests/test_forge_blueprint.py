@@ -765,6 +765,40 @@ def test_resolver_bgc_mode_none_with_physics_only_forcing():
     assert cfg.code.marbl is None
 
 
+def test_cppdefs_tides_tracks_tidal_forcing_presence():
+    """TIDES is derived purely from whether a tidal item is being generated -- the
+    bundled glorys-era5-unified ForcingSpec carries one (ntides=15), so it defaults
+    True; stripping tidal items out flips it False.
+    """
+    cfg = _build()
+    assert cfg.model_settings["cppdefs"]["tides"] is True
+
+    cfg_no_tides = _build(forcing_inputs=_PHYSICS_ONLY_FORCING)
+    assert cfg_no_tides.model_settings["cppdefs"]["tides"] is False
+
+
+def test_cppdefs_sponge_tune_defaults_false_and_is_overridable():
+    """SPONGE_TUNE has no per-run resolver kwarg -- it's a plain ModelSpec default
+    (False) only reachable via compile_time_overrides (the wizard's advanced
+    settings accordion).
+    """
+    cfg = _build()
+    assert cfg.model_settings["cppdefs"]["sponge_tune"] is False
+
+    cfg_on = _build(compile_time_overrides={"cppdefs": {"sponge_tune": True}})
+    assert cfg_on.model_settings["cppdefs"]["sponge_tune"] is True
+
+
+def test_cppdefs_nhy_nox_forcing_default_true_and_off_when_bgc_mode_none():
+    cfg = _build()
+    assert cfg.model_settings["cppdefs"]["nhy_forcing"] is True
+    assert cfg.model_settings["cppdefs"]["nox_forcing"] is True
+
+    cfg_none = _build(bgc_mode="none", forcing_inputs=_PHYSICS_ONLY_FORCING)
+    assert cfg_none.model_settings["cppdefs"]["nhy_forcing"] is False
+    assert cfg_none.model_settings["cppdefs"]["nox_forcing"] is False
+
+
 def test_resolver_bgc_mode_marbl_requires_model_yml_pin():
     from cstar_forge.forge.forge_blueprint import CodeRepo
     from cstar_forge.forge_blueprint_resolve import _build_code
@@ -1033,6 +1067,9 @@ class TestForgeBlueprintWizard:
         } <= sections
         # Dynamic / dedicated-widget sections are dropped from the accordion (their
         # resolver-composed value still flows through -- see the exclusion test).
+        # ``cppdefs`` is the one partial exception: sponge_tune/nhy_forcing/
+        # nox_forcing are accordion-editable (see test_advanced_editor_excludes_
+        # dedicated_widget_fields for the resolver-derived fields that still aren't).
         assert not (
             {
                 "time_stepping",
@@ -1040,7 +1077,6 @@ class TestForgeBlueprintWizard:
                 "grid",
                 "s_coord",
                 "param",
-                "cppdefs",
                 "forcing",
             }
             & sections
@@ -1065,10 +1101,30 @@ class TestForgeBlueprintWizard:
         settings accordion -- but their resolved value still flows through.
         """
         w = self._wizard()
-        # The whole cppdefs/param/time_stepping/grid group is dropped from the
-        # accordion (resolver-derived or edited by a dedicated widget).
-        for dropped in ("cppdefs", "param", "time_stepping", "grid", "s_coord"):
+        # The whole param/time_stepping/grid group is dropped from the accordion
+        # (resolver-derived or edited by a dedicated widget).
+        for dropped in ("param", "time_stepping", "grid", "s_coord"):
             assert dropped not in w.editor._section_fields
+
+        # cppdefs is only PARTIALLY dropped: sponge_tune/nhy_forcing/nox_forcing (no
+        # other UI) are accordion-editable; every resolver-derived flag still has no
+        # widget at all, matching the dedicated-widget/derivation fields above.
+        for resolver_owned in (
+            "obc_west",
+            "obc_east",
+            "obc_north",
+            "obc_south",
+            "marbl",
+            "use_pio",
+            "cdr_forcing",
+            "co2_tvarying",
+            "sal_restore",
+            "tides",
+        ):
+            assert ("cppdefs", resolver_owned) not in w.editor._widgets
+        assert ("cppdefs", "sponge_tune") in w.editor._widgets
+        assert ("cppdefs", "nhy_forcing") in w.editor._widgets
+        assert ("cppdefs", "nox_forcing") in w.editor._widgets
 
         # No widget for these fields, but the resolver-composed value still lands
         # in the final config -- dropping the editor can't drop/reset the value.

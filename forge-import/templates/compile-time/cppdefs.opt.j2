@@ -29,7 +29,9 @@
 
 ! Apply tidal forcing
 ! Usage notes: None
-#define TIDES
+{% if cppdefs.tides %}#define TIDES
+{% else %}#undef TIDES
+{% endif %}
 
 ! Use advection in horizontal momentum equations
 ! Usage notes: None
@@ -260,7 +262,9 @@
 
 ! Add baroclinic pressure fluxes at open boundaries
 ! Usage notes: Used in the child domain during downscaling of nested simulations. Requires pressure fluxes to be saved in the parent simulation. Use is optional.
-#undef SPONGE_TUNE
+{% if cppdefs.sponge_tune %}#define SPONGE_TUNE
+{% else %}#undef SPONGE_TUNE
+{% endif %}
 
 
 !!!!!!!!!!!!!!!!!!!!!!!!! MIXING OPTIONS !!!!!!!!!!!!!!!!!!!!!!!!!
@@ -348,11 +352,15 @@
 
 ! Use ammonia atmospheric forcing
 ! Usage notes: None
-#define NHY_FORCING
+{% if cppdefs.nhy_forcing %}#define NHY_FORCING
+{% else %}#undef NHY_FORCING
+{% endif %}
 
 ! Use nitrogen oxide atmospheric forcing
 ! Usage notes: None
-#define NOX_FORCING
+{% if cppdefs.nox_forcing %}#define NOX_FORCING
+{% else %}#undef NOX_FORCING
+{% endif %}
 
 ! Use atmospheric forcing for CO2
 ! Usage notes: None
