@@ -64,7 +64,7 @@ from cstar.roms.input_dataset import (
 )
 from cstar.roms.namelist import RomsNamelist
 from cstar.simulation import Simulation
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 if TYPE_CHECKING:
     from cstar.base.external_codebase import ExternalCodeBase
@@ -1447,6 +1447,8 @@ class ROMSSimulation(Simulation):
         if is_feature_enabled(ENV_FF_DEBUG_BUILD_MODE):
             mode_clause = "BUILD_MODE=debug "
 
+        cstar_sysmgr = get_sysmgr()
+
         _run_cmd(
             f"make {mode_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
@@ -1611,6 +1613,8 @@ class ROMSSimulation(Simulation):
         self.fs_manager.run_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
         self.fs_manager.output_dir.mkdir(parents=True, exist_ok=True)
+
+        cstar_sysmgr = get_sysmgr()
 
         if (queue_name is None) and (cstar_sysmgr.scheduler is not None):
             queue_name = cstar_sysmgr.scheduler.primary_queue_name

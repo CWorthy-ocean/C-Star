@@ -6,7 +6,7 @@ import unittest.mock as mock
 import pytest
 
 from cstar.roms.external_codebase import ROMSExternalCodeBase
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 
 class TestROMSExternalCodeBaseInit:
@@ -79,6 +79,8 @@ class TestROMSExternalCodeBaseConfigure:
             # Assertions:
             ## Check environment variables
             assert os.environ[recb.root_env_var] == str(recb.working_copy.path)
+
+        cstar_sysmgr = get_sysmgr()
 
         mock_run_cmd.assert_any_call(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",

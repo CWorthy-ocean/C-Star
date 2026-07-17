@@ -6,7 +6,7 @@ import unittest.mock as mock
 import pytest
 
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 
 class TestMARBLExternalCodeBaseInit:
@@ -76,6 +76,8 @@ class TestMARBLExternalCodeBaseConfigure:
         ## Check that environment was updated correctly
         actual_value = os.getenv(mecb.root_env_var)
         assert actual_value == str(mecb.working_copy.path)
+
+        cstar_sysmgr = get_sysmgr()
 
         mock_run_cmd.assert_called_once_with(
             f"make {cstar_sysmgr.environment.compiler} USEMPI=TRUE",

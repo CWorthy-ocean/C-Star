@@ -30,7 +30,7 @@ from cstar.roms.input_dataset import (
 from cstar.roms.namelist import RomsNamelist
 from cstar.roms.simulation import ROMSSimulation
 from cstar.system.environment import CStarEnvironment
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 # A complete, forge-produced runtime namelist used to back the
 # roms_runtime_settings tests (RomsNamelist is a strict 40-group schema).
@@ -1325,6 +1325,7 @@ class TestProcessingAndExecution:
             capture_output=True,
             text=True,
         )
+        cstar_sysmgr = get_sysmgr()
         mock_subprocess.assert_any_call(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
@@ -1473,7 +1474,7 @@ class TestProcessingAndExecution:
                 sim.build()
 
         assert mock_subprocess.call_count == 1
-
+        cstar_sysmgr = get_sysmgr()
         mock_subprocess.assert_any_call(
             f"make COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
@@ -1622,6 +1623,7 @@ class TestProcessingAndExecution:
             execution_handler = sim.run()
 
             # Check LocalProcess was instantiated correctly
+            cstar_sysmgr = get_sysmgr()
             mock_local_process.assert_called_once_with(
                 commands=f"{cstar_sysmgr.environment.mpi_exec_prefix} -n {sim.discretization.n_procs_tot} ./roms cstar_generated_roms.nml",
                 run_path=sim.fs_manager.run_dir,

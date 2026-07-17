@@ -4,7 +4,7 @@ from pathlib import Path
 from cstar.base.log import LoggingMixin
 from cstar.io.source_data import SourceData
 from cstar.io.staged_data import StagedRepository
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 
 class ExternalCodeBase(ABC, LoggingMixin):
@@ -53,6 +53,8 @@ class ExternalCodeBase(ABC, LoggingMixin):
         ExternalCodeBase
             An initialized ExternalCodeBase object
         """
+        cstar_sysmgr = get_sysmgr()
+
         if not source_repo:
             source_repo = self._default_source_repo
         if not checkout_target:
@@ -153,6 +155,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
             return
 
         if not target_dir:
+            cstar_sysmgr = get_sysmgr()
             target_dir = Path(
                 cstar_sysmgr.environment.package_root
                 / f"externals/{self.source.basename.replace('.git', '')}"

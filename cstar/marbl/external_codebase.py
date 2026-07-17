@@ -3,7 +3,7 @@ from pathlib import Path
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 
 class MARBLExternalCodeBase(ExternalCodeBase):
@@ -36,6 +36,8 @@ class MARBLExternalCodeBase(ExternalCodeBase):
 
         This method compiles MARBL and adds necessary  variables to the environment.
         """
+        cstar_sysmgr = get_sysmgr()
+
         assert self.working_copy is not None  # Has been verified by `configure()``
         marbl_root = self.working_copy.path
         # Set env var:
@@ -60,6 +62,8 @@ class MARBLExternalCodeBase(ExternalCodeBase):
         - The repository has not changed from that described by `source`.
         - MARBL's `lib` and `inc` dirs exist and are populated
         """
+        cstar_sysmgr = get_sysmgr()
+
         # Check MARBL_ROOT env var is set:
         marbl_root = cstar_sysmgr.environment.environment_variables.get(
             self.root_env_var
