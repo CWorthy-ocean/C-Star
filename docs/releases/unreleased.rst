@@ -39,6 +39,7 @@ Improvements
 - add a class-level `key` function to return the target configuration key (`#583 <https://github.com/CWorthy-ocean/C-Star/pull/583>`_)
 - rename `ContinuanceTransform` to `ContinuanceDirective` (`#583 <https://github.com/CWorthy-ocean/C-Star/pull/583>`_)
 - rename `NestingTransform` to `NestingDirective` (`#583 <https://github.com/CWorthy-ocean/C-Star/pull/583>`_)
+- Rely on `threading.Event` alone during service shutdown to avoid inconsistent behavior / service hangs. (`#592 <https://github.com/CWorthy-ocean/C-Star/pull/592>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
