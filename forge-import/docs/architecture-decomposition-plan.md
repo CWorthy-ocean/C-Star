@@ -1,7 +1,8 @@
 # Decomposition plan: `CstarSpecBuilder` → the forge application (ForgeBlueprint-native executor)
 
-**Status:** proposal. Sequencing decided: **Option A (decompose first)** — invitees will
-touch engine internals. Not started.
+**Status:** DONE — this decomposition has been executed and merged into `refactor`.
+Kept as a historical record of the plan; for the current architecture see
+`docs/developer-guide.md`.
 
 ## Terminology (read first — the target model)
 

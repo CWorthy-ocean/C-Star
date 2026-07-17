@@ -1,4 +1,4 @@
-# Developer Guide (current state, 2026-07-09, branch `refactor`)
+# Developer Guide (current state, 2026-07-17, branch `refactor`)
 
 This supersedes the mental model in `docs/overview.md` / `docs/CStarSpecBuilder-overview.md`
 / `docs/machine-config.md` / `docs/forge-blueprint-inventory.md`, which describe the
@@ -7,15 +7,16 @@ pre-refactor `_core.py` / `CstarSpecBuilder` design. Those files are stale (see
 
 ## 1. The big picture
 
-Forge is splitting into two layers along a hard boundary, in preparation for moving
+Forge is split into two layers along a hard boundary, in preparation for moving
 the execution half into C-Star as an "application":
 
 - **Authoring** (stays in this repo): the catalog of reusable pieces (Model/Domain/
-  Forcing/Output specs), a Phase-1 **resolver** that assembles them into a single
-  reviewable file, and a wizard UI.
+  Forcing/Output specs), a **resolver** that assembles them into a single
+  reviewable file, and a **wizard** UI.
 - **Execution** (`cstar_forge/forge/`, target: relocates into C-Star wholesale):
-  a Phase-2 **engine** that turns that file into ROMS-MARBL input NetCDFs, a
-  namelist, and a downstream blueprint. It never touches the catalog.
+  an **engine** that turns that file into ROMS-MARBL input NetCDFs, a
+  namelist, and a downstream blueprint, plus the **executor** that does the actual
+  work. Execution never touches the catalog.
 
 The file that crosses the boundary is `ForgeBlueprint` — **the forge application's own
 blueprint**. Terminology trap to avoid: C-Star also has an existing, unrelated
@@ -26,7 +27,7 @@ downstream artifact, not forge's own input.
 ```
  catalog pieces ─┐
  (Model/Domain/  ├─► build_forge_blueprint() ─► ForgeBlueprint ─► process_forge_blueprint(cfg, host)
-  Forcing/Output)│      (Phase 1, resolver)   (.yml,          (Phase 2, engine)
+  Forcing/Output)│         (resolver)         (.yml,               (engine → executor)
                  │                             portable)           │
  wizard UI ──────┘                                                 ▼
                                                      input NetCDFs, namelist.nml,
@@ -34,9 +35,10 @@ downstream artifact, not forge's own input.
 ```
 
 `CstarSpecBuilder`/`CstarSpecEngine`/`_core.py` **no longer exist** — fully deleted
-and replaced by the above. `git log` for that deletion: the branch carries ~20
-commits of decomposition work (see `docs/architecture-decomposition-plan.md` and
-`docs/executor-portability-plan.md`, which record the actual decisions made).
+and replaced by the above. The `docs/architecture-decomposition-plan.md` and
+`docs/executor-portability-plan.md` planning docs record the history of how that
+decomposition was carried out and are kept as historical reference; this guide is
+the current-state description.
 
 ## 2. Directory map
 
@@ -47,7 +49,7 @@ cstar_forge/
                                ForcingSpec,OutputSpec,Machines,blueprints}, exposes
                                *_data()/*_path() accessors + blueprintDF()
   domain_catalog_sketch.py    dead prototype, unreferenced anywhere — candidate for deletion
-  forge_blueprint_resolve.py      Phase-1 resolver: build_forge_blueprint(...)
+  forge_blueprint_resolve.py      resolver: build_forge_blueprint(...)
   forge_blueprint_wizard.py       ForgeBlueprintWizard (ipywidgets UI), thin shell over the resolver
   models.py                   Pydantic wrappers for model.yml (ModelSpec, ModelCode,
                                ModelTemplates, load_models_yaml); imports its forcing/IC/
@@ -113,7 +115,7 @@ repo refs) · `composition` (which catalog pieces produced this + overrides laye
 
 ## 4. The call chain end to end
 
-**Authoring (Phase 1):**
+**Authoring (catalog → resolver/wizard → blueprint):**
 1. `wiz = ForgeBlueprintWizard()` (forge_blueprint_wizard.py) — scans the catalog via
    `domain_catalog.default_catalog`, populates dropdowns.
 2. User picks a domain → `_on_domain()` prefills grid/boundaries/partitioning/dates from
@@ -126,7 +128,7 @@ repo refs) · `composition` (which catalog pieces produced this + overrides laye
    `v_sponge`, etc.), returns a `ForgeBlueprint`.
 4. `wiz.config.to_yaml(path)` writes the portable `forge_blueprint.yml`.
 
-**Execution (Phase 2), same machine or a different one:**
+**Execution (blueprint → engine → executor), same machine or a different one:**
 5. `python -m cstar_forge.run forge_blueprint.yml` (run.py) — resolves the host via
    `cstar_forge.config.resolve_host()` (machine tag, `source_data_cache`,
    `working_dir` override).
@@ -148,7 +150,7 @@ item 1) — `forge/settings.py`/`forge/forge_blueprint_engine.py` import
 as same-package siblings now, not top-level reach-ups. Both modules are also now in the
 boundary guard's `_FORGE_APP_MODULES` list.
 
-## 5. `models.py` vs `forge/forge_blueprint.py` (Phase D — done)
+## 5. `models.py` vs `forge/forge_blueprint.py` (item-model unification — done)
 
 Earlier project memory described two parallel item-model schemas kept in sync by a
 "lockstep drift guard" test. **That has been resolved**: `models.py` now imports its
@@ -227,9 +229,10 @@ Ranked roughly by what's worth doing next:
    stale ones — not load-tested by anything, low urgency.
 9. **`domain_catalog_sketch.py`** (167 lines) — dead prototype, zero references anywhere
    (code, tests, notebooks, docs). Safe to delete.
-10. **Architecture doc headers understate progress.** `docs/architecture-decomposition-plan.md`
-    still says "Status: proposal… Not started" — Phases 0/B/C/D described in that doc are
-    actually complete. Worth a status update so a new reader isn't misled.
+10. ~~Architecture doc headers understated progress.~~ **DONE (2026-07-17):**
+    `docs/architecture-decomposition-plan.md` and `docs/executor-portability-plan.md` had
+    stale "proposal"/"executing" status headers even though the decomposition they describe
+    is complete (see this guide for current state) — both status lines now point here.
 
 **Good news / already resolved that older memory implied was still open:**
 - A **settings-level** golden test exists: `test_golden_model_settings_test_tiny`

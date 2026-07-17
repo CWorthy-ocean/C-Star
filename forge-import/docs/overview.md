@@ -33,7 +33,7 @@ The tool produces **ROMS-MARBL blueprint** YAML files that capture the complete 
 ```
 cstar-forge/
 ├── cstar_forge/                 # Main package directory
-│   ├── forge_blueprint_resolve.py  # Phase-1 resolver: build_forge_blueprint(...)
+│   ├── forge_blueprint_resolve.py  # resolver: build_forge_blueprint(...)
 │   ├── forge_blueprint_wizard.py   # ForgeBlueprintWizard (ipywidgets UI)
 │   ├── models.py               # Model specification classes (ModelSpec, etc.)
 │   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors

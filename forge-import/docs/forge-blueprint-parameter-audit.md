@@ -13,16 +13,16 @@ Per the developer guide (`docs/developer-guide.md`), a value's life cycle is:
  ModelSpec + DomainSpec + ForcingSpec + OutputSpec   (catalog pieces, hand-edits)
               │  wizard UI (ForgeBlueprintWizard)
               ▼
-      build_forge_blueprint()            Phase 1 — forge_blueprint_resolve.py
+      build_forge_blueprint()            resolver — forge_blueprint_resolve.py
               │
               ▼
        ForgeBlueprint (.yml)             the reviewable, portable file
               │
               ▼
-   ForgeExecutor.generate_inputs()        Phase 2a — input_data.py (roms-tools calls)
+   ForgeExecutor.generate_inputs()        executor (generate) — input_data.py (roms-tools calls)
               │
               ▼
-   ForgeExecutor.configure_build()        Phase 2b — overlays cfg.model_settings,
+   ForgeExecutor.configure_build()        executor (configure) — overlays cfg.model_settings,
               │                            renders cppdefs.opt + namelist.nml
               ▼
    cppdefs.opt · namelist.nml · NetCDFs · roms_marbl blueprint (B_*.yml)
@@ -41,20 +41,21 @@ Each table below covers one section of `ForgeBlueprint`. Columns:
 3. **Executor destination** — the roms-tools class, `cppdefs.opt`, `namelist.nml`
    group, or "not consumed" it feeds at processing time.
 4. **Overridden?** — using this legend:
-   - **(R)** resolver (`build_forge_blueprint`, Phase 1) force-derives/overwrites the
+   - **(R)** resolver (`build_forge_blueprint`) force-derives/overwrites the
      ModelSpec value regardless of what's in `model.yml`
-   - **(O)** OutputSpec deep-merges over the ModelSpec default (Phase 1, before overrides)
+   - **(O)** OutputSpec deep-merges over the ModelSpec default (resolve time, before overrides)
    - **(W)** a `run_time_overrides`/`compile_time_overrides` layer (wizard manual edit,
-     applied last in Phase 1 — wins over R and O)
-   - **(G)** `input_data.py` (Phase 2a, `generate_inputs`) re-derives the value from the
-     *live* roms-tools object, independent of what Phase 1 stored
-   - **(E)** `ForgeExecutor.configure_build` (Phase 2b) overlays the *stored*
-     `ForgeBlueprint.model_settings` back on top of whatever Phase 2a just derived, via a
+     applied last at resolve time — wins over R and O)
+   - **(G)** `input_data.py` (`generate_inputs`, the executor's generate step) re-derives
+     the value from the *live* roms-tools object, independent of what the resolver stored
+   - **(E)** `ForgeExecutor.configure_build` (the executor's configure step) overlays the
+     *stored* `ForgeBlueprint.model_settings` back on top of whatever `generate_inputs`
+     just derived, via a
      **per-leaf-key deep merge** (`_deep_merge_settings_dict`, executor.py:126): for any
      section present in `model_settings`, every leaf key the resolver set wins over
-     whatever `generate_inputs` just computed live — usually harmless, since Phase 1 and
-     Phase 2a typically compute the identical value from the identical domain description
-     (e.g. `param.llm`). The exception is the handful of leaf keys that are only ever
+     whatever `generate_inputs` just computed live — usually harmless, since the resolver
+     and `generate_inputs` typically compute the identical value from the identical domain
+     description (e.g. `param.llm`). The exception is the handful of leaf keys that are only ever
      meaningfully known post-generation (`river_frc.*`, `cdr_frc.{cdr_source,cdr_file,
      ncdr_parm,forcing_parameterized,cdr_volume}`, `cdr_output.do_cdr`,
      `tides.{ntides,bry_tides,pot_tides,ana_tides}`): `split_model_settings`
@@ -191,7 +192,7 @@ One row per section — individual fields diverge only where noted.
 These are exactly the sections in `forge_blueprint_resolve.OUTPUT_SECTIONS`, plus the
 partial sections in `PARTIAL_OUTPUT_SECTIONS` (`marbl_bgc`'s two write-lists, and — as
 of 2026-07-16 — `bgc`'s 12 output-write-control fields) — deep-merged over the
-ModelSpec defaults at Phase 1 (`_deep_merge(settings, output_settings)`,
+ModelSpec defaults at resolve time (`_deep_merge(settings, output_settings)`,
 forge_blueprint_resolve.py ~L358), **before** `run_time_overrides`/`compile_time_overrides`
 are applied (so a wizard hand-edit still wins over the OutputSpec selection).
 
@@ -419,7 +420,7 @@ cannot know the true generation-time answer at all (`river_frc`, `cdr_frc`,
 **Verified empirically, in two parts, before fixing (not just read):**
 
 1. **The load-bearing precondition** — that a *real*, river-configured domain actually
-   produced a stored placeholder — was checked by running Phase 1 only (no network, no
+   produced a stored placeholder — was checked by running the resolver only (no network, no
    grid build: `build_forge_blueprint(dt=60.0, ...)`) on the real catalog inputs
    (`DomainSpec/ccs-12km` + `ForcingSpec/glorys-era5-unified`, whose `forcing.river` has
    a real configured `DAI` river item). Result: `cfg.forcing.river` was non-empty while

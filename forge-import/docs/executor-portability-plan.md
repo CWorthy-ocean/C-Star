@@ -1,10 +1,11 @@
 # Executor portability plan — make the forge application fully relocatable
 
-**Status:** decided; executing. Follows the decomposition (Phases 0/B/C/D + host seam,
-allowlist 5→0). This closes the last coupling: `ForgeExecutor` still reads
-`cstar_forge.config` and the authoring `DomainCatalog`/`ModelSpec`. Goal: the executor
+**Status:** DONE — this portability work has been executed; `ForgeExecutor` now reads
+only the `ForgeBlueprint` + an injected `HostPaths`, and `tests/test_forge_app_boundary.py`
+enforces it with an empty violation allowlist. Kept as a historical record of the plan;
+for the current architecture see `docs/developer-guide.md`. (Original goal: the executor
 reads **only** the `ForgeBlueprint` + an injected runtime location, so the entire
-`cstar_forge/forge/` package relocates into C-Star untouched.
+`cstar_forge/forge/` package relocates into C-Star untouched.)
 
 ## Governing principle (from the design discussion)
 
