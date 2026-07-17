@@ -103,12 +103,12 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     mock_exec.assert_called_once()
 
 
+@pytest.mark.usefixtures("prefect_server_url")
 def test_workplan_run_variable_unknown(
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
     default_blueprint_path: str,
-    prefect_server_url: str,
 ) -> None:
     """Verify that attempting to run a workplan with runtime variables that are
     not declared by the workplan results in a failure.
