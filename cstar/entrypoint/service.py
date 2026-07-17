@@ -331,7 +331,7 @@ class Service(ABC, LoggingMixin):
 
         This method is called when the service has been cancelled via a term signal.
         """
-        self.log.info("Shutting down service.")
+        self.log.info("Performing service cancellation.")
         self._shutdown()
 
     async def execute(self) -> None:
