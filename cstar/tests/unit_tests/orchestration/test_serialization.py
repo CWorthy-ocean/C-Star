@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
-from cstar.applications.plotter_app import PlotterBlueprint
+from cstar.applications.plotter import PlotterBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.serialization import (

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from cstar.applications.core import RunnerRequest
-from cstar.applications.hello_world_app import (
+from cstar.applications.hello_world import (
     HelloWorldBlueprint,
     HelloWorldRunner,
 )

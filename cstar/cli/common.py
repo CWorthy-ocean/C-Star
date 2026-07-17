@@ -1,5 +1,4 @@
 import functools
-import importlib
 import os
 import typing as t
 from collections.abc import Callable
@@ -178,29 +177,6 @@ def path_callback(value: str | None) -> str | None:
     if value and not is_remote_resource(value):
         return Path(value).expanduser().resolve().as_posix()
     return value
-
-
-def locate_app_modules() -> list[str]:
-    """Return a list of absolute import strings where the module matches the
-    application module naming standard of ending with `app.py`
-    (e.g. cstar/applications/hello_app.py).
-
-    Returns
-    -------
-    str
-        The absolute import path, e.g. `cstar.applications.hello_app`
-    """
-    root = Path(__file__).parent.parent  # <path>/cstar
-    location = root / "applications"
-    apps = [
-        f.relative_to(root.parent) for f in location.rglob("*app.py") if f.is_file()
-    ]
-    return [str(f.with_suffix("")).replace("/", ".") for f in apps]
-
-
-def autoimport_apps(module_names: list[str]) -> None:
-    for module_name in module_names:
-        importlib.import_module(module_name)
 
 
 class PersistedMigrateResult(t.NamedTuple):

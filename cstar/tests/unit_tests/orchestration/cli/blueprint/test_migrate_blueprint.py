@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from cstar.applications.hello_world_app import HelloWorldSchemaAdapterV1V1
-from cstar.applications.plotter_app import APP_NAME as APP_PLOTTER
-from cstar.applications.plotter_app import PlotterSchemaAdapterV1V2
+from cstar.applications.hello_world import HelloWorldSchemaAdapterV1V1
+from cstar.applications.plotter import APP_NAME as APP_PLOTTER
+from cstar.applications.plotter import PlotterSchemaAdapterV1V2
 from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
 from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
 from cstar.base.env import ENV_CSTAR_STATE_HOME
