@@ -81,7 +81,7 @@ def main(argv: list | None = None) -> int:
         use_dask=not args.no_dask,
     )
     if not args.no_configure:
-        print(f"\nBuild blueprint: {executor.path_roms_marbl_blueprint(stage='build')}")
+        print(f"\nBlueprint: {executor.path_roms_marbl_blueprint()}")
         print("Run it with:  cstar blueprint run <path>")
     return 0
 

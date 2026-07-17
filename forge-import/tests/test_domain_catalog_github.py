@@ -31,8 +31,8 @@ NOTE: These tests are currently commented out pending GitHub token setup.
 #
 # @pytest.fixture(scope="module")
 # def roms_marbl_blueprint_df(github_catalog):
-#     """Cached roms_marbl_blueprint_df(stage=None) — avoids repeated GitHub fetches."""
-#     return github_catalog.roms_marbl_blueprint_df(stage=None)
+#     """Cached roms_marbl_blueprint_df() — avoids repeated GitHub fetches."""
+#     return github_catalog.roms_marbl_blueprint_df()
 #
 #
 # class TestGitHubCatalogInit:
@@ -61,7 +61,7 @@ NOTE: These tests are currently commented out pending GitHub token setup.
 #         assert not roms_marbl_blueprint_df.empty
 #
 #     def test_expected_columns(self, roms_marbl_blueprint_df):
-#         for col in ("model_name", "grid_name", "blueprint_name", "stage",
+#         for col in ("model_name", "grid_name", "blueprint_name",
 #                     "blueprint_path", "grid_yaml_path"):
 #             assert col in roms_marbl_blueprint_df.columns, f"Missing column: {col}"
 #

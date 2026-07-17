@@ -245,20 +245,24 @@ longer flips to `origin="custom"`).
 
 ---
 
-## 8. Downstream `roms_marbl` blueprint stages — which fields land where
+## 8. Downstream `roms_marbl` blueprint — which fields land where
 
-The emitted downstream blueprint (`B_{name}_{stage}.yml`, a *different* blueprint from
-`ForgeBlueprint` — see `docs/developer-guide.md` terminology note) is written by
-`ForgeExecutor.persist()` (executor.py:638-714) at each of 4 stages, alongside a
-`settings_B_{name}_{stage}.yml` sidecar holding the full `_settings_compile_time`/
-`_settings_run_time` dicts:
+**Update (2026-07-16): the "stages" concept has been removed.** The executor no
+longer models PRECONFIG/POSTCONFIG/BUILD/RUN as a persisted state machine —
+`generate_inputs`/`configure_build` mutate an in-memory `RomsMarblBlueprint`
+(a *different* blueprint from `ForgeBlueprint` — see `docs/developer-guide.md`
+terminology note), and `ForgeExecutor.persist()` writes it to disk exactly
+once, at the end of `configure_build()`, as a single `B_{name}.yml` (+
+`settings_B_{name}.yml` sidecar holding `_settings_compile_time`/
+`_settings_run_time`). The table below now describes build *steps*, not
+stored/persisted stages — only the last row's output is ever written to disk.
 
-| Stage | Method | Fields populated |
+| Step | Method | Fields populated |
 |---|---|---|
-| **PRECONFIG** | `_initialize_roms_marbl_blueprint` (1066-1121) | `name`, `description`, `valid_start_date`/`end_date`, `partitioning`, `code` (roms/marbl/pio repos + placeholder run_time/compile_time locations), placeholder `grid`/`initial_conditions`/`forcing`, `cdr_forcing=None`; `model_params=None`, `runtime_params=None` |
-| **POSTCONFIG** | `generate_inputs` (1504-1540) | `grid`, `initial_conditions`, `forcing`, `cdr_forcing`, `nesting_info` populated with real file `Resource` locations; `model_params`/`runtime_params` still `None` (settings live only in the sidecar at this point) |
-| **BUILD** | `configure_build` (1915-1950) | `code.compile_time`/`code.run_time` replaced with rendered file locations; `model_params={"time_step": dt, "use_pio": True (iff enabled)}`; `runtime_params={start_date,end_date,output_dir=run_output_dir}`; `working_dir=run_output_dir` |
-| **RUN** | `run()` (2027-2049) | no new blueprint fields — calls `prep_cstar_environment()`, drives `RomsMarblRunner`, re-persists with a `_{datestr}` filename suffix |
+| **Initialize** | `_initialize_roms_marbl_blueprint` | `name`, `description`, `valid_start_date`/`end_date`, `partitioning`, `code` (roms/marbl/pio repos + placeholder run_time/compile_time locations), placeholder `grid`/`initial_conditions`/`forcing`, `cdr_forcing=None`; `model_params=None`, `runtime_params=None`. In-memory only. |
+| **Generate inputs** | `generate_inputs` | `grid`, `initial_conditions`, `forcing`, `cdr_forcing`, `nesting_info` populated with real file `Resource` locations; `model_params`/`runtime_params` still `None` (settings live only in the in-memory settings dicts at this point). In-memory only. |
+| **Configure build** | `configure_build` | `code.compile_time`/`code.run_time` replaced with rendered file locations; `model_params={"time_step": dt, "use_pio": True (iff enabled)}`; `runtime_params={start_date,end_date,output_dir=run_output_dir}`; `working_dir=run_output_dir`. **Persists `B_{name}.yml` + sidecar — the only write.** |
+| **Run** | `run()` | no new blueprint fields — calls `prep_cstar_environment()`, hands `B_{name}.yml`'s path to `RomsMarblRunner`; does not re-persist |
 
 ---
 

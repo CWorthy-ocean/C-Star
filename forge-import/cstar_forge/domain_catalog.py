@@ -610,7 +610,7 @@ class DomainCatalog:
         Returns
         -------
         Path
-            Path to the blueprint's directory (contains B_*.yml stage files).
+            Path to the blueprint's directory (contains B_*.yml).
         """
         if isinstance(roms_marbl_blueprint_id, str):
             return self.roms_marbl_blueprint_path(roms_marbl_blueprint_id)
@@ -797,25 +797,15 @@ class DomainCatalog:
     # Blueprint DataFrame methods (merged from BlueprintCatalog)
     # ------------------------------------------------------------------
 
-    def _find_roms_marbl_blueprint_stage_files(
-        self, stage: str | None = None
-    ) -> list[Path]:
+    def _find_roms_marbl_blueprint_files(self) -> list[Path]:
         """Find B_*.yml files across all known blueprint directories."""
-        pattern = f"B_*_{stage}.yml" if stage else "B_*.yml"
         files: list[Path] = []
         for bp_dir in self._roms_marbl_blueprints.values():
             files.extend(
                 f
-                for f in self._fs_glob(bp_dir, pattern)
+                for f in self._fs_glob(bp_dir, "B_*.yml")
                 if ".ipynb_checkpoints" not in str(f)
             )
-        if not stage or stage == "run":
-            for bp_dir in self._roms_marbl_blueprints.values():
-                files.extend(
-                    f
-                    for f in self._fs_glob(bp_dir, "B_*_run_*.yml")
-                    if ".ipynb_checkpoints" not in str(f)
-                )
         return sorted(set(files))
 
     def _load_roms_marbl_blueprint_yaml(
@@ -863,25 +853,19 @@ class DomainCatalog:
             return parts[0], parts[1]
         return None, None
 
-    def roms_marbl_blueprint_df(self, stage: str | None = None) -> pd.DataFrame:
+    def roms_marbl_blueprint_df(self) -> pd.DataFrame:
         """Load all blueprints and return a pandas DataFrame.
-
-        Parameters
-        ----------
-        stage : str, optional
-            Blueprint stage to filter by (preconfig, postconfig, build, run).
-            Defaults to None, which returns all stages.
 
         Returns
         -------
         pd.DataFrame
             DataFrame with columns: model_name, grid_name, blueprint_name,
-            description, start_time, end_time, blueprint_path, grid_yaml_path, stage.
+            description, start_time, end_time, blueprint_path, grid_yaml_path.
         """
         import pandas as pd
 
         records = []
-        for bp_file in self._find_roms_marbl_blueprint_stage_files(stage=stage):
+        for bp_file in self._find_roms_marbl_blueprint_files():
             try:
                 bp = self._load_roms_marbl_blueprint_yaml(bp_file)
                 roms_marbl_blueprint_name = bp.get("name")
@@ -908,14 +892,6 @@ class DomainCatalog:
                 roms_marbl_blueprint_path_result: Path | str = (
                     self._to_raw_github_url(bp_file) if is_github else bp_file
                 )
-                file_stage = next(
-                    (
-                        s
-                        for s in ("preconfig", "postconfig", "build", "run")
-                        if f"_{s}" in bp_file.name
-                    ),
-                    None,
-                )
                 records.append(
                     {
                         "model_name": model_name,
@@ -926,7 +902,6 @@ class DomainCatalog:
                         "end_time": bp.get("valid_end_date"),
                         "blueprint_path": roms_marbl_blueprint_path_result,
                         "grid_yaml_path": grid_yaml_result,
-                        "stage": file_stage,
                     }
                 )
             except Exception as e:

@@ -81,48 +81,6 @@ class DatasetsDict(dict):
         return self.get(key)
 
 
-class RomsMarblBlueprintStage:
-    """
-    Blueprint stage constants and validation.
-
-    Valid stages:
-    - PRECONFIG: Blueprint before configuration
-    - POSTCONFIG: Blueprint after configuration
-    - BUILD: Blueprint after building/compiling the model
-    - RUN: Blueprint for running the simulation
-    """
-
-    PRECONFIG: str = "preconfig"
-    POSTCONFIG: str = "postconfig"
-    BUILD: str = "build"
-    RUN: str = "run"
-
-    # Numerical values for stage comparison
-    N_PRECONFIG: int = 0
-    N_POSTCONFIG: int = 1
-    N_BUILD: int = 2
-    N_RUN: int = 3
-
-    @classmethod
-    def validate_stage(cls, stage: str) -> str:
-        """Validate that stage is one of the valid values."""
-        valid_stages = {cls.PRECONFIG, cls.POSTCONFIG, cls.BUILD, cls.RUN}
-        if stage not in valid_stages:
-            raise ValueError(f"stage must be one of {valid_stages}, got {stage}")
-        return stage
-
-    @classmethod
-    def get_stage_value(cls, stage: str) -> int:
-        """Get the numerical value of a stage for comparison."""
-        stage_map = {
-            cls.PRECONFIG: cls.N_PRECONFIG,
-            cls.POSTCONFIG: cls.N_POSTCONFIG,
-            cls.BUILD: cls.N_BUILD,
-            cls.RUN: cls.N_RUN,
-        }
-        return stage_map.get(stage, -1)
-
-
 def _deep_merge_settings_dict(target: dict[str, Any], update: dict[str, Any]) -> None:
     """
     Recursively merge ``update`` into ``target`` (mutates ``target`` in place).
@@ -141,38 +99,26 @@ class ForgeExecutor(BaseModel):
     """
     Builder for C-Star RomsMarblBlueprint specifications.
 
-    This class provides a Pydantic-based interface for constructing
-    and managing ROMS-MARBL blueprints through a staged workflow.
+    This class provides a Pydantic-based interface for constructing and
+    managing a ROMS-MARBL blueprint. It builds up the blueprint in memory
+    across three steps, and persists it to disk exactly once, at the end:
 
-    **Workflow and Stage Progression:**
-
-    The builder progresses through distinct stages, each representing a
-    phase of the model configuration and execution pipeline:
-
-    1. **PRECONFIG** (initialization):
-       - Created during `model_post_init()` via `_initialize_roms_marbl_blueprint()`
-       - Blueprint structure initialized with placeholder data
+    1. **Initialization** (`model_post_init()` / `_initialize_roms_marbl_blueprint()`):
+       - Blueprint structure initialized in memory with placeholder data
        - Settings dictionaries initialized from model defaults
-       - Blueprint persisted to disk
 
-    2. **POSTCONFIG** (input generation):
-       - Achieved by calling `generate_inputs()`
+    2. **Input generation** (`generate_inputs()`):
        - Source data prepared, input files generated (grid, initial conditions, forcing)
-       - Blueprint updated with actual data file locations
-       - Settings updated with input-specific values
-       - Blueprint persisted to disk
+       - In-memory blueprint updated with actual data file locations
+       - In-memory settings updated with input-specific values
 
-    3. **BUILD** (configuration):
-       - Achieved by calling `configure_build()`
+    3. **Build configuration** (`configure_build()`):
        - Jinja2 templates rendered with current settings
        - Blueprint updated with rendered code locations
-       - Blueprint persisted to disk
+       - **Blueprint persisted to disk** -- the only time this happens
        - ROMSSimulation instance created
 
-    4. **RUN** (execution):
-       - Achieved by calling `run()` after `build()`
-       - Blueprint persisted with runtime parameters
-       - Model executable runs
+    `run()` then hands the persisted blueprint's path to C-Star for execution.
 
     **Settings:**
 
@@ -182,11 +128,11 @@ class ForgeExecutor(BaseModel):
 
     **Key Concepts:**
 
-    - Settings are stored in sidecar YAML files (not in blueprint itself)
-    - Blueprint state is persisted to disk at each stage transition
+    - Settings are stored in a sidecar YAML file (not in blueprint itself)
+    - The blueprint is persisted to disk exactly once, in `configure_build()`
     - Grid object is created during initialization and reused throughout
     - Source data can be prepared independently via `ensure_source_data()`
-    - All produced artifacts (inputs, blueprints, builds, run output) live under the
+    - All produced artifacts (inputs, blueprint, build, run output) live under the
       injected ``host.working_dir``.
 
     .. warning::
@@ -323,7 +269,6 @@ class ForgeExecutor(BaseModel):
     _datasets: dict[str, xr.Dataset | list[xr.Dataset]] | None = PrivateAttr(
         default=None
     )
-    _stage: str | None = PrivateAttr(default=None)
     _cstar_simulation: Any | None = PrivateAttr(default=None)
     _settings_compile_time: dict[str, Any] = PrivateAttr(default_factory=dict)
     _settings_run_time: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -388,8 +333,9 @@ class ForgeExecutor(BaseModel):
         1. Creates the grid object from `grid_kwargs`
         2. Initializes the blueprint structure (calls `_initialize_roms_marbl_blueprint()`)
 
-        After this method completes, the blueprint is in the **PRECONFIG** stage
-        and has been persisted to disk.
+        After this method completes, `self.roms_marbl_blueprint` holds the initial
+        in-memory structure (placeholder data, not yet persisted). Nothing is written
+        to disk until `configure_build()` completes.
         """
         # Fail fast if no host was injected — every artifact path needs it.
         self._require_host()
@@ -647,16 +593,15 @@ class ForgeExecutor(BaseModel):
 
     def persist(self) -> None:
         """
-        Persist the current blueprint state to a YAML file.
+        Persist the current blueprint to a YAML file.
 
-        Saves the blueprint to disk at the file path determined by the current
-        stage (PRECONFIG, POSTCONFIG, BUILD, or RUN). Also saves settings to
-        a sidecar file.
+        Saves the blueprint to disk (overwriting any previous save for this
+        executor). Also saves settings to a sidecar file.
 
         **File Structure:**
 
-        - Blueprint: `B_{name}_{stage}.yml` (or with datestr for RUN stage)
-        - Settings: `settings_B_{name}_{stage}.yml` (sidecar file)
+        - Blueprint: `B_{name}.yml`
+        - Settings: `settings_B_{name}.yml` (sidecar file)
 
         The settings are stored separately from the blueprint to avoid
         cluttering the blueprint with configuration details.
@@ -670,30 +615,13 @@ class ForgeExecutor(BaseModel):
         Raises
         ------
         ValueError
-            If blueprint is None, if _stage is None, if stage is "run" but
-            runtime_params is not available, or if stage is not a valid
-            blueprint stage.
+            If blueprint is not initialized.
         """
         if self.roms_marbl_blueprint is None:
             raise ValueError("Cannot persist: blueprint is not initialized")
 
-        if self._stage is None:
-            raise ValueError("Cannot persist: _stage is not set")
-
-        # Validate stage
-        stage = RomsMarblBlueprintStage.validate_stage(self._stage)
-
-        # Determine run_params for path_roms_marbl_blueprint if stage is "run"
-        run_params = None
-        if stage == RomsMarblBlueprintStage.RUN:
-            if self.roms_marbl_blueprint.runtime_params is None:
-                raise ValueError(
-                    "Cannot persist run blueprint: runtime_params is not set"
-                )
-            run_params = self.roms_marbl_blueprint.runtime_params
-
         # Get the file path using path_roms_marbl_blueprint
-        bp_path = self.path_roms_marbl_blueprint(stage=stage, run_params=run_params)
+        bp_path = self.path_roms_marbl_blueprint()
 
         # Ensure directory exists
         bp_path.parent.mkdir(parents=True, exist_ok=True)
@@ -728,7 +656,7 @@ class ForgeExecutor(BaseModel):
         Return the path to the settings sidecar file for a given blueprint path.
 
         The settings file has the same name as the blueprint file, with "settings_" prepended.
-        For example: "B_model_postconfig.yml" -> "settings_B_model_postconfig.yml"
+        For example: "B_model.yml" -> "settings_B_model.yml"
 
         Parameters
         ----------
@@ -845,54 +773,16 @@ class ForgeExecutor(BaseModel):
                 stacklevel=2,
             )
 
-    def path_roms_marbl_blueprint(
-        self,
-        stage: str | None = None,
-        run_params: cstar_models.RuntimeParameterSet | None = None,
-    ) -> Path:
+    def path_roms_marbl_blueprint(self) -> Path:
         """
-        Return the path to the blueprint file for a given stage.
-
-        Parameters
-        ----------
-        stage : str, optional
-            The blueprint stage. If not provided, uses the blueprint's current state.
-        run_params : RuntimeParameterSet, optional
-            Runtime parameters for the simulation. Required if stage="run", optional otherwise.
-            Used to generate a unique filename for the run blueprint.
+        Return the path to this executor's single blueprint file.
 
         Returns
         -------
         Path
-            Path to the blueprint YAML file for the specified stage.
-
-        Raises
-        ------
-        AssertionError
-            If stage is not one of the valid values.
-        ValueError
-            If stage="run" and run_params is not provided, or if stage is None and blueprint is None.
+            Path to the blueprint YAML file: `B_{name}.yml`.
         """
-        if stage is None:
-            if self.roms_marbl_blueprint is None:
-                raise ValueError(
-                    "stage must be provided if blueprint is not initialized"
-                )
-            stage = self.roms_marbl_blueprint.state
-        RomsMarblBlueprintStage.validate_stage(stage)
-
-        if stage == RomsMarblBlueprintStage.RUN:
-            if run_params is None:
-                raise ValueError("run_params is required when stage='run'")
-            # Generate a unique identifier from run_params for the filename
-            # Using start_date and end_date to create a unique identifier
-
-            return (
-                self.roms_marbl_blueprint_dir
-                / f"B_{self.name}_{stage}_{self.datestr}.yml"
-            )
-        else:
-            return self.roms_marbl_blueprint_dir / f"B_{self.name}_{stage}.yml"
+        return self.roms_marbl_blueprint_dir / f"B_{self.name}.yml"
 
     @property
     def datasets(self) -> DatasetsDict:
@@ -1075,7 +965,7 @@ class ForgeExecutor(BaseModel):
 
     def _initialize_roms_marbl_blueprint(self) -> None:
         """
-        Initialize blueprint with basic structure and set stage to PRECONFIG.
+        Initialize the in-memory blueprint with its basic structure.
 
         This method creates the initial blueprint structure with placeholder data.
         It is called automatically during initialization via `model_post_init()`.
@@ -1087,12 +977,11 @@ class ForgeExecutor(BaseModel):
            - Basic metadata (name, description, dates, partitioning)
            - Code repository specifications from code_spec
            - Placeholder Resource objects for grid, initial_conditions, forcing
-        3. Sets `_stage` to PRECONFIG
-        4. Persists blueprint to disk
 
-        The blueprint at this stage has the correct structure but contains
-        placeholder data (None locations). Actual data files are added during
-        the POSTCONFIG stage via `generate_inputs()`.
+        The blueprint at this point has the correct structure but contains
+        placeholder data (None locations); nothing is persisted to disk yet.
+        Actual data files are added by `generate_inputs()`, and the blueprint is
+        only ever written to disk once, at the end of `configure_build()`.
         """
         # Initialize settings from the resolved ForgeBlueprint
         self._init_settings_compile_time()
@@ -1127,20 +1016,15 @@ class ForgeExecutor(BaseModel):
             forcing=forcing_config,
             cdr_forcing=None,
         )
-        self._stage = RomsMarblBlueprintStage.PRECONFIG
-        self.persist()
 
     def _load_roms_marbl_blueprint_file(
-        self, stage: str | None = None, load_settings: bool = True
+        self, load_settings: bool = True
     ) -> cstar_models.RomsMarblBlueprint | None:
         """
-        Load blueprint from file for the specified stage.
+        Load the persisted blueprint file, if it exists.
 
         Parameters
         ----------
-        stage : Optional[str], optional
-            Blueprint stage to load. If None, uses self._stage.
-            If self._stage is also None, defaults to POSTCONFIG.
         load_settings : bool, optional
             If True, load settings from sidecar file. Defaults to True.
 
@@ -1149,16 +1033,7 @@ class ForgeExecutor(BaseModel):
         Optional[cstar_models.RomsMarblBlueprint]
             Loaded blueprint or None if file doesn't exist or loading fails.
         """
-        # Determine which stage to use
-        if stage is None:
-            stage = (
-                self._stage
-                if self._stage is not None
-                else RomsMarblBlueprintStage.PRECONFIG
-            )
-
-        # Get blueprint file path for this stage
-        bp_path = self.path_roms_marbl_blueprint(stage=stage, run_params=None)
+        bp_path = self.path_roms_marbl_blueprint()
 
         if not bp_path.exists():
             return None
@@ -1214,10 +1089,7 @@ class ForgeExecutor(BaseModel):
     @property
     def roms_marbl_blueprint_from_file(self) -> cstar_models.RomsMarblBlueprint | None:
         """
-        Load and return blueprint from file based on current stage.
-
-        Uses self._stage to determine which blueprint file to load.
-        If self._stage is None, defaults to POSTCONFIG stage.
+        Load and return the persisted blueprint from disk.
 
         Returns
         -------
@@ -1424,11 +1296,13 @@ class ForgeExecutor(BaseModel):
         test: bool = False,
     ) -> cstar_models.RomsMarblBlueprint:
         """
-        Generate ROMS input files and advance blueprint to POSTCONFIG stage.
+        Generate ROMS input files and update the in-memory blueprint in place.
 
-        Always regenerates the blueprint (and settings sidecar). Existing NetCDF files
-        are preserved and reused per-step when ``clobber=False``; pass ``clobber=True``
-        to delete and re-create them.
+        Always regenerates the in-memory blueprint (and in-memory settings).
+        Existing NetCDF files are preserved and reused per-step when
+        ``clobber=False``; pass ``clobber=True`` to delete and re-create them.
+        Nothing is persisted to disk here -- the blueprint is written once, at
+        the end of `configure_build()`.
 
         Parameters
         ----------
@@ -1444,7 +1318,7 @@ class ForgeExecutor(BaseModel):
         Returns
         -------
         cstar_models.RomsMarblBlueprint
-            The blueprint updated with all input file locations (POSTCONFIG stage).
+            The blueprint updated with all input file locations.
 
         Raises
         ------
@@ -1547,8 +1421,6 @@ class ForgeExecutor(BaseModel):
         self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
             **roms_marbl_blueprint_dict
         )
-        self._stage = RomsMarblBlueprintStage.POSTCONFIG
-        self.persist()
         return self.roms_marbl_blueprint
 
     def _init_settings_compile_time(self) -> None:
@@ -1751,7 +1623,7 @@ class ForgeExecutor(BaseModel):
         **kwargs,
     ):
         """
-        Configure blueprint by rendering templates and advance to BUILD stage.
+        Configure blueprint by rendering templates, then persist the final blueprint.
 
         This method renders Jinja2 templates with current settings to produce
         configuration files needed for model compilation and execution.
@@ -1767,14 +1639,11 @@ class ForgeExecutor(BaseModel):
              static run-time files (e.g., marbl_in)
         5. Updates blueprint with rendered code locations and file lists
         6. Sets blueprint model_params and runtime_params
-        7. Sets `_stage` to BUILD
-        8. Persists blueprint to disk
-        9. Creates ROMSSimulation instance from blueprint
+        7. Persists the blueprint to disk -- the only time it is written
+        8. Creates ROMSSimulation instance from blueprint
 
-        **Stage Transition:**
-
-        - **Input:** Blueprint in POSTCONFIG stage (with input data files)
-        - **Output:** Blueprint in BUILD stage (with rendered configuration files)
+        This is expected to run after `generate_inputs()` has populated the
+        in-memory blueprint with real input data file locations.
 
         **Settings:**
 
@@ -1957,7 +1826,6 @@ class ForgeExecutor(BaseModel):
             self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                 **roms_marbl_blueprint_dict
             )
-            self._stage = RomsMarblBlueprintStage.BUILD
             self.persist()
 
         return
@@ -2038,13 +1906,11 @@ class ForgeExecutor(BaseModel):
     async def run(
         self,
     ):
-        """Run C-Star for this Builder's BUILD blueprint"""
+        """Run C-Star for this Builder's blueprint"""
         self.prep_cstar_environment()
 
         request = RunnerRequest(
-            uri=str(
-                self.path_roms_marbl_blueprint(stage=RomsMarblBlueprintStage.BUILD)
-            ),
+            uri=str(self.path_roms_marbl_blueprint()),
             bp_type=RomsMarblBlueprint,
             name=self.casename,
         )
@@ -2054,7 +1920,3 @@ class ForgeExecutor(BaseModel):
             request=request, service_cfg=service_cfg, job_cfg=job_cfg
         )
         await runner.execute()
-
-        # Persist blueprint to file
-        self._stage = RomsMarblBlueprintStage.RUN
-        self.persist()

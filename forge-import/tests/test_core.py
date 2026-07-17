@@ -15,7 +15,7 @@ Tests cover:
 - ensure_source_data
 - generate_inputs
 - configure_build / build
-- deep-merge helper and RomsMarblBlueprintStage
+- deep-merge helper
 """
 
 import os
@@ -313,10 +313,8 @@ class TestForgeExecutorProperties:
     def test_path_roms_marbl_blueprint_method(self, minimal_cstar_spec_builder_args):
         """Test the path_roms_marbl_blueprint method (host-based)."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        expected_path = (
-            builder.roms_marbl_blueprint_dir / f"B_{builder.name}_preconfig.yml"
-        )
-        assert builder.path_roms_marbl_blueprint(stage="preconfig") == expected_path
+        expected_path = builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yml"
+        assert builder.path_roms_marbl_blueprint() == expected_path
 
     def test_datasets_property_auto_populates(
         self, minimal_cstar_spec_builder_args, tmp_path
@@ -469,13 +467,35 @@ class TestForgeExecutorModelPostInit:
             "path": "/custom/my_topo.nc",
         }
 
-    def test_model_post_init_loads_roms_marbl_blueprint_from_file_when_exists(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """model_post_init persists a PRECONFIG blueprint; roms_marbl_blueprint_from_file loads it."""
+    def test_model_post_init_does_not_persist(self, minimal_cstar_spec_builder_args):
+        """model_post_init only builds the in-memory blueprint; the executor now
+        persists exactly once, at the end of configure_build(). Nothing should be
+        on disk yet, so roms_marbl_blueprint_from_file finds nothing to load.
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        # The preconfig blueprint was persisted during initialization, so it loads back.
+        assert not builder.path_roms_marbl_blueprint().exists()
+        assert builder.roms_marbl_blueprint_from_file is None
+
+    def test_configure_build_blueprint_loads_back_from_file(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """After configure_build() persists the blueprint, roms_marbl_blueprint_from_file
+        loads it back from disk.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build()
+
         assert builder.roms_marbl_blueprint_from_file is not None
         assert isinstance(
             builder.roms_marbl_blueprint_from_file, cstar_models.RomsMarblBlueprint
@@ -703,31 +723,14 @@ class TestForgeExecutorBuildAndRun:
                 == expected_location
             )
 
-    def test_build_sets_stage_to_build(self, minimal_cstar_spec_builder_args):
-        """Test that configure_build() sets _stage to BUILD."""
-        from cstar_forge.forge.executor import RomsMarblBlueprintStage
-
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-
-        with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
-        ):
-            mock_render.return_value = {
-                "location": str(builder.compile_time_code_dir),
-                "filter": {"files": ["test.opt"]},
-                "branch": "main",
-            }
-
-            builder.configure_build()
-
-            assert builder._stage == RomsMarblBlueprintStage.BUILD
-
     def test_build_persists_roms_marbl_blueprint(self, minimal_cstar_spec_builder_args):
-        """Test that configure_build() persists blueprint to file."""
-        from cstar_forge.forge.executor import RomsMarblBlueprintStage
-
+        """Test that configure_build() persists the blueprint to file -- the only
+        time the executor writes it to disk.
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        # Nothing is persisted before configure_build() runs.
+        assert not builder.path_roms_marbl_blueprint().exists()
 
         with (
             patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
@@ -741,9 +744,7 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-            expected_bp_path = builder.path_roms_marbl_blueprint(
-                stage=RomsMarblBlueprintStage.BUILD
-            )
+            expected_bp_path = builder.path_roms_marbl_blueprint()
             assert expected_bp_path.exists()
 
             with open(expected_bp_path) as f:
@@ -752,6 +753,38 @@ class TestForgeExecutorBuildAndRun:
                 assert "code" in roms_marbl_blueprint_data
                 assert "compile_time" in roms_marbl_blueprint_data["code"]
                 assert "location" in roms_marbl_blueprint_data["code"]["compile_time"]
+
+    def test_configure_build_writes_exactly_one_blueprint_and_sidecar(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """No preconfig/postconfig/run stage artifacts are ever written -- the
+        stages concept is gone. `roms_marbl_blueprint_dir` holds exactly one
+        `B_{name}.yml` and one `settings_B_{name}.yml` after configure_build().
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build()
+
+        bp_files = sorted(builder.roms_marbl_blueprint_dir.glob("B_*.yml"))
+        settings_files = sorted(
+            builder.roms_marbl_blueprint_dir.glob("settings_B_*.yml")
+        )
+        assert bp_files == [builder.path_roms_marbl_blueprint()]
+        assert settings_files == [
+            builder.path_roms_marbl_blueprint().parent
+            / f"settings_{builder.path_roms_marbl_blueprint().name}"
+        ]
+        for suffix in ("_preconfig", "_postconfig", "_run"):
+            assert suffix not in bp_files[0].name
 
     def test_build_stages_compile_time_templates(self, minimal_cstar_spec_builder_args):
         """configure_build() stages the compile-time templates (via C-Star
@@ -791,8 +824,6 @@ class TestForgeExecutorBuildAndRun:
         """With use_pio, the emitted RomsMarblBlueprint carries code.pio and
         model_params.use_pio: true.
         """
-        from cstar_forge.forge.executor import RomsMarblBlueprintStage
-
         builder = _make_builder(minimal_cstar_spec_builder_args, use_pio=True)
 
         assert builder._use_pio is True
@@ -809,7 +840,7 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-        bp_path = builder.path_roms_marbl_blueprint(stage=RomsMarblBlueprintStage.BUILD)
+        bp_path = builder.path_roms_marbl_blueprint()
         with open(bp_path) as f:
             data = yaml.safe_load(f)
         assert data["model_params"]["use_pio"] is True
@@ -822,8 +853,6 @@ class TestForgeExecutorBuildAndRun:
         """Without use_pio, model_params has no use_pio key and code.pio is unset
         (keeps non-PIO blueprints loadable by main-branch C-Star).
         """
-        from cstar_forge.forge.executor import RomsMarblBlueprintStage
-
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         assert builder._use_pio is False
@@ -840,7 +869,7 @@ class TestForgeExecutorBuildAndRun:
 
             builder.configure_build()
 
-        bp_path = builder.path_roms_marbl_blueprint(stage=RomsMarblBlueprintStage.BUILD)
+        bp_path = builder.path_roms_marbl_blueprint()
         with open(bp_path) as f:
             data = yaml.safe_load(f)
         assert "use_pio" not in data["model_params"]
@@ -964,89 +993,29 @@ class TestForgeExecutorBuildAndRun:
 class TestForgeExecutorPathRomsMarblBlueprint:
     """Tests for path_roms_marbl_blueprint method."""
 
-    def test_path_roms_marbl_blueprint_preconfig(self, minimal_cstar_spec_builder_args):
-        """Test path_roms_marbl_blueprint for preconfig stage."""
+    def test_path_roms_marbl_blueprint(self, minimal_cstar_spec_builder_args):
+        """path_roms_marbl_blueprint returns the single B_{name}.yml path -- there
+        is no stage suffix and no stage/run_params arguments to pass.
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        path = builder.path_roms_marbl_blueprint(stage="preconfig")
+        path = builder.path_roms_marbl_blueprint()
 
-        assert "preconfig" in str(path)
-        assert builder.name in str(path)
+        assert path == builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yml"
         assert path.suffix == ".yml"
-
-    def test_path_roms_marbl_blueprint_postconfig(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """Test path_roms_marbl_blueprint for postconfig stage."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        path = builder.path_roms_marbl_blueprint(stage="postconfig")
-
-        assert "postconfig" in str(path)
-        assert builder.name in str(path)
-
-    def test_path_roms_marbl_blueprint_build(self, minimal_cstar_spec_builder_args):
-        """Test path_roms_marbl_blueprint for build stage."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        path = builder.path_roms_marbl_blueprint(stage="build")
-
-        assert "build" in str(path)
-        assert builder.name in str(path)
-        assert path.name.endswith("_build.yml")
-
-    def test_path_roms_marbl_blueprint_run_with_params(
-        self, minimal_cstar_spec_builder_args, sample_runtime_params
-    ):
-        """Test path_roms_marbl_blueprint for run stage with runtime params."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        path = builder.path_roms_marbl_blueprint(
-            stage="run", run_params=sample_runtime_params
-        )
-
-        assert "run" in str(path)
-        assert "20120101" in str(path)  # start_date
-        assert "20120102" in str(path)  # end_date
-
-    def test_path_roms_marbl_blueprint_run_without_params(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """Test path_roms_marbl_blueprint for run stage without params raises error."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-
-        with pytest.raises(ValueError) as exc_info:
-            builder.path_roms_marbl_blueprint(stage="run", run_params=None)
-        assert "run_params is required" in str(exc_info.value)
-
-    def test_path_roms_marbl_blueprint_invalid_stage(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """Test path_roms_marbl_blueprint with invalid stage raises error."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-
-        with pytest.raises(ValueError) as exc_info:
-            builder.path_roms_marbl_blueprint(stage="invalid_stage")
-        assert "stage must be one of" in str(exc_info.value)
-
-    def test_path_roms_marbl_blueprint_uses_roms_marbl_blueprint_state(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """Test path_roms_marbl_blueprint uses blueprint state when stage is None."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder.roms_marbl_blueprint.state = "postconfig"
-
-        path = builder.path_roms_marbl_blueprint(stage=None)
-        assert "postconfig" in str(path)
 
 
 class TestForgeExecutorPersist:
     """Tests for persist method."""
 
-    def test_persist_preconfig(self, minimal_cstar_spec_builder_args):
-        """Test persist for preconfig stage."""
+    def test_persist_writes_blueprint_and_sidecar(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """persist() writes the single B_{name}.yml plus its settings sidecar."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder._stage = "preconfig"
 
         builder.persist()
 
-        bp_path = builder.path_roms_marbl_blueprint(stage="preconfig")
+        bp_path = builder.path_roms_marbl_blueprint()
         assert bp_path.exists()
 
         with bp_path.open("r") as f:
@@ -1054,28 +1023,8 @@ class TestForgeExecutorPersist:
             assert data is not None
             assert "name" in data
 
-    def test_persist_postconfig(self, minimal_cstar_spec_builder_args):
-        """Test persist for postconfig stage."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder._stage = "postconfig"
-
-        builder.persist()
-
-        bp_path = builder.path_roms_marbl_blueprint(stage="postconfig")
-        assert bp_path.exists()
-
-    def test_persist_run(self, minimal_cstar_spec_builder_args, sample_runtime_params):
-        """Test persist for run stage."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder._stage = "run"
-        builder.roms_marbl_blueprint.runtime_params = sample_runtime_params
-
-        builder.persist()
-
-        bp_path = builder.path_roms_marbl_blueprint(
-            stage="run", run_params=sample_runtime_params
-        )
-        assert bp_path.exists()
+        settings_path = bp_path.parent / f"settings_{bp_path.name}"
+        assert settings_path.exists()
 
     def test_persist_raises_when_roms_marbl_blueprint_none(
         self, minimal_cstar_spec_builder_args
@@ -1083,32 +1032,10 @@ class TestForgeExecutorPersist:
         """Test persist raises error when blueprint is None."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
         builder.roms_marbl_blueprint = None
-        builder._stage = "preconfig"
 
         with pytest.raises(ValueError) as exc_info:
             builder.persist()
         assert "blueprint is not initialized" in str(exc_info.value)
-
-    def test_persist_raises_when_stage_none(self, minimal_cstar_spec_builder_args):
-        """Test persist raises error when _stage is None."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder._stage = None
-
-        with pytest.raises(ValueError) as exc_info:
-            builder.persist()
-        assert "_stage is not set" in str(exc_info.value)
-
-    def test_persist_raises_when_run_stage_no_runtime_params(
-        self, minimal_cstar_spec_builder_args
-    ):
-        """Test persist raises error for run stage without runtime_params."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-        builder._stage = "run"
-        builder.roms_marbl_blueprint.runtime_params = None
-
-        with pytest.raises(ValueError) as exc_info:
-            builder.persist()
-        assert "runtime_params is not set" in str(exc_info.value)
 
 
 class TestForgeExecutorDefaultRuntimeParams:
@@ -1201,12 +1128,15 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert call_kwargs["netcdf_format"] == "NETCDF3_64BIT_DATA"
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
-    def test_generate_inputs_test_mode_does_not_persist(
+    def test_generate_inputs_does_not_persist(
         self,
         mock_input_data_class,
         minimal_cstar_spec_builder_args,
     ):
-        """Test generate_inputs in test mode does not persist blueprint."""
+        """generate_inputs() only updates the in-memory blueprint -- it never persists
+        (regardless of the `test` flag). The blueprint is written to disk exactly
+        once, at the end of configure_build().
+        """
         mock_input_data_instance = MagicMock()
         mock_roms_marbl_blueprint_elements = MagicMock()
         mock_roms_marbl_blueprint_elements.grid = MagicMock()
@@ -1508,36 +1438,6 @@ class TestDeepMergeSettingsDict:
         target = {"blk": {"nested": {"x": 1}}}
         _deep_merge_settings_dict(target, {"blk": {"nested": "scalar"}})
         assert target["blk"]["nested"] == "scalar"
-
-
-class TestRomsMarblBlueprintStage:
-    """Tests for RomsMarblBlueprintStage class."""
-
-    def test_roms_marbl_blueprintstage_constants(self):
-        """Test RomsMarblBlueprintStage constants."""
-        from cstar_forge.forge.executor import RomsMarblBlueprintStage
-
-        assert RomsMarblBlueprintStage.PRECONFIG == "preconfig"
-        assert RomsMarblBlueprintStage.POSTCONFIG == "postconfig"
-        assert RomsMarblBlueprintStage.BUILD == "build"
-        assert RomsMarblBlueprintStage.RUN == "run"
-
-    def test_roms_marbl_blueprintstage_validate_stage_valid(self):
-        """Test RomsMarblBlueprintStage.validate_stage with valid stage."""
-        from cstar_forge.forge.executor import RomsMarblBlueprintStage
-
-        assert RomsMarblBlueprintStage.validate_stage("preconfig") == "preconfig"
-        assert RomsMarblBlueprintStage.validate_stage("postconfig") == "postconfig"
-        assert RomsMarblBlueprintStage.validate_stage("build") == "build"
-        assert RomsMarblBlueprintStage.validate_stage("run") == "run"
-
-    def test_roms_marbl_blueprintstage_validate_stage_invalid(self):
-        """Test RomsMarblBlueprintStage.validate_stage with invalid stage."""
-        from cstar_forge.forge.executor import RomsMarblBlueprintStage
-
-        with pytest.raises(ValueError) as exc_info:
-            RomsMarblBlueprintStage.validate_stage("invalid")
-        assert "stage must be one of" in str(exc_info.value)
 
 
 class TestGoldenNamelist:

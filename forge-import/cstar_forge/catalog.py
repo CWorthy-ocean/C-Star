@@ -29,8 +29,8 @@ class BlueprintCatalog:
     # Delegating methods (preserve original API)
     # ------------------------------------------------------------------
 
-    def find_blueprint_files(self, stage: str | None = None) -> list[Path]:
-        return self._catalog._find_roms_marbl_blueprint_stage_files(stage=stage)
+    def find_blueprint_files(self) -> list[Path]:
+        return self._catalog._find_roms_marbl_blueprint_files()
 
     def load_blueprint(self, blueprint_path: Path) -> dict[str, Any]:
         return self._catalog._load_roms_marbl_blueprint_yaml(blueprint_path)
@@ -41,12 +41,12 @@ class BlueprintCatalog:
     def _extract_model_and_grid_name(self, blueprint_name: str):
         return self._catalog._extract_model_and_grid_name(blueprint_name)
 
-    def load(self, stage: str | None = "postconfig"):
+    def load(self):
         """Deprecated alias for blueprintDF()."""
-        return self._catalog.roms_marbl_blueprint_df(stage=stage)
+        return self._catalog.roms_marbl_blueprint_df()
 
-    def blueprintDF(self, stage: str | None = "postconfig"):
-        return self._catalog.roms_marbl_blueprint_df(stage=stage)
+    def blueprintDF(self):
+        return self._catalog.roms_marbl_blueprint_df()
 
 
 # Convenience instance

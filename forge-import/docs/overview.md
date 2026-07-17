@@ -53,8 +53,8 @@ cstar-forge/
 │   │   ├── blueprints/         # Generated blueprint YAML files
 │   │   │   └── {machine}/
 │   │   │       └── {model}_{grid}/
-│   │   │           ├── B_{name}_{stage}.yml      # Blueprint files (preconfig, postconfig, build, run)
-│   │   │           ├── settings_B_{name}_{stage}.yml  # Settings sidecar files (same directory)
+│   │   │           ├── B_{name}.yml              # Blueprint file (persisted once, by configure_build)
+│   │   │           ├── settings_B_{name}.yml      # Settings sidecar file (same directory)
 │   │   │           └── _{input_type}.yml         # Input-specific blueprints
 │   │   └── builds/             # Model compilation directories
 │   │       └── {model}_{grid}/

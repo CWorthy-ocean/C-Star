@@ -300,7 +300,7 @@ def process_forge_blueprint(
     via the last).
 
     Returns the executor (``ForgeExecutor`` by default), so callers can reach
-    ``.path_roms_marbl_blueprint('build')`` / ``.prep_cstar_environment(...)`` / ``.run()``.
+    ``.path_roms_marbl_blueprint()`` / ``.prep_cstar_environment(...)`` / ``.run()``.
 
     Parameters
     ----------

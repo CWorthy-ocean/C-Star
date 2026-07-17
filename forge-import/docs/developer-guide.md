@@ -134,8 +134,8 @@ repo refs) · `composition` (which catalog pieces produced this + overrides laye
    `ForgeExecutor` via `ForgeExecutor.from_forge_blueprint(cfg, host)` and drives:
    `ensure_source_data()` → `generate_inputs()` → `configure_build()`.
 7. Outputs land under `host.working_dir`: input NetCDFs, `namelist.nml`, `cppdefs.opt`,
-   the blueprint YAML (`B_{name}_{stage}.yml`), and the emitted downstream `roms_marbl`
-   blueprint.
+   and the emitted downstream `roms_marbl` blueprint YAML (`B_{name}.yml`, persisted
+   once by `configure_build()` — there is no per-stage blueprint file).
 
 `ForgeExecutor` never imports `cstar_forge.config`/`catalog`/`domain_catalog`/
 `forge_blueprint_resolve`/`forge_blueprint_wizard` — verified both by grep and by

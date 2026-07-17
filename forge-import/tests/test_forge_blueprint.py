@@ -288,7 +288,7 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
         def configure_build(self, **k):
             self.calls.append("c")
 
-        def path_roms_marbl_blueprint(self, stage=None):
+        def path_roms_marbl_blueprint(self):
             return "/bp"
 
     with pytest.warns(UserWarning, match="integrity check FAILED"):
@@ -1320,8 +1320,8 @@ class _FakeBuilder:
     def configure_build(self, **k):
         self.calls.append(("configure", k))
 
-    def path_roms_marbl_blueprint(self, stage=None):
-        return f"/bp/{stage}.yml"
+    def path_roms_marbl_blueprint(self):
+        return "/bp.yml"
 
 
 class TestForgeBlueprintEngine:
