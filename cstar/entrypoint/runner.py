@@ -171,7 +171,7 @@ class BlueprintRunner(Service, XRunner[TBlueprint]):
         RunnerResult
         """
         if ExecutionStatus.is_terminal(status):
-            self._running = False
+            self._stop_event.set()
 
         if isinstance(errors, str) and errors:
             errors = [errors]
