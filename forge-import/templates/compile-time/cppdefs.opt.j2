@@ -336,11 +336,15 @@
 
 ! Use the MARBL biogeochemical library
 ! Usage notes: Cannot be used simultaneously with BIOLOGY_BEC2
-#define MARBL
+{% if cppdefs.marbl %}#define MARBL
+{% else %}#undef MARBL
+{% endif %}
 
 ! Enable the writing of diagnostics and other variables from the MARBL biogeochemical library
 ! Usage notes: Specific variables can be requested in the runtime "marbl_diagnostic_output_list" file
-#define MARBL_DIAGS
+{% if cppdefs.marbl %}#define MARBL_DIAGS
+{% else %}#undef MARBL_DIAGS
+{% endif %}
 
 ! Use ammonia atmospheric forcing
 ! Usage notes: None

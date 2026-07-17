@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cstar_forge import nb_engine
+from cstar_forge.legacy_notebook import nb_engine
 
 
 def test_run_notebook_calls_papermill(monkeypatch, tmp_path):

@@ -1649,6 +1649,12 @@ class ForgeBlueprintWizard:
             "near future (e.g. once the executor moves into C-Star, this may become a "
             "<code>cstar blueprint run</code> command).</span>"
         )
+        self.run_later_note = W.HTML(
+            "<span style='color:#666'>ℹ To run this later, or on a different "
+            "machine, save the blueprint above and then (from the "
+            "<code>cstar-forge</code> environment) call: "
+            "<code>python -m cstar_forge.run &lt;path/to/forge_blueprint.yml&gt;</code></span>"
+        )
         self.run_btn = W.Button(description="Run", icon="play")
         self.run_status = W.HTML("")
         self.run_output = W.Output(
@@ -2656,6 +2662,7 @@ class ForgeBlueprintWizard:
                 section(
                     "Run",
                     self.run_warning,
+                    self.run_later_note,
                     W.HBox([self.run_btn, self.run_status]),
                     self.run_output,
                 ),

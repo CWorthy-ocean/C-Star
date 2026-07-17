@@ -394,6 +394,20 @@ class TestCppdefsTemplate:
         assert "#undef PARALLEL_IO" in text
         assert "#define PARALLEL_IO" not in text
 
+    def test_marbl_true_defines_marbl_and_diags(self, tmp_path):
+        text = self._render(tmp_path, {"marbl": True})
+        assert "#define MARBL\n" in text
+        assert "#define MARBL_DIAGS" in text
+        assert "#undef MARBL\n" not in text
+        assert "#undef MARBL_DIAGS" not in text
+
+    def test_marbl_false_undefs_marbl_and_diags(self, tmp_path):
+        text = self._render(tmp_path, {"marbl": False})
+        assert "#undef MARBL\n" in text
+        assert "#undef MARBL_DIAGS" in text
+        assert "#define MARBL\n" not in text
+        assert "#define MARBL_DIAGS" not in text
+
 
 class TestROMSTemplateRenderer:
     """Tests for ROMSTemplateRenderer class."""

@@ -7,7 +7,7 @@ from cstar_forge import catalog, config, diagnostics, models
 from cstar_forge.domain_catalog import DomainCatalog, default_catalog
 from cstar_forge.forge import settings, source_data
 from cstar_forge.forge.executor import ForgeExecutor
-from cstar_forge.nb_engine import run_notebook, save_notebook_copy
+from cstar_forge.legacy_notebook.nb_engine import run_notebook, save_notebook_copy
 
 __all__ = [
     "DomainCatalog",

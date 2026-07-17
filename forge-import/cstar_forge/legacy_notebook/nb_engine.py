@@ -26,7 +26,8 @@ try:
 except ImportError:  # pragma: no cover - exercised via explicit error path
     papermill = None
 
-from cstar_forge import compute, config
+from cstar_forge import config
+from cstar_forge.legacy_notebook import compute
 from cstar_forge.parsers import load_app_config, load_yaml_params
 
 logger = logging.getLogger(__name__)
