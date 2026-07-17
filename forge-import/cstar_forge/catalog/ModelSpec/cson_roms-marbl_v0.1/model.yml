@@ -1,21 +1,39 @@
-# ModelSpec: code refs, template refs, and model-specific physics/numerics defaults.
+# ModelSpec: code refs, template refs, bgc_mode, and model-specific physics/numerics
+# defaults.
 #
 # This intentionally holds nothing that a Domain/Forcing/Output spec already provides:
 # no grid/IC/forcing source selection (that's a ForcingSpec's job -- pick one from the
 # catalog; there is no more "model default" forcing) and no ocean_vars/surf_flux/
 # diagnostics/stdout_diag/ts_output/frc_output/cdr_output/upscale_output/zslice/
 # random_output sections or marbl_bgc write-lists (those are an OutputSpec's job -- pick
-# one from the catalog; there is no more "model default" output either).
+# one from the catalog; there is no more "model default" output either). Nor does it
+# hold anything Domain-owned (open_boundaries -> cppdefs.obc_*; grid_kwargs/
+# partitioning -> param's llm/mmm/n/np_xi/np_eta) or Forcing-owned (tidal presence ->
+# cppdefs.tides + tides.ntides; MBL_co2 surface item -> cppdefs.co2_tvarying;
+# river_frc/cdr_frc namelist defaults, which the resolver now owns directly and a
+# ForcingSpec may override -- see build_forge_blueprint). Nor does it hold
+# extract_data (child-grid nesting): its active values come from a second,
+# separately-selected DomainSpec (the nesting child), so the resolver owns its
+# disabled fallback directly too.
+#
+# `bgc_mode` (marbl|none) is a per-run toggle: it prepopulates the wizard's BGC
+# dropdown and the resolver uses it to set cppdefs.marbl (and gate nhy_forcing/
+# nox_forcing) and to decide whether code.marbl is populated.
 #
 # `model_settings` is flat and mirrors ForgeBlueprint.model_settings 1:1 (cppdefs sits
 # at the same level as the namelist sections, matching how the resolver treats them).
 # A few sections here are fully overwritten by the resolver at build time regardless of
 # what's written below (time_stepping, v_sponge from grid/run-window; param's
-# llm/mmm/n/np_xi/np_eta/nsub_x/nsub_e from grid/partitioning; cppdefs.obc_*/marbl/
-# cdr_forcing/use_pio, tides.ntides from open boundaries/bgc_mode/forcing/direct input) --
-# they're included below only where the remaining fields in that same section
-# (nt_passive/ntrc_bio in param; bry_tides/pot_tides/ana_tides in tides) are real,
-# still-relevant model defaults.
+# llm/mmm/n/np_xi/np_eta from grid/partitioning; cppdefs.obc_*/marbl/co2_tvarying/
+# tides/cdr_forcing/use_pio from open boundaries/bgc_mode/forcing/direct input;
+# river_frc/cdr_frc entirely; extract_data entirely; tides.ntides from tidal
+# forcing) -- they're included
+# below only where the remaining fields in that same section (nt_passive/ntrc_bio in
+# param; bry_tides/pot_tides/ana_tides in tides) are real, still-relevant model
+# defaults. `pipe_frc` stays here in full: there is no pipe forcing item or
+# generation path, so it has no other piece to live in.
+
+bgc_mode: marbl  # marbl|none -- prepopulates the wizard; resolver derives cppdefs.marbl from it
 
 code:
   roms:
@@ -48,16 +66,10 @@ code:
 
 model_settings:
   cppdefs:
-    # Boundary condition flags (always overwritten from the domain's open_boundaries)
-    obc_west: true
-    obc_east: true
-    obc_north: true
-    obc_south: true
-    marbl: true  # always overwritten by the resolver from bgc_mode (marbl|none)
-    cdr_forcing: false
-    co2_tvarying: false  # Set to true when using time-varying CO2 atmospheric forcing (MBL_co2)
-    use_pio: false  # Set to true to build ROMS against the ParallelIO (PIO) library
-    tides: true  # always overwritten by the resolver from whether tidal forcing is generated
+    # obc_west/east/north/south, marbl, co2_tvarying, tides, cdr_forcing, and use_pio
+    # are all resolver-derived (from the domain's open_boundaries, bgc_mode, forcing
+    # selection, CDR-forcing presence, and the use_pio kwarg, respectively) and are
+    # intentionally absent here -- there is no model default to duplicate.
     sponge_tune: false  # advanced setting only (nested-domain pressure flux forcing); not resolver-derived
     nhy_forcing: true  # ammonia atmospheric forcing; forced off by the resolver when bgc_mode="none"
     nox_forcing: true  # nitrogen oxide atmospheric forcing; forced off by the resolver when bgc_mode="none"
@@ -87,13 +99,9 @@ model_settings:
   ubind: 0.1  # m/s, OBC binding velocity scale
 
   param:
-    # llm/mmm/n/np_xi/np_eta/nsub_x/nsub_e are always overwritten by the resolver from
-    # the domain's grid_kwargs/partitioning -- only nt_passive/ntrc_bio are read from here.
-    llm: 512
-    mmm: 512
-    n: 60
-    np_xi: 16
-    np_eta: 16
+    # llm/mmm/n/np_xi/np_eta are Domain-owned (resolver-derived from grid_kwargs/
+    # partitioning) and intentionally absent here; nsub_x/nsub_e are hardcoded by the
+    # resolver. Only nt_passive/ntrc_bio (real model-level BGC tracer counts) live here.
     nt_passive: 0
     ntrc_bio: 32
 
@@ -110,54 +118,11 @@ model_settings:
     check_bulk_frc_units: false
 
   tides:
-    ntides: 10  # overwritten by the tidal forcing item's ntides, if set
+    # ntides is Forcing-owned (set by the resolver from the tidal item's ntides, or 0
+    # when there is no tidal forcing) and intentionally absent here.
     bry_tides: true
     pot_tides: true
     ana_tides: false
-
-  river_frc:
-    river_source: false
-    analytical: false
-    nriv: 0
-    rvol_vname: 'river_volume'
-    rvol_tname: 'river_time'
-    rtrc_vname: 'river_tracer'
-    rtrc_tname: 'river_time'
-
-  cdr_frc:
-    cdr_source: false
-    cdr_file: 'cdr.nc'
-    ncdr_parm: 1
-    forcing_depth_profiles: false
-    forcing_3d: false
-    forcing_parameterized: true
-    time_interpolation: false
-    relocate_to_wet_pts: true
-    cdr_volume: false
-    cdrvol_vname: 'cdr_volume'
-    cdrvol_tname: 'cdr_time'
-    cdrtrc_vname: 'cdr_tracer'
-    cdrtrc_tname: 'cdr_time'
-    cdrflx_vname: 'cdr_trcflx'
-    cdrflx_tname: 'cdr_time'
-    cdr_loc_lon: 'cdr_lon'
-    cdr_loc_lat: 'cdr_lat'
-    cdr_loc_dep: 'cdr_dep'
-    cdr_scl_hor: 'cdr_hsc'
-    cdr_scl_vrt: 'cdr_vsc'
-    nz_chd: 50
-
-  extract_data:
-    # Nesting (child-grid extraction). Overwritten (do_extract=true + child s-coord/
-    # period) only when this domain has a child grid; otherwise stays disabled.
-    do_extract: false
-    extract_file: 'sample_edata.nc'
-    nrpf: 24
-    n_chd: 90
-    theta_s_chd: 5.0
-    theta_b_chd: 2.0
-    hc_chd: 250.0
-    extract_period: 3600.0
 
   sponge_tune:
     pflx_w_vname: 'up_west'

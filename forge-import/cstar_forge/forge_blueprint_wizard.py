@@ -1814,6 +1814,7 @@ class ForgeBlueprintWizard:
         )
 
         self.roms_ref.value = self._model_default_roms_ref()
+        self.bgc_dd.value = self._model_default_bgc_mode()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         self._forcing_seed = self._forcing_editor.gather()
         self._wire()
@@ -1872,6 +1873,7 @@ class ForgeBlueprintWizard:
             return
         self._overrides = {}
         self.roms_ref.value = self._model_default_roms_ref()
+        self.bgc_dd.value = self._model_default_bgc_mode()
         self._rebuild()
 
     def _on_editor_edit(self, section, field):
@@ -1904,6 +1906,14 @@ class ForgeBlueprintWizard:
             return roms.get("commit") or roms.get("branch") or ""
         except Exception:
             return ""
+
+    def _model_default_bgc_mode(self) -> str:
+        """The selected model's ModelSpec-declared bgc_mode (prepopulates self.bgc_dd)."""
+        try:
+            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
+            return data["model"].get("bgc_mode", "marbl")
+        except Exception:
+            return "marbl"
 
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(

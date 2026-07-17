@@ -57,6 +57,54 @@ def _populated_rt_dict():
     # model_settings -- fill in representative values for these direct-model tests.
     rt["time_stepping"] = {"ntimes": 12, "dt": 7200, "ndtfast": 60, "ninfo": 1}
     rt["v_sponge"] = {"v_sponge": 8333.33}
+    # param's grid/partitioning dims, tides.ntides, river_frc/cdr_frc, and
+    # extract_data are likewise resolver-derived (from Domain/Forcing/a nesting
+    # child domain, not a ModelSpec default) -- fill in representative values for
+    # these direct-model tests.
+    rt["param"].update({"llm": 512, "mmm": 512, "n": 60, "np_xi": 16, "np_eta": 16})
+    rt["tides"]["ntides"] = 15
+    rt["extract_data"] = {
+        "do_extract": False,
+        "extract_file": "sample_edata.nc",
+        "nrpf": 24,
+        "n_chd": 90,
+        "theta_s_chd": 5.0,
+        "theta_b_chd": 2.0,
+        "hc_chd": 250.0,
+        "extract_period": 3600.0,
+    }
+    rt["river_frc"] = {
+        "river_source": False,
+        "analytical": False,
+        "nriv": 0,
+        "rvol_vname": "river_volume",
+        "rvol_tname": "river_time",
+        "rtrc_vname": "river_tracer",
+        "rtrc_tname": "river_time",
+    }
+    rt["cdr_frc"] = {
+        "cdr_source": False,
+        "cdr_file": "cdr.nc",
+        "ncdr_parm": 1,
+        "forcing_depth_profiles": False,
+        "forcing_3d": False,
+        "forcing_parameterized": True,
+        "time_interpolation": False,
+        "relocate_to_wet_pts": True,
+        "cdr_volume": False,
+        "cdrvol_vname": "cdr_volume",
+        "cdrvol_tname": "cdr_time",
+        "cdrtrc_vname": "cdr_tracer",
+        "cdrtrc_tname": "cdr_time",
+        "cdrflx_vname": "cdr_trcflx",
+        "cdrflx_tname": "cdr_time",
+        "cdr_loc_lon": "cdr_lon",
+        "cdr_loc_lat": "cdr_lat",
+        "cdr_loc_dep": "cdr_dep",
+        "cdr_scl_hor": "cdr_hsc",
+        "cdr_scl_vrt": "cdr_vsc",
+        "nz_chd": 50,
+    }
     rt["forcing"] = {
         "surface_forcing_path": "/in/surf.nc",
         "surface_forcing_bgc_path": None,

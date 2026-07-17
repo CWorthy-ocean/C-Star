@@ -19,7 +19,7 @@ callers that import them from ``cstar_forge.models``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -98,6 +98,12 @@ class ModelSpec(BaseModel):
         Logical name of the model (e.g., "cson_roms-marbl_v0.1").
     code : ModelCode
         Code repository refs (roms/marbl/pio) + template refs.
+    bgc_mode : Literal["marbl", "none"]
+        Per-run BGC toggle. Prepopulates the wizard's BGC dropdown; the resolver
+        uses it to derive ``model_settings.cppdefs.marbl`` (and gate
+        ``nhy_forcing``/``nox_forcing``) and to decide whether ``code.marbl`` is
+        populated. Not part of ``model_settings`` -- it's a build mode, not a
+        namelist section.
     model_settings : dict[str, Any]
         Flat model-specific physics/numerics defaults, mirroring
         ``ForgeBlueprint.model_settings`` 1:1. Contains nothing a Domain/Forcing/
@@ -108,6 +114,7 @@ class ModelSpec(BaseModel):
 
     name: str
     code: ModelCode
+    bgc_mode: Literal["marbl", "none"] = "marbl"
     model_settings: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -236,5 +243,6 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
     return ModelSpec(
         name=model_name,
         code=model_code,
+        bgc_mode=block.get("bgc_mode", "marbl"),
         model_settings=block.get("model_settings", {}) or {},
     )

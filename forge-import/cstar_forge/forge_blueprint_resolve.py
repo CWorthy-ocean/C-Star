@@ -219,6 +219,65 @@ def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# ``river_frc``/``cdr_frc`` namelist run-time defaults: these are Forcing-owned (not
+# a model-level physics default), but the fields are required by
+# ``namelist_model.RunTimeSettings`` and their presence/counts (river_source/nriv,
+# cdr_source/ncdr_parm) are only knowable at *generation* time from the actual
+# roms-tools output -- so the resolver seeds this disabled baseline (matching a
+# forcing with no rivers/CDR), which a ForcingSpec may override with its own
+# top-level ``river_frc``/``cdr_frc`` block, and which generation then overwrites
+# in turn (see ``GENERATION_DERIVED_LEAF_KEYS`` in ``forge_blueprint_engine.py``).
+_RIVER_FRC_DEFAULT: dict[str, Any] = {
+    "river_source": False,
+    "analytical": False,
+    "nriv": 0,
+    "rvol_vname": "river_volume",
+    "rvol_tname": "river_time",
+    "rtrc_vname": "river_tracer",
+    "rtrc_tname": "river_time",
+}
+_CDR_FRC_DEFAULT: dict[str, Any] = {
+    "cdr_source": False,
+    "cdr_file": "cdr.nc",
+    "ncdr_parm": 1,
+    "forcing_depth_profiles": False,
+    "forcing_3d": False,
+    "forcing_parameterized": True,
+    "time_interpolation": False,
+    "relocate_to_wet_pts": True,
+    "cdr_volume": False,
+    "cdrvol_vname": "cdr_volume",
+    "cdrvol_tname": "cdr_time",
+    "cdrtrc_vname": "cdr_tracer",
+    "cdrtrc_tname": "cdr_time",
+    "cdrflx_vname": "cdr_trcflx",
+    "cdrflx_tname": "cdr_time",
+    "cdr_loc_lon": "cdr_lon",
+    "cdr_loc_lat": "cdr_lat",
+    "cdr_loc_dep": "cdr_dep",
+    "cdr_scl_hor": "cdr_hsc",
+    "cdr_scl_vrt": "cdr_vsc",
+    "nz_chd": 50,
+}
+
+# ``extract_data`` (child-grid nesting extraction) is likewise a required namelist
+# section whose active values come from a *second, separately-selected* DomainSpec
+# (the nesting child's grid_kwargs/metadata, passed as grid_kwargs_child/
+# metadata_child) rather than the domain/forcing being resolved -- so, like
+# river_frc/cdr_frc, the resolver seeds this disabled baseline and the nesting block
+# below overwrites it when a child grid is actually provided.
+_EXTRACT_DATA_DEFAULT: dict[str, Any] = {
+    "do_extract": False,
+    "extract_file": "sample_edata.nc",
+    "nrpf": 24,
+    "n_chd": 90,
+    "theta_s_chd": 5.0,
+    "theta_b_chd": 2.0,
+    "hc_chd": 250.0,
+    "extract_period": 3600.0,
+}
+
+
 def read_cdr_forcing_yaml(source: str | Path) -> dict[str, Any]:
     """Read a roms-tools ``CDRForcing.to_yaml(...)`` dump into a plain kwargs dict.
 
@@ -277,7 +336,7 @@ def build_forge_blueprint(
     topography_path: str | None = None,
     topography_source: str | TopographySource = TopographySource.ETOPO5,
     use_pio: bool = False,
-    bgc_mode: Literal["marbl", "none"] = "marbl",
+    bgc_mode: Literal["marbl", "none"] | None = None,
     roms_ref: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
     compile_time_overrides: dict[str, Any] | None = None,
@@ -303,7 +362,10 @@ def build_forge_blueprint(
     ``bgc_mode="none"`` raises if the resolved forcing selection still requests BGC
     forcing (a bgc-type surface/boundary item, an IC bgc_source, or a river with
     ``include_bgc=True``); it also forces ``cppdefs.nhy_forcing``/``nox_forcing``
-    off regardless of the ModelSpec/advanced-settings default.
+    off regardless of the ModelSpec/advanced-settings default. If ``None`` (the
+    default), it falls back to the ModelSpec's own ``bgc_mode`` (itself defaulting
+    to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
+    explicit value to override it for one run.
 
     ``cdr_forcing_yaml``, if given, takes precedence over ``cdr_forcing``: it is a
     path to (or the raw text of) a roms-tools ``CDRForcing.to_yaml(...)`` dump, read
@@ -320,6 +382,8 @@ def build_forge_blueprint(
     spec = load_model_spec_data(model_dir)
     model = spec["model"]
     model_name = spec["model_name"]
+    if bgc_mode is None:
+        bgc_mode = model.get("bgc_mode", "marbl")
     # ModelSpec no longer embeds a default forcing/output selection -- a ForcingSpec and
     # an OutputSpec must always be supplied explicitly (from the catalog or hand-authored).
     if forcing_inputs is None:
@@ -355,6 +419,20 @@ def build_forge_blueprint(
         settings.pop(sec, None)
     settings["time_stepping"] = {"ntimes": ntimes, "dt": dt, "ndtfast": 60, "ninfo": 1}
     settings["v_sponge"] = {"v_sponge": v_sponge}
+    # river_frc/cdr_frc are Forcing-owned, not a ModelSpec default: seed the disabled
+    # baseline, then let the ForcingSpec's own top-level river_frc/cdr_frc (if any)
+    # override it. Generation later overwrites the presence/count leaves for real
+    # (see _RIVER_FRC_DEFAULT/_CDR_FRC_DEFAULT docstring above).
+    settings["river_frc"] = _deep_merge(
+        copy.deepcopy(_RIVER_FRC_DEFAULT), inputs.get("river_frc") or {}
+    )
+    settings["cdr_frc"] = _deep_merge(
+        copy.deepcopy(_CDR_FRC_DEFAULT), inputs.get("cdr_frc") or {}
+    )
+    # extract_data (child-grid nesting) is Domain-owned when active (the nesting
+    # block below overwrites it from grid_kwargs_child/metadata_child); seed the
+    # disabled baseline here so it's always present when not nesting.
+    settings["extract_data"] = copy.deepcopy(_EXTRACT_DATA_DEFAULT)
     param = dict(settings.get("param", {}))
     param.update(
         {
@@ -404,10 +482,10 @@ def build_forge_blueprint(
     cppdefs["tides"] = bool(tidal_items)
     settings["cppdefs"] = cppdefs
 
-    # tidal forcing's ntides drives the run-time tides.ntides (else it's left at the
-    # run-time-defaults placeholder, out of sync with the actual generated constituent
-    # count -- see input_data._generate_tidal_forcing, which re-derives the same value
-    # at generation time).
+    # ntides is Forcing-owned (no ModelSpec default): drive it from the tidal
+    # forcing item's ntides, or 0 when there is no tidal forcing -- see
+    # input_data._generate_tidal_forcing, which re-derives the same value at
+    # generation time.
     _ntides = next(
         (
             it.get("ntides")
@@ -416,8 +494,9 @@ def build_forge_blueprint(
         ),
         None,
     )
-    if _ntides is not None:
-        settings.setdefault("tides", {})["ntides"] = int(_ntides)
+    settings.setdefault("tides", {})["ntides"] = (
+        int(_ntides) if _ntides is not None else 0
+    )
 
     # ----- nesting (child domain) -------------------------------------------
     # A child grid means this domain's parent extracts data for it: enable the
