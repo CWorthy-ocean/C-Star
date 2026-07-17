@@ -12,6 +12,7 @@ import os
 import shutil
 import sys
 import warnings
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,22 @@ def _deep_merge_settings_dict(target: dict[str, Any], update: dict[str, Any]) ->
             _deep_merge_settings_dict(target[k], v)
         else:
             target[k] = copy.deepcopy(v)
+
+
+@contextmanager
+def _suppress_pydantic_warnings():
+    """Suppress the Pydantic UserWarnings expected when reading/serializing a
+    blueprint built with ``model_construct`` (placeholder/partial values don't
+    match the declared field types).
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
+        warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.main")
+        warnings.filterwarnings("ignore", message=".*Pydantic.*", category=UserWarning)
+        warnings.filterwarnings(
+            "ignore", message=".*serializer.*", category=UserWarning
+        )
+        yield
 
 
 class ForgeExecutor(BaseModel):
@@ -649,33 +666,17 @@ class ForgeExecutor(BaseModel):
             )
 
         # Write settings to sidecar file
-        self._persist_settings(bp_path)
+        self._persist_settings()
 
-    def _path_settings_file(self, roms_marbl_blueprint_path: Path) -> Path:
+    def _path_settings_file(self) -> Path:
         """
-        Return the path to the settings sidecar file for a given blueprint path.
+        Return the path to this executor's settings sidecar file.
 
-        The settings file has the same name as the blueprint file, with "settings_" prepended.
-        For example: "B_model.yml" -> "settings_B_model.yml"
-
-        Parameters
-        ----------
-        roms_marbl_blueprint_path : Path
-            Path to the blueprint file.
-
-        Returns
-        -------
-        Path
-            Path to the settings sidecar file.
+        The settings file has the same name as the blueprint file, with "settings_"
+        prepended. For example: "B_model.yml" -> "settings_B_model.yml"
         """
-        # Get the directory and filename
-        directory = roms_marbl_blueprint_path.parent
-        filename = roms_marbl_blueprint_path.name
-
-        # Prepend "settings_" to the filename
-        settings_filename = f"settings_{filename}"
-
-        return directory / settings_filename
+        bp_path = self.path_roms_marbl_blueprint()
+        return bp_path.parent / f"settings_{bp_path.name}"
 
     def _convert_paths_to_strings(self, obj: Any) -> Any:
         """
@@ -705,19 +706,14 @@ class ForgeExecutor(BaseModel):
         else:
             return obj
 
-    def _persist_settings(self, roms_marbl_blueprint_path: Path) -> None:
+    def _persist_settings(self) -> None:
         """
-        Persist settings dictionaries to a sidecar file.
+        Persist settings dictionaries to this executor's sidecar file.
 
         Writes compile_time and run_time settings to a YAML file with the same
         name as the blueprint file, prepended with "settings_".
-
-        Parameters
-        ----------
-        roms_marbl_blueprint_path : Path
-            Path to the blueprint file (used to determine settings file path).
         """
-        settings_path = self._path_settings_file(roms_marbl_blueprint_path)
+        settings_path = self._path_settings_file()
 
         # Prepare settings dictionary
         settings_dict = {
@@ -735,21 +731,16 @@ class ForgeExecutor(BaseModel):
         with settings_path.open("w") as f:
             yaml.safe_dump(settings_dict, f, default_flow_style=False, sort_keys=False)
 
-    def _load_settings_from_file(self, roms_marbl_blueprint_path: Path) -> None:
+    def _load_settings_from_file(self) -> None:
         """
-        Load settings dictionaries from a sidecar file.
+        Load settings dictionaries from this executor's sidecar file.
 
         Reads compile_time and run_time settings from a YAML file with the same
         name as the blueprint file, prepended with "settings_".
 
         If the settings file doesn't exist, leaves settings dictionaries unchanged.
-
-        Parameters
-        ----------
-        roms_marbl_blueprint_path : Path
-            Path to the blueprint file (used to determine settings file path).
         """
-        settings_path = self._path_settings_file(roms_marbl_blueprint_path)
+        settings_path = self._path_settings_file()
 
         if not settings_path.exists():
             # Settings file doesn't exist, leave settings unchanged
@@ -1017,21 +1008,16 @@ class ForgeExecutor(BaseModel):
             cdr_forcing=None,
         )
 
-    def _load_roms_marbl_blueprint_file(
-        self, load_settings: bool = True
-    ) -> cstar_models.RomsMarblBlueprint | None:
+    @property
+    def roms_marbl_blueprint_from_file(self) -> cstar_models.RomsMarblBlueprint | None:
         """
-        Load the persisted blueprint file, if it exists.
-
-        Parameters
-        ----------
-        load_settings : bool, optional
-            If True, load settings from sidecar file. Defaults to True.
+        Load and return the persisted blueprint from disk, refreshing the
+        in-memory settings dicts from its sidecar file.
 
         Returns
         -------
         Optional[cstar_models.RomsMarblBlueprint]
-            Loaded blueprint or None if file doesn't exist or loading fails.
+            Loaded blueprint or None if the file doesn't exist or loading fails.
         """
         bp_path = self.path_roms_marbl_blueprint()
 
@@ -1039,23 +1025,9 @@ class ForgeExecutor(BaseModel):
             return None
 
         try:
-            # Try to deserialize with full validation first
-            # Suppress Pydantic serialization warnings (YAML may contain dicts where models expected)
-            with warnings.catch_warnings():
-                # Filter all UserWarnings from pydantic module and pydantic.main
-                warnings.filterwarnings(
-                    "ignore", category=UserWarning, module="pydantic"
-                )
-                warnings.filterwarnings(
-                    "ignore", category=UserWarning, module="pydantic.main"
-                )
-                # Also filter warnings with "Pydantic" in the message
-                warnings.filterwarnings(
-                    "ignore", message=".*Pydantic.*", category=UserWarning
-                )
-                warnings.filterwarnings(
-                    "ignore", message=".*serializer.*", category=UserWarning
-                )
+            # Try to deserialize with full validation first (Pydantic warns on
+            # placeholder/partial values persisted via model_construct).
+            with _suppress_pydantic_warnings():
                 roms_marbl_blueprint = deserialize(
                     bp_path, cstar_models.RomsMarblBlueprint
                 )
@@ -1080,35 +1052,10 @@ class ForgeExecutor(BaseModel):
                 )
                 return None
 
-        # Load settings from sidecar file if blueprint was loaded and load_settings is True
-        if roms_marbl_blueprint is not None and load_settings:
-            self._load_settings_from_file(bp_path)
+        if roms_marbl_blueprint is not None:
+            self._load_settings_from_file()
 
         return roms_marbl_blueprint
-
-    @property
-    def roms_marbl_blueprint_from_file(self) -> cstar_models.RomsMarblBlueprint | None:
-        """
-        Load and return the persisted blueprint from disk.
-
-        Returns
-        -------
-        Optional[cstar_models.RomsMarblBlueprint]
-            Loaded blueprint or None if file doesn't exist or loading fails.
-        """
-        # Suppress Pydantic warnings when loading blueprint
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, module="pydantic.main"
-            )
-            warnings.filterwarnings(
-                "ignore", message=".*Pydantic.*", category=UserWarning
-            )
-            warnings.filterwarnings(
-                "ignore", message=".*serializer.*", category=UserWarning
-            )
-            return self._load_roms_marbl_blueprint_file()
 
     def get_ds(self, field: str, from_file: bool = True) -> list[xr.Dataset] | None:
         """
@@ -1151,18 +1098,7 @@ class ForgeExecutor(BaseModel):
             Always returns a list, even for single files.
         """
         # Select which blueprint to use
-        # Suppress Pydantic warnings when accessing blueprint
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, module="pydantic.main"
-            )
-            warnings.filterwarnings(
-                "ignore", message=".*Pydantic.*", category=UserWarning
-            )
-            warnings.filterwarnings(
-                "ignore", message=".*serializer.*", category=UserWarning
-            )
+        with _suppress_pydantic_warnings():
             if from_file:
                 roms_marbl_blueprint = self.roms_marbl_blueprint_from_file
             else:
@@ -1173,18 +1109,7 @@ class ForgeExecutor(BaseModel):
 
         # Navigate to the field (handle nested fields like "forcing.surface")
         # Handle both model instances and dicts at each level
-        # Suppress warnings during navigation as well
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, module="pydantic.main"
-            )
-            warnings.filterwarnings(
-                "ignore", message=".*Pydantic.*", category=UserWarning
-            )
-            warnings.filterwarnings(
-                "ignore", message=".*serializer.*", category=UserWarning
-            )
+        with _suppress_pydantic_warnings():
             field_parts = field.split(".")
             data = roms_marbl_blueprint
             for part in field_parts:
