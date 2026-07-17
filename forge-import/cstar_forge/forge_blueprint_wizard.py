@@ -567,36 +567,149 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 }
 
 
-class _SettingsEditor:
-    """A collapsible (Accordion) editor over the *editable* model_settings sections.
+# Modeler-facing consolidation of the raw namelist sections into a few
+# Advanced-settings panes, grouped the way an ocean modeler categorizes knobs
+# rather than by the exact namelist sub-groups. DISPLAY-ONLY: each widget stays
+# keyed by its real ``(section, field)``, so the overrides layer, ``_diff_overrides``,
+# and the output/model "modified" tracking are all unaffected by the grouping.
+#
+# Sections deliberately absent (time_stepping, reference_date_settings, grid,
+# s_coord, param, title, output_root_name, initial, forcing, cppdefs) are filled
+# dynamically at resolve/run time (ntimes from the run duration, grid/IC/forcing
+# paths from generated files, cppdefs flags from the resolver) or edited by a
+# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, np_xi/np_eta,
+# reference date, PIO/open-boundary checkboxes). Their resolver-composed value
+# still flows through untouched -- omitting the pane only removes an editor that
+# would be clobbered or duplicated, never the value.
+#
+# ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
+# ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
+# their output write-controls live under Output, the rest under Biogeochemistry.
+_OUTPUT_CATEGORY = "Output & diagnostics"
+_ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Physics & subgrid tuning",
+        (
+            "lateral_visc",
+            "vertical_mixing",
+            "tracer_diff2",
+            "bottom_drag",
+            "v_sponge",
+            "sponge_tune",
+            "gamma2",
+            "ubind",
+            "lin_rho_eos",
+        ),
+    ),
+    (
+        "Surface & lateral forcing",
+        (
+            "blk_frc",
+            "flux_frc",
+            "tides",
+            "river_frc",
+            "pipe_frc",
+            "sss_correction",
+            "sst_correction",
+        ),
+    ),
+    (
+        "Biogeochemistry (BGC / MARBL)",
+        ("bgc", "marbl_bgc", "dic_alk_correction"),
+    ),
+    (
+        "Carbon dioxide removal (CDR)",
+        ("cdr_frc", "cdr_output"),
+    ),
+    (
+        _OUTPUT_CATEGORY,
+        (
+            "ocean_vars",
+            "surf_flux",
+            "diagnostics",
+            "stdout_diag",
+            "ts_output",
+            "frc_output",
+            "upscale_output",
+            "zslice",
+            "random_output",
+            "calc_pflx",
+            "particles",
+            "extract_data",
+            "bgc",
+            "marbl_bgc",
+        ),
+    ),
+)
 
-    Auto-generates typed widgets per field using the ``RunTimeSettings`` sub-model
-    schema (falling back to value-type inference, e.g. for ``cppdefs``). All panes are
-    collapsed by default. ``gather()`` returns the edited sections; ``set_from()``
-    pushes values in (used on load). Fields listed in ``_ACCORDION_EXCLUDED_FIELDS``
-    are skipped entirely -- their value still flows through from the resolver-composed
-    settings dict (this editor never authors that dict, only a sparse overrides
-    layer), so hiding the widget cannot drop or reset the value.
+
+def _split_fields(
+    category_title: str, section: str
+) -> tuple[frozenset | None, frozenset]:
+    """Field filter ``(include, exclude)`` for a section shown in ``category_title``.
+
+    ``include=None`` means "all fields"; otherwise only those in ``include`` are
+    shown. ``exclude`` is always dropped. Sections split across panes (``bgc`` /
+    ``marbl_bgc`` via :data:`PARTIAL_OUTPUT_SECTIONS`) keep their output write-
+    controls under Output and the rest under their feature pane.
+    """
+    parts = PARTIAL_OUTPUT_SECTIONS.get(section)
+    if parts is None:
+        return None, frozenset()
+    if category_title == _OUTPUT_CATEGORY:
+        return frozenset(parts), frozenset()
+    return None, frozenset(parts)
+
+
+class _SettingsEditor:
+    """A collapsible (Accordion) editor over the *editable* model_settings sections,
+    consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`).
+
+    Each pane groups several namelist sections under a sub-header per section, so the
+    grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR, output)
+    while every widget is still keyed by its real ``(section, field)``. Auto-generates
+    typed widgets per field using the ``RunTimeSettings`` sub-model schema (falling
+    back to value-type inference). All panes are collapsed by default. ``sync()``
+    pushes values in (used on load); ``read()`` returns a single field. Fields listed
+    in ``_ACCORDION_EXCLUDED_FIELDS`` (and sections not named in a category) are
+    skipped -- their value still flows through from the resolver-composed settings
+    dict (this editor never authors that dict, only a sparse overrides layer), so
+    hiding the widget cannot drop or reset the value.
     """
 
-    def __init__(
-        self, W, model_settings: dict[str, Any], sections: list[str], on_edit=None
-    ):
+    def __init__(self, W, model_settings: dict[str, Any], on_edit=None):
         self.W = W
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
         self._section_fields: dict[str, list[str | None]] = {}
+        # category title -> sections shown under it (a section may appear under two
+        # panes when split along PARTIAL_OUTPUT_SECTIONS, e.g. bgc/marbl_bgc).
+        self._pane_sections: dict[str, list[str]] = {}
         panes, titles = [], []
-        for section in sections:
-            if section not in model_settings:
+        for title, members in _ADVANCED_CATEGORIES:
+            blocks = []
+            for section in members:
+                if section not in model_settings:
+                    continue
+                include, exclude = _split_fields(title, section)
+                box, fields = self._build_section(
+                    section, model_settings[section], include, exclude
+                )
+                if not fields:
+                    continue
+                self._pane_sections.setdefault(title, []).append(section)
+                blocks.append(
+                    W.HTML(
+                        f"<div style='font-weight:600;margin:8px 0 2px;color:#555'>"
+                        f"{section}</div>"
+                    )
+                )
+                blocks.append(box)
+                self._section_fields[section] = fields
+            if not blocks:
                 continue
-            value = model_settings[section]
-            box, fields = self._build_section(section, value)
-            if not fields:
-                continue
-            panes.append(box)
-            titles.append(section)
-            self._section_fields[section] = fields
+            panes.append(W.VBox(blocks))
+            titles.append(title)
         self.accordion = W.Accordion(children=panes, selected_index=None)
         for i, title in enumerate(titles):
             self.accordion.set_title(i, title)
@@ -629,7 +742,13 @@ class _SettingsEditor:
         widget, base = self._widgets[(section, field)]
         return _read_field_widget(widget, base)
 
-    def _build_section(self, section: str, value: Any):
+    def _build_section(
+        self,
+        section: str,
+        value: Any,
+        include: frozenset | None = None,
+        exclude: frozenset = frozenset(),
+    ):
         W = self.W
         sub = _section_submodel(section)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
@@ -641,7 +760,14 @@ class _SettingsEditor:
         excluded = _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset())
         rows, fields = [], []
         for key, val in value.items():
-            if key in excluded:
+            if key in excluded or key in exclude:
+                continue
+            if include is not None and key not in include:
+                continue
+            # Skip metadata-name keys (*_vname/*_tname, cdb_min, ...): the settings
+            # sub-models are extra="ignore", so anything not a typed field is dropped
+            # by the namelist transform and has no business in the editor.
+            if sub is not None and key not in sub.model_fields:
                 continue
             ann = (
                 sub.model_fields[key].annotation
@@ -2251,7 +2377,7 @@ class ForgeBlueprintWizard:
         composed = cfg.model_settings
         if self.editor is None or self._editor_model != self.model_dd.value:
             self.editor = _SettingsEditor(
-                self.W, composed, list(composed), on_edit=self._on_editor_edit
+                self.W, composed, on_edit=self._on_editor_edit
             )
             self._editor_model = self.model_dd.value
             self.editor_box.children = [self.editor.accordion]

@@ -36,7 +36,7 @@ code:
   # the executor fetches these via C-Star's AdditionalCode from the forge git ref.
   # Pin the serving forge commit with `templates_commit:` (until pinned, the resolver
   # defaults to branch `main`).
-  templates_commit: a2167c72ddc265203c9a3af69952e12469c640ec
+  templates_commit: 4208f4384431852daccea1ccad01d03c0cb473d9
   templates_compile_time:
     directory: "templates/compile-time"
     files:

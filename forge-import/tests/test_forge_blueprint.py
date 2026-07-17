@@ -1010,43 +1010,74 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         assert "settings valid" in w.validation.value
 
-    def test_advanced_editor_includes_all_sections(self):
+    def test_advanced_editor_groups_sections_into_modeler_categories(self):
         w = self._wizard()
         assert w.editor is not None
+        # Panes are the modeler-facing categories, in order, not raw section names.
+        assert list(w.editor._pane_sections) == [
+            "Physics & subgrid tuning",
+            "Surface & lateral forcing",
+            "Biogeochemistry (BGC / MARBL)",
+            "Carbon dioxide removal (CDR)",
+            "Output & diagnostics",
+        ]
         sections = set(w.editor._section_fields)
-        # every model_settings section is editable, including the derived ones
+        # A representative editable section from each category is present.
         assert {
-            "ocean_vars",
-            "lateral_visc",
-            "marbl_bgc",
-            "time_stepping",
-            "param",
-            "v_sponge",
-            "cppdefs",
-            "extract_data",
+            "lateral_visc",  # physics
+            "tides",  # forcing
+            "marbl_bgc",  # bgc
+            "cdr_frc",  # cdr
+            "ocean_vars",  # output
+            "extract_data",  # output
         } <= sections
+        # Dynamic / dedicated-widget sections are dropped from the accordion (their
+        # resolver-composed value still flows through -- see the exclusion test).
+        assert not (
+            {
+                "time_stepping",
+                "reference_date_settings",
+                "grid",
+                "s_coord",
+                "param",
+                "cppdefs",
+                "forcing",
+            }
+            & sections
+        )
         assert w.config.composition.overrides == {}
 
-    def test_advanced_editor_excludes_dedicated_widget_fields(self):
-        """Fields with a dedicated wizard widget elsewhere (PIO, open boundaries,
-        BGC mode, grid dims, partitioning, dt) must not also appear in the generic
-        Advanced-settings accordion -- but their resolved value still flows through.
+    def test_advanced_editor_splits_bgc_along_output_seam(self):
+        """bgc/marbl_bgc straddle physics and output: the write-controls appear under
+        Output, the rest under Biogeochemistry (the PARTIAL_OUTPUT_SECTIONS seam).
         """
         w = self._wizard()
-        assert "use_pio" not in w.editor._section_fields["cppdefs"]
-        assert "marbl" not in w.editor._section_fields["cppdefs"]
-        for d in ("west", "east", "north", "south"):
-            assert f"obc_{d}" not in w.editor._section_fields["cppdefs"]
-        for f in ("llm", "mmm", "n", "np_xi", "np_eta"):
-            assert f not in w.editor._section_fields["param"]
-        assert "dt" not in w.editor._section_fields["time_stepping"]
+        assert "bgc" in w.editor._pane_sections["Biogeochemistry (BGC / MARBL)"]
+        assert "bgc" in w.editor._pane_sections["Output & diagnostics"]
+        # A bgc physics field and a bgc output field each got a widget (neither half
+        # was dropped by the split).
+        assert ("bgc", "xco2air_default") in w.editor._widgets  # physics
+        assert ("bgc", "wrt_his") in w.editor._widgets  # output write-control
+
+    def test_advanced_editor_excludes_dedicated_widget_fields(self):
+        """Fields/sections controlled elsewhere (PIO, open boundaries, BGC mode, grid
+        dims, partitioning, dt, run length) must not appear in the generic Advanced-
+        settings accordion -- but their resolved value still flows through.
+        """
+        w = self._wizard()
+        # The whole cppdefs/param/time_stepping/grid group is dropped from the
+        # accordion (resolver-derived or edited by a dedicated widget).
+        for dropped in ("cppdefs", "param", "time_stepping", "grid", "s_coord"):
+            assert dropped not in w.editor._section_fields
 
         # No widget for these fields, but the resolver-composed value still lands
-        # in the final config -- hiding the widget can't drop/reset the value.
+        # in the final config -- dropping the editor can't drop/reset the value.
         assert (
             w.config.model_settings["param"]["llm"] == w.config.domain.grid_kwargs["nx"]
         )
         assert w.config.model_settings["cppdefs"]["marbl"] is True
+        assert "use_pio" in w.config.model_settings["cppdefs"]
+        assert w.config.model_settings["time_stepping"]["ntimes"] > 0
 
     def test_editing_advanced_setting_reflects_in_config(self):
         w = self._wizard()
@@ -1062,25 +1093,24 @@ class TestForgeBlueprintWizard:
         assert w.config.model_settings["param"]["llm"] == 8  # derived refreshed
 
     def test_editing_derived_value_records_override_and_wins(self):
-        """param.np_xi/np_eta now have a dedicated widget (self.npx/self.npy) and are
-        excluded from the accordion (see _ACCORDION_EXCLUDED_FIELDS); use
-        time_stepping.ntimes instead -- still resolver-derived (from dt/run window)
-        and still accordion-editable -- to exercise the same override-wins-over-
-        re-derivation mechanic.
+        """time_stepping/param are now dropped from the accordion (resolver-controlled
+        or dedicated widgets). Use v_sponge instead -- still resolver-derived (from
+        grid spacing) and still accordion-editable (Physics pane) -- to exercise the
+        same override-wins-over-re-derivation mechanic.
         """
         w = self._wizard()
-        w.editor._widgets[("time_stepping", "ntimes")][0].value = 999
-        assert w.config.composition.overrides == {"time_stepping": {"ntimes": 999}}
-        # override persists and wins over the composed value when dt changes
+        w.editor._widgets[("v_sponge", "v_sponge")][0].value = 999.0
+        assert w.config.composition.overrides == {"v_sponge": {"v_sponge": 999.0}}
+        # override persists and wins over the re-composed value across a rebuild
         w.dt.value = 3600.0
-        assert w.config.model_settings["time_stepping"]["ntimes"] == 999
+        assert w.config.model_settings["v_sponge"]["v_sponge"] == 999.0
         assert (
-            w.config.model_settings["time_stepping"]["ndtfast"] == 60
-        )  # non-overridden sibling unaffected
+            w.config.model_settings["lateral_visc"]["visc2"] == 0.0
+        )  # non-overridden field still re-derives to its composed default
 
     def test_override_layer_round_trips_through_load(self, tmp_path):
         w1 = self._wizard()
-        w1.editor._widgets[("time_stepping", "ntimes")][0].value = 999
+        w1.editor._widgets[("v_sponge", "v_sponge")][0].value = 999.0
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
         p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
@@ -1088,10 +1118,9 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.config.model_settings["time_stepping"]["ntimes"] == 999
+        assert w2.config.model_settings["v_sponge"]["v_sponge"] == 999.0
         assert (
-            w2.config.composition.overrides.get("time_stepping", {}).get("ntimes")
-            == 999
+            w2.config.composition.overrides.get("v_sponge", {}).get("v_sponge") == 999.0
         )
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 3.3
 
