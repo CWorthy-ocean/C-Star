@@ -16,7 +16,13 @@ from cstar.applications.roms_marbl.transforms import (
 )
 from cstar.base.env import FLAG_OFF
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
-from cstar.orchestration.models import Application, BlueprintState, Step, Workplan
+from cstar.orchestration.models import (
+    Application,
+    BlueprintState,
+    Step,
+    UserDefinedVariables,
+    Workplan,
+)
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
@@ -380,9 +386,6 @@ def test_workplan_transformer_applies_working_dir_overrides(
     assert blueprint.working_dir != dir_orig
 
     # confirm the workplan override took precedence over user-supplied overrides
-    exp_dir = (  # noqa: F841
-        step_trx.fsm.run_dir
-    )  # TODO: there is something very wrong with the fsm root...
     assert blueprint.working_dir == sys_working_dir_override  # exp_dir
     assert blueprint.working_dir != dir_orig
     assert blueprint.working_dir != original_override
@@ -430,7 +433,7 @@ def test_template_fill_variable_substitution(
     assert result.blueprint_overrides["input_dir"] == "/data/base/input"
 
 
-def test_template_fill_path_substitution(
+def test_template_fill_scoped_resolver(
     live_step_with_templates: LiveStep, tmp_path: Path
 ) -> None:
     """{{work_dir: step_name}} tokens are replaced using the scope resolver."""
@@ -448,6 +451,53 @@ def test_template_fill_path_substitution(
     (result,) = transform(step)
 
     assert result.blueprint_overrides[wd_key] == f"{upstream_dir}/output"
+
+
+def test_template_fill_scoped_resolver_invalid_lookup(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Verify that the fill transform raises a value error if an attempt to access
+    a valid scope on an invalid member (e.g. look up working_dir, but with a
+    step name that doesn't exist).
+    """
+    wd_key = "working_dir"
+    step1 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"name": "step-1"},
+    )
+    step2 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {wd_key: "{{working_dir: step-111}}/output"}},
+    )
+
+    resolver = get_fsm_resolver([step1, step2])
+    transform = TemplateFillTransform(scoped_resolver=resolver)
+
+    with pytest.raises(KeyError, match="unknown step"):
+        _ = transform(step2)
+
+
+def test_template_fill_variable_resolver_unknown_variable(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Verify that the fill transform raises a value error if an attempt to access
+    an unknown scope on a scoped resolver is encountered.
+
+    E.g. passing {{typo-var}} when the variable is named "ok-var" in the workplan.
+    """
+    wd_key = "working_dir"
+    step = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {wd_key: "{{xxx}}/output"}},
+    )
+    named_config = UserDefinedVariables(
+        keys={"yyy"},
+        mapping={"yyy": "value"},
+    )
+    transform = TemplateFillTransform(variable_resolver=named_config.resolve)
+
+    with pytest.raises(KeyError, match="Unable to resolve variable"):
+        _ = transform(step)
 
 
 def test_template_fill_nested_dict(live_step_with_templates: LiveStep) -> None:
@@ -546,8 +596,33 @@ def test_template_fill_with_path_resolver_unknown_purpose(
 
     fill = TemplateFillTransform(variable_resolver=str, scoped_resolver=resolver)
 
-    with pytest.raises(ValueError, match="Unable to resolve"):
+    with pytest.raises(KeyError, match="Unable to resolve"):
         list(fill(step))
+
+
+def test_template_fill_scoped_resolver_unknown_scope(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Verify that the fill transform raises a value error if an attempt to access
+    an unknown scope on a scoped resolver is encountered.
+
+    E.g. in {{oooutput_dir: Step A}} the scope is invalid.
+    """
+    wd_key = "working_dir"
+    step1 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"name": "step-1"},
+    )
+    step2 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {wd_key: "{{woorking_dir: step-1}}/output"}},
+    )
+
+    resolver = get_fsm_resolver([step1, step2])
+    transform = TemplateFillTransform(scoped_resolver=resolver)
+
+    with pytest.raises(KeyError, match="Unable to resolve 'woorking_dir'"):
+        _ = transform(step2)
 
 
 def test_template_fill_does_not_mutate_original_step(

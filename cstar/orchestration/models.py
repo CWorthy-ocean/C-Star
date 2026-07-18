@@ -509,6 +509,14 @@ class UserDefinedVariables(BaseModel):
 
         return self
 
+    def resolve(self, name: str) -> str:
+        """Return the variable value for the supplied name."""
+        if name not in self.mapping:
+            csv = ", ".join(k for k in self.mapping)
+            msg = f"Unable to resolve variable {name!r}. Available variables: {csv}"
+            raise KeyError(msg)
+        return self.mapping[name]
+
 
 register_representer(WorkplanState, strenum_representer)
 register_representer(BlueprintState, strenum_representer)
