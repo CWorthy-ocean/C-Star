@@ -53,7 +53,10 @@ cstar_forge/
                                wizard's "save modified pieces to catalog" panel)
   domain_catalog_sketch.py    dead prototype, unreferenced anywhere — candidate for deletion
   forge_blueprint_resolve.py      resolver: build_forge_blueprint(...)
-  forge_blueprint_wizard.py       ForgeBlueprintWizard (ipywidgets UI), thin shell over the resolver
+  forge_blueprint_wizard.py       ForgeBlueprintWizard (ipywidgets UI), thin shell over the resolver;
+                               ForgeBlueprintWizardApp wraps it with a catalog-location bar
+                               (defaults to the bundled catalog; Reload rebuilds against a
+                               different local path/"local"/GitHub URL/http URL)
   models.py                   Pydantic wrappers for model.yaml (ModelSpec, ModelCode,
                                ModelTemplates, load_models_yaml); imports its forcing/IC/
                                OpenBoundaries item models FROM forge.forge_blueprint (single
@@ -127,7 +130,11 @@ repo refs) · `composition` (which catalog pieces produced this + overrides laye
 
 **Authoring (catalog → resolver/wizard → blueprint):**
 1. `wiz = ForgeBlueprintWizard()` (forge_blueprint_wizard.py) — scans the catalog via
-   `domain_catalog.default_catalog`, populates dropdowns.
+   `domain_catalog.default_catalog`, populates dropdowns. The notebook entry point is
+   actually `ForgeBlueprintWizardApp()`, a thin wrapper that shows a catalog-location
+   bar above the wizard (auto-loads the bundled catalog; Reload rebuilds a fresh
+   `ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=...))` against a different
+   local path/`"local"`/GitHub URL/http URL, keeping the previous wizard on failure).
 2. User picks a domain → `_on_domain()` prefills grid/boundaries/partitioning/dates from
    `catalog.domain_data(name)`.
 3. Every edit → `_rebuild()` → `build_forge_blueprint(**self._gather())`

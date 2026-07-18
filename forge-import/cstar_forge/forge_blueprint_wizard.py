@@ -3569,3 +3569,82 @@ class ForgeBlueprintWizard:
         from IPython.display import display
 
         display(self.widget)
+
+
+class ForgeBlueprintWizardApp:
+    """Thin wrapper around :class:`ForgeBlueprintWizard` that adds a catalog-location
+    bar above it. Defaults to and auto-loads the bundled in-repo catalog; entering a
+    different location (a local path, ``"local"``, a GitHub URL, or an http URL --
+    anything :class:`~cstar_forge.domain_catalog.DomainCatalog` accepts as
+    ``catalog_root``) and clicking Reload rebuilds the wizard against it.
+
+    Usage (in a Jupyter notebook)::
+
+        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+        app = ForgeBlueprintWizardApp()
+        app.display()
+        # ... optionally enter a different catalog path/URL above and click Reload ...
+        cfg = app.inner.config       # the current resolved ForgeBlueprint (or None)
+    """
+
+    def __init__(self, catalog_root: str | None = None):
+        import ipywidgets as W
+
+        self.W = W
+        self.inner: ForgeBlueprintWizard | None = None
+
+        self._cat_input = W.Text(
+            value="",
+            placeholder="catalog path or GitHub URL (blank = bundled in-repo catalog)",
+            description="Catalog:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="520px"),
+        )
+        self._cat_reload_btn = W.Button(description="Reload catalog", icon="refresh")
+        self._cat_status = W.HTML("")
+        self._cat_reload_btn.on_click(self._reload)
+
+        self._outer = W.VBox([])
+        self._load(catalog_root)
+
+    def _load(self, catalog_root_value: str | None) -> None:
+        from cstar_forge.domain_catalog import DomainCatalog
+
+        val = (catalog_root_value or "").strip() or None
+        try:
+            cat = DomainCatalog(catalog_root=val)
+            inner = ForgeBlueprintWizard(catalog=cat)
+        except Exception as exc:
+            self._cat_status.value = (
+                f"<span style='color:#b00'>Failed to load catalog "
+                f"{val or '(bundled)'!r}: {exc}</span>"
+            )
+            return
+
+        self.inner = inner
+        self._cat_status.value = (
+            f"<span style='color:#2a2'>Loaded {cat.catalog_root} -- "
+            f"{len(cat.model_names)} models, "
+            f"{len(cat.roms_marbl_blueprint_names)} blueprints</span>"
+        )
+        self._outer.children = [
+            self.W.VBox(
+                [
+                    self.W.HTML("<h4>Catalog location</h4>"),
+                    self.W.HBox([self._cat_input, self._cat_reload_btn]),
+                    self._cat_status,
+                ],
+                layout=self.W.Layout(
+                    border="1px solid #e0e0e0", padding="8px", margin="4px 0"
+                ),
+            ),
+            inner.widget,
+        ]
+
+    def _reload(self, _btn):
+        self._load(self._cat_input.value)
+
+    def display(self):
+        from IPython.display import display
+
+        display(self._outer)

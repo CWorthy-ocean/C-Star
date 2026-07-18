@@ -1534,6 +1534,33 @@ class TestForgeBlueprintWizard:
         assert f'download="{wiz.config.name}.forge_blueprint.yaml"' in html
 
 
+class TestForgeBlueprintWizardApp:
+    """The catalog-location wrapper around ForgeBlueprintWizard."""
+
+    def _app(self, **kwargs):
+        pytest.importorskip("ipywidgets")
+        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+
+        return ForgeBlueprintWizardApp(**kwargs)
+
+    def test_default_auto_loads_bundled_catalog(self):
+        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT
+        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+
+        app = self._app()
+        assert isinstance(app.inner, ForgeBlueprintWizard)
+        assert app.inner.catalog.catalog_root == _DEFAULT_CATALOG_ROOT
+        assert "color:#2a2" in app._cat_status.value
+
+    def test_reload_with_bad_path_keeps_previous_wizard(self):
+        app = self._app()
+        original_inner = app.inner
+        app._cat_input.value = "/nonexistent/catalog/path"
+        app._reload(None)
+        assert app.inner is original_inner
+        assert "color:#b00" in app._cat_status.value
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 engine (orchestration tested with an injected fake builder; the real
 # pipeline downloads data + runs roms_tools and is out of scope for unit tests)
