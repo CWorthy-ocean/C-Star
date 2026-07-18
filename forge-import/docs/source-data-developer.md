@@ -137,7 +137,7 @@ Handler functions must:
 
 ### Logical Names vs. Dataset Keys
 
-Users specify **logical source names** in configuration (e.g., a model's `model.yml`):
+Users specify **logical source names** in configuration (e.g., a model's `model.yaml`):
 - `"GLORYS"` → maps to `"GLORYS_REGIONAL"` or `"GLORYS_GLOBAL"` (platform-dependent)
 - `"UNIFIED"` → maps to `"UNIFIED_BGC"`
 - `"SRTM15"` → maps to `"SRTM15_V2.7"` (version-specific)

@@ -33,8 +33,8 @@ time or must be produced by processing.
 | Layer | Source | User-mutable? | Resolved when | In authoritative file? |
 |---|---|---|---|---|
 | **L1 Run inputs** | `CstarSpecBuilder` constructor args | yes | construction | ✅ verbatim |
-| **L2 ModelSpec** | `model.yml` + `compile/run-time-defaults.yml` + code pins + input source defaults | via override files / editing `model.yml` | `_load_model_spec` at construction | ✅ resolved & inlined |
-| **L3 Machine/env** | `config.py` `DataPaths`, `catalog/Machines/*.yml`, env vars | via env / machine | import + construction | ⚠️ partial — re-resolvable at ingest |
+| **L2 ModelSpec** | `model.yaml` + `compile/run-time-defaults.yaml` + code pins + input source defaults | via override files / editing `model.yaml` | `_load_model_spec` at construction | ✅ resolved & inlined |
+| **L3 Machine/env** | `config.py` `DataPaths`, `catalog/Machines/*.yaml`, env vars | via env / machine | import + construction | ⚠️ partial — re-resolvable at ingest |
 | **L4 Hardcoded** | literals in `source_data.py`, `input_data.py`, `_core.py`, `util.py` | no (code change only) | baked in | ✅ snapshot as explicit, overridable values |
 | **L5 Derived** | computed in `_init_settings_*` and the input handlers | indirectly | config-time **or** process-time | 🔶 split (see §3) |
 | **L6 External lib** | `roms_tools` defaults (nesting period, `Grid` behavior) | no | call-time | ✅ snapshot the resolved value |
@@ -46,7 +46,7 @@ time or must be produced by processing.
 ### A. Grid / domain geometry
 - **L1:** `grid_kwargs`, `grid_kwargs_parent`, `grid_kwargs_child` (incl. optional `metadata`), `grid_name`
   → build `rt.Grid` objects (`grid`, `grid_parent`, `grid_child`, `metadata_child`) in `model_post_init` (`_core.py:374–446`).
-- **L2:** `inputs.grid.topography_source` (`ETOPO5`) — `model.yml`.
+- **L2:** `inputs.grid.topography_source` (`ETOPO5`) — `model.yaml`.
 - **L4 hardcoded:** `param.nsub_x = nsub_e = 1` (`input_data.py:661–662`); grid / `grid_child` / `nesting` filename stems.
 - **L5 derived:** `param.{llm,mmm,n}` (from grid `nx`/`ny`/`N`); `cppdefs.obc_{west,east,north,south}` (from boundaries present); child `extract_data.{n_chd,theta_s_chd,theta_b_chd,hc_chd}`.
 - **L5 derived — artifact-dependent (process-time only):** `s_coord.{theta_s,theta_b,tcline}` (read from the generated grid file); `grid.grid_file` path.
@@ -60,7 +60,7 @@ time or must be produced by processing.
 - **L5 derived — artifact-dependent (process-time only):** all `forcing.*_path`, `initial.initial_file`.
 
 ### C. Model / physics / numerics
-- **L2 (`run-time-defaults.yml`, ~25 sections):** `lateral_visc`, `vertical_mixing`, `tracer_diff2`, `bottom_drag`, `v_sponge`, `gamma2`, `ubind`, `lin_rho_eos`, `sss_correction`, `sst_correction`.
+- **L2 (`run-time-defaults.yaml`, ~25 sections):** `lateral_visc`, `vertical_mixing`, `tracer_diff2`, `bottom_drag`, `v_sponge`, `gamma2`, `ubind`, `lin_rho_eos`, `sss_correction`, `sst_correction`.
 - **L2 (`settings.properties`):** `n_tracers=34`, `marbl=true`.
 - **L4 hardcoded:** `time_stepping.ndtfast=60`, `ninfo=1` (`_core.py` timestepping defaults).
 - **L5 derived (pure functions of config inputs):** `time_stepping.dt` (CFL from grid size/spacing); `ntimes` (duration ÷ dt); `v_sponge.v_sponge` (grid spacing in m ÷ 10).
@@ -154,8 +154,8 @@ selection — so a UI/review can show provenance without re-deriving it.
 ```
    [Phase 1: COLLECTION / CURATION]          [authoritative file]      [Phase 2: PROCESSING]
  user args ─┐                                                    Phase 2 resolves the
- model.yml ─┤                                                    HOST (machine + paths)
- defaults  ─┼─► resolve + merge + validate ─► forge_blueprint.yml ─► from cstar_forge.config,
+ model.yaml ─┤                                                    HOST (machine + paths)
+ defaults  ─┼─► resolve + merge + validate ─► forge_blueprint.yaml ─► from cstar_forge.config,
  hardcoded ─┘   (+ compute pure-derived)       (reviewable)      then Engine.run(forge_blueprint)
                                                                  → blueprint + NetCDF + namelist
 ```
@@ -169,7 +169,7 @@ Two choices that make "review here, process elsewhere" work:
 1. **Inline resolved values, don't reference them.** Hardcoded registries/URLs (L4)
    and `roms_tools` defaults (L6) are *snapshotted* into the file, so a reviewer sees
    the real GLORYS `dataset_id`/URL and the processing host can't silently drift.
-2. **Keep machine/paths OUT of the file entirely.** The same `forge_blueprint.yml` is
+2. **Keep machine/paths OUT of the file entirely.** The same `forge_blueprint.yaml` is
    portable by construction: the processing host resolves its own machine tag, data
    paths, and output dirs from `cstar_forge.config`, so nothing host-specific is
    baked in at config time.
@@ -181,7 +181,7 @@ Two choices that make "review here, process elsewhere" work:
 1. **[DONE — draft]** Define `ForgeBlueprint` + `to_yaml`/`from_yaml`
    (`cstar_forge/forge_blueprint.py`) and a dependency-light Phase-1 resolver
    `build_forge_blueprint` (`cstar_forge/forge_blueprint_resolve.py`), validated against the
-   `test-tiny` demo (`tests/test_forge_blueprint.py`, `docs/forge-blueprint-example.test-tiny.yml`).
+   `test-tiny` demo (`tests/test_forge_blueprint.py`, `docs/forge-blueprint-example.test-tiny.yaml`).
    The resolver reads the ModelSpec YAML directly and needs no ROMS/C-Star/roms_tools
    (only `dt` via CFL is optional/lazy), so a UI backend can call it.
 2. **[DONE — draft]** Phase-2 processing engine
@@ -191,7 +191,7 @@ Two choices that make "review here, process elsewhere" work:
    `CstarSpecBuilder` from the config's atomic inputs, run
    `ensure_source_data` → `generate_inputs`, and **overlay** the reviewed
    `model_settings` via `configure_build(...)` so config edits win over re-derived
-   defaults. CLI: `python -m cstar_forge.run forge_blueprint.yml`
+   defaults. CLI: `python -m cstar_forge.run forge_blueprint.yaml`
    (`--host-only`, `--clobber`, `--no-{data,generate,configure,dask}`). The Forge-side
    `cstar_forge.run` auto-detects the host and injects it; the app engine
    (`cstar_forge.forge.forge_blueprint_engine`) is host-independent.
@@ -250,8 +250,8 @@ Two choices that make "review here, process elsewhere" work:
 | tides flags | `bry_tides=True`, `pot_tides=True`, `ana_tides=False` | `input_data.py` |
 | `ndtfast`, `ninfo` | `60`, `1` | `_core.py` |
 | nesting period fallback | `3600.0` | `util.py` |
-| NERSC / RCAC account | `m4632` / `ees250129` | `catalog/Machines/*.yml` |
-| `pes_per_node` (both HPC) | `128` | `catalog/Machines/*.yml` |
+| NERSC / RCAC account | `m4632` / `ees250129` | `catalog/Machines/*.yaml` |
+| `pes_per_node` (both HPC) | `128` | `catalog/Machines/*.yaml` |
 
 These split three ways:
 

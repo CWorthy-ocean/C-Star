@@ -2,7 +2,7 @@
 
 A utility for generating new regional oceanographic modeling domains and creating reproducible [C-Star](https://c-star.readthedocs.io) workflows through blueprint descriptors.
 
-[![Run Tests](https://github.com/CWorthy-ocean/cstar-forge/actions/workflows/tests.yml/badge.svg)](https://github.com/CWorthy-ocean/cstar-forge/actions/workflows/tests.yml?query=branch%3Amain)
+[![Run Tests](https://github.com/CWorthy-ocean/cstar-forge/actions/workflows/tests.yaml/badge.svg)](https://github.com/CWorthy-ocean/cstar-forge/actions/workflows/tests.yaml?query=branch%3Amain)
 [![codecov](https://codecov.io/gh/CWorthy-ocean/cstar-forge/graph/badge.svg)](https://codecov.io/gh/CWorthy-ocean/cstar-forge)
 
 ## Using C-STAR Forge

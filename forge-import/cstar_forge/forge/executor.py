@@ -152,10 +152,6 @@ class ForgeExecutor(BaseModel):
     - All produced artifacts (inputs, blueprint, build, run output) live under the
       injected ``host.working_dir``.
 
-    .. warning::
-        This functionality is under active development and not yet fully implemented.
-        Some methods (e.g., `build()` and `run()`) may raise `NotImplementedError`.
-        Use with caution.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -604,8 +600,8 @@ class ForgeExecutor(BaseModel):
 
         **File Structure:**
 
-        - Blueprint: `B_{name}.yml`
-        - Settings: `settings_B_{name}.yml` (sidecar file)
+        - Blueprint: `B_{name}.yaml`
+        - Settings: `settings_B_{name}.yaml` (sidecar file)
 
         The settings are stored separately from the blueprint to avoid
         cluttering the blueprint with configuration details.
@@ -660,7 +656,7 @@ class ForgeExecutor(BaseModel):
         Return the path to this executor's settings sidecar file.
 
         The settings file has the same name as the blueprint file, with "settings_"
-        prepended. For example: "B_model.yml" -> "settings_B_model.yml"
+        prepended. For example: "B_model.yaml" -> "settings_B_model.yaml"
         """
         bp_path = self.path_roms_marbl_blueprint()
         return bp_path.parent / f"settings_{bp_path.name}"
@@ -758,9 +754,9 @@ class ForgeExecutor(BaseModel):
         Returns
         -------
         Path
-            Path to the blueprint YAML file: `B_{name}.yml`.
+            Path to the blueprint YAML file: `B_{name}.yaml`.
         """
-        return self.roms_marbl_blueprint_dir / f"B_{self.name}.yml"
+        return self.roms_marbl_blueprint_dir / f"B_{self.name}.yaml"
 
     @property
     def datasets(self) -> DatasetsDict:
@@ -1204,7 +1200,6 @@ class ForgeExecutor(BaseModel):
         self,
         clobber: bool = False,
         use_dask: bool = True,
-        partition_files: bool = False,
         test: bool = False,
     ) -> cstar_models.RomsMarblBlueprint:
         """
@@ -1222,8 +1217,6 @@ class ForgeExecutor(BaseModel):
             If True, delete and regenerate existing NetCDF input files. Default False.
         use_dask : bool, optional
             Use dask for parallel computations. Default True.
-        partition_files : bool, optional
-            Partition input files across tiles. Currently not implemented.
         test : bool, optional
             Truncate the generation loop after 2 iterations (for unit tests).
 
@@ -1236,15 +1229,8 @@ class ForgeExecutor(BaseModel):
         ------
         RuntimeError
             If blueprint is not initialized, or if settings are not initialized.
-        NotImplementedError
-            If partition_files is True.
-        """
-        if partition_files:
-            raise NotImplementedError(
-                "File partitioning functionality is not yet fully implemented. "
-                "Please set partition_files=False."
-            )
 
+        """
         if self.roms_marbl_blueprint is None:
             raise RuntimeError("Blueprint must be initialized before generating inputs")
 
@@ -1280,7 +1266,7 @@ class ForgeExecutor(BaseModel):
                 cdr_forcing=self.cdr_forcing,
                 use_dask=use_dask,
                 netcdf_format="NETCDF3_64BIT_DATA" if self._use_pio else "NETCDF4",
-            ).generate_all(partition_files=partition_files, clobber=clobber, test=test)
+            ).generate_all(clobber=clobber, test=test)
         )
 
         if roms_marbl_blueprint_elements is None:

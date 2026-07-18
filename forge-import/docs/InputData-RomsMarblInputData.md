@@ -174,7 +174,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - Grid NetCDF file: `{model_name}_{grid_name}_grid.nc`
-- Grid YAML metadata: `_{grid_name}.yml` (in roms_marbl_blueprint_dir)
+- Grid YAML metadata: `_{grid_name}.yaml` (in roms_marbl_blueprint_dir)
 
 **Updates ROMS-MARBL Blueprint:**
 - Appends `Resource` to `roms_marbl_blueprint_elements.grid.data`
@@ -206,7 +206,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - Initial conditions NetCDF file(s): `{model_name}_{grid_name}_initial_conditions.nc`
-- Initial conditions YAML metadata: `_initial_conditions.yml`
+- Initial conditions YAML metadata: `_initial_conditions.yaml`
 
 **Source Resolution:**
 - Uses `source` and optional `bgc_source` from kwargs
@@ -230,7 +230,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - Surface forcing NetCDF file(s): `{model_name}_{grid_name}_surface-{type}_YYYYMM.nc`
-- Surface forcing YAML metadata: `_forcing.surface-{type}.yml`
+- Surface forcing YAML metadata: `_forcing.surface-{type}.yaml`
 
 **Key Features:**
 - Supports multiple surface forcing sources (physics and bgc)
@@ -261,7 +261,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - Boundary forcing NetCDF file(s): `{model_name}_{grid_name}_boundary-{type}_YYYYMM.nc`
-- Boundary forcing YAML metadata: `_forcing.boundary-{type}.yml`
+- Boundary forcing YAML metadata: `_forcing.boundary-{type}.yaml`
 
 **Key Features:**
 - Supports multiple boundary forcing sources (physics and bgc)
@@ -293,7 +293,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - Tidal forcing NetCDF file(s): `{model_name}_{grid_name}_tidal.nc`
-- Tidal forcing YAML metadata: `_forcing.tidal.yml`
+- Tidal forcing YAML metadata: `_forcing.tidal.yaml`
 
 **Key Features:**
 - Uses `ntides` parameter from kwargs (default from model_spec.inputs)
@@ -325,7 +325,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - River forcing NetCDF file(s): `{model_name}_{grid_name}_river.nc`
-- River forcing YAML metadata: `_forcing.river.yml`
+- River forcing YAML metadata: `_forcing.river.yaml`
 
 **Key Features:**
 - Uses `include_bgc` parameter from kwargs
@@ -362,7 +362,7 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 
 **Generates:**
 - CDR forcing NetCDF file(s): `{model_name}_{grid_name}_cdr_forcing.nc`
-- CDR forcing YAML metadata: `_cdr_forcing.yml`
+- CDR forcing YAML metadata: `_cdr_forcing.yaml`
 
 **Key Features:**
 - Optional input (only generates if `cdr_list` is provided)

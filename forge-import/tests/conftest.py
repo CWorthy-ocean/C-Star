@@ -64,7 +64,7 @@ def workflows_dir():
 
 @pytest.fixture
 def real_models_yaml():
-    """Path to the actual models.yml file in the cstar_forge package."""
+    """Path to the actual models.yaml file in the cstar_forge package."""
     # Use the same pattern as config.py: get path relative to package location
     import cstar_forge
 

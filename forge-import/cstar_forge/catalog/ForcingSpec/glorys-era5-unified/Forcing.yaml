@@ -1,7 +1,7 @@
 description: "GLORYS physics + UNIFIED BGC + ERA5 surface (+MBL_co2, WOA sss-restoring) + TPXO tides + DAI rivers"
 # A ForcingSpec is a selectable forcing configuration (initial conditions + surface/
 # boundary/tidal/river forcing). Every domain must explicitly pick one -- there is no
-# "model default" fallback. Topography source/path are DomainSpec-owned (Domain.yml /
+# "model default" fallback. Topography source/path are DomainSpec-owned (Domain.yaml /
 # the wizard's Grid section), not part of a ForcingSpec.
 
 initial_conditions:

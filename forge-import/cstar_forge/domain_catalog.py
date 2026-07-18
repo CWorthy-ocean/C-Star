@@ -71,22 +71,22 @@ class DomainCatalog:
 
         catalog/
         ├── Machines/
-        │   ├── MacOS.yml
-        │   ├── NERSC_perlmutter.yml
-        │   └── RCAC_anvil.yml
+        │   ├── MacOS.yaml
+        │   ├── NERSC_perlmutter.yaml
+        │   └── RCAC_anvil.yaml
         ├── ModelSpec/
         │   └── cson_roms-marbl_v0.1/
-        │       └── model.yml    (single consolidated file: code + model_settings)
+        │       └── model.yaml   (single consolidated file: code + model_settings)
         ├── DomainSpec/
         │   ├── ccs-12km/
-        │   │   ├── Domain.yml
+        │   │   ├── Domain.yaml
         │   │   └── Assets/
         │   └── PAC_2fth_deg/
-        │       ├── Domain.yml
+        │       ├── Domain.yaml
         │       └── Assets/
         ├── Blueprints/  (alias: blueprints/)
         │   └── <machine>/<blueprint-name>/
-        │       ├── B_*.yml
+        │       ├── B_*.yaml
         │       └── Build/
         └── Observations/
 
@@ -202,6 +202,23 @@ class DomainCatalog:
             return list(directory.glob(pattern))
         return [Path(f) for f in self._fs.glob(str(directory / pattern))]
 
+    def _fs_glob_dual(self, directory: Path, stem_pattern: str) -> list[Path]:
+        """Glob *stem_pattern* (no extension, e.g. ``"*"`` or ``"*/model"``) matching
+        both ``.yaml`` and ``.yml`` files. New catalog entries are always written as
+        ``.yaml``; this keeps existing on-disk ``.yml`` catalogs/blueprints (outside
+        the repo, e.g. a user's scratch catalog) discoverable without regeneration.
+        ``.yaml`` wins if both exist for the same stem.
+        """
+        yml_matches = {
+            p.parent / p.stem: p
+            for p in self._fs_glob(directory, f"{stem_pattern}.yml")
+        }
+        yaml_matches = {
+            p.parent / p.stem: p
+            for p in self._fs_glob(directory, f"{stem_pattern}.yaml")
+        }
+        return sorted({**yml_matches, **yaml_matches}.values())
+
     def _fs_iterdir(self, path: Path) -> list[Path]:
         if self._is_local:
             return list(path.iterdir())
@@ -219,6 +236,19 @@ class DomainCatalog:
             return path.open("r")
         return self._fs.open(str(path), "r")
 
+    def _resolve_stem_file(self, directory: Path, stem: str) -> Path:
+        """Resolve ``directory/{stem}.yaml`` or ``directory/{stem}.yml``, preferring
+        ``.yaml``. Falls back to the ``.yaml`` path (even if absent) so callers get a
+        sensible path to report in a "not found" error or to write a fresh file to.
+        """
+        yaml_path = directory / f"{stem}.yaml"
+        if self._fs_exists(yaml_path):
+            return yaml_path
+        yml_path = directory / f"{stem}.yml"
+        if self._fs_exists(yml_path):
+            return yml_path
+        return yaml_path
+
     def _to_raw_github_url(self, path: Path) -> str:
         """Return the raw.githubusercontent.com URL for a path in the GitHub repo."""
         org = self._fs.org
@@ -235,17 +265,19 @@ class DomainCatalog:
         self._machines = {}
         machine_dir = self.catalog_root / "Machines"
         try:
-            for f in sorted(self._fs_glob(machine_dir, "*.yml")):
+            for f in sorted(self._fs_glob_dual(machine_dir, "*")):
                 self._machines[f.stem] = f
         except Exception:
             pass
 
     def _scan_models(self) -> None:
-        """Scan ModelSpec/ for per-model directories containing model.yml."""
+        """Scan ModelSpec/ for per-model directories containing model.yaml (or
+        legacy model.yml).
+        """
         self._models = {}
         model_dir_root = self.catalog_root / "ModelSpec"
         try:
-            for f in sorted(self._fs_glob(model_dir_root, "*/model.yml")):
+            for f in sorted(self._fs_glob_dual(model_dir_root, "*/model")):
                 model_dir = f.parent
                 self._models[model_dir.name] = model_dir  # store dir, not file
         except Exception:
@@ -254,7 +286,7 @@ class DomainCatalog:
     def _scan_roms_marbl_blueprints(self) -> None:
         """Scan blueprints/ (and Blueprints/) for blueprint directories.
 
-        Expected layout: blueprints/<machine>/<name>/B_*.yml
+        Expected layout: blueprints/<machine>/<name>/B_*.yaml
         Uses _fs_iterdir_dirs to retrieve directory type from a single ls call,
         avoiding a separate isdir API call per entry.
         """
@@ -271,37 +303,45 @@ class DomainCatalog:
                 pass
 
     def _scan_domains(self) -> None:
-        """Scan DomainSpec/ for domain directories containing Domain.yml.
+        """Scan DomainSpec/ for domain directories containing Domain.yaml (or
+        legacy Domain.yml).
 
-        Uses a single glob for */Domain.yml to find all domains in one API call.
+        Uses a single dual-extension glob for */Domain.{yaml,yml} to find all
+        domains in one API call (per extension).
         """
         self._domains = {}
         domain_spec_dir = self.catalog_root / "DomainSpec"
         try:
-            for domain_yml in sorted(self._fs_glob(domain_spec_dir, "*/Domain.yml")):
-                domain_dir = domain_yml.parent
+            for domain_yaml in sorted(self._fs_glob_dual(domain_spec_dir, "*/Domain")):
+                domain_dir = domain_yaml.parent
                 self._domains[domain_dir.name] = domain_dir
         except Exception:
             pass
 
     def _scan_forcing(self) -> None:
-        """Scan ForcingSpec/ for directories containing Forcing.yml (one glob)."""
+        """Scan ForcingSpec/ for directories containing Forcing.yaml (or legacy
+        Forcing.yml).
+        """
         self._forcing = {}
         forcing_spec_dir = self.catalog_root / "ForcingSpec"
         try:
-            for forcing_yml in sorted(self._fs_glob(forcing_spec_dir, "*/Forcing.yml")):
-                forcing_dir = forcing_yml.parent
+            for forcing_yaml in sorted(
+                self._fs_glob_dual(forcing_spec_dir, "*/Forcing")
+            ):
+                forcing_dir = forcing_yaml.parent
                 self._forcing[forcing_dir.name] = forcing_dir
         except Exception:
             pass
 
     def _scan_output(self) -> None:
-        """Scan OutputSpec/ for directories containing Output.yml (one glob)."""
+        """Scan OutputSpec/ for directories containing Output.yaml (or legacy
+        Output.yml).
+        """
         self._output = {}
         output_spec_dir = self.catalog_root / "OutputSpec"
         try:
-            for output_yml in sorted(self._fs_glob(output_spec_dir, "*/Output.yml")):
-                output_dir = output_yml.parent
+            for output_yaml in sorted(self._fs_glob_dual(output_spec_dir, "*/Output")):
+                output_dir = output_yaml.parent
                 self._output[output_dir.name] = output_dir
         except Exception:
             pass
@@ -378,9 +418,9 @@ class DomainCatalog:
         if not self._machines or not self._models:
             missing = []
             if not self._machines:
-                missing.append("Machines/ (with at least one .yml)")
+                missing.append("Machines/ (with at least one .yaml)")
             if not self._models:
-                missing.append("ModelSpec/ (with at least one <name>/model.yml)")
+                missing.append("ModelSpec/ (with at least one <name>/model.yaml)")
             raise ValueError(
                 f"No valid catalog found at '{self.catalog_root}'. "
                 f"Missing: {', '.join(missing)}.\n"
@@ -465,16 +505,18 @@ class DomainCatalog:
     # ------------------------------------------------------------------
 
     def model_path(self, model_name: str) -> Path:
-        """Return the path to the model.yml file for a named model."""
+        """Return the path to the model.yaml (or legacy model.yml) file for a
+        named model.
+        """
         if model_name not in self._models:
             raise KeyError(
                 f"Model '{model_name}' not found in catalog at {self.catalog_root}. "
                 f"Available models: {self.model_names}"
             )
-        return self._models[model_name] / "model.yml"
+        return self._resolve_stem_file(self._models[model_name], "model")
 
     def model_dir(self, model_name: str) -> Path:
-        """Return the directory containing model.yml for a named model."""
+        """Return the directory containing model.yaml for a named model."""
         if model_name not in self._models:
             raise KeyError(
                 f"Model '{model_name}' not found in catalog at {self.catalog_root}. "
@@ -492,7 +534,7 @@ class DomainCatalog:
         return self._machines[machine_name]
 
     def domain_path(self, domain_name: str) -> Path:
-        """Return the directory path for a named domain (contains Domain.yml and Assets/)."""
+        """Return the directory path for a named domain (contains Domain.yaml and Assets/)."""
         if domain_name not in self._domains:
             raise KeyError(
                 f"Domain '{domain_name}' not found in catalog at {self.catalog_root}. "
@@ -526,30 +568,30 @@ class DomainCatalog:
             return yaml.safe_load(f) or {}
 
     def domain_data(self, domain_name: str) -> dict:
-        """Return the raw YAML data dict for a named domain (reads Domain.yml)."""
-        path = self.domain_path(domain_name) / "Domain.yml"
+        """Return the raw YAML data dict for a named domain (reads Domain.yaml)."""
+        path = self._resolve_stem_file(self.domain_path(domain_name), "Domain")
         with self._fs_open(path) as f:
             return yaml.safe_load(f) or {}
 
     def forcing_data(self, forcing_name: str) -> dict:
-        """Return the raw YAML data dict for a named forcing spec (reads Forcing.yml)."""
+        """Return the raw YAML data dict for a named forcing spec (reads Forcing.yaml)."""
         if forcing_name not in self._forcing:
             raise KeyError(
                 f"ForcingSpec '{forcing_name}' not found in catalog at {self.catalog_root}. "
                 f"Available: {self.forcing_names}"
             )
-        path = self._forcing[forcing_name] / "Forcing.yml"
+        path = self._resolve_stem_file(self._forcing[forcing_name], "Forcing")
         with self._fs_open(path) as f:
             return yaml.safe_load(f) or {}
 
     def output_data(self, output_name: str) -> dict:
-        """Return the raw YAML data dict for a named output spec (reads Output.yml)."""
+        """Return the raw YAML data dict for a named output spec (reads Output.yaml)."""
         if output_name not in self._output:
             raise KeyError(
                 f"OutputSpec '{output_name}' not found in catalog at {self.catalog_root}. "
                 f"Available: {self.output_names}"
             )
-        path = self._output[output_name] / "Output.yml"
+        path = self._resolve_stem_file(self._output[output_name], "Output")
         with self._fs_open(path) as f:
             data = yaml.safe_load(f) or {}
         data.pop("description", None)
@@ -570,7 +612,7 @@ class DomainCatalog:
         Returns
         -------
         dict
-            Parsed Domain.yml content.
+            Parsed Domain.yaml content.
         """
         if isinstance(domain_id, str):
             return self.domain_data(domain_id)
@@ -610,7 +652,7 @@ class DomainCatalog:
         Returns
         -------
         Path
-            Path to the blueprint's directory (contains B_*.yml).
+            Path to the blueprint's directory (contains B_*.yaml).
         """
         if isinstance(roms_marbl_blueprint_id, str):
             return self.roms_marbl_blueprint_path(roms_marbl_blueprint_id)
@@ -650,17 +692,17 @@ class DomainCatalog:
     # ------------------------------------------------------------------
 
     def register_model(self, model_dir: Path | str) -> None:
-        """Register a new model by copying its directory (containing model.yml) into ModelSpec/ and rescanning.
+        """Register a new model by copying its directory (containing model.yaml) into ModelSpec/ and rescanning.
 
         Parameters
         ----------
         model_dir : str or Path
-            Path to the model directory (which must contain model.yml).
-            The directory name is used as the model name.
+            Path to the model directory (which must contain model.yaml, or
+            legacy model.yml). The directory name is used as the model name.
         """
         src = Path(model_dir).expanduser().resolve()
-        if not (src / "model.yml").exists():
-            raise ValueError(f"model_dir must contain a model.yml file: {src}")
+        if not (src / "model.yaml").exists() and not (src / "model.yml").exists():
+            raise ValueError(f"model_dir must contain a model.yaml file: {src}")
         dest_dir = self.catalog_root / "ModelSpec" / src.name
         if dest_dir.exists():
             shutil.rmtree(dest_dir)
@@ -670,7 +712,7 @@ class DomainCatalog:
     def register_domain(self, builder: Any) -> None:
         """Create a new DomainSpec entry from a ForgeExecutor instance.
 
-        Writes a Domain.yml file and creates an empty Assets/ directory under
+        Writes a Domain.yaml file and creates an empty Assets/ directory under
         DomainSpec/<grid_name>/. The domain name is taken from builder.grid_name.
 
         Parameters
@@ -679,7 +721,7 @@ class DomainCatalog:
             A configured builder whose grid_name, grid_kwargs, open_boundaries,
             and partitioning will be recorded. ``ForgeExecutor`` no longer tracks
             a bare ``model_name`` (post naming-refactor it only carries the
-            combined blueprint ``name``), so the written ``Domain.yml`` omits it;
+            combined blueprint ``name``), so the written ``Domain.yaml`` omits it;
             ``register_domain_from_dict`` accepts an explicit ``model_name`` when
             the caller has one (e.g. the wizard's composition).
         """
@@ -705,7 +747,7 @@ class DomainCatalog:
         if builder.grid_kwargs_child:
             domain_data["grid_kwargs_child"] = builder.grid_kwargs_child
 
-        with (domain_dir / "Domain.yml").open("w") as f:
+        with (domain_dir / "Domain.yaml").open("w") as f:
             yaml.safe_dump(
                 domain_data,
                 f,
@@ -719,7 +761,7 @@ class DomainCatalog:
     def register_domain_from_dict(self, name: str, domain_data: dict[str, Any]) -> None:
         """Create a new DomainSpec entry from a plain dict (the wizard's save path).
 
-        Writes ``domain_data`` verbatim as ``Domain.yml`` under
+        Writes ``domain_data`` verbatim as ``Domain.yaml`` under
         ``DomainSpec/<name>/`` (+ an empty ``Assets/`` dir), then rescans.
         Refuses to overwrite an existing entry -- catalog entries are named,
         shared resources; pick a different name or delete the old one first.
@@ -729,7 +771,7 @@ class DomainCatalog:
             raise FileExistsError(f"DomainSpec '{name}' already exists at {domain_dir}")
         domain_dir.mkdir(parents=True)
         (domain_dir / "Assets").mkdir(exist_ok=True)
-        with (domain_dir / "Domain.yml").open("w") as f:
+        with (domain_dir / "Domain.yaml").open("w") as f:
             yaml.safe_dump(
                 domain_data,
                 f,
@@ -742,7 +784,7 @@ class DomainCatalog:
     def register_output(
         self, name: str, output_settings: dict[str, Any], description: str = ""
     ) -> None:
-        """Create a new OutputSpec entry (``OutputSpec/<name>/Output.yml``).
+        """Create a new OutputSpec entry (``OutputSpec/<name>/Output.yaml``).
 
         ``output_settings`` is the output-owned subset of ``model_settings`` (see
         ``forge_blueprint_resolve.extract_output_settings``). Refuses to overwrite
@@ -753,7 +795,7 @@ class DomainCatalog:
             raise FileExistsError(f"OutputSpec '{name}' already exists at {output_dir}")
         output_dir.mkdir(parents=True)
         data = {"description": description, **output_settings}
-        with (output_dir / "Output.yml").open("w") as f:
+        with (output_dir / "Output.yaml").open("w") as f:
             yaml.safe_dump(
                 data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
             )
@@ -766,7 +808,7 @@ class DomainCatalog:
         cdr_forcing: dict[str, Any] | None = None,
         description: str = "",
     ) -> None:
-        """Create a new ForcingSpec entry (``ForcingSpec/<name>/Forcing.yml``).
+        """Create a new ForcingSpec entry (``ForcingSpec/<name>/Forcing.yaml``).
 
         ``forcing_inputs`` is the ``{initial_conditions, forcing}`` shape returned
         by the wizard's forcing editor ``gather()``. ``cdr_forcing``, if given, is
@@ -783,7 +825,7 @@ class DomainCatalog:
         data = {"description": description, **forcing_inputs}
         if cdr_forcing:
             data["cdr_forcing"] = cdr_forcing
-        with (forcing_dir / "Forcing.yml").open("w") as f:
+        with (forcing_dir / "Forcing.yaml").open("w") as f:
             yaml.safe_dump(
                 data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
             )
@@ -796,17 +838,18 @@ class DomainCatalog:
         base_model_dir: Path | str,
         description: str = "",
     ) -> None:
-        """Create a new ModelSpec entry (``ModelSpec/<name>/model.yml``).
+        """Create a new ModelSpec entry (``ModelSpec/<name>/model.yaml``).
 
         Clones ``code``/``bgc_mode``/``use_pio``/``templates_commit`` verbatim from
-        ``base_model_dir``'s ``model.yml`` and swaps in ``model_settings`` (the
+        ``base_model_dir``'s ``model.yaml`` and swaps in ``model_settings`` (the
         model-owned subset -- see the wizard's ``_model_owned_settings``).
         Refuses to overwrite an existing entry.
         """
         model_dir = self.catalog_root / "ModelSpec" / name
         if model_dir.exists():
             raise FileExistsError(f"ModelSpec '{name}' already exists at {model_dir}")
-        base = yaml.safe_load((Path(base_model_dir) / "model.yml").read_text()) or {}
+        base_model_path = self._resolve_stem_file(Path(base_model_dir), "model")
+        base = yaml.safe_load(base_model_path.read_text()) or {}
         data = {
             "description": description or base.get("description", ""),
             "bgc_mode": base.get("bgc_mode", "marbl"),
@@ -815,7 +858,7 @@ class DomainCatalog:
             "model_settings": model_settings,
         }
         model_dir.mkdir(parents=True)
-        with (model_dir / "model.yml").open("w") as f:
+        with (model_dir / "model.yaml").open("w") as f:
             yaml.safe_dump(
                 data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
             )
@@ -828,7 +871,7 @@ class DomainCatalog:
         asset_file: Any,
         asset_metadata: dict,
     ) -> None:
-        """Add an asset file to a domain's Assets/ folder and record it in Domain.yml.
+        """Add an asset file to a domain's Assets/ folder and record it in Domain.yaml.
 
         Parameters
         ----------
@@ -839,7 +882,7 @@ class DomainCatalog:
         asset_file : file-like or path-like
             Source of the asset: a file-like object (must have .read()) or a path.
         asset_metadata : dict
-            Arbitrary key/value metadata recorded alongside the asset in Domain.yml.
+            Arbitrary key/value metadata recorded alongside the asset in Domain.yaml.
         """
         domain_dir = self.domain_path(domain_name)
         assets_dir = domain_dir / "Assets"
@@ -851,7 +894,7 @@ class DomainCatalog:
         else:
             shutil.copy2(Path(asset_file), dest)
 
-        domain_yml = domain_dir / "Domain.yml"
+        domain_yml = self._resolve_stem_file(domain_dir, "Domain")
         with domain_yml.open() as f:
             data = yaml.safe_load(f) or {}
         data.setdefault("assets", {})[asset_name] = {
@@ -868,7 +911,7 @@ class DomainCatalog:
             )
 
     def copy_domain(self, domain_name: str, catalog: DomainCatalog) -> None:
-        """Copy a domain spec directory (Domain.yml + Assets/) to another DomainCatalog.
+        """Copy a domain spec directory (Domain.yaml + Assets/) to another DomainCatalog.
 
         Parameters
         ----------
@@ -885,7 +928,7 @@ class DomainCatalog:
         catalog._scan_domains()
 
     def copy_model(self, model_name: str, catalog: DomainCatalog) -> None:
-        """Copy a model directory (model.yml) to another DomainCatalog.
+        """Copy a model directory (model.yaml) to another DomainCatalog.
 
         Parameters
         ----------
@@ -906,12 +949,14 @@ class DomainCatalog:
     # ------------------------------------------------------------------
 
     def _find_roms_marbl_blueprint_files(self) -> list[Path]:
-        """Find B_*.yml files across all known blueprint directories."""
+        """Find B_*.yaml (or legacy B_*.yml) files across all known blueprint
+        directories.
+        """
         files: list[Path] = []
         for bp_dir in self._roms_marbl_blueprints.values():
             files.extend(
                 f
-                for f in self._fs_glob(bp_dir, "B_*.yml")
+                for f in self._fs_glob_dual(bp_dir, "B_*")
                 if ".ipynb_checkpoints" not in str(f)
             )
         return sorted(set(files))
@@ -919,7 +964,7 @@ class DomainCatalog:
     def _load_roms_marbl_blueprint_yaml(
         self, roms_marbl_blueprint_path: Path
     ) -> dict[str, Any]:
-        """Load a single B_*.yml file."""
+        """Load a single B_*.yaml (or legacy B_*.yml) file."""
         if not self._fs_exists(roms_marbl_blueprint_path):
             raise FileNotFoundError(
                 f"Blueprint file not found: {roms_marbl_blueprint_path}"
@@ -928,7 +973,7 @@ class DomainCatalog:
             return yaml.safe_load(f) or {}
 
     def _load_grid_kwargs(self, grid_yaml_path: Path) -> dict[str, Any]:
-        """Load Grid kwargs from a two-document _grid.yml file."""
+        """Load Grid kwargs from a two-document _grid.yaml (or legacy _grid.yml) file."""
         if not self._fs_exists(grid_yaml_path):
             raise FileNotFoundError(f"Grid YAML file not found: {grid_yaml_path}")
         with self._fs_open(grid_yaml_path) as f:
@@ -989,7 +1034,7 @@ class DomainCatalog:
                     )
                     continue
                 is_github = hasattr(self._fs, "org")
-                grid_yaml = bp_file.parent / "_grid.yml"
+                grid_yaml = self._resolve_stem_file(bp_file.parent, "_grid")
                 grid_yaml_exists = self._fs_exists(grid_yaml)
                 if grid_yaml_exists and is_github:
                     grid_yaml_result: Path | str | None = self._to_raw_github_url(

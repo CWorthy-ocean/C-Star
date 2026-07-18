@@ -130,7 +130,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
 
     Always returns a dict with ``initial_conditions`` and ``forcing`` keys mirroring
-    the model.yml inputs block. ``cfg.forcing`` is fully resolved by the Phase-1
+    the model.yaml inputs block. ``cfg.forcing`` is fully resolved by the Phase-1
     resolver (from the model default or an authored/edited selection), so the executor
     always drives input generation from this dict and never reads ``model_spec.inputs``.
     """

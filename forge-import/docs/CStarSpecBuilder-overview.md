@@ -7,8 +7,8 @@
 >
 > The executor no longer models a "preconfig/postconfig/build/run" blueprint stage
 > machine. It builds the blueprint up in memory across three steps and persists it
-> to disk exactly once, at the end of `configure_build()`, as a single `B_{name}.yml`
-> (+ `settings_B_{name}.yml` sidecar). The flow below reflects that.
+> to disk exactly once, at the end of `configure_build()`, as a single `B_{name}.yaml`
+> (+ `settings_B_{name}.yaml` sidecar). The flow below reflects that.
 
 ## Workflow
 
@@ -16,8 +16,8 @@ The C-STAR Forge workflow progresses through distinct steps, transforming a mode
 
 ```{mermaid}
 flowchart TD
-    S[settings-defaults.yml] --> A[model.yml]
-    T["templates:<br/>cppdefs.opt.j2"] --> A[model.yml]
+    S[settings-defaults.yaml] --> A[model.yaml]
+    T["templates:<br/>cppdefs.opt.j2"] --> A[model.yaml]
     A -->|build_forge_blueprint| B[ForgeBlueprint]
 
     C["User input / wizard UI"] -->|domain, forcing, run window| B
@@ -31,7 +31,7 @@ flowchart TD
     G -->|generate_inputs| H["Generate Inputs<br/>(in memory)"]
 
     H -->|configure_build| J["Configure Build<br/>Render Templates<br/>Create Simulation<br/>."]
-    J -->|persist| K[B_name.yml]
+    J -->|persist| K[B_name.yaml]
 
     K -->|build| L["Compile<br/>Setup C-Star<br/>Build ROMS/MARBL<br/>."]
     L --> M[Executable]
@@ -47,7 +47,7 @@ flowchart TD
 ### Workflow Steps
 
 1. **Initialize** (`model_post_init()` / `_initialize_roms_marbl_blueprint()`)
-   - Load `ModelSpec` from the model's `model.yml` (under `catalog/ModelSpec/<model>/`)
+   - Load `ModelSpec` from the model's `model.yaml` (under `catalog/ModelSpec/<model>/`)
    - Build a `ForgeBlueprint` (`build_forge_blueprint`) from the catalog pieces + domain/run
      inputs, then construct a `ForgeExecutor` from it (`ForgeExecutor.from_forge_blueprint`)
    - Initialize grid object from `grid_kwargs`
@@ -74,10 +74,10 @@ flowchart TD
      - Run-time → `namelist.nml` (via f90nml) + `marbl_in`
    - Update blueprint with rendered code locations
    - Create `ROMSSimulation` instance
-   - **Persist the blueprint to `B_{name}.yml`** (+ `settings_B_{name}.yml` sidecar)
+   - **Persist the blueprint to `B_{name}.yaml`** (+ `settings_B_{name}.yaml` sidecar)
      — the only time it is written to disk
    - Compile model executable (`build()`)
 
 4. **Run** (`run()`)
    - Prepare run directory (`prep_cstar_environment()`)
-   - Hand `B_{name}.yml`'s path to C-Star and execute the model simulation
+   - Hand `B_{name}.yaml`'s path to C-Star and execute the model simulation

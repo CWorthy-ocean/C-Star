@@ -159,7 +159,7 @@ class VisualizationSettings(BaseModel):
 
 
 class AppConfig(BaseModel):
-    """Top-level API schema for parameters.yml."""
+    """Top-level API schema for parameters.yaml."""
 
     dask_cluster_kwargs: DaskClusterKwargs | None = None
     notebook_list: NotebookList
@@ -299,7 +299,7 @@ def _select_roms_tools_class_name(yaml_params: dict[str, Any]) -> str:
 
 
 def load_app_config(path: Path | str) -> AppConfig:
-    """Load parameters.yml into an AppConfig object."""
+    """Load parameters.yaml into an AppConfig object."""
     path_obj = Path(path)
     raw = load_yaml_params(path_obj)
     dask_kwargs = raw.get("dask_cluster_kwargs")

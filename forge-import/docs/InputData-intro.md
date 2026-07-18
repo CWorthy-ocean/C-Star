@@ -68,7 +68,7 @@ Steps are executed in order (lowest `order` value first):
 The `RomsMarblInputData` class provides ROMS-MARBL specific input generation:
 
 **Key Attributes:**
-- `model_spec`: Model specification from the model's `model.yml` (under `catalog/ModelSpec/<model>/`)
+- `model_spec`: Model specification from the model's `model.yaml` (under `catalog/ModelSpec/<model>/`)
 - `grid`: ROMS grid object
 - `boundaries`: Open boundary configuration
 - `source_data`: Prepared source datasets

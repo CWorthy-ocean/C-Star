@@ -6,7 +6,7 @@ This is the **disposable host-resolution glue**: it auto-detects the host via
 typed. When the forge application relocates into C-Star, C-Star provides its own entry
 point + host resolution, and this module is not carried over.
 
-CLI:  ``python -m cstar_forge.run <forge_blueprint.yml> [options]``
+CLI:  ``python -m cstar_forge.run <forge_blueprint.yaml> [options]``
 """
 
 from __future__ import annotations
@@ -34,10 +34,10 @@ def process(spec, *, working_dir=None, **kwargs):
 def main(argv: list | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m cstar_forge.run",
-        description="Process a forge_blueprint.yml on this machine "
+        description="Process a forge_blueprint.yaml on this machine "
         "(generate inputs + configure build).",
     )
-    parser.add_argument("forge_blueprint", help="path to a forge_blueprint.yml")
+    parser.add_argument("forge_blueprint", help="path to a forge_blueprint.yaml")
     parser.add_argument(
         "--no-data", action="store_true", help="skip ensure_source_data"
     )

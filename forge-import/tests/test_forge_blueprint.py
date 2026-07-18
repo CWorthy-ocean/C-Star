@@ -116,7 +116,7 @@ def test_application_discriminator_default():
 
 def test_from_yaml_rejects_newer_version(tmp_path):
     cfg = _build()
-    p = tmp_path / "forge_blueprint.yml"
+    p = tmp_path / "forge_blueprint.yaml"
     cfg.to_yaml(p)
     import yaml as _yaml
 
@@ -129,7 +129,7 @@ def test_from_yaml_rejects_newer_version(tmp_path):
 
 def test_schema_round_trip_identity(tmp_path):
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     back = ForgeBlueprint.from_yaml(p)
     # content_hash is stamped on write -> back carries it; otherwise identical
     assert back.provenance.content_hash == cfg.content_hash()
@@ -236,7 +236,7 @@ def test_content_hash_ignores_pio_repo_location():
 
 def test_code_pio_round_trips_through_yaml(tmp_path):
     cfg = _build(use_pio=True)
-    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     back = ForgeBlueprint.from_yaml(p)
     assert back.code.pio is not None
     assert back.code.pio.location == cfg.code.pio.location
@@ -246,7 +246,7 @@ def test_code_pio_round_trips_through_yaml(tmp_path):
 
 def test_content_hash_round_trips_through_yaml(tmp_path):
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     back = ForgeBlueprint.from_yaml(p)
     # recomputed hash on the loaded config matches the stamped one (no edits)
     assert back.content_hash() == back.provenance.content_hash
@@ -259,7 +259,7 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
     )
 
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     data = yaml.safe_load(p.read_text())
     # hand-edit a results-affecting value WITHOUT updating the recorded hash
     data["model_settings"]["v_sponge"]["v_sponge"] = 12345.0
@@ -269,7 +269,7 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
     # ... and a clean (re-saved) file does not warn
     assert (
         verify_content_hash(
-            ForgeBlueprint.from_yaml(cfg.to_yaml(tmp_path / "clean.yml"))
+            ForgeBlueprint.from_yaml(cfg.to_yaml(tmp_path / "clean.yaml"))
         )
         is None
     )
@@ -373,7 +373,7 @@ def test_resolver_no_nesting_keeps_defaults():
 
 
 def test_resolver_restoring_sets_sal_restore():
-    # the cson model.yml includes a WOA surface source with type=restoring and
+    # the cson model.yaml includes a WOA surface source with type=restoring and
     # restoring_forces=['sss'], so the resolver derives sal_restore=True
     # (see forge_blueprint_resolve.py: sal_restore = any restoring item with 'sss').
     cfg = _build()
@@ -641,7 +641,7 @@ _CDR_SAMPLE_YAML = (
     / "blueprints"
     / "MacOS"
     / "cson_roms-marbl_v0.1_test-tiny_1procs"
-    / "_cdr_forcing.yml"
+    / "_cdr_forcing.yaml"
 )
 
 
@@ -695,7 +695,7 @@ def test_cdr_forcing_content_hash_stable_across_yaml_round_trip(tmp_path):
     cfg = _build(cdr_forcing_yaml=_CDR_SAMPLE_YAML)
     h1 = cfg.content_hash()
 
-    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     back = ForgeBlueprint.from_yaml(p)
     assert back.content_hash() == h1
 
@@ -722,9 +722,9 @@ def test_resolver_use_pio_defaults_from_model_spec(tmp_path):
 
     model_dir = tmp_path / "cson_roms-marbl_v0.1"
     shutil.copytree(_MODEL_DIR, model_dir)
-    text = (model_dir / "model.yml").read_text()
+    text = (model_dir / "model.yaml").read_text()
     assert "use_pio: false" in text
-    (model_dir / "model.yml").write_text(
+    (model_dir / "model.yaml").write_text(
         text.replace("use_pio: false", "use_pio: true")
     )
 
@@ -850,7 +850,7 @@ def test_resolver_roms_ref_default_uses_model_yml_pin():
 
 
 def test_build_code_coerces_numeric_commit_to_string():
-    """A bare numeric commit in model.yml (e.g. `commit: 123456`, parsed by PyYAML
+    """A bare numeric commit in model.yaml (e.g. `commit: 123456`, parsed by PyYAML
     as an int) must be coerced to str -- CodeRepo.commit is str-typed and rejects
     an int outright.
     """
@@ -882,7 +882,7 @@ def test_content_hash_changes_with_roms_ref():
 
 def test_roms_ref_round_trips_through_yaml(tmp_path):
     cfg = _build(roms_ref="pio-refdate")
-    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     back = ForgeBlueprint.from_yaml(p)
     assert back.code.roms.commit == "pio-refdate"
     assert back.code.roms.branch is None
@@ -958,7 +958,7 @@ def test_composition_records_piece_provenance():
 
 def test_yaml_round_trip(tmp_path):
     cfg = _build()
-    p = cfg.to_yaml(tmp_path / "forge_blueprint.yml")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     back = ForgeBlueprint.from_yaml(p)
     assert back.casename == cfg.casename
     assert back.model_settings["time_stepping"] == cfg.model_settings["time_stepping"]
@@ -969,7 +969,7 @@ def test_committed_example_validates():
     example = (
         Path(cstar_forge.__file__).parents[1]
         / "docs"
-        / "forge-blueprint-example.test-tiny.yml"
+        / "forge-blueprint-example.test-tiny.yaml"
     )
     if not example.exists():
         pytest.skip("example file not present")
@@ -1035,9 +1035,9 @@ class TestForgeBlueprintWizard:
 
     def test_save_writes_valid_yaml(self, tmp_path):
         wiz = self._wizard()
-        wiz.save_path.value = str(tmp_path / "forge_blueprint.yml")
+        wiz.save_path.value = str(tmp_path / "forge_blueprint.yaml")
         wiz._on_save(None)
-        cfg = ForgeBlueprint.from_yaml(tmp_path / "forge_blueprint.yml")
+        cfg = ForgeBlueprint.from_yaml(tmp_path / "forge_blueprint.yaml")
         assert cfg.casename == wiz.config.casename
 
     def test_load_existing_config_round_trips(self, tmp_path):
@@ -1048,7 +1048,7 @@ class TestForgeBlueprintWizard:
         if "gulf-guinea-toy" in w1.domain_dd.options:
             w1.domain_dd.value = "gulf-guinea-toy"
         w1.name.value = "my-custom-run"
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         saved = ForgeBlueprint.from_yaml(p)
@@ -1068,7 +1068,7 @@ class TestForgeBlueprintWizard:
 
     def test_load_from_upload_bytes(self, tmp_path):
         w1 = self._wizard()
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -1203,7 +1203,7 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         w1.editor._widgets[("v_sponge", "v_sponge")][0].value = 999.0
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -1268,7 +1268,7 @@ class TestForgeBlueprintWizard:
         if "standard" not in w1.output_dd.options:
             pytest.skip("example OutputSpec not in catalog")
         w1.output_dd.value = "standard"
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -1294,7 +1294,7 @@ class TestForgeBlueprintWizard:
         row["type"].value = "restoring"
         row["name"].value = "WOA"
         row["restoring_forces"].value = "sss"
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -1328,7 +1328,7 @@ class TestForgeBlueprintWizard:
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 7.25
         w1.nest_enable.value = True
         w1.child_w["N"].value = 18
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -1342,7 +1342,7 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         w1.roms_ref.value = "pio-refdate"
         assert w1.config.code.roms.commit == "pio-refdate"
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -1359,10 +1359,10 @@ class TestForgeBlueprintWizard:
         """
         w1 = self._wizard()
         default_ref = w1._model_default_roms_ref()
-        assert default_ref  # this model.yml pins a commit
+        assert default_ref  # this model.yaml pins a commit
         assert w1.roms_ref.value == default_ref
 
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._on_save(None)
         w2 = self._wizard()
@@ -1383,12 +1383,12 @@ class TestForgeBlueprintWizard:
         import yaml
 
         w = self._wizard()
-        p = tmp_path / "forge_blueprint.yml"
+        p = tmp_path / "forge_blueprint.yaml"
         w.save_path.value = str(p)
         w._on_save(None)
         data = yaml.safe_load(p.read_text())
         data["model_settings"]["param"]["np_xi"] = "not-an-int"  # corrupt a value
-        bad = tmp_path / "bad.yml"
+        bad = tmp_path / "bad.yaml"
         bad.write_text(yaml.safe_dump(data))
         w2 = self._wizard()
         w2.load_path.value = str(bad)
@@ -1399,7 +1399,7 @@ class TestForgeBlueprintWizard:
 
     def test_load_bad_input_shows_error_not_crash(self):
         w = self._wizard()
-        w.load_path.value = "/nonexistent/forge_blueprint.yml"
+        w.load_path.value = "/nonexistent/forge_blueprint.yaml"
         w._on_load_path(None)
         assert "color:#b00" in w.load_status.value
         w._load_bytes(b"not: [valid spec config")
@@ -1416,8 +1416,9 @@ class TestForgeBlueprintWizard:
         b64 = re.search(r"base64,([A-Za-z0-9+/=]+)", html).group(1)
         text = base64.b64decode(b64).decode("utf-8")
         assert "forge_blueprint_version" in text
-        # casename is derived (not serialized) — it appears in the download filename
-        assert wiz.config.casename in html
+        # the download filename is keyed off cfg.name (matching save_path, see
+        # _on_save_path_change/_rebuild), not the date-suffixed casename
+        assert f'download="{wiz.config.name}.forge_blueprint.yaml"' in html
 
 
 # ---------------------------------------------------------------------------
@@ -1441,7 +1442,7 @@ class _FakeBuilder:
         self.calls.append(("configure", k))
 
     def path_roms_marbl_blueprint(self):
-        return "/bp.yml"
+        return "/bp.yaml"
 
 
 class TestForgeBlueprintEngine:

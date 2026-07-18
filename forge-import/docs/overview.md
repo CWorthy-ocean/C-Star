@@ -38,7 +38,7 @@ cstar-forge/
 │   ├── models.py               # Model specification classes (ModelSpec, etc.)
 │   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors
 │   ├── config.py               # Path management and system detection
-│   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yml
+│   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yaml
 │   ├── forge/                  # The forge application (execution engine; see
 │   │   │                       # docs/developer-guide.md — relocates into C-Star as one unit)
 │   │   ├── forge_blueprint.py      # ForgeBlueprint — the forge application's blueprint
@@ -53,9 +53,9 @@ cstar-forge/
 │   │   ├── blueprints/         # Generated blueprint YAML files
 │   │   │   └── {machine}/
 │   │   │       └── {model}_{grid}/
-│   │   │           ├── B_{name}.yml              # Blueprint file (persisted once, by configure_build)
-│   │   │           ├── settings_B_{name}.yml      # Settings sidecar file (same directory)
-│   │   │           └── _{input_type}.yml         # Input-specific blueprints
+│   │   │           ├── B_{name}.yaml              # Blueprint file (persisted once, by configure_build)
+│   │   │           ├── settings_B_{name}.yaml      # Settings sidecar file (same directory)
+│   │   │           └── _{input_type}.yaml         # Input-specific blueprints
 │   │   └── builds/             # Model compilation directories
 │   │       └── {model}_{grid}/
 │   │           ├── compile-time/   # Rendered configuration files
@@ -65,9 +65,9 @@ cstar-forge/
 │   │               └── marbl_*     # MARBL input files
 │   └── catalog/ModelSpec/      # Model settings defaults (per-model)
 │       └── {model}/
-│           ├── model.yml            # Code repos, templates, default input sources
-│           ├── compile-time-defaults.yml
-│           └── run-time-defaults.yml
+│           ├── model.yaml            # Code repos, templates, default input sources
+│           ├── compile-time-defaults.yaml
+│           └── run-time-defaults.yaml
 ├── templates/                  # Render templates (cppdefs.opt.j2, marbl_in), decoupled
 │                                # from ModelSpec — fetched by ForgeExecutor via C-Star's
 │                                # AdditionalCode

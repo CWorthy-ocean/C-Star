@@ -1,7 +1,7 @@
 """
 Pydantic models for the ModelSpec catalog format.
 
-A ModelSpec is a single YAML (``model.yml``) with two top-level sections:
+A ModelSpec is a single YAML (``model.yaml``) with two top-level sections:
 ``code`` (roms/marbl/pio source pins + template refs) and ``model_settings``
 (flat, mirrors ``ForgeBlueprint.model_settings`` 1:1). It intentionally holds
 nothing a Domain/Forcing/Output spec already provides -- no grid/initial-
@@ -182,12 +182,12 @@ class ModelSpec(BaseModel):
 
 
 def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
-    """Load a ModelSpec from a ``model.yml`` file.
+    """Load a ModelSpec from a ``model.yaml`` file.
 
     Parameters
     ----------
     path : Path
-        Path to the model.yml file.
+        Path to the model.yaml file.
     model_name : str
         Name of the model (used as ``ModelSpec.name``; either the multi-model
         block key, or -- for a single-model file -- the directory/file's logical
@@ -216,7 +216,7 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
         raise KeyError(f"Model '{model_name}' not found in models YAML file: {path}")
 
     if "code" not in block:
-        raise ValueError(f"Model '{model_name}' must specify 'code' in model.yml")
+        raise ValueError(f"Model '{model_name}' must specify 'code' in model.yaml")
 
     code_block = block["code"]
 

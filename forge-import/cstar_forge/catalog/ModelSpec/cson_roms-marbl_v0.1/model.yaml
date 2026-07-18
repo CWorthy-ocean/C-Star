@@ -116,7 +116,7 @@ model_settings:
     ntrc_bio: 32
 
   # Output-write-control fields (wrt_*/output_period_*/nrpf_*) are an OutputSpec's
-  # job (Output.yml's own `bgc:` block) and are deep-merged on top of these at
+  # job (Output.yaml's own `bgc:` block) and are deep-merged on top of these at
   # resolve time -- only the physics defaults stay here.
   bgc:
     nbgc_flx: 2
@@ -193,4 +193,4 @@ model_settings:
   marbl_bgc:
     marbl_config_file: "marbl_in"
     marbl_timestep: 3600.0
-    # marbl_tracers_to_write / marbl_diagnostics_to_write are OutputSpec's (see Output.yml)
+    # marbl_tracers_to_write / marbl_diagnostics_to_write are OutputSpec's (see Output.yaml)

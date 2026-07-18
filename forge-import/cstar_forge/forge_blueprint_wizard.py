@@ -316,7 +316,7 @@ HELP_TEXT: dict[str, str] = {
         "river",
         "include_bgc",
     ): "Include BGC tracer concentrations (e.g. nutrients) in the river forcing. "
-    "Requires a BGC river dataset (bgc_source configured in model.yml).",
+    "Requires a BGC river dataset (bgc_source configured in model.yaml).",
     (
         "river",
         "convert_to_climatology",
@@ -588,7 +588,7 @@ def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
 def _split_forcing_data(
     d: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Split a raw ForcingSpec dict (as read from ``Forcing.yml``) into the
+    """Split a raw ForcingSpec dict (as read from ``Forcing.yaml``) into the
     ``{initial_conditions, forcing}`` shape the forcing editor expects, plus the
     optional embedded ``cdr_forcing`` block (``None`` if absent). Strips
     ``description`` (not part of either). Shared by the round-trip verifier and
@@ -1522,10 +1522,10 @@ class ForgeBlueprintWizard:
         models = list(self.catalog.model_names)
         domains = list(self.catalog.domain_names)
 
-        # --- load / import an existing forge_blueprint.yml ---
+        # --- load / import an existing forge_blueprint.yaml ---
         self.load_path = W.Text(
             value="",
-            placeholder="path to forge_blueprint.yml",
+            placeholder="path to forge_blueprint.yaml",
             description="Load file:",
             style={"description_width": "110px"},
             layout=W.Layout(width="420px"),
@@ -1859,7 +1859,7 @@ class ForgeBlueprintWizard:
         self.download_link = W.HTML("")
         # Save to the server/working-dir filesystem (handy for local or HPC use)
         self.save_path = W.Text(
-            value="forge_blueprint.yml",
+            value="forge_blueprint.yaml",
             description="Save to:",
             style={"description_width": "110px"},
             layout=W.Layout(width="420px"),
@@ -1927,7 +1927,7 @@ class ForgeBlueprintWizard:
             "<span style='color:#666'>ℹ To run this later, or on a different "
             "machine, save the blueprint above and then (from the "
             "<code>cstar-forge</code> environment) call: "
-            "<code>python -m cstar_forge.run &lt;path/to/forge_blueprint.yml&gt;</code></span>"
+            "<code>python -m cstar_forge.run &lt;path/to/forge_blueprint.yaml&gt;</code></span>"
         )
         self.run_btn = W.Button(description="Run", icon="play")
         self.run_status = W.HTML("")
@@ -2272,7 +2272,7 @@ class ForgeBlueprintWizard:
         }
 
     def _on_domain(self, _change):
-        """Prefill from a cataloged Domain.yml when one is selected."""
+        """Prefill from a cataloged Domain.yaml when one is selected."""
         name = self.domain_dd.value
         if name == "<custom>":
             self._domain_seed = None
@@ -2298,7 +2298,7 @@ class ForgeBlueprintWizard:
             self.topo_source.value = data.get("topography_source", "ETOPO5")
             self.topo_path.value = data.get("topography_path", "") or ""
             # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
-            # from a DomainSpec's Domain.yml (only present if the spec was saved
+            # from a DomainSpec's Domain.yaml (only present if the spec was saved
             # via register_domain_from_dict with nesting active).
             child = data.get("grid_kwargs_child")
             self.nest_enable.value = child is not None
@@ -2337,7 +2337,7 @@ class ForgeBlueprintWizard:
         }
 
     def _domain_piece_data(self) -> dict[str, Any]:
-        """Build a ``Domain.yml``-shaped dict from the current widget state (the
+        """Build a ``Domain.yaml``-shaped dict from the current widget state (the
         domain-piece extractor for "save modified pieces to catalog"). Includes
         topography and nesting -- both results-affecting -- so a saved DomainSpec
         actually round-trips (see ``_verify_piece_roundtrip``); ``register_domain``
@@ -2487,7 +2487,7 @@ class ForgeBlueprintWizard:
             self._name_touched = (
                 True  # a loaded name is a deliberate choice, not a default
             )
-            self.save_path.value = f"{cfg.name}.forge_blueprint.yml"
+            self.save_path.value = f"{cfg.name}.forge_blueprint.yaml"
             self._save_path_touched = True
             self.start.value = cfg.run.start_date.date()
             self.end.value = cfg.run.end_date.date()
@@ -2737,7 +2737,7 @@ class ForgeBlueprintWizard:
                 if not self._name_touched:
                     self.name.value = cfg.name
                 if not self._save_path_touched:
-                    self.save_path.value = f"{cfg.name}.forge_blueprint.yml"
+                    self.save_path.value = f"{cfg.name}.forge_blueprint.yaml"
         self.download_link.value = self._download_html(cfg)
         problems = validate_run_time_sections(cfg.model_settings)
         if problems:
@@ -2765,7 +2765,7 @@ class ForgeBlueprintWizard:
         """
         payload = cfg.to_yaml_str().encode("utf-8")
         b64 = base64.b64encode(payload).decode("ascii")
-        fname = f"{cfg.name}.forge_blueprint.yml"
+        fname = f"{cfg.name}.forge_blueprint.yaml"
         return (
             f'⬇ <a download="{fname}" href="data:text/yaml;base64,{b64}">'
             f"Download <code>{fname}</code></a>"
@@ -3184,7 +3184,7 @@ class ForgeBlueprintWizard:
                 W.HTML(
                     "<h3>ForgeBlueprint wizard</h3>"
                     "<i>Pick a Model and (optionally) a Domain, tweak fields, review, save. "
-                    "Or load an existing forge_blueprint.yml to edit it. Fine-tune model "
+                    "Or load an existing forge_blueprint.yaml to edit it. Fine-tune model "
                     "settings under “Advanced settings”.</i>"
                 ),
                 section(

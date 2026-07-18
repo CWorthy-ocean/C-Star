@@ -27,7 +27,7 @@ downstream artifact, not forge's own input.
 ```
  catalog pieces ─┐
  (Model/Domain/  ├─► build_forge_blueprint() ─► ForgeBlueprint ─► process_forge_blueprint(cfg, host)
-  Forcing/Output)│         (resolver)         (.yml,               (engine → executor)
+  Forcing/Output)│         (resolver)         (.yaml,               (engine → executor)
                  │                             portable)           │
  wizard UI ──────┘                                                 ▼
                                                      input NetCDFs, namelist.nml,
@@ -54,13 +54,13 @@ cstar_forge/
   domain_catalog_sketch.py    dead prototype, unreferenced anywhere — candidate for deletion
   forge_blueprint_resolve.py      resolver: build_forge_blueprint(...)
   forge_blueprint_wizard.py       ForgeBlueprintWizard (ipywidgets UI), thin shell over the resolver
-  models.py                   Pydantic wrappers for model.yml (ModelSpec, ModelCode,
+  models.py                   Pydantic wrappers for model.yaml (ModelSpec, ModelCode,
                                ModelTemplates, load_models_yaml); imports its forcing/IC/
                                OpenBoundaries item models FROM forge.forge_blueprint (single
                                source, no duplicates — see §5)
   config.py                   DataPaths / MachineConfig / resolve_host() — authoring-side
                                host detection (NERSC/RCAC/macOS), used by run.py only
-  run.py                      CLI: `python -m cstar_forge.run forge_blueprint.yml`; resolves
+  run.py                      CLI: `python -m cstar_forge.run forge_blueprint.yaml`; resolves
                                host, calls forge.forge_blueprint_engine.process_forge_blueprint
   catalog/                    ModelSpec/, DomainSpec/, ForcingSpec/, OutputSpec/,
                                Machines/, blueprints/ — the YAML data the catalog scans
@@ -98,7 +98,7 @@ Defined in `cstar_forge/forge/forge_blueprint.py`. Top-level shape:
 `forge_blueprint_version` (int, bump only on breaking change; currently 3) · `application`
 (=`"forge"`, C-Star app discriminator) · `identity` (`name`, `description` — `name` is the
 single user-editable canonical name; `ForgeBlueprint.name` returns it directly, `casename`/
-`working_dir`/`B_{name}.yml`/netCDF stems all derive from it. `model_name`/`grid_name` moved
+`working_dir`/`B_{name}.yaml`/netCDF stems all derive from it. `model_name`/`grid_name` moved
 out: `model_name` lives only in `composition.model.name`, `grid_name` moved onto `domain`
 since it's results-affecting — `SourceData` keys cache filenames off it. `ensemble_id` was
 removed entirely, a dead concept with no effect beyond a cosmetic name suffix. A v2→v3
@@ -131,22 +131,22 @@ repo refs) · `composition` (which catalog pieces produced this + overrides laye
 2. User picks a domain → `_on_domain()` prefills grid/boundaries/partitioning/dates from
    `catalog.domain_data(name)`.
 3. Every edit → `_rebuild()` → `build_forge_blueprint(**self._gather())`
-   (forge_blueprint_resolve.py) — reads the single consolidated `model.yml` directly as a
+   (forge_blueprint_resolve.py) — reads the single consolidated `model.yaml` directly as a
    dict (no Pydantic here; `code` + flat `model_settings`, no embedded forcing/output
    defaults — a ForcingSpec and OutputSpec must always be supplied explicitly), resolves
    dataset keys via `source_registry`, computes pure-derived settings (CFL `dt`,
    `v_sponge`, etc.), returns a `ForgeBlueprint`.
-4. `wiz.config.to_yaml(path)` writes the portable `forge_blueprint.yml`.
+4. `wiz.config.to_yaml(path)` writes the portable `forge_blueprint.yaml`.
 
 **Execution (blueprint → engine → executor), same machine or a different one:**
-5. `python -m cstar_forge.run forge_blueprint.yml` (run.py) — resolves the host via
+5. `python -m cstar_forge.run forge_blueprint.yaml` (run.py) — resolves the host via
    `cstar_forge.config.resolve_host()` (machine tag, `source_data_cache`,
    `working_dir` override).
 6. `forge.forge_blueprint_engine.process_forge_blueprint(cfg, host, ...)` builds a
    `ForgeExecutor` via `ForgeExecutor.from_forge_blueprint(cfg, host)` and drives:
    `ensure_source_data()` → `generate_inputs()` → `configure_build()`.
 7. Outputs land under `host.working_dir`: input NetCDFs, `namelist.nml`, `cppdefs.opt`,
-   and the emitted downstream `roms_marbl` blueprint YAML (`B_{name}.yml`, persisted
+   and the emitted downstream `roms_marbl` blueprint YAML (`B_{name}.yaml`, persisted
    once by `configure_build()` — there is no per-stage blueprint file).
 
 `ForgeExecutor` never imports `cstar_forge.config`/`catalog`/`domain_catalog`/
@@ -166,12 +166,12 @@ Earlier project memory described two parallel item-model schemas kept in sync by
 "lockstep drift guard" test. **That has been resolved**: `models.py` now imports its
 forcing/IC item models (`BoundaryForcingItem`, `SurfaceForcingItem`, `InitialConditions`,
 etc.) directly from `forge.forge_blueprint` — single source of truth, no duplication, no
-drift guard needed for item models. What `models.py` still owns is the `model.yml`
+drift guard needed for item models. What `models.py` still owns is the `model.yaml`
 *wrapper* shape (`ModelSpec`, `ModelCode`, `ModelTemplates`, `load_models_yaml`) used by
 `domain_catalog.load_model_spec()` for full Pydantic validation at catalog-registration
 time — a heavier, separate path from the resolver's plain-dict read of the same file.
 ModelSpec no longer has an `inputs`/split `templates`+`settings` shape (consolidated,
-2026-07; see the catalog's `ModelSpec/*/model.yml` for the current `code` +
+2026-07; see the catalog's `ModelSpec/*/model.yaml` for the current `code` +
 `model_settings` shape) — `GridInput`/`ForcingInput`/`ModelInputs`/`SettingsStage`/
 `SettingsSpec`/`TemplatesSpec` etc. were removed.
 
@@ -212,7 +212,7 @@ Ranked roughly by what's worth doing next:
    before hashing — only `commit`/`branch`/`directory`/`files` are results-affecting, so a
    mirror/local-path change no longer perturbs the hash (test:
    `test_content_hash_ignores_code_repo_location`). **DONE:** `_build_code` in
-   `forge_blueprint_resolve.py` reads a `code.templates_commit:` pin from `model.yml`
+   `forge_blueprint_resolve.py` reads a `code.templates_commit:` pin from `model.yaml`
    when set, and the bundled `cson_roms-marbl_v0.1` ModelSpec now sets it to a real
    commit SHA (post-`refactor`-merge) rather than tracking branch `main`.
 5. **`refactor` has not been merged to `main` yet** (currently `main`+38 commits, 0 behind
@@ -233,9 +233,9 @@ Ranked roughly by what's worth doing next:
    green.
 7. **Stale docstring** in `forge/forge_blueprint.py` (L42-44) still says "this module is not
    yet wired into `ForgeExecutor`" — it has been for a while now; delete/update.
-8. **`examples/forge_blueprint.yml` / `forge_blueprint2.yml` / `forge_blueprint3.yml`** still stamp
-   `application: roms_marbl` (pre-rename); `forge_blueprint_new.yml` and
-   `docs/forge-blueprint-example.test-tiny.yml` already say `forge`. Regenerate or delete the
+8. **`examples/forge_blueprint.yaml` / `forge_blueprint2.yaml` / `forge_blueprint3.yaml`** still stamp
+   `application: roms_marbl` (pre-rename); `forge_blueprint_new.yaml` and
+   `docs/forge-blueprint-example.test-tiny.yaml` already say `forge`. Regenerate or delete the
    stale ones — not load-tested by anything, low urgency.
 9. **`domain_catalog_sketch.py`** (167 lines) — dead prototype, zero references anywhere
    (code, tests, notebooks, docs). Safe to delete.

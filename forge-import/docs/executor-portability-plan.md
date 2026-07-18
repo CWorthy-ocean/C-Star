@@ -43,7 +43,7 @@ reads **only** the `ForgeBlueprint` + an injected runtime location, so the entir
    no network/clone/mock). **Deferred reproducibility follow-up:** the resolver still pins
    the template repo by `branch` (`main`), not a commit, and `code.templates_*.location`
    participates in `content_hash` — so a template edit changes build output without a hash
-   bump, and a local test `location` perturbs the (unasserted) hash. Model.yml has a
+   bump, and a local test `location` perturbs the (unasserted) hash. Model.yaml has a
    `templates.commit:` pin hook; the principled fix is to pin a commit and hash the
    template *version* (commit/directory/files) rather than the fetch `location`.
 5. **Settings** — `cfg.model_settings` is authoritative; the executor uses it directly and
@@ -126,20 +126,20 @@ introduced vs. what predates it.
    resolver only ever persists the GitHub URL (host-independent), and the local-path override
    is transient/test-only (never saved, never asserted). But it isn't the principled end-
    state — the hash should capture the template *version* (commit/directory/files), not the
-   fetch *location*. Ties to to-do #2: pin `templates.commit:` (hook already in model.yml)
+   fetch *location*. Ties to to-do #2: pin `templates.commit:` (hook already in model.yaml)
    and refine the hash to exclude `location`.
-5. **`examples/forge_blueprint*.yml` carry stale `application: roms_marbl`** (should be `forge`).
+5. **`examples/forge_blueprint*.yaml` carry stale `application: roms_marbl`** (should be `forge`).
    Confirmed **not load-tested** and referenced only as a doc follow-up → dead docs. TODO:
    regenerate or delete (low urgency). Their template blocks (`directory: templates/…`) are
    already forward-compatible.
-6. **Stale `.ipynb_checkpoints/*.yml`** — `cstar_forge/.ipynb_checkpoints/models-checkpoint.yml`
-   references the deleted `models.yml`; `…/ModelSpec/…/.ipynb_checkpoints/model-checkpoint.yml`
+6. **Stale `.ipynb_checkpoints/*.yaml`** — `cstar_forge/.ipynb_checkpoints/models-checkpoint.yaml`
+   references the deleted `models.yaml`; `…/ModelSpec/…/.ipynb_checkpoints/model-checkpoint.yaml`
    has the pre-move template block. Not loaded by anything. TODO: delete + gitignore
    `.ipynb_checkpoints/`.
 
 ### Nits (no action needed)
 - `docs/overview.md` line 57 labels `catalog/ModelSpec/` as "Model templates and defaults" —
-  now only the `*-defaults.yml` live there (render templates moved out).
+  now only the `*-defaults.yaml` live there (render templates moved out).
 - The offline test seam's `_local_args` omits the `or ""` guard the real `_template_repo_args`
   has (test-only; resolver always sets `directory`).
 

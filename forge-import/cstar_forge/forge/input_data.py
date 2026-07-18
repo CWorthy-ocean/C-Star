@@ -529,7 +529,7 @@ class RomsMarblInputData(InputData):
     def _yaml_filename(self, input_name: str) -> Path:
         """Construct the YAML filename for a given input key."""
         self.roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
-        return self.roms_marbl_blueprint_dir / f"_{input_name}.yml"
+        return self.roms_marbl_blueprint_dir / f"_{input_name}.yaml"
 
     def _resolve_source_block(self, block: str | dict[str, Any]) -> dict[str, Any]:
         """

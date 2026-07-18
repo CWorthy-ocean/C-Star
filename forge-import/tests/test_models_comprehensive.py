@@ -282,9 +282,9 @@ class TestModelSpec:
 
 
 class TestLoadModelsYaml:
-    """Tests for load_models_yaml (parses a model.yml into a ModelSpec)."""
+    """Tests for load_models_yaml (parses a model.yaml into a ModelSpec)."""
 
-    def _write(self, tmp_path, content, filename="model.yml"):
+    def _write(self, tmp_path, content, filename="model.yaml"):
         path = tmp_path / filename
         path.write_text(yaml.safe_dump(content))
         return path
@@ -349,7 +349,7 @@ class TestLoadModelsYaml:
         assert spec.code.roms.branch == "main"
 
     def test_load_use_pio_round_trips(self, tmp_path):
-        """A top-level use_pio key on model.yml round-trips onto ModelSpec.use_pio
+        """A top-level use_pio key on model.yaml round-trips onto ModelSpec.use_pio
         (mirrors bgc_mode), and is False by default when absent.
         """
         base_yaml = {
@@ -374,11 +374,11 @@ class TestLoadModelsYaml:
             "model_settings": {"cppdefs": {}},
         }
 
-        no_pio_path = self._write(tmp_path, base_yaml, filename="no_pio.yml")
+        no_pio_path = self._write(tmp_path, base_yaml, filename="no_pio.yaml")
         assert load_models_yaml(no_pio_path, "my_model").use_pio is False
 
         with_pio = {**base_yaml, "use_pio": True}
-        with_pio_path = self._write(tmp_path, with_pio, filename="with_pio.yml")
+        with_pio_path = self._write(tmp_path, with_pio, filename="with_pio.yaml")
         assert load_models_yaml(with_pio_path, "my_model").use_pio is True
 
     def test_load_numeric_commit_coerced(self, tmp_path):

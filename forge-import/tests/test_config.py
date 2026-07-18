@@ -49,9 +49,9 @@ class TestDataPaths:
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yml",
-            builds_yaml=tmp_path / "builds.yml",
-            machines_yaml=tmp_path / "machines.yml",
+            models_yaml=tmp_path / "models.yaml",
+            builds_yaml=tmp_path / "builds.yaml",
+            machines_yaml=tmp_path / "machines.yaml",
         )
 
         assert paths.here == tmp_path
@@ -60,9 +60,9 @@ class TestDataPaths:
         assert paths.scratch == tmp_path / "run-dir"
         assert paths.catalog == cat
         assert paths.blueprints == cat / "blueprints"
-        assert paths.models_yaml == tmp_path / "models.yml"
-        assert paths.builds_yaml == tmp_path / "builds.yml"
-        assert paths.machines_yaml == tmp_path / "machines.yml"
+        assert paths.models_yaml == tmp_path / "models.yaml"
+        assert paths.builds_yaml == tmp_path / "builds.yaml"
+        assert paths.machines_yaml == tmp_path / "machines.yaml"
 
     def test_datapaths_frozen(self, tmp_path):
         """Test that DataPaths is frozen (immutable)."""
@@ -74,9 +74,9 @@ class TestDataPaths:
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yml",
-            builds_yaml=tmp_path / "builds.yml",
-            machines_yaml=tmp_path / "machines.yml",
+            models_yaml=tmp_path / "models.yaml",
+            builds_yaml=tmp_path / "builds.yaml",
+            machines_yaml=tmp_path / "machines.yaml",
         )
 
         with pytest.raises(FrozenInstanceError):
@@ -92,9 +92,9 @@ class TestDataPaths:
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yml",
-            builds_yaml=tmp_path / "builds.yml",
-            machines_yaml=tmp_path / "machines.yml",
+            models_yaml=tmp_path / "models.yaml",
+            builds_yaml=tmp_path / "builds.yaml",
+            machines_yaml=tmp_path / "machines.yaml",
         )
         other = tmp_path / "other_catalog"
         moved = with_catalog(paths, other)
@@ -436,7 +436,7 @@ class TestLoadMachineConfig:
 
     def test_load_machine_config_nonexistent_file(self, tmp_path):
         """Test loading machine config when file doesn't exist."""
-        machines_yaml = tmp_path / "machines.yml"
+        machines_yaml = tmp_path / "machines.yaml"
         config = load_machine_config("test_system", machines_yaml)
 
         assert isinstance(config, MachineConfig)
@@ -446,7 +446,7 @@ class TestLoadMachineConfig:
 
     def test_load_machine_config_existing_machine(self, tmp_path):
         """Test loading machine config for existing machine."""
-        machines_yaml = tmp_path / "machines.yml"
+        machines_yaml = tmp_path / "machines.yaml"
         machines_data = {
             "NERSC_perlmutter": {
                 "account": "test_account",
@@ -466,7 +466,7 @@ class TestLoadMachineConfig:
 
     def test_load_machine_config_nonexistent_machine(self, tmp_path):
         """Test loading machine config for machine not in file."""
-        machines_yaml = tmp_path / "machines.yml"
+        machines_yaml = tmp_path / "machines.yaml"
         machines_data = {"NERSC_perlmutter": {"account": "test_account"}}
 
         with machines_yaml.open("w") as f:
@@ -479,7 +479,7 @@ class TestLoadMachineConfig:
 
     def test_load_machine_config_invalid_yaml(self, tmp_path):
         """Test loading machine config with invalid YAML."""
-        machines_yaml = tmp_path / "machines.yml"
+        machines_yaml = tmp_path / "machines.yaml"
         machines_yaml.write_text("invalid: yaml: content: [")
 
         config = load_machine_config("test_system", machines_yaml)
@@ -502,9 +502,9 @@ class TestCLI:
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yml"),
-            builds_yaml=Path("/test/builds.yml"),
-            machines_yaml=Path("/test/machines.yml"),
+            models_yaml=Path("/test/models.yaml"),
+            builds_yaml=Path("/test/builds.yaml"),
+            machines_yaml=Path("/test/machines.yaml"),
         )
 
         # Patch everything in one context manager
@@ -531,9 +531,9 @@ class TestCLI:
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yml"),
-            builds_yaml=Path("/test/builds.yml"),
-            machines_yaml=Path("/test/machines.yml"),
+            models_yaml=Path("/test/models.yaml"),
+            builds_yaml=Path("/test/builds.yaml"),
+            machines_yaml=Path("/test/machines.yaml"),
         )
 
         # Patch everything in one context manager
@@ -562,9 +562,9 @@ class TestCLI:
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yml"),
-            builds_yaml=Path("/test/builds.yml"),
-            machines_yaml=Path("/test/machines.yml"),
+            models_yaml=Path("/test/models.yaml"),
+            builds_yaml=Path("/test/builds.yaml"),
+            machines_yaml=Path("/test/machines.yaml"),
         )
 
         with (

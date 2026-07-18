@@ -7,7 +7,7 @@ forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
 
 1. **Collection / curation** — assemble every option from its source (constructor
    args, the ModelSpec, and the *pure* derived values), validate it, and write one
-   reviewable ``forge_blueprint.yml`` (``cstar_forge.forge_blueprint_resolve.build_forge_blueprint``).
+   reviewable ``forge_blueprint.yaml`` (``cstar_forge.forge_blueprint_resolve.build_forge_blueprint``).
 2. **Processing** — ingest that file on any machine and run the heavy work
    (``generate_inputs`` + ``configure_build``).
 
@@ -269,7 +269,7 @@ def sanitize_name(raw: str) -> str:
     Used for both user-supplied names (the wizard's editable Export field, a
     hand-edited YAML) and the resolver's derived default, so the two are
     idempotent with each other. The result feeds ``working_dir``, ``casename``,
-    ``B_{name}.yml``, and netCDF filename stems -- keep the charset conservative
+    ``B_{name}.yaml``, and netCDF filename stems -- keep the charset conservative
     ([A-Za-z0-9._-]); anything else collapses to a single ``_``.
     """
     s = _NAME_UNSAFE_RE.sub("_", raw.strip())
@@ -280,7 +280,7 @@ def sanitize_name(raw: str) -> str:
 
 
 def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
-    """Version-check + forward-migrate a parsed ``forge_blueprint.yml`` dict.
+    """Version-check + forward-migrate a parsed ``forge_blueprint.yaml`` dict.
 
     Rejects a file declaring a *newer* version than this build understands. For
     v<=2 files (pre-v3 ``identity`` shape: ``model_name``/``grid_name``/
@@ -343,7 +343,7 @@ class Identity(_Section):
 
     ``name`` is the single source of truth for ``ForgeBlueprint.name``: everything
     else derived from it (``casename``, namelist ``title``, ``output_root_name``,
-    ``run_output_dir``, the default ``working_dir``, ``B_{name}.yml``) is a
+    ``run_output_dir``, the default ``working_dir``, ``B_{name}.yaml``) is a
     deterministic function -- see :class:`ForgeBlueprint` properties. The resolver
     computes a sensible default (``{model_name}_{grid_name}_{n_procs}procs``) but a
     user may override it; ``model_name``/``grid_name`` themselves live in
@@ -631,7 +631,7 @@ class Provenance(_Section):
 class ForgeBlueprint(_Section):
     """The complete, sufficient, reviewable input to processing.
 
-    Round-trips to a single ``forge_blueprint.yml`` via :meth:`to_yaml` / :meth:`from_yaml`.
+    Round-trips to a single ``forge_blueprint.yaml`` via :meth:`to_yaml` / :meth:`from_yaml`.
 
     ``model_settings`` is a FLAT mapping of settings sections: ``cppdefs`` (compile
     time) sits at the same level as every namelist section (``lateral_visc``,
@@ -774,7 +774,7 @@ class ForgeBlueprint(_Section):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ForgeBlueprint:
-        """Load and validate a ``forge_blueprint.yml`` (Phase 2 entry point)."""
+        """Load and validate a ``forge_blueprint.yaml`` (Phase 2 entry point)."""
         data = yaml.safe_load(Path(path).read_text())
         return cls.model_validate(migrate_forge_blueprint_data(data))
 

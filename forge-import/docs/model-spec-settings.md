@@ -6,14 +6,14 @@ These defaults are used in the templating engine to generate source code and inp
 Settings are managed in `forge` using 
 1. Templated code files
 2. YAML dictionaries specifying defaults 
-  - Example [compile-time-settings.yml](reference-settings-compile-time.md)
-  - Example [run-time-settings.yml](reference-settings-run-time.md)  
+  - Example [compile-time-settings.yaml](reference-settings-compile-time.md)
+  - Example [run-time-settings.yaml](reference-settings-run-time.md)  
 3. User override settings
 
 
 ### Templates
 
-A model specification in `model.yml` will include a list of code templates. For example,
+A model specification in `model.yaml` will include a list of code templates. For example,
 ```yaml
 templates:
   compile_time:
@@ -38,7 +38,7 @@ Compile-time options still use a Jinja2 template, `cppdefs.opt.j2`, which render
   {% endif %}
   ```
 
-Run-time options are no longer rendered from Jinja2 templates. Instead they are written to a single `namelist.nml` (via `f90nml`, in `write_roms_namelist`) from the run-time settings, whose defaults live in `templates/run-time-defaults.yml`. The `marbl_in` file is copied as-is.
+Run-time options are no longer rendered from Jinja2 templates. Instead they are written to a single `namelist.nml` (via `f90nml`, in `write_roms_namelist`) from the run-time settings, whose defaults live in `templates/run-time-defaults.yaml`. The `marbl_in` file is copied as-is.
 
 When `forge` configures and builds the model for a new domain, it uses the `jinja2` templating engine to replace keys in `cppdefs.opt.j2` with values from the `CStarSpecBuilder._compile_time_settings` dictionary. 
 
@@ -46,7 +46,7 @@ When `forge` configures and builds the model for a new domain, it uses the `jinj
 
 This dictionary is initialized to the defaults curated in YAML files. 
 
-For example, `catalog/ModelSpec/cson_roms-marbl_v0.1/templates/compile-time-defaults.yml` includes the following:
+For example, `catalog/ModelSpec/cson_roms-marbl_v0.1/templates/compile-time-defaults.yaml` includes the following:
 ```yaml
 cppdefs:
   obc_west: true

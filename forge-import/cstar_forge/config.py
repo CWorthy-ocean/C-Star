@@ -52,7 +52,7 @@ class DataPaths:
 @dataclass(frozen=True)
 class MachineConfig:
     """
-    Machine-specific configuration loaded from machines.yml.
+    Machine-specific configuration loaded from machines.yaml.
 
     Attributes
     ----------
@@ -213,9 +213,9 @@ def get_data_paths() -> DataPaths:
     # Inner catalog dir: .../cstar_forge_data/catalog/blueprints/
     catalog = default_catalog_inner_dir(input_data)
     blueprints_dir = catalog / "blueprints"
-    models_yaml = here / "models.yml"
-    builds_yaml = here / "builds.yml"
-    machines_yaml = here / "machines.yml"
+    models_yaml = here / "models.yaml"
+    builds_yaml = here / "builds.yaml"
+    machines_yaml = here / "machines.yaml"
 
     # ensure everything exists
     for p in (source_data, input_data, scratch, catalog, blueprints_dir):
@@ -259,14 +259,14 @@ def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
 
 def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineConfig:
     """
-    Load machine-specific configuration from machines.yml.
+    Load machine-specific configuration from machines.yaml.
 
     Parameters
     ----------
     system_tag : str
         System tag (e.g., "NERSC_perlmutter", "RCAC_anvil").
     machines_yaml_path : Path
-        Path to the machines.yml file.
+        Path to the machines.yaml file.
 
     Returns
     -------

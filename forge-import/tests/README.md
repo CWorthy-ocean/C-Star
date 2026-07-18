@@ -37,4 +37,4 @@ Tests are automatically run on:
 - Pull requests to `main` or `develop` branches
 - Manual workflow dispatch
 
-See `.github/workflows/tests.yml` for CI configuration.
+See `.github/workflows/tests.yaml` for CI configuration.

@@ -2,7 +2,7 @@
 
 The `ModelSpec` abstraction is designed to formalize and preserve a notion of a trusted model configuration by aggregrating the information required to build and configure a particular model as a named entity. 
 
-Model specifications are defined per-model in `cstar_forge/catalog/ModelSpec/<model>/model.yml` (see [here](reference-models-yml.md)). Models are discovered by scanning `catalog/ModelSpec/*/model.yml`. 
+Model specifications are defined per-model in `cstar_forge/catalog/ModelSpec/<model>/model.yaml` (see [here](reference-models-yml.md)). Models are discovered by scanning `catalog/ModelSpec/*/model.yaml`. 
 
 Each model includes:
 
@@ -12,7 +12,7 @@ Each model includes:
 - Input dataset defaults (a list of required source datasets is derived from inputs)
 
 
-## `model.yml` Schema
+## `model.yaml` Schema
 
 Here's a view of the schema:
 ```yaml
@@ -32,9 +32,9 @@ settings:
   properties:
     n_tracers: 34
   compile_time:
-    _default_config_yaml: "templates/compile-time-defaults.yml"
+    _default_config_yaml: "templates/compile-time-defaults.yaml"
   run_time:
-    _default_config_yaml: "templates/run-time-defaults.yml"
+    _default_config_yaml: "templates/run-time-defaults.yaml"
 
 code:
   roms:
@@ -125,6 +125,6 @@ Each `source` in the inputs can be:
   - `name`: Source name (e.g., "GLORYS", "ERA5", "UNIFIED", "TPXO", "DAI", "GLOFAS")
   - `climatology`: Boolean indicating whether to use climatology data (default: `false`)
 
-You can add new models by creating a new directory under `cstar_forge/catalog/ModelSpec/<model>/` containing a `model.yml` with the schema above.
+You can add new models by creating a new directory under `cstar_forge/catalog/ModelSpec/<model>/` containing a `model.yaml` with the schema above.
 
 

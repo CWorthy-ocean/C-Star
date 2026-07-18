@@ -4,7 +4,7 @@ namelist transform (``build_namelist``).
 
 * :class:`RunTimeSettings` validates and types forge's run-time settings dict —
   the YAML vocabulary (``tcline``, ``np_xi``, ``analytical`` …). Defaults live
-  in each ModelSpec's ``run-time-defaults.yml``, not here: fields are required
+  in each ModelSpec's ``run-time-defaults.yaml``, not here: fields are required
   so an incomplete YAML fails loudly; only the runtime-filled fields (grid file,
   IC file, s-coord, forcing paths, casename, output root) are ``Optional``.
 * :func:`build_namelist` transforms a validated ``RunTimeSettings`` into a
@@ -94,7 +94,7 @@ PathStr = Annotated[str | None, BeforeValidator(_coerce_pathlike)]
 # Settings-vocabulary models (forge's run-time dict, validated)
 #
 # DEFAULTS LIVE IN THE YAML, NOT HERE. Each ModelSpec ships its own
-# run-time-defaults.yml with its own values; these models only *validate and
+# run-time-defaults.yaml with its own values; these models only *validate and
 # type* whatever that YAML (plus overrides + dynamically-set values) provides.
 # So fields carry NO value defaults — they are required, and an incomplete
 # ModelSpec YAML fails validation loudly (naming the missing field). The only

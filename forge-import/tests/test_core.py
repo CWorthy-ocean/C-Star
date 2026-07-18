@@ -314,7 +314,7 @@ class TestForgeExecutorProperties:
     def test_path_roms_marbl_blueprint_method(self, minimal_cstar_spec_builder_args):
         """Test the path_roms_marbl_blueprint method (host-based)."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        expected_path = builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yml"
+        expected_path = builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yaml"
         assert builder.path_roms_marbl_blueprint() == expected_path
 
     def test_datasets_property_auto_populates(
@@ -760,7 +760,7 @@ class TestForgeExecutorBuildAndRun:
     ):
         """No preconfig/postconfig/run stage artifacts are ever written -- the
         stages concept is gone. `roms_marbl_blueprint_dir` holds exactly one
-        `B_{name}.yml` and one `settings_B_{name}.yml` after configure_build().
+        `B_{name}.yaml` and one `settings_B_{name}.yaml` after configure_build().
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
@@ -775,9 +775,9 @@ class TestForgeExecutorBuildAndRun:
             }
             builder.configure_build()
 
-        bp_files = sorted(builder.roms_marbl_blueprint_dir.glob("B_*.yml"))
+        bp_files = sorted(builder.roms_marbl_blueprint_dir.glob("B_*.yaml"))
         settings_files = sorted(
-            builder.roms_marbl_blueprint_dir.glob("settings_B_*.yml")
+            builder.roms_marbl_blueprint_dir.glob("settings_B_*.yaml")
         )
         assert bp_files == [builder.path_roms_marbl_blueprint()]
         assert settings_files == [
@@ -981,7 +981,7 @@ class TestForgeExecutorBuildAndRun:
             assert args["files"] == list(repo.files)
         # Resolver default: github repo pinned at the ModelSpec code.templates_commit,
         # repo-root-relative directory.
-        pinned = yaml.safe_load((_MODEL_DIR / "model.yml").read_text())["code"][
+        pinned = yaml.safe_load((_MODEL_DIR / "model.yaml").read_text())["code"][
             "templates_commit"
         ]
         ct = builder._template_repo_args("compile_time")
@@ -995,14 +995,14 @@ class TestForgeExecutorPathRomsMarblBlueprint:
     """Tests for path_roms_marbl_blueprint method."""
 
     def test_path_roms_marbl_blueprint(self, minimal_cstar_spec_builder_args):
-        """path_roms_marbl_blueprint returns the single B_{name}.yml path -- there
+        """path_roms_marbl_blueprint returns the single B_{name}.yaml path -- there
         is no stage suffix and no stage/run_params arguments to pass.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
         path = builder.path_roms_marbl_blueprint()
 
-        assert path == builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yml"
-        assert path.suffix == ".yml"
+        assert path == builder.roms_marbl_blueprint_dir / f"B_{builder.name}.yaml"
+        assert path.suffix == ".yaml"
 
 
 class TestForgeExecutorPersist:
@@ -1011,7 +1011,7 @@ class TestForgeExecutorPersist:
     def test_persist_writes_blueprint_and_sidecar(
         self, minimal_cstar_spec_builder_args
     ):
-        """persist() writes the single B_{name}.yml plus its settings sidecar."""
+        """persist() writes the single B_{name}.yaml plus its settings sidecar."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         builder.persist()

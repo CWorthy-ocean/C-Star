@@ -127,7 +127,7 @@ path at `_core.py:2609` and `domain_catalog.py:697`).
 - Fold `models.py` forcing item models into `forge_blueprint.py` (single source). Reconcile:
   - **`extra` policy:** `models.py` items use `extra="allow"` (legacy passthrough);
     `forge_blueprint` uses `forbid`. Move to `forbid` now that `options` is the sanctioned
-    hatch — *after* confirming `model.yml`/resolver emit no stray keys.
+    hatch — *after* confirming `model.yaml`/resolver emit no stray keys.
   - **Naming:** `InitialConditionsInput` → `InitialConditions`.
   - **`SourceSpec` validator:** move the `Literal` typing + `glorys_layout`-only-for-GLORYS
     validator into `forge_blueprint`'s `SourceSpec` (stays stdlib/pydantic-only).
@@ -168,7 +168,7 @@ The application is named **`forge`**. The `application` discriminator identifies
    in place of the `forge_app/` placeholder).
 3. **Executor class** — `ForgeExecutor` (replaces `CstarSpecBuilder`).
 
-> Follow-up: `examples/forge_blueprint*.yml` and `docs/forge-blueprint-example.test-tiny.yml` were
+> Follow-up: `examples/forge_blueprint*.yaml` and `docs/forge-blueprint-example.test-tiny.yaml` were
 > stamped under the old value; the doc example is re-stamped to `forge`. The `examples/*`
 > snapshots should be regenerated (they may carry other catalog drift too).
 

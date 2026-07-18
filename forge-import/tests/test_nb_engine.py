@@ -81,7 +81,7 @@ def test_run_notebook_replaces_markdown_placeholders(monkeypatch, tmp_path):
     )
     nbformat.write(nb, str(notebook_path))
     output_path = tmp_path / "executed.ipynb"
-    params = {"grid_yaml": "tests/_grid.yml"}
+    params = {"grid_yaml": "tests/_grid.yaml"}
 
     captured = {}
 
@@ -108,7 +108,7 @@ def test_run_notebook_replaces_markdown_placeholders(monkeypatch, tmp_path):
     nb_engine.run_notebook(notebook_path, output_path, params)
 
     assert captured["input_path"] != str(notebook_path)
-    assert captured["markdown"] == "Grid: tests/_grid.yml"
+    assert captured["markdown"] == "Grid: tests/_grid.yaml"
     assert captured["cwd"] == str(notebook_path.parent.resolve())
 
 
@@ -123,7 +123,7 @@ def test_main_cli_uses_yaml_file(monkeypatch, tmp_path):
 
     monkeypatch.setattr(nb_engine, "run_notebook", fake_run_notebook)
 
-    config_path = tmp_path / "parameters.yml"
+    config_path = tmp_path / "parameters.yaml"
     config_path.write_text(
         "\n".join(
             [
@@ -132,7 +132,7 @@ def test_main_cli_uses_yaml_file(monkeypatch, tmp_path):
                 "  children:",
                 "  - regional-domain-sizing:",
                 "      parameters:",
-                "        grid_yaml: tests/_grid.yml",
+                "        grid_yaml: tests/_grid.yaml",
                 "        test: true",
                 "      output_path: executed/domain-sizing/example.ipynb",
                 "",
@@ -147,7 +147,7 @@ def test_main_cli_uses_yaml_file(monkeypatch, tmp_path):
     # Notebook path is resolved relative to workflow directory (where config_path is)
     assert captured["notebook_path"] == tmp_path / "regional-domain-sizing.ipynb"
     assert captured["output_path"] == tmp_path / "executed/domain-sizing/example.ipynb"
-    assert captured["parameters"]["grid_yaml"] == str(tmp_path / "tests/_grid.yml")
+    assert captured["parameters"]["grid_yaml"] == str(tmp_path / "tests/_grid.yaml")
 
 
 def test_main_cli_requires_yaml_file():

@@ -84,7 +84,7 @@ python -m cstar_forge.config show-paths --json
 
 ## Machine Configuration
 
-Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/machines.yml`. The `config.machine` object provides access to these settings:
+Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/machines.yaml`. The `config.machine` object provides access to these settings:
 
 ```python
 from cstar_forge import config
@@ -95,7 +95,7 @@ pes_per_node = config.machine.pes_per_node  # Cores per node
 default_queue = config.machine.queues.get("default")  # Default queue name
 ```
 
-If a machine is not found in `machines.yml` or the file doesn't exist, an empty `MachineConfig` is returned.
+If a machine is not found in `machines.yaml` or the file doesn't exist, an empty `MachineConfig` is returned.
 
 ### Cluster Types
 
@@ -146,7 +146,7 @@ The `get_data_paths()` function automatically creates these directories if they 
 
 For further reference, see:
 - [API Reference: Core](api-core.md) - Configuration module source code
-- [Machines (machines.yml)](reference-machines.md) - Machine-specific settings
+- [Machines (machines.yaml)](reference-machines.md) - Machine-specific settings
 
 
 

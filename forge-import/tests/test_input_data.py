@@ -515,7 +515,7 @@ class TestRomsMarblInputDataHelperMethods:
     def test_yaml_filename(self, sample_roms_marbl_input_data):
         """Test _yaml_filename method."""
         yaml_path = sample_roms_marbl_input_data._yaml_filename("grid")
-        assert yaml_path.name == "_grid.yml"
+        assert yaml_path.name == "_grid.yaml"
         assert yaml_path.parent == sample_roms_marbl_input_data.roms_marbl_blueprint_dir
         assert sample_roms_marbl_input_data.roms_marbl_blueprint_dir.exists()
 
@@ -1082,7 +1082,7 @@ class TestRomsMarblInputDataGeneration:
             / "blueprints"
             / "MacOS"
             / "cson_roms-marbl_v0.1_test-tiny_1procs"
-            / "_cdr_forcing.yml"
+            / "_cdr_forcing.yaml"
         )
         cdr_kwargs = read_cdr_forcing_yaml(sample)
 

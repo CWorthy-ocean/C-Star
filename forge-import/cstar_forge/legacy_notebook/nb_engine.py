@@ -271,7 +271,7 @@ def parse_args(args: Iterable[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "yaml_file",
-        help="Path to parameters.yml file.",
+        help="Path to parameters.yaml file.",
     )
     parser.add_argument(
         "--kernel",

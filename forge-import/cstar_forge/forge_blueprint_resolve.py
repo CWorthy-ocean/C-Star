@@ -109,7 +109,7 @@ def _resolved_dataset(name: str, glorys_layout: str | None = None) -> ResolvedDa
 
 
 def _parse_source(block: Any) -> SourceSpec:
-    """A model.yml ``source`` block: a bare name string or a dict."""
+    """A model.yaml ``source`` block: a bare name string or a dict."""
     if isinstance(block, str):
         name = block
         d: dict[str, Any] = {}
@@ -137,13 +137,16 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
 def load_model_spec_data(model_dir: str | Path) -> dict[str, Any]:
     """Read a ModelSpec directory into a plain dict (no heavy deps).
 
-    A ModelSpec is a single ``model.yml`` with two top-level sections: ``code``
+    A ModelSpec is a single ``model.yaml`` with two top-level sections: ``code``
     (roms/marbl/pio + template refs) and ``model_settings`` (flat, mirrors
     ``ForgeBlueprint.model_settings`` 1:1 -- no separate compile/run-time defaults
-    files to resolve). Returns ``{"model_name": <dir name>, "model": <model.yml dict>}``.
+    files to resolve). Returns ``{"model_name": <dir name>, "model": <model.yaml dict>}``.
     """
     model_dir = Path(model_dir)
-    model = yaml.safe_load((model_dir / "model.yml").read_text())
+    model_path = model_dir / "model.yaml"
+    if not model_path.exists():
+        model_path = model_dir / "model.yml"  # legacy extension, still readable
+    model = yaml.safe_load(model_path.read_text())
     # single-model file: sections at top level; else unwrap a single named block
     if not any(k in model for k in ("code", "model_settings")):
         if len(model) == 1:
@@ -780,7 +783,7 @@ def _build_code(
 
     roms = _repo("roms")
     if roms is None:
-        raise ValueError("ModelSpec model.yml is missing a code.roms repository")
+        raise ValueError("ModelSpec model.yaml is missing a code.roms repository")
     if roms_ref:
         # User override: commit/branch/tag are all valid `git checkout` targets and
         # collapse to the same checkout_target downstream (C-Star CodeRepository), so
@@ -792,7 +795,7 @@ def _build_code(
         pio = _repo("pio")
         if pio is None:
             raise ValueError(
-                "use_pio=True but the ModelSpec model.yml has no code.pio repository "
+                "use_pio=True but the ModelSpec model.yaml has no code.pio repository "
                 "(Forge pins codebases for reproducibility)"
             )
     marbl = None
@@ -800,7 +803,7 @@ def _build_code(
         marbl = _repo("marbl")
         if marbl is None:
             raise ValueError(
-                'bgc_mode="marbl" but the ModelSpec model.yml has no code.marbl '
+                'bgc_mode="marbl" but the ModelSpec model.yaml has no code.marbl '
                 "repository (Forge pins codebases for reproducibility)"
             )
     return Code(

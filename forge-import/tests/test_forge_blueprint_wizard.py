@@ -150,7 +150,7 @@ def test_roms_ref_prefilled_and_placed_next_to_model_dropdown():
     """
     wiz = ForgeBlueprintWizard()
     assert wiz.roms_ref.value == wiz._model_default_roms_ref()
-    assert wiz.roms_ref.value  # this model.yml pins a concrete commit
+    assert wiz.roms_ref.value  # this model.yaml pins a concrete commit
 
     pieces_box = _find_section(wiz.widget, "<b>Pieces</b>")
     assert pieces_box is not None
@@ -351,13 +351,13 @@ _CDR_SAMPLE_YAML = (
     / "blueprints"
     / "MacOS"
     / "cson_roms-marbl_v0.1_test-tiny_1procs"
-    / "_cdr_forcing.yml"
+    / "_cdr_forcing.yaml"
 )
 
 
 def _upload_change(content: bytes):
     """Build an ipywidgets FileUpload-style ``change`` dict for a single file."""
-    return {"new": ({"name": "cdr.yml", "content": content},)}
+    return {"new": ({"name": "cdr.yaml", "content": content},)}
 
 
 def test_cdr_upload_valid_yaml_gathers_into_config():
@@ -438,7 +438,7 @@ def test_cdr_forcing_round_trips_through_load(tmp_path):
     wiz.end.value = date(2012, 1, 2)
     wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
     assert wiz.config is not None
-    saved = tmp_path / "forge_blueprint.yml"
+    saved = tmp_path / "forge_blueprint.yaml"
     wiz.config.to_yaml(saved)
 
     wiz2 = ForgeBlueprintWizard()
@@ -582,7 +582,7 @@ def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
     assert wiz.config.composition.domain.modified is True
     assert wiz.config.composition.model.modified is True
 
-    saved = tmp_path / "forge_blueprint.yml"
+    saved = tmp_path / "forge_blueprint.yaml"
     wiz.config.to_yaml(saved)
 
     wiz2 = ForgeBlueprintWizard()
@@ -613,7 +613,7 @@ def test_composition_modified_all_false_on_pristine_save_and_load_round_trip(
     assert wiz.config.composition.model.modified is False
     assert wiz.config.composition.output.modified is False
 
-    saved = tmp_path / "forge_blueprint.yml"
+    saved = tmp_path / "forge_blueprint.yaml"
     wiz.config.to_yaml(saved)
 
     wiz2 = ForgeBlueprintWizard()
@@ -740,8 +740,8 @@ def test_build_run_command_uses_current_interpreter():
     import sys
 
     wiz = ForgeBlueprintWizard()
-    cmd = wiz._build_run_command("/tmp/some_blueprint.yml")
-    assert cmd == [sys.executable, "-m", "cstar_forge.run", "/tmp/some_blueprint.yml"]
+    cmd = wiz._build_run_command("/tmp/some_blueprint.yaml")
+    assert cmd == [sys.executable, "-m", "cstar_forge.run", "/tmp/some_blueprint.yaml"]
 
 
 def test_on_run_guards_on_invalid_config(monkeypatch):
@@ -798,7 +798,7 @@ def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_p
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    wiz.save_path.value = str(tmp_path / "bp.yml")
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
 
     captured_cmd = {}
 
@@ -811,7 +811,7 @@ def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_p
 
     wiz._on_run(None)
 
-    assert (tmp_path / "bp.yml").exists()  # auto-saved before running
+    assert (tmp_path / "bp.yaml").exists()  # auto-saved before running
     assert captured_cmd["kwargs"]["stderr"] == asyncio.subprocess.STDOUT
     text = "".join(o["text"] for o in wiz.run_output.outputs)
     assert "line one" in text
@@ -828,7 +828,7 @@ def test_on_run_reports_nonzero_exit_code(monkeypatch, tmp_path):
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    wiz.save_path.value = str(tmp_path / "bp.yml")
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
 
     async def _fake_create_subprocess_exec(*args, **kwargs):
         return _FakeProcess([b"uh oh\n"], returncode=1)
