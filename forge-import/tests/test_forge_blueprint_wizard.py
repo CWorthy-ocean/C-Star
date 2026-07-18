@@ -315,6 +315,36 @@ def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
     assert "Invalid" in wiz.derived.value
 
 
+def test_use_pio_chk_default_seeded_from_model_spec():
+    """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
+    top-level use_pio (default False for the bundled catalog model).
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.use_pio_chk.value is False
+    assert wiz._model_default_use_pio() is False
+
+
+def test_use_pio_chk_emit_is_unconditional():
+    """The wizard must send an explicit use_pio=False to the resolver when the
+    checkbox is unchecked (not simply omit the kwarg) -- otherwise a ModelSpec
+    that declares use_pio: true could never be turned off in the UI, since the
+    resolver's None fallback re-reads the ModelSpec default.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    assert wiz.use_pio_chk.value is False
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cppdefs"]["use_pio"] is False
+    assert wiz.config.code.pio is None
+
+    wiz.use_pio_chk.value = True
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["use_pio"] is True
+    assert wiz.config.code.pio is not None
+
+
 _CDR_SAMPLE_YAML = (
     Path(cstar_forge.__file__).parent
     / "catalog"

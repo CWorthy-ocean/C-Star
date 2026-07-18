@@ -65,7 +65,7 @@ def _make_builder(args, **overrides):
         start_date=merged["start_date"],
         end_date=merged["end_date"],
         description=merged.get("description", "Generated blueprint"),
-        ensemble_id=merged.get("ensemble_id"),
+        name=merged.get("name"),
         use_pio=merged.get("use_pio", False),
         dt=7200,
         forcing_inputs=merged.get("forcing_inputs", _FORCING_INPUTS),
@@ -200,7 +200,7 @@ class TestForgeExecutorInitialization:
         """Test creating ForgeExecutor with minimal required fields."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        assert builder.model_name == "cson_roms-marbl_v0.1"
+        assert builder.name.startswith("cson_roms-marbl_v0.1_")
         assert builder.grid_name == "test-grid"
         assert builder.description == "Generated blueprint"  # Default value
 
@@ -291,11 +291,12 @@ class TestForgeExecutorProperties:
     """Tests for ForgeExecutor properties."""
 
     def test_name_property(self, minimal_cstar_spec_builder_args):
-        """Test the name property."""
+        """Test the name property (now the stored ForgeBlueprint.identity.name,
+        which defaults to {model_name}_{grid_name}_{n_procs}procs).
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
-        # Name includes n_procs suffix: {model_name}_{grid_name}_{n_procs}procs
         n_procs = builder.partitioning.n_procs_x * builder.partitioning.n_procs_y
-        expected_name = f"{builder.model_name}_{builder.grid_name}_{n_procs}procs"
+        expected_name = f"cson_roms-marbl_v0.1_{builder.grid_name}_{n_procs}procs"
         assert builder.name == expected_name
 
     def test_input_data_dir_property(self, minimal_cstar_spec_builder_args):

@@ -168,6 +168,24 @@ class TestModelSpec:
         )
         assert spec.model_settings == {}
 
+    def test_use_pio_defaults_false(self):
+        """use_pio mirrors bgc_mode: a per-run build toggle defaulting off."""
+        spec = ModelSpec(
+            name="test_model",
+            code=_model_code(),
+            model_settings={"cppdefs": {"marbl": True}},
+        )
+        assert spec.use_pio is False
+
+    def test_use_pio_explicit_true(self):
+        spec = ModelSpec(
+            name="test_model",
+            code=_model_code(),
+            use_pio=True,
+            model_settings={"cppdefs": {"marbl": True}},
+        )
+        assert spec.use_pio is True
+
     def test_extra_fields_rejected(self):
         with pytest.raises(ValidationError):
             ModelSpec(
@@ -329,6 +347,39 @@ class TestLoadModelsYaml:
 
         assert spec.name == "my_model"
         assert spec.code.roms.branch == "main"
+
+    def test_load_use_pio_round_trips(self, tmp_path):
+        """A top-level use_pio key on model.yml round-trips onto ModelSpec.use_pio
+        (mirrors bgc_mode), and is False by default when absent.
+        """
+        base_yaml = {
+            "code": {
+                "roms": {
+                    "location": "https://github.com/test/roms.git",
+                    "commit": "x",
+                },
+                "pio": {
+                    "location": "https://github.com/NCAR/ParallelIO.git",
+                    "commit": "pio2_7_0",
+                },
+                "templates_compile_time": {
+                    "directory": "templates/compile-time",
+                    "files": ["cppdefs.opt.j2"],
+                },
+                "templates_run_time": {
+                    "directory": "templates/run-time",
+                    "files": ["marbl_in"],
+                },
+            },
+            "model_settings": {"cppdefs": {}},
+        }
+
+        no_pio_path = self._write(tmp_path, base_yaml, filename="no_pio.yml")
+        assert load_models_yaml(no_pio_path, "my_model").use_pio is False
+
+        with_pio = {**base_yaml, "use_pio": True}
+        with_pio_path = self._write(tmp_path, with_pio, filename="with_pio.yml")
+        assert load_models_yaml(with_pio_path, "my_model").use_pio is True
 
     def test_load_numeric_commit_coerced(self, tmp_path):
         """A commit value written as a bare int in YAML is still accepted (Pydantic

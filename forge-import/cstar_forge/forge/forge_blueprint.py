@@ -24,11 +24,11 @@ mechanically derivable is computed at **processing** time, never stored:
   processing time from ``cstar_forge.config`` on the machine that runs the work.
   ``run_output_dir`` and the namelist ``output_root_name`` (which embed the scratch
   path) are therefore derived there too.
-* **Naming** — the only atomic identity inputs are ``model_name`` and ``grid_name``
-  (plus ``ensemble_id`` and the run dates). ``name``, ``casename``,
-  the namelist ``title``, ``output_root_name``, and ``run_output_dir`` are
-  deterministic functions of those and are exposed as computed properties /
-  helpers — never stored as independent values.
+* **Naming** — the canonical ``name`` is a user-editable atomic input (``identity.name``),
+  defaulting to a derived value (``{model_name}_{grid_name}_{n_procs}procs``) computed
+  once by the resolver. ``casename``, the namelist ``title``, ``output_root_name``, and
+  ``run_output_dir`` are deterministic functions of ``name`` + the run dates and are
+  exposed as computed properties / helpers — never stored as independent values.
 * **Artifacts** — ``s_coord`` (theta_s/theta_b/tcline, read from the generated grid
   file) and all file paths (grid / initial / forcing) are processing outputs and
   belong in the resulting blueprint, not here.
@@ -46,13 +46,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ===========================================================================
 # Enums for roms-tools constrained string parameters.
@@ -239,7 +240,12 @@ _HASH_EXCLUDE = {
 # Bumped only on a BREAKING schema change. Additive fields (with defaults) are
 # backward-compatible — old files still load — so they do NOT bump this. ``from_yaml``
 # rejects files declaring a *newer* version than this build understands.
-FORGE_BLUEPRINT_VERSION = 2
+#
+# v3 (2026-07): ``identity`` dropped ``model_name``/``grid_name``/``ensemble_id`` in
+# favor of a single user-editable ``name``; ``grid_name`` moved onto ``domain`` (it is
+# results-affecting -- SourceData keys cache filenames off it -- so it belongs in the
+# hashed section, not the excluded ``identity`` block). ``from_yaml`` migrates v2 files.
+FORGE_BLUEPRINT_VERSION = 3
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
@@ -253,6 +259,76 @@ DEFAULT_APPLICATION = "forge"
 # default-form paths onto host scratch at run time.
 DEFAULT_WORKING_ROOT = "~/cstar-forge-data"
 
+_NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_NAME_RUN_RE = re.compile(r"[_.-]{2,}")
+
+
+def sanitize_name(raw: str) -> str:
+    """Normalize a free-form blueprint ``name`` into a filesystem/URL-safe token.
+
+    Used for both user-supplied names (the wizard's editable Export field, a
+    hand-edited YAML) and the resolver's derived default, so the two are
+    idempotent with each other. The result feeds ``working_dir``, ``casename``,
+    ``B_{name}.yml``, and netCDF filename stems -- keep the charset conservative
+    ([A-Za-z0-9._-]); anything else collapses to a single ``_``.
+    """
+    s = _NAME_UNSAFE_RE.sub("_", raw.strip())
+    s = _NAME_RUN_RE.sub(lambda m: m.group(0)[0], s).strip("_.-")
+    if not s:
+        raise ValueError(f"name {raw!r} is empty after sanitization")
+    return s
+
+
+def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
+    """Version-check + forward-migrate a parsed ``forge_blueprint.yml`` dict.
+
+    Rejects a file declaring a *newer* version than this build understands. For
+    v<=2 files (pre-v3 ``identity`` shape: ``model_name``/``grid_name``/
+    ``ensemble_id`` instead of a single ``name``), rewrites ``identity`` to the v3
+    shape and moves ``grid_name`` onto ``domain``, reproducing the exact old
+    derived name (including the ``_{ensemble_id:03d}`` suffix) so ``name``/
+    ``casename``/``working_dir`` are preserved bit-for-bit for existing files.
+
+    Note: a migrated file's *recorded* ``provenance.content_hash`` was computed
+    without ``domain.grid_name`` in the hashed data, so it no longer matches the
+    recomputed hash post-migration -- ``verify_content_hash`` only warns on a
+    mismatch, and re-saving via ``to_yaml`` recomputes the hash.
+    """
+    data = dict(data or {})
+    version = data.get("forge_blueprint_version")
+    if version is not None and version > FORGE_BLUEPRINT_VERSION:
+        raise ValueError(
+            f"forge_blueprint_version {version} is newer than this build supports "
+            f"({FORGE_BLUEPRINT_VERSION}); upgrade cstar-forge to read this file."
+        )
+    if version is not None and version >= 3:
+        return data
+    identity = dict(data.get("identity") or {})
+    model_name = identity.get("model_name")
+    grid_name = identity.get("grid_name")
+    if model_name is None or grid_name is None:
+        # Already v3-shaped identity (e.g. a hand-authored dict without a version
+        # stamp) -- nothing to migrate.
+        data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
+        return data
+    ensemble_id = identity.get("ensemble_id")
+    domain = dict(data.get("domain") or {})
+    partitioning = domain.get("partitioning") or {}
+    n_procs = int(partitioning.get("n_procs_x", 1)) * int(
+        partitioning.get("n_procs_y", 1)
+    )
+    name = f"{model_name}_{grid_name}_{n_procs}procs"
+    if ensemble_id is not None:
+        name += f"_{int(ensemble_id):03d}"
+    domain["grid_name"] = grid_name
+    data["domain"] = domain
+    data["identity"] = {
+        "name": sanitize_name(name),
+        "description": identity.get("description", "Generated blueprint"),
+    }
+    data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
+    return data
+
 
 class _Section(BaseModel):
     # Strict by default: an unknown key is a bug in the resolver or a stale file.
@@ -263,15 +339,25 @@ class _Section(BaseModel):
 # Identity (atomic naming inputs only) & run window
 # ===========================================================================
 class Identity(_Section):
-    """The *atomic* naming inputs. Everything else (``name``, ``casename``,
-    namelist ``title``, ``output_root_name``, ``run_output_dir``) is derived from
-    these + the run dates + ``partitioning`` — see :class:`ForgeBlueprint` properties.
+    """The blueprint's canonical name + human description.
+
+    ``name`` is the single source of truth for ``ForgeBlueprint.name``: everything
+    else derived from it (``casename``, namelist ``title``, ``output_root_name``,
+    ``run_output_dir``, the default ``working_dir``, ``B_{name}.yml``) is a
+    deterministic function -- see :class:`ForgeBlueprint` properties. The resolver
+    computes a sensible default (``{model_name}_{grid_name}_{n_procs}procs``) but a
+    user may override it; ``model_name``/``grid_name`` themselves live in
+    ``composition.model.name``/``domain.grid_name`` (they are provenance/functional
+    inputs, not naming inputs, once ``name`` is stored directly).
     """
 
-    model_name: str  # the ModelSpec id, e.g. "cson_roms-marbl_v0.1"
-    grid_name: str  # e.g. "test-tiny"
-    ensemble_id: int | None = None
+    name: str  # canonical blueprint name (user-editable; defaults to a derived value)
     description: str = "Generated blueprint"
+
+    @field_validator("name")
+    @classmethod
+    def _sanitize(cls, v: str) -> str:
+        return sanitize_name(v)
 
 
 class RunWindow(_Section):
@@ -307,6 +393,9 @@ class Domain(_Section):
     processing from the generated grid rather than duplicated here.
     """
 
+    grid_name: (
+        str  # e.g. "test-tiny" -- results-affecting (SourceData cache keys off it)
+    )
     grid_kwargs: dict[str, Any]
     topography_source: TopographySource | str = TopographySource.ETOPO5
     # str fallback allows a custom path dict to be passed through grid_kwargs
@@ -595,7 +684,7 @@ class ForgeBlueprint(_Section):
             self.working_dir = f"{DEFAULT_WORKING_ROOT}/{self.name}"
         return self
 
-    # ---- derived naming (single source of truth: identity + dates + n_procs) ----
+    # ---- derived naming (single source of truth: identity.name + dates) ----
     @property
     def n_procs(self) -> int:
         return self.domain.partitioning.n_procs_x * self.domain.partitioning.n_procs_y
@@ -610,12 +699,11 @@ class ForgeBlueprint(_Section):
 
     @property
     def name(self) -> str:
-        base = (
-            f"{self.identity.model_name}_{self.identity.grid_name}_{self.n_procs}procs"
-        )
-        if self.identity.ensemble_id is not None:
-            base += f"_{self.identity.ensemble_id:03d}"
-        return base
+        """The stored, authoritative canonical name (``identity.name``). The
+        resolver computes its default (``{model_name}_{grid_name}_{n_procs}procs``)
+        once at build time; this property no longer re-derives it.
+        """
+        return self.identity.name
 
     @property
     def datestr(self) -> str:
@@ -688,10 +776,11 @@ class ForgeBlueprint(_Section):
     def from_yaml(cls, path: str | Path) -> ForgeBlueprint:
         """Load and validate a ``forge_blueprint.yml`` (Phase 2 entry point)."""
         data = yaml.safe_load(Path(path).read_text())
-        version = (data or {}).get("forge_blueprint_version")
-        if version is not None and version > FORGE_BLUEPRINT_VERSION:
-            raise ValueError(
-                f"forge_blueprint_version {version} is newer than this build supports "
-                f"({FORGE_BLUEPRINT_VERSION}); upgrade cstar-forge to read this file."
-            )
-        return cls.model_validate(data)
+        return cls.model_validate(migrate_forge_blueprint_data(data))
+
+    @classmethod
+    def from_yaml_data(cls, data: dict[str, Any]) -> ForgeBlueprint:
+        """Validate an already-parsed dict (e.g. a browser upload), applying the
+        same version check + migration as :meth:`from_yaml`.
+        """
+        return cls.model_validate(migrate_forge_blueprint_data(data))

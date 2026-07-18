@@ -104,6 +104,12 @@ class ModelSpec(BaseModel):
         ``nhy_forcing``/``nox_forcing``) and to decide whether ``code.marbl`` is
         populated. Not part of ``model_settings`` -- it's a build mode, not a
         namelist section.
+    use_pio : bool
+        Per-run ParallelIO (PIO) build toggle. Prepopulates the wizard's PIO
+        checkbox; the resolver uses it to derive ``model_settings.cppdefs.use_pio``
+        and to decide whether ``code.pio`` is populated (raising if PIO is
+        requested but the model has no ``code.pio`` pin). Not part of
+        ``model_settings`` -- it's a build mode, not a namelist section.
     model_settings : dict[str, Any]
         Flat model-specific physics/numerics defaults, mirroring
         ``ForgeBlueprint.model_settings`` 1:1. Contains nothing a Domain/Forcing/
@@ -115,6 +121,7 @@ class ModelSpec(BaseModel):
     name: str
     code: ModelCode
     bgc_mode: Literal["marbl", "none"] = "marbl"
+    use_pio: bool = False
     model_settings: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -244,5 +251,6 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
         name=model_name,
         code=model_code,
         bgc_mode=block.get("bgc_mode", "marbl"),
+        use_pio=block.get("use_pio", False),
         model_settings=block.get("model_settings", {}) or {},
     )

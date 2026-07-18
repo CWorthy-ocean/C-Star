@@ -10,6 +10,7 @@
 # hold anything Domain-owned (open_boundaries -> cppdefs.obc_*; grid_kwargs/
 # partitioning -> param's llm/mmm/n/np_xi/np_eta) or Forcing-owned (tidal presence ->
 # cppdefs.tides + tides.ntides; MBL_co2 surface item -> cppdefs.co2_tvarying;
+# restoring surface forcing with an SSS component -> cppdefs.sal_restore;
 # river_frc/cdr_frc namelist defaults, which the resolver now owns directly and a
 # ForcingSpec may override -- see build_forge_blueprint). Nor does it hold
 # extract_data (child-grid nesting): its active values come from a second,
@@ -20,20 +21,27 @@
 # dropdown and the resolver uses it to set cppdefs.marbl (and gate nhy_forcing/
 # nox_forcing) and to decide whether code.marbl is populated.
 #
+# `use_pio` (bool) is a per-run toggle mirroring bgc_mode: it prepopulates the
+# wizard's PIO checkbox and the resolver uses it to set cppdefs.use_pio and to
+# decide whether code.pio is populated.
+#
 # `model_settings` is flat and mirrors ForgeBlueprint.model_settings 1:1 (cppdefs sits
 # at the same level as the namelist sections, matching how the resolver treats them).
 # A few sections here are fully overwritten by the resolver at build time regardless of
 # what's written below (time_stepping, v_sponge from grid/run-window; param's
 # llm/mmm/n/np_xi/np_eta from grid/partitioning; cppdefs.obc_*/marbl/co2_tvarying/
-# tides/cdr_forcing/use_pio from open boundaries/bgc_mode/forcing/direct input;
-# river_frc/cdr_frc entirely; extract_data entirely; tides.ntides from tidal
-# forcing) -- they're included
-# below only where the remaining fields in that same section (nt_passive/ntrc_bio in
-# param; bry_tides/pot_tides/ana_tides in tides) are real, still-relevant model
-# defaults. `pipe_frc` stays here in full: there is no pipe forcing item or
-# generation path, so it has no other piece to live in.
+# sal_restore/tides/cdr_forcing/use_pio from, respectively, open boundaries/bgc_mode/
+# forcing selection/forcing selection/tidal-forcing presence/CDR-forcing presence/the
+# top-level use_pio toggle; river_frc/cdr_frc entirely; extract_data
+# entirely; tides.ntides from tidal forcing) -- they're included
+# below only where the remaining fields in that same section (cppdefs' sponge_tune/
+# nhy_forcing/nox_forcing; param's nt_passive/ntrc_bio; tides' bry_tides/pot_tides/
+# ana_tides) are real, still-relevant model defaults. `pipe_frc` stays here in full:
+# there is no pipe forcing item or generation path, so it has no other piece to
+# live in.
 
 bgc_mode: marbl  # marbl|none -- prepopulates the wizard; resolver derives cppdefs.marbl from it
+use_pio: false  # prepopulates the wizard's PIO checkbox; resolver derives cppdefs.use_pio from it
 
 code:
   roms:
@@ -66,10 +74,12 @@ code:
 
 model_settings:
   cppdefs:
-    # obc_west/east/north/south, marbl, co2_tvarying, tides, cdr_forcing, and use_pio
-    # are all resolver-derived (from the domain's open_boundaries, bgc_mode, forcing
-    # selection, CDR-forcing presence, and the use_pio kwarg, respectively) and are
-    # intentionally absent here -- there is no model default to duplicate.
+    # obc_west/east/north/south, marbl, co2_tvarying, sal_restore, tides, cdr_forcing,
+    # and use_pio are all resolver-derived (from the domain's open_boundaries, bgc_mode,
+    # forcing selection, restoring-forcing SSS component, tidal-forcing presence,
+    # CDR-forcing presence, and the top-level use_pio toggle, respectively) and are
+    # intentionally absent here -- there is no separate cppdefs-level default to
+    # duplicate (use_pio's own default lives at the top level, above).
     sponge_tune: false  # advanced setting only (nested-domain pressure flux forcing); not resolver-derived
     nhy_forcing: true  # ammonia atmospheric forcing; forced off by the resolver when bgc_mode="none"
     nox_forcing: true  # nitrogen oxide atmospheric forcing; forced off by the resolver when bgc_mode="none"

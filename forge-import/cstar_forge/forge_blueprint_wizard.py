@@ -24,7 +24,9 @@ is the only action that builds a grid (needs ``roms_tools``).
 from __future__ import annotations
 
 import base64
+import copy
 import json
+import re
 import typing
 from datetime import date, datetime
 from pathlib import Path
@@ -60,6 +62,7 @@ from cstar_forge.forge_blueprint_resolve import (
     OUTPUT_SECTIONS,
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
+    extract_output_settings,
     load_model_spec_data,
     read_cdr_forcing_yaml,
 )
@@ -92,11 +95,9 @@ HELP_TEXT: dict[str, str] = {
     ): "Barotropic time step in seconds. Leave blank to compute from the CFL criterion "
     "(click 'Compute dt (CFL)' — requires roms_tools).",
     ("run", "description"): "Human-readable description of this blueprint.",
-    (
-        "run",
-        "ensemble_id",
-    ): "Optional integer ensemble member identifier. Appended to the domain name "
-    "as a zero-padded three-digit suffix (e.g. _003).",
+    ("export", "name"): "Canonical blueprint name. Drives the save filename, "
+    "working_dir, casename, and generated file stems. Defaults to a derived "
+    "name (model_grid_NprocsProcs); edit to override.",
     # ---- grid ------------------------------------------------------------------
     ("grid", "nx"): "Number of horizontal grid points in the x-direction (longitude).",
     ("grid", "ny"): "Number of horizontal grid points in the y-direction (latitude).",
@@ -515,6 +516,97 @@ def _overrides_nested(overrides: dict[Any, Any]) -> dict[str, Any]:
         else:
             out.setdefault(section, {})[field] = value
     return out
+
+
+# ---------------------------------------------------------------------------
+# "Save modified pieces to catalog" -- per-piece extractors + round-trip verify
+# ---------------------------------------------------------------------------
+# Whole sections that are Domain/Forcing-owned or purely resolver-derived (never
+# a ModelSpec default) -- the exact inverse of the mutations build_forge_blueprint
+# applies on top of a ModelSpec's model_settings (forge_blueprint_resolve.py).
+_RESOLVER_DERIVED_SECTIONS = (
+    "time_stepping",
+    "v_sponge",
+    "river_frc",
+    "cdr_frc",
+    "extract_data",
+)
+# Leaves within a kept section that are still resolver-derived (grid/partitioning/
+# forcing/bgc-mode driven), so a saved ModelSpec must not bake in a stale value.
+_PARAM_DERIVED_LEAVES = frozenset(
+    {"llm", "mmm", "n", "np_xi", "np_eta", "nsub_x", "nsub_e"}
+)
+_CPPDEFS_DERIVED_LEAVES = frozenset(
+    {
+        "obc_west",
+        "obc_east",
+        "obc_north",
+        "obc_south",
+        "cdr_forcing",
+        "use_pio",
+        "marbl",
+        "co2_tvarying",
+        "sal_restore",
+        "tides",
+    }
+)
+_TIDES_DERIVED_LEAVES = frozenset({"ntides"})
+
+
+def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
+    """The model-owned subset of a resolved ``model_settings`` dict.
+
+    The exact inverse of ``build_forge_blueprint``'s mutations (forge_blueprint_
+    resolve.py): drops whole Domain/Forcing-owned or resolver-derived sections,
+    every OUTPUT section/partial-output field (an OutputSpec's job), and the
+    resolver-derived leaves within otherwise-kept sections (``param``'s grid/
+    partitioning dims, ``cppdefs``'s domain/forcing/bgc-driven flags, ``tides``'s
+    ``ntides``). What remains is safe to bake into a new ModelSpec's
+    ``model_settings`` and reusable across domains/forcing/output selections.
+    """
+    out = copy.deepcopy(effective)
+    for sec in _RESOLVER_DERIVED_SECTIONS:
+        out.pop(sec, None)
+    for sec in OUTPUT_SECTIONS:
+        out.pop(sec, None)
+    if "param" in out:
+        for leaf in _PARAM_DERIVED_LEAVES:
+            out["param"].pop(leaf, None)
+    if "cppdefs" in out:
+        for leaf in _CPPDEFS_DERIVED_LEAVES:
+            out["cppdefs"].pop(leaf, None)
+    if "tides" in out:
+        for leaf in _TIDES_DERIVED_LEAVES:
+            out["tides"].pop(leaf, None)
+    for sec, fields in PARTIAL_OUTPUT_SECTIONS.items():
+        if sec in out:
+            for f in fields:
+                out[sec].pop(f, None)
+    return out
+
+
+def _split_forcing_data(
+    d: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Split a raw ForcingSpec dict (as read from ``Forcing.yml``) into the
+    ``{initial_conditions, forcing}`` shape the forcing editor expects, plus the
+    optional embedded ``cdr_forcing`` block (``None`` if absent). Strips
+    ``description`` (not part of either). Shared by the round-trip verifier and
+    ``_on_forcing_spec``/``_populate_from`` so CDR routes consistently everywhere
+    a ForcingSpec is read.
+    """
+    d = dict(d)
+    d.pop("description", None)
+    cdr = d.pop("cdr_forcing", None)
+    return d, cdr
+
+
+_SPEC_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _valid_spec_name(name: str) -> bool:
+    """A safe catalog entry name: non-empty, single path component."""
+    return bool(name) and _SPEC_NAME_RE.fullmatch(name) is not None
 
 
 def _is_output_key(section: str, field: Any) -> bool:
@@ -1625,15 +1717,6 @@ class ForgeBlueprintWizard:
             layout=W.Layout(width="420px"),
             tooltip=_tip("run", "description"),
         )
-        self.ensemble = W.Text(
-            value="",
-            description="Ensemble id:",
-            placeholder="(optional int)",
-            style={"description_width": "110px"},
-            layout=W.Layout(width="260px"),
-            tooltip=_tip("run", "ensemble_id"),
-        )
-
         # --- grid extended options ---
         self.hmin = W.FloatText(
             value=5.0,
@@ -1784,6 +1867,50 @@ class ForgeBlueprintWizard:
         self.save_btn = W.Button(description="Save to disk", icon="save")
         self.save_status = W.HTML("")
 
+        # --- canonical blueprint name (also in the Export section) ---
+        # Defaults to the resolver's derived name and keeps tracking it until the user
+        # edits the field (self._name_touched flips True on their first real edit;
+        # programmatic backfills in _rebuild() happen under _suspend() so they don't
+        # themselves flip it). save_path tracks the derived name the same way.
+        self._name_touched = False
+        self.name = W.Text(
+            value="",
+            description="Name:",
+            placeholder="(derived from model/grid/procs)",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            tooltip=_tip("export", "name"),
+        )
+        self.name.observe(self._on_name_change, names="value")
+        self._save_path_touched = False
+        self.save_path.observe(self._on_save_path_change, names="value")
+
+        # --- save modified pieces to catalog (name + button + status per piece) ---
+        def _piece_save_row(placeholder):
+            name_w = W.Text(
+                value="",
+                description="Name:",
+                placeholder=placeholder,
+                style={"description_width": "60px"},
+                layout=W.Layout(width="260px"),
+            )
+            btn = W.Button(description="Save as new spec", icon="save")
+            status = W.HTML("")
+            return name_w, btn, status
+
+        self.save_output_name, self.save_output_btn, self.save_output_status = (
+            _piece_save_row("(new OutputSpec name)")
+        )
+        self.save_model_name, self.save_model_btn, self.save_model_status = (
+            _piece_save_row("(new ModelSpec name)")
+        )
+        self.save_domain_name, self.save_domain_btn, self.save_domain_status = (
+            _piece_save_row("(new DomainSpec name)")
+        )
+        self.save_forcing_name, self.save_forcing_btn, self.save_forcing_status = (
+            _piece_save_row("(new ForcingSpec name)")
+        )
+
         # --- run (invokes the executor CLI on the just-saved blueprint) ---
         from cstar_forge.config import system as _detected_system
 
@@ -1815,6 +1942,7 @@ class ForgeBlueprintWizard:
 
         self.roms_ref.value = self._model_default_roms_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
+        self.use_pio_chk.value = self._model_default_use_pio()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         self._forcing_seed = self._forcing_editor.gather()
         self._wire()
@@ -1828,6 +1956,10 @@ class ForgeBlueprintWizard:
         self.plot_btn.on_click(self._on_plot)
         self.nest_plot_btn.on_click(self._on_nest_plot)
         self.save_btn.on_click(self._on_save)
+        self.save_output_btn.on_click(self._on_save_output)
+        self.save_model_btn.on_click(self._on_save_model)
+        self.save_domain_btn.on_click(self._on_save_domain)
+        self.save_forcing_btn.on_click(self._on_save_forcing)
         self.run_btn.on_click(self._on_run)
         self.load_btn.on_click(self._on_load_path)
         self.upload.observe(self._on_upload, names="value")
@@ -1848,7 +1980,6 @@ class ForgeBlueprintWizard:
             self.end,
             self.model_ref_date,
             self.description,
-            self.ensemble,
             self.dt,
             self.hmin,
             self.close_narrow_chk,
@@ -1865,6 +1996,19 @@ class ForgeBlueprintWizard:
         for w in watched:
             w.observe(self._rebuild, names="value")
 
+    def _on_name_change(self, _change):
+        # A programmatic backfill (see _rebuild) happens under _suspend() -- only a
+        # real user edit should "lock in" the field against further auto-updates.
+        if getattr(self, "_suspended", False):
+            return
+        self._name_touched = True
+        self._rebuild()
+
+    def _on_save_path_change(self, _change):
+        if getattr(self, "_suspended", False):
+            return
+        self._save_path_touched = True
+
     def _on_model_change(self, _change):
         # a different model has different defaults -> existing overrides no longer apply.
         # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
@@ -1874,6 +2018,7 @@ class ForgeBlueprintWizard:
         self._overrides = {}
         self.roms_ref.value = self._model_default_roms_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
+        self.use_pio_chk.value = self._model_default_use_pio()
         self._rebuild()
 
     def _on_editor_edit(self, section, field):
@@ -1915,6 +2060,14 @@ class ForgeBlueprintWizard:
         except Exception:
             return "marbl"
 
+    def _model_default_use_pio(self) -> bool:
+        """The selected model's ModelSpec-declared use_pio (prepopulates self.use_pio_chk)."""
+        try:
+            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
+            return bool(data["model"].get("use_pio", False))
+        except Exception:
+            return False
+
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
             self.W, base_inputs, on_change=self._on_forcing_change
@@ -1922,10 +2075,20 @@ class ForgeBlueprintWizard:
         self.forcing_box.children = [self._forcing_editor.widget]
 
     def _on_forcing_spec(self, _change):
-        """Selecting a ForcingSpec reseeds the forcing editor."""
+        """Selecting a ForcingSpec reseeds the forcing editor (and any embedded
+        CDR forcing -- see ``_split_forcing_data``).
+        """
         if getattr(self, "_suspended", False):
             return
-        self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
+        fi, cdr = _split_forcing_data(self.catalog.forcing_data(self.forcing_dd.value))
+        self._build_forcing_editor(fi)
+        self._cdr_forcing = cdr
+        self.cdr_status.value = (
+            f"<span style='color:#080'>✓ CDR loaded from ForcingSpec: "
+            f"{len(cdr.get('releases', []))} release(s)</span>"
+            if cdr
+            else ""
+        )
         self._forcing_seed = self._forcing_editor.gather()
         self._rebuild()
 
@@ -1974,6 +2137,60 @@ class ForgeBlueprintWizard:
             forcing=forcing,
             output=output,
         )
+
+    def _verify_piece_roundtrip(self, piece: str, new_name: str) -> bool:
+        """Side-effect-free check: does re-resolving with ``piece`` sourced from
+        its freshly-written catalog file (``new_name``) reproduce the exact same
+        resolved blueprint currently shown (``self.config``)?
+
+        Reads ``self._gather()``/``self._overrides``/``self.catalog`` only --
+        mutates nothing on the wizard. Compares ``content_hash()``, which covers
+        exactly the results-affecting data (excludes identity/composition/
+        provenance/working_dir -- see ``ForgeBlueprint._HASH_EXCLUDE``), so a
+        match proves the saved piece is a safe substitute for what's currently
+        composed/edited and the piece can be marked ``modified=False``.
+        """
+        if self.config is None:
+            return False
+        kw = self._gather()
+        overrides2 = dict(self._overrides)
+        try:
+            if piece == "output":
+                kw["output_settings"] = self.catalog.output_data(new_name)
+                overrides2 = {
+                    k: v for k, v in overrides2.items() if not _is_output_key(*k)
+                }
+            elif piece == "model":
+                kw["model_dir"] = self.catalog.model_dir(new_name)
+                overrides2 = {k: v for k, v in overrides2.items() if _is_output_key(*k)}
+            elif piece == "forcing":
+                fi, cdr = _split_forcing_data(self.catalog.forcing_data(new_name))
+                kw["forcing_inputs"] = fi
+                kw["cdr_forcing"] = cdr
+            elif piece == "domain":
+                d = self.catalog.domain_data(new_name)
+                kw["grid_kwargs"] = d.get("grid_kwargs", {})
+                kw["open_boundaries"] = d.get("open_boundaries", {})
+                kw["partitioning"] = d.get("partitioning", {})
+                kw["topography_source"] = d.get("topography_source", "ETOPO5")
+                kw.pop("topography_path", None)
+                if d.get("topography_path"):
+                    kw["topography_path"] = d["topography_path"]
+                for k in ("grid_kwargs_child", "grid_kwargs_parent", "metadata_child"):
+                    kw.pop(k, None)
+                    if d.get(k) is not None:
+                        kw[k] = d[k]
+                kw["nesting_include_pressure_fluxes"] = bool(
+                    d.get("nesting_include_pressure_fluxes", False)
+                )
+            else:
+                raise ValueError(f"unknown piece {piece!r}")
+            cfg2 = build_forge_blueprint(**kw)
+        except Exception:
+            return False
+        eff2 = _apply_overrides(cfg2.model_settings, overrides2)
+        cfg2 = cfg2.model_copy(update={"model_settings": eff2})
+        return cfg2.content_hash() == self.config.content_hash()
 
     @staticmethod
     def _sources_to_inputs(cfg: ForgeBlueprint) -> dict[str, Any]:
@@ -2080,6 +2297,21 @@ class ForgeBlueprintWizard:
                 self.model_dd.value = data["model_name"]
             self.topo_source.value = data.get("topography_source", "ETOPO5")
             self.topo_path.value = data.get("topography_path", "") or ""
+            # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
+            # from a DomainSpec's Domain.yml (only present if the spec was saved
+            # via register_domain_from_dict with nesting active).
+            child = data.get("grid_kwargs_child")
+            self.nest_enable.value = child is not None
+            if child:
+                for k, w in self.child_w.items():
+                    if k in child:
+                        w.value = child[k]
+                period = (data.get("metadata_child") or {}).get("period")
+                if period is not None:
+                    self.nest_period.value = float(period)
+                self.nest_pressure_fluxes.value = bool(
+                    data.get("nesting_include_pressure_fluxes", False)
+                )
         self._domain_seed = self._domain_snapshot()
         self._rebuild()
         self._on_plot(None)
@@ -2098,7 +2330,42 @@ class ForgeBlueprintWizard:
             "npy": self.npy.value,
             "topo_source": self.topo_source.value,
             "topo_path": self.topo_path.value,
+            "nest_enable": self.nest_enable.value,
+            "child_w": {k: w.value for k, w in self.child_w.items()},
+            "nest_period": self.nest_period.value,
+            "nest_pressure_fluxes": self.nest_pressure_fluxes.value,
         }
+
+    def _domain_piece_data(self) -> dict[str, Any]:
+        """Build a ``Domain.yml``-shaped dict from the current widget state (the
+        domain-piece extractor for "save modified pieces to catalog"). Includes
+        topography and nesting -- both results-affecting -- so a saved DomainSpec
+        actually round-trips (see ``_verify_piece_roundtrip``); ``register_domain``
+        (the ForgeExecutor-driven path) predates these and omits them.
+        """
+        kw = self._gather()
+        data: dict[str, Any] = {
+            "description": self.description.value,
+            "model_name": self.model_dd.value,
+            "grid_name": self.grid_name.value,
+            "start_time": self.start.value.isoformat(),
+            "end_time": self.end.value.isoformat(),
+            "grid_kwargs": kw["grid_kwargs"],
+            "open_boundaries": kw["open_boundaries"],
+            "partitioning": kw["partitioning"],
+            "topography_source": self.topo_source.value,
+        }
+        if self.topo_path.value.strip():
+            data["topography_path"] = self.topo_path.value.strip()
+        for k in (
+            "grid_kwargs_child",
+            "grid_kwargs_parent",
+            "metadata_child",
+            "nesting_include_pressure_fluxes",
+        ):
+            if k in kw:
+                data[k] = kw[k]
+        return data
 
     class _Suspender:
         def __init__(self, wiz):
@@ -2142,7 +2409,7 @@ class ForgeBlueprintWizard:
     def _load_bytes(self, content: bytes):
         """Parse + load a forge_blueprint from raw YAML bytes (browser upload path)."""
         try:
-            cfg = ForgeBlueprint.model_validate(yaml.safe_load(content))
+            cfg = ForgeBlueprint.from_yaml_data(yaml.safe_load(content))
         except Exception as exc:
             self.load_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
@@ -2212,15 +2479,16 @@ class ForgeBlueprintWizard:
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
-            if cfg.identity.model_name in self.model_dd.options:
-                self.model_dd.value = cfg.identity.model_name
-            self.grid_name.value = cfg.identity.grid_name
-            self.ensemble.value = (
-                ""
-                if cfg.identity.ensemble_id is None
-                else str(cfg.identity.ensemble_id)
-            )
+            if cfg.composition.model.name in self.model_dd.options:
+                self.model_dd.value = cfg.composition.model.name
+            self.grid_name.value = cfg.domain.grid_name
             self.description.value = cfg.identity.description
+            self.name.value = cfg.identity.name
+            self._name_touched = (
+                True  # a loaded name is a deliberate choice, not a default
+            )
+            self.save_path.value = f"{cfg.name}.forge_blueprint.yml"
+            self._save_path_touched = True
             self.start.value = cfg.run.start_date.date()
             self.end.value = cfg.run.end_date.date()
             gk = cfg.domain.grid_kwargs
@@ -2281,10 +2549,11 @@ class ForgeBlueprintWizard:
             # a file that matches its recorded catalog forcing loads as unmodified;
             # one that was hand-edited before saving loads as modified.
             try:
+                fi, _cdr = _split_forcing_data(
+                    self.catalog.forcing_data(self.forcing_dd.value)
+                )
                 self._forcing_seed = _ForcingEditor(
-                    self.W,
-                    self.catalog.forcing_data(self.forcing_dd.value),
-                    on_change=lambda: None,
+                    self.W, fi, on_change=lambda: None
                 ).gather()
             except Exception:
                 self._forcing_seed = None
@@ -2315,7 +2584,6 @@ class ForgeBlueprintWizard:
         if self.scoord_chk.value:
             for k in _SCOORD:
                 gk[k] = float(self.grid_w[k].value)
-        ens = self.ensemble.value.strip()
         # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
         if self.hmin.value != 5.0:
             gk["hmin"] = float(self.hmin.value)
@@ -2335,14 +2603,16 @@ class ForgeBlueprintWizard:
             start_date=datetime.combine(self.start.value, datetime.min.time()),
             end_date=datetime.combine(self.end.value, datetime.min.time()),
             description=self.description.value,
-            ensemble_id=int(ens) if ens else None,
+            # Untouched: always pass None so the resolver recomputes a fresh default
+            # (self.name.value may still hold the *previous* rebuild's backfilled
+            # default -- reusing it here would freeze it instead of tracking inputs).
+            name=(self.name.value.strip() or None) if self._name_touched else None,
             dt=float(self.dt.value),
         )
         if self.topo_path.value.strip():  # blank = derive default topography path
             kw["topography_path"] = self.topo_path.value.strip()
         kw["topography_source"] = self.topo_source.value
-        if self.use_pio_chk.value:
-            kw["use_pio"] = True
+        kw["use_pio"] = self.use_pio_chk.value
         kw["bgc_mode"] = self.bgc_dd.value
         if self.roms_ref.value.strip():
             kw["roms_ref"] = self.roms_ref.value.strip()
@@ -2458,6 +2728,16 @@ class ForgeBlueprintWizard:
         cfg = cfg.model_copy(update={"model_settings": effective, "composition": comp})
 
         self.config = cfg
+        # Backfill the Export name/save-path fields with the current derived default
+        # until the user edits either -- their edit "locks in" that field (see
+        # _on_name_change/_on_save_path_change). Under _suspend() so these
+        # programmatic writes don't themselves flip the touched flags or recurse.
+        if not self._name_touched or not self._save_path_touched:
+            with self._suspend():
+                if not self._name_touched:
+                    self.name.value = cfg.name
+                if not self._save_path_touched:
+                    self.save_path.value = f"{cfg.name}.forge_blueprint.yml"
         self.download_link.value = self._download_html(cfg)
         problems = validate_run_time_sections(cfg.model_settings)
         if problems:
@@ -2485,7 +2765,7 @@ class ForgeBlueprintWizard:
         """
         payload = cfg.to_yaml_str().encode("utf-8")
         b64 = base64.b64encode(payload).decode("ascii")
-        fname = f"{cfg.casename}.forge_blueprint.yml"
+        fname = f"{cfg.name}.forge_blueprint.yml"
         return (
             f'⬇ <a download="{fname}" href="data:text/yaml;base64,{b64}">'
             f"Download <code>{fname}</code></a>"
@@ -2625,6 +2905,202 @@ class ForgeBlueprintWizard:
         except Exception as exc:
             self.save_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    # ---- save modified pieces to catalog --------------------------------------
+    # Each handler: validate name -> extract that piece from current state ->
+    # write it to the catalog (durable) -> side-effect-free round-trip verify ->
+    # on match, commit the minimal state change (repoint the dropdown, drop that
+    # piece's overrides / reset its seed) under _suspend() + a single _rebuild();
+    # on mismatch, the file is still written but nothing else changes (options
+    # refreshed so the new name is selectable, but .value/overrides/seed untouched).
+    def _on_save_output(self, _):
+        name = self.save_output_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_output_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_output_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        try:
+            self.catalog.register_output(
+                name,
+                extract_output_settings(self.config.model_settings),
+                description=self.description.value,
+            )
+        except FileExistsError:
+            self.save_output_status.value = (
+                f"<span style='color:#b00'>'{name}' already exists.</span>"
+            )
+            return
+        except Exception as exc:
+            self.save_output_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_piece_roundtrip("output", name)
+        with self._suspend():
+            # ipywidgets resets .value to the first option on a bare `.options =`
+            # reassignment even when the old value is still present -- restore it
+            # explicitly so a mismatch genuinely leaves the selection untouched.
+            old_value = self.output_dd.value
+            self.output_dd.options = list(self.catalog.output_names)
+            self.output_dd.value = name if ok else old_value
+            if ok:
+                self._overrides = {
+                    k: v for k, v in self._overrides.items() if not _is_output_key(*k)
+                }
+        if ok:
+            self._rebuild()
+            self.save_output_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_output_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — piece kept as modified.</span>"
+            )
+
+    def _on_save_model(self, _):
+        name = self.save_model_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_model_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_model_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        try:
+            self.catalog.register_model_from_settings(
+                name,
+                _model_owned_settings(self.config.model_settings),
+                self.catalog.model_dir(self.model_dd.value),
+                description=self.description.value,
+            )
+        except FileExistsError:
+            self.save_model_status.value = (
+                f"<span style='color:#b00'>'{name}' already exists.</span>"
+            )
+            return
+        except Exception as exc:
+            self.save_model_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_piece_roundtrip("model", name)
+        with self._suspend():
+            old_value = self.model_dd.value
+            self.model_dd.options = list(self.catalog.model_names)
+            self.model_dd.value = name if ok else old_value
+            if ok:
+                self._overrides = {
+                    k: v for k, v in self._overrides.items() if _is_output_key(*k)
+                }
+        if ok:
+            self._rebuild()
+            self.save_model_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_model_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — piece kept as modified.</span>"
+            )
+
+    def _on_save_domain(self, _):
+        name = self.save_domain_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_domain_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_domain_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        try:
+            self.catalog.register_domain_from_dict(name, self._domain_piece_data())
+        except FileExistsError:
+            self.save_domain_status.value = (
+                f"<span style='color:#b00'>'{name}' already exists.</span>"
+            )
+            return
+        except Exception as exc:
+            self.save_domain_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_piece_roundtrip("domain", name)
+        with self._suspend():
+            old_value = self.domain_dd.value
+            self.domain_dd.options = ["<custom>", *self.catalog.domain_names]
+            self.domain_dd.value = name if ok else old_value
+            if ok:
+                self._domain_seed = self._domain_snapshot()
+        if ok:
+            self._rebuild()
+            self.save_domain_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_domain_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — piece kept as modified.</span>"
+            )
+
+    def _on_save_forcing(self, _):
+        name = self.save_forcing_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_forcing_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_forcing_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        try:
+            self.catalog.register_forcing(
+                name,
+                self._forcing_editor.gather(),
+                cdr_forcing=self._cdr_forcing,
+                description=self.description.value,
+            )
+        except FileExistsError:
+            self.save_forcing_status.value = (
+                f"<span style='color:#b00'>'{name}' already exists.</span>"
+            )
+            return
+        except Exception as exc:
+            self.save_forcing_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_piece_roundtrip("forcing", name)
+        with self._suspend():
+            old_value = self.forcing_dd.value
+            self.forcing_dd.options = list(self.catalog.forcing_names)
+            self.forcing_dd.value = name if ok else old_value
+            if ok:
+                self._forcing_seed = self._forcing_editor.gather()
+        if ok:
+            self._rebuild()
+            self.save_forcing_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_forcing_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — piece kept as modified.</span>"
             )
 
     def _build_run_command(self, blueprint_path: str) -> list[str]:
@@ -2790,16 +3266,8 @@ class ForgeBlueprintWizard:
                     self.end,
                     self.model_ref_date,
                     self.description,
-                    self.ensemble,
                 ),
                 section("Timestep", W.HBox([self.dt, self.dt_btn]), self.dt_status),
-                section(
-                    "Output settings",
-                    W.HTML(
-                        "<i>Select an OutputSpec above (in Pieces) to seed the output "
-                        "sections; fine-tune them under Advanced settings.</i>"
-                    ),
-                ),
                 section(
                     "Advanced settings (model defaults — collapsed; click to edit)",
                     self.editor_box,
@@ -2811,7 +3279,44 @@ class ForgeBlueprintWizard:
                     self.preview,
                 ),
                 section(
+                    "Save modified pieces to catalog",
+                    W.HTML(
+                        "<i>Promote an edited piece to a new named catalog entry. "
+                        "Only marked unmodified if the saved file re-resolves to "
+                        "the identical blueprint.</i>"
+                    ),
+                    W.HBox(
+                        [
+                            self.save_output_name,
+                            self.save_output_btn,
+                            self.save_output_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_model_name,
+                            self.save_model_btn,
+                            self.save_model_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_domain_name,
+                            self.save_domain_btn,
+                            self.save_domain_status,
+                        ]
+                    ),
+                    W.HBox(
+                        [
+                            self.save_forcing_name,
+                            self.save_forcing_btn,
+                            self.save_forcing_status,
+                        ]
+                    ),
+                ),
+                section(
                     "Export",
+                    self.name,
                     self.download_link,
                     W.HBox([self.save_path, self.save_btn]),
                     self.save_status,

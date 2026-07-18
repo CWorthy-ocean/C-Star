@@ -1,15 +1,15 @@
-forge_blueprint_version: 2
+forge_blueprint_version: 3
 application: forge
+working_dir: ~/cstar-forge-data/cson_roms-marbl_v0.1_test-tiny_1procs
 identity:
-  model_name: cson_roms-marbl_v0.1
-  grid_name: test-tiny
-  ensemble_id: null
+  name: cson_roms-marbl_v0.1_test-tiny_1procs
   description: Test tiny
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
   model_reference_date: '2000-01-01T00:00:00'
 domain:
+  grid_name: test-tiny
   grid_kwargs:
     nx: 6
     ny: 2
@@ -23,6 +23,7 @@ domain:
     theta_b: 2.0
     hc: 250.0
   topography_source: ETOPO5
+  topography_path: null
   open_boundaries:
     north: true
     south: false
@@ -41,10 +42,12 @@ forcing:
       name: GLORYS
       climatology: false
       glorys_layout: regional
+      path: null
     bgc_source:
       name: UNIFIED
       climatology: true
       glorys_layout: null
+      path: null
     bgc_interpolation_method: depth
     allow_flex_time: false
     options: {}
@@ -53,6 +56,7 @@ forcing:
       name: ERA5
       climatology: false
       glorys_layout: null
+      path: null
     type: physics
     correct_radiation: true
     coarse_grid_mode: never
@@ -63,6 +67,7 @@ forcing:
       name: UNIFIED
       climatology: true
       glorys_layout: null
+      path: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -74,6 +79,7 @@ forcing:
       name: GLORYS
       climatology: false
       glorys_layout: regional
+      path: null
     type: physics
     bgc_interpolation_method: depth
     prefill: null
@@ -86,6 +92,7 @@ forcing:
       name: UNIFIED
       climatology: true
       glorys_layout: null
+      path: null
     type: bgc
     bgc_interpolation_method: depth
     prefill: null
@@ -99,6 +106,7 @@ forcing:
       name: TPXO
       climatology: false
       glorys_layout: null
+      path: null
     ntides: 15
     options: {}
   river:
@@ -106,6 +114,7 @@ forcing:
       name: DAI
       climatology: false
       glorys_layout: null
+      path: null
     include_bgc: true
     convert_to_climatology: if_any_missing
     bgc_source: null
@@ -364,6 +373,7 @@ forcing:
       dataset_id: null
       url: null
       streamable: false
+datasets: []
 model_settings:
   time_stepping:
     ntimes: 12
@@ -637,6 +647,7 @@ code:
     location: https://github.com/marbl-ecosys/MARBL.git
     commit: marbl0.45.0
     branch: null
+  pio: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/cstar-forge.git
     commit: null
@@ -674,8 +685,8 @@ provenance:
   forge_version: null
   roms_tools_version: 3.6.1.dev17+g97b5fe39e
   override_files_applied: []
-  content_hash: 2baf8fcacccb1ec10efc8a4ad6b3a1247b013584c6b5e282714c3917e7328e43
-  notes: Built by cstar_forge.forge_blueprint_resolve.build_forge_blueprint from the demo
-    notebook inputs (test-tiny). Machine/paths and naming are NOT stored (resolved
+  content_hash: a3c56652b490c376caf1c0dfe37cf5a852b0c09f2f4f9a122bd37eaafa9794ab
+  notes: Built by cstar_forge.forge_blueprint_resolve.build_forge_blueprint from the
+    demo notebook inputs (test-tiny). Machine/paths and naming are NOT stored (resolved
     at processing / derived). s_coord + file paths are processing outputs. provenance.overrides
     records manual edits on top of the pieces.

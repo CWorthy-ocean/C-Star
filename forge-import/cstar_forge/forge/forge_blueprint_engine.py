@@ -188,8 +188,8 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
     """
     kwargs = dict(
         description=cfg.identity.description,
-        model_name=cfg.identity.model_name,
-        grid_name=cfg.identity.grid_name,
+        name=cfg.name,
+        grid_name=cfg.domain.grid_name,
         grid_kwargs=dict(cfg.domain.grid_kwargs),
         topography_source=getattr(
             cfg.domain.topography_source, "value", cfg.domain.topography_source
@@ -199,7 +199,6 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         partitioning=cfg.domain.partitioning.model_dump(),
         start_time=cfg.run.start_date,
         end_time=cfg.run.end_date,
-        ensemble_id=cfg.identity.ensemble_id,
         cdr_forcing=cfg.forcing.cdr_forcing,
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,

@@ -162,8 +162,8 @@ class ForgeExecutor(BaseModel):
 
     # User inputs
     description: str = "Generated blueprint"
-    model_name: str
-    grid_name: str
+    name: str  # the blueprint's canonical name (ForgeBlueprint.identity.name, stored)
+    grid_name: str  # results-affecting: SourceData keys its cache filenames off it
     grid_kwargs: dict[str, Any]
     grid_kwargs_parent: dict[str, Any] | None = Field(
         default=None, validate_default=False
@@ -263,7 +263,6 @@ class ForgeExecutor(BaseModel):
             "built from it. Required (fed by from_forge_blueprint)."
         ),
     )
-    ensemble_id: int | None = Field(default=None, validate_default=False)
     # Internal attributes (computed/loaded)
     roms_marbl_blueprint: cstar_models.RomsMarblBlueprint | None = Field(
         default=None, init=False, validate_default=False, validate_assignment=False
@@ -535,18 +534,6 @@ class ForgeExecutor(BaseModel):
         )
         print("\n".join(lines))
         print()
-
-    @property
-    def name(self) -> str:
-        """
-        Return the name of this blueprint as '{model_name}_{grid_name}_{n_procs}procs'.
-
-        This property sets blueprint.name when the blueprint is created.
-        """
-        ensemble_str = (
-            f"_{self.ensemble_id:03d}" if self.ensemble_id is not None else ""
-        )
-        return f"{self.model_name}_{self.grid_name}_{self.n_procs}procs{ensemble_str}"
 
     @property
     def n_procs(self) -> int:

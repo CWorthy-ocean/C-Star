@@ -714,6 +714,30 @@ def test_resolver_use_pio_default_off():
     assert cfg.code.pio is None
 
 
+def test_resolver_use_pio_defaults_from_model_spec(tmp_path):
+    """A ModelSpec's top-level `use_pio: true` becomes the resolver default when the
+    caller doesn't pass an explicit use_pio kwarg (mirrors bgc_mode's fallback).
+    """
+    import shutil
+
+    model_dir = tmp_path / "cson_roms-marbl_v0.1"
+    shutil.copytree(_MODEL_DIR, model_dir)
+    text = (model_dir / "model.yml").read_text()
+    assert "use_pio: false" in text
+    (model_dir / "model.yml").write_text(
+        text.replace("use_pio: false", "use_pio: true")
+    )
+
+    cfg = _build(model_dir=model_dir)
+    assert cfg.model_settings["cppdefs"]["use_pio"] is True
+    assert cfg.code.pio is not None
+
+    # an explicit kwarg still overrides the ModelSpec default
+    cfg_off = _build(model_dir=model_dir, use_pio=False)
+    assert cfg_off.model_settings["cppdefs"]["use_pio"] is False
+    assert cfg_off.code.pio is None
+
+
 def test_resolver_use_pio_requires_model_yml_pin():
     from cstar_forge.forge.forge_blueprint import CodeRepo
     from cstar_forge.forge_blueprint_resolve import _build_code
@@ -950,7 +974,7 @@ def test_committed_example_validates():
     if not example.exists():
         pytest.skip("example file not present")
     cfg = ForgeBlueprint.from_yaml(example)
-    assert cfg.identity.model_name == "cson_roms-marbl_v0.1"
+    assert cfg.composition.model.name == "cson_roms-marbl_v0.1"
     assert cfg.composition.model.origin == "catalog"
 
 
@@ -975,7 +999,7 @@ class TestForgeBlueprintWizard:
             pytest.skip("gulf-guinea-toy domain not in catalog")
         wiz.domain_dd.value = "gulf-guinea-toy"  # triggers prefill + rebuild
         cfg = wiz.config
-        assert cfg.identity.grid_name == "gulf-guinea-toy"
+        assert cfg.domain.grid_name == "gulf-guinea-toy"
         assert cfg.domain.grid_kwargs["nx"] == 10 and cfg.domain.grid_kwargs["N"] == 5
         assert (
             cfg.domain.partitioning.n_procs_x,
@@ -992,11 +1016,22 @@ class TestForgeBlueprintWizard:
         wiz.bnd["west"].value = False
         assert wiz.config.model_settings["cppdefs"]["obc_west"] is False
 
-    def test_ensemble_id_feeds_derived_name(self):
+    def test_blank_name_tracks_derived_default(self):
         wiz = self._wizard()
-        wiz.ensemble.value = "3"
-        assert wiz.config.identity.ensemble_id == 3
-        assert wiz.config.name.endswith("_003")
+        default_name = wiz.config.name
+        assert wiz.name.value == default_name  # auto-backfilled
+        wiz.npx.value = wiz.npx.value + 1  # change an input the default depends on
+        assert wiz.config.name != default_name
+        assert wiz.name.value == wiz.config.name  # still tracking the new default
+
+    def test_custom_name_overrides_default_and_stops_tracking(self):
+        wiz = self._wizard()
+        default_name = wiz.config.name
+        wiz.name.value = "my-custom-run"
+        assert wiz.config.name == "my-custom-run"
+        wiz.npx.value = wiz.npx.value + 1  # would change the derived default
+        assert wiz.config.name == "my-custom-run"  # but the override sticks
+        assert wiz.config.name != default_name
 
     def test_save_writes_valid_yaml(self, tmp_path):
         wiz = self._wizard()
@@ -1012,7 +1047,7 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         if "gulf-guinea-toy" in w1.domain_dd.options:
             w1.domain_dd.value = "gulf-guinea-toy"
-        w1.ensemble.value = "7"
+        w1.name.value = "my-custom-run"
         p = tmp_path / "forge_blueprint.yml"
         w1.save_path.value = str(p)
         w1._on_save(None)
@@ -1021,9 +1056,9 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.grid_name.value == saved.identity.grid_name
+        assert w2.grid_name.value == saved.domain.grid_name
         assert w2.domain_dd.value == "<custom>"  # file authoritative, no prefill
-        assert w2.ensemble.value == "7"
+        assert w2.name.value == "my-custom-run"
         assert w2.config is not None
         assert w2.config.casename == saved.casename
         assert (
@@ -1418,8 +1453,9 @@ class TestForgeBlueprintEngine:
             forge_blueprint_to_builder_kwargs,
         )
 
-        kw = forge_blueprint_to_builder_kwargs(self._cfg())
-        assert kw["model_name"] == "cson_roms-marbl_v0.1"
+        cfg = self._cfg()
+        kw = forge_blueprint_to_builder_kwargs(cfg)
+        assert kw["name"] == cfg.name
         assert kw["grid_name"] == "test-tiny"
         assert kw["partitioning"] == {"n_procs_x": 1, "n_procs_y": 1}
         assert kw["open_boundaries"]["east"] is True
@@ -1686,3 +1722,175 @@ class TestResolverBuilderParity:
             if sec not in _PARITY_SKIP and b_rt.get(sec) != rval
         }
         assert not mismatches, f"resolver/executor settings drift: {mismatches}"
+
+
+# ---------------------------------------------------------------------------
+# "Save modified pieces to catalog" (wizard panel + DomainCatalog register_*)
+# ---------------------------------------------------------------------------
+class TestSaveModifiedPiecesToCatalog:
+    """Each save handler: extract the piece from current state, write it to an
+    isolated catalog, side-effect-free round-trip verify via content_hash, and
+    only on a match repoint the dropdown / clear that piece's overrides-or-seed.
+    A mismatch must still write the file but leave everything else untouched.
+    """
+
+    @pytest.fixture
+    def isolated_catalog(self, tmp_path):
+        import shutil
+
+        from cstar_forge.domain_catalog import DomainCatalog
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_CATALOG.catalog_root, root)
+        return DomainCatalog(catalog_root=root)
+
+    def _wizard(self, catalog):
+        pytest.importorskip("ipywidgets")
+        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+
+        return ForgeBlueprintWizard(catalog=catalog)
+
+    def test_save_output_piece_marks_unmodified_and_clears_overrides(
+        self, isolated_catalog
+    ):
+        wiz = self._wizard(isolated_catalog)
+        wiz._overrides[("ocean_vars", "wrt_file_his")] = True
+        wiz._rebuild()
+        assert wiz.config.composition.output.modified is True
+
+        wiz.save_output_name.value = "my-output"
+        wiz._on_save_output(None)
+
+        assert "my-output" in isolated_catalog.output_names
+        assert wiz.output_dd.value == "my-output"
+        assert wiz.config.composition.output.modified is False
+        assert wiz._overrides == {}
+        assert "✓" in wiz.save_output_status.value
+
+    def test_save_model_piece_marks_unmodified(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        wiz._overrides[("lateral_visc", "visc2")] = 999.0
+        wiz._rebuild()
+        assert wiz.config.composition.model.modified is True
+
+        wiz.save_model_name.value = "my-model"
+        wiz._on_save_model(None)
+
+        assert "my-model" in isolated_catalog.model_names
+        assert wiz.model_dd.value == "my-model"
+        assert wiz.config.composition.model.modified is False
+
+    def test_save_forcing_piece_marks_unmodified(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        wiz._forcing_editor.ic_bgc_clim.value = (
+            not wiz._forcing_editor.ic_bgc_clim.value
+        )
+        wiz._on_forcing_change()
+        assert wiz.config.composition.forcing.modified is True
+
+        wiz.save_forcing_name.value = "my-forcing"
+        wiz._on_save_forcing(None)
+
+        assert "my-forcing" in isolated_catalog.forcing_names
+        assert wiz.forcing_dd.value == "my-forcing"
+        assert wiz.config.composition.forcing.modified is False
+
+    def test_save_forcing_piece_embeds_and_reloads_cdr(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        fake_cdr = {"releases": [{"lon": 1.0, "lat": 2.0}]}
+        wiz._cdr_forcing = fake_cdr
+        wiz._rebuild()
+        assert wiz.config.forcing.cdr_forcing == fake_cdr
+
+        wiz.save_forcing_name.value = "my-cdr-forcing"
+        wiz._on_save_forcing(None)
+        assert wiz.config.composition.forcing.modified is False
+        assert (
+            isolated_catalog.forcing_data("my-cdr-forcing")["cdr_forcing"] == fake_cdr
+        )
+
+        # a fresh wizard picking this ForcingSpec reloads the same CDR dict.
+        wiz2 = self._wizard(isolated_catalog)
+        wiz2.forcing_dd.value = "my-cdr-forcing"
+        assert wiz2._cdr_forcing == fake_cdr
+
+    def test_save_domain_piece_marks_unmodified_and_preserves_other_pieces(
+        self, isolated_catalog
+    ):
+        wiz = self._wizard(isolated_catalog)
+        if "gulf-guinea-toy" in wiz.domain_dd.options:
+            wiz.domain_dd.value = "gulf-guinea-toy"
+        wiz.npx.value = wiz.npx.value + 1
+        assert wiz.config.composition.domain.modified is True
+
+        before_overrides = dict(wiz._overrides)
+        before_forcing_seed = wiz._forcing_seed
+        before_model_dd = wiz.model_dd.value
+        before_output_dd = wiz.output_dd.value
+
+        wiz.save_domain_name.value = "my-domain"
+        wiz._on_save_domain(None)
+
+        assert "my-domain" in isolated_catalog.domain_names
+        assert wiz.domain_dd.value == "my-domain"
+        assert wiz.config.composition.domain.modified is False
+        # no-clobber: every OTHER piece's state is untouched by the domain save.
+        assert wiz._overrides == before_overrides
+        assert wiz._forcing_seed == before_forcing_seed
+        assert wiz.model_dd.value == before_model_dd
+        assert wiz.output_dd.value == before_output_dd
+
+    def test_invalid_name_refuses_without_writing(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        before = list(isolated_catalog.output_names)
+        wiz.save_output_name.value = "bad name!!"
+        wiz._on_save_output(None)
+        assert "color:#b00" in wiz.save_output_status.value
+        assert isolated_catalog.output_names == before
+
+    def test_name_collision_refuses(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        wiz.save_output_name.value = "standard"
+        wiz._on_save_output(None)
+        assert "already exists" in wiz.save_output_status.value
+
+    def test_config_invalid_refuses(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        wiz.start.value = None
+        wiz._rebuild()
+        assert wiz.config is None
+        wiz.save_output_name.value = "whatever"
+        wiz._on_save_output(None)
+        assert "nothing to save" in wiz.save_output_status.value
+
+    def test_mismatch_keeps_piece_modified_and_state_untouched(
+        self, isolated_catalog, monkeypatch
+    ):
+        """A writer bug (or any post-write drift) must not silently claim
+        unmodified: the file is still written, but the dropdown/overrides don't
+        move -- this is the side-effect-free verifier's whole purpose.
+        """
+        wiz = self._wizard(isolated_catalog)
+        wiz._overrides[("ocean_vars", "wrt_file_his")] = True
+        wiz._rebuild()
+        assert wiz.config.composition.output.modified is True
+
+        orig_register = isolated_catalog.register_output
+
+        def _bad_register(name, output_settings, description=""):
+            corrupted = dict(output_settings)
+            corrupted.pop("ocean_vars", None)  # simulate a lossy extractor/writer
+            orig_register(name, corrupted, description)
+
+        monkeypatch.setattr(isolated_catalog, "register_output", _bad_register)
+
+        before_overrides = dict(wiz._overrides)
+        before_dd = wiz.output_dd.value
+        wiz.save_output_name.value = "broken-output"
+        wiz._on_save_output(None)
+
+        assert "broken-output" in isolated_catalog.output_names  # still written
+        assert wiz.output_dd.value == before_dd  # selection untouched
+        assert wiz._overrides == before_overrides  # overrides untouched
+        assert wiz.config.composition.output.modified is True  # still modified
+        assert "differs" in wiz.save_output_status.value

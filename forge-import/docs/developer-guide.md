@@ -47,7 +47,10 @@ cstar_forge/
   catalog.py                 thin back-compat shim: BlueprintCatalog → DomainCatalog
   domain_catalog.py           DomainCatalog: scans catalog/{ModelSpec,DomainSpec,
                                ForcingSpec,OutputSpec,Machines,blueprints}, exposes
-                               *_data()/*_path() accessors + blueprintDF()
+                               *_data()/*_path() accessors + blueprintDF(); register_output/
+                               register_forcing/register_domain_from_dict/
+                               register_model_from_settings write new catalog entries (the
+                               wizard's "save modified pieces to catalog" panel)
   domain_catalog_sketch.py    dead prototype, unreferenced anywhere — candidate for deletion
   forge_blueprint_resolve.py      resolver: build_forge_blueprint(...)
   forge_blueprint_wizard.py       ForgeBlueprintWizard (ipywidgets UI), thin shell over the resolver
@@ -92,10 +95,17 @@ cstar_forge/
 ## 3. `ForgeBlueprint` — the forge blueprint
 
 Defined in `cstar_forge/forge/forge_blueprint.py`. Top-level shape:
-`forge_blueprint_version` (int, bump only on breaking change) · `application` (=`"forge"`,
-C-Star app discriminator) · `identity` (model_name, grid_name, ensemble_id, description)
-· `run` (start/end date, model_reference_date) · `domain` (grid_kwargs, topography_source,
-open_boundaries, partitioning, nesting) · `forcing` (flat: initial_conditions,
+`forge_blueprint_version` (int, bump only on breaking change; currently 3) · `application`
+(=`"forge"`, C-Star app discriminator) · `identity` (`name`, `description` — `name` is the
+single user-editable canonical name; `ForgeBlueprint.name` returns it directly, `casename`/
+`working_dir`/`B_{name}.yml`/netCDF stems all derive from it. `model_name`/`grid_name` moved
+out: `model_name` lives only in `composition.model.name`, `grid_name` moved onto `domain`
+since it's results-affecting — `SourceData` keys cache filenames off it. `ensemble_id` was
+removed entirely, a dead concept with no effect beyond a cosmetic name suffix. A v2→v3
+migration in `ForgeBlueprint.from_yaml`/`from_yaml_data` reproduces the old derived name
+bit-for-bit for existing files — see `migrate_forge_blueprint_data`.)
+· `run` (start/end date, model_reference_date) · `domain` (`grid_name`, grid_kwargs,
+topography_source, open_boundaries, partitioning, nesting) · `forcing` (flat: initial_conditions,
 surface/boundary/tidal/river lists, cdr_forcing, resolved_datasets) · `datasets`
 (host-independent list of resolved dataset keys) · `model_settings` (flat dict: cppdefs +
 ~35 namelist sections) · `code` (roms/marbl repos + `templates_compile_time`/`_run_time`

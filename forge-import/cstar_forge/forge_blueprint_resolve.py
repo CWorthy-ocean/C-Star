@@ -55,6 +55,7 @@ try:  # pragma: no cover - exercised both ways
         TemplateRepo,
         TidalForcingItem,
         TopographySource,
+        sanitize_name,
     )
 except ImportError:  # pragma: no cover
     from forge_blueprint import (  # type: ignore
@@ -79,6 +80,7 @@ except ImportError:  # pragma: no cover
         TemplateRepo,
         TidalForcingItem,
         TopographySource,
+        sanitize_name,
     )
 
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
@@ -323,7 +325,7 @@ def build_forge_blueprint(
     partitioning: dict[str, int],
     start_date: datetime,
     end_date: datetime,
-    ensemble_id: int | None = None,
+    name: str | None = None,
     description: str = "Generated blueprint",
     cdr_forcing: dict[str, Any] | None = None,
     cdr_forcing_yaml: str | Path | None = None,
@@ -335,7 +337,7 @@ def build_forge_blueprint(
     nesting_include_pressure_fluxes: bool = False,
     topography_path: str | None = None,
     topography_source: str | TopographySource = TopographySource.ETOPO5,
-    use_pio: bool = False,
+    use_pio: bool | None = None,
     bgc_mode: Literal["marbl", "none"] | None = None,
     roms_ref: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
@@ -367,10 +369,20 @@ def build_forge_blueprint(
     to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
     explicit value to override it for one run.
 
+    ``use_pio`` is a per-run toggle mirroring ``bgc_mode``: it overwrites
+    ``cppdefs.use_pio`` and gates whether ``code.pio`` is populated (raising if PIO
+    is requested but the ModelSpec has no ``code.pio`` repository). If ``None`` (the
+    default), it falls back to the ModelSpec's own ``use_pio`` (itself defaulting to
+    ``False``) -- the ModelSpec is the single source of the default; pass an
+    explicit value to override it for one run.
+
     ``cdr_forcing_yaml``, if given, takes precedence over ``cdr_forcing``: it is a
     path to (or the raw text of) a roms-tools ``CDRForcing.to_yaml(...)`` dump, read
     via :func:`read_cdr_forcing_yaml`. This is the wizard's upload path made
     resolver-native; a caller may pass either kwarg, not both meaningfully at once.
+
+    ``name`` is the blueprint's canonical name (``identity.name``); if omitted, this
+    computes and sanitizes the default (``{model_name}_{grid_name}_{n_procs}procs``).
     """
     if cdr_forcing_yaml is not None:
         cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
@@ -384,6 +396,8 @@ def build_forge_blueprint(
     model_name = spec["model_name"]
     if bgc_mode is None:
         bgc_mode = model.get("bgc_mode", "marbl")
+    if use_pio is None:
+        use_pio = bool(model.get("use_pio", False))
     # ModelSpec no longer embeds a default forcing/output selection -- a ForcingSpec and
     # an OutputSpec must always be supplied explicitly (from the catalog or hand-authored).
     if forcing_inputs is None:
@@ -575,15 +589,15 @@ def build_forge_blueprint(
         roms_ref=roms_ref,
     )
 
+    default_name = sanitize_name(f"{model_name}_{grid_name}_{npx * npy}procs")
     return ForgeBlueprint(
         identity=Identity(
-            model_name=model_name,
-            grid_name=grid_name,
-            ensemble_id=ensemble_id,
+            name=name or default_name,
             description=description,
         ),
         run=RunWindow(start_date=start_date, end_date=end_date),
         domain=Domain(
+            grid_name=grid_name,
             grid_kwargs=grid_kwargs,
             topography_source=topography_source,
             topography_path=topography_path,

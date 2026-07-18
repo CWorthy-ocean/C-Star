@@ -676,8 +676,12 @@ class DomainCatalog:
         Parameters
         ----------
         builder : ForgeExecutor
-            A configured builder whose grid_name, model_name, grid_kwargs,
-            open_boundaries, and partitioning will be recorded.
+            A configured builder whose grid_name, grid_kwargs, open_boundaries,
+            and partitioning will be recorded. ``ForgeExecutor`` no longer tracks
+            a bare ``model_name`` (post naming-refactor it only carries the
+            combined blueprint ``name``), so the written ``Domain.yml`` omits it;
+            ``register_domain_from_dict`` accepts an explicit ``model_name`` when
+            the caller has one (e.g. the wizard's composition).
         """
         domain_name = builder.grid_name
         domain_dir = self.catalog_root / "DomainSpec" / domain_name
@@ -686,7 +690,6 @@ class DomainCatalog:
 
         domain_data: dict[str, Any] = {
             "description": builder.description,
-            "model_name": builder.model_name,
             "grid_name": builder.grid_name,
             "start_time": builder.start_date.isoformat(),
             "end_time": builder.end_date.isoformat(),
@@ -712,6 +715,111 @@ class DomainCatalog:
             )
 
         self._scan_domains()
+
+    def register_domain_from_dict(self, name: str, domain_data: dict[str, Any]) -> None:
+        """Create a new DomainSpec entry from a plain dict (the wizard's save path).
+
+        Writes ``domain_data`` verbatim as ``Domain.yml`` under
+        ``DomainSpec/<name>/`` (+ an empty ``Assets/`` dir), then rescans.
+        Refuses to overwrite an existing entry -- catalog entries are named,
+        shared resources; pick a different name or delete the old one first.
+        """
+        domain_dir = self.catalog_root / "DomainSpec" / name
+        if domain_dir.exists():
+            raise FileExistsError(f"DomainSpec '{name}' already exists at {domain_dir}")
+        domain_dir.mkdir(parents=True)
+        (domain_dir / "Assets").mkdir(exist_ok=True)
+        with (domain_dir / "Domain.yml").open("w") as f:
+            yaml.safe_dump(
+                domain_data,
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+        self._scan_domains()
+
+    def register_output(
+        self, name: str, output_settings: dict[str, Any], description: str = ""
+    ) -> None:
+        """Create a new OutputSpec entry (``OutputSpec/<name>/Output.yml``).
+
+        ``output_settings`` is the output-owned subset of ``model_settings`` (see
+        ``forge_blueprint_resolve.extract_output_settings``). Refuses to overwrite
+        an existing entry.
+        """
+        output_dir = self.catalog_root / "OutputSpec" / name
+        if output_dir.exists():
+            raise FileExistsError(f"OutputSpec '{name}' already exists at {output_dir}")
+        output_dir.mkdir(parents=True)
+        data = {"description": description, **output_settings}
+        with (output_dir / "Output.yml").open("w") as f:
+            yaml.safe_dump(
+                data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+            )
+        self._scan_output()
+
+    def register_forcing(
+        self,
+        name: str,
+        forcing_inputs: dict[str, Any],
+        cdr_forcing: dict[str, Any] | None = None,
+        description: str = "",
+    ) -> None:
+        """Create a new ForcingSpec entry (``ForcingSpec/<name>/Forcing.yml``).
+
+        ``forcing_inputs`` is the ``{initial_conditions, forcing}`` shape returned
+        by the wizard's forcing editor ``gather()``. ``cdr_forcing``, if given, is
+        embedded under an optional ``cdr_forcing:`` block (not part of the
+        original ForcingSpec schema, added so a domain using CDR forcing can still
+        save/reload its ForcingSpec). Refuses to overwrite an existing entry.
+        """
+        forcing_dir = self.catalog_root / "ForcingSpec" / name
+        if forcing_dir.exists():
+            raise FileExistsError(
+                f"ForcingSpec '{name}' already exists at {forcing_dir}"
+            )
+        forcing_dir.mkdir(parents=True)
+        data = {"description": description, **forcing_inputs}
+        if cdr_forcing:
+            data["cdr_forcing"] = cdr_forcing
+        with (forcing_dir / "Forcing.yml").open("w") as f:
+            yaml.safe_dump(
+                data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+            )
+        self._scan_forcing()
+
+    def register_model_from_settings(
+        self,
+        name: str,
+        model_settings: dict[str, Any],
+        base_model_dir: Path | str,
+        description: str = "",
+    ) -> None:
+        """Create a new ModelSpec entry (``ModelSpec/<name>/model.yml``).
+
+        Clones ``code``/``bgc_mode``/``use_pio``/``templates_commit`` verbatim from
+        ``base_model_dir``'s ``model.yml`` and swaps in ``model_settings`` (the
+        model-owned subset -- see the wizard's ``_model_owned_settings``).
+        Refuses to overwrite an existing entry.
+        """
+        model_dir = self.catalog_root / "ModelSpec" / name
+        if model_dir.exists():
+            raise FileExistsError(f"ModelSpec '{name}' already exists at {model_dir}")
+        base = yaml.safe_load((Path(base_model_dir) / "model.yml").read_text()) or {}
+        data = {
+            "description": description or base.get("description", ""),
+            "bgc_mode": base.get("bgc_mode", "marbl"),
+            "use_pio": base.get("use_pio", False),
+            "code": base.get("code", {}),
+            "model_settings": model_settings,
+        }
+        model_dir.mkdir(parents=True)
+        with (model_dir / "model.yml").open("w") as f:
+            yaml.safe_dump(
+                data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+            )
+        self._scan_models()
 
     def add_asset_to_domain(
         self,
