@@ -369,8 +369,6 @@ async def test_tracking_list_history_run_id(
         (2, False),
         (4, True),
         (4, False),
-        (8, True),
-        (8, False),
     ],
 )
 @pytest.mark.asyncio

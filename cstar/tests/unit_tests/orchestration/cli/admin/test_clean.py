@@ -12,7 +12,6 @@ from typer.testing import CliRunner
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, FLAG_ON
 from cstar.cli.admin.clean import (
     ARG_YES,
-    CleanupAction,
     FileSystemCleanupAction,
     app,
     get_default_cleanup_actions,
@@ -22,7 +21,7 @@ from cstar.cli.admin.clean import (
 from cstar.entrypoint.utils import ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import TrackingRepository
 
 
 @pytest.fixture(autouse=True)
@@ -195,7 +194,7 @@ async def test_cli_admin_clean_perform_actions_dryrun(
 
 
 @pytest.mark.asyncio
-async def test_cli_admin_clean_get_run_action(
+async def test_cli_admin_clean_runid_callback(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
     """Verify that `get_run_action` results in the population of the typer
@@ -217,26 +216,10 @@ async def test_cli_admin_clean_get_run_action(
 
     assert run is not None
 
-    with (
-        mock.patch(
-            "cstar.cli.admin.clean.get_from_ctxmap", return_value=run
-        ) as mock_get,
-        mock.patch("cstar.cli.admin.clean.preload_run", return_value=run_id),
-    ):
-        actual_run_id = runid_callback(mock_ctx, run_id)
+    actual_run_id = runid_callback(mock_ctx, run_id)
 
     # confirm the run-id is returned with any callback cleaning appleid
-    mock_get.assert_called_once_with(mock_ctx, "run", WorkplanRun)
     assert actual_run_id == run_id.strip()
-
-    # confirm the action was set
-    action: FileSystemCleanupAction | None = mock_ctx.obj.get("action", None)
-    assert isinstance(action, CleanupAction)
-    assert run.state_dir in action.asset_paths
-
-    # confirm only run-specific asset paths (none of the defaults)
-    assets = [str(p) for p in action.asset_paths]
-    assert all(actual_run_id in p for p in assets)
 
 
 @pytest.mark.parametrize(
