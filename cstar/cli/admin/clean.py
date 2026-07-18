@@ -404,8 +404,10 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
     else:
         # if we can't load a run, check the default data path.
         data_dir = StateDirectoryManager.data_dir(run_id=run_id)
-        rundata_paths.append(data_dir)
-        log.debug(f"Run {run_id!r} not found")
+        if data_dir.exists():
+            rundata_paths.append(data_dir)
+        else:
+            log.debug(f"Run {run_id!r} not found")
 
     storage_root: t.Final[Path] = get_prefect_storage_path()
     if workplan:
