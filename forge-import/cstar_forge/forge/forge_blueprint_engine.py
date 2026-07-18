@@ -288,7 +288,6 @@ def process_forge_blueprint(
     configure: bool = True,
     clobber: bool = False,
     use_dask: bool = True,
-    partition_files: bool = False,
     validate: bool = True,
     executor_factory: ExecutorFactory | None = None,
 ) -> ForgeBlueprintExecutor:
@@ -348,9 +347,7 @@ def process_forge_blueprint(
     if ensure_data:
         executor.ensure_source_data()
     if generate:
-        executor.generate_inputs(
-            clobber=clobber, use_dask=use_dask, partition_files=partition_files
-        )
+        executor.generate_inputs(clobber=clobber, use_dask=use_dask)
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)
         executor.configure_build(

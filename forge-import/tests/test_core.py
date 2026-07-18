@@ -1058,19 +1058,6 @@ class TestForgeExecutorGenerateInputsComprehensive:
     """Comprehensive tests for generate_inputs method covering full workflow."""
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
-    def test_generate_inputs_with_partition_files_raises_error(
-        self,
-        mock_input_data_class,
-        minimal_cstar_spec_builder_args,
-    ):
-        """Test generate_inputs raises NotImplementedError when partition_files=True."""
-        builder = _make_builder(minimal_cstar_spec_builder_args)
-
-        with pytest.raises(NotImplementedError) as exc_info:
-            builder.generate_inputs(partition_files=True)
-        assert "partitioning functionality" in str(exc_info.value).lower()
-
-    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_creates_input_data_instance(
         self,
         mock_input_data_class,

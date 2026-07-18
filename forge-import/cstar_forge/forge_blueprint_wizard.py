@@ -162,6 +162,18 @@ HELP_TEXT: dict[str, str] = {
         "nest_pressure_fluxes",
     ): "Include baroclinic pressure flux variables in nesting.nc. Required when "
     "the namelist calc_pflx setting is enabled in the child domain.",
+    (
+        "nesting",
+        "parent_enable",
+    ): "Declare that this grid is nested inside a coarser parent grid. The grid "
+    "is aligned to the parent (roms_tools.align_grids) and its boundary values "
+    "come from the parent's nesting.nc extraction rather than reanalysis "
+    "boundary forcing, which is cleared automatically.",
+    (
+        "nesting",
+        "parent_domain_dd",
+    ): "Optionally prefill the parent grid kwargs from a cataloged DomainSpec. "
+    "You can still edit any parent-grid field after selecting.",
     # ---- partitioning ----------------------------------------------------------
     (
         "domain",
@@ -1351,6 +1363,15 @@ class _ForcingEditor:
             add
         ]
 
+    def clear_category(self, cat: str):
+        """Remove all rows for a forcing category (e.g. ``"boundary"`` for a
+        child/nested grid, which receives boundaries from the parent's
+        nesting.nc extraction instead of reanalysis boundary forcing).
+        """
+        self._rows[cat] = []
+        self._render(cat)
+        self.on_change()
+
     def _add(self, cat: str):
         self._rows[cat].append(self._make_row(cat, {"source": {"name": ""}}))
         self._render(cat)
@@ -1691,6 +1712,50 @@ class ForgeBlueprintWizard:
             layout=W.Layout(min_width="400px", max_width="600px"),
         )
 
+        # --- parent (optional: this grid is a child nested inside a parent) ---
+        self.parent_enable = W.Checkbox(
+            value=False,
+            description="enable parent (this grid is a child)",
+            indent=False,
+            tooltip=_tip("nesting", "parent_enable"),
+        )
+        self.parent_domain_dd = W.Dropdown(
+            options=["<custom>", *domains],
+            description="Parent from:",
+            value="<custom>",
+            style={"description_width": "110px"},
+            tooltip=_tip("nesting", "parent_domain_dd"),
+        )
+        self.parent_w: dict[str, Any] = {}
+        for k in _GRID_INT:
+            self.parent_w[k] = W.IntText(
+                value=int(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k) + " (parent/outer grid)",
+            )
+        for k in _GRID_FLOAT + _SCOORD:
+            self.parent_w[k] = W.FloatText(
+                value=float(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k) + " (parent/outer grid)",
+            )
+        # --- parent plot (this grid's boundary within its parent) ---
+        self.parent_plot_btn = W.Button(
+            description="Refresh plot",
+            icon="refresh",
+            tooltip="Build the parent grid and this grid from current settings and "
+            "render both via plot_nesting (parent+this-grid boundary overlay).",
+        )
+        self.parent_plot_status = W.HTML("")
+        self.parent_plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px"),
+        )
+
         # --- run window ---
         self.start = W.DatePicker(
             value=date(2012, 1, 1),
@@ -1967,6 +2032,9 @@ class ForgeBlueprintWizard:
         self.cdr_clear_btn.on_click(self._on_cdr_clear)
         self.model_dd.observe(self._on_model_change, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
+        self.parent_domain_dd.observe(self._on_parent_domain, names="value")
+        self.parent_plot_btn.on_click(self._on_parent_plot)
+        self.parent_enable.observe(self._on_parent_toggle, names="value")
         self.output_dd.observe(self._on_output_spec, names="value")
         watched = [
             self.grid_name,
@@ -1989,9 +2057,11 @@ class ForgeBlueprintWizard:
             self.nest_enable,
             self.nest_period,
             self.nest_pressure_fluxes,
+            self.parent_enable,
             *self.grid_w.values(),
             *self.bnd.values(),
             *self.child_w.values(),
+            *self.parent_w.values(),
         ]
         for w in watched:
             w.observe(self._rebuild, names="value")
@@ -2042,6 +2112,39 @@ class ForgeBlueprintWizard:
         self._rebuild()
         self._on_nest_plot(None)
 
+    def _on_parent_domain(self, _change):
+        """Prefill the parent grid from a selected DomainSpec (and enable it)."""
+        name = self.parent_domain_dd.value
+        if name == "<custom>":
+            return
+        gk = self.catalog.domain_data(name).get("grid_kwargs", {}) or {}
+        with self._suspend():
+            self.parent_enable.value = True
+            for k, w in self.parent_w.items():
+                if k in gk:
+                    w.value = gk[k]
+        self._clear_boundary_forcing()
+        self._rebuild()
+        self._on_parent_plot(None)
+
+    def _on_parent_toggle(self, change):
+        """Enabling a parent clears boundary forcing: a child grid receives its
+        boundary values from the parent's nesting.nc extraction, not reanalysis
+        boundary forcing (open-boundary edge flags are left untouched -- the
+        edges stay open, just fed differently).
+        """
+        if getattr(self, "_suspended", False):
+            return
+        if change["new"]:
+            self._clear_boundary_forcing()
+
+    def _clear_boundary_forcing(self):
+        """Remove any boundary-forcing rows from the forcing editor (UX mirror of
+        the durable clear in ``_gather()``, which is the source of truth).
+        """
+        if getattr(self, "_forcing_editor", None) is not None:
+            self._forcing_editor.clear_category("boundary")
+
     # ---- forcing piece -------------------------------------------------------
     def _model_default_roms_ref(self) -> str:
         """The selected model's pinned ucla-roms checkout target (commit or branch)."""
@@ -2082,6 +2185,11 @@ class ForgeBlueprintWizard:
             return
         fi, cdr = _split_forcing_data(self.catalog.forcing_data(self.forcing_dd.value))
         self._build_forcing_editor(fi)
+        if self.parent_enable.value:
+            # A child grid (has a parent) gets its boundaries from the parent's
+            # nesting.nc extraction, not reanalysis boundary forcing -- strip any
+            # boundary items the freshly-built editor just reseeded from the spec.
+            self._clear_boundary_forcing()
         self._cdr_forcing = cdr
         self.cdr_status.value = (
             f"<span style='color:#080'>✓ CDR loaded from ForcingSpec: "
@@ -2165,6 +2273,11 @@ class ForgeBlueprintWizard:
                 overrides2 = {k: v for k, v in overrides2.items() if _is_output_key(*k)}
             elif piece == "forcing":
                 fi, cdr = _split_forcing_data(self.catalog.forcing_data(new_name))
+                if self.parent_enable.value:
+                    # Mirror the _gather() durable clear so re-verifying against a
+                    # freshly-picked ForcingSpec doesn't spuriously show "modified"
+                    # for a child grid whose boundary forcing is always stripped.
+                    fi.setdefault("forcing", {})["boundary"] = []
                 kw["forcing_inputs"] = fi
                 kw["cdr_forcing"] = cdr
             elif piece == "domain":
@@ -2312,6 +2425,14 @@ class ForgeBlueprintWizard:
                 self.nest_pressure_fluxes.value = bool(
                     data.get("nesting_include_pressure_fluxes", False)
                 )
+            # Parent: mirrors the child block above, reading grid_kwargs_parent
+            # (only present if the spec was saved with a parent grid active).
+            parent = data.get("grid_kwargs_parent")
+            self.parent_enable.value = parent is not None
+            if parent:
+                for k, w in self.parent_w.items():
+                    if k in parent:
+                        w.value = parent[k]
         self._domain_seed = self._domain_snapshot()
         self._rebuild()
         self._on_plot(None)
@@ -2334,6 +2455,8 @@ class ForgeBlueprintWizard:
             "child_w": {k: w.value for k, w in self.child_w.items()},
             "nest_period": self.nest_period.value,
             "nest_pressure_fluxes": self.nest_pressure_fluxes.value,
+            "parent_enable": self.parent_enable.value,
+            "parent_w": {k: w.value for k, w in self.parent_w.items()},
         }
 
     def _domain_piece_data(self) -> dict[str, Any]:
@@ -2544,6 +2667,11 @@ class ForgeBlueprintWizard:
             elif self.forcing_dd.options:
                 self.forcing_dd.value = self.forcing_dd.options[0]
             self._build_forcing_editor(self._sources_to_inputs(cfg))
+            if self.parent_enable.value:
+                # A loaded file may (inconsistently) carry boundary forcing for a
+                # child grid -- _gather() strips it either way, but clear the
+                # visible rows too so the editor doesn't show stale entries.
+                self._clear_boundary_forcing()
             # Seed forcing.modified against the *catalog* piece (not the just-loaded
             # sources) so a deviation is detected the same way as during authoring --
             # a file that matches its recorded catalog forcing loads as unmodified;
@@ -2630,8 +2758,22 @@ class ForgeBlueprintWizard:
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
             if self.nest_pressure_fluxes.value:
                 kw["nesting_include_pressure_fluxes"] = True
+        if self.parent_enable.value:
+            pk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                pk[k] = int(self.parent_w[k].value)
+            for k in _GRID_FLOAT + _SCOORD:
+                pk[k] = float(self.parent_w[k].value)
+            kw["grid_kwargs_parent"] = pk
         # forcing/output are always required now (no more model-default fallback).
         kw["forcing_inputs"] = self._forcing_editor.gather()
+        if self.parent_enable.value:
+            # Durable guarantee (authoritative, independent of forcing-editor UI
+            # state): a child grid (has a parent) receives its boundary values
+            # from the parent's nesting.nc extraction, not reanalysis boundary
+            # forcing. Open-boundary edge flags are untouched -- the edges stay
+            # open, just fed differently.
+            kw["forcing_inputs"]["forcing"]["boundary"] = []
         kw["output_settings"] = self._output_settings()
         kw["composition"] = self._composition()
         if self._cdr_forcing:
@@ -2649,6 +2791,12 @@ class ForgeBlueprintWizard:
             period = (cfg.domain.metadata_child or {}).get("period")
             if period is not None:
                 self.nest_period.value = float(period)
+        parent = cfg.domain.grid_kwargs_parent
+        self.parent_enable.value = parent is not None
+        if parent:
+            for k, w in self.parent_w.items():
+                if k in parent:
+                    w.value = parent[k]
 
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
@@ -2890,6 +3038,65 @@ class ForgeBlueprintWizard:
             self.nest_plot_status.value = "<span style='color:#080'>✓</span>"
         except Exception as exc:
             self.nest_plot_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    def _on_parent_plot(self, _):
+        """Build the parent+this-grid roms_tools Grids and render ``plot_nesting``
+        (boundary overlay of this grid within its parent) into the Parent
+        section's own plot. This grid is the fine/inner grid; the parent is the
+        coarse/outer grid it's aligned into.
+        """
+        self.parent_plot_status.value = "<i>building grids…</i>"
+        try:
+            import io
+
+            import matplotlib.pyplot as plt
+            from roms_tools import Grid, plot_nesting
+
+            gk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                gk[k] = int(self.grid_w[k].value)
+            for k in _GRID_FLOAT:
+                gk[k] = float(self.grid_w[k].value)
+            if self.scoord_chk.value:
+                for k in _SCOORD:
+                    gk[k] = float(self.grid_w[k].value)
+            if self.hmin.value != 5.0:
+                gk["hmin"] = float(self.hmin.value)
+            if self.close_narrow_chk.value:
+                gk["close_narrow_channels"] = True
+            if self.mask_shapefile.value.strip():
+                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+
+            pk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                pk[k] = int(self.parent_w[k].value)
+            for k in _GRID_FLOAT + _SCOORD:
+                pk[k] = float(self.parent_w[k].value)
+
+            plt.ioff()
+            try:
+                parent = Grid(**pk)
+                this_grid = Grid(**gk)
+                # See _on_nest_plot for why plt.show() is neutralized here.
+                _real_show, plt.show = plt.show, lambda *a, **k: None
+                try:
+                    plot_nesting(parent, this_grid)
+                finally:
+                    plt.show = _real_show
+                fig = plt.gcf()
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+                plt.close(fig)
+            finally:
+                plt.ion()
+
+            buf.seek(0)
+            self.parent_plot_img.value = buf.read()
+            self.parent_plot_status.value = "<span style='color:#080'>✓</span>"
+        except Exception as exc:
+            self.parent_plot_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
@@ -3179,6 +3386,10 @@ class ForgeBlueprintWizard:
             [self.child_w[k] for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)],
             layout=W.Layout(grid_template_columns="repeat(3, 210px)"),
         )
+        parent_box = W.GridBox(
+            [self.parent_w[k] for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)],
+            layout=W.Layout(grid_template_columns="repeat(3, 210px)"),
+        )
         return W.VBox(
             [
                 W.HTML(
@@ -3244,6 +3455,29 @@ class ForgeBlueprintWizard:
                                 [
                                     W.HBox([self.nest_plot_btn, self.nest_plot_status]),
                                     self.nest_plot_img,
+                                ],
+                                layout=W.Layout(padding="0 0 0 20px"),
+                            ),
+                        ]
+                    ),
+                ),
+                section(
+                    "Parent grid (optional)",
+                    W.HBox(
+                        [
+                            W.VBox(
+                                [
+                                    self.parent_enable,
+                                    self.parent_domain_dd,
+                                    parent_box,
+                                ]
+                            ),
+                            W.VBox(
+                                [
+                                    W.HBox(
+                                        [self.parent_plot_btn, self.parent_plot_status]
+                                    ),
+                                    self.parent_plot_img,
                                 ],
                                 layout=W.Layout(padding="0 0 0 20px"),
                             ),

@@ -412,6 +412,16 @@ class Domain(_Section):
     """Whether to include baroclinic pressure fluxes in the nesting extraction file
     (passed to make_nesting_info / make_edata as include_pressure_fluxes)."""
 
+    @property
+    def is_child(self) -> bool:
+        """Whether this domain is nested inside a coarser parent grid."""
+        return self.grid_kwargs_parent is not None
+
+    @property
+    def is_parent(self) -> bool:
+        """Whether this domain is a parent that extracts nesting data for a child."""
+        return self.grid_kwargs_child is not None
+
 
 # ===========================================================================
 # B. Forcing & source data

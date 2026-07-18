@@ -372,6 +372,77 @@ def test_resolver_no_nesting_keeps_defaults():
     assert cfg.domain.grid_kwargs_child is None
 
 
+_PARENT_GRID_KWARGS = dict(
+    nx=20,
+    ny=20,
+    size_x=2000,
+    size_y=2000,
+    center_lon=0,
+    center_lat=55,
+    rot=0,
+    N=10,
+    theta_s=6.0,
+    theta_b=3.0,
+    hc=250.0,
+)
+
+
+def test_resolver_parent_grid_stored_and_is_child():
+    cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS)
+    assert cfg.domain.grid_kwargs_parent["nx"] == 20
+    assert cfg.domain.is_child is True
+    assert cfg.domain.is_parent is False
+
+
+def test_resolver_parent_grid_clears_boundary_forcing():
+    # the bundled glorys-era5-unified ForcingSpec carries boundary items --
+    # a child grid (has a parent) must not generate boundary forcing (it
+    # receives boundaries from the parent's nesting.nc extraction instead).
+    fi = _CATALOG.forcing_data("glorys-era5-unified")
+    assert fi["forcing"]["boundary"]  # sanity: fixture actually has boundary items
+    cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS)
+    assert cfg.forcing.boundary == []
+    # open-boundary edge flags are untouched -- edges stay open, just fed by
+    # nesting.nc instead of reanalysis boundary forcing.
+    assert cfg.domain.open_boundaries.model_dump() == _BOUNDARIES
+
+
+def test_resolver_parent_grid_skips_boundary_only_dataset():
+    # Boundary items must be skipped entirely (not just cleared afterward) so a
+    # boundary-only source never leaks into resolved_datasets/datasets -- e.g.
+    # CESM_REGRIDDED here isn't used by surface/IC/tidal/river in this fixture,
+    # so a stale post-hoc clear would still leave it in cfg.datasets.
+    import copy
+
+    fi = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fi["forcing"]["boundary"] = [{"source": {"name": "CESM_REGRIDDED"}, "type": "bgc"}]
+    cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS, forcing_inputs=fi)
+    assert cfg.forcing.boundary == []
+    assert "CESM_REGRIDDED" not in cfg.datasets
+    assert "CESM_REGRIDDED" not in cfg.forcing.resolved_datasets
+
+
+def test_resolver_child_grid_is_parent_and_keeps_boundary_forcing():
+    cfg = _build(
+        grid_kwargs_child=dict(
+            nx=3,
+            ny=3,
+            size_x=300,
+            size_y=300,
+            center_lon=0,
+            center_lat=55,
+            rot=0,
+            N=10,
+            theta_s=6.0,
+            theta_b=3.0,
+            hc=250.0,
+        )
+    )
+    assert cfg.domain.is_parent is True
+    assert cfg.domain.is_child is False
+    assert cfg.forcing.boundary  # a parent-only grid keeps its own boundary forcing
+
+
 def test_resolver_restoring_sets_sal_restore():
     # the cson model.yaml includes a WOA surface source with type=restoring and
     # restoring_forces=['sss'], so the resolver derives sal_restore=True
@@ -1337,6 +1408,48 @@ class TestForgeBlueprintWizard:
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 7.25
         assert w2.nest_enable.value is True
         assert w2.config.model_settings["extract_data"]["n_chd"] == 18
+
+    def test_parent_from_domain_dropdown_prefills_parent(self):
+        w = self._wizard()
+        if "gulf-guinea-toy" not in w.parent_domain_dd.options:
+            pytest.skip("gulf-guinea-toy domain not in catalog")
+        w.parent_domain_dd.value = "gulf-guinea-toy"  # prefills parent + enables it
+        assert w.parent_enable.value is True
+        assert w.parent_w["nx"].value == 10 and w.parent_w["N"].value == 5
+        assert w.config.domain.grid_kwargs_parent is not None
+        assert w.config.domain.is_child is True
+
+    def test_parent_ui_stores_grid_kwargs_parent_and_clears_boundary_forcing(self):
+        w = self._wizard()
+        assert w.config.forcing.boundary  # sanity: default forcing has boundary items
+        w.parent_enable.value = True
+        w.parent_w["N"].value = 25
+        cfg = w.config
+        assert cfg.domain.grid_kwargs_parent is not None
+        assert cfg.domain.grid_kwargs_parent["N"] == 25
+        assert cfg.domain.is_child is True
+        assert cfg.domain.is_parent is False
+        assert cfg.forcing.boundary == []
+        # open-boundary edge flags (obc_*) are untouched -- edges stay open, fed
+        # by the parent's nesting.nc extraction instead of reanalysis forcing.
+        assert cfg.domain.open_boundaries.model_dump() == {
+            d: w_.value for d, w_ in w.bnd.items()
+        }
+
+    def test_load_preserves_parent(self, tmp_path):
+        w1 = self._wizard()
+        w1.parent_enable.value = True
+        w1.parent_w["N"].value = 30
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.parent_enable.value is True
+        assert w2.parent_w["N"].value == 30
+        assert w2.config.domain.is_child is True
+        assert w2.config.forcing.boundary == []
 
     def test_roms_ref_gather_and_default_round_trip(self, tmp_path):
         w1 = self._wizard()

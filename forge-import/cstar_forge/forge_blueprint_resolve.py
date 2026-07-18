@@ -550,8 +550,18 @@ def build_forge_blueprint(
         _deep_merge(settings, run_time_overrides)
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
+    # A child grid (has a parent) receives its boundary values from the parent's
+    # nesting.nc extraction, not from reanalysis boundary forcing -- the executor
+    # already skips boundary-forcing generation for a child (grid_parent is not
+    # None, see ForgeExecutor/RomsMarblInputData). Skip building boundary items
+    # here too (defense-in-depth, the wizard also clears this at the UI layer) --
+    # done inside _build_forcing (not by zeroing sources.boundary afterward) so a
+    # boundary-only source is never noted into resolved_datasets/datasets either.
     sources = _build_forcing(
-        inputs, cdr_forcing, topography_source
+        inputs,
+        cdr_forcing,
+        topography_source,
+        is_child=grid_kwargs_parent is not None,
     )  # kept as `sources` locally for brevity
 
     # ----- bgc_mode consistency check ----------------------------------------
@@ -653,12 +663,17 @@ def _build_forcing(
     inputs: dict[str, Any],
     cdr_forcing: dict[str, Any] | None,
     topography_source: str | TopographySource | None = None,
+    is_child: bool = False,
 ) -> Forcing:
     """Build the flat ``Forcing`` object from model inputs + CDR config.
 
     The former ``Sources / inner Forcing`` two-level nesting is flattened here:
     initial_conditions and surface/boundary/tidal/river items all live directly on
     ``Forcing``.
+
+    ``is_child`` (this domain has a parent grid) skips boundary items entirely --
+    not just clears them afterward -- so a boundary-only source is never noted
+    into ``resolved_datasets``/``datasets`` either.
     """
     ic_block = inputs.get("initial_conditions", {}) or {}
     forcing_block = inputs.get("forcing", {}) or {}
@@ -690,18 +705,22 @@ def _build_forcing(
         SurfaceForcingItem,
         ("type", "correct_radiation", "coarse_grid_mode", "restoring_forces"),
     )
-    boundary = _items(
-        "boundary",
-        BoundaryForcingItem,
-        (
-            "type",
-            "bgc_interpolation_method",
-            "prefill",
-            "prefill_kwargs",
-            "regrid_method",
-            "extrap_method",
-            "extrap_kwargs",
-        ),
+    boundary = (
+        []
+        if is_child
+        else _items(
+            "boundary",
+            BoundaryForcingItem,
+            (
+                "type",
+                "bgc_interpolation_method",
+                "prefill",
+                "prefill_kwargs",
+                "regrid_method",
+                "extrap_method",
+                "extrap_kwargs",
+            ),
+        )
     )
     tidal = _items("tidal", TidalForcingItem, ("ntides",))
     river = _items(
