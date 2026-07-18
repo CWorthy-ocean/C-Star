@@ -159,13 +159,13 @@ async def test_tracking_retrieve_variant(
     )
 
     # manually serialize so i have access to a known, working path for mocks
-    mock_doc_path = tmp_path / repo._runfile_name(run_id)
+    mock_doc_path = tmp_path / repo._runfile_name(datetime.now())  # type: ignore
     assert serialize(mock_doc_path, wp_run)
 
     with (
         mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
-        mock.patch.object(repo, "_history_path", return_value=mock_doc_path) as hp_fn,
-        mock.patch.object(repo, "_latest_path", return_value=mock_doc_path) as lp_fn,
+        mock.patch.object(repo, "history_path", return_value=mock_doc_path) as hp_fn,
+        mock.patch.object(repo, "latest_path", return_value=mock_doc_path) as lp_fn,
     ):
         latest = await repo.get_workplan_run(wp_run.run_id, None)
         assert latest
@@ -400,7 +400,7 @@ async def test_tracking_get_run_paths(
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
         repo = TrackingRepository()
-        expected_paths = [repo._latest_path(run_id=run_id)]  # type: ignore
+        expected_paths = [repo.latest_path(run_id=run_id)]  # type: ignore
 
         # insert some runs that re-use the same run-id
         for _ in range(num_runs):
@@ -417,7 +417,7 @@ async def test_tracking_get_run_paths(
             )
 
         # retrieve the list of run paths
-        actual_paths = repo.list_run_paths(run_id, all_history)
+        actual_paths = repo.list_runtracking_paths(run_id, all_history)
 
     if all_history:
         # run path for latest plus each history entry
@@ -428,4 +428,5 @@ async def test_tracking_get_run_paths(
         expected_paths = [expected_paths[0], expected_paths[-1]]
 
     assert len(actual_paths) == exp_num_paths
-    assert set(actual_paths).issuperset(expected_paths)
+    mismatched = set(actual_paths).difference(expected_paths)
+    assert not mismatched  # set(actual_paths).issuperset(expected_paths)

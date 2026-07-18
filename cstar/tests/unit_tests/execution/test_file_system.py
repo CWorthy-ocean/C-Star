@@ -5,7 +5,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_DATA_HOME
+from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
@@ -139,35 +139,35 @@ def test_live_step(tmp_path: Path) -> None:
     ls_5_name = "child of ls 2"
     ls_5 = LiveStep.from_step(ls_1, update={"name": ls_5_name})  # override attributes
 
+    run_id = "fake-run-id"
+    task_dir_name = JobFileSystemManager._TASKS_NAME  # type: ignore # noqa: SLF001
+
     with mock.patch.dict(
         os.environ,
-        {ENV_CSTAR_DATA_HOME: data_home.as_posix()},
+        {
+            ENV_CSTAR_DATA_HOME: data_home.as_posix(),
+            ENV_CSTAR_RUNID: run_id,
+        },
         clear=True,
     ):
         actual = ls_1.get_working_dir
-        expected = data_home / JobFileSystemManager._TASKS_NAME / ls_1.safe_name  # noqa: SLF001
+        expected = data_home / run_id / task_dir_name / ls_1.safe_name
         assert actual == expected
 
         actual = ls_2.get_working_dir
-        expected = (
-            ls_1.get_working_dir / JobFileSystemManager._TASKS_NAME / ls_2.safe_name
-        )  # noqa: SLF001
+        expected = ls_1.get_working_dir / task_dir_name / ls_2.safe_name
         assert actual == expected
 
         actual = ls_3.get_working_dir
-        expected = (
-            ls_2.get_working_dir / JobFileSystemManager._TASKS_NAME / ls_3.safe_name
-        )  # noqa: SLF001
+        expected = ls_2.get_working_dir / task_dir_name / ls_3.safe_name
         assert actual == expected
 
         actual = ls_4.get_working_dir
         # confirm the parent carries over and ls4 is a child of ls2
-        expected = (
-            ls_2.get_working_dir / JobFileSystemManager._TASKS_NAME / ls_4.safe_name
-        )  # noqa: SLF001
+        expected = ls_2.get_working_dir / task_dir_name / ls_4.safe_name
         assert actual == expected
 
         actual = ls_5.get_working_dir
-        expected = data_home / JobFileSystemManager._TASKS_NAME / ls_5.safe_name  # noqa: SLF001
+        expected = data_home / run_id / task_dir_name / ls_5.safe_name
         assert actual == expected
         assert ls_5.name == ls_5_name  # confirm the update was honored

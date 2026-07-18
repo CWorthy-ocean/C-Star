@@ -16,7 +16,10 @@ from cstar.base.log import get_logger
 from cstar.cli.common import set_ctxmap
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
-from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    StateDirectoryManager,
+)
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
 from cstar.orchestration.serialization import deserialize, try_deserialize
@@ -95,7 +98,7 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
             log.debug(msg)
 
     # run state may be cleaned up. fallback to directory search
-    run_dir = DirectoryManager.data_home() / run_id
+    run_dir = StateDirectoryManager.data_dir()
     tasks_dir = JobFileSystemManager(run_dir).tasks_dir
 
     if not tasks_dir.exists():

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from cstar.base.log import LoggingMixin, get_logger
+from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
     StateDirectoryManager,
@@ -15,8 +15,6 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
-
-log = get_logger(__name__)
 
 
 class WorkplanRun(BaseModel):
@@ -133,7 +131,22 @@ class TrackingRepository(LoggingMixin):
         """
         return run_date.strftime("%Y%m%d%H%M%S.%f")
 
-    def _runfile_name(self, run_id: str) -> str:
+    def _runfile_name(self, run_date: datetime) -> str:
+        """Generate the file name for persisting a `WorkplanRun` to disk.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+
+        Returns
+        -------
+        str
+        """
+        formatted_dt = self._format_run_date(run_date)
+        return f"{formatted_dt}.{TrackingRepository._MODE.value}"
+
+    def _latestfile_name(self, run_id: str) -> str:
         """Generate the file name for persisting a `WorkplanRun` to disk.
 
         Parameters
@@ -147,7 +160,7 @@ class TrackingRepository(LoggingMixin):
         """
         return f"{run_id}.{TrackingRepository._MODE.value}"
 
-    def _latest_path(self, run_id: str) -> Path:
+    def latest_path(self, run_id: str) -> Path:
         """Generate the full path for persisting a `WorkplanRun` to disk as
         the "latest run" record.
 
@@ -160,25 +173,14 @@ class TrackingRepository(LoggingMixin):
         -------
         Path
         """
-        runfile_name = self._runfile_name(run_id)
+        runfile_name = self._latestfile_name(run_id)
         return self.latest_dir / runfile_name
 
-    def _run_root_dir(self, run_id: str) -> Path:
-        """Generate the path to the directory used to store tracking information
-        related to a run-id.
-
-        Parameters
-        ----------
-        run_id : str
-            The run_id of the WorkplanRun
-
-        Returns
-        -------
-        Path
-        """
+    def run_history_dir(self, run_id: str) -> Path:
+        """Generate the path to the history directory."""
         return self.history_dir / run_id
 
-    def _history_path(self, run_id: str, run_date: datetime) -> Path:
+    def history_path(self, run_id: str, run_date: datetime) -> Path:
         """Generate the full path for persisting a `WorkplanRun` to disk as
         a history record.
 
@@ -193,9 +195,8 @@ class TrackingRepository(LoggingMixin):
         -------
         Path
         """
-        formatted_dt = self._format_run_date(run_date)
-        runfile_name = self._runfile_name(formatted_dt)
-        return self._run_root_dir(run_id) / runfile_name
+        runfile_name = self._runfile_name(run_date)
+        return self.run_history_dir(run_id) / runfile_name
 
     def _find_run_path(self, run_id: str, run_date: datetime | None) -> Path:
         """Identify a path where a `WorkplanRun` is persisted to disk.
@@ -215,20 +216,20 @@ class TrackingRepository(LoggingMixin):
         Path
         """
         if run_date:
-            path = self._history_path(run_id, run_date)
+            path = self.history_path(run_id, run_date)
             if path.exists():
                 msg = f"Located workplan run in history for {run_id!r} at: {path}"
                 self.log.trace(msg)
                 return path
 
-        path = self._latest_path(run_id)
+        path = self.latest_path(run_id)
         if path.exists():
             msg = f"Located latest run of {run_id!r} at: {path}"
             self.log.trace(msg)
 
         return path
 
-    def list_run_paths(
+    def list_runtracking_paths(
         self,
         run_id: str,
         all_history: bool = False,
@@ -252,12 +253,12 @@ class TrackingRepository(LoggingMixin):
         """
         run_paths: list[Path] = []
 
-        latest = self._latest_path(run_id)
+        latest = self.latest_path(run_id)
         if latest.exists():
             run_paths.append(latest)
 
-        root_dir = self._run_root_dir(run_id)
-        all_runs = root_dir.iterdir()
+        search_dir = self.run_history_dir(run_id=run_id)
+        all_runs = search_dir.iterdir() if search_dir.exists() else list[Path]()
 
         if all_history:
             run_paths.extend(all_runs)
@@ -299,7 +300,7 @@ class TrackingRepository(LoggingMixin):
         if not run_path.exists():
             rd_out = run_date or "latest"
             msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-            self.log.warning(msg)
+            self.log.debug(msg)
             return None
 
         return deserialize(run_path, WorkplanRun)
@@ -319,8 +320,8 @@ class TrackingRepository(LoggingMixin):
         Path
             The path to the persisted history record
         """
-        run_path = self._history_path(run.run_id, run.start_at)
-        latest_path = self._latest_path(run.run_id)
+        run_path = self.history_path(run.run_id, run.start_at)
+        latest_path = self.latest_path(run.run_id)
 
         if not serialize(run_path, run):
             self.log.warning("Run could not be persisted")

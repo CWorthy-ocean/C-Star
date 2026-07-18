@@ -418,6 +418,20 @@ class StateDirectoryManager:
         root = cls.root_dir()
         return root / cls._RUN_TRACKING_NAME
 
+    @classmethod
+    def data_dir(cls, run_id: str | None = None) -> Path:
+        """The directory for data files used by a run.
+
+        The result is a _run-specific_ directory.
+
+        Returns
+        -------
+        Path
+        """
+        data_home = DirectoryManager.data_home()
+        run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
+        return data_home / run_id
+
 
 def is_remote_resource(uri: str) -> bool:
     """Determine if the supplied string contains a local or remote path.

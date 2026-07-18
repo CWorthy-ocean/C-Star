@@ -16,8 +16,8 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import lazy_import, slugify
 from cstar.execution.file_system import (
-    DirectoryManager,
     JobFileSystemManager,
+    StateDirectoryManager,
 )
 from cstar.orchestration.converter.converter import (
     convert_step_to_blueprint_run_command,
@@ -238,9 +238,7 @@ class LiveStep(Step):
             if self.parent:
                 root_fsm = self.parent.fsm
             else:
-                root_dir = DirectoryManager.data_home()
-                if run_id := os.environ.get(ENV_CSTAR_RUNID, ""):
-                    root_dir = root_dir.joinpath(run_id)
+                root_dir = StateDirectoryManager.data_dir()
                 root_fsm = JobFileSystemManager(root_dir)
 
             self.working_dir = root_fsm.tasks_dir / self.safe_name

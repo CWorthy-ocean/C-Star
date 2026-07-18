@@ -15,7 +15,7 @@ from cstar.base.env import (
     FLAG_ON,
 )
 from cstar.base.feature import is_flag_enabled
-from cstar.base.log import LogLevelChoices, reset_log_level
+from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.execution.file_system import DirectoryManager, is_remote_resource
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import (
@@ -32,6 +32,7 @@ from cstar.system.migration import (
 )
 
 app = typer.Typer()
+log = get_logger(__name__)
 
 HELP_SHORT = "Print the current version of the C-Star package and exit."
 
@@ -381,20 +382,22 @@ def get_from_ctxmap(context: typer.Context, key: str, klass: type[_TValue]) -> _
     context_map: dict[str, t.Any] | None = context.obj
 
     if not context_map:
-        print("Unable to retrieve value from empty context map")
+        log.error("Unable to retrieve value from empty context map")
         raise typer.Exit(100)
 
     if key not in context_map:
         items = ", ".join(context_map.keys())
-        print(f"Unable to retrieve key {key!r} from context. Available data: {items}")
+        log.warning(
+            f"Unable to retrieve key {key!r} from context. Available data: {items}"
+        )
 
     value: _TValue | None = context.obj[key]
     if value is None:
-        print(f"Context map contains null value for key: {key}")
+        log.debug(f"Context map contains null value for key: {key}")
         raise typer.Exit(101)
 
     if not isinstance(value, klass):
-        print(
+        log.warning(
             "Context map contains value with type mismatch. "
             f"Expected {klass.__name__!r} but received {value.__class__.__name__!r}."
         )

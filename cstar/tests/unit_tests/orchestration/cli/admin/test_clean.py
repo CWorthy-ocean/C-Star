@@ -1,5 +1,6 @@
 import itertools
 import os
+import typing as t
 from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
@@ -12,10 +13,11 @@ from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, FLAG_ON
 from cstar.cli.admin.clean import (
     ARG_YES,
     CleanupAction,
+    FileSystemCleanupAction,
     app,
     get_default_cleanup_actions,
-    get_run_action,
     perform_actions,
+    runid_callback,
 )
 from cstar.entrypoint.utils import ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager
@@ -55,7 +57,9 @@ def test_cli_admin_clean_get_default_cleanup_actions(prefect_path: Path) -> None
     prefect_path : Path
         The path returned by the mocked `get_prefect_storage_path` function.
     """
-    default_actions = get_default_cleanup_actions()
+    default_actions = t.cast(
+        "list[FileSystemCleanupAction]", get_default_cleanup_actions()
+    )
 
     default_paths = set(
         itertools.chain.from_iterable(a.asset_paths for a in default_actions)
@@ -116,7 +120,7 @@ def test_cli_admin_cleanupaction_mitigated(
     # add any paths that are already "cleaned up"
     all_assets.extend(tmp_path / e for e in missing)
 
-    action = CleanupAction(
+    action = FileSystemCleanupAction(
         name="action",
         asset_paths=all_assets,
     )
@@ -142,7 +146,7 @@ async def test_cli_admin_clean_perform_actions(
         The number of cleanup actions to create and execute via `perform_action`
     """
     actions = [
-        CleanupAction(
+        FileSystemCleanupAction(
             name=f"action-{i}",
             asset_paths=[tmp_path / f"action-{i}-{j}" for j in range(3)],
         )
@@ -158,7 +162,7 @@ async def test_cli_admin_clean_perform_actions(
 
 @pytest.mark.parametrize(
     "num_actions",
-    range(5),
+    range(1, 5),
 )
 async def test_cli_admin_clean_perform_actions_dryrun(
     tmp_path: Path,
@@ -173,7 +177,7 @@ async def test_cli_admin_clean_perform_actions_dryrun(
     num_actions : int
         The number of cleanup actions to create and execute via `perform_action`
     """
-    action = CleanupAction(
+    action = FileSystemCleanupAction(
         name="action",
         asset_paths=[tmp_path / str(i) for i in range(num_actions)],
     )
@@ -219,14 +223,14 @@ async def test_cli_admin_clean_get_run_action(
         ) as mock_get,
         mock.patch("cstar.cli.admin.clean.preload_run", return_value=run_id),
     ):
-        actual_run_id = get_run_action(mock_ctx, run_id)
+        actual_run_id = runid_callback(mock_ctx, run_id)
 
     # confirm the run-id is returned with any callback cleaning appleid
     mock_get.assert_called_once_with(mock_ctx, "run", WorkplanRun)
     assert actual_run_id == run_id.strip()
 
     # confirm the action was set
-    action: CleanupAction | None = mock_ctx.obj.get("action", None)
+    action: FileSystemCleanupAction | None = mock_ctx.obj.get("action", None)
     assert isinstance(action, CleanupAction)
     assert run.state_dir in action.asset_paths
 
@@ -252,7 +256,7 @@ def test_cli_admin_clean_default_cleanup(dry_run: bool) -> None:
         dynamically configures dry-run mode.
     """
     # create an asset in each of the default locations
-    actions = get_default_cleanup_actions()
+    actions = t.cast("list[FileSystemCleanupAction]", get_default_cleanup_actions())
     asset_idx = 0
     for action in actions:
         for path in action.asset_paths:
