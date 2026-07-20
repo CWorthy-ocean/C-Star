@@ -481,9 +481,9 @@ def test_template_fill_variable_resolver_unknown_variable(
     live_step_with_templates: LiveStep,
 ) -> None:
     """Verify that the fill transform raises a value error if an attempt to access
-    an unknown scope on a scoped resolver is encountered.
+    an unknown variable on a variable resolver is encountered.
 
-    E.g. passing {{typo-var}} when the variable is named "ok-var" in the workplan.
+    E.g. Template contains {{typo-var}} but variable is named "ok-var" in the workplan.
     """
     wd_key = "working_dir"
     step = LiveStep.from_step(
