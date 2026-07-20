@@ -1406,6 +1406,25 @@ class TestForgeBlueprintWizard:
         assert "v_sponge" not in w2.config.composition.overrides
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 3.3
 
+    def test_dt_persists_through_load(self, tmp_path):
+        """``dt`` has no touched flag (always gathered raw from the widget) and is
+        excluded from the accordion overrides layer -- it round-trips purely via
+        model_settings["time_stepping"]["dt"] being written on save and read back
+        in _populate_from. Lock that in explicitly.
+        """
+        w1 = self._wizard()
+        w1.dt.value = 1234.0
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.dt.value == 1234.0
+        assert w2.config.model_settings["time_stepping"]["dt"] == 1234.0
+        assert "time_stepping" not in w2.config.composition.overrides
+
     def test_forcing_spec_selection_and_edit(self):
         w = self._wizard()
         # ForcingSpec must always be an explicit catalog selection now -- no more
