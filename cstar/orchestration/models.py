@@ -509,13 +509,13 @@ class UserDefinedVariables(BaseModel):
 
         return self
 
-    def resolve(self, name: str) -> str:
-        """Return the variable value for the supplied name."""
-        if name not in self.mapping:
+    def __getitem__(self, key: str):
+        try:
+            return self.mapping[key]
+        except KeyError as ex:
             csv = ", ".join(k for k in self.mapping)
-            msg = f"Unable to resolve variable {name!r}. Available variables: {csv}"
-            raise KeyError(msg)
-        return self.mapping[name]
+            msg = f"Unable to resolve variable {key!r}. Available variables: {csv}"
+            raise KeyError(msg) from ex
 
 
 register_representer(WorkplanState, strenum_representer)

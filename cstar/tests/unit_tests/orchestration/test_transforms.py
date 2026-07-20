@@ -545,7 +545,7 @@ def test_template_fill_variable_resolver_unknown_variable(
         keys={"yyy"},
         mapping={"yyy": "value"},
     )
-    transform = TemplateFillTransform(variable_resolver=named_config.resolve)
+    transform = TemplateFillTransform(variable_resolver=lambda name: named_config[name])
 
     with pytest.raises(KeyError, match="Unable to resolve variable"):
         _ = transform(step)
