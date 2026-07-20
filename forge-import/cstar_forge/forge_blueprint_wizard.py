@@ -359,6 +359,18 @@ HELP_TEXT: dict[str, str] = {
     "time step from the CFL criterion. Requires roms_tools to be installed.",
 }
 
+# Label overrides for namelist-section widgets built via _build_section /
+# _make_field_widget. Keyed the same way as HELP_TEXT: (section, field_name).
+# Falls back to the raw field name when no override is present.
+LABEL_TEXT: dict[tuple[str, str], str] = {
+    ("bgc", "xco2air_default"): "Static xco2air (if co2_tvarying is False)",
+}
+
+
+def _namelist_label(section: str, field_name: str) -> str:
+    """Look up the display label override for a namelist field, else field_name."""
+    return LABEL_TEXT.get((section, field_name), field_name)
+
 
 def _namelist_tooltip(group_name: str, field_name: str) -> str:
     """Look up the tooltip for a namelist field from the RomsNamelist schema.
@@ -887,7 +899,8 @@ class _SettingsEditor:
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
             base = _base_type(None, value)
             tip = _namelist_tooltip(section, section)
-            w = _make_field_widget(W, section, base, value, tooltip=tip)
+            label = _namelist_label(section, section)
+            w = _make_field_widget(W, label, base, value, tooltip=tip)
             self._widgets[(section, None)] = (w, base)
             return W.VBox([w]), [None]
         excluded = _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset())
@@ -909,7 +922,8 @@ class _SettingsEditor:
             )
             base = _base_type(ann, val)
             tip = _namelist_tooltip(section, key)
-            w = _make_field_widget(W, key, base, val, tooltip=tip)
+            label = _namelist_label(section, key)
+            w = _make_field_widget(W, label, base, val, tooltip=tip)
             self._widgets[(section, key)] = (w, base)
             rows.append(w)
             fields.append(key)
