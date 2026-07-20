@@ -746,6 +746,16 @@ class DomainCatalog:
             domain_data["grid_kwargs_parent"] = builder.grid_kwargs_parent
         if builder.grid_kwargs_child:
             domain_data["grid_kwargs_child"] = builder.grid_kwargs_child
+        # v_sponge: best-effort -- this executor-driven path predates the
+        # wizard's touched/derived distinction (see forge_blueprint_wizard's
+        # _domain_piece_data, the authoritative save path), so it always
+        # records whatever the resolver computed rather than tracking whether
+        # it was a user override.
+        _v_sponge = (
+            (builder.resolved_settings or {}).get("v_sponge", {}).get("v_sponge")
+        )
+        if _v_sponge is not None:
+            domain_data["v_sponge"] = _v_sponge
 
         with (domain_dir / "Domain.yaml").open("w") as f:
             yaml.safe_dump(

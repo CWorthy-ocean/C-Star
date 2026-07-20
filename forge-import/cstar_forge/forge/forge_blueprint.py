@@ -411,6 +411,12 @@ class Domain(_Section):
     nesting_include_pressure_fluxes: bool = False
     """Whether to include baroclinic pressure fluxes in the nesting extraction file
     (passed to make_nesting_info / make_edata as include_pressure_fluxes)."""
+    v_sponge: float | None = None
+    """Sponge-layer viscosity. A first-class, domain-owned property (mirrors
+    ``open_boundaries``): the resolver derives it from grid spacing
+    (``cstar_forge.forge.util.compute_v_sponge_from_grid``) when not explicitly
+    supplied, and is the sole writer of both this field and the identical
+    ``model_settings["v_sponge"]["v_sponge"]`` leaf -- the two must never diverge."""
 
     @property
     def is_child(self) -> bool:

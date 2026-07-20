@@ -32,7 +32,7 @@ from __future__ import annotations
 import copy
 import logging
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import (
     Any,
@@ -290,6 +290,7 @@ def process_forge_blueprint(
     use_dask: bool = True,
     validate: bool = True,
     executor_factory: ExecutorFactory | None = None,
+    only_inputs: Iterable[str] | None = None,
 ) -> ForgeBlueprintExecutor:
     """Run Phase-2 processing for a ``ForgeBlueprint`` (object or path to a YAML file).
 
@@ -316,6 +317,20 @@ def process_forge_blueprint(
         Maps the ``ForgeBlueprint`` to an executor; defaults to the forge
         ``ForgeExecutor``. Injectable for tests and for the eventual C-Star app
         (which supplies its own executor for the same ``ForgeBlueprint`` blueprint).
+    only_inputs :
+        One-off subset mode: category names (see
+        ``input_data.resolve_input_selection`` for the accepted aliases —
+        ``grid``, ``initial_conditions``/``ic``, ``surface``, ``boundary``/``bry``,
+        ``tidal``/``tides``, ``river``, ``cdr``) to generate, skipping the rest.
+        Validated up front (before ``ensure_source_data``) so a typo fails fast. The
+        ``grid`` step always runs regardless of selection (every other input depends
+        on the in-memory grid object). When set, ``configure`` is forced to ``False``
+        — a partial input set would only produce an incomplete, misleading
+        downstream blueprint; ``persist()`` (which writes ``B_{name}.yaml``) only
+        runs inside ``configure_build``, so a subset run can never overwrite an
+        existing complete blueprint. Re-run without ``only_inputs`` later to
+        generate the remaining inputs (existing ones are reused, per the normal
+        skip-existing logic) and emit the blueprint.
     """
     cfg = spec if isinstance(spec, ForgeBlueprint) else ForgeBlueprint.from_yaml(spec)
 
@@ -332,6 +347,21 @@ def process_forge_blueprint(
                 "processing):\n  " + "\n  ".join(problems)
             )
 
+    resolved_only = None
+    if only_inputs is not None:
+        from cstar_forge.forge.input_data import resolve_input_selection
+
+        resolved_only = resolve_input_selection(only_inputs)
+        if configure:
+            logger.warning(
+                "only_inputs=%s given: skipping configure_build (a subset of "
+                "inputs cannot produce a complete blueprint). Re-run without "
+                "only_inputs once the desired inputs exist to generate the rest "
+                "and emit the blueprint.",
+                sorted(resolved_only),
+            )
+        configure = False
+
     if host is not None:
         logger.info("Resolved host:\n%s", host.summary(casename=cfg.casename))
 
@@ -347,7 +377,7 @@ def process_forge_blueprint(
     if ensure_data:
         executor.ensure_source_data()
     if generate:
-        executor.generate_inputs(clobber=clobber, use_dask=use_dask)
+        executor.generate_inputs(clobber=clobber, use_dask=use_dask, only=resolved_only)
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)
         executor.configure_build(

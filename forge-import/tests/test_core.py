@@ -1661,3 +1661,270 @@ class TestGoldenNamelist:
             "review the diff, and commit the updated fixture; otherwise this is a "
             "regression."
         )
+
+
+class TestOnlyInputsReuseIsIdempotent:
+    """Proves the `--only-inputs` design's load-bearing assumption: no state file
+    is needed between a piecemeal run and a later full run, because settings and
+    the downstream blueprint are fully re-derived from the grid object + whatever
+    is already on disk -- not read back from anywhere in memory.
+
+    Drives the real ``generate_inputs()`` -> ``configure_build()`` chain (as
+    ``TestGoldenNamelist`` does) TWICE against the *same* working directory, each
+    time against a brand-new ``ForgeExecutor`` (so nothing carries over in
+    memory between passes -- only the files on disk do), and asserts pass 2
+    (pure reuse) produces a byte-identical ``namelist.nml`` and ``B_{name}.yaml``
+    to pass 1.
+
+    Unlike ``TestGoldenNamelist``, the roms-tools mocks here write REAL sidecar
+    files (YAML + NetCDF), not no-ops -- specifically so pass 2 takes each
+    input's *cheapest* reuse branch (the one the real piecemeal-then-full
+    workflow actually exercises, since a one-off run leaves its sidecars on
+    disk), not just the "sidecar missing -> reconstruct" fallback:
+
+    - tidal: ``to_yaml`` writes a real multi-doc YAML with ``TidalForcing.ntides``,
+      so pass 2 reads ``ntides`` straight from it (``yaml.safe_load_all``), never
+      touching ``rt.TidalForcing`` again.
+    - river: ``save`` writes a real minimal NetCDF (river_volume/river_tracer over
+      a 3-sized ``nriver`` dim), so pass 2 reads ``nriv`` straight from it via
+      ``xr.open_dataset``, never touching ``rt.RiverForcing`` again.
+    - boundary: ``to_yaml`` writes a real (empty) sidecar file, so pass 2 reuses
+      the existing NetCDF with no reconstruction at all (boundary's cheap path
+      needs no read-back).
+    - surface: ``to_yaml`` writes a real (empty) sidecar file. Its cheap path
+      (``_interp_frc_surface_reuse``) peeks at the real NetCDF for
+      ``xi_coarse``/``eta_coarse`` dims and falls back to 0 on any read error;
+      since the mocked ``.save()`` only touches an empty placeholder file, this
+      peek harmlessly no-ops to the same ``interp_frc=0`` the mock's
+      ``use_coarse_grid=False`` would have given a fresh construction -- so this
+      exercises the "no reconstruction" code path, not the value derivation
+      itself.
+    - grid/initial_conditions/cdr_forcing: unconditionally re-derive settings
+      from the live (grid/reconstructed) object on every run regardless of
+      reuse -- there is no separate "cheap" branch to distinguish for these.
+    """
+
+    _GRID_KWARGS: ClassVar[dict] = dict(
+        nx=6,
+        ny=2,
+        size_x=500,
+        size_y=1000,
+        center_lon=0,
+        center_lat=55,
+        rot=10,
+        N=3,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+    )
+    _BOUNDARIES: ClassVar[dict] = {
+        "south": False,
+        "east": True,
+        "north": True,
+        "west": False,
+    }
+    _PARTITIONING: ClassVar[dict] = {"n_procs_x": 1, "n_procs_y": 1}
+    _CDR_FORCING: ClassVar[dict] = {"enabled": True}
+
+    @staticmethod
+    def _touch_save(path, **_kw):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).touch()
+        return path
+
+    @staticmethod
+    def _touch_save_list(path, **_kw):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).touch()
+        return [path]
+
+    @staticmethod
+    def _touch_yaml(path, **_kw):
+        """A real (empty-content) sidecar write -- enough to satisfy the
+        ``yaml_path.exists()`` gate that routes reuse to the cheap branch.
+        """
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).touch()
+
+    @staticmethod
+    def _write_tidal_yaml(path, **_kw):
+        """A real multi-doc sidecar matching what tidal's cheap-reuse parser
+        (``yaml.safe_load_all`` looking for a ``TidalForcing`` doc) expects.
+        """
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        with Path(path).open("w") as f:
+            yaml.safe_dump_all(
+                [{"roms_tools_version": "test"}, {"TidalForcing": {"ntides": 15}}], f
+            )
+
+    @staticmethod
+    def _river_dataset():
+        return xr.Dataset(
+            {
+                "river_volume": (["nriver", "time"], np.zeros((3, 2))),
+                "river_tracer": (
+                    ["nriver", "time", "tracer"],
+                    np.zeros((3, 2, 2)),
+                ),
+            }
+        )
+
+    @classmethod
+    def _write_river_netcdf(cls, path, **_kw):
+        """A real minimal NetCDF matching what river's cheap-reuse read
+        (``xr.open_dataset`` -> ``ds.sizes["nriver"]``) expects.
+        """
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        cls._river_dataset().to_netcdf(path)
+        return path
+
+    @staticmethod
+    def _mock_source_data(tmp_path):
+        mock_sd = MagicMock()
+        source_file = tmp_path / "source.nc"
+        source_file.touch()
+
+        def _dks(name, glorys_layout=None):
+            if name == "GLORYS":
+                return (
+                    "GLORYS_GLOBAL" if glorys_layout == "global" else "GLORYS_REGIONAL"
+                )
+            return {
+                "UNIFIED": "UNIFIED_BGC",
+                "ERA5": "ERA5",
+                "TPXO": "TPXO",
+                "DAI": "DAI",
+            }.get(name, name.upper())
+
+        mock_sd.path_for_source = MagicMock(return_value=source_file)
+        mock_sd.dataset_key_for_source = MagicMock(side_effect=_dks)
+        mock_sd.streamable_for_source = MagicMock(
+            side_effect=lambda name, glorys_layout=None: name.upper() in {"ERA5", "DAI"}
+        )
+        return mock_sd
+
+    def _run_one_pass(self, cfg, host, mock_grid, tmp_path):
+        """One full generate_inputs() -> configure_build() pass against `host`'s
+        working_dir. Returns (namelist_text, blueprint_text). Uses clobber=False
+        both times -- pass 1 has nothing on disk yet (generates fresh); pass 2
+        (a fresh executor against the same working_dir) finds pass 1's files
+        already there and takes the reuse branches.
+        """
+        grid_mock = _create_grid_mock()
+        grid_mock.nx = self._GRID_KWARGS["nx"]
+        grid_mock.ny = self._GRID_KWARGS["ny"]
+        grid_mock.N = self._GRID_KWARGS["N"]
+        grid_mock.theta_s = self._GRID_KWARGS["theta_s"]
+        grid_mock.theta_b = self._GRID_KWARGS["theta_b"]
+        grid_mock.hc = self._GRID_KWARGS["hc"]
+        grid_mock.save.side_effect = self._touch_save
+        mock_grid.return_value = grid_mock
+
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        builder.src_data = self._mock_source_data(tmp_path)
+
+        with (
+            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
+            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
+            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
+            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch(
+                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                {"ERA5"},
+            ),
+        ):
+            mock_ic_instance = MagicMock()
+            mock_ic_instance.save.side_effect = self._touch_save_list
+            mock_ic.return_value = mock_ic_instance
+
+            mock_surface_instance = MagicMock()
+            mock_surface_instance.save.side_effect = self._touch_save
+            mock_surface_instance.to_yaml.side_effect = self._touch_yaml
+            mock_surface_instance.use_coarse_grid = False
+            mock_surface.return_value = mock_surface_instance
+
+            mock_boundary_instance = MagicMock()
+            mock_boundary_instance.save.side_effect = self._touch_save
+            mock_boundary_instance.to_yaml.side_effect = self._touch_yaml
+            mock_boundary.return_value = mock_boundary_instance
+
+            mock_tidal_instance = MagicMock()
+            mock_tidal_instance.save.side_effect = self._touch_save
+            mock_tidal_instance.to_yaml.side_effect = self._write_tidal_yaml
+            mock_tidal_instance.ntides = 15
+            mock_tidal.return_value = mock_tidal_instance
+
+            mock_river_instance = MagicMock()
+            mock_river_instance.save.side_effect = self._write_river_netcdf
+            mock_river_instance.to_yaml.side_effect = self._touch_yaml
+            mock_river_instance.ds = self._river_dataset()
+            mock_river.return_value = mock_river_instance
+
+            mock_cdr_instance = MagicMock()
+            mock_cdr_instance.save.side_effect = self._touch_save
+            mock_releases = MagicMock()
+            mock_releases.__len__.return_value = 2
+            mock_releases.release_type = "volume"
+            mock_cdr_instance.releases = mock_releases
+            mock_cdr.return_value = mock_cdr_instance
+
+            builder.generate_inputs(clobber=False, use_dask=False, test=False)
+
+        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+
+        run_ov, compile_ov = split_model_settings(cfg)
+        with patch("cstar_forge.forge.executor.render_roms_settings") as mock_render:
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["cppdefs.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+        namelist_text = (builder.run_time_code_dir / "namelist.nml").read_text()
+        blueprint_text = builder.path_roms_marbl_blueprint().read_text()
+        return namelist_text, blueprint_text
+
+    def test_second_pass_reuse_matches_first_pass_byte_for_byte(
+        self, mock_grid, tmp_path
+    ):
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-tiny",
+            grid_kwargs=self._GRID_KWARGS,
+            open_boundaries=self._BOUNDARIES,
+            partitioning=self._PARTITIONING,
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            description="Only-inputs idempotence test",
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+            cdr_forcing=self._CDR_FORCING,
+        )
+
+        run_dir = tmp_path / "run"
+        host = HostPaths(
+            working_dir=run_dir,
+            source_data_cache=run_dir,
+            system="test",
+            machine_config=None,
+        )
+
+        namelist_1, blueprint_1 = self._run_one_pass(cfg, host, mock_grid, tmp_path)
+        namelist_2, blueprint_2 = self._run_one_pass(cfg, host, mock_grid, tmp_path)
+
+        assert namelist_2 == namelist_1, (
+            "A second full run against a working_dir that already has all "
+            "inputs must re-derive a byte-identical namelist.nml -- otherwise "
+            "the piecemeal-then-full workflow (generate a subset, verify, then "
+            "run the rest) cannot be trusted to produce a correct build."
+        )
+        assert blueprint_2 == blueprint_1, (
+            "A second full run against a working_dir that already has all "
+            "inputs must re-derive a byte-identical B_{name}.yaml."
+        )

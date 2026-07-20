@@ -54,6 +54,17 @@ def main(argv: list | None = None) -> int:
         "--no-dask", action="store_true", help="disable dask in input generation"
     )
     parser.add_argument(
+        "--only-inputs",
+        nargs="+",
+        default=None,
+        metavar="INPUT",
+        help="generate only these input categories (grid, initial_conditions, "
+        "surface, boundary, tidal, river, cdr) and skip configure_build/blueprint "
+        "emission -- a one-off run for slow or human-checked inputs. Existing "
+        "files are still reused per the normal skip-existing logic. Re-run "
+        "without this flag later to generate the rest and emit the blueprint.",
+    )
+    parser.add_argument(
         "--host-only", action="store_true", help="just print the resolved host and exit"
     )
     parser.add_argument(
@@ -79,8 +90,9 @@ def main(argv: list | None = None) -> int:
         configure=not args.no_configure,
         clobber=args.clobber,
         use_dask=not args.no_dask,
+        only_inputs=args.only_inputs,
     )
-    if not args.no_configure:
+    if not args.no_configure and not args.only_inputs:
         blueprint_path = executor.path_roms_marbl_blueprint()
         print(f"\nBlueprint: {blueprint_path}")
         print(f"Run it with:  cstar blueprint run {blueprint_path}")

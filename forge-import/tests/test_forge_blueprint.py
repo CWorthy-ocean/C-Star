@@ -1087,6 +1087,112 @@ class TestForgeBlueprintWizard:
         wiz.bnd["west"].value = False
         assert wiz.config.model_settings["cppdefs"]["obc_west"] is False
 
+    @staticmethod
+    def _stub_grid_with_mask():
+        """A fake roms_tools.Grid substitute for _build_grid_from_widgets: no
+        real grid build (no network/roms_tools needed). Its mask is chosen so
+        every edge's "any ocean point" verdict is the OPPOSITE of the widget
+        checkbox defaults (south=False, west=False, east=True, north=True) --
+        so a passing assertion can only mean real mask-derived values landed,
+        never a coincidental match with the pre-derive defaults.
+        """
+        from types import SimpleNamespace
+
+        import xarray as xr
+
+        mask = xr.DataArray(
+            [
+                [1, 1, 1, 1, 0],  # south edge (eta_rho=0): has ocean -> south=True
+                [1, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],  # north edge (eta_rho=-1): all land -> north=False
+            ],
+            dims=("eta_rho", "xi_rho"),
+            # west edge (xi_rho=0) has ocean -> west=True;
+            # east edge (xi_rho=-1) all land -> east=False
+        )
+        return SimpleNamespace(ds={"mask_rho": mask}, size_x=50.0, nx=5)
+
+    def test_derive_from_grid_sets_untouched_boundaries_from_mask(self):
+        """The "Derive from grid" button must actually flip open-boundary
+        checkboxes from the land mask, not silently leave the checkbox
+        defaults in place.
+        """
+        wiz = self._wizard()
+        assert (
+            wiz.bnd["south"].value,
+            wiz.bnd["west"].value,
+            wiz.bnd["east"].value,
+            wiz.bnd["north"].value,
+        ) == (False, False, True, True)  # widget defaults, pre-derive
+
+        wiz._build_grid_from_widgets = self._stub_grid_with_mask
+        wiz._on_derive_domain_properties(None)
+
+        assert wiz._boundaries_derived is True
+        assert wiz.bnd["south"].value is True
+        assert wiz.bnd["west"].value is True
+        assert wiz.bnd["east"].value is False
+        assert wiz.bnd["north"].value is False
+        ob = wiz.config.domain.open_boundaries
+        assert (ob.south, ob.west, ob.east, ob.north) == (True, True, False, False)
+
+    def test_derive_from_grid_does_not_overwrite_touched_boundaries(self):
+        """_boundaries_touched is a single flag for the whole open_boundaries
+        set (it persists to/from a DomainSpec as one unit) -- a manual edit to
+        ANY one boundary freezes ALL of them against further auto-derivation,
+        not just the one edited.
+        """
+        wiz = self._wizard()
+        wiz.bnd["south"].value = True  # a manual edit -> touches the whole set
+        assert wiz._boundaries_touched is True
+        pre = {d: w.value for d, w in wiz.bnd.items()}
+
+        wiz._build_grid_from_widgets = self._stub_grid_with_mask
+        wiz._on_derive_domain_properties(None)
+
+        assert wiz._boundaries_derived is True  # the button still "ran"
+        # nothing was overwritten by the mask, even though the stub's mask
+        # would derive different values for every one of these edges
+        assert {d: w.value for d, w in wiz.bnd.items()} == pre
+
+    def test_save_derives_untouched_boundaries_from_mask_not_defaults(self, tmp_path):
+        """The export-time safety net (_ensure_boundaries_derived, called from
+        _on_save) must make the SAVED blueprint reflect real mask-derived
+        boundaries, not the provisional checkbox defaults -- the core guarantee
+        behind "a save must never silently ship provisional defaults."
+        """
+        wiz = self._wizard()
+        wiz._build_grid_from_widgets = self._stub_grid_with_mask
+        p = tmp_path / "forge_blueprint.yaml"
+        wiz.save_path.value = str(p)
+        assert wiz._boundaries_derived is False  # nothing derived yet
+
+        wiz._on_save(None)
+
+        assert wiz._boundaries_derived is True  # the safety net ran
+        saved = ForgeBlueprint.from_yaml(p)
+        ob = saved.domain.open_boundaries
+        assert (ob.south, ob.west, ob.east, ob.north) == (True, True, False, False)
+
+    def test_save_aborts_when_boundary_derivation_fails(self, tmp_path):
+        """If the grid build needed to derive boundaries fails, Save must abort
+        rather than silently persist the provisional checkbox defaults.
+        """
+        wiz = self._wizard()
+
+        def _boom():
+            raise RuntimeError("synthetic grid-build failure")
+
+        wiz._build_grid_from_widgets = _boom
+        p = tmp_path / "forge_blueprint.yaml"
+        wiz.save_path.value = str(p)
+
+        wiz._on_save(None)
+
+        assert not p.exists()  # nothing was written
+        assert "aborted" in wiz.save_status.value.lower()
+
     def test_blank_name_tracks_derived_default(self):
         wiz = self._wizard()
         default_name = wiz.config.name
@@ -1107,6 +1213,10 @@ class TestForgeBlueprintWizard:
     def test_save_writes_valid_yaml(self, tmp_path):
         wiz = self._wizard()
         wiz.save_path.value = str(tmp_path / "forge_blueprint.yaml")
+        # Not exercising boundary derivation here -- skip the real grid build
+        # the export-time safety net would otherwise trigger (see the
+        # dedicated test_derive_from_grid_*/test_save_*_boundary_* tests).
+        wiz._boundaries_touched = True
         wiz._on_save(None)
         cfg = ForgeBlueprint.from_yaml(tmp_path / "forge_blueprint.yaml")
         assert cfg.casename == wiz.config.casename
@@ -1121,6 +1231,7 @@ class TestForgeBlueprintWizard:
         w1.name.value = "my-custom-run"
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         saved = ForgeBlueprint.from_yaml(p)
 
@@ -1141,6 +1252,7 @@ class TestForgeBlueprintWizard:
         w1 = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2._load_bytes(p.read_bytes())
@@ -1254,36 +1366,44 @@ class TestForgeBlueprintWizard:
         assert w.config.model_settings["lateral_visc"]["visc2"] == 12.5  # edit kept
         assert w.config.model_settings["param"]["llm"] == 8  # derived refreshed
 
-    def test_editing_derived_value_records_override_and_wins(self):
-        """time_stepping/param are now dropped from the accordion (resolver-controlled
-        or dedicated widgets). Use v_sponge instead -- still resolver-derived (from
-        grid spacing) and still accordion-editable (Physics pane) -- to exercise the
-        same override-wins-over-re-derivation mechanic.
+    def test_editing_v_sponge_touches_and_wins(self):
+        """v_sponge is a first-class domain property with its own dedicated
+        widget (Domain-derived properties), not a generic accordion override --
+        it has no accordion widget (_ACCORDION_EXCLUDED_FIELDS) and is never
+        recorded in composition.overrides. Editing it directly "touches" the
+        value so it wins over grid-driven re-derivation, exactly like the old
+        override-wins-over-re-derivation mechanic, but resolved via
+        build_forge_blueprint's own v_sponge= param instead of the overrides layer.
         """
         w = self._wizard()
-        w.editor._widgets[("v_sponge", "v_sponge")][0].value = 999.0
-        assert w.config.composition.overrides == {"v_sponge": {"v_sponge": 999.0}}
-        # override persists and wins over the re-composed value across a rebuild
+        assert ("v_sponge", "v_sponge") not in w.editor._widgets
+        w.v_sponge.value = 999.0
+        assert w._v_sponge_touched is True
+        assert w.config.model_settings["v_sponge"]["v_sponge"] == 999.0
+        assert w.config.domain.v_sponge == 999.0
+        assert "v_sponge" not in w.config.composition.overrides
+        # touched value persists and wins over the re-derived value across a rebuild
         w.dt.value = 3600.0
         assert w.config.model_settings["v_sponge"]["v_sponge"] == 999.0
         assert (
             w.config.model_settings["lateral_visc"]["visc2"] == 0.0
         )  # non-overridden field still re-derives to its composed default
 
-    def test_override_layer_round_trips_through_load(self, tmp_path):
+    def test_v_sponge_persists_through_load(self, tmp_path):
         w1 = self._wizard()
-        w1.editor._widgets[("v_sponge", "v_sponge")][0].value = 999.0
+        w1.v_sponge.value = 999.0
         w1.editor._widgets[("lateral_visc", "visc2")][0].value = 3.3
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
         assert w2.config.model_settings["v_sponge"]["v_sponge"] == 999.0
-        assert (
-            w2.config.composition.overrides.get("v_sponge", {}).get("v_sponge") == 999.0
-        )
+        assert w2.config.domain.v_sponge == 999.0
+        assert w2._v_sponge_touched is True
+        assert "v_sponge" not in w2.config.composition.overrides
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 3.3
 
     def test_forcing_spec_selection_and_edit(self):
@@ -1341,6 +1461,7 @@ class TestForgeBlueprintWizard:
         w1.output_dd.value = "standard"
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -1367,6 +1488,7 @@ class TestForgeBlueprintWizard:
         row["restoring_forces"].value = "sss"
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -1401,6 +1523,7 @@ class TestForgeBlueprintWizard:
         w1.child_w["N"].value = 18
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -1442,6 +1565,7 @@ class TestForgeBlueprintWizard:
         w1.parent_w["N"].value = 30
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -1457,6 +1581,7 @@ class TestForgeBlueprintWizard:
         assert w1.config.code.roms.commit == "pio-refdate"
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2.load_path.value = str(p)
@@ -1477,6 +1602,7 @@ class TestForgeBlueprintWizard:
 
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
         w1._on_save(None)
         w2 = self._wizard()
         w2.roms_ref.value = "stale-value-from-a-prior-load"
@@ -1498,6 +1624,7 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         p = tmp_path / "forge_blueprint.yaml"
         w.save_path.value = str(p)
+        w._boundaries_touched = True  # not exercising boundary derivation here
         w._on_save(None)
         data = yaml.safe_load(p.read_text())
         data["model_settings"]["param"]["np_xi"] = "not-an-int"  # corrupt a value
@@ -1704,6 +1831,41 @@ class TestForgeBlueprintEngine:
             executor_factory=_FakeBuilder,
         )
         assert [c[0] for c in b.calls] == ["configure"]
+
+    def test_only_inputs_forces_configure_off_and_resolves_selection(self):
+        """A subset run must never reach configure_build -- persist() only lives
+        there, so this is what guarantees an only_inputs run can't clobber an
+        existing complete blueprint from a prior full run.
+        """
+        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+
+        b = process_forge_blueprint(
+            self._cfg(),
+            only_inputs=["boundary", "bry"],  # dupe alias -> single resolved key
+            executor_factory=_FakeBuilder,
+        )
+        assert [c[0] for c in b.calls] == ["ensure", "generate"]
+        gen = dict(b.calls[1][1])
+        assert gen["only"] == {"forcing.boundary"}
+
+    def test_only_inputs_wins_even_if_configure_true(self):
+        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+
+        b = process_forge_blueprint(
+            self._cfg(),
+            configure=True,
+            only_inputs=["grid"],
+            executor_factory=_FakeBuilder,
+        )
+        assert "configure" not in [c[0] for c in b.calls]
+
+    def test_only_inputs_unknown_name_fails_fast_before_any_call(self):
+        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+
+        with pytest.raises(ValueError, match="bogus"):
+            process_forge_blueprint(
+                self._cfg(), only_inputs=["bogus"], executor_factory=_FakeBuilder
+            )
 
     def test_executor_must_implement_interface(self):
         from cstar_forge.forge.forge_blueprint_engine import (
@@ -1980,6 +2142,51 @@ class TestSaveModifiedPiecesToCatalog:
         assert wiz._forcing_seed == before_forcing_seed
         assert wiz.model_dd.value == before_model_dd
         assert wiz.output_dd.value == before_output_dd
+
+    def test_save_domain_piece_persists_v_sponge_when_touched(self, isolated_catalog):
+        """v_sponge is a first-class domain property (Domain-derived
+        properties): touching it and saving the domain must persist it into
+        Domain.yaml, and a fresh wizard selecting that saved domain must
+        restore both the value and the touched state -- so it doesn't
+        silently re-derive and drift on the next grid edit.
+        """
+        wiz = self._wizard(isolated_catalog)
+        wiz.v_sponge.value = 4242.0
+        assert wiz._v_sponge_touched is True
+
+        wiz.save_domain_name.value = "my-domain-vsponge"
+        wiz._on_save_domain(None)
+
+        assert "my-domain-vsponge" in isolated_catalog.domain_names
+        saved = isolated_catalog.domain_data("my-domain-vsponge")
+        assert saved.get("v_sponge") == 4242.0
+
+        wiz2 = self._wizard(isolated_catalog)
+        wiz2.domain_dd.value = "my-domain-vsponge"
+        assert wiz2.v_sponge.value == 4242.0
+        assert wiz2._v_sponge_touched is True
+        assert wiz2.config.domain.v_sponge == 4242.0
+
+    def test_save_domain_piece_omits_v_sponge_when_untouched(self, isolated_catalog):
+        """An untouched v_sponge is deliberately omitted from a saved
+        DomainSpec so it re-derives fresh from the grid on next load, instead
+        of freezing a resolver default that was never a real user choice.
+        """
+        wiz = self._wizard(isolated_catalog)
+        assert wiz._v_sponge_touched is False
+
+        wiz.save_domain_name.value = "my-domain-no-vsponge"
+        wiz._on_save_domain(None)
+
+        saved = isolated_catalog.domain_data("my-domain-no-vsponge")
+        assert "v_sponge" not in saved
+
+        wiz2 = self._wizard(isolated_catalog)
+        wiz2.domain_dd.value = "my-domain-no-vsponge"
+        assert wiz2._v_sponge_touched is False
+        # re-derives live from the (identical) grid -- same value, but arrived
+        # at by fresh derivation, not a frozen saved number.
+        assert wiz2.v_sponge.value == wiz.v_sponge.value
 
     def test_invalid_name_refuses_without_writing(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)

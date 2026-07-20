@@ -749,6 +749,7 @@ def test_on_run_guards_on_invalid_config(monkeypatch):
     import asyncio
 
     wiz = ForgeBlueprintWizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
     wiz.config = None
 
     def _boom(*a, **kw):
@@ -799,6 +800,7 @@ def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_p
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
 
     captured_cmd = {}
 
@@ -829,6 +831,7 @@ def test_on_run_reports_nonzero_exit_code(monkeypatch, tmp_path):
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
     wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
 
     async def _fake_create_subprocess_exec(*args, **kwargs):
         return _FakeProcess([b"uh oh\n"], returncode=1)

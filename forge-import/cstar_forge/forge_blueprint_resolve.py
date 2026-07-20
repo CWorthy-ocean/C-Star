@@ -346,6 +346,7 @@ def build_forge_blueprint(
     run_time_overrides: dict[str, Any] | None = None,
     compile_time_overrides: dict[str, Any] | None = None,
     dt: float | None = None,
+    v_sponge: float | None = None,
     grid: Any = None,
     templates_repo: CodeRepo | None = None,
     composition: Composition | None = None,
@@ -386,6 +387,14 @@ def build_forge_blueprint(
 
     ``name`` is the blueprint's canonical name (``identity.name``); if omitted, this
     computes and sanitizes the default (``{model_name}_{grid_name}_{n_procs}procs``).
+
+    ``v_sponge`` is a domain-owned numeric (mirrors ``dt``'s pattern): if ``None``
+    (the default), it is derived from grid spacing via
+    ``cstar_forge.forge.util.compute_v_sponge_from_grid``; pass an explicit value
+    (e.g. a value restored from a saved DomainSpec) to use it verbatim instead.
+    The resolver is the sole writer of both ``domain.v_sponge`` and the identical
+    ``model_settings["v_sponge"]["v_sponge"]`` leaf -- they are always written
+    together and must never diverge.
     """
     if cdr_forcing_yaml is not None:
         cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
@@ -418,7 +427,6 @@ def build_forge_blueprint(
     nx = grid_kwargs["nx"]
     ny = grid_kwargs["ny"]
     nvert = grid_kwargs["N"]
-    size_x = grid_kwargs["size_x"]
     npx = partitioning["n_procs_x"]
     npy = partitioning["n_procs_y"]
 
@@ -427,8 +435,10 @@ def build_forge_blueprint(
         dt = _compute_dt_from_cfl(grid_kwargs, grid)
     n_days = (end_date - start_date).days
     ntimes = round(n_days * 24 * 3600 / dt)
-    # v_sponge default = grid spacing (m) / 10  (== cstar_forge.forge.util.compute_v_sponge_from_grid)
-    v_sponge = (size_x / nx) * 1000.0 / 10.0
+    # v_sponge default = grid spacing (m) / 10 -- a caller (e.g. the wizard, restoring
+    # a user override saved into a DomainSpec) may pass an explicit value instead.
+    if v_sponge is None:
+        v_sponge = _compute_v_sponge_default(grid_kwargs)
 
     # ----- flat model_settings ----------------------------------------------
     settings: dict[str, Any] = copy.deepcopy(model.get("model_settings", {}) or {})
@@ -625,6 +635,12 @@ def build_forge_blueprint(
             grid_kwargs_parent=grid_kwargs_parent,
             metadata_child=metadata_child,
             nesting_include_pressure_fluxes=nesting_include_pressure_fluxes,
+            # Read back from ``settings`` (not the local ``v_sponge``) so a
+            # ``run_time_overrides={"v_sponge": ...}`` caller (the generic override
+            # mechanism, orthogonal to the ``v_sponge=`` param) can't desync this
+            # field from ``model_settings["v_sponge"]["v_sponge"]`` -- both must
+            # always agree.
+            v_sponge=settings["v_sponge"]["v_sponge"],
         ),
         forcing=sources,
         # Host-independent source-dataset keys to prepare (forcing/IC sources + topography),
@@ -832,6 +848,22 @@ def _build_code(
         templates_compile_time=_template("compile_time"),
         templates_run_time=_template("run_time"),
     )
+
+
+def _compute_v_sponge_default(grid_kwargs: dict[str, Any]) -> float:
+    """Lazily compute the default sponge viscosity from grid spacing (no grid build
+    needed -- pure arithmetic on ``nx``/``size_x``). Mirrors ``_compute_dt_from_cfl``'s
+    lazy-import pattern to keep this module dependency-light when unused.
+    """
+    try:
+        from cstar_forge.forge.util import compute_v_sponge_from_grid
+    except Exception as exc:  # pragma: no cover
+        raise RuntimeError(
+            "v_sponge was not provided and could not be computed: importing "
+            "cstar_forge.forge.util failed. Pass v_sponge= explicitly to keep "
+            f"Phase 1 dependency-light. ({exc})"
+        ) from exc
+    return compute_v_sponge_from_grid(grid_kwargs["size_x"], grid_kwargs["nx"])
 
 
 def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:

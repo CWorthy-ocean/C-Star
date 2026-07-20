@@ -668,6 +668,11 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
     ),
     "param": frozenset({"llm", "mmm", "n", "np_xi", "np_eta"}),
     "time_stepping": frozenset({"dt"}),
+    # v_sponge is a first-class domain property (self.v_sponge, in "Domain-derived
+    # properties") resolved via build_forge_blueprint's own v_sponge= param, not
+    # the generic overrides layer -- excluding it here keeps a loaded blueprint's
+    # domain.v_sponge from being reconstructed as a phantom accordion override.
+    "v_sponge": frozenset({"v_sponge"}),
 }
 
 
@@ -704,7 +709,10 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "vertical_mixing",
             "tracer_diff2",
             "bottom_drag",
-            "v_sponge",
+            # v_sponge is deliberately absent: it's a first-class domain property
+            # with its own dedicated widget in "Domain-derived properties"
+            # (self.v_sponge), not a generic model-settings override -- see
+            # _ACCORDION_EXCLUDED_FIELDS.
             "sponge_tune",
             "gamma2",
             "ubind",
@@ -1623,6 +1631,26 @@ class ForgeBlueprintWizard:
             )
             for d in ("north", "south", "east", "west")
         }
+        # --- domain-derived properties: v_sponge + (the above) open boundaries.
+        # Both auto-derive from the grid unless touched by a manual edit or
+        # restored from a saved DomainSpec -- see _on_derive_domain_properties /
+        # _v_sponge_touched / _boundaries_touched / _boundaries_derived.
+        self.v_sponge = W.FloatText(
+            value=0.0,
+            description="v_sponge:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px"),
+            tooltip="Sponge-layer viscosity. Auto-derived from grid spacing "
+            "(spacing / 10) unless you edit it or it was saved into a DomainSpec.",
+        )
+        self.derive_btn = W.Button(
+            description="Derive from grid",
+            icon="refresh",
+            layout=W.Layout(width="160px"),
+            tooltip="Build the grid and set any untouched v_sponge/open-boundary "
+            "values from it (sponge = spacing/10; boundaries from the land mask).",
+        )
+        self.derive_status = W.HTML("")
         self.npx = W.IntText(
             value=1,
             description="n_procs_x:",
@@ -1909,6 +1937,17 @@ class ForgeBlueprintWizard:
         # compared in _rebuild() to detect a deviation (composition.domain.modified).
         # None means no catalog domain has been picked yet (or domain_dd == "<custom>").
         self._domain_seed: dict[str, Any] | None = None
+        # Domain-derived properties (v_sponge, open boundaries): "touched" means a
+        # manual edit (or a value restored from a loaded blueprint/DomainSpec) has
+        # made this the user's authoritative value -- nothing auto-overwrites it
+        # again. v_sponge is cheap (pure arithmetic on grid spacing) and is kept
+        # live-derived in _rebuild() when untouched, so it needs no separate
+        # "derived" flag. Boundaries need a grid build (mask-based), so
+        # _boundaries_derived tracks whether that's happened since the last
+        # grid-affecting edit -- see _on_grid_kwarg_change/_on_derive_domain_properties.
+        self._v_sponge_touched = False
+        self._boundaries_touched = False
+        self._boundaries_derived = False
 
         self.derived = W.HTML("")
         self.validation = W.HTML("")
@@ -2036,6 +2075,7 @@ class ForgeBlueprintWizard:
         self.parent_plot_btn.on_click(self._on_parent_plot)
         self.parent_enable.observe(self._on_parent_toggle, names="value")
         self.output_dd.observe(self._on_output_spec, names="value")
+        self.derive_btn.on_click(self._on_derive_domain_properties)
         watched = [
             self.grid_name,
             self.scoord_chk,
@@ -2049,22 +2089,33 @@ class ForgeBlueprintWizard:
             self.model_ref_date,
             self.description,
             self.dt,
-            self.hmin,
-            self.close_narrow_chk,
-            self.mask_shapefile,
             self.topo_source,
             self.topo_path,
             self.nest_enable,
             self.nest_period,
             self.nest_pressure_fluxes,
             self.parent_enable,
-            *self.grid_w.values(),
-            *self.bnd.values(),
             *self.child_w.values(),
             *self.parent_w.values(),
         ]
         for w in watched:
             w.observe(self._rebuild, names="value")
+        # Grid-geometry/mask-affecting widgets: a change invalidates any prior
+        # mask-derived boundaries (a stale mask must never be silently reused),
+        # in addition to the plain rebuild every other watched widget gets.
+        for w in (
+            *self.grid_w.values(),
+            self.hmin,
+            self.close_narrow_chk,
+            self.mask_shapefile,
+        ):
+            w.observe(self._on_grid_kwarg_change, names="value")
+        # Domain-derived properties: a manual edit "touches" the property so
+        # nothing auto-overwrites it again (mirrors _on_editor_edit for the
+        # advanced-settings accordion).
+        for w in self.bnd.values():
+            w.observe(self._on_boundary_edit, names="value")
+        self.v_sponge.observe(self._on_v_sponge_edit, names="value")
 
     def _on_name_change(self, _change):
         # A programmatic backfill (see _rebuild) happens under _suspend() -- only a
@@ -2078,6 +2129,34 @@ class ForgeBlueprintWizard:
         if getattr(self, "_suspended", False):
             return
         self._save_path_touched = True
+
+    def _on_grid_kwarg_change(self, _change):
+        # A geometry/mask-affecting edit invalidates any prior mask-derived
+        # boundaries -- a stale mask must never be silently reused. Only the
+        # "derived" freshness flag resets; an already-touched (manually set or
+        # loaded) value is never overwritten by this. Clearing derive_status lets
+        # _rebuild's "not derived yet" warning reappear instead of leaving a
+        # stale "✓ derived" message visible against the now-invalidated mask.
+        if not getattr(self, "_suspended", False):
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+        self._rebuild()
+
+    def _on_boundary_edit(self, _change):
+        # A programmatic backfill (see _apply_grid_derived_properties, _on_domain,
+        # _populate_from) happens under _suspend() -- only a real user edit should
+        # "touch" the property against further auto-derivation.
+        if getattr(self, "_suspended", False):
+            return
+        self._boundaries_touched = True
+        self.derive_status.value = ""
+        self._rebuild()
+
+    def _on_v_sponge_edit(self, _change):
+        if getattr(self, "_suspended", False):
+            return
+        self._v_sponge_touched = True
+        self._rebuild()
 
     def _on_model_change(self, _change):
         # a different model has different defaults -> existing overrides no longer apply.
@@ -2283,7 +2362,17 @@ class ForgeBlueprintWizard:
             elif piece == "domain":
                 d = self.catalog.domain_data(new_name)
                 kw["grid_kwargs"] = d.get("grid_kwargs", {})
-                kw["open_boundaries"] = d.get("open_boundaries", {})
+                # open_boundaries/v_sponge: only override from the saved file
+                # when it actually carries them (touched at save time). Absence
+                # means "derive fresh" -- exactly what _on_domain would leave
+                # untouched on a real reload -- so kw already holds the right
+                # comparison value from _gather() (the live checkbox state /
+                # None-to-derive respectively); forcing a grid build here just
+                # to verify an intentionally-omitted value would be pointless.
+                if d.get("open_boundaries") is not None:
+                    kw["open_boundaries"] = d["open_boundaries"]
+                if d.get("v_sponge") is not None:
+                    kw["v_sponge"] = d["v_sponge"]
                 kw["partitioning"] = d.get("partitioning", {})
                 kw["topography_source"] = d.get("topography_source", "ETOPO5")
                 kw.pop("topography_path", None)
@@ -2398,8 +2487,29 @@ class ForgeBlueprintWizard:
                 if k in gk:
                     w.value = gk[k]
             self.scoord_chk.value = any(k in gk for k in _SCOORD)
-            for d, w in self.bnd.items():
-                w.value = bool((data.get("open_boundaries", {}) or {}).get(d, False))
+            # Domain-derived properties: a picked catalog Domain replaces the
+            # current grid entirely, so reset touched/derived state first, then
+            # restore only what the saved Domain.yaml actually carries --
+            # absence means "derive fresh from the grid" (click "Derive from
+            # grid", or the Save/Run safety net), mirroring
+            # _domain_piece_data's save-only-when-touched symmetry. Leaves the
+            # boundary checkboxes untouched (rather than resetting to False)
+            # when absent, since there's nothing to derive from without a grid
+            # build -- the derive_status warning surfaces that instead.
+            self._v_sponge_touched = False
+            self._boundaries_touched = False
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+            saved_v_sponge = data.get("v_sponge")
+            if saved_v_sponge is not None:
+                self.v_sponge.value = float(saved_v_sponge)
+                self._v_sponge_touched = True
+            saved_bnd = data.get("open_boundaries")
+            if saved_bnd is not None:
+                for d, w in self.bnd.items():
+                    if d in saved_bnd:
+                        w.value = bool(saved_bnd[d])
+                self._boundaries_touched = True
             part = data.get("partitioning", {}) or {}
             self.npx.value = int(part.get("n_procs_x", self.npx.value))
             self.npy.value = int(part.get("n_procs_y", self.npy.value))
@@ -2433,6 +2543,13 @@ class ForgeBlueprintWizard:
                 for k, w in self.parent_w.items():
                     if k in parent:
                         w.value = parent[k]
+        # v_sponge (unlike every other snapshot field) isn't finalized by the
+        # widget writes above when untouched -- _rebuild() itself live-derives
+        # it from the new grid. Settle that first, then snapshot, then rebuild
+        # again so domain_modified is computed against the now-correct seed
+        # (otherwise the seed would capture the *previous* domain's v_sponge,
+        # spuriously flagging modified=True immediately after picking).
+        self._rebuild()
         self._domain_seed = self._domain_snapshot()
         self._rebuild()
         self._on_plot(None)
@@ -2447,6 +2564,7 @@ class ForgeBlueprintWizard:
             "grid_w": {k: w.value for k, w in self.grid_w.items()},
             "scoord_chk": self.scoord_chk.value,
             "bnd": {d: w.value for d, w in self.bnd.items()},
+            "v_sponge": self.v_sponge.value,
             "npx": self.npx.value,
             "npy": self.npy.value,
             "topo_source": self.topo_source.value,
@@ -2474,10 +2592,19 @@ class ForgeBlueprintWizard:
             "start_time": self.start.value.isoformat(),
             "end_time": self.end.value.isoformat(),
             "grid_kwargs": kw["grid_kwargs"],
-            "open_boundaries": kw["open_boundaries"],
             "partitioning": kw["partitioning"],
             "topography_source": self.topo_source.value,
         }
+        # v_sponge/open_boundaries: included only when the user has touched
+        # them (a manual edit or a value restored from a prior save/load) --
+        # otherwise omitted so a reload re-derives fresh from the grid (see
+        # _on_domain's symmetric restore-only-if-present, and
+        # _ensure_boundaries_derived for the pre-save safety net that fills
+        # kw["open_boundaries"] with a real mask-derived value first).
+        if self._v_sponge_touched:
+            data["v_sponge"] = kw["v_sponge"]
+        if self._boundaries_touched:
+            data["open_boundaries"] = kw["open_boundaries"]
         if self.topo_path.value.strip():
             data["topography_path"] = self.topo_path.value.strip()
         for k in (
@@ -2621,6 +2748,22 @@ class ForgeBlueprintWizard:
             self.scoord_chk.value = any(k in gk for k in _SCOORD)
             for d, w in self.bnd.items():
                 w.value = bool(getattr(cfg.domain.open_boundaries, d))
+            # A loaded file's boundaries/v_sponge are a deliberate, already-resolved
+            # choice (mirrors _name_touched above), not a default to keep
+            # auto-deriving over -- freeze both as touched. v_sponge falls back to
+            # the model_settings leaf for a pre-domain.v_sponge file (backward
+            # compat: older blueprints only ever wrote it there).
+            self._boundaries_touched = True
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+            loaded_v_sponge = cfg.domain.v_sponge
+            if loaded_v_sponge is None:
+                loaded_v_sponge = (cfg.model_settings.get("v_sponge") or {}).get(
+                    "v_sponge"
+                )
+            if loaded_v_sponge is not None:
+                self.v_sponge.value = float(loaded_v_sponge)
+            self._v_sponge_touched = loaded_v_sponge is not None
             self.npx.value = cfg.domain.partitioning.n_procs_x
             self.npy.value = cfg.domain.partitioning.n_procs_y
             self.use_pio_chk.value = bool(
@@ -2736,6 +2879,10 @@ class ForgeBlueprintWizard:
             # default -- reusing it here would freeze it instead of tracking inputs).
             name=(self.name.value.strip() or None) if self._name_touched else None,
             dt=float(self.dt.value),
+            # Untouched: pass None so the resolver derives a fresh default from
+            # the current grid (see _rebuild, which mirrors it back into the
+            # widget for live display); touched: the user's/loaded value wins.
+            v_sponge=float(self.v_sponge.value) if self._v_sponge_touched else None,
         )
         if self.topo_path.value.strip():  # blank = derive default topography path
             kw["topography_path"] = self.topo_path.value.strip()
@@ -2819,6 +2966,14 @@ class ForgeBlueprintWizard:
                 print(f"{type(exc).__name__}: {exc}")
             return
 
+        # v_sponge is cheap (pure arithmetic on grid spacing, no grid build) --
+        # keep it live-derived in the widget whenever untouched, by reading back
+        # what the resolver just computed. Under _suspend() so this programmatic
+        # write doesn't itself flip _v_sponge_touched (see _on_v_sponge_edit).
+        if not self._v_sponge_touched:
+            with self._suspend():
+                self.v_sponge.value = float(cfg.domain.v_sponge)
+
         # Advanced settings editor: every section is editable. The resolver composes
         # a baseline from the pieces; the user's manual edits are a sparse overrides
         # layer applied on top (effective = composed ⊕ overrides). The editor is
@@ -2887,6 +3042,22 @@ class ForgeBlueprintWizard:
                 if not self._save_path_touched:
                     self.save_path.value = f"{cfg.name}.forge_blueprint.yaml"
         self.download_link.value = self._download_html(cfg)
+        # Surface (never silently ship) provisional open-boundary defaults: the
+        # checkboxes currently reflect whatever's live, but that's only a real
+        # mask-derived value once _boundaries_derived is True or the user has
+        # touched them -- see _ensure_boundaries_derived for the Save/Run
+        # guarantee. Only fills a *blank* status -- an actual derive/error
+        # message (set by _on_derive_domain_properties) stays visible instead
+        # of being clobbered by this generic warning on every rebuild.
+        if (
+            not self._boundaries_touched
+            and not self._boundaries_derived
+            and not self.derive_status.value
+        ):
+            self.derive_status.value = (
+                "<span style='color:#b58900'>⚠ boundaries not derived yet — "
+                'click "Derive from grid" (Save/Run derive automatically)</span>'
+            )
         problems = validate_run_time_sections(cfg.model_settings)
         if problems:
             self.validation.value = (
@@ -2935,6 +3106,100 @@ class ForgeBlueprintWizard:
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
 
+    def _build_grid_from_widgets(self) -> Any:
+        """Build a ``roms_tools.Grid`` from the current (main-domain) grid kwargs.
+
+        Shared by the plot button, "Derive from grid", and the export-time
+        safety net -- the only three places that pay the cost of an actual
+        grid build (the live preview / ``_rebuild`` never does, so typing in
+        the grid fields stays instant).
+        """
+        from roms_tools import Grid
+
+        gk: dict[str, Any] = {}
+        for k in _GRID_INT:
+            gk[k] = int(self.grid_w[k].value)
+        for k in _GRID_FLOAT:
+            gk[k] = float(self.grid_w[k].value)
+        if self.scoord_chk.value:
+            for k in _SCOORD:
+                gk[k] = float(self.grid_w[k].value)
+        if self.hmin.value != 5.0:
+            gk["hmin"] = float(self.hmin.value)
+        if self.close_narrow_chk.value:
+            gk["close_narrow_channels"] = True
+        if self.mask_shapefile.value.strip():
+            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        return Grid(**gk)
+
+    def _apply_grid_derived_properties(self, grid: Any) -> None:
+        """Set any untouched v_sponge/open-boundary values from a built grid.
+
+        Boundaries come from roms-tools' own ``check_and_set_boundaries`` (the
+        same logic ``rt.Grid``/downstream tools use to infer active edges from
+        the land mask); v_sponge from the existing grid-spacing formula. Only
+        overwrites properties the user hasn't touched -- see the module-level
+        touched/derived state-machine notes on ``_v_sponge_touched`` etc.
+        """
+        from roms_tools.setup.utils import check_and_set_boundaries
+
+        from cstar_forge.forge.util import compute_v_sponge_from_grid
+
+        mask = grid.ds.get("mask_rho")
+        if mask is None:
+            raise ValueError(
+                "grid.ds has no 'mask_rho' -- cannot derive open boundaries from it"
+            )
+        boundaries = check_and_set_boundaries(None, mask)
+        with self._suspend():
+            if not self._boundaries_touched:
+                for d, w in self.bnd.items():
+                    if d in boundaries:
+                        w.value = bool(boundaries[d])
+            if not self._v_sponge_touched:
+                self.v_sponge.value = compute_v_sponge_from_grid(grid.size_x, grid.nx)
+        self._boundaries_derived = True
+
+    def _on_derive_domain_properties(self, _):
+        """Handle the "Derive from grid" button: build the grid once and
+        refresh any untouched v_sponge/open-boundary values from it.
+        """
+        self.derive_status.value = "<i>building grid…</i>"
+        try:
+            grid = self._build_grid_from_widgets()
+            self._apply_grid_derived_properties(grid)
+            self.derive_status.value = (
+                "<span style='color:#080'>✓ derived from grid</span>"
+            )
+        except Exception as exc:
+            self.derive_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+        self._rebuild()
+
+    def _ensure_boundaries_derived(self) -> bool:
+        """Export-time safety net for Save/Save-domain/Run: if boundaries are
+        untouched and have never been derived against the current grid, force
+        one grid build now so those actions can never ship the provisional
+        checkbox defaults (east+north) silently.
+
+        Returns True if boundaries are known-good (touched, already derived, or
+        just successfully derived here); False if an explicit derive was needed
+        and failed (see ``derive_status`` for the error) -- callers MUST abort
+        rather than proceed and silently persist the provisional defaults.
+
+        The passive browser download link (a plain data-URI anchor, regenerated
+        on every ``_rebuild``) has no click-time Python hook to apply this to --
+        forcing a grid build on every edit would reintroduce the UI-stall this
+        design explicitly avoids. Its freshness is only as good as the last
+        explicit derive/rebuild; ``derive_status`` surfaces that instead of
+        shipping it silently.
+        """
+        if self._boundaries_touched or self._boundaries_derived:
+            return True
+        self._on_derive_domain_properties(None)
+        return self._boundaries_derived
+
     def _on_plot(self, _):
         """Build a roms_tools.Grid from the current grid kwargs and render it."""
         self.plot_status.value = "<i>building grid…</i>"
@@ -2942,26 +3207,10 @@ class ForgeBlueprintWizard:
             import io
 
             import matplotlib.pyplot as plt
-            from roms_tools import Grid
-
-            gk: dict[str, Any] = {}
-            for k in _GRID_INT:
-                gk[k] = int(self.grid_w[k].value)
-            for k in _GRID_FLOAT:
-                gk[k] = float(self.grid_w[k].value)
-            if self.scoord_chk.value:
-                for k in _SCOORD:
-                    gk[k] = float(self.grid_w[k].value)
-            if self.hmin.value != 5.0:
-                gk["hmin"] = float(self.hmin.value)
-            if self.close_narrow_chk.value:
-                gk["close_narrow_channels"] = True
-            if self.mask_shapefile.value.strip():
-                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
 
             plt.ioff()
             try:
-                grid = Grid(**gk)
+                grid = self._build_grid_from_widgets()
                 grid.plot()
                 fig = plt.gcf()
                 buf = io.BytesIO()
@@ -3101,6 +3350,14 @@ class ForgeBlueprintWizard:
             )
 
     def _on_save(self, _):
+        if not self._ensure_boundaries_derived():
+            self.save_status.value = (
+                "<span style='color:#b00'>Save aborted — open boundaries could "
+                "not be derived from the grid (see the Domain-derived properties "
+                "status above). A save must never ship provisional defaults; fix "
+                "the grid or set boundaries manually, then retry.</span>"
+            )
+            return
         if self.config is None:
             self.save_status.value = (
                 "<span style='color:#b00'>Nothing to save — config is invalid.</span>"
@@ -3233,6 +3490,13 @@ class ForgeBlueprintWizard:
                 "<span style='color:#b00'>Config invalid — nothing to save.</span>"
             )
             return
+        # Unlike _on_save/_on_run (which emit concrete boundaries into the
+        # blueprint right now), an untouched open_boundaries is deliberately
+        # OMITTED from a saved DomainSpec (see _domain_piece_data) so it can
+        # re-derive fresh on next load -- there's nothing here for a failed
+        # derive to protect, and forcing one would block a legitimate
+        # checkpoint-save of a domain whose grid can't build yet (e.g.
+        # topography not sorted out). No _ensure_boundaries_derived() call.
         try:
             self.catalog.register_domain_from_dict(name, self._domain_piece_data())
         except FileExistsError:
@@ -3320,6 +3584,14 @@ class ForgeBlueprintWizard:
         return [sys.executable, "-m", "cstar_forge.run", blueprint_path]
 
     def _on_run(self, _):
+        if not self._ensure_boundaries_derived():
+            self.run_status.value = (
+                "<span style='color:#b00'>Run aborted — open boundaries could "
+                "not be derived from the grid (see the Domain-derived properties "
+                "status above). Fix the grid or set boundaries manually, then "
+                "retry.</span>"
+            )
+            return
         if self.config is None:
             self.run_status.value = (
                 "<span style='color:#b00'>Nothing to run — config is invalid.</span>"
@@ -3436,7 +3708,11 @@ class ForgeBlueprintWizard:
                         ]
                     ),
                 ),
-                section("Open boundaries", W.HBox(list(self.bnd.values()))),
+                section(
+                    "Domain-derived properties",
+                    W.HBox([self.v_sponge, self.derive_btn, self.derive_status]),
+                    section("Open boundaries", W.HBox(list(self.bnd.values()))),
+                ),
                 section(
                     "Nesting (optional)",
                     W.HBox(

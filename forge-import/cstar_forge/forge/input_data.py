@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -160,6 +160,52 @@ class InputStep:
 
 
 INPUT_REGISTRY: dict[str, InputStep] = {}
+
+# User-facing aliases for `--only-inputs` / `only=` selection, mapped onto the
+# canonical INPUT_REGISTRY keys. Category-level only (no per-item selection).
+_INPUT_SELECTION_ALIASES: dict[str, str] = {
+    "grid": "grid",
+    "initial_conditions": "initial_conditions",
+    "ic": "initial_conditions",
+    "initial": "initial_conditions",
+    "surface": "forcing.surface",
+    "forcing.surface": "forcing.surface",
+    "boundary": "forcing.boundary",
+    "bry": "forcing.boundary",
+    "forcing.boundary": "forcing.boundary",
+    "tidal": "forcing.tidal",
+    "tides": "forcing.tidal",
+    "forcing.tidal": "forcing.tidal",
+    "river": "forcing.river",
+    "rivers": "forcing.river",
+    "forcing.river": "forcing.river",
+    "cdr": "cdr_forcing",
+    "cdr_forcing": "cdr_forcing",
+}
+
+
+def resolve_input_selection(names: Iterable[str]) -> set[str]:
+    """
+    Normalize a user-supplied ``--only-inputs``/``only=`` selection to the
+    canonical ``INPUT_REGISTRY`` key set.
+
+    Lowercases each name and maps it through ``_INPUT_SELECTION_ALIASES``.
+    Raises ``ValueError`` listing the valid names if any token is unrecognized.
+    """
+    resolved: set[str] = set()
+    unknown: list[str] = []
+    for raw in names:
+        key = _INPUT_SELECTION_ALIASES.get(raw.strip().lower())
+        if key is None:
+            unknown.append(raw)
+        else:
+            resolved.add(key)
+    if unknown:
+        valid = sorted(set(_INPUT_SELECTION_ALIASES))
+        raise ValueError(
+            f"Unknown input selection {unknown!r}. Valid names: {', '.join(valid)}"
+        )
+    return resolved
 
 
 def register_input(name: str, order: int, label: str | None = None):
@@ -335,7 +381,11 @@ class RomsMarblInputData(InputData):
         return {} if self.netcdf_format == "NETCDF4" else {"format": self.netcdf_format}
 
     def generate_all(
-        self, clobber: bool = False, partition_files: bool = False, test: bool = False
+        self,
+        clobber: bool = False,
+        partition_files: bool = False,
+        test: bool = False,
+        only: set[str] | None = None,
     ):
         """
         Generate all ROMS input files for this grid using the registered
@@ -349,6 +399,12 @@ class RomsMarblInputData(InputData):
             If True, partition input files across tiles.
         test : bool, optional
             If True, truncate the loop after 2 iterations for testing purposes.
+        only : set[str], optional
+            Canonical ``INPUT_REGISTRY`` keys (see ``resolve_input_selection``) to
+            restrict generation to. The ``grid`` step always runs regardless (cheap,
+            and reused if already on disk), since every other step depends on the
+            in-memory grid object. When ``None`` (default), all registered steps in
+            ``input_list`` run as before.
         """
         self._clobber = clobber
         if not self._ensure_empty_or_clobber(clobber):
@@ -390,6 +446,11 @@ class RomsMarblInputData(InputData):
                 )
                 continue
             if test and step.name != "forcing.boundary":
+                continue
+            if only is not None and step.name != "grid" and step.name not in only:
+                print(
+                    f"\n⏭️  [{idx}/{total}] Skipping {step.label} (not in --only-inputs)."
+                )
                 continue
             print(f"\n▶️  [{idx}/{total}] {step.label}...")
             step.handler(self, key=step.name, **kwargs)

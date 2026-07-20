@@ -35,6 +35,7 @@ from cstar_forge.forge.input_data import (
     RomsMarblBlueprintInputData,
     RomsMarblInputData,
     register_input,
+    resolve_input_selection,
 )
 
 
@@ -430,6 +431,49 @@ class TestRegisterInput:
         finally:
             INPUT_REGISTRY.clear()
             INPUT_REGISTRY.update(original_registry)
+
+
+class TestResolveInputSelection:
+    """Tests for resolve_input_selection (the ``--only-inputs`` normalizer)."""
+
+    def test_canonical_names_pass_through(self):
+        assert resolve_input_selection(
+            ["grid", "initial_conditions", "cdr_forcing"]
+        ) == {
+            "grid",
+            "initial_conditions",
+            "cdr_forcing",
+        }
+
+    def test_aliases_map_to_canonical_registry_keys(self):
+        assert resolve_input_selection(["surface", "boundary", "tidal", "river"]) == {
+            "forcing.surface",
+            "forcing.boundary",
+            "forcing.tidal",
+            "forcing.river",
+        }
+        assert resolve_input_selection(["bry", "tides", "rivers", "ic", "cdr"]) == {
+            "forcing.boundary",
+            "forcing.tidal",
+            "forcing.river",
+            "initial_conditions",
+            "cdr_forcing",
+        }
+
+    def test_case_insensitive_and_deduplicates(self):
+        assert resolve_input_selection(["Boundary", "BOUNDARY", " bry "]) == {
+            "forcing.boundary"
+        }
+
+    def test_unknown_name_raises_with_valid_names_listed(self):
+        with pytest.raises(ValueError, match="bogus"):
+            resolve_input_selection(["boundary", "bogus"])
+
+        with pytest.raises(ValueError, match="boundary"):
+            resolve_input_selection(["bogus"])
+
+    def test_empty_selection_returns_empty_set(self):
+        assert resolve_input_selection([]) == set()
 
 
 class TestRomsMarblInputDataInitialization:
@@ -1421,6 +1465,87 @@ class TestRomsMarblInputDataGenerateAll:
         # and stop after 2 iterations
         # The exact behavior depends on the order of steps
         assert result is not None
+
+    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
+    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
+    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
+    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("xarray.combine_by_coords")
+    @patch("xarray.open_dataset")
+    def test_generate_all_only_restricts_to_selected_categories(
+        self,
+        mock_open_dataset,
+        mock_combine,
+        mock_boundary_class,
+        mock_ic_class,
+        mock_river_class,
+        mock_tidal_class,
+        mock_surface_class,
+        sample_roms_marbl_input_data,
+        tmp_path,
+    ):
+        """``only={"forcing.boundary"}`` runs grid + boundary only.
+
+        Grid always runs (every other input depends on the in-memory grid
+        object); every other requested category (initial_conditions, surface,
+        tidal, river) must be skipped -- proven here by asserting their
+        roms-tools classes are never constructed and their blueprint elements
+        stay empty, not just by checking a return value.
+        """
+        mock_grid_instance = MagicMock()
+
+        def grid_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return path
+
+        mock_grid_instance.save.side_effect = grid_save
+        mock_grid_instance.to_yaml = MagicMock()
+        mock_grid_instance.nx = 6
+        mock_grid_instance.ny = 2
+        mock_grid_instance.N = 3
+        mock_grid_instance.hc = 250.0
+        mock_grid_instance.theta_b = 2.0
+        mock_grid_instance.theta_s = 5.0
+        sample_roms_marbl_input_data.grid = mock_grid_instance
+
+        mock_boundary_instance = MagicMock()
+
+        def boundary_save(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            Path(path).touch()
+            return path
+
+        mock_boundary_instance.save.side_effect = boundary_save
+        mock_boundary_instance.to_yaml = MagicMock()
+        mock_boundary_class.return_value = mock_boundary_instance
+
+        mock_ds = xr.Dataset()
+        mock_open_dataset.return_value = mock_ds
+        mock_combine.return_value = mock_ds
+
+        elements, _settings_compile_time, _settings_run_time = (
+            sample_roms_marbl_input_data.generate_all(
+                clobber=True, only={"forcing.boundary"}
+            )
+        )
+
+        # Selected: grid ran (always does) and boundary ran.
+        mock_boundary_class.assert_called()
+        assert len(elements.grid.data) >= 1
+        assert len(elements.forcing.boundary.data) >= 1
+
+        # Not selected: skipped entirely, not merely reused -- their roms-tools
+        # constructors were never called and no Resources were appended.
+        mock_ic_class.assert_not_called()
+        mock_surface_class.assert_not_called()
+        mock_tidal_class.assert_not_called()
+        mock_river_class.assert_not_called()
+        assert elements.initial_conditions.data == []
+        assert elements.forcing.surface.data == []
+        assert elements.forcing.tidal.data == []
+        assert elements.forcing.river.data == []
 
     @patch("cstar_forge.forge.input_data.rt.Grid")
     @patch("cstar_forge.forge.input_data.rt.InitialConditions")

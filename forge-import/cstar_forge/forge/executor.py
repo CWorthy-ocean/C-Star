@@ -1201,6 +1201,7 @@ class ForgeExecutor(BaseModel):
         clobber: bool = False,
         use_dask: bool = True,
         test: bool = False,
+        only: set[str] | None = None,
     ) -> cstar_models.RomsMarblBlueprint:
         """
         Generate ROMS input files and update the in-memory blueprint in place.
@@ -1219,6 +1220,12 @@ class ForgeExecutor(BaseModel):
             Use dask for parallel computations. Default True.
         test : bool, optional
             Truncate the generation loop after 2 iterations (for unit tests).
+        only : set[str], optional
+            Canonical input-category keys (see
+            ``input_data.resolve_input_selection``) to restrict generation to.
+            The resulting in-memory blueprint/settings only reflect the generated
+            subset (plus grid, which always runs) -- callers doing a subset run
+            should not proceed to ``configure_build()``.
 
         Returns
         -------
@@ -1266,7 +1273,7 @@ class ForgeExecutor(BaseModel):
                 cdr_forcing=self.cdr_forcing,
                 use_dask=use_dask,
                 netcdf_format="NETCDF3_64BIT_DATA" if self._use_pio else "NETCDF4",
-            ).generate_all(clobber=clobber, test=test)
+            ).generate_all(clobber=clobber, test=test, only=only)
         )
 
         if roms_marbl_blueprint_elements is None:
