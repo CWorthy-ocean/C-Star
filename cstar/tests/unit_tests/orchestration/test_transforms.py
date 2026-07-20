@@ -731,8 +731,14 @@ def test_template_fill_combined_resolvers(
 
     Parammeters
     -----------
-    ovr_var : str
-        The name of the `Step` that will be used as the source.
+    use_var: str
+        The mock name of variable that will be resolved by the variable resolver.
+    use_placeholder : str
+        The mock name of a `Step` that will be resolved by the scoped resolver.
+    exp_resolved_var : str
+        The expected value after resolving the variable.
+    exp_resolved_ph : str
+        The expected value after resolving the placeholder.
     """
     variables = {"var1": "123", "var2": "XYZ", "var3": "PQR"}
     placeholders = {"ph1": "ABC", "ph2": "DEF", "ph3": "GHI"}
@@ -757,7 +763,7 @@ def test_template_fill_combined_resolvers(
     )
     (result,) = transform(step)
 
-    # confirm the variable resoler was applied
+    # confirm the variable resolver was applied
     assert result.blueprint_overrides["variable"] == exp_resolved_var
 
     # confirm the scoped resolver was applied
