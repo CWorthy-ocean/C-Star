@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.orchestration.models import KeyValueStore, Step, Workplan, WorkplanState
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 
 
@@ -1108,3 +1109,32 @@ def test_workplan_computeenv_set(
         plan.compute_environment = compute_env
 
     assert "compute_environment" in str(error)
+
+
+def test_liveworkplan_step_lookup(
+    gen_fake_steps: Callable[[int], Generator[Step, None, None]],
+) -> None:
+    """Verify __contains__ and __getitem__ work as expected.
+
+    Parameters
+    ----------
+    gen_fake_steps : Callable[[int], Generator[Step, None, None]]
+        A generator function to produce minimally valid test steps
+
+    """
+    steps = list(gen_fake_steps(3))
+    step_names = {s.name for s in steps}
+    wp = Workplan(
+        name="test-plan",
+        description="test-description",
+        steps=steps,
+    )
+
+    live_steps = [LiveStep.from_step(s) for s in steps]
+    live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+
+    for s in step_names:
+        # confirm __contains__
+        assert s in live_plan
+        # confirm __getitem__
+        assert live_plan[s].name == s

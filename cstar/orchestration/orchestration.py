@@ -329,6 +329,56 @@ class LiveStep(Step):
 class LiveWorkplan(Workplan):
     steps: Sequence[LiveStep]
 
+    _lookup: Mapping[str, LiveStep] | None = None
+
+    def _get_step_lookup(self) -> Mapping[str, LiveStep]:
+        """Build a mapping from step name to step for the steps
+        contained in the workplan.
+
+        Returns
+        -------
+        Mapping[str, LiveStep]
+        """
+        if self._lookup is None:
+            self._lookup = {s.name: s for s in self.steps}
+        return self._lookup
+
+    def __getitem__(self, step_name: str) -> LiveStep:
+        """Return the step with the given name.
+
+        Parameters
+        ----------
+        step_name : str
+            The name of the step to retrieve.
+
+        Returns
+        -------
+        LiveStep
+
+        Raises
+        ------
+        KeyError
+            If a step with the supplied name cannot be found.
+        """
+        lookup = self._get_step_lookup()
+        return lookup[step_name]
+
+    def __contains__(self, step_name: str) -> bool:
+        """Return `True` then a step with the `Workplan` contains a step with the
+        supplied name.
+
+        Parameters
+        ----------
+        step_name : str
+            The name of the step.
+
+        Returns
+        -------
+        bool
+        """
+        lookup = self._get_step_lookup()
+        return step_name in lookup
+
 
 class Task(BaseModel, t.Generic[_THandle]):
     """A task represents a live-execution of a step."""
