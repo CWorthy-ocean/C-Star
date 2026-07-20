@@ -346,8 +346,7 @@ class TemplateFillTransform:
         Iterable[LiveStep]
             A single-element iterable containing the updated step.
         """
-        filled = self._fill(step)
-        return (LiveStep.from_step(filled),)
+        return (LiveStep.from_step(self._fill(step)),)
 
     @property
     def variable_resolver(self) -> Callable[[str], str] | None:
