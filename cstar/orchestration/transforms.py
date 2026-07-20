@@ -189,17 +189,11 @@ def fsm_resolver(
     scope : str
         The scope to be resolved (which attribute on the FSM instance).
     """
-    fsm_attrs = [
-        p
-        for p in dir(next(iter(fsm_map.values())))
-        if not p.startswith("_") and p.endswith("_dir")
-    ]
     fsm = fsm_map.get(step_name, None)
     if not fsm:
         msg = f"Unable to resolve {scope!r} for unknown step {step_name!r}"
         raise KeyError(msg)
 
-    fsm_attrs.append("root")
     if value := getattr(fsm, scope, None):
         return str(value)
 
@@ -352,7 +346,8 @@ class TemplateFillTransform:
         Iterable[LiveStep]
             A single-element iterable containing the updated step.
         """
-        return (LiveStep.from_step(self._fill(step)),)
+        filled = self._fill(step)
+        return (LiveStep.from_step(filled),)
 
     @property
     def variable_resolver(self) -> Callable[[str], str] | None:
