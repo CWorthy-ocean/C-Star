@@ -346,7 +346,9 @@ async def prepare_workplan(
         if named_config.error:
             raise ValueError(named_config.error)
 
-        fill_transform = TemplateFillTransform(variable_resolver=named_config.resolve)
+        fill_transform = TemplateFillTransform(
+            variable_resolver=lambda name: named_config[name]
+        )
 
         persist_vars = WorkplanTransformer.derived_path(
             wp_path, run_root_dir, suffix="", extension=".vars"
