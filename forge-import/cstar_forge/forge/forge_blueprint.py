@@ -417,6 +417,12 @@ class Domain(_Section):
     (``cstar_forge.forge.util.compute_v_sponge_from_grid``) when not explicitly
     supplied, and is the sole writer of both this field and the identical
     ``model_settings["v_sponge"]["v_sponge"]`` leaf -- the two must never diverge."""
+    dt: float | None = None
+    """Baroclinic timestep (seconds). A first-class, domain-owned property (mirrors
+    ``v_sponge``): the resolver derives it from the CFL criterion
+    (``cstar_forge.forge.util``, via a grid build) when not explicitly supplied, and
+    is the sole writer of both this field and the identical
+    ``model_settings["time_stepping"]["dt"]`` leaf -- the two must never diverge."""
 
     @property
     def is_child(self) -> bool:

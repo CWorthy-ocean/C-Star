@@ -388,13 +388,15 @@ def build_forge_blueprint(
     ``name`` is the blueprint's canonical name (``identity.name``); if omitted, this
     computes and sanitizes the default (``{model_name}_{grid_name}_{n_procs}procs``).
 
-    ``v_sponge`` is a domain-owned numeric (mirrors ``dt``'s pattern): if ``None``
-    (the default), it is derived from grid spacing via
-    ``cstar_forge.forge.util.compute_v_sponge_from_grid``; pass an explicit value
-    (e.g. a value restored from a saved DomainSpec) to use it verbatim instead.
-    The resolver is the sole writer of both ``domain.v_sponge`` and the identical
-    ``model_settings["v_sponge"]["v_sponge"]`` leaf -- they are always written
-    together and must never diverge.
+    ``v_sponge`` and ``dt`` are both domain-owned numerics with the same pattern:
+    if ``None`` (the default), each is derived from the grid -- ``v_sponge`` from
+    grid spacing via ``cstar_forge.forge.util.compute_v_sponge_from_grid``, ``dt``
+    from the CFL criterion via ``_compute_dt_from_cfl`` (builds a grid); pass an
+    explicit value (e.g. one restored from a saved DomainSpec) to use it verbatim
+    instead. The resolver is the sole writer of both ``domain.v_sponge`` /
+    ``domain.dt`` and the identical ``model_settings["v_sponge"]["v_sponge"]`` /
+    ``model_settings["time_stepping"]["dt"]`` leaves -- each pair is always
+    written together and must never diverge.
     """
     if cdr_forcing_yaml is not None:
         cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
@@ -641,6 +643,10 @@ def build_forge_blueprint(
             # field from ``model_settings["v_sponge"]["v_sponge"]`` -- both must
             # always agree.
             v_sponge=settings["v_sponge"]["v_sponge"],
+            # Same reasoning as v_sponge above: read back from ``settings`` so a
+            # ``run_time_overrides={"time_stepping": {"dt": ...}}`` caller can't
+            # desync this field from ``model_settings["time_stepping"]["dt"]``.
+            dt=settings["time_stepping"]["dt"],
         ),
         forcing=sources,
         # Host-independent source-dataset keys to prepare (forcing/IC sources + topography),

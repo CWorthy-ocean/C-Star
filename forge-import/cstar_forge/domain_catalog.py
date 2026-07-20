@@ -756,6 +756,10 @@ class DomainCatalog:
         )
         if _v_sponge is not None:
             domain_data["v_sponge"] = _v_sponge
+        # dt: same best-effort reasoning as v_sponge above.
+        _dt = (builder.resolved_settings or {}).get("time_stepping", {}).get("dt")
+        if _dt is not None:
+            domain_data["dt"] = _dt
 
         with (domain_dir / "Domain.yaml").open("w") as f:
             yaml.safe_dump(

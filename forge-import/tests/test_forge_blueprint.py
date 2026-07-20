@@ -2207,6 +2207,45 @@ class TestSaveModifiedPiecesToCatalog:
         # at by fresh derivation, not a frozen saved number.
         assert wiz2.v_sponge.value == wiz.v_sponge.value
 
+    def test_save_domain_piece_persists_dt(self, isolated_catalog):
+        """``dt`` is a first-class domain property (Domain-derived properties),
+        alongside v_sponge -- but unlike v_sponge/open_boundaries it has no
+        touched flag: the widget is always authoritative (default, CFL-computed,
+        or hand-typed), so saving a domain always records the current dt,
+        whether or not the user ever edited it.
+        """
+        wiz = self._wizard(isolated_catalog)
+        wiz.dt.value = 3333.0
+
+        wiz.save_domain_name.value = "my-domain-dt"
+        wiz._on_save_domain(None)
+
+        assert "my-domain-dt" in isolated_catalog.domain_names
+        saved = isolated_catalog.domain_data("my-domain-dt")
+        assert saved.get("dt") == 3333.0
+
+        wiz2 = self._wizard(isolated_catalog)
+        wiz2.domain_dd.value = "my-domain-dt"
+        assert wiz2.dt.value == 3333.0
+        assert wiz2.config.domain.dt == 3333.0
+        # domain.dt and the model_settings leaf must never diverge.
+        assert (
+            wiz2.config.domain.dt == wiz2.config.model_settings["time_stepping"]["dt"]
+        )
+
+    def test_dt_edit_flags_domain_modified(self, isolated_catalog):
+        """Editing ``dt`` after picking a catalog domain is a domain-owned
+        deviation, exactly like editing v_sponge or a boundary checkbox.
+        """
+        wiz = self._wizard(isolated_catalog)
+        wiz.save_domain_name.value = "my-domain-dt-seed"
+        wiz._on_save_domain(None)
+        wiz.domain_dd.value = "my-domain-dt-seed"
+        assert wiz.config.composition.domain.modified is False
+
+        wiz.dt.value = wiz.dt.value + 100.0
+        assert wiz.config.composition.domain.modified is True
+
     def test_invalid_name_refuses_without_writing(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
         before = list(isolated_catalog.output_names)

@@ -2373,6 +2373,12 @@ class ForgeBlueprintWizard:
                     kw["open_boundaries"] = d["open_boundaries"]
                 if d.get("v_sponge") is not None:
                     kw["v_sponge"] = d["v_sponge"]
+                # dt is always saved (no touched gate, see _domain_piece_data),
+                # so an absent value here only happens for an older DomainSpec
+                # predating this field -- fall back to kw's existing _gather()
+                # value (the live widget dt) rather than force one in.
+                if d.get("dt") is not None:
+                    kw["dt"] = d["dt"]
                 kw["partitioning"] = d.get("partitioning", {})
                 kw["topography_source"] = d.get("topography_source", "ETOPO5")
                 kw.pop("topography_path", None)
@@ -2510,6 +2516,13 @@ class ForgeBlueprintWizard:
                     if d in saved_bnd:
                         w.value = bool(saved_bnd[d])
                 self._boundaries_touched = True
+            # dt has no touched flag (see _domain_piece_data) -- a saved
+            # DomainSpec always carries it, but an older file might not, so
+            # restore only if present; otherwise leave the widget's current
+            # value as-is (there's no live re-derive to fall back on for dt).
+            saved_dt = data.get("dt")
+            if saved_dt is not None:
+                self.dt.value = float(saved_dt)
             part = data.get("partitioning", {}) or {}
             self.npx.value = int(part.get("n_procs_x", self.npx.value))
             self.npy.value = int(part.get("n_procs_y", self.npy.value))
@@ -2565,6 +2578,7 @@ class ForgeBlueprintWizard:
             "scoord_chk": self.scoord_chk.value,
             "bnd": {d: w.value for d, w in self.bnd.items()},
             "v_sponge": self.v_sponge.value,
+            "dt": self.dt.value,
             "npx": self.npx.value,
             "npy": self.npy.value,
             "topo_source": self.topo_source.value,
@@ -2594,6 +2608,11 @@ class ForgeBlueprintWizard:
             "grid_kwargs": kw["grid_kwargs"],
             "partitioning": kw["partitioning"],
             "topography_source": self.topo_source.value,
+            # dt (unlike v_sponge/open_boundaries below) has no touched flag --
+            # the widget is always authoritative (default / CFL-computed / typed)
+            # and _gather() always passes it explicitly -- so it's always saved,
+            # not gated on a "was this edited" check.
+            "dt": kw["dt"],
         }
         # v_sponge/open_boundaries: included only when the user has touched
         # them (a manual edit or a value restored from a prior save/load) --
@@ -2796,9 +2815,14 @@ class ForgeBlueprintWizard:
                 if self._cdr_forcing
                 else ""
             )
-            dt = (cfg.model_settings.get("time_stepping", {}) or {}).get("dt")
-            if dt is not None:
-                self.dt.value = float(dt)
+            # dt: prefer the first-class domain.dt field; fall back to the
+            # model_settings leaf for a pre-domain.dt file (backward compat --
+            # older blueprints only ever wrote it there).
+            loaded_dt = cfg.domain.dt
+            if loaded_dt is None:
+                loaded_dt = (cfg.model_settings.get("time_stepping") or {}).get("dt")
+            if loaded_dt is not None:
+                self.dt.value = float(loaded_dt)
             self._populate_nesting(cfg)
             # forcing: reconstruct the editor from the loaded sources. Forcing/output
             # dropdowns always need a valid catalog selection (no more "model_default"
@@ -3711,6 +3735,7 @@ class ForgeBlueprintWizard:
                 section(
                     "Domain-derived properties",
                     W.HBox([self.v_sponge, self.derive_btn, self.derive_status]),
+                    W.HBox([self.dt, self.dt_btn, self.dt_status]),
                     section("Open boundaries", W.HBox(list(self.bnd.values()))),
                 ),
                 section(
@@ -3777,7 +3802,6 @@ class ForgeBlueprintWizard:
                     self.model_ref_date,
                     self.description,
                 ),
-                section("Timestep", W.HBox([self.dt, self.dt_btn]), self.dt_status),
                 section(
                     "Advanced settings (model defaults — collapsed; click to edit)",
                     self.editor_box,
