@@ -216,10 +216,19 @@ class RiverSource(str, Enum):
     GLOFAS = "GLOFAS"
 
 
+class RiverBgcSource(str, Enum):
+    """Source names accepted by RiverForcing's ``bgc_source`` (river biogeochemistry)."""
+
+    CONSTANTS = "CONSTANTS"
+    RIVR2O = "RIVR2O"
+
+
 class TopographySource(str, Enum):
     """Source names accepted by Grid (without a custom path)."""
 
     ETOPO5 = "ETOPO5"
+    SRTM15 = "SRTM15"
+    EMOD = "EMOD"
 
 
 # Top-level sections EXCLUDED from the integrity hash: provenance (where the hash
@@ -524,6 +533,26 @@ class RiverForcingItem(_Section):
         20  # grid cells beyond domain edge kept in the bounding-box pre-filter
     )
     options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
+
+    @model_validator(mode="after")
+    def _bgc_source_requires_include_bgc(self) -> RiverForcingItem:
+        # roms-tools silently ignores `bgc_source` unless `include_bgc=True` (and
+        # river BGC tracers additionally require MARBL compiled in — see the
+        # `bgc_signals` cppdef flip in forge_blueprint_resolve.py). Catch the silent
+        # no-op here rather than let a configured RIVR2O/CONSTANTS source vanish.
+        if self.bgc_source is not None:
+            if not self.include_bgc:
+                raise ValueError(
+                    "river bgc_source is set but include_bgc is False; roms-tools "
+                    "ignores bgc_source unless include_bgc=True"
+                )
+            name = self.bgc_source.get("name")
+            valid = {m.value for m in RiverBgcSource}
+            if name is not None and str(name).upper() not in valid:
+                raise ValueError(
+                    f"river bgc_source name {name!r} is not one of {sorted(valid)}"
+                )
+        return self
 
 
 class InitialConditions(_Section):

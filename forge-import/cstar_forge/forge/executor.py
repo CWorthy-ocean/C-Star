@@ -1185,8 +1185,20 @@ class ForgeExecutor(BaseModel):
                 "construct via ForgeExecutor.from_forge_blueprint."
             )
 
+        # An explicit topography_path was already staged verbatim by
+        # _resolve_topography_source (before grid construction, in model_post_init) and
+        # used as-is regardless of source name. Drop the topography key from this main
+        # pass so a verify-only handler (e.g. EMOD/SRTM15) doesn't spuriously re-check
+        # the conventional source_data_dir location when the user pointed elsewhere.
+        dataset_keys = self.source_dataset_keys
+        if self.topography_path:
+            topo_name = str(
+                getattr(self.topography_source, "value", self.topography_source)
+            ).upper()
+            dataset_keys = [k for k in dataset_keys if k.upper() != topo_name]
+
         self.src_data = source_data.SourceData(
-            datasets=self.source_dataset_keys,
+            datasets=dataset_keys,
             clobber=False,
             grid=self.grid,
             grid_name=self.grid_name,

@@ -451,6 +451,77 @@ def test_resolver_restoring_sets_sal_restore():
     assert cfg.model_settings["cppdefs"].get("sal_restore") is True
 
 
+def test_resolver_threads_river_bgc_source_and_climatology():
+    """Regression: the resolver's river _items()/_note() previously dropped
+    bgc_source and convert_to_climatology entirely (a silent no-op — a configured
+    RIVR2O river-BGC source would vanish before reaching RiverForcingItem). Both
+    must round-trip, and a Forge-staged bgc_source name (RIVR2O) must land in
+    datasets/resolved_datasets so the executor verifies it; CONSTANTS (roms-tools'
+    own auto-downloaded default) must NOT, since Forge has no handler for it.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"][0]["bgc_source"] = {
+        "name": "RIVR2O",
+        "path": "/tmp/rivr2o/*.nc",
+    }
+    fdata["forcing"]["river"][0]["convert_to_climatology"] = "always"
+
+    cfg = _build(forcing_inputs=fdata)
+    river = cfg.forcing.river[0]
+
+    assert river.bgc_source == {"name": "RIVR2O", "path": "/tmp/rivr2o/*.nc"}
+    assert river.convert_to_climatology.value == "always"
+    assert "RIVR2O" in cfg.datasets
+    assert "RIVR2O" in cfg.forcing.resolved_datasets
+    assert "CONSTANTS" not in cfg.datasets
+
+
+def test_resolver_topography_source_emod_lands_in_datasets():
+    cfg = _build(topography_source="EMOD")
+    assert "EMOD" in cfg.datasets
+    assert "EMOD" in cfg.forcing.resolved_datasets
+
+
+def test_sources_to_forcing_override_carries_river_bgc_source():
+    """Regression: sources_to_forcing_override is the production path a serialized
+    ForgeBlueprint takes on the execution host (no original inputs dict available).
+    If it dropped river bgc_source/convert_to_climatology the way the resolver's
+    _items() once did, ensure_source_data would still stage/verify RIVR2O (datasets
+    already carries it) but rt.RiverForcing would silently fall back to CONSTANTS —
+    file present, no error, wrong tracers. Confirm it survives the round trip.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar_forge.forge.forge_blueprint_engine import (
+        forge_blueprint_to_builder_kwargs,
+        sources_to_forcing_override,
+    )
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"][0]["bgc_source"] = {
+        "name": "RIVR2O",
+        "path": "/tmp/rivr2o/*.nc",
+    }
+    fdata["forcing"]["river"][0]["convert_to_climatology"] = "always"
+
+    cfg = _build(forcing_inputs=fdata, topography_source="EMOD")
+
+    ov = sources_to_forcing_override(cfg)
+    river_ov = ov["forcing"]["river"][0]
+    assert river_ov["bgc_source"] == {"name": "RIVR2O", "path": "/tmp/rivr2o/*.nc"}
+    assert river_ov["convert_to_climatology"] == "always"
+
+    kwargs = forge_blueprint_to_builder_kwargs(cfg)
+    assert kwargs["topography_source"] == "EMOD"
+    assert "RIVR2O" in kwargs["source_dataset_keys"]
+    assert "EMOD" in kwargs["source_dataset_keys"]
+
+
 def test_catalog_scans_forcingspec():
     from cstar_forge.domain_catalog import default_catalog as cat
 

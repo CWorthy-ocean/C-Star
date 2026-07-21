@@ -748,7 +748,13 @@ def _build_forcing(
     river = _items(
         "river",
         RiverForcingItem,
-        ("include_bgc", "coast_snap_buffer_km", "domain_edge_buffer"),
+        (
+            "include_bgc",
+            "convert_to_climatology",
+            "bgc_source",
+            "coast_snap_buffer_km",
+            "domain_edge_buffer",
+        ),
     )
 
     # snapshot every distinct logical source touched
@@ -765,6 +771,16 @@ def _build_forcing(
     for grp in (surface, boundary, tidal, river):
         for it in grp:
             _note(it.source)
+    # River BGC source (a plain dict, not a SourceSpec — separate from it.source, the
+    # river discharge source). CONSTANTS is not noted: it is roms-tools' own
+    # auto-downloaded default and has no Forge SourceData handler/registry entry, so
+    # staging it here would raise "Unknown dataset" downstream. Only a genuinely
+    # Forge-staged BGC source (e.g. RIVR2O) needs to land in resolved_datasets/datasets
+    # so the executor verifies it.
+    for it in river:
+        bgc_name = (it.bgc_source or {}).get("name")
+        if bgc_name and str(bgc_name).upper() != "CONSTANTS":
+            resolved.setdefault(str(bgc_name).upper(), _resolved_dataset(bgc_name))
     # topography source (now a Domain-level input, not read from ForcingSpec)
     topo = getattr(topography_source, "value", topography_source)
     if topo:

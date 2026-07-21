@@ -37,6 +37,9 @@ from cstar_forge.forge.input_data import (
     register_input,
     resolve_input_selection,
 )
+from cstar_forge.forge.source_registry import (
+    STREAMABLE_SOURCES as _REAL_STREAMABLE_SOURCES,
+)
 
 
 @contextmanager
@@ -629,6 +632,28 @@ class TestRomsMarblInputDataHelperMethods:
                 {"name": "ERA5", "path": None}
             )
             assert "path" not in result
+
+    def test_resolve_source_block_constants_river_bgc_is_streamable(
+        self, sample_roms_marbl_input_data
+    ):
+        """Regression: a river bgc_source={"name": "CONSTANTS"} must not crash.
+        roms-tools auto-downloads CONSTANTS' own default file; Forge has no staging
+        handler for it and must recognize it as streamable rather than trying to
+        resolve a staged path (which previously raised KeyError). Uses a real
+        SourceData and the real (unpatched) STREAMABLE_SOURCES — the fixture-scoped
+        patch to {"ERA5"} only reflects other tests' narrower scenarios and would
+        mask the bug this test is guarding against.
+        """
+        real_sd = source_data.SourceData(datasets=["DAI"])
+        with patch(
+            "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+            _REAL_STREAMABLE_SOURCES,
+        ):
+            sample_roms_marbl_input_data.source_data = real_sd
+            result = sample_roms_marbl_input_data._resolve_source_block(
+                {"name": "CONSTANTS"}
+            )
+        assert result == {"name": "CONSTANTS"}
 
     def test_build_input_args_with_base_kwargs(self, sample_roms_marbl_input_data):
         """Test _build_input_args with base_kwargs."""

@@ -113,6 +113,75 @@ def test_row_box_without_type_unaffected(editor):
     assert w["ntides"] in box.children
 
 
+def test_river_bgc_widgets_visible_only_when_include_bgc_checked(editor):
+    """The river-BGC source/path widgets only take effect when include_bgc=True
+    (roms-tools ignores bgc_source otherwise), so they stay hidden until checked.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    assert _display(w["bgc_source_name"]) == "none"
+    assert _display(w["bgc_source_path"]) == "none"
+
+    w["include_bgc"].value = True
+    assert _display(w["bgc_source_name"]) == ""
+    assert _display(w["bgc_source_path"]) == ""
+
+    w["include_bgc"].value = False
+    assert _display(w["bgc_source_name"]) == "none"
+    assert _display(w["bgc_source_path"]) == "none"
+
+
+def test_river_bgc_source_seeded_from_existing_item(editor):
+    """Loading an item with a pre-set bgc_source (e.g. RIVR2O) seeds the dropdown/path
+    and shows the widgets immediately (include_bgc already True).
+    """
+    w = editor._make_row(
+        "river",
+        {
+            "source": {"name": "DAI"},
+            "include_bgc": True,
+            "bgc_source": {"name": "RIVR2O", "path": "/data/rivr2o/*.nc"},
+        },
+    )
+    assert w["bgc_source_name"].value == "RIVR2O"
+    assert w["bgc_source_path"].value == "/data/rivr2o/*.nc"
+    assert _display(w["bgc_source_name"]) == ""
+    assert _display(w["bgc_source_path"]) == ""
+
+
+def test_gather_item_river_includes_bgc_source_only_when_include_bgc_checked(editor):
+    """_gather_item must not emit bgc_source when include_bgc is unchecked (matches
+    the RiverForcingItem validator, which rejects bgc_source without include_bgc).
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["bgc_source_name"].value = "RIVR2O"
+    w["bgc_source_path"].value = "/data/rivr2o/*.nc"
+
+    item = editor._gather_item("river", w)
+    assert "bgc_source" not in item
+
+    w["include_bgc"].value = True
+    item = editor._gather_item("river", w)
+    assert item["bgc_source"] == {"name": "RIVR2O", "path": "/data/rivr2o/*.nc"}
+
+
+def test_gather_item_river_bgc_source_omits_path_when_blank(editor):
+    """A blank bgc path means 'derive the default staged location' — omit the key
+    rather than emitting an empty string.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["include_bgc"].value = True
+    w["bgc_source_name"].value = "CONSTANTS"
+
+    item = editor._gather_item("river", w)
+    assert item["bgc_source"] == {"name": "CONSTANTS"}
+
+
+def test_topo_source_dropdown_includes_emod():
+    """The topography-source dropdown must offer EMOD alongside ETOPO5/SRTM15."""
+    wiz = ForgeBlueprintWizard()
+    assert "EMOD" in wiz.topo_source.options
+
+
 def test_wizard_smoke_assembles_widget():
     """Reordered sections (item 4b) and relocated dropdowns (item 5) assemble cleanly."""
     wiz = ForgeBlueprintWizard()

@@ -53,6 +53,7 @@ from cstar_forge.forge.forge_blueprint import (
     Prefill,
     RegridMethod,
     RestoringSurfaceSource,
+    RiverBgcSource,
     RiverSource,
     SurfaceType,
     TidalSource,
@@ -328,13 +329,26 @@ HELP_TEXT: dict[str, str] = {
         "river",
         "include_bgc",
     ): "Include BGC tracer concentrations (e.g. nutrients) in the river forcing. "
-    "Requires a BGC river dataset (bgc_source configured in model.yaml).",
+    "Select a 'bgc src' below to choose the tracer dataset (roms-tools ignores "
+    "bgc src unless this is checked).",
     (
         "river",
         "convert_to_climatology",
     ): "When to compute a river climatology from the raw data: "
     "'if_any_missing' (default) — compute if any requested months are absent, "
     "'never' — always use raw data, 'always' — always compute a climatology.",
+    (
+        "river",
+        "bgc_source_name",
+    ): "River BGC tracer dataset. 'CONSTANTS' uses fixed MARBL default concentrations "
+    "(auto-downloaded by roms-tools). 'RIVR2O' uses the RIVR2O river export product "
+    "(annual files, 1903-2024); the files must be manually placed at "
+    "source_data/RIVR2O/*.nc. Blank + include_bgc checked also falls back to CONSTANTS.",
+    (
+        "river",
+        "bgc_source_path",
+    ): "Optional explicit path/glob to the BGC dataset file(s) "
+    "(e.g. a custom RIVR2O location). Blank derives the default staged location.",
     (
         "river",
         "coast_snap_buffer_km",
@@ -954,6 +968,7 @@ _SOURCE_OPTS: dict[Any, list[str]] = {
 }
 _IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource]
 _IC_BGC_SOURCE_OPTS = [""] + [e.value for e in BgcInitialConditionsSource]
+_RIVER_BGC_SOURCE_OPTS = [""] + [e.value for e in RiverBgcSource]
 
 
 def _source_opts_for(cat: str, type_val: str | None) -> list[str]:
@@ -1356,6 +1371,36 @@ class _ForcingEditor:
                 layout=W.Layout(width="160px"),
                 tooltip=_tip("river", "domain_edge_buffer"),
             )
+            _bgc_src = item.get("bgc_source") or {}
+            _bgc_name_val = str(_bgc_src.get("name", "") or "")
+            if _bgc_name_val not in _RIVER_BGC_SOURCE_OPTS:
+                _bgc_name_val = ""
+            w["bgc_source_name"] = W.Dropdown(
+                options=_RIVER_BGC_SOURCE_OPTS,
+                value=_bgc_name_val,
+                description="bgc src:",
+                style=small,
+                layout=W.Layout(width="150px"),
+                tooltip=_tip("river", "bgc_source_name"),
+            )
+            w["bgc_source_path"] = W.Text(
+                value=str(_bgc_src.get("path") or ""),
+                description="bgc path:",
+                placeholder="(default)",
+                style=small,
+                layout=W.Layout(width="220px"),
+                tooltip=_tip("river", "bgc_source_path"),
+            )
+
+            # bgc_source only takes effect when include_bgc is checked (roms-tools
+            # silently ignores it otherwise — see RiverForcingItem validation).
+            def _sync_river_bgc_visibility(_change=None, ws=w):
+                on = bool(ws["include_bgc"].value)
+                ws["bgc_source_name"].layout.display = "" if on else "none"
+                ws["bgc_source_path"].layout.display = "" if on else "none"
+
+            w["include_bgc"].observe(_sync_river_bgc_visibility, names="value")
+            _sync_river_bgc_visibility()
         # Advanced passthrough: raw roms-tools kwargs not (yet) typed above.
         w["options"] = _options_editor(W, item.get("options"))
         remove = W.Button(
@@ -1442,6 +1487,13 @@ class _ForcingEditor:
             item["ntides"] = int(w["ntides"].value)
         if "include_bgc" in w and w["include_bgc"].value:
             item["include_bgc"] = True
+            if "bgc_source_name" in w and w["bgc_source_name"].value:
+                bgc_src: dict[str, Any] = {"name": w["bgc_source_name"].value}
+                if (
+                    "bgc_source_path" in w and w["bgc_source_path"].value.strip()
+                ):  # blank = derive default path
+                    bgc_src["path"] = w["bgc_source_path"].value.strip()
+                item["bgc_source"] = bgc_src
         if "convert_to_climatology" in w:
             item["convert_to_climatology"] = w["convert_to_climatology"].value
         if (
@@ -1847,7 +1899,7 @@ class ForgeBlueprintWizard:
             tooltip=_tip("grid", "mask_shapefile"),
         )
         self.topo_source = W.Dropdown(
-            options=["ETOPO5", "SRTM15"],
+            options=["ETOPO5", "SRTM15", "EMOD"],
             value="ETOPO5",
             description="topo source:",
             style={"description_width": "120px"},
@@ -2464,6 +2516,13 @@ class ForgeBlueprintWizard:
                     d["ntides"] = it.ntides
                 if getattr(it, "include_bgc", False):
                     d["include_bgc"] = True
+                if getattr(it, "bgc_source", None):
+                    d["bgc_source"] = dict(it.bgc_source)
+                _ctc = getattr(it, "convert_to_climatology", None)
+                if _ctc is not None:
+                    _ctc_val = getattr(_ctc, "value", _ctc)
+                    if _ctc_val != ClimatologyMode.IF_ANY_MISSING.value:
+                        d["convert_to_climatology"] = _ctc_val
                 # roms-tools >=4 boundary regrid/interp knobs. getattr(v, "value", v)
                 # normalizes (str, Enum) members to their plain string value.
                 _b_interp = getattr(it, "bgc_interpolation_method", None)

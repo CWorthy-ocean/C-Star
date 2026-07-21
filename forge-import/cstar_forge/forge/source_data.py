@@ -738,3 +738,92 @@ def _prepare_glofas(self: SourceData) -> Path:
     print(f"✔️  GloFAS dataset verified at: {glofas_path}")
     self.paths["GLOFAS"] = glofas_path
     return glofas_path
+
+
+# ---------------------------
+# EMOD handler (user-provided dataset)
+# ---------------------------
+
+
+@register_dataset("EMOD")
+def _prepare_emod(self: SourceData) -> Path:
+    """
+    Verify that the user has provided an EMODnet bathymetry/topography file.
+
+    Unlike ETOPO5 (fetched automatically by roms-tools at grid-build time), EMODnet
+    has no roms-tools auto-download and no single canonical filename, so this is a
+    USER_DATASET, like TPXO/WOA/GLOFAS: the file must already exist at the expected
+    location.
+
+    Expected location: self.source_data_dir / "EMOD" / "*.nc" (any NetCDF file;
+    EMODnet exports do not have a fixed filename).
+
+    Returns
+    -------
+    Path
+        Path to the EMODnet NetCDF file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the EMOD directory or no matching NetCDF file is found.
+    """
+    emod_dir = self.source_data_dir / "EMOD"
+    matches = sorted(emod_dir.glob("*.nc")) if emod_dir.exists() else []
+
+    if not matches:
+        raise FileNotFoundError(
+            f"EMOD (EMODnet) topography dataset not found at: {emod_dir}\n"
+            "EMODnet bathymetry must be downloaded manually (e.g. from "
+            "https://emodnet.ec.europa.eu/geoviewer/) and placed as a .nc file in "
+            f"{emod_dir}."
+        )
+
+    path = matches[0]
+    print(f"✔️  EMOD dataset verified at: {path}")
+    self.paths["EMOD"] = path
+    return path
+
+
+# ---------------------------
+# RIVR2O handler (user-provided dataset)
+# ---------------------------
+
+
+@register_dataset("RIVR2O")
+def _prepare_rivr2o(self: SourceData) -> Path:
+    """
+    Verify that the user has provided RIVR2O river biogeochemistry export files.
+
+    RIVR2O has no roms-tools auto-download (unlike the CONSTANTS river-BGC default,
+    which roms-tools downloads itself), so this is a USER_DATASET, like TPXO/WOA/GLOFAS:
+    the files must already exist at the expected location. The product ships one
+    NetCDF file per year (1903-2024); roms-tools accepts a wildcard pattern spanning
+    multiple years.
+
+    Expected location: self.source_data_dir / "RIVR2O" / "*.nc"
+
+    Returns
+    -------
+    Path
+        Wildcard pattern matching the staged RIVR2O NetCDF file(s).
+
+    Raises
+    ------
+    FileNotFoundError
+        If the RIVR2O directory or no matching NetCDF file is found.
+    """
+    rivr2o_dir = self.source_data_dir / "RIVR2O"
+    matches = sorted(rivr2o_dir.glob("*.nc")) if rivr2o_dir.exists() else []
+
+    if not matches:
+        raise FileNotFoundError(
+            f"RIVR2O river biogeochemistry dataset not found at: {rivr2o_dir}\n"
+            "RIVR2O must be obtained separately and placed as one or more .nc files "
+            f"(one per year) in {rivr2o_dir}."
+        )
+
+    pattern = rivr2o_dir / "*.nc"
+    print(f"✔️  RIVR2O dataset verified at: {rivr2o_dir} ({len(matches)} file(s))")
+    self.paths["RIVR2O"] = pattern
+    return pattern

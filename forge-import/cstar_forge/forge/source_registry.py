@@ -49,10 +49,17 @@ SOURCE_ALIAS: dict[str, str] = {
     "WOA": "WOA",
     "DAI": "DAI",  # placeholder until a real DAI handler exists
     "GLOFAS": "GLOFAS",  # alternative river-discharge dataset (roms-tools rt>=4, PR #625)
+    "EMOD": "EMOD",  # alternative topography source (EMODnet); user-staged, like TPXO/WOA
+    "RIVR2O": "RIVR2O",  # river biogeochemistry source; user-staged, like TPXO/WOA/GLOFAS
+    "CONSTANTS": "CONSTANTS",  # river-BGC default (roms-tools' own auto-download)
 }
 
 # Sources streamed at run time (not staged unless explicitly requested).
-STREAMABLE_SOURCES = ["ERA5", "DAI"]
+# CONSTANTS (the river-BGC default) belongs here too, alongside DAI: roms-tools
+# auto-downloads its own file (river_tracer_defaults.nc) at generation time, so
+# Forge must never try to resolve/verify a staged path for it (there is no
+# @register_dataset("CONSTANTS") handler and none is needed).
+STREAMABLE_SOURCES = ["ERA5", "DAI", "CONSTANTS"]
 
 # Recognized dataset keys that Forge does NOT stage locally — they have no SourceData
 # handler because something else provides them:
@@ -78,6 +85,9 @@ DATASET_METADATA: dict[str, dict[str, str]] = {
     "ERA5": {},
     "DAI": {},
     "GLOFAS": {"url": GLOFAS_CDS_URL},
+    "EMOD": {},  # user-staged (EMODnet has no canonical download URL Forge can pin)
+    "RIVR2O": {},  # user-staged (no roms-tools auto-download; annual files, 1903-2024)
+    "CONSTANTS": {},  # roms-tools auto-download (river_tracer_defaults.nc); streamable
 }
 
 _STREAMABLE_UPPER = {s.upper() for s in STREAMABLE_SOURCES}

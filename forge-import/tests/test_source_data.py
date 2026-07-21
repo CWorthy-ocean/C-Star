@@ -458,6 +458,94 @@ class TestPrepareGlofas:
         assert sd.dataset_key_for_source("GLOFAS") == "GLOFAS"
 
 
+class TestPrepareEmod:
+    """Tests for the EMOD (EMODnet) user-provided topography dataset handler."""
+
+    def test_missing_dir_raises_with_instructions(self, tmp_path):
+        """Missing EMOD directory raises FileNotFoundError pointing at the expected path."""
+        sd = SourceData(datasets=["EMOD"], source_data_dir=tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="EMOD"):
+            sd.prepare_all()
+
+    def test_empty_dir_raises_with_instructions(self, tmp_path):
+        """EMOD directory present but with no .nc file still raises."""
+        (tmp_path / "EMOD").mkdir(parents=True)
+        sd = SourceData(datasets=["EMOD"], source_data_dir=tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="EMOD"):
+            sd.prepare_all()
+
+    def test_verified_when_file_present(self, tmp_path):
+        """An existing .nc file (any name) is accepted and recorded in sd.paths."""
+        emod_dir = tmp_path / "EMOD"
+        emod_dir.mkdir(parents=True)
+        emod_file = emod_dir / "emodnet_bathymetry.nc"
+        emod_file.touch()
+
+        sd = SourceData(datasets=["EMOD"], source_data_dir=tmp_path)
+        sd.prepare_all()
+
+        assert sd.paths["EMOD"] == emod_file
+
+    def test_dataset_key_for_source(self):
+        """Logical name 'EMOD' resolves to the 'EMOD' dataset key."""
+        sd = SourceData(datasets=["EMOD"])
+        assert sd.dataset_key_for_source("EMOD") == "EMOD"
+
+
+class TestPrepareRivr2o:
+    """Tests for the RIVR2O user-provided river-BGC dataset handler."""
+
+    def test_missing_dir_raises_with_instructions(self, tmp_path):
+        """Missing RIVR2O directory raises FileNotFoundError pointing at the expected path."""
+        sd = SourceData(datasets=["RIVR2O"], source_data_dir=tmp_path)
+
+        with pytest.raises(FileNotFoundError, match="RIVR2O"):
+            sd.prepare_all()
+
+    def test_verified_when_files_present(self, tmp_path):
+        """Existing yearly RIVR2O files resolve to a wildcard pattern in sd.paths."""
+        rivr2o_dir = tmp_path / "RIVR2O"
+        rivr2o_dir.mkdir(parents=True)
+        (rivr2o_dir / "rivr2o_riverinputs_2000.nc").touch()
+        (rivr2o_dir / "rivr2o_riverinputs_2001.nc").touch()
+
+        sd = SourceData(datasets=["RIVR2O"], source_data_dir=tmp_path)
+        sd.prepare_all()
+
+        assert sd.paths["RIVR2O"] == rivr2o_dir / "*.nc"
+
+    def test_dataset_key_for_source(self):
+        """Logical name 'RIVR2O' resolves to the 'RIVR2O' dataset key."""
+        sd = SourceData(datasets=["RIVR2O"])
+        assert sd.dataset_key_for_source("RIVR2O") == "RIVR2O"
+
+
+class TestConstantsRiverBgcSource:
+    """Regression: an explicit river bgc_source={"name": "CONSTANTS"} must not crash
+    at generation. roms-tools auto-downloads CONSTANTS' own file
+    (river_tracer_defaults.nc) — Forge has no @register_dataset("CONSTANTS") handler
+    and must never try to stage/verify a path for it. Before CONSTANTS was added to
+    STREAMABLE_SOURCES, path_for_source("CONSTANTS") raised KeyError because it was
+    neither prepared nor recognized as streamable.
+    """
+
+    def test_streamable(self):
+        sd = SourceData(datasets=["DAI"])
+        assert sd.streamable_for_source("CONSTANTS") is True
+
+    def test_path_for_source_returns_none_without_raising(self):
+        sd = SourceData(datasets=["DAI"])
+        assert sd.path_for_source("CONSTANTS") is None
+
+    def test_has_no_staging_handler(self):
+        """CONSTANTS deliberately has no DATASET_REGISTRY handler (unlike RIVR2O) —
+        it is roms-tools-provided, not Forge-staged.
+        """
+        assert "CONSTANTS" not in DATASET_REGISTRY
+
+
 class TestSourceDataHelperMethods:
     """Tests for SourceData helper methods."""
 
