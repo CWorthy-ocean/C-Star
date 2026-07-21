@@ -69,17 +69,6 @@ class ConfiguredBaseModel(BaseModel):
     """Configures the behavior of the pydantic model."""
 
 
-class PolymorphicBaseModel(ConfiguredBaseModel):
-    """Base-model configuring common instantiation and validation behavior
-    for serialization of covariant references.
-    """
-
-    model_config: t.ClassVar[ConfigDict] = ConfigDict(
-        polymorphic_serialization=True,
-    )
-    """Configures the behavior of the pydantic model."""
-
-
 class Resource(ConfiguredBaseModel):
     location: FilePath | HttpUrl | str
     """Location of the file to retrieve."""
