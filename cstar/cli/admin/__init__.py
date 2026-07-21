@@ -4,7 +4,6 @@ from cstar.base.feature import (
     ENV_FF_DEVELOPER_MODE,
     is_feature_enabled,
 )
-from cstar.cli.admin.clean import app as app_clean
 
 app = typer.Typer(
     name="admin",
@@ -12,4 +11,6 @@ app = typer.Typer(
 )
 
 if is_feature_enabled(ENV_FF_DEVELOPER_MODE):
+    from cstar.cli.admin.clean import app as app_clean
+
     app.add_typer(app_clean)
