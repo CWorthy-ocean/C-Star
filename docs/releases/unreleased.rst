@@ -24,6 +24,7 @@ Bug Fixes
 
 
 - Fix failure to cache updated status during status checks (`#579 <https://github.com/CWorthy-ocean/C-Star/pull/579>`_)
+- Fix bug filling templates with `str(None)` (`#588 <https://github.com/CWorthy-ocean/C-Star/pull/588>`_)
 
 Improvements
 ~~~~~~~~~~~~
