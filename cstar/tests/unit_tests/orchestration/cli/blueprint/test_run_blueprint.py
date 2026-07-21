@@ -182,12 +182,6 @@ def test_blueprint_run_apply_directives(
     mock_sim_instance = mock.Mock()
     mock_sim_instance.name = "test simulation"
 
-    wp = LiveWorkplan(
-        name="test-workplan",
-        description="a live workplan used to create a `WorkplanRun` to test directives",
-        steps=[temp_step],
-    )
-
     async def modify_runner(
         self: BlueprintRunner[RomsMarblBlueprint],
     ) -> RunnerResult[RomsMarblBlueprint]:
@@ -211,7 +205,13 @@ def test_blueprint_run_apply_directives(
         ) as mock_exec_runner,
         mock.patch(
             "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
-            mock.Mock(return_value=wp),
+            mock.Mock(
+                return_value=LiveWorkplan(
+                    name="test-workplan",
+                    description="a live workplan used to create a `WorkplanRun` to test directives",
+                    steps=[temp_step],
+                )
+            ),
         ),
     ):
         runner = CliRunner()

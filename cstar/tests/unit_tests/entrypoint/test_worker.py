@@ -940,18 +940,6 @@ def test_worker_main_exec_continue_from(
         assert ContinuanceDirective.suffix() in str(self.request.blueprint_uri)
         return self.result
 
-    wp = LiveWorkplan(
-        name="test-workplan",
-        description="a live workplan used to create a `WorkplanRun` to test directives",
-        steps=[
-            LiveStep(
-                name="test-step",
-                application="roms_marbl",
-                blueprint=blueprint_path,
-            )
-        ],
-    )
-
     # don't let it perform any real work; mock out RomsMarblRunner
     with (
         mock.patch.object(sys, "argv", args),
@@ -967,7 +955,19 @@ def test_worker_main_exec_continue_from(
         ),
         mock.patch(
             "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
-            mock.Mock(return_value=wp),
+            mock.Mock(
+                return_value=LiveWorkplan(
+                    name="test-workplan",
+                    description="a live workplan used to create a `WorkplanRun` to test directives",
+                    steps=[
+                        LiveStep(
+                            name="test-step",
+                            application="roms_marbl",
+                            blueprint=blueprint_path,
+                        )
+                    ],
+                )
+            ),
         ),
     ):
         # This should run the simulation and return a success code
@@ -1034,22 +1034,6 @@ def test_worker_main_directive_args_parsed(
     mock_roms_sim_class = mock.Mock()
     mock_roms_sim_class.from_blueprint.return_value = mock_sim_instance
 
-    wp = LiveWorkplan(
-        name="test-workplan",
-        description="a live workplan used to create a `WorkplanRun` to test directives",
-        steps=[
-            LiveStep(
-                name="step-for-testing",
-                application="roms_marbl",
-                blueprint=bp_path,
-                working_dir=Path(),
-                directives={
-                    "continue-from": {"path": step_dir.as_posix()},
-                },
-            )
-        ],
-    )
-
     args = [
         "cstar.applications.roms_marbl",
         ARG_URI_LONG,
@@ -1081,7 +1065,23 @@ def test_worker_main_directive_args_parsed(
         ),
         mock.patch(
             "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
-            mock.Mock(return_value=wp),
+            mock.Mock(
+                return_value=LiveWorkplan(
+                    name="test-workplan",
+                    description="a live workplan used to create a `WorkplanRun` to test directives",
+                    steps=[
+                        LiveStep(
+                            name="step-for-testing",
+                            application="roms_marbl",
+                            blueprint=bp_path,
+                            working_dir=Path(),
+                            directives={
+                                "continue-from": {"path": step_dir.as_posix()},
+                            },
+                        )
+                    ],
+                )
+            ),
         ),
     ):
         _ = main()
