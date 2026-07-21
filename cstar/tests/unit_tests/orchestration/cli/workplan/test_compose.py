@@ -199,6 +199,7 @@ async def test_build_and_run_dag_env(
     # mock the sys manager to engage the checks for Slurm env-vars
     mock_sys_manager = mock.Mock()
     mock_sys_manager.scheduler = mock.Mock()
+    mock_get_mgr = mock.Mock(return_value=mock_sys_manager)
 
     mock_env = {
         ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
@@ -213,7 +214,7 @@ async def test_build_and_run_dag_env(
 
     with (
         mock.patch("cstar.orchestration.dag_runner.process_plan", mock_process),
-        mock.patch("cstar.orchestration.dag_runner.cstar_sysmgr", mock_sys_manager),
+        mock.patch("cstar.orchestration.dag_runner.get_sysmgr", mock_get_mgr),
         mock.patch.dict(os.environ, mock_env, clear=True),
         mock.patch(
             "cstar.system.environment.CStarEnvironment.settings_klass",
