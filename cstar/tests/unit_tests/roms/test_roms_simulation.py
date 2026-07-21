@@ -2219,14 +2219,12 @@ class TestROMSSimulationUsePIO:
         dtype: str,
         expected_problem: str | None,
     ):
-        """Test that `_pio_input_file_problems` flags non-classic formats and
+        """Test that `check_nc_pio_compatible` flags non-classic formats and
         64-bit/unsigned variable types, and passes compatible files.
         """
         # netCDF4 is used directly as xarray coerces int64 when writing
         # classic formats, while tools like nccopy preserve it
         import netCDF4
-
-        from cstar.roms.simulation import _check_nc_pio_compatible
 
         path = tmp_path / "input.nc"
         with netCDF4.Dataset(path, "w", format=file_format) as nc:
@@ -2234,7 +2232,10 @@ class TestROMSSimulationUsePIO:
             var = nc.createVariable("myvar", dtype, ("x",))
             var[:] = [0, 1, 2]
 
-        problems = _check_nc_pio_compatible(path)
+        dataset = mock.MagicMock(
+            spec=ROMSInputDataset, path_for_roms_unpartitioned=[path]
+        )
+        problems = ROMSInputDataset.check_nc_pio_compatible(dataset)
         if expected_problem is None:
             assert problems == []
         else:
@@ -2273,6 +2274,14 @@ class TestROMSSimulationUsePIO:
             path_for_roms_unpartitioned=[bad_path],
         )
         unstaged = mock.MagicMock(spec=ROMSInputDataset, exists_locally=False)
+
+        # Run the real check against each mock's `path_for_roms_unpartitioned`
+        good.check_nc_pio_compatible.side_effect = lambda: (
+            ROMSInputDataset.check_nc_pio_compatible(good)
+        )
+        bad.check_nc_pio_compatible.side_effect = lambda: (
+            ROMSInputDataset.check_nc_pio_compatible(bad)
+        )
 
         with mock.patch.object(
             ROMSSimulation, "input_datasets", new_callable=mock.PropertyMock

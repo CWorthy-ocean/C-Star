@@ -198,12 +198,7 @@ class ModelParameterSet(ParameterSet):
     """The time step the model integrates over."""
 
     use_pio: bool = False
-    """Use the ParallelIO library for model input/output.
-
-    Requires `#define PARALLEL_IO` in the compile-time `cppdefs.opt`. When active,
-    ROMS reads and writes joined files directly, so input datasets are not
-    partitioned and outputs are not joined.
-    """
+    """Use the ParallelIO library for model input/output."""
 
 
 class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):

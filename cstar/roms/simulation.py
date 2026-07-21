@@ -147,50 +147,6 @@ def _extract_data_join_wildcard(
     logger.info(f"Spatial extract/join of {str(out_file)!r} is complete")
 
 
-def _check_nc_pio_compatible(path: Path) -> list[str]:
-    """Check a netCDF file for properties that ROMS with ParallelIO cannot read.
-
-    ROMS with `use_pio` reads inputs through PnetCDF, which requires classic-format
-    files (CDF-1/2/5, e.g. netCDF-4/HDF5 files are unreadable). Additionally, PIO
-    only supports 64-bit and unsigned variable types when built against a
-    parallel-enabled netCDF-C library, which is not available in all environments
-    (e.g. conda), so these types are also rejected.
-
-    Parameters
-    ----------
-    path : Path
-        Location of the netCDF file to check.
-
-    Returns
-    -------
-    list of str
-        A description of each problem found; empty if the file is compatible.
-    """
-    # Lazy import: only needed on the use_pio path
-    import xarray as xr
-
-    with open(path, "rb") as f:
-        header = f.read(4)
-    if header[:3] != b"CDF":
-        detected = "netCDF-4/HDF5" if header == b"\x89HDF" else "unrecognized"
-        return [
-            f"{path}: not a classic-format netCDF file (detected: {detected}). "
-            "Rewrite it in CDF-5 format, e.g. with "
-            "xarray's to_netcdf(format='NETCDF3_64BIT_DATA')."
-        ]
-
-    problems = []
-    with xr.open_dataset(path, decode_times=False) as ds:
-        for name, var in ds.variables.items():
-            if var.dtype.name.startswith(("int64", "uint")):
-                problems.append(
-                    f"{path}: variable {name!r} has dtype '{var.dtype}', which "
-                    "ParallelIO cannot read on all systems. Cast it to a signed "
-                    "32-bit integer or a float type."
-                )
-    return problems
-
-
 class ROMSSimulation(Simulation):
     """A specialized `Simulation` subclass for configuring and running ROMS (Regional
     Ocean Modeling System) simulations.
@@ -650,19 +606,15 @@ class ROMSSimulation(Simulation):
         class_name = self.__class__.__name__
         base_str = super().__str__()
 
-        # ROMS runtime settings
         if self.runtime_code.exists_locally:
             base_str += f"\nRuntime Settings: {self.roms_runtime_settings.__class__.__name__} instance (query using {class_name}.roms_runtime_settings)\n"
 
-        # MARBL Codebase
         if self.marbl_codebase is not None:
             base_str += f"\nMARBL Codebase: {self.marbl_codebase.__class__.__name__} instance (query using {class_name}.marbl_codebase)\n"
 
-        # PIO Codebase
         if self.pio_codebase is not None:
             base_str += f"\nPIO Codebase: {self.pio_codebase.__class__.__name__} instance (query using {class_name}.pio_codebase)\n"
 
-        # Input Datasets:
         base_str += "\nInput Datasets:\n"
         if self.model_grid is not None:
             base_str += f"Model grid: <{self.model_grid.__class__.__name__} instance>"
@@ -1702,13 +1654,7 @@ class ROMSSimulation(Simulation):
         for dataset in self.input_datasets:
             if not dataset.exists_locally:
                 continue
-            try:
-                paths = dataset.path_for_roms_unpartitioned
-            except ValueError as exc:
-                problems.append(str(exc))
-                continue
-            for path in paths:
-                problems.extend(_check_nc_pio_compatible(path))
+            problems.extend(dataset.check_nc_pio_compatible())
 
         if problems:
             raise ValueError(

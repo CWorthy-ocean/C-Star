@@ -64,6 +64,9 @@ class PIOExternalCodeBase(ExternalCodeBase):
 
         netcdf_home = self._get_dependency_root("NETCDFHOME")
         pnetcdf_home = self._get_dependency_root("PNETCDFHOME")
+        assert netcdf_home is not None
+        assert pnetcdf_home is not None
+
         missing = [
             var
             for var, val in (("NETCDFHOME", netcdf_home), ("PNETCDFHOME", pnetcdf_home))

@@ -487,6 +487,49 @@ class ROMSInputDataset(InputDataset, ABC):
             return list(self.working_copy.paths)
         return [self.working_copy.path]
 
+    def check_nc_pio_compatible(self) -> list[str]:
+        """Check this dataset's files for properties ROMS with ParallelIO cannot read.
+
+        ROMS with `use_pio` reads inputs through PnetCDF, which requires classic-format
+        files (CDF-1/2/5, e.g. netCDF-4/HDF5 files are unreadable). Additionally, PIO
+        only supports 64-bit and unsigned variable types when built against a
+        parallel-enabled netCDF-C library, which is not available in all environments
+        (e.g. conda), so these types are also rejected.
+
+        Every file in `path_for_roms_unpartitioned` is checked.
+
+        Returns
+        -------
+        list of str
+            A description of each problem found; empty if all files are compatible.
+        """
+        # Lazy import: only needed on the use_pio path
+        import xarray as xr
+
+        problems = []
+
+        for path in self.path_for_roms_unpartitioned:
+            with open(path, "rb") as f:
+                header = f.read(4)
+            if header[:3] != b"CDF":
+                detected = "netCDF-4/HDF5" if header == b"\x89HDF" else "unrecognized"
+                problems.append(
+                    f"{path}: not a classic-format netCDF file (detected: {detected}). "
+                    "Rewrite it in CDF-5 format, e.g. with "
+                    "xarray's to_netcdf(format='NETCDF3_64BIT_DATA')."
+                )
+                continue
+
+            with xr.open_dataset(path, decode_times=False) as ds:
+                for name, var in ds.variables.items():
+                    if var.dtype.name.startswith(("int64", "uint")):
+                        problems.append(
+                            f"{path}: variable {name!r} has dtype '{var.dtype}', which "
+                            "ParallelIO cannot read on all systems. Cast it to a signed "
+                            "32-bit integer or a float type."
+                        )
+        return problems
+
 
 class ROMSModelGrid(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model grid files."""
