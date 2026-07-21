@@ -1,5 +1,6 @@
 import os
 import shutil
+import typing as t
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
@@ -64,8 +65,6 @@ class PIOExternalCodeBase(ExternalCodeBase):
 
         netcdf_home = self._get_dependency_root("NETCDFHOME")
         pnetcdf_home = self._get_dependency_root("PNETCDFHOME")
-        assert netcdf_home is not None
-        assert pnetcdf_home is not None
 
         missing = [
             var
@@ -108,8 +107,8 @@ class PIOExternalCodeBase(ExternalCodeBase):
         # in calls to whatever nc_* API the netcdf_meta.h it sees advertises, and
         # ROMS links $(NETCDFHOME)'s libnetcdf — a mismatch surfaces as undefined
         # nc_* references (e.g. nc_inq_filter_avail) at ROMS link time.
-        netcdf_pkgconfig = Path(netcdf_home) / "lib/pkgconfig"
-        pnetcdf_pkgconfig = Path(pnetcdf_home) / "lib/pkgconfig"
+        netcdf_pkgconfig = Path(t.cast("str", netcdf_home)) / "lib/pkgconfig"
+        pnetcdf_pkgconfig = Path(t.cast("str", pnetcdf_home)) / "lib/pkgconfig"
         _run_cmd(
             f'PKG_CONFIG_PATH="{netcdf_pkgconfig}:{pnetcdf_pkgconfig}:${{PKG_CONFIG_PATH:-}}" '
             "cmake -S . -B build "
