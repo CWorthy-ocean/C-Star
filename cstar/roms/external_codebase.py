@@ -4,7 +4,7 @@ from pathlib import Path
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 
 class ROMSExternalCodeBase(ExternalCodeBase):
@@ -36,6 +36,8 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         # Set env vars:
         assert self.working_copy is not None  # verified by ExternalCodeBase.configure()
         roms_root = self.working_copy.path
+
+        cstar_sysmgr = get_sysmgr()
         cstar_sysmgr.environment.set_env_var(self.root_env_var, str(roms_root))
         cstar_sysmgr.environment.set_env_var(
             "PATH", f"{roms_root / 'Tools-Roms'}:{os.environ.get('PATH')}"
@@ -54,6 +56,7 @@ class ROMSExternalCodeBase(ExternalCodeBase):
     @property
     def is_configured(self) -> bool:
         # Check ROMS_ROOT env var is set:
+        cstar_sysmgr = get_sysmgr()
         roms_root = cstar_sysmgr.environment.environment_variables.get(
             self.root_env_var
         )

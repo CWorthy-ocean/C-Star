@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, ValidationError
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import parse_log_level_name
 from cstar.system.environment import SlurmSettingsBase
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
 
@@ -104,7 +104,7 @@ def get_job_config() -> JobConfig:
     """
     account_id, walltime, priority = "", "", ""
 
-    if klass := cstar_sysmgr.environment.settings_klass:
+    if klass := get_sysmgr().environment.settings_klass:
         try:
             system_env = klass()
             if isinstance(system_env, SlurmSettingsBase):

@@ -29,7 +29,7 @@ from cstar.orchestration.serialization import (
     register_representer,
 )
 from cstar.system.environment import get_envfield_alias
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 nx = lazy_import("networkx")
 
@@ -562,6 +562,8 @@ class Launcher(t.Protocol, t.Generic[_THandle]):
         CstarExpectationFailed
             If an environment variable required by the launcher cannot be found.
         """
+        cstar_sysmgr = get_sysmgr()
+
         if klass := cstar_sysmgr.environment.settings_klass:
             try:
                 _ = klass()

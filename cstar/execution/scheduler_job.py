@@ -19,7 +19,7 @@ from cstar.base.feature import (
 )
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 from cstar.system.scheduler import (
     PBSScheduler,
     SlurmPartition,
@@ -408,18 +408,17 @@ def create_scheduler_job(
     """
     # mypy assigns type based on first condition, assigning explicitly:
     job_type: type[SlurmJob] | type[PBSJob]
+    scheduler = get_sysmgr().scheduler
 
-    if isinstance(cstar_sysmgr.scheduler, SlurmScheduler):
+    if isinstance(scheduler, SlurmScheduler):
         job_type = SlurmJob
-    elif isinstance(cstar_sysmgr.scheduler, PBSScheduler):
+    elif isinstance(scheduler, PBSScheduler):
         job_type = PBSJob
     else:
-        raise TypeError(
-            f"Unsupported scheduler type: {type(cstar_sysmgr.scheduler).__name__}"
-        )
+        raise TypeError(f"Unsupported scheduler type: {type(scheduler).__name__}")
 
     return job_type(
-        scheduler=cstar_sysmgr.scheduler,
+        scheduler=scheduler,
         commands=commands,
         cpus=cpus,
         nodes=nodes,

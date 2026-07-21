@@ -563,4 +563,7 @@ class CStarSystemManager:
         return self._scheduler
 
 
-cstar_sysmgr = CStarSystemManager()
+@functools.lru_cache
+def get_sysmgr() -> CStarSystemManager:
+    """Return a cached system manager instance."""
+    return CStarSystemManager()

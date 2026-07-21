@@ -111,7 +111,7 @@ def sim_runner(
     service_config = ServiceConfiguration(
         as_service=False,
         loop_delay=0,
-        health_check_frequency=0,
+        health_check_frequency=0,  # None
         log_level=logging.DEBUG,
         health_check_log_threshold=10,
         name="test_simulation_runner",
@@ -348,7 +348,7 @@ def test_start_runner(
 
     service_config = ServiceConfiguration(
         as_service=False,
-        health_check_frequency=0,
+        health_check_frequency=0,  # None
         log_level=logging.DEBUG,
         name="test_start_runner",
         loop_delay=0,

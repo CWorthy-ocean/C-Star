@@ -36,7 +36,7 @@ from cstar.orchestration.transforms import (
     WorkplanTransformer,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_DELAYS
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 log = get_logger(__name__)
 
@@ -180,7 +180,7 @@ def get_launcher() -> Launcher[t.Any]:
     -------
     Launcher[t.Any]
     """
-    launcher = SlurmLauncher() if cstar_sysmgr.scheduler else LocalLauncher()
+    launcher = SlurmLauncher() if get_sysmgr().scheduler else LocalLauncher()
     launcher.check_preconditions()
     return launcher
 
