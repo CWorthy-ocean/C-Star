@@ -18,6 +18,7 @@ New features
 
 
 - Add model_reference_data to namelist pydantic model (not used in this repo, but needed by Forge) (`#586 <https://github.com/CWorthy-ocean/C-Star/pull/586>`_)
+- added `cstar admin clean` CLI command (`#589 <https://github.com/CWorthy-ocean/C-Star/pull/589>`_)
 
 Bug Fixes
 ~~~~~~~~~
