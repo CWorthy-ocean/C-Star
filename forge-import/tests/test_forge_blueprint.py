@@ -11,7 +11,7 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 assertions were validated standalone during development.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -1560,6 +1560,26 @@ class TestForgeBlueprintWizard:
         assert w2.dt.value == 1234.0
         assert w2.config.model_settings["time_stepping"]["dt"] == 1234.0
         assert "time_stepping" not in w2.config.composition.overrides
+
+    def test_model_ref_date_persists_through_load(self, tmp_path):
+        """model_ref_date is gathered into Run.model_reference_date whenever it
+        differs from the 2000-01-01 default, but build_forge_blueprint() had no
+        matching parameter (a TypeError swallowed by _rebuild's except, always
+        showing "Invalid") and _populate_from never restored the widget -- both
+        fixed together since the populate fix is meaningless without the resolver
+        accepting the value (see project memory for the load-back bug pattern).
+        """
+        w1 = self._wizard()
+        w1.model_ref_date.value = date(2015, 6, 15)
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        assert w1.config.run.model_reference_date == datetime(2015, 6, 15)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.model_ref_date.value == date(2015, 6, 15)
 
     def test_grid_extended_options_persist_through_load(self, tmp_path):
         """hmin/close_narrow_channels/mask_shapefile are grid_kwargs entries with

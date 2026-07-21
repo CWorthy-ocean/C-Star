@@ -2974,6 +2974,7 @@ class ForgeBlueprintWizard:
             self._save_path_touched = True
             self.start.value = cfg.run.start_date.date()
             self.end.value = cfg.run.end_date.date()
+            self.model_ref_date.value = cfg.run.model_reference_date.date()
             gk = cfg.domain.grid_kwargs
             for k, w in self.grid_w.items():
                 if k in gk:

@@ -328,6 +328,7 @@ def build_forge_blueprint(
     partitioning: dict[str, int],
     start_date: datetime,
     end_date: datetime,
+    model_reference_date: datetime | None = None,
     name: str | None = None,
     description: str = "Generated blueprint",
     cdr_forcing: dict[str, Any] | None = None,
@@ -387,6 +388,10 @@ def build_forge_blueprint(
 
     ``name`` is the blueprint's canonical name (``identity.name``); if omitted, this
     computes and sanitizes the default (``{model_name}_{grid_name}_{n_procs}procs``).
+
+    ``model_reference_date`` is the ROMS model reference date (t=0), passed to every
+    rt object that accepts it. If ``None`` (the default), ``RunWindow`` falls back to
+    its own default (2000-01-01, the roms-tools default).
 
     ``v_sponge`` and ``dt`` are both domain-owned numerics with the same pattern:
     if ``None`` (the default), each is derived from the grid -- ``v_sponge`` from
@@ -627,7 +632,15 @@ def build_forge_blueprint(
             name=name or default_name,
             description=description,
         ),
-        run=RunWindow(start_date=start_date, end_date=end_date),
+        run=RunWindow(
+            start_date=start_date,
+            end_date=end_date,
+            **(
+                {"model_reference_date": model_reference_date}
+                if model_reference_date is not None
+                else {}
+            ),
+        ),
         domain=Domain(
             grid_name=grid_name,
             grid_kwargs=grid_kwargs,
