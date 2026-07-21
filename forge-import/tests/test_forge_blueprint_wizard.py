@@ -484,6 +484,7 @@ _CDR_SAMPLE_YAML = (
     Path(cstar_forge.__file__).parent
     / "catalog"
     / "blueprints"
+    / "legacy"
     / "MacOS"
     / "cson_roms-marbl_v0.1_test-tiny_1procs"
     / "_cdr_forcing.yaml"

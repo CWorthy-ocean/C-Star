@@ -2626,6 +2626,8 @@ class ForgeBlueprintWizard:
             and getattr(_ic_interp, "value", _ic_interp) != BgcInterpMethod.DEPTH.value
         ):
             ic["bgc_interpolation_method"] = getattr(_ic_interp, "value", _ic_interp)
+        if getattr(f.initial_conditions, "allow_flex_time", False):
+            ic["allow_flex_time"] = True
         for f2 in ("prefill", "regrid_method", "extrap_method"):
             v2 = getattr(f.initial_conditions, f2, None)
             if v2 is not None:

@@ -604,16 +604,18 @@ def test_regrid_options_survive_resolve_and_override_round_trip():
 def test_regrid_options_survive_wizard_load_back():
     """The *other* reverse path -- ForgeBlueprintWizard._sources_to_inputs, which
     seeds the forcing editor when a config is loaded into the wizard -- must also
-    carry prefill/regrid_method/extrap_method. This is the load-back whitelist that
-    silently dropped a field in a past bug (see project memory
-    emod_rivr2o_datasources); sources_to_forcing_override (tested above) is a
-    different code path and does not cover this one.
+    carry prefill/regrid_method/extrap_method and allow_flex_time. This is the
+    load-back whitelist that silently dropped allow_flex_time until this test was
+    added (see project memory emod_rivr2o_datasources for the pattern);
+    sources_to_forcing_override (tested above) is a different code path and does
+    not cover this one.
     """
     from cstar_forge.domain_catalog import default_catalog as cat
     from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
 
     fdata = cat.forcing_data("glorys-era5-unified")
     fdata["initial_conditions"]["prefill"] = "inverse_dist"
+    fdata["initial_conditions"]["allow_flex_time"] = True
     fdata["forcing"]["surface"][0]["regrid_method"] = "xesmf"
     fdata["forcing"]["tidal"][0]["extrap_method"] = "nearest_s2d"
 
@@ -621,6 +623,7 @@ def test_regrid_options_survive_wizard_load_back():
     seeded = ForgeBlueprintWizard._sources_to_inputs(cfg)
 
     assert seeded["initial_conditions"]["prefill"] == "inverse_dist"
+    assert seeded["initial_conditions"]["allow_flex_time"] is True
     assert seeded["forcing"]["surface"][0]["regrid_method"] == "xesmf"
     assert seeded["forcing"]["tidal"][0]["extrap_method"] == "nearest_s2d"
 
@@ -842,6 +845,7 @@ _CDR_SAMPLE_YAML = (
     Path(cstar_forge.__file__).parent
     / "catalog"
     / "blueprints"
+    / "legacy"
     / "MacOS"
     / "cson_roms-marbl_v0.1_test-tiny_1procs"
     / "_cdr_forcing.yaml"
