@@ -2,6 +2,7 @@ import functools
 import logging
 import os
 import random
+import uuid
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
@@ -20,6 +21,7 @@ from cstar.base.env import (
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_ORCH_LOCAL_DELAY,
+    ENV_CSTAR_RUNID,
     ENV_CSTAR_STATE_HOME,
 )
 from cstar.base.external_codebase import ExternalCodeBase
@@ -1849,8 +1851,17 @@ def bp_templates_dir(templates_dir: Path) -> Path:
 
 
 @pytest.fixture
+def mock_run_id() -> Generator[str]:
+    """Configure the CSTAR_RUNID environment variable."""
+    run_id = str(uuid.uuid4())
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: run_id}):
+        yield run_id
+
+
+@pytest.fixture
 def mocked_simulation_outputs(
     tmp_path: Path,
+    mock_run_id: str,
     bp_templates_dir: Path,
 ) -> tuple[Path, Path, Path]:
     """This fixture creates a directory structure mocking a completed simulation.
@@ -1878,7 +1889,7 @@ def mocked_simulation_outputs(
     """
     info_msg = f"This file was created by the {__name__} fixture\n"
 
-    container_dir = tmp_path / "mock_sim_output_dir"
+    container_dir = tmp_path / mock_run_id
     user_data_dir = container_dir / "userdata"
     user_data_dir.mkdir(parents=True, exist_ok=True)
 

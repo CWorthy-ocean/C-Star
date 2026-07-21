@@ -19,7 +19,7 @@ from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.converter.converter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.roms.simulation import ROMSSimulation
 
 
@@ -182,6 +182,12 @@ def test_blueprint_run_apply_directives(
     mock_sim_instance = mock.Mock()
     mock_sim_instance.name = "test simulation"
 
+    wp = LiveWorkplan(
+        name="test-workplan",
+        description="a live workplan used to create a `WorkplanRun` to test directives",
+        steps=[temp_step],
+    )
+
     async def modify_runner(
         self: BlueprintRunner[RomsMarblBlueprint],
     ) -> RunnerResult[RomsMarblBlueprint]:
@@ -203,6 +209,10 @@ def test_blueprint_run_apply_directives(
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(return_value=wp),
+        ),
     ):
         runner = CliRunner()
         _ = runner.invoke(

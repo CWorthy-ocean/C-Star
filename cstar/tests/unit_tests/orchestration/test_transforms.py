@@ -17,6 +17,7 @@ from cstar.applications.roms_marbl.transforms import (
     RomsMarblTimeSplitter,
 )
 from cstar.base.env import FLAG_OFF
+from cstar.base.exceptions import CstarError
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.models import (
     Application,
@@ -123,88 +124,6 @@ def step_overiding_wp(
     wp = deserialize(test_wp_path, Workplan)
 
     return wp
-
-
-@pytest.mark.asyncio
-async def test_continuance_directive_path_resolution(
-    tmp_path: Path,
-    bp_templates_dir: Path,
-    wp_templates_dir: Path,
-    create_mocked_simulation_outputs: Callable[
-        [Path, Path, str], Awaitable[None]
-    ],  # tuple[Path, Path, Path]],
-    mock_run_id: str,
-) -> None:
-    """Verify that compose creates a new workplan and blueprint in the expected
-    output directory.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory for test outputs
-    bp_templates_dir: Path
-        Fixture returning the path to the directory containing blueprint template files
-    wp_templates_dir: Path
-        Fixture returning the path to the directory containing workplan template files
-    mock_run_id
-        A unique run-id that has already been added to os.environ
-    """
-    run_id = mock_run_id
-
-    wp_template_file = "linear.yaml"
-    wp_template_path = wp_templates_dir / wp_template_file
-
-    bp_template_file = "blueprint.yaml"
-    bp_template_path = bp_templates_dir / bp_template_file
-
-    local_bp = tmp_path / bp_template_file
-    local_bp.write_text(bp_template_path.read_text())
-
-    wp = deserialize(wp_template_path, Workplan)
-
-    # Prepare the templated workplan by adding directive configuration
-    live_steps = [LiveStep.from_step(s) for s in wp.steps]
-
-    for i, step in enumerate(live_steps):
-        step.blueprint_path = local_bp
-        step.working_dir = tmp_path / run_id / step.safe_name
-        if i > 0:
-            step.directives[ContinuanceDirective.key()] = {"step": wp.steps[i - 1].name}
-
-    live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
-    live_wp_path = tmp_path / wp_template_file
-    assert serialize(live_wp_path, live_plan)
-
-    await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
-
-    for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):
-        if i > 0:
-            prior_step = live_plan.steps[i - 1]
-            directives = t.cast("dict[str, dict[str, str]]", step.directives)
-            assert ContinuanceDirective.key() in directives
-
-            config = directives.get(ContinuanceDirective.key(), {})
-            assert ContinuanceDirective.KEY_STEP in config
-            assert ContinuanceDirective.KEY_PATH not in config
-
-            modifier = ContinuanceDirective(config)
-            altered = modifier(step)[0]
-
-            current_directives = t.cast("dict[str, dict[str, str]]", altered.directives)
-            assert ContinuanceDirective.key() in current_directives
-
-            config = current_directives.get(ContinuanceDirective.key(), {})
-
-            # confirm the path still doesn't exist in the directive
-            assert not altered.blueprint_overrides
-            assert ContinuanceDirective.KEY_STEP in config
-            assert ContinuanceDirective.KEY_PATH not in config
-
-            # confirm the initial conditions have been overridden to reference the named step
-            bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
-            assert Path(bp.initial_conditions.data[0].location).is_relative_to(
-                prior_step.fsm.output_dir
-            )
 
 
 def test_get_transforms() -> None:
@@ -338,7 +257,153 @@ def test_override_transform_system_precedence(
     assert Path(bp_new.working_dir) == sys_od
 
 
-def test_continuance_transform_not_supported(test_working_dir: Path) -> None:
+@pytest.mark.asyncio
+async def test_continuance_directive_step_resolution(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    wp_templates_dir: Path,
+    create_mocked_simulation_outputs: Callable[[Path, Path, str], Awaitable[None]],
+    mock_run_id: str,
+) -> None:
+    """Verify that a continuance directive uses context information to identify
+    the search path when a step name is provided.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
+    mock_run_id
+        A unique run-id that has already been added to os.environ
+    """
+    run_id = mock_run_id
+
+    wp_template_file = "linear.yaml"
+    wp_template_path = wp_templates_dir / wp_template_file
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    local_bp = tmp_path / bp_template_file
+    local_bp.write_text(bp_template_path.read_text())
+
+    wp = deserialize(wp_template_path, Workplan)
+
+    # Prepare the templated workplan by adding directive configuration
+    live_steps = [LiveStep.from_step(s) for s in wp.steps]
+
+    for i, step in enumerate(live_steps):
+        step.blueprint_path = local_bp
+        step.working_dir = tmp_path / run_id / step.safe_name
+        if i > 0:
+            step.directives[ContinuanceDirective.key()] = {"step": wp.steps[i - 1].name}
+
+    live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    live_wp_path = tmp_path / wp_template_file
+    assert serialize(live_wp_path, live_plan)
+
+    await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
+
+    for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):
+        if i > 0:
+            prior_step = live_plan.steps[i - 1]
+            directives = t.cast("dict[str, dict[str, str]]", step.directives)
+            assert ContinuanceDirective.key() in directives
+
+            config = directives.get(ContinuanceDirective.key(), {})
+            assert ContinuanceDirective.KEY_STEP in config
+            assert ContinuanceDirective.KEY_PATH not in config
+
+            modifier = ContinuanceDirective(config, workplan=live_plan)
+            altered = modifier(step)[0]
+
+            current_directives = t.cast("dict[str, dict[str, str]]", altered.directives)
+            assert ContinuanceDirective.key() in current_directives
+
+            config = current_directives.get(ContinuanceDirective.key(), {})
+
+            # confirm the path still doesn't exist in the directive
+            assert not altered.blueprint_overrides
+            assert ContinuanceDirective.KEY_STEP in config
+            assert ContinuanceDirective.KEY_PATH not in config
+
+            # confirm the initial conditions have been overridden to reference the named step
+            bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+            assert Path(bp.initial_conditions.data[0].location).is_relative_to(
+                prior_step.fsm.output_dir
+            )
+
+
+@pytest.mark.asyncio
+async def test_continuance_directive_context_not_supplied() -> None:
+    """Verify that constructing a `ContinuanceDirective` that requires contextual
+    information without supplying the necessary context info results in a failure.
+
+    """
+    workplan: LiveWorkplan | None = None
+    config = {"step": "any-step-name"}
+
+    with pytest.raises(CstarError, match="Directive did not receive workplan"):
+        ContinuanceDirective(config, workplan)
+
+
+@pytest.mark.asyncio
+async def test_continuance_directive_step_DNE(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify that constructing a `ContinuanceDirective` that has an invalid
+    step name as the source results in a failure.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir: Path
+        Fixture returning the path to the directory containing blueprint template files
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
+    mock_run_id
+        A unique run-id that has already been added to os.environ
+    """
+    run_id = mock_run_id
+
+    wp_template_file = "linear.yaml"
+    wp_template_path = wp_templates_dir / wp_template_file
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    local_bp = tmp_path / bp_template_file
+    local_bp.write_text(bp_template_path.read_text())
+
+    wp = deserialize(wp_template_path, Workplan)
+
+    # Prepare the templated workplan by adding directive configuration
+    live_steps = [LiveStep.from_step(s) for s in wp.steps]
+
+    for i, step in enumerate(live_steps):
+        step.blueprint_path = local_bp
+        step.working_dir = tmp_path / run_id / step.safe_name
+        if i > 0:
+            step.directives[ContinuanceDirective.key()] = {"step": wp.steps[i - 1].name}
+
+    live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    bad_name = str(uuid.uuid4())
+    config = {"step": bad_name}
+
+    with pytest.raises(KeyError, match=f"Unable to locate step {bad_name!r}"):
+        ContinuanceDirective(config, live_plan)
+
+
+def test_continuance_directive_incomplete_config_supplied(
+    test_working_dir: Path,
+) -> None:
     """Verify that unknown configuration results in an exception.
 
     Parameters
@@ -351,7 +416,7 @@ def test_continuance_transform_not_supported(test_working_dir: Path) -> None:
         _ = ContinuanceDirective({"not-path": str(test_working_dir)})
 
 
-def test_continuance_transform_path_dne() -> None:
+def test_continuance_directive_path_dne() -> None:
     """Verify that sending a path to a directory that does not exist results in
     an exception being raised.
     """
@@ -360,12 +425,12 @@ def test_continuance_transform_path_dne() -> None:
 
 
 @pytest.mark.parametrize("pad_size", range(1, 10))
-def test_continuance_transform_happy_path(
+def test_continuance_directive_happy_path(
     single_step_workplan: Workplan,
     mocked_simulation_outputs: tuple[Path, Path, Path],
     pad_size: int,
 ) -> None:
-    """Verify that applying a well-formed continuance transform causes the
+    """Verify that applying a well-formed continuance directive causes the
     blueprint initial conditions to be updated.
 
     Parameters

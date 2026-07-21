@@ -15,7 +15,6 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
@@ -29,7 +28,6 @@ from cstar.base.utils import (
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     Directive,
     DirectiveConfig,
@@ -616,7 +614,11 @@ class ContinuanceDirective(Directive, OverrideTransform):
     KEY_STEP: t.Final[str] = "step"
     """Key used to specify a step name as the source for continuance."""
 
-    def __init__(self, config: dict[str, t.Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, t.Any],
+        workplan: LiveWorkplan | None = None,
+    ) -> None:
         """Initialize the instance.
 
         Parameters
@@ -624,42 +626,12 @@ class ContinuanceDirective(Directive, OverrideTransform):
         config : dict[str, t.Any] | None
             A dictionary containing configuration for the directive.
         """
-        Directive.__init__(self, config)
+        Directive.__init__(self, config, workplan=workplan)
         OverrideTransform.__init__(self, self._create_initial_condition_overrides())
 
     @classmethod
     def key(cls) -> str:
         return "continue-from"
-
-    def _find_step_path(self, name: str) -> Path:
-        """Identify the path to the output directory for another step.
-
-        Parameters
-        ----------
-        name : str
-            The name of the step to locate
-
-        Returns
-        -------
-        Path
-        """
-        run_id = os.getenv(ENV_CSTAR_RUNID, None)
-        run: WorkplanRun | None = None
-
-        if run_id:
-            tracking = TrackingRepository()
-            run = tracking.get_workplan_run_sync(run_id)
-
-        if run is None:
-            msg = "Workplan context information was not supplied."
-            raise RuntimeError(msg)
-
-        wp = deserialize(run.trx_workplan_path, LiveWorkplan)
-        if step := next((s for s in wp.steps if s.name == name), None):
-            return step.fsm.output_dir
-
-        msg = f"Unable to locate metadata for step {name!r} in runtime context."
-        raise RuntimeError(msg)
 
     def _create_initial_condition_overrides(
         self,
@@ -694,7 +666,12 @@ class ContinuanceDirective(Directive, OverrideTransform):
             search_path = Path(target_path)
 
         if name := self._config.get(self.KEY_STEP, None):
-            search_path = self._find_step_path(name)
+            if name in self.workplan:
+                step = self.workplan[name]
+                search_path = step.fsm.output_dir
+            else:
+                msg = f"Unable to locate step {name!r} in workplan"
+                raise KeyError(msg)
 
         if search_path and (
             restart_file := RestartFile.find(search_path, notfound_ok=False)

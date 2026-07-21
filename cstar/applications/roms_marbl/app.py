@@ -159,7 +159,10 @@ def main() -> int:
 
     blueprint_uri = str(args.blueprint_uri)
     if args.directives:
-        blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
+        blueprint_uri = DirectiveConfig.apply_directives(
+            args.directives,
+            blueprint_uri,
+        )
 
     request = RunnerRequest(blueprint_uri, RomsMarblBlueprint)
     runner = RomsMarblRunner(request, service_cfg, job_cfg)
