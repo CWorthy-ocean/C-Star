@@ -1,0 +1,544 @@
+{
+    "$defs": {
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        },
+        "CodeRepository": {
+            "additionalProperties": true,
+            "description": "Reference to a remote code repository with optional path filtering\nand point-in-time specification.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "title": "Location"
+                },
+                "commit": {
+                    "default": "",
+                    "title": "Commit",
+                    "type": "string"
+                },
+                "branch": {
+                    "default": "",
+                    "title": "Branch",
+                    "type": "string"
+                },
+                "filter": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/PathFilter"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "CodeRepository",
+            "type": "object"
+        },
+        "Dataset": {
+            "additionalProperties": true,
+            "description": "A dataset contains a data block alongside documentation and locking fields.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "data": {
+                    "items": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/$defs/Resource"
+                            },
+                            {
+                                "$ref": "#/$defs/VersionedResource"
+                            }
+                        ]
+                    },
+                    "title": "Data",
+                    "type": "array"
+                }
+            },
+            "required": [
+                "data"
+            ],
+            "title": "Dataset",
+            "type": "object"
+        },
+        "ForcingConfiguration": {
+            "additionalProperties": true,
+            "description": "Configuration of the forcing parameters of the model.",
+            "properties": {
+                "boundary": {
+                    "$ref": "#/$defs/Dataset"
+                },
+                "surface": {
+                    "$ref": "#/$defs/Dataset"
+                },
+                "tidal": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "river": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "corrections": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                }
+            },
+            "required": [
+                "boundary",
+                "surface"
+            ],
+            "title": "ForcingConfiguration",
+            "type": "object"
+        },
+        "ModelParameterSet": {
+            "additionalProperties": true,
+            "description": "Parameters that can override ROMS.in values. Unlike RuntimeParameters, these affect the validity of the\nmodel solution, and should be locked for validated blueprints.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "title": "Hash"
+                },
+                "time_step": {
+                    "exclusiveMinimum": 0,
+                    "title": "Time Step",
+                    "type": "integer"
+                },
+                "use_pio": {
+                    "default": false,
+                    "title": "Use Pio",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "time_step"
+            ],
+            "title": "ModelParameterSet",
+            "type": "object"
+        },
+        "PartitioningParameterSet": {
+            "additionalProperties": true,
+            "description": "Parameters for the partitioning of the model.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "title": "Hash"
+                },
+                "n_procs_x": {
+                    "exclusiveMinimum": 0,
+                    "title": "N Procs X",
+                    "type": "integer"
+                },
+                "n_procs_y": {
+                    "exclusiveMinimum": 0,
+                    "title": "N Procs Y",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "n_procs_x",
+                "n_procs_y"
+            ],
+            "title": "PartitioningParameterSet",
+            "type": "object"
+        },
+        "PathFilter": {
+            "additionalProperties": true,
+            "description": "A filter used to specify a subset of files.",
+            "properties": {
+                "directory": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": "",
+                    "title": "Directory"
+                },
+                "files": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Files",
+                    "type": "array"
+                }
+            },
+            "title": "PathFilter",
+            "type": "object"
+        },
+        "ROMSCompositeCodeRepository": {
+            "additionalProperties": true,
+            "description": "Collection of repositories used to build, configure, and execute ROMS.",
+            "properties": {
+                "roms": {
+                    "$ref": "#/$defs/CodeRepository"
+                },
+                "run_time": {
+                    "$ref": "#/$defs/CodeRepository"
+                },
+                "compile_time": {
+                    "$ref": "#/$defs/CodeRepository"
+                },
+                "marbl": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/CodeRepository"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                },
+                "pio": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/CodeRepository"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null
+                }
+            },
+            "required": [
+                "roms",
+                "run_time",
+                "compile_time"
+            ],
+            "title": "ROMSCompositeCodeRepository",
+            "type": "object"
+        },
+        "Resource": {
+            "additionalProperties": true,
+            "properties": {
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "file-path",
+                            "type": "string"
+                        },
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "title": "Location"
+                },
+                "partitioned": {
+                    "default": false,
+                    "title": "Partitioned",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "Resource",
+            "type": "object"
+        },
+        "RuntimeParameterSet": {
+            "additionalProperties": true,
+            "description": "Parameters for the execution of the model.\n\nThese parameters can be varied (within bounds defined elsewhere in the blueprint, e.g. valid_start/end_date),\nwithout changing the validity of the model solution.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "title": "Hash"
+                },
+                "start_date": {
+                    "format": "date-time",
+                    "title": "Start Date",
+                    "type": "string"
+                },
+                "end_date": {
+                    "format": "date-time",
+                    "title": "End Date",
+                    "type": "string"
+                },
+                "checkpoint_frequency": {
+                    "default": "1d",
+                    "minLength": 2,
+                    "pattern": "([1-9][0-9]*)([hdwmy])",
+                    "title": "Checkpoint Frequency",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "start_date",
+                "end_date"
+            ],
+            "title": "RuntimeParameterSet",
+            "type": "object"
+        },
+        "VersionedResource": {
+            "additionalProperties": true,
+            "description": "A physical asset that is used as an input or configuration and\nhas an associated hash used to identify a specific version.",
+            "properties": {
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "file-path",
+                            "type": "string"
+                        },
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "title": "Location"
+                },
+                "partitioned": {
+                    "default": false,
+                    "title": "Partitioned",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "minLength": 1,
+                    "title": "Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "location",
+                "hash"
+            ],
+            "title": "VersionedResource",
+            "type": "object"
+        }
+    },
+    "additionalProperties": true,
+    "description": "Blueprint schema for running a ROMS-MARBL simulation.",
+    "properties": {
+        "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "roms_marbl",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset"
+        },
+        "schema_version": {
+            "default": "2.1.0",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "default": ".",
+            "format": "path",
+            "title": "Working Dir",
+            "type": "string"
+        },
+        "valid_start_date": {
+            "format": "date-time",
+            "title": "Valid Start Date",
+            "type": "string"
+        },
+        "valid_end_date": {
+            "format": "date-time",
+            "title": "Valid End Date",
+            "type": "string"
+        },
+        "code": {
+            "$ref": "#/$defs/ROMSCompositeCodeRepository"
+        },
+        "initial_conditions": {
+            "$ref": "#/$defs/Dataset",
+            "maxLength": 1,
+            "minLength": 1
+        },
+        "grid": {
+            "$ref": "#/$defs/Dataset",
+            "maxLength": 1,
+            "minLength": 1
+        },
+        "forcing": {
+            "$ref": "#/$defs/ForcingConfiguration"
+        },
+        "partitioning": {
+            "$ref": "#/$defs/PartitioningParameterSet"
+        },
+        "model_params": {
+            "$ref": "#/$defs/ModelParameterSet"
+        },
+        "runtime_params": {
+            "$ref": "#/$defs/RuntimeParameterSet"
+        },
+        "cdr_forcing": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/Dataset"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null
+        },
+        "nesting_info": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/Dataset"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "valid_start_date",
+        "valid_end_date",
+        "code",
+        "initial_conditions",
+        "grid",
+        "forcing",
+        "partitioning",
+        "model_params",
+        "runtime_params"
+    ],
+    "title": "RomsMarblBlueprint",
+    "type": "object"
+}

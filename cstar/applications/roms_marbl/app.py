@@ -9,7 +9,10 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
-from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
+from cstar.applications.roms_marbl.migration import (
+    RomsMarblSchemaAdapter2025v1,
+    RomsMarblSchemaAdapterV2V21,
+)
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
 from cstar.base.exceptions import CstarError
@@ -133,7 +136,7 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
     applicable_transforms = (RomsMarblTimeSplitter,)
-    migrations = (RomsMarblSchemaAdapter2025v1,)
+    migrations = (RomsMarblSchemaAdapter2025v1, RomsMarblSchemaAdapterV2V21)
 
 
 def main() -> int:

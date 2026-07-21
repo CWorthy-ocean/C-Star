@@ -19,7 +19,9 @@ from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
 from cstar.applications.roms_marbl.migration import (
     APP_ROMS_MARBL_SCHEMA_1_0_0,
     APP_ROMS_MARBL_SCHEMA_2_0_0,
+    APP_ROMS_MARBL_SCHEMA_2_1_0,
     RomsMarblSchemaAdapter2025v1,
+    RomsMarblSchemaAdapterV2V21,
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import (
@@ -40,12 +42,12 @@ APP_SLEEP: t.Final[str] = "sleep"
     [
         pytest.param(
             {KEY_APP: APP_ROMS},
-            APP_ROMS_MARBL_SCHEMA_2_0_0,
+            APP_ROMS_MARBL_SCHEMA_2_1_0,
             id="rm::app-only",
         ),
         pytest.param(
             {KEY_APP: APP_ROMS, KEY_SV: APP_ROMS_MARBL_SCHEMA_1_0_0},
-            APP_ROMS_MARBL_SCHEMA_2_0_0,
+            APP_ROMS_MARBL_SCHEMA_2_1_0,
             id="rm::with source schema",
         ),
         pytest.param(
@@ -61,6 +63,7 @@ def test_migration_version(model: dict[str, t.Any], exp_version: str) -> None:
 
     adapters: list[type[SchemaAdapter]] = [
         RomsMarblSchemaAdapter2025v1,
+        RomsMarblSchemaAdapterV2V21,
         HelloWorldSchemaAdapterV1V1,
     ]
 
