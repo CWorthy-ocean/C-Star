@@ -43,6 +43,7 @@ Improvements
 - Rely on `threading.Event` alone during service shutdown to avoid inconsistent behavior / service hangs. (`#592 <https://github.com/CWorthy-ocean/C-Star/pull/592>`_)
 - Fix unnecessarily long start-up times due to loading application libraries automatically (`#590 <https://github.com/CWorthy-ocean/C-Star/pull/590>`_)
 - Avoid starting prefect server unnecessarily when running tests (`#591 <https://github.com/CWorthy-ocean/C-Star/pull/591>`_)
+- Reduce startup time by instantiating `CStarSystemManager` at runtime. (`#593 <https://github.com/CWorthy-ocean/C-Star/pull/593>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
