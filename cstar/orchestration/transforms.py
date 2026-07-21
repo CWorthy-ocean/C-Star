@@ -189,23 +189,17 @@ def fsm_resolver(
     scope : str
         The scope to be resolved (which attribute on the FSM instance).
     """
-    fsm_attrs = [
-        p
-        for p in dir(next(iter(fsm_map.values())))
-        if not p.startswith("_") and p.endswith("_dir")
-    ]
     fsm = fsm_map.get(step_name, None)
     if not fsm:
         msg = f"Unable to resolve {scope!r} for unknown step {step_name!r}"
-        raise ValueError(msg)
+        raise KeyError(msg)
 
-    fsm_attrs.append("root")
-    if value := str(getattr(fsm, scope, None)):
-        return value
+    if value := getattr(fsm, scope, None):
+        return str(value)
 
     ph = mustache(f"{scope}: {step_name}")
     msg = f"Unable to resolve {scope!r} for placeholder {ph!r}"
-    raise ValueError(msg)
+    raise KeyError(msg)
 
 
 def get_fsm_resolver(steps: Sequence[LiveStep]) -> Callable[[str, str], str]:

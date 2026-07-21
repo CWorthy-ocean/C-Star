@@ -1,6 +1,7 @@
 # ruff: noqa: SLF001, S101
 import os
 import typing as t
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
@@ -16,7 +17,13 @@ from cstar.applications.roms_marbl.transforms import (
 )
 from cstar.base.env import FLAG_OFF
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
-from cstar.orchestration.models import Application, BlueprintState, Step, Workplan
+from cstar.orchestration.models import (
+    Application,
+    BlueprintState,
+    Step,
+    UserDefinedVariables,
+    Workplan,
+)
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import (
@@ -380,9 +387,6 @@ def test_workplan_transformer_applies_working_dir_overrides(
     assert blueprint.working_dir != dir_orig
 
     # confirm the workplan override took precedence over user-supplied overrides
-    exp_dir = (  # noqa: F841
-        step_trx.fsm.run_dir
-    )  # TODO: there is something very wrong with the fsm root...
     assert blueprint.working_dir == sys_working_dir_override  # exp_dir
     assert blueprint.working_dir != dir_orig
     assert blueprint.working_dir != original_override
@@ -413,41 +417,138 @@ def test_template_fill_suffix() -> None:
     assert TemplateFillTransform.suffix() == "tmpl"
 
 
+@pytest.mark.parametrize(
+    ("use_var", "exp_value"),
+    [
+        ("v0", "/data/1/input"),
+        ("v1", "/data/2/input"),
+        ("v2", "/data/3/input"),
+    ],
+)
 def test_template_fill_variable_substitution(
     live_step_with_templates: LiveStep,
+    use_var: str,
+    exp_value: str,
 ) -> None:
-    """Plain {{name}} tokens are replaced using the variable resolver."""
-    variables = {"base_dir": "/data/base", "var1": "ALK", "var2": "pH_3D"}
+    """Verify that variable-only tokens (e.g. `{{name}}`) are replaced
+    using the variable resolver.
+    """
+    variables = {"v0": "/data/1", "v1": "/data/2", "v2": "/data/3"}
     transform = TemplateFillTransform(variable_resolver=variables.__getitem__)
 
-    # only fill overrides that don't contain path: tokens
+    # create a template that will use the variable resolver
     step = LiveStep.from_step(
         live_step_with_templates,
-        update={"blueprint_overrides": {"input_dir": "{{base_dir}}/input"}},
+        update={
+            "blueprint_overrides": {
+                # use `{{baseX}}/input` to ensure `/input` part is not modified
+                "input_dir": f"{mustache(f'{use_var}')}/input"
+            }
+        },
     )
     (result,) = transform(step)
+    assert result.blueprint_overrides["input_dir"] == exp_value
 
-    assert result.blueprint_overrides["input_dir"] == "/data/base/input"
 
-
-def test_template_fill_path_substitution(
-    live_step_with_templates: LiveStep, tmp_path: Path
+@pytest.mark.parametrize(
+    ("purpose", "exp_value", "wd_name"),
+    [
+        ("root_dir", "my-test-path1", "my-test-path1"),
+        ("input_dir", "my-test-path2/input", "my-test-path2"),
+        ("run_dir", "my-test-path3/work", "my-test-path3"),
+        ("tasks_dir", "my-test-path4/tasks", "my-test-path4"),
+        ("logs_dir", "my-test-path5/logs", "my-test-path5"),
+        ("output_dir", "my-test-path6/output", "my-test-path6"),
+    ],
+)
+def test_template_fill_scoped_resolver(
+    live_step_with_templates: LiveStep,
+    tmp_path: Path,
+    purpose: str,
+    exp_value: str,
+    wd_name: str,
 ) -> None:
-    """{{work_dir: step_name}} tokens are replaced using the scope resolver."""
-    upstream_dir = tmp_path / "upstream"
+    """Verify `{{<fsm-attr>: step_name}}` tokens are replaced using the scoped resolver.
 
-    def _resolve(_x: str, _y: str) -> str:
-        return str(upstream_dir)
+    Varies the `working_dir` on the upstream (source) step to ensure it's not
+    "getting lucky" by using a default working directory.
+    """
+    upstream_dir = tmp_path / wd_name
+    KEY_WD: t.Final[str] = "working_dir"
 
-    transform = TemplateFillTransform(scoped_resolver=_resolve)
+    step1 = LiveStep.from_step(
+        live_step_with_templates,
+        update={
+            "name": str(uuid.uuid4()),
+            KEY_WD: upstream_dir,
+        },
+    )
+    step2 = LiveStep.from_step(
+        live_step_with_templates,
+        update={
+            "blueprint_overrides": {
+                KEY_WD: mustache(f"{purpose}: {step1.name}"),
+            },
+        },
+    )
+    resolver = get_fsm_resolver([step1, step2])
+
+    transform = TemplateFillTransform(scoped_resolver=resolver)
+    (result,) = transform(step2)
+
+    source_value = str(getattr(step1.fsm, purpose))
+    actual_value = str(result.blueprint_overrides[KEY_WD])
+
+    assert actual_value == source_value
+    assert actual_value.endswith(exp_value)
+    assert Path(actual_value).is_relative_to(upstream_dir)
+
+
+def test_template_fill_scoped_resolver_invalid_lookup(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Verify that the fill transform raises a value error if an attempt to access
+    a valid scope on an invalid member (e.g. look up working_dir, but with a
+    step name that doesn't exist).
+    """
+    wd_key = "working_dir"
+    step1 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"name": "step-1"},
+    )
+    step2 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {wd_key: "{{working_dir: step-111}}/output"}},
+    )
+
+    resolver = get_fsm_resolver([step1, step2])
+    transform = TemplateFillTransform(scoped_resolver=resolver)
+
+    with pytest.raises(KeyError, match="unknown step"):
+        _ = transform(step2)
+
+
+def test_template_fill_variable_resolver_unknown_variable(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Verify that the fill transform raises a value error if an attempt to access
+    an unknown variable on a variable resolver is encountered.
+
+    E.g. Template contains {{typo-var}} but variable is named "ok-var" in the workplan.
+    """
     wd_key = "working_dir"
     step = LiveStep.from_step(
         live_step_with_templates,
-        update={"blueprint_overrides": {wd_key: "{{work_dir: upstream}}/output"}},
+        update={"blueprint_overrides": {wd_key: "{{xxx}}/output"}},
     )
-    (result,) = transform(step)
+    named_config = UserDefinedVariables(
+        keys={"yyy"},
+        mapping={"yyy": "value"},
+    )
+    transform = TemplateFillTransform(variable_resolver=lambda name: named_config[name])
 
-    assert result.blueprint_overrides[wd_key] == f"{upstream_dir}/output"
+    with pytest.raises(KeyError, match="Unable to resolve variable"):
+        _ = transform(step)
 
 
 def test_template_fill_nested_dict(live_step_with_templates: LiveStep) -> None:
@@ -546,8 +647,33 @@ def test_template_fill_with_path_resolver_unknown_purpose(
 
     fill = TemplateFillTransform(variable_resolver=str, scoped_resolver=resolver)
 
-    with pytest.raises(ValueError, match="Unable to resolve"):
+    with pytest.raises(KeyError, match="Unable to resolve"):
         list(fill(step))
+
+
+def test_template_fill_scoped_resolver_unknown_scope(
+    live_step_with_templates: LiveStep,
+) -> None:
+    """Verify that the fill transform raises a value error if an attempt to access
+    an unknown scope on a scoped resolver is encountered.
+
+    E.g. in {{oooutput_dir: Step A}} the scope is invalid.
+    """
+    wd_key = "working_dir"
+    step1 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"name": "step-1"},
+    )
+    step2 = LiveStep.from_step(
+        live_step_with_templates,
+        update={"blueprint_overrides": {wd_key: "{{woorking_dir: step-1}}/output"}},
+    )
+
+    resolver = get_fsm_resolver([step1, step2])
+    transform = TemplateFillTransform(scoped_resolver=resolver)
+
+    with pytest.raises(KeyError, match="Unable to resolve 'woorking_dir'"):
+        _ = transform(step2)
 
 
 def test_template_fill_does_not_mutate_original_step(
@@ -581,46 +707,68 @@ def test_template_fill_yields_single_step(live_step_with_templates: LiveStep) ->
 
 
 @pytest.mark.parametrize(
-    "purpose",
+    ("use_var", "use_placeholder", "exp_resolved_var", "exp_resolved_ph"),
     [
-        "root",
-        "input_dir",
-        "work_dir",
-        "tasks_dir",
-        "logs_dir",
-        "output_dir",
+        ("var1", "ph1", "123", "ABC/joined_output"),
+        ("var1", "ph2", "123", "DEF/joined_output"),
+        ("var1", "ph3", "123", "GHI/joined_output"),
+        ("var2", "ph1", "XYZ", "ABC/joined_output"),
+        ("var2", "ph2", "XYZ", "DEF/joined_output"),
+        ("var2", "ph3", "XYZ", "GHI/joined_output"),
+        ("var3", "ph1", "PQR", "ABC/joined_output"),
+        ("var3", "ph2", "PQR", "DEF/joined_output"),
+        ("var3", "ph3", "PQR", "GHI/joined_output"),
     ],
 )
 def test_template_fill_combined_resolvers(
-    tmp_path: Path, live_step_with_templates: LiveStep, purpose: str
+    live_step_with_templates: LiveStep,
+    use_var: str,
+    use_placeholder: str,
+    exp_resolved_var: str,
+    exp_resolved_ph: str,
 ) -> None:
     """Ensure that variable and scope resolvers both operate in the same transform pass.
 
     Parammeters
     -----------
-    purpose : str
-        Parameterized value that ensures all expected/known purpose keys can be retrieved.
+    use_var: str
+        The mock name of variable that will be resolved by the variable resolver.
+    use_placeholder : str
+        The mock name of a `Step` that will be resolved by the scoped resolver.
+    exp_resolved_var : str
+        The expected value after resolving the variable.
+    exp_resolved_ph : str
+        The expected value after resolving the placeholder.
     """
-    upstream_dir = tmp_path / "tasks" / "upstream"
-    variables = {"var1": "ALK"}
+    variables = {"var1": "123", "var2": "XYZ", "var3": "PQR"}
+    placeholders = {"ph1": "ABC", "ph2": "DEF", "ph3": "GHI"}
+
+    def scoped_resolver(placeholder: str, scope_: str) -> str:
+        """Return from the mocked resolver data in `placeholders`."""
+        return placeholders[placeholder]
+
     transform = TemplateFillTransform(
         variable_resolver=variables.__getitem__,
-        scoped_resolver=lambda _key, _scope: str(upstream_dir),
+        scoped_resolver=scoped_resolver,
     )
-    template = mustache(f"{purpose}: var1")
+    template = mustache(f"ignored-here: {use_placeholder}")
     step = LiveStep.from_step(
         live_step_with_templates,
         update={
             "blueprint_overrides": {
-                "variable": mustache("var1"),
+                "variable": mustache(use_var),
                 "input_dir": f"{template}/joined_output",
             },
         },
     )
     (result,) = transform(step)
 
-    assert result.blueprint_overrides["variable"] == "ALK"
-    assert result.blueprint_overrides["input_dir"] == f"{upstream_dir}/joined_output"
+    # confirm the variable resolver was applied
+    assert result.blueprint_overrides["variable"] == exp_resolved_var
+
+    # confirm the scoped resolver was applied
+    actual_input = result.blueprint_overrides["input_dir"]
+    assert str(actual_input) == exp_resolved_ph
 
 
 @pytest.mark.parametrize(

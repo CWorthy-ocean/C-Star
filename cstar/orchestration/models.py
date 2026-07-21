@@ -509,6 +509,14 @@ class UserDefinedVariables(BaseModel):
 
         return self
 
+    def __getitem__(self, key: str):
+        try:
+            return self.mapping[key]
+        except KeyError as ex:
+            csv = ", ".join(k for k in self.mapping)
+            msg = f"Unable to resolve variable {key!r}. Available variables: {csv}"
+            raise KeyError(msg) from ex
+
 
 register_representer(WorkplanState, strenum_representer)
 register_representer(BlueprintState, strenum_representer)

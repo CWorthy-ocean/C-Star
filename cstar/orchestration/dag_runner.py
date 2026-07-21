@@ -347,7 +347,7 @@ async def prepare_workplan(
             raise ValueError(named_config.error)
 
         fill_transform = TemplateFillTransform(
-            variable_resolver=lambda name: named_config.mapping[name]
+            variable_resolver=lambda name: named_config[name]
         )
 
         persist_vars = WorkplanTransformer.derived_path(
