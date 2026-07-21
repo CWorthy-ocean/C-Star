@@ -220,6 +220,24 @@ HELP_TEXT: dict[str, str] = {
         "ic_flex_time",
     ): "Allow a ±24-hour search window when looking for the requested ini_time in the "
     "source dataset. Useful when the exact timestamp is absent.",
+    (
+        "ic",
+        "prefill",
+    ): "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+    "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+    "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+    "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    (
+        "ic",
+        "regrid_method",
+    ): "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+    "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    (
+        "ic",
+        "extrap_method",
+    ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+    "initial conditions. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+    "nearest source point. Ignored when a prefill is set.",
     # ---- surface forcing -------------------------------------------------------
     (
         "surface",
@@ -260,6 +278,24 @@ HELP_TEXT: dict[str, str] = {
         "restoring_forces",
     ): "Comma-separated list of variables to apply restoring forces to, e.g. 'sss' or "
     "'sst,sss'. Only relevant for type='restoring'. Enables sal_restore/SST correction.",
+    (
+        "surface",
+        "prefill",
+    ): "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+    "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+    "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+    "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    (
+        "surface",
+        "regrid_method",
+    ): "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+    "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    (
+        "surface",
+        "extrap_method",
+    ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+    "surface forcing. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+    "nearest source point. Ignored when a prefill is set.",
     # ---- boundary forcing ------------------------------------------------------
     (
         "boundary",
@@ -313,6 +349,24 @@ HELP_TEXT: dict[str, str] = {
         "ntides",
     ): "Number of tidal constituents to include (max 15). The TPXO atlas provides M2, "
     "S2, N2, K2, K1, O1, P1, Q1, Mf, Mm, M4, MS4, MN4, Mtm, Mf. Default: 10.",
+    (
+        "tidal",
+        "prefill",
+    ): "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+    "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+    "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+    "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    (
+        "tidal",
+        "regrid_method",
+    ): "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+    "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    (
+        "tidal",
+        "extrap_method",
+    ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+    "tidal fields. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+    "nearest source point. Ignored when a prefill is set.",
     # ---- river forcing ---------------------------------------------------------
     (
         "river",
@@ -971,6 +1025,47 @@ _IC_BGC_SOURCE_OPTS = [""] + [e.value for e in BgcInitialConditionsSource]
 _RIVER_BGC_SOURCE_OPTS = [""] + [e.value for e in RiverBgcSource]
 
 
+def _add_regrid_widgets(W, w: dict[str, Any], cat: str, item: dict[str, Any], small):
+    """Build the shared prefill/regrid_method/extrap_method dropdowns onto row-widget
+    dict ``w``, tooltipped for ``cat``. Used by surface, boundary, and tidal forcing —
+    the three-of-five roms-tools >=4 regrid knobs with wizard UI (``prefill_kwargs``/
+    ``extrap_kwargs`` stay typed-but-UI-less, reachable via the ``options`` editor).
+    """
+    _prefill_val = str(item.get("prefill") or "")
+    if _prefill_val not in _PREFILL_OPTS:
+        _prefill_val = ""
+    w["prefill"] = W.Dropdown(
+        options=_PREFILL_OPTS,
+        value=_prefill_val,
+        description="prefill:",
+        style=small,
+        layout=W.Layout(width="200px"),
+        tooltip=_tip(cat, "prefill"),
+    )
+    _regrid_val = str(item.get("regrid_method") or "")
+    if _regrid_val not in _REGRID_OPTS:
+        _regrid_val = ""
+    w["regrid_method"] = W.Dropdown(
+        options=_REGRID_OPTS,
+        value=_regrid_val,
+        description="regrid:",
+        style=small,
+        layout=W.Layout(width="150px"),
+        tooltip=_tip(cat, "regrid_method"),
+    )
+    _extrap_val = str(item.get("extrap_method") or "")
+    if _extrap_val not in _EXTRAP_OPTS:
+        _extrap_val = ""
+    w["extrap_method"] = W.Dropdown(
+        options=_EXTRAP_OPTS,
+        value=_extrap_val,
+        description="extrap:",
+        style=small,
+        layout=W.Layout(width="170px"),
+        tooltip=_tip(cat, "extrap_method"),
+    )
+
+
 def _source_opts_for(cat: str, type_val: str | None) -> list[str]:
     """Return the valid source names for a given forcing category and type."""
     return _SOURCE_OPTS.get((cat, type_val), _SOURCE_OPTS.get((cat, None), []))
@@ -1109,6 +1204,36 @@ class _ForcingEditor:
             indent=False,
             tooltip=_tip("ic", "ic_flex_time"),
         )
+        _ic_prefill_val = str(ic.get("prefill") or "")
+        if _ic_prefill_val not in _PREFILL_OPTS:
+            _ic_prefill_val = ""
+        self.ic_prefill = W.Dropdown(
+            options=_PREFILL_OPTS,
+            value=_ic_prefill_val,
+            description="prefill:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "prefill"),
+        )
+        _ic_regrid_val = str(ic.get("regrid_method") or "")
+        if _ic_regrid_val not in _REGRID_OPTS:
+            _ic_regrid_val = ""
+        self.ic_regrid_method = W.Dropdown(
+            options=_REGRID_OPTS,
+            value=_ic_regrid_val,
+            description="regrid:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "regrid_method"),
+        )
+        _ic_extrap_val = str(ic.get("extrap_method") or "")
+        if _ic_extrap_val not in _EXTRAP_OPTS:
+            _ic_extrap_val = ""
+        self.ic_extrap_method = W.Dropdown(
+            options=_EXTRAP_OPTS,
+            value=_ic_extrap_val,
+            description="extrap:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "extrap_method"),
+        )
         self.ic_options = _options_editor(W, ic.get("options"))
         for _w in (
             self.ic_name,
@@ -1119,6 +1244,9 @@ class _ForcingEditor:
             self.ic_bgc_path,
             self.ic_bgc_interp,
             self.ic_flex_time,
+            self.ic_prefill,
+            self.ic_regrid_method,
+            self.ic_extrap_method,
             self.ic_options,
         ):
             _w.observe(lambda _ch: on_change(), names="value")
@@ -1275,6 +1403,7 @@ class _ForcingEditor:
                 placeholder="sss,sst",
                 tooltip=_tip("surface", "restoring_forces"),
             )
+            _add_regrid_widgets(W, w, "surface", item, small)
         if cat == "boundary":
             _b_interp = str(
                 item.get("bgc_interpolation_method", BgcInterpMethod.DEPTH.value)
@@ -1289,39 +1418,7 @@ class _ForcingEditor:
                 layout=W.Layout(width="180px"),
                 tooltip=_tip("boundary", "bgc_interpolation_method"),
             )
-            _prefill_val = str(item.get("prefill") or "")
-            if _prefill_val not in _PREFILL_OPTS:
-                _prefill_val = ""
-            w["prefill"] = W.Dropdown(
-                options=_PREFILL_OPTS,
-                value=_prefill_val,
-                description="prefill:",
-                style=small,
-                layout=W.Layout(width="200px"),
-                tooltip=_tip("boundary", "prefill"),
-            )
-            _regrid_val = str(item.get("regrid_method") or "")
-            if _regrid_val not in _REGRID_OPTS:
-                _regrid_val = ""
-            w["regrid_method"] = W.Dropdown(
-                options=_REGRID_OPTS,
-                value=_regrid_val,
-                description="regrid:",
-                style=small,
-                layout=W.Layout(width="150px"),
-                tooltip=_tip("boundary", "regrid_method"),
-            )
-            _extrap_val = str(item.get("extrap_method") or "")
-            if _extrap_val not in _EXTRAP_OPTS:
-                _extrap_val = ""
-            w["extrap_method"] = W.Dropdown(
-                options=_EXTRAP_OPTS,
-                value=_extrap_val,
-                description="extrap:",
-                style=small,
-                layout=W.Layout(width="170px"),
-                tooltip=_tip("boundary", "extrap_method"),
-            )
+            _add_regrid_widgets(W, w, "boundary", item, small)
         if cat == "tidal":
             w["ntides"] = W.IntText(
                 value=int(item.get("ntides") or 0),
@@ -1330,6 +1427,7 @@ class _ForcingEditor:
                 layout=W.Layout(width="130px"),
                 tooltip=_tip("tidal", "ntides"),
             )
+            _add_regrid_widgets(W, w, "tidal", item, small)
         if cat == "river":
             w["climatology"] = W.Checkbox(
                 value=bool(src.get("climatology", False)),
@@ -1471,7 +1569,8 @@ class _ForcingEditor:
             item["restoring_forces"] = [
                 p.strip() for p in w["restoring_forces"].value.split(",") if p.strip()
             ]
-        # Boundary regrid/interp knobs: only emit non-default values to keep specs clean.
+        # Shared surface/boundary/tidal regrid/interp knobs: only emit non-default
+        # values to keep specs clean.
         if (
             "bgc_interpolation_method" in w
             and w["bgc_interpolation_method"].value != BgcInterpMethod.DEPTH.value
@@ -1529,6 +1628,12 @@ class _ForcingEditor:
             ic["bgc_interpolation_method"] = self.ic_bgc_interp.value
         if self.ic_flex_time.value:
             ic["allow_flex_time"] = True
+        if self.ic_prefill.value:  # Dropdown: "" = leave unset
+            ic["prefill"] = self.ic_prefill.value
+        if self.ic_regrid_method.value:
+            ic["regrid_method"] = self.ic_regrid_method.value
+        if self.ic_extrap_method.value:
+            ic["extrap_method"] = self.ic_extrap_method.value
         ic_opts = _parse_options(self.ic_options.value)
         if ic_opts:
             ic["options"] = ic_opts
@@ -1552,6 +1657,7 @@ class _ForcingEditor:
                 W.HBox([self.ic_bgc_name, self.ic_bgc_clim]),
                 self.ic_bgc_path,
                 W.HBox([self.ic_bgc_interp, self.ic_flex_time]),
+                W.HBox([self.ic_prefill, self.ic_regrid_method, self.ic_extrap_method]),
                 self.ic_options,
             ]
         )
@@ -2520,6 +2626,10 @@ class ForgeBlueprintWizard:
             and getattr(_ic_interp, "value", _ic_interp) != BgcInterpMethod.DEPTH.value
         ):
             ic["bgc_interpolation_method"] = getattr(_ic_interp, "value", _ic_interp)
+        for f2 in ("prefill", "regrid_method", "extrap_method"):
+            v2 = getattr(f.initial_conditions, f2, None)
+            if v2 is not None:
+                ic[f2] = getattr(v2, "value", v2)
         if getattr(f.initial_conditions, "options", None):
             ic["options"] = dict(f.initial_conditions.options)
         forcing: dict[str, Any] = {}
@@ -2551,8 +2661,9 @@ class ForgeBlueprintWizard:
                     _ctc_val = getattr(_ctc, "value", _ctc)
                     if _ctc_val != ClimatologyMode.IF_ANY_MISSING.value:
                         d["convert_to_climatology"] = _ctc_val
-                # roms-tools >=4 boundary regrid/interp knobs. getattr(v, "value", v)
-                # normalizes (str, Enum) members to their plain string value.
+                # roms-tools >=4 regrid/interp knobs, shared across surface/boundary/
+                # tidal. getattr(v, "value", v) normalizes (str, Enum) members to
+                # their plain string value.
                 _b_interp = getattr(it, "bgc_interpolation_method", None)
                 if (
                     _b_interp is not None

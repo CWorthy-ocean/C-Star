@@ -564,6 +564,67 @@ def test_sources_to_forcing_override_converts_custom_forcing():
     assert ov["forcing"]["tidal"][0]["ntides"] == 15
 
 
+def test_regrid_options_survive_resolve_and_override_round_trip():
+    """The roms-tools >=4 prefill/regrid_method/extrap_method knobs, authored on
+    initial_conditions/surface/tidal, survive both the resolver
+    (build_forge_blueprint -> Forcing) and the reverse dump
+    (sources_to_forcing_override) -- the two propagation paths that must stay in
+    lockstep with the typed model fields (see forge_blueprint_resolve._build_forcing
+    and forge_blueprint_engine.sources_to_forcing_override).
+    """
+    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    fdata["initial_conditions"]["prefill"] = "inverse_dist"
+    fdata["initial_conditions"]["regrid_method"] = "xesmf"
+    fdata["forcing"]["surface"][0]["prefill"] = "nearest_neighbor"
+    fdata["forcing"]["surface"][0]["extrap_method"] = "nearest_s2d"
+    fdata["forcing"]["tidal"][0]["prefill"] = "2d_lateral_fill"
+    fdata["forcing"]["tidal"][0]["regrid_method"] = "scipy"
+
+    cfg = _build(forcing_inputs=fdata)
+    s = cfg.forcing
+    assert s.initial_conditions.prefill == "inverse_dist"
+    assert s.initial_conditions.regrid_method == "xesmf"
+    assert s.surface[0].prefill == "nearest_neighbor"
+    assert s.surface[0].extrap_method == "nearest_s2d"
+    assert s.tidal[0].prefill == "2d_lateral_fill"
+    assert s.tidal[0].regrid_method == "scipy"
+
+    ov = sources_to_forcing_override(cfg)
+    assert ov["initial_conditions"]["prefill"] == "inverse_dist"
+    assert ov["initial_conditions"]["regrid_method"] == "xesmf"
+    assert ov["forcing"]["surface"][0]["prefill"] == "nearest_neighbor"
+    assert ov["forcing"]["surface"][0]["extrap_method"] == "nearest_s2d"
+    assert ov["forcing"]["tidal"][0]["prefill"] == "2d_lateral_fill"
+    assert ov["forcing"]["tidal"][0]["regrid_method"] == "scipy"
+
+
+def test_regrid_options_survive_wizard_load_back():
+    """The *other* reverse path -- ForgeBlueprintWizard._sources_to_inputs, which
+    seeds the forcing editor when a config is loaded into the wizard -- must also
+    carry prefill/regrid_method/extrap_method. This is the load-back whitelist that
+    silently dropped a field in a past bug (see project memory
+    emod_rivr2o_datasources); sources_to_forcing_override (tested above) is a
+    different code path and does not cover this one.
+    """
+    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+
+    fdata = cat.forcing_data("glorys-era5-unified")
+    fdata["initial_conditions"]["prefill"] = "inverse_dist"
+    fdata["forcing"]["surface"][0]["regrid_method"] = "xesmf"
+    fdata["forcing"]["tidal"][0]["extrap_method"] = "nearest_s2d"
+
+    cfg = _build(forcing_inputs=fdata)
+    seeded = ForgeBlueprintWizard._sources_to_inputs(cfg)
+
+    assert seeded["initial_conditions"]["prefill"] == "inverse_dist"
+    assert seeded["forcing"]["surface"][0]["regrid_method"] == "xesmf"
+    assert seeded["forcing"]["tidal"][0]["extrap_method"] == "nearest_s2d"
+
+
 def test_forcing_override_coerces_enums_to_strings():
     """Regression: enum-typed item fields (SurfaceType, BoundaryType, BgcInterpMethod,
     ClimatologyMode, …) must be dumped as plain strings, not enum instances. Enum

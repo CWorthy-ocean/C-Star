@@ -801,6 +801,28 @@ class TestRomsMarblInputDataGeneration:
         )
 
     @patch("cstar_forge.forge.input_data.rt.InitialConditions")
+    def test_generate_initial_conditions_forwards_regrid_options(
+        self, mock_ic_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """prefill/regrid_method/extrap_method reach rt.InitialConditions verbatim."""
+        mock_ic = MagicMock()
+        ic_path = tmp_path / "ic.nc"
+        ic_path.touch()
+        mock_ic.save.return_value = [ic_path]
+        mock_ic_class.return_value = mock_ic
+
+        sample_roms_marbl_input_data._generate_initial_conditions(
+            source={"name": "GLORYS"},
+            prefill="inverse_dist",
+            regrid_method="xesmf",
+            extrap_method="nearest_s2d",
+        )
+
+        assert mock_ic_class.call_args.kwargs["prefill"] == "inverse_dist"
+        assert mock_ic_class.call_args.kwargs["regrid_method"] == "xesmf"
+        assert mock_ic_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
+
+    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
     def test_generate_initial_conditions_multiple_paths(
         self, mock_ic_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -868,6 +890,30 @@ class TestRomsMarblInputDataGeneration:
         )
 
         assert mock_sf.save.call_args.kwargs["format"] == "NETCDF3_64BIT_DATA"
+
+    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    def test_generate_surface_forcing_forwards_regrid_options(
+        self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """prefill/regrid_method/extrap_method reach rt.SurfaceForcing verbatim."""
+        mock_sf = MagicMock()
+        surface_path = tmp_path / "surface.nc"
+        surface_path.touch()
+        mock_sf.save.return_value = surface_path
+        mock_sf_class.return_value = mock_sf
+
+        sample_roms_marbl_input_data._generate_surface_forcing(
+            key="forcing.surface",
+            source={"name": "ERA5"},
+            type="physics",
+            prefill="inverse_dist",
+            regrid_method="xesmf",
+            extrap_method="nearest_s2d",
+        )
+
+        assert mock_sf_class.call_args.kwargs["prefill"] == "inverse_dist"
+        assert mock_sf_class.call_args.kwargs["regrid_method"] == "xesmf"
+        assert mock_sf_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
 
     @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_missing_type(
@@ -980,6 +1026,29 @@ class TestRomsMarblInputDataGeneration:
             )
             > 0
         )
+
+    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
+    def test_generate_tidal_forcing_forwards_regrid_options(
+        self, mock_tf_class, sample_roms_marbl_input_data, tmp_path
+    ):
+        """prefill/regrid_method/extrap_method reach rt.TidalForcing verbatim."""
+        mock_tf = MagicMock()
+        tidal_path = tmp_path / "tidal.nc"
+        tidal_path.touch()
+        mock_tf.save.return_value = tidal_path
+        mock_tf_class.return_value = mock_tf
+
+        sample_roms_marbl_input_data._generate_tidal_forcing(
+            key="forcing.tidal",
+            source={"name": "TPXO"},
+            prefill="2d_lateral_fill",
+            regrid_method="scipy",
+            extrap_method="nearest_s2d",
+        )
+
+        assert mock_tf_class.call_args.kwargs["prefill"] == "2d_lateral_fill"
+        assert mock_tf_class.call_args.kwargs["regrid_method"] == "scipy"
+        assert mock_tf_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
 
     @patch("cstar_forge.forge.input_data.rt.TidalForcing")
     def test_generate_tidal_forcing_reuse_skips_roms_tools_calls(

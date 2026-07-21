@@ -112,9 +112,10 @@ class BgcInterpMethod(str, Enum):
 
 
 class Prefill(str, Enum):
-    """Accepted values for ``BoundaryForcing.prefill`` (roms-tools >=4): how to
-    fill NaN (land/void) cells in the *source* before regridding. ``None`` (the
-    default, expressed as an absent field) applies no source prefill.
+    """Accepted values for ``prefill`` on ``SurfaceForcing``, ``BoundaryForcing``,
+    ``TidalForcing``, and ``InitialConditions`` (roms-tools >=4): how to fill NaN
+    (land/void) cells in the *source* before regridding. ``None`` (the default,
+    expressed as an absent field) applies no source prefill.
     """
 
     LATERAL_FILL_2D = "2d_lateral_fill"  # legacy AMG Poisson fill (smoothest, slow)
@@ -126,8 +127,9 @@ class Prefill(str, Enum):
 
 
 class RegridMethod(str, Enum):
-    """Accepted values for ``BoundaryForcing.regrid_method`` (roms-tools >=4):
-    the horizontal regrid engine, chosen independently of ``prefill``.
+    """Accepted values for ``regrid_method`` on ``SurfaceForcing``,
+    ``BoundaryForcing``, ``TidalForcing``, and ``InitialConditions`` (roms-tools
+    >=4): the horizontal regrid engine, chosen independently of ``prefill``.
     """
 
     AUTO = "auto"  # xESMF if installed, else scipy (default when unset)
@@ -136,9 +138,10 @@ class RegridMethod(str, Enum):
 
 
 class ExtrapMethod(str, Enum):
-    """Accepted values for ``BoundaryForcing.extrap_method`` (roms-tools >=4):
-    xESMF destination extrapolation on the default (prefill=None) path. Ignored
-    when ``prefill`` is set.
+    """Accepted values for ``extrap_method`` on ``SurfaceForcing``,
+    ``BoundaryForcing``, ``TidalForcing``, and ``InitialConditions`` (roms-tools
+    >=4): xESMF destination extrapolation on the default (prefill=None) path.
+    Ignored when ``prefill`` is set.
     """
 
     INVERSE_DIST = "inverse_dist"  # inverse-distance-weighted (effective default)
@@ -496,6 +499,13 @@ class SurfaceForcingItem(_Section):
     coarse_grid_mode: CoarseGridMode = CoarseGridMode.AUTO
     restoring_forces: list[RestoringForce] | None = None
     wind_dropoff: bool = False  # coastal wind-speed reduction
+    prefill: Prefill | None = None  # source NaN prefill before regridding
+    prefill_kwargs: dict[str, Any] | None = None
+    regrid_method: RegridMethod | None = None  # horizontal regrid engine (None -> auto)
+    extrap_method: ExtrapMethod | None = (
+        None  # destination extrapolation (default path)
+    )
+    extrap_kwargs: dict[str, Any] | None = None
     options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 
@@ -518,6 +528,13 @@ class BoundaryForcingItem(_Section):
 class TidalForcingItem(_Section):
     source: SourceSpec
     ntides: int | None = None
+    prefill: Prefill | None = None  # source NaN prefill before regridding
+    prefill_kwargs: dict[str, Any] | None = None
+    regrid_method: RegridMethod | None = None  # horizontal regrid engine (None -> auto)
+    extrap_method: ExtrapMethod | None = (
+        None  # destination extrapolation (default path)
+    )
+    extrap_kwargs: dict[str, Any] | None = None
     options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 
@@ -562,6 +579,13 @@ class InitialConditions(_Section):
         BgcInterpMethod.DEPTH
     )  # BGC vertical interp
     allow_flex_time: bool = False  # ±24h search window around ini_time
+    prefill: Prefill | None = None  # source NaN prefill before regridding
+    prefill_kwargs: dict[str, Any] | None = None
+    regrid_method: RegridMethod | None = None  # horizontal regrid engine (None -> auto)
+    extrap_method: ExtrapMethod | None = (
+        None  # destination extrapolation (default path)
+    )
+    extrap_kwargs: dict[str, Any] | None = None
     options: dict[str, Any] = Field(default_factory=dict, description=_OPTIONS_HELP)
 
 

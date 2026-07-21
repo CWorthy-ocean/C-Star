@@ -718,13 +718,25 @@ def _build_forcing(
             out.append(cls(**kw))
         return out
 
+    # Source-prefill / horizontal-regrid / destination-extrapolation knobs shared by
+    # SurfaceForcing, BoundaryForcing, TidalForcing, and InitialConditions (roms-tools
+    # >=4). Kept as one tuple so all four load-back whitelists stay in lockstep with
+    # each other and with tests/test_roms_tools_coverage.py::_FORGE_FIELDS.
+    _REGRID_FIELDS = (
+        "prefill",
+        "prefill_kwargs",
+        "regrid_method",
+        "extrap_method",
+        "extrap_kwargs",
+    )
+
     ic_kw = {
         "source": _parse_source(ic_block.get("source")),
         "bgc_source": _parse_source(ic_block["bgc_source"])
         if ic_block.get("bgc_source")
         else None,
     }
-    for f in ("bgc_interpolation_method", "allow_flex_time"):
+    for f in ("bgc_interpolation_method", "allow_flex_time", *_REGRID_FIELDS):
         if f in ic_block:
             ic_kw[f] = ic_block[f]
     ic = InitialConditions(**ic_kw)
@@ -732,7 +744,13 @@ def _build_forcing(
     surface = _items(
         "surface",
         SurfaceForcingItem,
-        ("type", "correct_radiation", "coarse_grid_mode", "restoring_forces"),
+        (
+            "type",
+            "correct_radiation",
+            "coarse_grid_mode",
+            "restoring_forces",
+            *_REGRID_FIELDS,
+        ),
     )
     boundary = (
         []
@@ -743,15 +761,11 @@ def _build_forcing(
             (
                 "type",
                 "bgc_interpolation_method",
-                "prefill",
-                "prefill_kwargs",
-                "regrid_method",
-                "extrap_method",
-                "extrap_kwargs",
+                *_REGRID_FIELDS,
             ),
         )
     )
-    tidal = _items("tidal", TidalForcingItem, ("ntides",))
+    tidal = _items("tidal", TidalForcingItem, ("ntides", *_REGRID_FIELDS))
     river = _items(
         "river",
         RiverForcingItem,

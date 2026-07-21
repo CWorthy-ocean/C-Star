@@ -113,6 +113,72 @@ def test_row_box_without_type_unaffected(editor):
     assert w["ntides"] in box.children
 
 
+@pytest.mark.parametrize("cat", ["surface", "boundary", "tidal"])
+def test_regrid_widgets_present_and_gathered(editor, cat):
+    """prefill/regrid_method/extrap_method dropdowns (roms-tools >=4) are built for
+    surface, boundary, and tidal rows alike, and a non-blank selection round-trips
+    through ``_gather_item``.
+    """
+    seed = {"source": {"name": "TPXO" if cat == "tidal" else "ERA5"}}
+    if cat != "tidal":
+        seed["type"] = "physics"
+    w = editor._make_row(cat, seed)
+    assert w["prefill"].value == ""  # blank sentinel = leave unset
+    assert w["regrid_method"].value == ""
+    assert w["extrap_method"].value == ""
+
+    w["prefill"].value = "inverse_dist"
+    w["regrid_method"].value = "xesmf"
+    w["extrap_method"].value = "nearest_s2d"
+    item = editor._gather_item(cat, w)
+    assert item["prefill"] == "inverse_dist"
+    assert item["regrid_method"] == "xesmf"
+    assert item["extrap_method"] == "nearest_s2d"
+
+
+def test_ic_regrid_widgets_seed_gather_and_layout():
+    """IC prefill/regrid_method/extrap_method dropdowns seed from a loaded config,
+    gather back into the authored dict, and are actually placed in the displayed
+    ic_box (a widget built but never laid out renders invisibly).
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "prefill": "nearest_neighbor",
+                "regrid_method": "scipy",
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.ic_prefill.value == "nearest_neighbor"
+    assert ed.ic_regrid_method.value == "scipy"
+    assert ed.ic_extrap_method.value == ""
+
+    ed.ic_extrap_method.value = "nearest_s2d"
+    gathered = ed.gather()
+    ic = gathered["initial_conditions"]
+    assert ic["prefill"] == "nearest_neighbor"
+    assert ic["regrid_method"] == "scipy"
+    assert ic["extrap_method"] == "nearest_s2d"
+
+    # layout check: the widgets must actually be reachable from the rendered widget
+    all_children = []
+
+    def _walk(node):
+        all_children.append(node)
+        for c in getattr(node, "children", []):
+            _walk(c)
+
+    _walk(ed.widget)
+    assert ed.ic_prefill in all_children
+    assert ed.ic_regrid_method in all_children
+    assert ed.ic_extrap_method in all_children
+
+
 def test_river_bgc_widgets_visible_only_when_include_bgc_checked(editor):
     """The river-BGC source/path widgets only take effect when include_bgc=True
     (roms-tools ignores bgc_source otherwise), so they stay hidden until checked.
