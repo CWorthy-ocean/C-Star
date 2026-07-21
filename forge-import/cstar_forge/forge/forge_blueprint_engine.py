@@ -292,6 +292,7 @@ def process_forge_blueprint(
     configure: bool = True,
     clobber: bool = False,
     use_dask: bool = True,
+    subchunk: bool = False,
     validate: bool = True,
     executor_factory: ExecutorFactory | None = None,
     only_inputs: Iterable[str] | None = None,
@@ -335,6 +336,10 @@ def process_forge_blueprint(
         existing complete blueprint. Re-run without ``only_inputs`` later to
         generate the remaining inputs (existing ones are reused, per the normal
         skip-existing logic) and emit the blueprint.
+    subchunk :
+        Interim hack (see ``glorys_subchunk.py``): just-in-time build a
+        kerchunk-subchunked reference for multi-file GLORYS sources and read from
+        it instead of the raw per-day files. Default False.
     """
     cfg = spec if isinstance(spec, ForgeBlueprint) else ForgeBlueprint.from_yaml(spec)
 
@@ -381,7 +386,9 @@ def process_forge_blueprint(
     if ensure_data:
         executor.ensure_source_data()
     if generate:
-        executor.generate_inputs(clobber=clobber, use_dask=use_dask, only=resolved_only)
+        executor.generate_inputs(
+            clobber=clobber, use_dask=use_dask, subchunk=subchunk, only=resolved_only
+        )
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)
         executor.configure_build(

@@ -1212,6 +1212,7 @@ class ForgeExecutor(BaseModel):
         self,
         clobber: bool = False,
         use_dask: bool = True,
+        subchunk: bool = False,
         test: bool = False,
         only: set[str] | None = None,
     ) -> cstar_models.RomsMarblBlueprint:
@@ -1230,6 +1231,10 @@ class ForgeExecutor(BaseModel):
             If True, delete and regenerate existing NetCDF input files. Default False.
         use_dask : bool, optional
             Use dask for parallel computations. Default True.
+        subchunk : bool, optional
+            Interim hack (see ``glorys_subchunk.py``): just-in-time build a
+            kerchunk-subchunked reference for multi-file GLORYS sources and read
+            from it instead of the raw per-day files. Default False.
         test : bool, optional
             Truncate the generation loop after 2 iterations (for unit tests).
         only : set[str], optional
@@ -1284,6 +1289,7 @@ class ForgeExecutor(BaseModel):
                 partitioning=self.partitioning,
                 cdr_forcing=self.cdr_forcing,
                 use_dask=use_dask,
+                subchunk=subchunk,
                 netcdf_format="NETCDF3_64BIT_DATA" if self._use_pio else "NETCDF4",
             ).generate_all(clobber=clobber, test=test, only=only)
         )

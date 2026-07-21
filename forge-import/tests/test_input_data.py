@@ -1994,3 +1994,176 @@ class TestRomsMarblInputDataPartitionFiles:
         assert len(dataset.data) == 3
         assert all(r.partitioned for r in dataset.data)
         assert all(r.location is not None for r in dataset.data)
+
+
+@pytest.mark.integration
+class TestGlorysSubchunkIntegration:
+    """Drives the actual wired ``--subchunk`` path end to end: the
+    ``_resolve_source_block`` swap + memoization, then real, *unmodified*
+    ``rt.InitialConditions``/``rt.BoundaryForcing`` construction to confirm roms-tools'
+    stock loader reads the ``.parquet`` reference correctly. No roms-tools patching is
+    involved -- kerchunk registers its own xarray backend
+    (``kerchunk.xarray_backend:KerchunkBackend``) whose ``guess_can_open()`` recognizes
+    the reference by extension, so xarray's engine auto-detection handles it
+    transparently (see glorys_subchunk.py).
+
+    Skipped when the interim subchunking deps (kerchunk/fastparquet/etc.) aren't
+    installed.
+    """
+
+    @pytest.fixture
+    def synthetic_glorys_files(self, tmp_path):
+        """Three per-day GLORYS-shaped NetCDF files with a fixed-epoch time encoding
+        (matching the real CMEMS convention), so multi-file kerchunk combine works.
+        """
+        pytest.importorskip("kerchunk")
+        pytest.importorskip("fastparquet")
+        pytest.importorskip("nest_asyncio")
+        pytest.importorskip("ujson")
+
+        import pandas as pd
+
+        src_dir = tmp_path / "glorys_src"
+        src_dir.mkdir()
+        lon = np.linspace(-10, 10, 20)
+        lat = np.linspace(30, 40, 15)
+        depth = np.array([0.5, 1.5, 5, 10, 20, 50], dtype="float64")
+
+        files = []
+        for i, date in enumerate(pd.date_range("2020-01-01", periods=3, freq="D")):
+            rng = np.random.default_rng(i)
+            shape4d = (1, len(depth), len(lat), len(lon))
+            ds = xr.Dataset(
+                {
+                    "thetao": (
+                        ("time", "depth", "latitude", "longitude"),
+                        rng.random(shape4d).astype("float32"),
+                    ),
+                    "so": (
+                        ("time", "depth", "latitude", "longitude"),
+                        rng.random(shape4d).astype("float32"),
+                    ),
+                    "uo": (
+                        ("time", "depth", "latitude", "longitude"),
+                        rng.random(shape4d).astype("float32"),
+                    ),
+                    "vo": (
+                        ("time", "depth", "latitude", "longitude"),
+                        rng.random(shape4d).astype("float32"),
+                    ),
+                    "zos": (
+                        ("time", "latitude", "longitude"),
+                        np.full((1, len(lat), len(lon)), 0.5, dtype="float32"),
+                    ),
+                },
+                coords={
+                    "time": [date],
+                    "depth": depth,
+                    "latitude": lat,
+                    "longitude": lon,
+                },
+            )
+            encoding = {
+                "time": {
+                    "units": "hours since 1950-01-01 00:00:00",
+                    "calendar": "gregorian",
+                    "dtype": "int32",
+                }
+            }
+            fn = src_dir / f"fake_GLORYS_{date.strftime('%Y%m%d')}.nc"
+            ds.to_netcdf(fn, engine="h5netcdf", encoding=encoding)
+            files.append(fn)
+        return files
+
+    def test_subchunk_swap_memoizes_and_real_dispatch_reads_it(
+        self,
+        tmp_path,
+        synthetic_glorys_files,
+        sample_open_boundaries,
+        sample_partitioning,
+    ):
+        grid = rt.Grid(
+            nx=10,
+            ny=10,
+            size_x=300,
+            size_y=300,
+            center_lon=0,
+            center_lat=35,
+            rot=0,
+            N=3,
+            theta_s=5.0,
+            theta_b=2.0,
+            hc=250.0,
+        )
+
+        mock_sd = MagicMock(spec=source_data.SourceData)
+        mock_sd.path_for_source = MagicMock(return_value=list(synthetic_glorys_files))
+        mock_sd.dataset_key_for_source = MagicMock(return_value="GLORYS_REGIONAL")
+        mock_sd.streamable_for_source = MagicMock(return_value=False)
+        mock_sd.source_data_dir = tmp_path / "cache"
+        mock_sd.start_time = datetime(2020, 1, 1)
+        mock_sd.end_time = datetime(2020, 1, 3)
+
+        ic_item = forge_models.InitialConditionsInput(
+            source=forge_models.SourceSpec(name="GLORYS")
+        )
+        forcing_override = {"initial_conditions": ic_item.model_dump(), "forcing": {}}
+
+        rmid = RomsMarblInputData(
+            domain_name="subchunk_drive",
+            start_date=datetime(2020, 1, 1),
+            end_date=datetime(2020, 1, 3),
+            forcing_override=forcing_override,
+            grid=grid,
+            boundaries=sample_open_boundaries,
+            source_data=mock_sd,
+            roms_marbl_blueprint_dir=tmp_path / "blueprints",
+            partitioning=sample_partitioning,
+            use_dask=True,
+            subchunk=True,
+            input_data_dir=tmp_path / "input_data",
+        )
+
+        # 1) The swap: a GLORYS source block with a multi-file path resolves to a
+        # subchunk reference, not the raw file list.
+        resolved1 = rmid._resolve_source_block({"name": "GLORYS"})
+        assert str(resolved1["path"]).endswith(".parquet")
+        assert Path(resolved1["path"]).exists()
+
+        # 2) Memoization: a second resolve (as IC + boundary each would trigger)
+        # reuses the same reference rather than rebuilding it.
+        resolved2 = rmid._resolve_source_block({"name": "GLORYS"})
+        assert resolved2["path"] == resolved1["path"]
+        assert rmid._subchunk_refs == {"GLORYS_REGIONAL": Path(resolved1["path"])}
+
+        # 3) Real, unmodified roms-tools dispatch: rt.InitialConditions -> _get_data
+        # -> the "external" GLORYS variant -> GLORYSDataset -> roms-tools' stock
+        # loader. No patching -- xarray auto-detects the kerchunk backend for the
+        # ".parquet" reference on its own.
+        ic = rt.InitialConditions(
+            grid=grid,
+            ini_time=datetime(2020, 1, 1),
+            source={
+                "name": "GLORYS",
+                "path": resolved1["path"],
+                "climatology": False,
+            },
+            use_dask=True,
+        )
+        assert {"temp", "salt", "u", "v", "zeta"}.issubset(set(ic.ds.data_vars))
+
+        # 4) Same for BoundaryForcing (the other real GLORYS consumer, including the
+        # BGC density-boundary companion path).
+        bf = rt.BoundaryForcing(
+            grid=grid,
+            start_time=datetime(2020, 1, 1),
+            end_time=datetime(2020, 1, 3),
+            boundaries=sample_open_boundaries.model_dump(),
+            source={
+                "name": "GLORYS",
+                "path": resolved1["path"],
+                "climatology": False,
+            },
+            use_dask=True,
+        )
+        assert "temp_north" in bf.ds.data_vars

@@ -275,6 +275,16 @@ class RomsMarblInputData(InputData):
     """NetCDF format forwarded to every roms-tools save (grid, IC, forcing,
     nesting, partitioning). At the default ("NETCDF4") no ``format=`` kwarg is
     passed, so released roms-tools (no such kwarg) keeps working."""
+    subchunk: bool = False
+    """Interim/experimental (see ``glorys_subchunk.py``): when True, just-in-time
+    build a kerchunk-subchunked reference for multi-file GLORYS sources and hand its
+    path through in place of the raw per-day files. No roms-tools patching involved
+    -- kerchunk's own xarray backend auto-detects the reference, so roms-tools reads
+    it via its normal loader. Off by default; enabled via ``--subchunk``."""
+
+    # Memoized subchunk reference paths, keyed by dataset key (e.g. "GLORYS_REGIONAL"),
+    # so IC + boundary + bgc-physics-boundary reuse one reference instead of rebuilding.
+    _subchunk_refs: dict[str, Path] = field(default_factory=dict, init=False)
 
     # Blueprint elements containing input data
     roms_marbl_blueprint_elements: RomsMarblBlueprintInputData = field(init=False)
@@ -626,8 +636,44 @@ class RomsMarblInputData(InputData):
 
         path = self.source_data.path_for_source(name, glorys_layout=glorys_layout)
         if path is not None:
+            if (
+                self.subchunk
+                and name.upper() == "GLORYS"
+                and isinstance(path, list)
+                and len(path) >= 2
+            ):
+                path = self._subchunked_glorys_path(name, glorys_layout, path)
             out.setdefault("path", path)
         return out
+
+    def _subchunked_glorys_path(
+        self,
+        name: str,
+        glorys_layout: str | None,
+        path: list[Path],
+    ) -> Path:
+        """Build (or reuse) a subchunked kerchunk reference for a multi-file GLORYS
+        path, in place of the raw per-day files. roms-tools reads the reference path
+        via its normal loader (kerchunk's xarray backend auto-detects it); no
+        patching involved -- see ``glorys_subchunk.py``.
+
+        Memoized per dataset key so initial_conditions + forcing.boundary (+ the BGC
+        physics-boundary companion) share one reference instead of each rebuilding it.
+        """
+        from cstar_forge.forge.glorys_subchunk import build_ref_for_files
+
+        key = self.source_data.dataset_key_for_source(name, glorys_layout=glorys_layout)
+        ref = self._subchunk_refs.get(key)
+        if ref is None:
+            ref = build_ref_for_files(
+                path,
+                out_dir=self.source_data.source_data_dir,
+                key=key,
+                start=self.source_data.start_time,
+                end=self.source_data.end_time,
+            )
+            self._subchunk_refs[key] = ref
+        return ref
 
     def _build_input_args(
         self,

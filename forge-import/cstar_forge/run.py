@@ -54,6 +54,13 @@ def main(argv: list | None = None) -> int:
         "--no-dask", action="store_true", help="disable dask in input generation"
     )
     parser.add_argument(
+        "--subchunk",
+        action="store_true",
+        help="interim hack: just-in-time build a kerchunk-subchunked reference for "
+        "multi-file GLORYS sources and read from it instead of the raw per-day "
+        "files (see cstar_forge/forge/glorys_subchunk.py)",
+    )
+    parser.add_argument(
         "--only-inputs",
         nargs="+",
         default=None,
@@ -90,6 +97,7 @@ def main(argv: list | None = None) -> int:
         configure=not args.no_configure,
         clobber=args.clobber,
         use_dask=not args.no_dask,
+        subchunk=args.subchunk,
         only_inputs=args.only_inputs,
     )
     if not args.no_configure and not args.only_inputs:
