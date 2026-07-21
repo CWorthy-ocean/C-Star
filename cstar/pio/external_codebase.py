@@ -6,7 +6,7 @@ from pathlib import Path
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
-from cstar.system.manager import cstar_sysmgr
+from cstar.system.manager import get_sysmgr
 
 
 class PIOExternalCodeBase(ExternalCodeBase):
@@ -40,7 +40,7 @@ class PIOExternalCodeBase(ExternalCodeBase):
         """Look up a dependency location from the C-Star environment or the process
         environment.
         """
-        return cstar_sysmgr.environment.environment_variables.get(
+        return get_sysmgr().environment.environment_variables.get(
             env_var
         ) or os.environ.get(env_var)
 
@@ -61,6 +61,7 @@ class PIOExternalCodeBase(ExternalCodeBase):
         assert self.working_copy is not None  # Has been verified by `configure()``
         pio_root = self.working_copy.path
         # Set env var:
+        cstar_sysmgr = get_sysmgr()
         cstar_sysmgr.environment.set_env_var(self.root_env_var, str(pio_root))
 
         netcdf_home = self._get_dependency_root("NETCDFHOME")
@@ -154,7 +155,7 @@ class PIOExternalCodeBase(ExternalCodeBase):
         - PIO's C and Fortran libraries exist in the in-tree build directory
         """
         # Check PIO_ROOT env var is set:
-        pio_root = cstar_sysmgr.environment.environment_variables.get(self.root_env_var)
+        pio_root = get_sysmgr().environment.environment_variables.get(self.root_env_var)
         if not pio_root:
             return False
         # Check PIO repo hasn't changed:
