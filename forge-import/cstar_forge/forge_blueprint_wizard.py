@@ -1751,9 +1751,14 @@ class ForgeBlueprintWizard:
         # --- nesting (optional child grid) ---
         self.nest_enable = W.Checkbox(
             value=False,
-            description="enable nesting (child grid)",
+            description="This grid is a parent (enter child grid info below).",
             indent=False,
             tooltip=_tip("nesting", "nest_enable"),
+        )
+        self.nest_help = W.HTML(
+            "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
+            "This will enable the extract_data module and output boundary info "
+            "for your child grid.</div>"
         )
         self.nest_domain_dd = W.Dropdown(
             options=["<custom>", *domains],
@@ -1809,9 +1814,15 @@ class ForgeBlueprintWizard:
         # --- parent (optional: this grid is a child nested inside a parent) ---
         self.parent_enable = W.Checkbox(
             value=False,
-            description="enable parent (this grid is a child)",
+            description="This is a child grid (enter parent grid info below).",
             indent=False,
             tooltip=_tip("nesting", "parent_enable"),
+        )
+        self.parent_help = W.HTML(
+            "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
+            "This will align the mask and topography with the parent grid. It "
+            "will also disable boundary tides, switch sponge ub_tune to False, "
+            "and skip boundary forcing generation.</div>"
         )
         self.parent_domain_dd = W.Dropdown(
             options=["<custom>", *domains],
@@ -3759,6 +3770,77 @@ class ForgeBlueprintWizard:
             [self.parent_w[k] for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)],
             layout=W.Layout(grid_template_columns="repeat(3, 210px)"),
         )
+
+        nesting_accordion = W.Accordion(
+            children=[
+                W.VBox(
+                    [
+                        section(
+                            "Child grid",
+                            W.HBox(
+                                [
+                                    W.VBox(
+                                        [
+                                            self.nest_enable,
+                                            self.nest_help,
+                                            self.nest_domain_dd,
+                                            child_box,
+                                            W.HBox(
+                                                [
+                                                    self.nest_period,
+                                                    self.nest_pressure_fluxes,
+                                                ]
+                                            ),
+                                        ]
+                                    ),
+                                    W.VBox(
+                                        [
+                                            W.HBox(
+                                                [
+                                                    self.nest_plot_btn,
+                                                    self.nest_plot_status,
+                                                ]
+                                            ),
+                                            self.nest_plot_img,
+                                        ],
+                                        layout=W.Layout(padding="0 0 0 20px"),
+                                    ),
+                                ]
+                            ),
+                        ),
+                        section(
+                            "Parent grid",
+                            W.HBox(
+                                [
+                                    W.VBox(
+                                        [
+                                            self.parent_enable,
+                                            self.parent_help,
+                                            self.parent_domain_dd,
+                                            parent_box,
+                                        ]
+                                    ),
+                                    W.VBox(
+                                        [
+                                            W.HBox(
+                                                [
+                                                    self.parent_plot_btn,
+                                                    self.parent_plot_status,
+                                                ]
+                                            ),
+                                            self.parent_plot_img,
+                                        ],
+                                        layout=W.Layout(padding="0 0 0 20px"),
+                                    ),
+                                ]
+                            ),
+                        ),
+                    ]
+                ),
+            ],
+            selected_index=None,
+        )
+        nesting_accordion.set_title(0, "Parent and child grid settings")
         return W.VBox(
             [
                 W.HTML(
@@ -3811,53 +3893,7 @@ class ForgeBlueprintWizard:
                     W.HBox([self.dt, self.dt_btn, self.dt_status]),
                     section("Open boundaries", W.HBox(list(self.bnd.values()))),
                 ),
-                section(
-                    "Nesting (optional)",
-                    W.HBox(
-                        [
-                            W.VBox(
-                                [
-                                    self.nest_enable,
-                                    self.nest_domain_dd,
-                                    child_box,
-                                    W.HBox(
-                                        [self.nest_period, self.nest_pressure_fluxes]
-                                    ),
-                                ]
-                            ),
-                            W.VBox(
-                                [
-                                    W.HBox([self.nest_plot_btn, self.nest_plot_status]),
-                                    self.nest_plot_img,
-                                ],
-                                layout=W.Layout(padding="0 0 0 20px"),
-                            ),
-                        ]
-                    ),
-                ),
-                section(
-                    "Parent grid (optional)",
-                    W.HBox(
-                        [
-                            W.VBox(
-                                [
-                                    self.parent_enable,
-                                    self.parent_domain_dd,
-                                    parent_box,
-                                ]
-                            ),
-                            W.VBox(
-                                [
-                                    W.HBox(
-                                        [self.parent_plot_btn, self.parent_plot_status]
-                                    ),
-                                    self.parent_plot_img,
-                                ],
-                                layout=W.Layout(padding="0 0 0 20px"),
-                            ),
-                        ]
-                    ),
-                ),
+                nesting_accordion,
                 section("Forcing", self.forcing_box),
                 section(
                     "CDR forcing (optional)",

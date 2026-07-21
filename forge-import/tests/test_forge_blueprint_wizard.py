@@ -198,9 +198,9 @@ def test_wizard_smoke_assembles_widget():
 
     walk(root)
     order = [t for t in titles]
-    grid_i = next(i for i, t in enumerate(order) if "Grid" in t and "Nesting" not in t)
+    grid_i = next(i for i, t in enumerate(order) if "Grid" in t and "Child" not in t)
     obc_i = next(i for i, t in enumerate(order) if "Open boundaries" in t)
-    nest_i = next(i for i, t in enumerate(order) if "Nesting" in t)
+    nest_i = next(i for i, t in enumerate(order) if "Child grid" in t)
     assert grid_i < obc_i < nest_i
 
 

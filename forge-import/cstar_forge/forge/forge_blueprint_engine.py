@@ -122,7 +122,11 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
         "cdr_volume",
     ),
     "cdr_output": ("do_cdr",),
-    "tides": ("ntides", "bry_tides", "pot_tides", "ana_tides"),
+    # Only ntides is genuinely generation-derived (the real tidal-constituent count
+    # is only known once TPXO data is actually extracted). bry_tides/pot_tides/
+    # ana_tides are static booleans -- the resolver/model_settings is their single
+    # official source (e.g. a child grid forces bry_tides=False there).
+    "tides": ("ntides",),
 }
 
 

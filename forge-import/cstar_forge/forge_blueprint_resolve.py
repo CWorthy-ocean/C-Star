@@ -561,6 +561,13 @@ def build_forge_blueprint(
     if run_time_overrides:
         _deep_merge(settings, run_time_overrides)
 
+    # A child grid (has a parent) gets its boundaries from the parent's nesting.nc
+    # extraction: no boundary tides and no sponge ub_tune. Force both off after the
+    # override merge so an explicit bry_tides=True / ub_tune=True override can't win.
+    if grid_kwargs_parent is not None:
+        settings.setdefault("tides", {})["bry_tides"] = False
+        settings.setdefault("sponge_tune", {})["ub_tune"] = False
+
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
     # A child grid (has a parent) receives its boundary values from the parent's
     # nesting.nc extraction, not from reanalysis boundary forcing -- the executor

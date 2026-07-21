@@ -1181,12 +1181,12 @@ class RomsMarblInputData(InputData):
                 resource
             )
 
-        # Update settings_dict with tidal forcing parameters
-        self._settings_run_time["tides"] = dict(
-            ntides=ntides if tidal is None else tidal.ntides,
-            bry_tides=True,
-            pot_tides=True,
-            ana_tides=False,
+        # Update settings_dict with the actually-generated tidal-constituent count.
+        # bry_tides/pot_tides/ana_tides are NOT set here -- they're static booleans
+        # owned by the resolver/model_settings (GENERATION_DERIVED_LEAF_KEYS only
+        # covers ntides), so a child grid's bry_tides=False override isn't clobbered.
+        self._settings_run_time.setdefault("tides", {})["ntides"] = (
+            ntides if tidal is None else tidal.ntides
         )
 
         if "forcing" not in self._settings_run_time:
