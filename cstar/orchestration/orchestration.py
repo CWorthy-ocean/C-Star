@@ -364,8 +364,7 @@ class LiveWorkplan(Workplan):
         return lookup[step_name]
 
     def __contains__(self, step_name: str) -> bool:
-        """Return `True` then a step with the `Workplan` contains a step with the
-        supplied name.
+        """Return `True` when the `Workplan` contains a step with the supplied name.
 
         Parameters
         ----------

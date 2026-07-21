@@ -619,12 +619,19 @@ class OverrideDirective(Directive, OverrideTransform):
         ----------
         config : dict[str, t.Any] | None
             A dictionary containing configuration for the directive.
+        workplan : LiveWorkplan | None
+            The workplan instance containing contextual information for the directive.
         """
         Directive.__init__(self, config, workplan=workplan)
         OverrideTransform.__init__(self, self._generate_overrides())
 
     def _generate_overrides(self) -> dict[str, t.Any]:
-        """Generate any system overrides required by the directive."""
+        """Generate any system overrides required by the directive.
+
+        Returns
+        -------
+        dict[str, t.Any]
+        """
         return {}
 
 
