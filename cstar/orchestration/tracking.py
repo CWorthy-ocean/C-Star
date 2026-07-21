@@ -132,12 +132,12 @@ class TrackingRepository(LoggingMixin):
         return run_date.strftime("%Y%m%d%H%M%S.%f")
 
     def _runfile_name(self, run_date: datetime) -> str:
-        """Generate the file name for persisting a `WorkplanRun` to disk.
+        """Generate the file name for persisting a `WorkplanRun` history entry to disk.
 
         Parameters
         ----------
-        run_id : str
-            The run_id of the WorkplanRun
+        run_date : datetime
+            The start time of the run.
 
         Returns
         -------
@@ -147,7 +147,7 @@ class TrackingRepository(LoggingMixin):
         return f"{formatted_dt}.{TrackingRepository._MODE.value}"
 
     def _latestfile_name(self, run_id: str) -> str:
-        """Generate the file name for persisting a `WorkplanRun` to disk.
+        """Generate the file name for persisting the latest `WorkplanRun` history entry to disk.
 
         Parameters
         ----------
