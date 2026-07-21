@@ -6,7 +6,6 @@ from unittest import mock
 import pytest
 
 import cstar.base.external_codebase as external_codebase
-from cstar.system.manager import CStarSystemManager
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeExternalCodeBase
 
 
@@ -109,7 +108,7 @@ class TestSetup:
         staged_repo = mock.Mock(spec=external_codebase.StagedRepository)
         fakeexternalcodebase.source.stage = mock.Mock(return_value=staged_repo)
 
-        mock_mgr = mock.Mock(spec=CStarSystemManager)
+        mock_mgr = mock.Mock()
         mock_mgr.environment.package_root = tmp_path
         mock_getsysmgr = mock.Mock(return_value=mock_mgr)
 
