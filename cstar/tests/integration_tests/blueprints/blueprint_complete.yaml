@@ -1,8 +1,8 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.0.0.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.1.0.json
 name: roms_marbl_example_wales_new_bp
 description: toy domain near wales, for fast laptop/CI runs
 application: roms_marbl
-schema_version: 2.0.0
+schema_version: 2.1.0
 working_dir: "temp_out_dir"
 state: draft
 valid_start_date: 2012-01-01 00:00:00
