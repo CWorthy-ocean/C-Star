@@ -266,7 +266,7 @@ DEFAULT_APPLICATION = "forge"
 # spec-default sentinel: ForgeBlueprint expands it to ``<root>/<name>`` on validation,
 # and host providers (Forge's ``config.resolve_host``; eventually C-Star) may rebase
 # default-form paths onto host scratch at run time.
-DEFAULT_WORKING_ROOT = "~/cstar-forge-data"
+DEFAULT_WORKING_ROOT = "~/cstar-forge-data/cstar-forge-run"
 
 _NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _NAME_RUN_RE = re.compile(r"[_.-]{2,}")

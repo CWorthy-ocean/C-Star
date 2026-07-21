@@ -2207,6 +2207,23 @@ class ForgeBlueprintWizard:
             return
         self._save_path_touched = True
 
+    def _default_blueprint_path(self, name: str) -> str:
+        """Default "Save to:" path for a blueprint named *name*.
+
+        Prefers the active catalog's ``blueprints/`` directory so a save lands
+        where the wizard's other catalog-aware pieces look; falls back to a
+        bare filename (CWD-relative) when the catalog isn't a local filesystem
+        (e.g. loaded from a GitHub/http URL) and so isn't writable.
+        """
+        fname = f"{name}.forge_blueprint.yaml"
+        cat = getattr(self, "catalog", None)
+        try:
+            if cat is not None and getattr(cat, "_is_local", False):
+                return str(cat.roms_marbl_blueprints_dir / fname)
+        except Exception:
+            pass
+        return fname
+
     def _on_grid_kwarg_change(self, _change):
         # A geometry/mask-affecting edit invalidates any prior mask-derived
         # boundaries -- a stale mask must never be silently reused. Only the
@@ -2840,7 +2857,7 @@ class ForgeBlueprintWizard:
             self._name_touched = (
                 True  # a loaded name is a deliberate choice, not a default
             )
-            self.save_path.value = f"{cfg.name}.forge_blueprint.yaml"
+            self.save_path.value = self._default_blueprint_path(cfg.name)
             self._save_path_touched = True
             self.start.value = cfg.run.start_date.date()
             self.end.value = cfg.run.end_date.date()
@@ -3148,7 +3165,7 @@ class ForgeBlueprintWizard:
                 if not self._name_touched:
                     self.name.value = cfg.name
                 if not self._save_path_touched:
-                    self.save_path.value = f"{cfg.name}.forge_blueprint.yaml"
+                    self.save_path.value = self._default_blueprint_path(cfg.name)
         self.download_link.value = self._download_html(cfg)
         # Surface (never silently ship) provisional open-boundary defaults: the
         # checkboxes currently reflect whatever's live, but that's only a real
