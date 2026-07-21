@@ -604,19 +604,13 @@ class BoundaryFileTrxAdapter:
         }
 
 
-class ContinuanceDirective(Directive, OverrideTransform):
-    """A transform that locates a restart file with an unknown path at the
-    time the task was scheduled.
-    """
-
-    KEY_PATH: t.Final[str] = "path"
-    """Key used to specify a path as the source for continuance."""
-    KEY_STEP: t.Final[str] = "step"
-    """Key used to specify a step name as the source for continuance."""
+class OverrideDirective(Directive, OverrideTransform):
+    _overrides: dict[str, t.Any]
 
     def __init__(
         self,
         config: dict[str, t.Any],
+        *,
         workplan: LiveWorkplan | None = None,
     ) -> None:
         """Initialize the instance.
@@ -627,17 +621,32 @@ class ContinuanceDirective(Directive, OverrideTransform):
             A dictionary containing configuration for the directive.
         """
         Directive.__init__(self, config, workplan=workplan)
-        OverrideTransform.__init__(self, self._create_initial_condition_overrides())
+        OverrideTransform.__init__(self, self._generate_overrides())
+
+    def _generate_overrides(self) -> dict[str, t.Any]:
+        """Generate any system overrides required by the directive."""
+        return {}
+
+
+class ContinuanceDirective(OverrideDirective):
+    """A transform that locates a restart file with an unknown path at the
+    time the task was scheduled.
+    """
+
+    KEY_PATH: t.Final[str] = "path"
+    """Key used to specify a path as the source for continuance."""
+    KEY_STEP: t.Final[str] = "step"
+    """Key used to specify a step name as the source for continuance."""
 
     @classmethod
     def key(cls) -> str:
         return "continue-from"
 
-    def _create_initial_condition_overrides(
-        self,
-    ) -> dict[str, t.Any]:
-        """Create an overrides dictionary that will result in the modified blueprint
-        using a
+    def _generate_overrides(self) -> dict[str, t.Any]:
+        """Create an overrides dictionary that will result in the modified blueprint.
+
+        ContinuanceDirective creates overrides to modify the initial conditions
+        using the output from another step or a fixed directory path.
 
         Returns
         -------
@@ -693,28 +702,18 @@ class ContinuanceDirective(Directive, OverrideTransform):
         return "cfrom"
 
 
-class NestingDirective(Directive, OverrideTransform):
+class NestingDirective(OverrideDirective):
     """A transform that uses a restart file and boundary conditions from a previous parent simulation."""
-
-    def __init__(self, config: dict[str, t.Any]) -> None:
-        """Initialize the instance.
-
-        Parameters
-        ----------
-        config : dict[str, t.Any] | None
-            A dictionary containing configuration for the directive.
-        """
-        Directive.__init__(self, config)
-        OverrideTransform.__init__(
-            self, self._create_initial_condition_and_bc_overrides()
-        )
 
     @classmethod
     def key(cls) -> str:
         return "nest-from"
 
-    def _create_initial_condition_and_bc_overrides(self) -> dict[str, t.Any]:
+    def _generate_overrides(self) -> dict[str, t.Any]:
         """Create an overrides dictionary that will result in the modified blueprint.
+
+        NestingDirective creates overrides that will modify the initial conditions
+        and boundary conditions.
 
         Returns
         -------

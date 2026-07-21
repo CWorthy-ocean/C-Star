@@ -347,7 +347,7 @@ async def test_continuance_directive_context_not_supplied() -> None:
     config = {"step": "any-step-name"}
 
     with pytest.raises(CstarError, match="Directive did not receive workplan"):
-        ContinuanceDirective(config, workplan)
+        ContinuanceDirective(config, workplan=workplan)
 
 
 @pytest.mark.asyncio
@@ -398,7 +398,7 @@ async def test_continuance_directive_step_DNE(
     config = {"step": bad_name}
 
     with pytest.raises(KeyError, match=f"Unable to locate step {bad_name!r}"):
-        ContinuanceDirective(config, live_plan)
+        ContinuanceDirective(config, workplan=live_plan)
 
 
 def test_continuance_directive_incomplete_config_supplied(
