@@ -1561,6 +1561,31 @@ class TestForgeBlueprintWizard:
         assert w2.config.model_settings["time_stepping"]["dt"] == 1234.0
         assert "time_stepping" not in w2.config.composition.overrides
 
+    def test_grid_extended_options_persist_through_load(self, tmp_path):
+        """hmin/close_narrow_channels/mask_shapefile are grid_kwargs entries with
+        their own dedicated widgets (not in self.grid_w, which only covers
+        _GRID_INT/_GRID_FLOAT/_SCOORD) -- _populate_from silently left them at
+        their constructor defaults on load until this test was added (same bug
+        class as allow_flex_time; see project memory).
+        """
+        w1 = self._wizard()
+        w1.hmin.value = 3.3
+        w1.close_narrow_chk.value = True
+        w1.mask_shapefile.value = "/tmp/mask.shp"
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        assert w1.config.domain.grid_kwargs["hmin"] == 3.3
+        assert w1.config.domain.grid_kwargs["close_narrow_channels"] is True
+        assert w1.config.domain.grid_kwargs["mask_shapefile"] == "/tmp/mask.shp"
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.hmin.value == 3.3
+        assert w2.close_narrow_chk.value is True
+        assert w2.mask_shapefile.value == "/tmp/mask.shp"
+
     def test_forcing_spec_selection_and_edit(self):
         w = self._wizard()
         # ForcingSpec must always be an explicit catalog selection now -- no more
@@ -1686,6 +1711,26 @@ class TestForgeBlueprintWizard:
         assert w2.config.model_settings["lateral_visc"]["visc2"] == 7.25
         assert w2.nest_enable.value is True
         assert w2.config.model_settings["extract_data"]["n_chd"] == 18
+
+    def test_nesting_pressure_fluxes_persists_through_load(self, tmp_path):
+        """nesting_include_pressure_fluxes is a first-class Domain field, correctly
+        gathered from nest_pressure_fluxes.value, but _populate_nesting silently
+        left the widget at its default (False) on load until this test was added
+        (same bug class as allow_flex_time; see project memory).
+        """
+        w1 = self._wizard()
+        w1.nest_enable.value = True
+        w1.nest_pressure_fluxes.value = True
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        assert w1.config.domain.nesting_include_pressure_fluxes is True
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.nest_enable.value is True
+        assert w2.nest_pressure_fluxes.value is True
 
     def test_parent_from_domain_dropdown_prefills_parent(self):
         w = self._wizard()

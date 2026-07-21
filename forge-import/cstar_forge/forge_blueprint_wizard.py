@@ -2978,6 +2978,9 @@ class ForgeBlueprintWizard:
             for k, w in self.grid_w.items():
                 if k in gk:
                     w.value = gk[k]
+            self.hmin.value = float(gk.get("hmin", 5.0))
+            self.close_narrow_chk.value = bool(gk.get("close_narrow_channels", False))
+            self.mask_shapefile.value = str(gk.get("mask_shapefile") or "")
             self.scoord_chk.value = any(k in gk for k in _SCOORD)
             for d, w in self.bnd.items():
                 w.value = bool(getattr(cfg.domain.open_boundaries, d))
@@ -3176,6 +3179,9 @@ class ForgeBlueprintWizard:
             period = (cfg.domain.metadata_child or {}).get("period")
             if period is not None:
                 self.nest_period.value = float(period)
+        self.nest_pressure_fluxes.value = bool(
+            cfg.domain.nesting_include_pressure_fluxes
+        )
         parent = cfg.domain.grid_kwargs_parent
         self.parent_enable.value = parent is not None
         if parent:
