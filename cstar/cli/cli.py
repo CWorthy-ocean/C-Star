@@ -1,6 +1,7 @@
 import typer
 
 from cstar.applications import *  # noqa: F403
+from cstar.cli.admin import app as app_admin
 from cstar.cli.blueprint import app as app_blueprint
 from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
@@ -17,6 +18,7 @@ def attach_subcommands(app: typer.Typer) -> None:
         (app_env, "env"),
         (app_template, "template"),
         (app_workplan, "workplan"),
+        (app_admin, "admin"),
     ]
 
     try:

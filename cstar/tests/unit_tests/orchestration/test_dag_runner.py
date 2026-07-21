@@ -9,7 +9,10 @@ import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
-from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    StateDirectoryManager,
+)
 from cstar.orchestration.dag_runner import get_status_detail_map, load_run_state
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.models import BlueprintState, Step, Workplan, WorkplanState
@@ -64,7 +67,7 @@ async def layered_workplan(
             step_name = f"Step {idx}"
             target = f"@{idx}"
             fsm_map[step_name] = JobFileSystemManager(
-                DirectoryManager.data_home() / fake_run_id
+                StateDirectoryManager.data_dir(run_id=fake_run_id)
             )
 
             bp = HelloWorldBlueprint(

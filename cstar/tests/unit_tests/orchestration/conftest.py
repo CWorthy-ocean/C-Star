@@ -12,7 +12,10 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID
-from cstar.execution.file_system import DirectoryManager, JobFileSystemManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    StateDirectoryManager,
+)
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.serialization import deserialize
@@ -642,7 +645,7 @@ async def executed_workplan_with_sideeffects(
     the run directories with logs.
     """
     wp_path, wp, fake_run_id = executed_workplan
-    root_fsm = JobFileSystemManager(DirectoryManager.data_home() / fake_run_id)
+    root_fsm = JobFileSystemManager(StateDirectoryManager.data_dir())
 
     for i, step in enumerate(wp.steps):
         step_fsm = root_fsm.get_subtask_manager(step.safe_name)

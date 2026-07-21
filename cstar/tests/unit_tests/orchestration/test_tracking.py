@@ -60,6 +60,29 @@ async def test_tracking_create(tmp_path: Path) -> None:
     assert found_files
 
 
+@pytest.mark.parametrize(
+    "run_id",
+    [
+        "",
+        " ",
+        "\t \n",
+    ],
+)
+@pytest.mark.asyncio
+async def test_tracking_retrieve_no_runid(run_id: str) -> None:
+    """Verify that run-tracking reports an invalid run-id.
+
+    Parameters
+    ----------
+    run_id : str
+        Parameterized "bad values" for the run-id that should result in exceptions.
+    """
+    repo = TrackingRepository()
+
+    with pytest.raises(ValueError, match="run-id was not provided"):
+        await repo.get_workplan_run(run_id=run_id)
+
+
 @pytest.mark.asyncio
 async def test_tracking_retrieve(tmp_path: Path) -> None:
     """Verify that run-tracking retrieves a persisted record and deserializes it
@@ -136,13 +159,13 @@ async def test_tracking_retrieve_variant(
     )
 
     # manually serialize so i have access to a known, working path for mocks
-    mock_doc_path = tmp_path / repo._runfile_name(run_id)
+    mock_doc_path = tmp_path / repo._runfile_name(datetime.now())  # type: ignore
     assert serialize(mock_doc_path, wp_run)
 
     with (
         mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
-        mock.patch.object(repo, "_history_path", return_value=mock_doc_path) as hp_fn,
-        mock.patch.object(repo, "_latest_path", return_value=mock_doc_path) as lp_fn,
+        mock.patch.object(repo, "history_path", return_value=mock_doc_path) as hp_fn,
+        mock.patch.object(repo, "latest_path", return_value=mock_doc_path) as lp_fn,
     ):
         latest = await repo.get_workplan_run(wp_run.run_id, None)
         assert latest
@@ -335,3 +358,73 @@ async def test_tracking_list_history_run_id(
 
         # confirm 2 separate run-ids had the same number of runs inserted.
         assert len(base_matches) == num_unique * num_runs
+
+
+@pytest.mark.parametrize(
+    ("num_runs", "all_history"),
+    [
+        (1, True),
+        (1, False),
+        (2, True),
+        (2, False),
+        (4, True),
+        (4, False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_tracking_get_run_paths(
+    tmp_path: Path,
+    num_runs: int,
+    all_history: bool,
+) -> None:
+    """Verify that using the `get_run_paths` method locates
+    all directories for the specified run-id
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    num_runs : int
+        The number of runs to insert for a given run id
+    all_history : bool
+        Pass `True` to test retrieval of all historical run paths.
+    """
+    state_dir = tmp_path / "state"
+    output_path = tmp_path / "output"
+    wp_path = tmp_path / "fake_workplan.yaml"
+    wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
+    run_id = "test-get-run-paths-run-id"
+    captured_env = {"foo": "foo-value"}
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+        expected_paths = [repo.latest_path(run_id=run_id)]  # type: ignore
+
+        # insert some runs that re-use the same run-id
+        for _ in range(num_runs):
+            expected_paths.append(
+                await repo.put_workplan_run(
+                    WorkplanRun(
+                        workplan_path=wp_path,
+                        trx_workplan_path=wp_trx_path,
+                        output_path=output_path,
+                        run_id=run_id,
+                        environment=captured_env,
+                    )
+                )
+            )
+
+        # retrieve the list of run paths
+        actual_paths = repo.list_runtracking_paths(run_id, all_history)
+
+    if all_history:
+        # run path for latest plus each history entry
+        exp_num_paths = num_runs + 1
+    else:
+        # only the latest history entry and corresponding symlink, e.g. latest/<run-id>
+        exp_num_paths = 2
+        expected_paths = [expected_paths[0], expected_paths[-1]]
+
+    assert len(actual_paths) == exp_num_paths
+    mismatched = set(actual_paths).difference(expected_paths)
+    assert not mismatched  # set(actual_paths).issuperset(expected_paths)
