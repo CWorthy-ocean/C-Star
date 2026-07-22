@@ -81,6 +81,7 @@ def mem_log(name, level=logging.INFO, collect=True, enabled=True):
     if not enabled:
         yield
         return
+    log.debug("%s: starting", name)
     resettable = _reset_peak()
     before = rss_mb()
     start = time.perf_counter()
