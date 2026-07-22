@@ -27,6 +27,7 @@ Bug Fixes
 - Fix failure to cache updated status during status checks (`#579 <https://github.com/CWorthy-ocean/C-Star/pull/579>`_)
 - Fix bug filling templates with `str(None)` (`#588 <https://github.com/CWorthy-ocean/C-Star/pull/588>`_)
 - Mitigate test regressions (`#596 <https://github.com/CWorthy-ocean/C-Star/pull/596>`_)
+- Fix attempt to use local file paths that do not exist. (`#597 <https://github.com/CWorthy-ocean/C-Star/pull/597>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -48,6 +49,7 @@ Improvements
 - Reduce startup time by instantiating `CStarSystemManager` at runtime. (`#593 <https://github.com/CWorthy-ocean/C-Star/pull/593>`_)
 - Reduce usage of remote blueprints in test suite (`#600 <https://github.com/CWorthy-ocean/C-Star/pull/600>`_)
 - Mitigate use of deprecated `typing.Optional`. (`#602 <https://github.com/CWorthy-ocean/C-Star/pull/602>`_)
+- Improved logging, input validation, and test coverage for `file_system` module (`#597 <https://github.com/CWorthy-ocean/C-Star/pull/597>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
