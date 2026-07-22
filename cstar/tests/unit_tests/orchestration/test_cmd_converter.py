@@ -12,17 +12,9 @@ from cstar.orchestration.adapter import (
     StepToRunRequestAdapter,
 )
 from cstar.orchestration.formatting import RunRequestCommandFormatter
-from cstar.orchestration.models import (
-    Application,
-    Step,
-)
-from cstar.orchestration.orchestration import LiveStep, RunRequest
+from cstar.orchestration.models import Application
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize
-
-
-def custom_map_function(step: Step) -> RunRequest:
-    """A custom step mapping function for testing purposes."""
-    return RunRequest(command=["UNIT-TEST-MAPPING", step.name])
 
 
 @pytest.mark.parametrize(
