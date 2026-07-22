@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import yaml
 
@@ -232,19 +232,19 @@ class ROMSSimulation(Simulation):
         directory: str | Path,
         discretization: "ROMSDiscretization",
         runtime_code: "AdditionalCode",
-        compile_time_code: Optional["AdditionalCode"] = None,
-        codebase: Optional["ROMSExternalCodeBase"] = None,
+        compile_time_code: "AdditionalCode | None" = None,
+        codebase: "ROMSExternalCodeBase | None" = None,
         start_date: str | datetime | None = None,
         end_date: str | datetime | None = None,
         valid_start_date: str | datetime | None = None,
         valid_end_date: str | datetime | None = None,
-        marbl_codebase: Optional["MARBLExternalCodeBase"] = None,
-        model_grid: Optional["ROMSModelGrid"] = None,
-        initial_conditions: Optional["ROMSInitialConditions"] = None,
-        tidal_forcing: Optional["ROMSTidalForcing"] = None,
-        river_forcing: Optional["ROMSRiverForcing"] = None,
-        cdr_forcing: Optional["ROMSCdrForcing"] = None,
-        nesting_info: Optional["ROMSNestingInfo"] = None,
+        marbl_codebase: "MARBLExternalCodeBase | None" = None,
+        model_grid: "ROMSModelGrid | None" = None,
+        initial_conditions: "ROMSInitialConditions | None" = None,
+        tidal_forcing: "ROMSTidalForcing | None" = None,
+        river_forcing: "ROMSRiverForcing | None" = None,
+        cdr_forcing: "ROMSCdrForcing | None" = None,
+        nesting_info: "ROMSNestingInfo | None" = None,
         boundary_forcing: list["ROMSBoundaryForcing"] | None = None,
         surface_forcing: list["ROMSSurfaceForcing"] | None = None,
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
