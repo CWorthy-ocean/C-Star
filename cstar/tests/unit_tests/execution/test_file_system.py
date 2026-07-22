@@ -6,7 +6,14 @@ from unittest import mock
 import pytest
 
 from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
-from cstar.execution.file_system import JobFileSystemManager, RomsFileSystemManager
+from cstar.execution.file_system import (
+    JobFileSystemManager,
+    RomsFileSystemManager,
+    is_remote_resource,
+    local_copy,
+    local_copy_async,
+    remove_files,
+)
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
 
@@ -171,3 +178,215 @@ def test_live_step(tmp_path: Path) -> None:
         expected = data_home / run_id / task_dir_name / ls_5.safe_name
         assert actual == expected
         assert ls_5.name == ls_5_name  # confirm the update was honored
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "http://example.com/resource",
+        "https://example.com/resource",
+        "ftp://example.com/resource",
+        "sftp://example.com/resource",
+        "smb://host/share/resource",
+        "s3://example-bucket.s3.amazonaws.com/folder/resource",
+    ],
+)
+def test_file_system_is_remote_resource_remote(uri: str) -> None:
+    """Verify that remote URIs are correctly interpreted as remote resources."""
+    assert is_remote_resource(uri), "Remote URI was not properly identified"
+
+
+@pytest.mark.parametrize(
+    "uri",
+    ["/", "/foo/bar", "\\\\host\\share\resource"],
+)
+def test_file_system_is_remote_resource_local(uri: str) -> None:
+    """Verify that local URIs are correctly interpreted as remote resources."""
+    assert not is_remote_resource(uri), "Local URI was not properly identified"
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "",
+        " ",
+        "  ",
+        "\n",
+    ],
+)
+def test_file_system_is_remote_resource_empty(uri: str) -> None:
+    """Verify that an empty URI results in an exception"""
+    with pytest.raises(ValueError, match="Invalid resource URI"):
+        _ = is_remote_resource(uri)
+
+
+def test_file_system_local_copy_failed_retrieval() -> None:
+    """Verify that a failure while retrieving a remote resource is handled as expected."""
+    uri = "http://example.com/resource"
+
+    mock_request = mock.Mock()
+    mock_sc_prop = mock.PropertyMock(return_value=404)
+    type(mock_request).status_code = mock_sc_prop
+
+    mock_req_fn = mock.MagicMock(return_value=mock_request)
+
+    with (
+        mock.patch("cstar.execution.file_system.request", new=mock_req_fn),
+        pytest.raises(FileNotFoundError, match="Unable to retrieve remote file"),
+    ):
+        with local_copy(uri):
+            assert False
+
+    mock_req_fn.assert_called_once()
+    mock_sc_prop.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "http://example.com/resource",
+        "https://example.com/resource",
+        "ftp://example.com/resource",
+        "sftp://example.com/resource",
+        "smb://host/share/resource",
+        "s3://example-bucket.s3.amazonaws.com/folder/resource",
+    ],
+)
+def test_file_system_local_copy(uri: str) -> None:
+    """Verify that a local copy of a remote resource is correctly written."""
+    mock_body = "mocked-resource-body"
+
+    mock_request = mock.Mock()
+    mock_sc_prop = mock.PropertyMock(return_value=200)
+    mock_text_prop = mock.PropertyMock(return_value=mock_body)
+    type(mock_request).status_code = mock_sc_prop
+    type(mock_request).text = mock_text_prop
+
+    mock_req_fn = mock.MagicMock(return_value=mock_request)
+
+    with mock.patch("cstar.execution.file_system.request", new=mock_req_fn):
+        with local_copy(uri) as local_path:
+            assert local_path.exists()
+            assert local_path.read_text() == mock_body
+
+        mock_req_fn.assert_called_once()
+        mock_sc_prop.assert_called_once()
+        mock_text_prop.assert_called_once()
+
+
+def test_file_system_local_copy_dne(tmp_path: Path) -> None:
+    """Verify that a local path that doesn't exist results in an exception."""
+    path = tmp_path / "file.txt"
+
+    with pytest.raises(FileNotFoundError, match="File not found"):
+        with local_copy(path.as_posix()) as _local_path:
+            ...
+
+
+def test_file_system_local_copy_passthrough(tmp_path: Path) -> None:
+    """Verify that a local file is returned directly and is not copied."""
+    path = tmp_path / "file.txt"
+    content = "yo yo yo "
+    path.write_text(content)
+
+    with local_copy(path.as_posix()) as local_path:
+        assert local_path == path.expanduser().resolve()
+        assert local_path.read_text() == content
+
+
+@pytest.mark.asyncio
+async def test_file_system_local_copy_async() -> None:
+    """Verify that a local copy of a remote resource is correctly written."""
+    uri = "http://example.com/resource"
+    mock_body = "mocked-resource-body"
+
+    mock_request = mock.Mock()
+    mock_sc_prop = mock.PropertyMock(return_value=200)
+    mock_text_prop = mock.PropertyMock(return_value=mock_body)
+    type(mock_request).status_code = mock_sc_prop
+    type(mock_request).text = mock_text_prop
+
+    mock_req_fn = mock.MagicMock(return_value=mock_request)
+
+    with mock.patch("cstar.execution.file_system.request", new=mock_req_fn):
+        async with local_copy_async(uri) as local_path:
+            assert local_path.exists()
+            assert local_path.read_text() == mock_body
+
+        mock_req_fn.assert_called_once()
+        mock_sc_prop.assert_called_once()
+        mock_text_prop.assert_called_once()
+
+
+def test_file_system_remove_files_path_DNE(tmp_path: Path) -> None:
+    """Verify that passing a non-existant path is logged and handled gracefully."""
+    path = tmp_path / "dne.txt"
+
+    # nothing was removed - expect `False` as retval
+    assert not remove_files(path, "*.txt")
+
+
+@pytest.mark.asyncio
+async def test_file_system_remove_files_file_path(tmp_path: Path) -> None:
+    """Verify that passing a path to a file instead of a directory results
+    in an exception.
+    """
+    path = tmp_path / "dne.txt"
+    path.touch()
+
+    with pytest.raises(ValueError, match="Directory is required"):
+        _ = remove_files(path, "*.txt")
+
+
+def test_file_system_remove_files_no_content(tmp_path: Path) -> None:
+    """Verify that an empty directory results in retval==`False`."""
+    path = tmp_path / "content"
+    path.mkdir(parents=True, exist_ok=False)
+
+    assert not remove_files(path, "*.txt")
+
+
+def test_file_system_remove_files_no_matches(tmp_path: Path) -> None:
+    """Verify that an empty directory results in retval==`False`."""
+    path = tmp_path / "content"
+    path.mkdir(parents=True, exist_ok=False)
+
+    log = path / "foo.log"
+    log.touch()
+
+    assert not remove_files(path, "*.txt")
+
+
+def test_file_system_remove_files(tmp_path: Path) -> None:
+    """Verify that wildcard matches are removed as expected."""
+    path = tmp_path / "content"
+    path.mkdir(parents=True, exist_ok=False)
+
+    log = path / "foo.txt"
+    log.touch()
+
+    assert remove_files(path, "*.txt")
+    assert not log.exists()
+
+
+def test_file_system_remove_files_directories(tmp_path: Path) -> None:
+    """Verify that directories matching the wildcard are deleted."""
+    path = tmp_path / "content"
+    file_match = tmp_path / "content.log"
+    file_match.touch()
+
+    subdir = path / "nested"
+    subdir.mkdir(parents=True, exist_ok=False)
+
+    log = subdir / "foo.txt"
+    log.touch()
+
+    # /content
+    #  - nested
+    #    - foo.txt
+    # /content.log
+
+    assert remove_files(tmp_path, "content*")
+    assert not path.exists()
+    assert not file_match.exists()
+    assert not log.exists()
