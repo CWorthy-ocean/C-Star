@@ -1259,7 +1259,7 @@ class TestRomsMarblInputDataGeneration:
         with pytest.raises(NotImplementedError):
             sample_roms_marbl_input_data._generate_corrections()
 
-    @patch("cstar_forge.forge.input_data.roms_tools_nesting_writer")
+    @patch("cstar_forge.forge.input_data.rt.make_nesting_info")
     @patch("cstar_forge.forge.input_data.rt.Grid")
     def test_generate_grid_with_child(
         self,
@@ -1326,7 +1326,7 @@ class TestRomsMarblInputDataGeneration:
         assert extract_data["theta_b_chd"] == mock_child.theta_b
         assert extract_data["hc_chd"] == mock_child.hc
 
-    @patch("cstar_forge.forge.input_data.roms_tools_nesting_writer")
+    @patch("cstar_forge.forge.input_data.rt.make_nesting_info")
     @patch("cstar_forge.forge.input_data.rt.Grid")
     def test_generate_grid_extract_file_is_basename(
         self,

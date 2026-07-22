@@ -6,7 +6,6 @@ This module contains utility functions used across the codebase.
 
 from __future__ import annotations
 
-import inspect
 import math
 import warnings
 from typing import Literal
@@ -179,32 +178,3 @@ def compute_grid_spacing_m(grid_size_x: float, grid_nx: int) -> float:
 def compute_v_sponge_from_grid(grid_size_x: float, grid_nx: int) -> float:
     """Default sponge viscosity: grid spacing (m) divided by 10."""
     return compute_grid_spacing_m(grid_size_x, grid_nx) / 10.0
-
-
-def roms_tools_nesting_writer():
-    """
-    Return the roms_tools API that writes parent/child nesting metadata to disk.
-
-    Newer roms_tools exposes ``make_edata``; older releases used ``make_nesting_info``.
-    Both accept ``(parent_grid, child_grid, filepath, **kwargs)`` with compatible kwargs
-    such as ``period``.
-    """
-    import roms_tools as rt
-
-    writer = getattr(rt, "make_nesting_info", None) or getattr(rt, "make_edata", None)
-    if writer is None:
-        raise AttributeError(
-            "roms_tools must provide make_edata or make_nesting_info for nested grids."
-        )
-    return writer
-
-
-def roms_tools_default_nesting_period_seconds() -> float:
-    """Default ``period`` (seconds) for nesting extract, from roms_tools writer signature."""
-    writer = roms_tools_nesting_writer()
-    params = inspect.signature(writer).parameters
-    if "period" in params:
-        default = params["period"].default
-        if default is not inspect.Parameter.empty:
-            return float(default)
-    return 3600.0

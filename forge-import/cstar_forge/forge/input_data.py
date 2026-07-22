@@ -8,7 +8,6 @@ the ROMS-MARBL specific implementation.
 
 from __future__ import annotations
 
-import inspect
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -25,7 +24,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from cstar_forge.forge import source_data
 from cstar_forge.forge.forge_blueprint import OpenBoundaries
-from cstar_forge.forge.util import roms_tools_nesting_writer
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the
 # substring ``cdr.nc`` so C-Star's ROMS build check on ``cdr_frc.opt`` passes.
@@ -763,7 +761,6 @@ class RomsMarblInputData(InputData):
                 # This section of code is needed when doing nesting with BGC.  ROMS_Tools has a flag called "include_bgc" which
                 # defaults to false when we are making child boundary conditions, but it needs to be set to true in order to
                 # save the BGC variables.
-                nesting_writer = roms_tools_nesting_writer()
                 nesting_kwargs = dict(self.metadata_child or {})
                 nesting_kwargs.update(self._save_kwargs)
                 has_marbl = bool(
@@ -771,16 +768,13 @@ class RomsMarblInputData(InputData):
                         "marbl", False
                     )
                 )
-                if (
-                    has_marbl
-                    and "include_bgc" in inspect.signature(nesting_writer).parameters
-                ):
+                if has_marbl:
                     # ROMS-Tools: include_bgc=True sets output_vars to include "bgc" on nesting.nc.
                     nesting_kwargs.setdefault("include_bgc", True)
-                nesting_writer(
+                rt.make_nesting_info(
                     self.grid,
                     self.grid_child,
-                    out_path_nesting,
+                    str(out_path_nesting),
                     **nesting_kwargs,
                 )
             self.roms_marbl_blueprint_elements.nesting_info = cstar_models.Dataset(
