@@ -2001,7 +2001,7 @@ class TestGlorysSubchunkIntegration:
     """Drives the actual wired ``--subchunk`` path end to end: the
     ``_resolve_source_block`` swap + memoization, then real, *unmodified*
     ``rt.InitialConditions``/``rt.BoundaryForcing`` construction to confirm roms-tools'
-    stock loader reads the ``.parquet`` reference correctly. No roms-tools patching is
+    stock loader reads the ``.json`` reference correctly. No roms-tools patching is
     involved -- kerchunk registers its own xarray backend
     (``kerchunk.xarray_backend:KerchunkBackend``) whose ``guess_can_open()`` recognizes
     the reference by extension, so xarray's engine auto-detection handles it
@@ -2071,7 +2071,7 @@ class TestGlorysSubchunkIntegration:
                 }
             }
             fn = src_dir / f"fake_GLORYS_{date.strftime('%Y%m%d')}.nc"
-            ds.to_netcdf(fn, engine="h5netcdf", encoding=encoding)
+            ds.to_netcdf(fn, engine="netcdf4", encoding=encoding)
             files.append(fn)
         return files
 
@@ -2127,7 +2127,7 @@ class TestGlorysSubchunkIntegration:
         # 1) The swap: a GLORYS source block with a multi-file path resolves to a
         # subchunk reference, not the raw file list.
         resolved1 = rmid._resolve_source_block({"name": "GLORYS"})
-        assert str(resolved1["path"]).endswith(".parquet")
+        assert str(resolved1["path"]).endswith(".json")
         assert Path(resolved1["path"]).exists()
 
         # 2) Memoization: a second resolve (as IC + boundary each would trigger)
@@ -2139,7 +2139,7 @@ class TestGlorysSubchunkIntegration:
         # 3) Real, unmodified roms-tools dispatch: rt.InitialConditions -> _get_data
         # -> the "external" GLORYS variant -> GLORYSDataset -> roms-tools' stock
         # loader. No patching -- xarray auto-detects the kerchunk backend for the
-        # ".parquet" reference on its own.
+        # ".json" reference on its own.
         ic = rt.InitialConditions(
             grid=grid,
             ini_time=datetime(2020, 1, 1),

@@ -310,7 +310,17 @@ def build_ref_for_files(
     """Build (or reuse) a subchunked kerchunk reference for a list of GLORYS files.
 
     Wraps :func:`build_subchunk_refs` with forge's naming/caching convention:
-    ``<out_dir>/subchunk/<key>_<startYYYYMMDD>_<endYYYYMMDD>.parquet``.
+    ``<out_dir>/subchunk/<key>_<startYYYYMMDD>_<endYYYYMMDD>.json``.
+
+    Uses the JSON reference format rather than parquet: GLORYS regularly has
+    chunks that are legitimately missing (fill-value-only, never written to the
+    source file -- ordinary zarr/kerchunk semantics). fsspec's parquet-backed
+    ``LazyReferenceMapper`` represents those as placeholder rows that round-trip
+    through pandas as ``pd.NA`` rather than ``None``, which crashes
+    ``ReferenceFileSystem``'s remote-protocol auto-detection with ``TypeError:
+    boolean value of NA is ambiguous`` (reproduced independently of this
+    codebase). Plain JSON refs are a flat dict with no preallocated padding, so
+    missing chunks are simply absent instead of malformed placeholder entries.
     """
     subchunk_dir = Path(out_dir) / "subchunk"
     subchunk_dir.mkdir(parents=True, exist_ok=True)
@@ -318,7 +328,7 @@ def build_ref_for_files(
     out_path = build_subchunk_refs(
         input_files=sorted(str(f) for f in files),
         out=str(subchunk_dir / stem),
-        output_format=".parquet",
+        output_format=".json",
         data_vars_4d=DEFAULT_DATA_VARS_4D,
         overwrite=overwrite,
     )
