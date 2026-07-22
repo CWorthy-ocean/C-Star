@@ -94,7 +94,7 @@ class ExternalCodeBase(ABC, LoggingMixin):
         repr_str += "\n)"
         return repr_str
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, str | None]:
         """Return this ExternalCodeBase as a dictionary of kwargs to ExternalCodeBase.__init__"""
         return {
             "source_repo": self.source.location,
