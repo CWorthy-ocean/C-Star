@@ -3,13 +3,13 @@ import typing as t
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from copy import deepcopy
+from pathlib import Path
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     FilePath,
-    NewPath,
 )
 
 from cstar.base.adapter import SchemaAdapter
@@ -50,7 +50,7 @@ class MigrationRequest(BaseModel):
         description="Path to a file containing a serialized blueprint",
         alias="path",
     )
-    target: NewPath | None = Field(
+    target: Path | None = Field(
         default=None,
         description="Path where the migrated blueprint will be serialized",
         frozen=True,
