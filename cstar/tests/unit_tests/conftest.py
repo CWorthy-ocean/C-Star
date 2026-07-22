@@ -1751,7 +1751,7 @@ def patch_romssimulation_init_sourcedata(
 def mock_placeholder_delay() -> Generator[None, None, None]:
     """Ensure delay for simulating processes during unit tests is tiny."""
     with mock.patch(
-        "cstar.orchestration.converter.converter.random.random",
+        "cstar.orchestration.adapter.random.random",
         return_value=0.01,
     ):
         yield

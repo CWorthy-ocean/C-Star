@@ -7,20 +7,22 @@ from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.file_system import RomsFileSystemManager
-from cstar.orchestration.converter.converter import (
-    convert_step_to_blueprint_run_command,
+from cstar.orchestration.adapter import (
+    StepToPlaceholderAdapter,
+    StepToRunRequestAdapter,
 )
+from cstar.orchestration.formatting import RunRequestCommandFormatter
 from cstar.orchestration.models import (
     Application,
     Step,
 )
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, RunRequest
 from cstar.orchestration.serialization import deserialize
 
 
-def custom_map_function(step: Step) -> str:
+def custom_map_function(step: Step) -> RunRequest:
     """A custom step mapping function for testing purposes."""
-    return f"UNIT-TEST-MAPPING: {step.name}"
+    return RunRequest(command=["UNIT-TEST-MAPPING", step.name])
 
 
 @pytest.mark.parametrize(
@@ -54,8 +56,61 @@ def test_converter_defaults(
         working_dir=tmp_path / "unit-test-work-dir",
     )
 
-    # confirm a mapping function was returned
-    assert convert_step_to_blueprint_run_command(step)
+    # confirm a command was returned
+    adapter = StepToRunRequestAdapter(step)
+    assert adapter.adapt()
+
+
+@pytest.mark.parametrize(
+    ("target_application"),
+    [
+        Application.ROMS_MARBL,
+        Application.SLEEP,
+        Application.HELLO_WORLD,
+    ],
+)
+def test_converter_steptoplaceholderadapter(
+    tmp_path: Path,
+    target_application: Application,
+) -> None:
+    """Verify that the placeholder adapter produces a placeholder script
+    instead of the original command.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary path fixture for writing per-test outputs.
+    target_application: Application
+        The application type to locate a mapping for
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step = LiveStep(
+        name="test step",
+        application=target_application,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+    )
+
+    adapter = StepToPlaceholderAdapter(step)
+    ph_request = adapter.adapt()
+
+    # confirm placeholder executes an alternative script
+    ph_command = RunRequestCommandFormatter().format(ph_request)
+    assert ph_command == f"sh {step.fsm.run_dir / adapter.SCRIPTFILE_NAME}"
+
+    # confirm the placeholder script was written
+    ph_path = Path(ph_command.split(" ", maxsplit=1)[1])
+    assert ph_path.exists()
+
+    # confirm the original script is documented in placeholder
+    cmd_adapter = StepToRunRequestAdapter(step)
+    cmd_request = cmd_adapter.adapt()
+    cmd = RunRequestCommandFormatter().format(cmd_request)
+
+    ph_content = ph_path.read_text()
+    assert f"replacing: {cmd}" in ph_content
 
 
 def test_convert_step_with_directives(
@@ -72,14 +127,16 @@ def test_convert_step_with_directives(
     step = preprocessable_roms_livestep
     bp_path = str(step.blueprint_path)
 
-    result = convert_step_to_blueprint_run_command(step)
+    result = StepToRunRequestAdapter(step).adapt()
 
     # confirm the parameter is sent
-    assert ARG_DIRECTIVES_URI_LONG in result
+    assert ARG_DIRECTIVES_URI_LONG in result.command
 
-    # confirm the directive path exists
-    dir_path = result.split(ARG_DIRECTIVES_URI_LONG)[1].split(" ", maxsplit=1)[0]
-    assert bp_path in result, "The blueprint path should be unchanged"
+    # confirm the run request includes the directives
+    cmd = RunRequestCommandFormatter().format(result)
+
+    dir_path = cmd.split(ARG_DIRECTIVES_URI_LONG)[1].split(" ", maxsplit=1)[0]
+    assert bp_path in cmd, "The blueprint path should be unchanged"
     assert Path(dir_path).exists()
 
 

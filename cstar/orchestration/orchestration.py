@@ -19,10 +19,7 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
-from cstar.orchestration.converter.converter import (
-    convert_step_to_blueprint_run_command,
-)
-from cstar.orchestration.models import Blueprint, Step, Workplan
+from cstar.orchestration.models import Blueprint, ConfiguredBaseModel, Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
     intenum_representer,
@@ -268,16 +265,6 @@ class LiveStep(Step):
         return bp_type(**base_bp.model_dump())
 
     @property
-    def command(self) -> str:
-        """Generate the shell command that will execute the underlying application.
-
-        Returns
-        -------
-        str
-        """
-        return convert_step_to_blueprint_run_command(self)
-
-    @property
     def script_path(self) -> Path:
         """Return the path to the the log file written by this task."""
         return self.fsm.root_dir / "script.sh"
@@ -409,7 +396,7 @@ class Planner(LoggingMixin):
             A traversal of the execution plan honoring all dependencies.
         """
 
-        def f(step: Step) -> bool:
+        def f(step: Step | None) -> bool:
             """Filter steps that are non-null."""
             return step is not None
 
@@ -925,6 +912,11 @@ class Orchestrator(LoggingMixin):
                 raise ValueError(msg)
 
         setattr(self, attr_name, func)
+
+
+class RunRequest(ConfiguredBaseModel):
+    command: list[str] = Field(default_factory=list[str])
+    environment: dict[str, str] = Field(default_factory=dict[str, str])
 
 
 def check_environment() -> None:

@@ -14,6 +14,8 @@ from pydantic import PrivateAttr
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
+from cstar.orchestration.adapter import StepToRunRequestAdapter
+from cstar.orchestration.formatting import RunRequestCommandFormatter
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -104,7 +106,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         str
         """
         blueprint_path = str(step.blueprint_path)
-        command = step.command.replace(blueprint_path, '"$BLUEPRINT_PATH"')
+
+        adapter = StepToRunRequestAdapter(step)
+        command = RunRequestCommandFormatter().format(adapter.adapt())
+        command = command.replace(blueprint_path, '"$BLUEPRINT_PATH"')
+
         pids = " ".join([f'"{h.pid}"' for h in dependencies])
         local_dep_delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
 
@@ -171,7 +177,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         if LocalLauncher.use_proxy:
             script = LocalLauncher._create_dep_aware_script(step, dependencies)
         else:
-            script = step.command
+            adapter = StepToRunRequestAdapter(step)
+            script = RunRequestCommandFormatter().format(adapter.adapt())
 
         step.fsm.prepare()
         step.script_path.write_text(script)

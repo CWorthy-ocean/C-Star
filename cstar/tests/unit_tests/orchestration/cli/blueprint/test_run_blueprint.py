@@ -17,7 +17,7 @@ from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.converter.converter import prepare_directive_file
+from cstar.orchestration.adapter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.orchestration import LiveStep
 from cstar.roms.simulation import ROMSSimulation
