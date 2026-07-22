@@ -15,18 +15,20 @@ from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import (
-    KEY_STATUS,
     KEY_STEP,
+    KEY_TASK,
     Orchestrator,
     Planner,
     RunMode,
-    Status,
+    Task,
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.transforms import WorkplanTransformer, get_time_slices
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from cstar.orchestration.orchestration import ProcessHandle
 
 
 @pytest.fixture
@@ -40,7 +42,7 @@ def diamond_graph(tmp_path: Path) -> nx.DiGraph:
             KEY_STEP: Step(
                 name=f"s-{i:02d}", application="sleep", blueprint=bp_path.as_posix()
             ),
-            KEY_STATUS: Status.Unsubmitted,
+            KEY_TASK: None,
         }
         for i, key in enumerate(g.nodes)
     }
@@ -68,10 +70,10 @@ def tree_graph(tmp_path: Path) -> nx.DiGraph:
     }
     bp_path = tmp_path / "blueprint.yaml"
     g = nx.DiGraph(data)
-    initial_stats: dict[str, dict[str, Step | Status]] = {
+    initial_stats: dict[str, dict[str, Step | Task[ProcessHandle] | None]] = {
         key: {
             KEY_STEP: Step(name=key, application="sleep", blueprint=bp_path.as_posix()),
-            KEY_STATUS: Status.Unsubmitted,
+            KEY_TASK: None,
         }
         for key in g.nodes
     }
