@@ -5,6 +5,7 @@ from cstar.base.adapter import ModelAdapter
 from cstar.base.additional_code import AdditionalCode
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration import models
+from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -75,6 +76,25 @@ class MARBLAdapter(ModelAdapter[RomsMarblBlueprint, MARBLExternalCodeBase]):
             source_repo=str(self.model.code.marbl.location),
             checkout_target=self.model.code.marbl.checkout_target
             or self.model.code.marbl.branch,
+        )
+
+
+class PIOAdapter(ModelAdapter[RomsMarblBlueprint, PIOExternalCodeBase]):
+    """Create a PIOExternalCodeBase from a blueprint model.
+
+    Unlike MARBL, a missing `code.pio` section is not an error: the default
+    ParallelIO source repository and checkout target are used instead.
+    """
+
+    @t.override
+    def adapt(self) -> PIOExternalCodeBase:
+        if self.model.code.pio is None:
+            return PIOExternalCodeBase()
+
+        return PIOExternalCodeBase(
+            source_repo=str(self.model.code.pio.location),
+            checkout_target=self.model.code.pio.checkout_target
+            or self.model.code.pio.branch,
         )
 
 

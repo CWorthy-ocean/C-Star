@@ -42,6 +42,7 @@ from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
+from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.tests.unit_tests.fake_abc_subclasses import (
     FakeExternalCodeBase,
     FakeInputDataset,
@@ -685,6 +686,41 @@ def marblexternalcodebase_staged(
     yield mecb
 
 
+@pytest.fixture
+def pioexternalcodebase(
+    mocksourcedata_remote_repo,
+) -> Generator[PIOExternalCodeBase, None, None]:
+    """Fixture providing a `PIOExternalCodeBase` instance for testing.
+
+    Patches `SourceData` calls to avoid network and filesystem interaction.
+    """
+    source_data = mocksourcedata_remote_repo(
+        location="https://parallelio.com/repo.git", identifier="v1"
+    )
+    patch_source_data = mock.patch(
+        "cstar.base.external_codebase.SourceData", return_value=source_data
+    )
+
+    with patch_source_data:
+        yield PIOExternalCodeBase()
+
+
+@pytest.fixture
+def pioexternalcodebase_staged(
+    pioexternalcodebase, stagedrepository, pio_path
+) -> Generator[PIOExternalCodeBase, None, None]:
+    """Fixture providing a staged `PIOExternalCodeBase` instance for testing.
+
+    Sets `working_copy` to a mock StagedRepository instance.
+    """
+    pecb = pioexternalcodebase
+    staged_data = stagedrepository(
+        path=pio_path, source=pecb.source, changed_from_source=False
+    )
+    pecb._working_copy = staged_data
+    yield pecb
+
+
 ################################################################################
 # InputDataset
 ################################################################################
@@ -795,6 +831,12 @@ def log() -> logging.Logger:
 def marbl_path(tmp_path: Path) -> Path:
     # A path to a temporary directory for writing the marbl code
     return tmp_path / "marbl"
+
+
+@pytest.fixture
+def pio_path(tmp_path: Path) -> Path:
+    # A path to a temporary directory for writing the parallelio code
+    return tmp_path / "pio"
 
 
 @pytest.fixture
@@ -1621,6 +1663,12 @@ def patch_romssimulation_init_sourcedata(
         location=sim.marbl_codebase.source.location,
         identifier=sim.marbl_codebase.source.identifier,
     )
+    # Only consumed by simulations with a pio_codebase (matches the
+    # `pioexternalcodebase` fixture); harmless surplus otherwise
+    mock_pio_externalcodebase_sourcedata = mocksourcedata_remote_repo(
+        location="https://parallelio.com/repo.git",
+        identifier="v1",
+    )
 
     # ROMS input dataset SourceData mocks
     mock_model_grid_sourcedata = mocksourcedata_remote_file(
@@ -1709,6 +1757,7 @@ def patch_romssimulation_init_sourcedata(
                 side_effect=[
                     mock_externalcodebase_sourcedata,
                     mock_marbl_externalcodebase_sourcedata,
+                    mock_pio_externalcodebase_sourcedata,
                 ],
             ),
             mock.patch(
