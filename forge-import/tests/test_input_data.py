@@ -15,6 +15,7 @@ Tests cover:
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import cstar.applications.roms_marbl.models as cstar_models
@@ -34,6 +35,7 @@ from cstar_forge.forge.input_data import (
     InputStep,
     RomsMarblBlueprintInputData,
     RomsMarblInputData,
+    filter_paths_by_time_window,
     register_input,
     resolve_input_selection,
 )
@@ -225,6 +227,48 @@ def sample_roms_marbl_input_data(
         use_dask=False,
         input_data_dir=data_dir,
     )
+
+
+class TestFilterPathsByTimeWindow:
+    """Tests for the filter_paths_by_time_window helper."""
+
+    FILES: ClassVar[list[Path]] = [
+        Path(f"/data/GLORYS_REGIONAL_test_201201{d:02d}.nc") for d in range(1, 6)
+    ]
+
+    def test_trims_to_window_inclusive(self):
+        kept = filter_paths_by_time_window(
+            self.FILES, datetime(2012, 1, 2), datetime(2012, 1, 3)
+        )
+        assert kept == self.FILES[1:3]
+
+    def test_unparseable_name_returns_original(self):
+        files = [*self.FILES, Path("/data/no_date_here.nc")]
+        assert (
+            filter_paths_by_time_window(
+                files, datetime(2012, 1, 2), datetime(2012, 1, 3)
+            )
+            == files
+        )
+
+    def test_empty_result_returns_original(self):
+        assert (
+            filter_paths_by_time_window(
+                self.FILES, datetime(2015, 6, 1), datetime(2015, 6, 2)
+            )
+            == self.FILES
+        )
+
+    def test_uses_last_date_in_stem(self):
+        """A grid name containing digits must not shadow the trailing date."""
+        files = [
+            Path(f"/data/GLORYS_REGIONAL_grid20120101_201201{d:02d}.nc")
+            for d in range(1, 4)
+        ]
+        kept = filter_paths_by_time_window(
+            files, datetime(2012, 1, 2), datetime(2012, 1, 3)
+        )
+        assert kept == files[1:3]
 
 
 class TestInputData:
@@ -654,6 +698,39 @@ class TestRomsMarblInputDataHelperMethods:
                 {"name": "CONSTANTS"}
             )
         assert result == {"name": "CONSTANTS"}
+
+    def test_resolve_source_block_time_window_trims_daily_list(
+        self, sample_roms_marbl_input_data
+    ):
+        """A time_window trims a per-day file list to the covering files."""
+        files = [
+            Path(f"/data/GLORYS_REGIONAL_test_201201{d:02d}.nc") for d in range(1, 11)
+        ]
+        sample_roms_marbl_input_data.source_data.path_for_source.return_value = files
+        result = sample_roms_marbl_input_data._resolve_source_block(
+            "GLORYS",
+            time_window=(datetime(2012, 1, 1), datetime(2012, 1, 2)),
+        )
+        assert result["path"] == files[:2]
+
+    def test_resolve_source_block_time_window_skips_subchunk(
+        self, sample_roms_marbl_input_data
+    ):
+        """With a time_window, the (shared, full-window) subchunk ref is not built."""
+        files = [
+            Path(f"/data/GLORYS_REGIONAL_test_201201{d:02d}.nc") for d in range(1, 11)
+        ]
+        sample_roms_marbl_input_data.source_data.path_for_source.return_value = files
+        sample_roms_marbl_input_data.subchunk = True
+        with patch.object(
+            sample_roms_marbl_input_data, "_subchunked_glorys_path"
+        ) as mock_sub:
+            result = sample_roms_marbl_input_data._resolve_source_block(
+                "GLORYS",
+                time_window=(datetime(2012, 1, 1), datetime(2012, 1, 2)),
+            )
+        mock_sub.assert_not_called()
+        assert result["path"] == files[:2]
 
     def test_build_input_args_with_base_kwargs(self, sample_roms_marbl_input_data):
         """Test _build_input_args with base_kwargs."""

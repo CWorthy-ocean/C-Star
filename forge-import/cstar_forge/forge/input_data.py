@@ -9,10 +9,11 @@ the ROMS-MARBL specific implementation.
 from __future__ import annotations
 
 import logging
+import re
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,36 @@ log = logging.getLogger(__name__)
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the
 # substring ``cdr.nc`` so C-Star's ROMS build check on ``cdr_frc.opt`` passes.
 CDR_FORCING_NETCDF_STEM = "cdr"
+
+
+def filter_paths_by_time_window(
+    paths: list[Path],
+    start: datetime,
+    end: datetime,
+) -> list[Path]:
+    """
+    Subset per-day source files to those whose filename date falls in [start, end].
+
+    Daily-staged sources (e.g. GLORYS, see ``SourceData._construct_glorys_path``)
+    encode the date as a trailing ``YYYYMMDD`` in the stem. Dates are compared at
+    day resolution, inclusive on both ends. If any filename has no parseable date,
+    or the filter would leave nothing, the original list is returned unchanged —
+    callers must never end up with fewer files than the consumer needs.
+    """
+    dated: list[tuple[Path, datetime]] = []
+    for p in paths:
+        m = re.search(r"(\d{8})(?!.*\d{8})", Path(p).stem)  # last YYYYMMDD in stem
+        if m is None:
+            return paths
+        try:
+            dated.append((p, datetime.strptime(m.group(1), "%Y%m%d")))
+        except ValueError:
+            return paths
+    lo, hi = start.date(), end.date()
+    kept = [p for p, d in dated if lo <= d.date() <= hi]
+    if not kept:
+        return paths
+    return kept
 
 
 def netcdf_filename_component(component: str) -> str:
@@ -623,10 +654,22 @@ class RomsMarblInputData(InputData):
         self.roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
         return self.roms_marbl_blueprint_dir / f"_{input_name}.yaml"
 
-    def _resolve_source_block(self, block: str | dict[str, Any]) -> dict[str, Any]:
+    def _resolve_source_block(
+        self,
+        block: str | dict[str, Any],
+        time_window: tuple[datetime, datetime] | None = None,
+    ) -> dict[str, Any]:
         """
         Normalize a "source"/"bgc_source" block and inject a 'path'
         based on SourceData.
+
+        When ``time_window`` is given and the resolved path is a per-day file list,
+        it is trimmed to the files covering that window (see
+        ``filter_paths_by_time_window``) — e.g. initial conditions only need
+        ``ini_time``'s day, not the whole run's daily files. A trimmed list skips
+        the subchunk branch: the subchunk reference is memoized per dataset key
+        and shared with full-window consumers (boundary forcing), so it must only
+        ever be built from the full list.
         """
         if isinstance(block, str):
             name = block
@@ -657,7 +700,20 @@ class RomsMarblInputData(InputData):
 
         path = self.source_data.path_for_source(name, glorys_layout=glorys_layout)
         if path is not None:
-            if (
+            if time_window is not None and isinstance(path, list) and len(path) >= 2:
+                trimmed = filter_paths_by_time_window(path, *time_window)
+                if len(trimmed) < len(path):
+                    log.info(
+                        "Trimmed %s source from %d to %d file(s) for time window "
+                        "[%s, %s]",
+                        name,
+                        len(path),
+                        len(trimmed),
+                        time_window[0],
+                        time_window[1],
+                    )
+                path = trimmed
+            elif (
                 self.subchunk
                 and name.upper() == "GLORYS"
                 and isinstance(path, list)
@@ -701,6 +757,7 @@ class RomsMarblInputData(InputData):
         key: str,
         extra: dict[str, Any] | None = None,
         base_kwargs: dict[str, Any] | None = None,
+        time_window: tuple[datetime, datetime] | None = None,
     ) -> dict[str, Any]:
         """
         Merge per-input defaults with runtime arguments.
@@ -719,7 +776,9 @@ class RomsMarblInputData(InputData):
                 # If it's a Pydantic model (SourceSpec), convert to dict first
                 if hasattr(cfg[field_name], "model_dump"):
                     cfg[field_name] = cfg[field_name].model_dump()
-                cfg[field_name] = self._resolve_source_block(cfg[field_name])
+                cfg[field_name] = self._resolve_source_block(
+                    cfg[field_name], time_window=time_window
+                )
 
         # Unpack any `options` passthrough dict from the item config before merging.
         # These are forwarded verbatim to the rt constructor and win over typed defaults
@@ -864,13 +923,21 @@ class RomsMarblInputData(InputData):
             use_dask=self.use_dask,
             **self._mrd_extra(),
         )
-        input_args = self._build_input_args(key, extra=extra, base_kwargs=kwargs)
+        # roms-tools selects the closest time in [ini_time, ini_time + 24h], so
+        # per-day source lists only need the day-of and next-day files.
+        input_args = self._build_input_args(
+            key,
+            extra=extra,
+            base_kwargs=kwargs,
+            time_window=(self.start_date, self.start_date + timedelta(days=1)),
+        )
 
         if self._should_reuse_existing_output(output_path):
             print(f"   ↪ Reusing existing file: {output_path}")
             paths = [str(output_path)]
             ic = None
         else:
+            log.info("InitialConditions kwargs: %r", input_args)
             with mem_log("InitialConditions()", enabled=self.verbose):
                 ic = rt.InitialConditions(grid=self.grid, **input_args)
 
@@ -884,6 +951,7 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
 
+            log.info("InitialConditions.save kwargs: %r", self._save_kwargs)
             with mem_log("InitialConditions.save", enabled=self.verbose):
                 paths = ic.save(output_path, **self._save_kwargs)
 

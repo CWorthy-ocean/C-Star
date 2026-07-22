@@ -86,6 +86,40 @@ def main(argv: list | None = None) -> int:
         default=None,
         help="override the spec's working_dir (per-run artifact root) for this host",
     )
+    parser.add_argument(
+        "--dask",
+        action="store_true",
+        help="start a dask.distributed Client for this run, so input generation "
+        "uses it instead of dask's default local threaded scheduler. Omitting "
+        "this flag leaves current behavior unchanged. Combine with the other "
+        "--dask-* flags to sweep cluster configs.",
+    )
+    parser.add_argument(
+        "--dask-workers", type=int, default=None, help="n_workers (requires --dask)"
+    )
+    parser.add_argument(
+        "--dask-threads-per-worker",
+        type=int,
+        default=None,
+        help="threads_per_worker (requires --dask)",
+    )
+    parser.add_argument(
+        "--dask-memory-limit",
+        default=None,
+        help="per-worker memory_limit, e.g. '4GB' (requires --dask)",
+    )
+    parser.add_argument(
+        "--dask-processes",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="process-based workers (--dask-processes) vs thread-based "
+        "(--no-dask-processes); omit to use dask's own default (requires --dask)",
+    )
+    parser.add_argument(
+        "--dask-dashboard-address",
+        default=None,
+        help="dashboard address, e.g. ':8787' (requires --dask)",
+    )
     args = parser.parse_args(argv)
 
     if args.verbose:
@@ -105,18 +139,42 @@ def main(argv: list | None = None) -> int:
     if args.host_only:
         return 0
 
-    executor = process_forge_blueprint(
-        cfg,
-        host=host,
-        ensure_data=not args.no_data,
-        generate=not args.no_generate,
-        configure=not args.no_configure,
-        clobber=args.clobber,
-        use_dask=not args.no_dask,
-        subchunk=args.subchunk,
-        only_inputs=args.only_inputs,
-        verbose=args.verbose,
-    )
+    dask_client = None
+    if args.dask:
+        from dask.distributed import Client
+
+        client_kwargs = {}
+        if args.dask_workers is not None:
+            client_kwargs["n_workers"] = args.dask_workers
+        if args.dask_threads_per_worker is not None:
+            client_kwargs["threads_per_worker"] = args.dask_threads_per_worker
+        if args.dask_memory_limit is not None:
+            client_kwargs["memory_limit"] = args.dask_memory_limit
+        if args.dask_processes is not None:
+            client_kwargs["processes"] = args.dask_processes
+        if args.dask_dashboard_address is not None:
+            client_kwargs["dashboard_address"] = args.dask_dashboard_address
+        dask_client = Client(**client_kwargs)
+        print(f"\n{dask_client}")
+        print(f"Dask dashboard: {dask_client.dashboard_link}")
+
+    try:
+        executor = process_forge_blueprint(
+            cfg,
+            host=host,
+            ensure_data=not args.no_data,
+            generate=not args.no_generate,
+            configure=not args.no_configure,
+            clobber=args.clobber,
+            use_dask=not args.no_dask,
+            subchunk=args.subchunk,
+            only_inputs=args.only_inputs,
+            verbose=args.verbose,
+        )
+    finally:
+        if dask_client is not None:
+            dask_client.close()
+
     if not args.no_configure and not args.only_inputs:
         blueprint_path = executor.path_roms_marbl_blueprint()
         print(f"\nBlueprint: {blueprint_path}")
