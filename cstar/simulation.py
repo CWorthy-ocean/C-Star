@@ -522,7 +522,7 @@ class Simulation(ABC, LoggingMixin):
 
         return state
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: dict[str, Any]):
         """Restore the object from a pickle."""
         self.__dict__.update(state)
 
@@ -593,7 +593,7 @@ class Simulation(ABC, LoggingMixin):
         return simulation
 
     @abstractmethod
-    def build(self, rebuild=False) -> None:
+    def build(self, rebuild: bool = False) -> None:
         """Abstract method to compile any necessary code for this simulation.
 
         This method should be implemented by subclasses to handle steps
