@@ -276,7 +276,7 @@ def test_engine_warns_on_hash_mismatch(tmp_path):
 
     # the engine warns but still processes (uses a fake executor)
     class _Fake:
-        def __init__(self, cfg=None, host=None):
+        def __init__(self, cfg=None, host=None, verbose=False):
             self.calls = []
 
         def ensure_source_data(self, **k):
@@ -1915,7 +1915,7 @@ class TestForgeBlueprintWizardApp:
 class _FakeBuilder:
     """A ForgeBlueprintExecutor stand-in: records calls instead of doing real work."""
 
-    def __init__(self, cfg=None, host=None):
+    def __init__(self, cfg=None, host=None, verbose=False):
         self.cfg = cfg
         self.calls = []
 
@@ -2097,7 +2097,7 @@ class TestForgeBlueprintEngine:
         assert isinstance(_FakeBuilder(), ForgeBlueprintExecutor)
 
         class _Bad:  # missing the required methods
-            def __init__(self, cfg=None, host=None):
+            def __init__(self, cfg=None, host=None, verbose=False):
                 pass
 
         with pytest.raises(TypeError, match="ForgeBlueprintExecutor"):

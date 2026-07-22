@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import os
 import shutil
 import sys
@@ -44,6 +45,9 @@ from cstar_forge.forge import input_data, source_data
 from cstar_forge.forge.forge_blueprint import OpenBoundaries
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
+from cstar_forge.utils import mem_log
+
+log = logging.getLogger(__name__)
 
 
 def _schedule_coroutine(coro):
@@ -220,6 +224,16 @@ class ForgeExecutor(BaseModel):
             "the executor reads no host paths from cstar_forge.config."
         ),
     )
+    verbose: bool = Field(
+        default=False,
+        exclude=True,
+        description=(
+            "Runtime diagnostic flag (not results-affecting, never serialized): enables "
+            "timestamped executor logging, verbose=True on the roms-tools calls that "
+            "support it (Grid, align_grids, make_nesting_info), and timing/memory "
+            "instrumentation around every roms-tools constructor and .save()."
+        ),
+    )
     source_dataset_keys: list[str] | None = Field(
         default=None,
         validate_default=False,
@@ -349,6 +363,10 @@ class ForgeExecutor(BaseModel):
         in-memory structure (placeholder data, not yet persisted). Nothing is written
         to disk until `configure_build()` completes.
         """
+        log.debug(
+            "model_post_init: entering for %r (verbose=%s)", self.name, self.verbose
+        )
+
         # Fail fast if no host was injected — every artifact path needs it.
         self._require_host()
 
@@ -381,9 +399,14 @@ class ForgeExecutor(BaseModel):
                 k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
             }
 
-            self.grid_child = rt.Grid(**grid_kwargs_child)
-            self.grid = rt.Grid(**self.grid_kwargs)
-            self.grid_child = rt.align_grids(self.grid, self.grid_child)
+            with mem_log("Grid(child)", enabled=self.verbose):
+                self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
+            with mem_log("Grid(self)", enabled=self.verbose):
+                self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
+            with mem_log("align_grids(self, child)", enabled=self.verbose):
+                self.grid_child = rt.align_grids(
+                    self.grid, self.grid_child, verbose=self.verbose
+                )
 
             if "metadata" in self.grid_kwargs_child:
                 self.metadata_child = self.grid_kwargs_child["metadata"]
@@ -399,12 +422,21 @@ class ForgeExecutor(BaseModel):
             grid_kwargs = {k: v for k, v in self.grid_kwargs.items() if k != "metadata"}
 
             # Adapt this grid to its parent, but create nesting data for its child
-            self.grid_parent = rt.Grid(**grid_kwargs_parent)
-            self.grid_child = rt.Grid(**grid_kwargs_child)
-            self.grid = rt.Grid(**grid_kwargs)
+            with mem_log("Grid(parent)", enabled=self.verbose):
+                self.grid_parent = rt.Grid(**grid_kwargs_parent, verbose=self.verbose)
+            with mem_log("Grid(child)", enabled=self.verbose):
+                self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
+            with mem_log("Grid(self)", enabled=self.verbose):
+                self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
 
-            self.grid = rt.align_grids(self.grid_parent, self.grid)
-            self.grid_child = rt.align_grids(self.grid, self.grid_child)
+            with mem_log("align_grids(parent, self)", enabled=self.verbose):
+                self.grid = rt.align_grids(
+                    self.grid_parent, self.grid, verbose=self.verbose
+                )
+            with mem_log("align_grids(self, child)", enabled=self.verbose):
+                self.grid_child = rt.align_grids(
+                    self.grid, self.grid_child, verbose=self.verbose
+                )
 
             if "metadata" in self.grid_kwargs_child:
                 self.metadata_child = self.grid_kwargs_child["metadata"]
@@ -417,14 +449,21 @@ class ForgeExecutor(BaseModel):
             grid_kwargs = {k: v for k, v in self.grid_kwargs.items() if k != "metadata"}
 
             # Adapt this grid to its parent. no nesting data needed
-            self.grid_parent = rt.Grid(**grid_kwargs_parent)
-            self.grid = rt.Grid(**grid_kwargs)
+            with mem_log("Grid(parent)", enabled=self.verbose):
+                self.grid_parent = rt.Grid(**grid_kwargs_parent, verbose=self.verbose)
+            with mem_log("Grid(self)", enabled=self.verbose):
+                self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
 
-            self.grid = rt.align_grids(self.grid_parent, self.grid)
+            with mem_log("align_grids(parent, self)", enabled=self.verbose):
+                self.grid = rt.align_grids(
+                    self.grid_parent, self.grid, verbose=self.verbose
+                )
         else:
-            self.grid = rt.Grid(**self.grid_kwargs)
+            with mem_log("Grid(self)", enabled=self.verbose):
+                self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
 
         # Initialize blueprint with basic structure
+        log.debug("model_post_init: initializing blueprint structure for %r", self.name)
         self._initialize_roms_marbl_blueprint()
 
         self._print_planned_netcdf_outputs()
@@ -1173,6 +1212,12 @@ class ForgeExecutor(BaseModel):
         RuntimeError
             If grid is not initialized (should be created during initialization).
         """
+        log.debug(
+            "ensure_source_data: entering for %r (include_streamable=%s)",
+            self.name,
+            include_streamable,
+        )
+
         if self.grid is None:
             raise RuntimeError(
                 "Grid must be created before preparing source data. "
@@ -1255,6 +1300,18 @@ class ForgeExecutor(BaseModel):
             If blueprint is not initialized, or if settings are not initialized.
 
         """
+        log.debug(
+            "generate_inputs: entering for %r (clobber=%s, use_dask=%s, subchunk=%s, "
+            "start_date=%s, end_date=%s, only=%s)",
+            self.name,
+            clobber,
+            use_dask,
+            subchunk,
+            self.start_date,
+            self.end_date,
+            only,
+        )
+
         if self.roms_marbl_blueprint is None:
             raise RuntimeError("Blueprint must be initialized before generating inputs")
 
@@ -1291,6 +1348,7 @@ class ForgeExecutor(BaseModel):
                 use_dask=use_dask,
                 subchunk=subchunk,
                 netcdf_format="NETCDF3_64BIT_DATA" if self._use_pio else "NETCDF4",
+                verbose=self.verbose,
             ).generate_all(clobber=clobber, test=test, only=only)
         )
 
@@ -1522,7 +1580,7 @@ class ForgeExecutor(BaseModel):
 
     @classmethod
     def from_forge_blueprint(
-        cls, cfg: Any, host: HostPaths | None = None
+        cls, cfg: Any, host: HostPaths | None = None, verbose: bool = False
     ) -> ForgeExecutor:
         """Canonical constructor: build the executor directly from a resolved
         ``ForgeBlueprint`` (the forge application's blueprint) + the injected ``host``.
@@ -1532,12 +1590,16 @@ class ForgeExecutor(BaseModel):
         (``forge_blueprint_resolve.build_forge_blueprint``) to produce the ``ForgeBlueprint`` and then
         here — so there is one place that maps blueprint → builder inputs
         (``forge_blueprint_engine.forge_blueprint_to_builder_kwargs``).
+
+        ``verbose`` must be supplied here (rather than only at ``generate_inputs``)
+        because the Grid/``align_grids`` calls run during ``model_post_init``, i.e.
+        before any post-construction method call could set it.
         """
         from cstar_forge.forge.forge_blueprint_engine import (
             forge_blueprint_to_builder_kwargs,
         )
 
-        return cls(**forge_blueprint_to_builder_kwargs(cfg), host=host)
+        return cls(**forge_blueprint_to_builder_kwargs(cfg), host=host, verbose=verbose)
 
     def configure_build(
         self,
@@ -1607,6 +1669,8 @@ class ForgeExecutor(BaseModel):
             If the model spec does not have required template configuration or
             properties (e.g., n_tracers).
         """
+        log.debug("configure_build: entering for %r", self.name)
+
         # Initialize to empty dict if None
         if compile_time_settings is None:
             compile_time_settings = {}
@@ -1830,6 +1894,7 @@ class ForgeExecutor(BaseModel):
         self,
     ):
         """Run C-Star for this Builder's blueprint"""
+        log.debug("run: entering for %r", self.name)
         self.prep_cstar_environment()
 
         request = RunnerRequest(

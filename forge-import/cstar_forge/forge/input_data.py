@@ -8,6 +8,7 @@ the ROMS-MARBL specific implementation.
 
 from __future__ import annotations
 
+import logging
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -24,6 +25,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from cstar_forge.forge import source_data
 from cstar_forge.forge.forge_blueprint import OpenBoundaries
+from cstar_forge.utils import mem_log
+
+log = logging.getLogger(__name__)
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name must contain the
 # substring ``cdr.nc`` so C-Star's ROMS build check on ``cdr_frc.opt`` passes.
@@ -279,6 +283,12 @@ class RomsMarblInputData(InputData):
     path through in place of the raw per-day files. No roms-tools patching involved
     -- kerchunk's own xarray backend auto-detects the reference, so roms-tools reads
     it via its normal loader. Off by default; enabled via ``--subchunk``."""
+    verbose: bool = False
+    """Runtime diagnostic flag (forwarded from ``ForgeExecutor.verbose``): forwarded
+    as ``verbose=`` to the roms-tools calls that support it (make_nesting_info), and
+    gates timing/memory instrumentation (``mem_log``) around every roms-tools
+    constructor and ``.save()`` in this class. Off by default; enabled via
+    ``--verbose``."""
 
     # Memoized subchunk reference paths, keyed by dataset key (e.g. "GLORYS_REGIONAL"),
     # so IC + boundary + bgc-physics-boundary reuse one reference instead of rebuilding.
@@ -414,6 +424,13 @@ class RomsMarblInputData(InputData):
             in-memory grid object. When ``None`` (default), all registered steps in
             ``input_list`` run as before.
         """
+        log.debug(
+            "generate_all: entering for %r (clobber=%s, test=%s, only=%s)",
+            self.domain_name,
+            clobber,
+            test,
+            only,
+        )
         self._clobber = clobber
         if not self._ensure_empty_or_clobber(clobber):
             return None, {}, {}
@@ -461,7 +478,13 @@ class RomsMarblInputData(InputData):
                 )
                 continue
             print(f"\n▶️  [{idx}/{total}] {step.label}...")
-            step.handler(self, key=step.name, **kwargs)
+            log.debug("generate_all: step %d/%d %r starting", idx, total, step.name)
+            # Coarse per-step timing/memory. On Linux this block's own peak reset can
+            # mask an early inner sub-block's peak (e.g. a large constructor that frees
+            # before a smaller .save() runs) -- the finer per-operation mem_log blocks
+            # inside each step (constructor/save, above) remain the accurate signal.
+            with mem_log(f"step:{step.name}", enabled=self.verbose):
+                step.handler(self, key=step.name, **kwargs)
             # Truncate after 2 iterations if test mode is enabled
             if test and idx >= 2:
                 print(f"\n⚠️  Test mode: truncated after {idx} iterations\n")
@@ -725,7 +748,8 @@ class RomsMarblInputData(InputData):
         if self._should_reuse_existing_output(out_path):
             print(f"   ↪ Reusing existing file: {out_path}")
         else:
-            self.grid.save(out_path, **self._save_kwargs)
+            with mem_log("grid.save", enabled=self.verbose):
+                self.grid.save(out_path, **self._save_kwargs)
 
         try:
             self.grid.to_yaml(yaml_path)
@@ -742,7 +766,8 @@ class RomsMarblInputData(InputData):
             if self._should_reuse_existing_output(out_path_child):
                 print(f"   ↪ Reusing existing file: {out_path_child}")
             else:
-                self.grid_child.save(out_path_child, **self._save_kwargs)
+                with mem_log("grid_child.save", enabled=self.verbose):
+                    self.grid_child.save(out_path_child, **self._save_kwargs)
             yaml_path_child = self._yaml_filename(key + "_child")
 
             try:
@@ -771,12 +796,14 @@ class RomsMarblInputData(InputData):
                 if has_marbl:
                     # ROMS-Tools: include_bgc=True sets output_vars to include "bgc" on nesting.nc.
                     nesting_kwargs.setdefault("include_bgc", True)
-                rt.make_nesting_info(
-                    self.grid,
-                    self.grid_child,
-                    str(out_path_nesting),
-                    **nesting_kwargs,
-                )
+                nesting_kwargs.setdefault("verbose", self.verbose)
+                with mem_log("make_nesting_info", enabled=self.verbose):
+                    rt.make_nesting_info(
+                        self.grid,
+                        self.grid_child,
+                        str(out_path_nesting),
+                        **nesting_kwargs,
+                    )
             self.roms_marbl_blueprint_elements.nesting_info = cstar_models.Dataset(
                 data=[Resource(location=str(out_path_nesting), partitioned=False)]
             )
@@ -843,8 +870,10 @@ class RomsMarblInputData(InputData):
             paths = [str(output_path)]
             ic = None
         else:
-            ic = rt.InitialConditions(grid=self.grid, **input_args)
-            paths = ic.save(output_path, **self._save_kwargs)
+            with mem_log("InitialConditions()", enabled=self.verbose):
+                ic = rt.InitialConditions(grid=self.grid, **input_args)
+            with mem_log("InitialConditions.save", enabled=self.verbose):
+                paths = ic.save(output_path, **self._save_kwargs)
 
         # See here: https://github.com/CWorthy-ocean/roms-tools/issues/553
         if ic is not None:
@@ -919,7 +948,10 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
-                frc = rt.SurfaceForcing(grid=self.grid, **input_args)
+                with mem_log(
+                    "SurfaceForcing() [yaml-sidecar-only]", enabled=self.verbose
+                ):
+                    frc = rt.SurfaceForcing(grid=self.grid, **input_args)
                 try:
                     frc.to_yaml(yaml_path)
                 except Exception as e:
@@ -929,8 +961,10 @@ class RomsMarblInputData(InputData):
                         stacklevel=2,
                     )
         else:
-            frc = rt.SurfaceForcing(grid=self.grid, **input_args)
-            paths = frc.save(output_path, **self._save_kwargs)
+            with mem_log("SurfaceForcing()", enabled=self.verbose):
+                frc = rt.SurfaceForcing(grid=self.grid, **input_args)
+            with mem_log("SurfaceForcing.save", enabled=self.verbose):
+                paths = frc.save(output_path, **self._save_kwargs)
             try:
                 frc.to_yaml(yaml_path)
             except Exception as e:
@@ -1044,7 +1078,8 @@ class RomsMarblInputData(InputData):
         physics_args = self._build_input_args(
             key, extra=extra, base_kwargs=physics_kwargs
         )
-        return rt.BoundaryForcing(grid=self.grid, **physics_args)
+        with mem_log("BoundaryForcing() [physics companion]", enabled=self.verbose):
+            return rt.BoundaryForcing(grid=self.grid, **physics_args)
 
     @register_input(
         name="forcing.boundary", order=40, label="Generating boundary forcing"
@@ -1105,7 +1140,10 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
-                bry = rt.BoundaryForcing(grid=self.grid, **input_args)
+                with mem_log(
+                    "BoundaryForcing() [yaml-sidecar-only]", enabled=self.verbose
+                ):
+                    bry = rt.BoundaryForcing(grid=self.grid, **input_args)
                 try:
                     bry.to_yaml(yaml_path)
                 except Exception as e:
@@ -1115,8 +1153,10 @@ class RomsMarblInputData(InputData):
                         stacklevel=2,
                     )
         else:
-            bry = rt.BoundaryForcing(grid=self.grid, **input_args)
-            paths = bry.save(output_path, **self._save_kwargs)
+            with mem_log("BoundaryForcing()", enabled=self.verbose):
+                bry = rt.BoundaryForcing(grid=self.grid, **input_args)
+            with mem_log("BoundaryForcing.save", enabled=self.verbose):
+                paths = bry.save(output_path, **self._save_kwargs)
             try:
                 bry.to_yaml(yaml_path)
             except Exception as e:
@@ -1187,7 +1227,8 @@ class RomsMarblInputData(InputData):
                 UserWarning,
                 stacklevel=2,
             )
-            tidal = rt.TidalForcing(grid=self.grid, **input_args)
+            with mem_log("TidalForcing() [yaml-sidecar-only]", enabled=self.verbose):
+                tidal = rt.TidalForcing(grid=self.grid, **input_args)
             try:
                 tidal.to_yaml(yaml_path)
             except Exception as e:
@@ -1197,8 +1238,10 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
         else:
-            tidal = rt.TidalForcing(grid=self.grid, **input_args)
-            paths = tidal.save(output_path, **self._save_kwargs)
+            with mem_log("TidalForcing()", enabled=self.verbose):
+                tidal = rt.TidalForcing(grid=self.grid, **input_args)
+            with mem_log("TidalForcing.save", enabled=self.verbose):
+                paths = tidal.save(output_path, **self._save_kwargs)
             try:
                 tidal.to_yaml(yaml_path)
             except Exception as e:
@@ -1285,7 +1328,8 @@ class RomsMarblInputData(InputData):
             return
 
         try:
-            river = rt.RiverForcing(grid=self.grid, **input_args)
+            with mem_log("RiverForcing()", enabled=self.verbose):
+                river = rt.RiverForcing(grid=self.grid, **input_args)
         except ValueError as e:
             warnings.warn(
                 f"Skipping river forcing generation due to invalid river configuration: {e}",
@@ -1306,7 +1350,8 @@ class RomsMarblInputData(InputData):
                 stacklevel=2,
             )
         else:
-            paths = river.save(output_path, **self._save_kwargs)
+            with mem_log("RiverForcing.save", enabled=self.verbose):
+                paths = river.save(output_path, **self._save_kwargs)
         if isinstance(paths, (list, tuple)) and len(paths) == 0:
             if self.roms_marbl_blueprint_elements.forcing is not None:
                 self.roms_marbl_blueprint_elements.forcing.river = None
@@ -1370,13 +1415,15 @@ class RomsMarblInputData(InputData):
 
         input_args = self._build_input_args(key, base_kwargs=cdr_kwargs)
 
-        cdr = rt.CDRForcing(**input_args)
+        with mem_log("CDRForcing()", enabled=self.verbose):
+            cdr = rt.CDRForcing(**input_args)
         output_path = self._forcing_filename(CDR_FORCING_NETCDF_STEM)
         if self._should_reuse_existing_output(output_path):
             print(f"   ↪ Reusing existing file: {output_path}")
             paths = [str(output_path)]
         else:
-            paths = cdr.save(output_path, **self._save_kwargs)
+            with mem_log("CDRForcing.save", enabled=self.verbose):
+                paths = cdr.save(output_path, **self._save_kwargs)
 
         # Normalize output paths to absolute strings so downstream template
         # settings can reliably embed full file locations.

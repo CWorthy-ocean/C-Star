@@ -75,13 +75,27 @@ def main(argv: list | None = None) -> int:
         "--host-only", action="store_true", help="just print the resolved host and exit"
     )
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="enable verbose diagnostics: timestamped logging throughout the "
+        "executor, roms-tools verbose=True on the calls that support it, and "
+        "timing/memory instrumentation around roms-tools constructors and saves",
+    )
+    parser.add_argument(
         "--working-dir",
         default=None,
         help="override the spec's working_dir (per-run artifact root) for this host",
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
+    if args.verbose:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            force=True,
+        )
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
     cfg = ForgeBlueprint.from_yaml(args.forge_blueprint)
     wd = args.working_dir if args.working_dir is not None else cfg.working_dir
     host = config.resolve_host(wd)
@@ -99,6 +113,7 @@ def main(argv: list | None = None) -> int:
         use_dask=not args.no_dask,
         subchunk=args.subchunk,
         only_inputs=args.only_inputs,
+        verbose=args.verbose,
     )
     if not args.no_configure and not args.only_inputs:
         blueprint_path = executor.path_roms_marbl_blueprint()

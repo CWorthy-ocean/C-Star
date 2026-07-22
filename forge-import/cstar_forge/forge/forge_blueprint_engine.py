@@ -68,9 +68,12 @@ class ForgeBlueprintExecutor(Protocol):
     def path_roms_marbl_blueprint(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-# A factory maps a host-independent ForgeBlueprint + the injected host to a ready-to-run
-# executor. The forge default builds a ForgeExecutor; a C-Star app would provide its own.
-ExecutorFactory = Callable[[ForgeBlueprint, HostPaths | None], ForgeBlueprintExecutor]
+# A factory maps a host-independent ForgeBlueprint + the injected host + a verbose flag to
+# a ready-to-run executor. The forge default builds a ForgeExecutor; a C-Star app would
+# provide its own.
+ExecutorFactory = Callable[
+    [ForgeBlueprint, HostPaths | None, bool], ForgeBlueprintExecutor
+]
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +275,7 @@ def verify_content_hash(cfg: ForgeBlueprint) -> str | None:
 
 
 def _default_executor_factory(
-    cfg: ForgeBlueprint, host: HostPaths | None = None
+    cfg: ForgeBlueprint, host: HostPaths | None = None, verbose: bool = False
 ) -> ForgeBlueprintExecutor:
     """Forge's default executor: a ``ForgeExecutor`` built from the config's
     atomic inputs + the injected host. Imported lazily so the lightweight bits above
@@ -280,7 +283,7 @@ def _default_executor_factory(
     """
     from cstar_forge.forge.executor import ForgeExecutor
 
-    return ForgeExecutor.from_forge_blueprint(cfg, host=host)
+    return ForgeExecutor.from_forge_blueprint(cfg, host=host, verbose=verbose)
 
 
 def process_forge_blueprint(
@@ -296,6 +299,7 @@ def process_forge_blueprint(
     validate: bool = True,
     executor_factory: ExecutorFactory | None = None,
     only_inputs: Iterable[str] | None = None,
+    verbose: bool = False,
 ) -> ForgeBlueprintExecutor:
     """Run Phase-2 processing for a ``ForgeBlueprint`` (object or path to a YAML file).
 
@@ -340,6 +344,14 @@ def process_forge_blueprint(
         Interim hack (see ``glorys_subchunk.py``): just-in-time build a
         kerchunk-subchunked reference for multi-file GLORYS sources and read from
         it instead of the raw per-day files. Default False.
+    verbose :
+        Enable verbose diagnostics: timestamped logging throughout the executor,
+        ``verbose=True`` forwarded to the roms-tools calls that support it (Grid,
+        align_grids, make_nesting_info), and timing/memory instrumentation around
+        every roms-tools constructor and ``.save()``. Threaded into the executor
+        at construction time (via ``executor_factory``), since Grid/align_grids
+        run during executor init. Default False; has no effect on emitted
+        blueprint/settings content.
     """
     cfg = spec if isinstance(spec, ForgeBlueprint) else ForgeBlueprint.from_yaml(spec)
 
@@ -375,7 +387,7 @@ def process_forge_blueprint(
         logger.info("Resolved host:\n%s", host.summary(casename=cfg.casename))
 
     factory = executor_factory or _default_executor_factory
-    executor = factory(cfg, host)
+    executor = factory(cfg, host, verbose)
     if not isinstance(executor, ForgeBlueprintExecutor):
         raise TypeError(
             f"executor_factory returned {type(executor).__name__}, which does not "

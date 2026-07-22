@@ -367,7 +367,9 @@ class TestForgeExecutorModelPostInit:
         """Test that model_post_init creates the grid via rt.Grid(**grid_kwargs)."""
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
-        mock_grid.assert_called_once_with(**builder.grid_kwargs)
+        mock_grid.assert_called_once_with(
+            **builder.grid_kwargs, verbose=builder.verbose
+        )
         assert builder.grid == mock_grid.return_value
 
     def test_model_post_init_etopo5_leaves_grid_kwargs_untouched(
