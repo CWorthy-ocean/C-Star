@@ -745,12 +745,6 @@ class RomsMarblInputData(InputData):
         out_path = self._forcing_filename(input_name="grid")
         yaml_path = self._yaml_filename(key)
 
-        if self._should_reuse_existing_output(out_path):
-            print(f"   ↪ Reusing existing file: {out_path}")
-        else:
-            with mem_log("grid.save", enabled=self.verbose):
-                self.grid.save(out_path, **self._save_kwargs)
-
         try:
             self.grid.to_yaml(yaml_path)
         except Exception as e:
@@ -760,14 +754,15 @@ class RomsMarblInputData(InputData):
                 stacklevel=2,
             )
 
+        if self._should_reuse_existing_output(out_path):
+            print(f"   ↪ Reusing existing file: {out_path}")
+        else:
+            with mem_log("grid.save", enabled=self.verbose):
+                self.grid.save(out_path, **self._save_kwargs)
+
         out_path_nesting = None
         if self.grid_child is not None:
             out_path_child = self._forcing_filename(input_name="grid_child")
-            if self._should_reuse_existing_output(out_path_child):
-                print(f"   ↪ Reusing existing file: {out_path_child}")
-            else:
-                with mem_log("grid_child.save", enabled=self.verbose):
-                    self.grid_child.save(out_path_child, **self._save_kwargs)
             yaml_path_child = self._yaml_filename(key + "_child")
 
             try:
@@ -778,6 +773,12 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
+
+            if self._should_reuse_existing_output(out_path_child):
+                print(f"   ↪ Reusing existing file: {out_path_child}")
+            else:
+                with mem_log("grid_child.save", enabled=self.verbose):
+                    self.grid_child.save(out_path_child, **self._save_kwargs)
 
             out_path_nesting = self._forcing_filename(input_name="nesting")
             if self._should_reuse_existing_output(out_path_nesting):
@@ -872,11 +873,8 @@ class RomsMarblInputData(InputData):
         else:
             with mem_log("InitialConditions()", enabled=self.verbose):
                 ic = rt.InitialConditions(grid=self.grid, **input_args)
-            with mem_log("InitialConditions.save", enabled=self.verbose):
-                paths = ic.save(output_path, **self._save_kwargs)
 
-        # See here: https://github.com/CWorthy-ocean/roms-tools/issues/553
-        if ic is not None:
+            # See here: https://github.com/CWorthy-ocean/roms-tools/issues/553
             try:
                 ic.to_yaml(yaml_path)
             except Exception as e:
@@ -885,6 +883,9 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
+
+            with mem_log("InitialConditions.save", enabled=self.verbose):
+                paths = ic.save(output_path, **self._save_kwargs)
 
         # Append Resources directly to roms_marbl_blueprint_elements.initial_conditions
         if isinstance(paths, (list, tuple)):
@@ -963,8 +964,6 @@ class RomsMarblInputData(InputData):
         else:
             with mem_log("SurfaceForcing()", enabled=self.verbose):
                 frc = rt.SurfaceForcing(grid=self.grid, **input_args)
-            with mem_log("SurfaceForcing.save", enabled=self.verbose):
-                paths = frc.save(output_path, **self._save_kwargs)
             try:
                 frc.to_yaml(yaml_path)
             except Exception as e:
@@ -973,6 +972,8 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
+            with mem_log("SurfaceForcing.save", enabled=self.verbose):
+                paths = frc.save(output_path, **self._save_kwargs)
 
         if input_args["type"] == "restoring":
             if "sss" in input_args["restoring_forces"]:
@@ -1155,8 +1156,6 @@ class RomsMarblInputData(InputData):
         else:
             with mem_log("BoundaryForcing()", enabled=self.verbose):
                 bry = rt.BoundaryForcing(grid=self.grid, **input_args)
-            with mem_log("BoundaryForcing.save", enabled=self.verbose):
-                paths = bry.save(output_path, **self._save_kwargs)
             try:
                 bry.to_yaml(yaml_path)
             except Exception as e:
@@ -1165,6 +1164,8 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
+            with mem_log("BoundaryForcing.save", enabled=self.verbose):
+                paths = bry.save(output_path, **self._save_kwargs)
         # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
@@ -1240,8 +1241,6 @@ class RomsMarblInputData(InputData):
         else:
             with mem_log("TidalForcing()", enabled=self.verbose):
                 tidal = rt.TidalForcing(grid=self.grid, **input_args)
-            with mem_log("TidalForcing.save", enabled=self.verbose):
-                paths = tidal.save(output_path, **self._save_kwargs)
             try:
                 tidal.to_yaml(yaml_path)
             except Exception as e:
@@ -1250,6 +1249,8 @@ class RomsMarblInputData(InputData):
                     UserWarning,
                     stacklevel=2,
                 )
+            with mem_log("TidalForcing.save", enabled=self.verbose):
+                paths = tidal.save(output_path, **self._save_kwargs)
 
         # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
@@ -1340,6 +1341,25 @@ class RomsMarblInputData(InputData):
                 self.roms_marbl_blueprint_elements.forcing.river = None
             river = rt.RiverForcing.__new__(rt.RiverForcing)
             return river
+
+        # river.ds is built during construction, so this reflects the same
+        # "no rivers in domain" condition save() used to report via an empty
+        # paths list -- checking it here lets the YAML sidecar be written
+        # before save() runs instead of depending on save()'s return value.
+        if river.ds.sizes["nriver"] == 0:
+            if self.roms_marbl_blueprint_elements.forcing is not None:
+                self.roms_marbl_blueprint_elements.forcing.river = None
+            return river
+
+        try:
+            river.to_yaml(yaml_path)
+        except Exception as e:
+            warnings.warn(
+                f"Failed to save river forcing YAML to {yaml_path}: {e}",
+                UserWarning,
+                stacklevel=2,
+            )
+
         if existing_paths:
             print(f"   ↪ Reusing existing file(s): {', '.join(existing_paths)}")
             paths = list(existing_paths)
@@ -1352,18 +1372,6 @@ class RomsMarblInputData(InputData):
         else:
             with mem_log("RiverForcing.save", enabled=self.verbose):
                 paths = river.save(output_path, **self._save_kwargs)
-        if isinstance(paths, (list, tuple)) and len(paths) == 0:
-            if self.roms_marbl_blueprint_elements.forcing is not None:
-                self.roms_marbl_blueprint_elements.forcing.river = None
-            return river
-        try:
-            river.to_yaml(yaml_path)
-        except Exception as e:
-            warnings.warn(
-                f"Failed to save river forcing YAML to {yaml_path}: {e}",
-                UserWarning,
-                stacklevel=2,
-            )
         # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
@@ -1418,6 +1426,9 @@ class RomsMarblInputData(InputData):
         with mem_log("CDRForcing()", enabled=self.verbose):
             cdr = rt.CDRForcing(**input_args)
         output_path = self._forcing_filename(CDR_FORCING_NETCDF_STEM)
+
+        cdr.to_yaml(yaml_path)
+
         if self._should_reuse_existing_output(output_path):
             print(f"   ↪ Reusing existing file: {output_path}")
             paths = [str(output_path)]
@@ -1439,7 +1450,6 @@ class RomsMarblInputData(InputData):
             normalized_paths.append(str(path_obj.resolve()))
         paths = normalized_paths
 
-        cdr.to_yaml(yaml_path)
         # Append Resources directly to roms_marbl_blueprint_elements.cdr_forcing
         for path in paths:
             resource = Resource(location=path, partitioned=False)
