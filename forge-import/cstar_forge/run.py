@@ -90,10 +90,12 @@ def main(argv: list | None = None) -> int:
 
     if args.verbose:
         logging.basicConfig(
-            level=logging.DEBUG,
+            level=logging.INFO,
             format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
             force=True,
         )
+        for name in ("cstar_forge", "roms_tools", "cstar"):
+            logging.getLogger(name).setLevel(logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
     cfg = ForgeBlueprint.from_yaml(args.forge_blueprint)
