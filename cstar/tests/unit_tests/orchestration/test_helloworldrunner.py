@@ -18,7 +18,7 @@ from cstar.cli.blueprint.run import app as app_run_blueprint
 from cstar.cli.workplan.run import app as app_run_workplan
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.converter.converter import convert_step_to_placeholder
+from cstar.orchestration.converter.converter import StepToPlaceholderAdapter
 from cstar.orchestration.models import Workplan, WorkplanState
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.utils import (
@@ -287,8 +287,8 @@ def test_hello_world_workplan_dry_run(
             mock.PropertyMock(return_value=None),
         ),
         mock.patch(
-            "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
-            convert_step_to_placeholder,
+            "cstar.orchestration.converter.converter.StepToCommandRequestAdapter",
+            StepToPlaceholderAdapter,
         ),
     ):
         args = [hw_single_step_wp_path.as_posix(), "--run-id", run_id]
@@ -346,8 +346,8 @@ def test_heterogeneous_workplan(
             mock.PropertyMock(return_value=None),
         ),
         mock.patch(
-            "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
-            convert_step_to_placeholder,
+            "cstar.orchestration.converter.converter.StepToCommandRequestAdapter",
+            StepToPlaceholderAdapter,
         ),
     ):
         args = [heterogeneous_workplan_path.as_posix(), "--run-id", run_id]
@@ -392,8 +392,8 @@ def test_hw_runner_bp_only(
             mock.PropertyMock(return_value=None),
         ),
         mock.patch(
-            "cstar.orchestration.converter.converter.convert_step_to_blueprint_run_command",
-            convert_step_to_placeholder,
+            "cstar.orchestration.converter.converter.StepToCommandRequestAdapter",
+            StepToPlaceholderAdapter,
         ),
     ):
         args = [str(hello_world_bp_path)]

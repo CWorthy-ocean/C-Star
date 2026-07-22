@@ -21,6 +21,7 @@ from cstar.execution.scheduler_job import (
     get_slurm_batch,
     get_slurm_batches,
 )
+from cstar.orchestration.converter.converter import StepToCommandRequestAdapter
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -46,14 +47,15 @@ log = get_logger(__name__)
 
 
 async def on_submit_complete(
-    task: PrefectTask, task_run: TaskRun, state: State
+    task: PrefectTask[["LiveStep", list["SlurmHandle"]], "SlurmHandle"],
+    task_run: TaskRun,
+    state: State["SlurmHandle"],
 ) -> None:
     """Perform actions required when a job submission completes
     successfully.
     """
     if state.is_completed() and state.name == "Cached":
-        result = await state.aresult()
-        handle = t.cast("SlurmHandle", result)
+        handle = await state.aresult()
         log.debug(f"Re-using result from cached SLURM job: {handle}")
 
 
@@ -136,6 +138,15 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
 
+    @staticmethod
+    def _get_command(step: "LiveStep") -> str:
+        adapter = StepToCommandRequestAdapter(step)
+        if request := adapter.adapt():
+            return request.as_command()
+
+        msg = f"Step-to-command adapter failed for step: {step.name}"
+        raise RuntimeError(msg)
+
     @task(
         persist_result=True,
         cache_key_fn=cache_key_func,
@@ -173,7 +184,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         run_id = os.getenv(ENV_CSTAR_RUNID, "")
         step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
-        command = step.command
+        command = SlurmLauncher._get_command(step)
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),
