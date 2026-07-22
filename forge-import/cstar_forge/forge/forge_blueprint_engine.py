@@ -296,6 +296,7 @@ def process_forge_blueprint(
     clobber: bool = False,
     use_dask: bool = True,
     subchunk: bool = False,
+    stage_ic_sources: bool = False,
     validate: bool = True,
     executor_factory: ExecutorFactory | None = None,
     only_inputs: Iterable[str] | None = None,
@@ -344,6 +345,10 @@ def process_forge_blueprint(
         Interim hack (see ``glorys_subchunk.py``): just-in-time build a
         kerchunk-subchunked reference for multi-file GLORYS sources and read from
         it instead of the raw per-day files. Default False.
+    stage_ic_sources :
+        I/O performance experiment: copy the initial-conditions source files
+        (physics + bgc) into the working directory (scratch) before constructing
+        ``rt.InitialConditions`` and read from the copies. Default False.
     verbose :
         Enable verbose diagnostics: timestamped logging throughout the executor,
         ``verbose=True`` forwarded to the roms-tools calls that support it (Grid,
@@ -399,7 +404,11 @@ def process_forge_blueprint(
         executor.ensure_source_data()
     if generate:
         executor.generate_inputs(
-            clobber=clobber, use_dask=use_dask, subchunk=subchunk, only=resolved_only
+            clobber=clobber,
+            use_dask=use_dask,
+            subchunk=subchunk,
+            stage_ic_sources=stage_ic_sources,
+            only=resolved_only,
         )
     if configure:
         run_overrides, compile_overrides = split_model_settings(cfg)

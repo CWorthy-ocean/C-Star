@@ -1258,6 +1258,7 @@ class ForgeExecutor(BaseModel):
         clobber: bool = False,
         use_dask: bool = True,
         subchunk: bool = False,
+        stage_ic_sources: bool = False,
         test: bool = False,
         only: set[str] | None = None,
     ) -> cstar_models.RomsMarblBlueprint:
@@ -1280,6 +1281,11 @@ class ForgeExecutor(BaseModel):
             Interim hack (see ``glorys_subchunk.py``): just-in-time build a
             kerchunk-subchunked reference for multi-file GLORYS sources and read
             from it instead of the raw per-day files. Default False.
+        stage_ic_sources : bool, optional
+            I/O performance experiment: copy the initial-conditions source files
+            (physics + bgc) into the working directory (scratch) before
+            constructing ``rt.InitialConditions`` and read from the copies.
+            Default False.
         test : bool, optional
             Truncate the generation loop after 2 iterations (for unit tests).
         only : set[str], optional
@@ -1302,11 +1308,12 @@ class ForgeExecutor(BaseModel):
         """
         log.debug(
             "generate_inputs: entering for %r (clobber=%s, use_dask=%s, subchunk=%s, "
-            "start_date=%s, end_date=%s, only=%s)",
+            "stage_ic_sources=%s, start_date=%s, end_date=%s, only=%s)",
             self.name,
             clobber,
             use_dask,
             subchunk,
+            stage_ic_sources,
             self.start_date,
             self.end_date,
             only,
@@ -1347,6 +1354,7 @@ class ForgeExecutor(BaseModel):
                 cdr_forcing=self.cdr_forcing,
                 use_dask=use_dask,
                 subchunk=subchunk,
+                stage_ic_sources=stage_ic_sources,
                 netcdf_format="NETCDF3_64BIT_DATA" if self._use_pio else "NETCDF4",
                 verbose=self.verbose,
             ).generate_all(clobber=clobber, test=test, only=only)

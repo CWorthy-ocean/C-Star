@@ -72,6 +72,14 @@ def main(argv: list | None = None) -> int:
         "without this flag later to generate the rest and emit the blueprint.",
     )
     parser.add_argument(
+        "--stage-ic-sources",
+        action="store_true",
+        help="I/O performance experiment: copy the initial-conditions source "
+        "netCDF files (physics + bgc) into the working directory (scratch) "
+        "before constructing InitialConditions, and read from those copies "
+        "instead of the originals on project space",
+    )
+    parser.add_argument(
         "--host-only", action="store_true", help="just print the resolved host and exit"
     )
     parser.add_argument(
@@ -168,6 +176,7 @@ def main(argv: list | None = None) -> int:
             clobber=args.clobber,
             use_dask=not args.no_dask,
             subchunk=args.subchunk,
+            stage_ic_sources=args.stage_ic_sources,
             only_inputs=args.only_inputs,
             verbose=args.verbose,
         )

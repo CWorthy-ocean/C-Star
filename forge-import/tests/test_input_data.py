@@ -732,6 +732,44 @@ class TestRomsMarblInputDataHelperMethods:
         mock_sub.assert_not_called()
         assert result["path"] == files[:2]
 
+    def test_stage_source_files_copies_and_repoints(
+        self, sample_roms_marbl_input_data, tmp_path
+    ):
+        """_stage_source_files copies source/bgc paths to scratch and rewrites them."""
+        origin = tmp_path / "project_space"
+        origin.mkdir()
+        phys = [origin / "GLORYS_20120101.nc", origin / "GLORYS_20120102.nc"]
+        for p in phys:
+            p.write_bytes(b"physics")
+        bgc = origin / "UNIFIED_clim.nc"
+        bgc.write_bytes(b"bgc")
+
+        input_args = {
+            "source": {"name": "GLORYS", "path": phys},
+            "bgc_source": {"name": "UNIFIED", "path": bgc},
+            "ini_time": datetime(2012, 1, 1),
+        }
+        result = sample_roms_marbl_input_data._stage_source_files(input_args)
+
+        staging_dir = sample_roms_marbl_input_data.input_data_dir / "staged_sources"
+        assert result["source"]["path"] == [staging_dir / p.name for p in phys]
+        assert result["bgc_source"]["path"] == staging_dir / bgc.name
+        for staged in [*result["source"]["path"], result["bgc_source"]["path"]]:
+            assert staged.exists()
+        assert result["bgc_source"]["path"].read_bytes() == b"bgc"
+        # Second call reuses the same-size copies instead of re-copying.
+        mtimes = {p: p.stat().st_mtime_ns for p in result["source"]["path"]}
+        again = sample_roms_marbl_input_data._stage_source_files(dict(input_args))
+        assert {p: p.stat().st_mtime_ns for p in again["source"]["path"]} == mtimes
+
+    def test_stage_source_files_skips_pathless_blocks(
+        self, sample_roms_marbl_input_data
+    ):
+        """Streamable (pathless) blocks and absent bgc_source are left untouched."""
+        input_args = {"source": {"name": "ERA5"}, "bgc_source": None}
+        result = sample_roms_marbl_input_data._stage_source_files(input_args)
+        assert result == {"source": {"name": "ERA5"}, "bgc_source": None}
+
     def test_build_input_args_with_base_kwargs(self, sample_roms_marbl_input_data):
         """Test _build_input_args with base_kwargs."""
         base_kwargs = {"source": {"name": "GLORYS"}, "type": "physics"}
