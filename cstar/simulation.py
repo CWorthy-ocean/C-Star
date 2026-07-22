@@ -515,7 +515,7 @@ class Simulation(ABC, LoggingMixin):
 
     def __getstate__(self):
         """Return a pickle-able representation of the object."""
-        state = self.__dict__.copy()
+        state = vars(self).copy()
 
         # Remove the un-pickleable logger attribute
         state.pop("_log", None)
@@ -524,7 +524,7 @@ class Simulation(ABC, LoggingMixin):
 
     def __setstate__(self, state: dict[str, Any]):
         """Restore the object from a pickle."""
-        self.__dict__.update(state)
+        vars(self).update(state)
 
     def persist(self) -> None:
         """Save the current state of the simulation to a file.
