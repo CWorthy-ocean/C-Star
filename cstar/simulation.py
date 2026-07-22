@@ -3,7 +3,7 @@ import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import dateutil
 
@@ -84,9 +84,9 @@ class Simulation(ABC, LoggingMixin):
         name: str,
         directory: str | Path,
         discretization: "Discretization",
-        runtime_code: Optional["AdditionalCode"] = None,
-        compile_time_code: Optional["AdditionalCode"] = None,
-        codebase: Optional["ExternalCodeBase"] = None,
+        runtime_code: "AdditionalCode | None" = None,
+        compile_time_code: "AdditionalCode | None" = None,
+        codebase: "ExternalCodeBase | None" = None,
         start_date: str | datetime | None = None,
         end_date: str | datetime | None = None,
         valid_start_date: str | datetime | None = None,
@@ -405,7 +405,7 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def from_dict(cls, simulation_dict: dict, directory: str | Path):
+    def from_dict(cls, simulation_dict: dict[str, Any], directory: str | Path):
         """Abstract method to create a Simulation instance from a dictionary.
 
         This method must be implemented by subclasses to construct a simulation
@@ -430,7 +430,7 @@ class Simulation(ABC, LoggingMixin):
         """
         pass
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the Simulation instance into a dictionary representation.
 
         This method serializes the attributes of the Simulation instance into a
@@ -447,7 +447,7 @@ class Simulation(ABC, LoggingMixin):
         from_dict : Constructs a Simulation instance from a dictionary.
         to_blueprint: Writes an equivalent representation to a yaml file.
         """
-        simulation_dict: dict[Any, Any] = {}
+        simulation_dict: dict[str, Any] = {}
 
         # Top-level information
         simulation_dict["name"] = self.name
