@@ -13,8 +13,8 @@ class ModelFormatter(t.Protocol, t.Generic[TFormattable]):
 
         Parameters
         ----------
-        request : RunRequest
-            The request to be formatted.
+        value : TFormattable
+            The value to be formatted.
 
         Returns
         -------
