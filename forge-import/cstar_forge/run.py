@@ -151,7 +151,7 @@ def main(argv: list | None = None) -> int:
     if args.dask:
         from dask.distributed import Client
 
-        client_kwargs = {}
+        client_kwargs = {"local_directory": "/tmp"}
         if args.dask_workers is not None:
             client_kwargs["n_workers"] = args.dask_workers
         if args.dask_threads_per_worker is not None:
