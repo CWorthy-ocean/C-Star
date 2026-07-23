@@ -1,4 +1,5 @@
 import importlib
+import os
 import typing as t
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -365,9 +366,23 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     ------
     ValueError
         if no registered application is associated with this classification
+
+    Notes
+    -----
+    Applications defined outside the ``cstar.applications`` package can be made
+    discoverable by setting the ``CSTAR_APP_MODULES`` environment variable to a
+    comma-separated list of importable module paths. Each module is imported
+    before lookup so its ``@register_application`` decorators run.
     """
     if name not in _registry:
-        importlib.import_module(f"cstar.applications.{name}")
+        for module in filter(None, os.environ.get("CSTAR_APP_MODULES", "").split(",")):
+            importlib.import_module(module.strip())
+
+    if name not in _registry:
+        try:
+            importlib.import_module(f"cstar.applications.{name}")
+        except ModuleNotFoundError:
+            pass
 
     if application := _registry.get(name):
         log.trace(f"Located application context {application.__name__!r} for {name!r}")
