@@ -240,3 +240,62 @@ def test_slurmlauncher_adapt_step_with_overrides(
 
     if exp_walltime != minimum_spec.max_walltime:
         assert f"{ENV_CSTAR_SLURM_MAX_WALLTIME}={exp_walltime!r}" in job.commands
+
+
+@pytest.fixture
+def deferred_live_step(tmp_path: Path) -> LiveStep:
+    """Create a LiveStep whose blueprint is deferred to an upstream step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+
+    Returns
+    -------
+    LiveStep
+    """
+    return LiveStep.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer"},
+            "depends_on": ["producer"],
+            "working_dir": tmp_path / "consumer",
+        },
+    )
+
+
+def test_default_compute_spec_deferred_defaults_to_one_cpu(
+    deferred_live_step: LiveStep,
+) -> None:
+    """Verify a deferred step with no declaration defaults to a single cpu.
+
+    Parameters
+    ----------
+    deferred_live_step : LiveStep
+        A step whose blueprint is deferred to an upstream step.
+    """
+    assert deferred_live_step.blueprint is None
+
+    spec = SlurmLauncher._get_default_compute_spec(deferred_live_step)  # type: ignore
+
+    assert spec.num_cpus == 1
+
+
+def test_compute_spec_deferred_with_overrides(deferred_live_step: LiveStep) -> None:
+    """Verify compute_overrides predict the cpu needs of a deferred step.
+
+    Parameters
+    ----------
+    deferred_live_step : LiveStep
+        A step whose blueprint is deferred to an upstream step.
+    """
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={"compute_overrides": {"slurm": {"num_cpus": 8}}},
+    )
+
+    spec = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+    assert spec.num_cpus == 8

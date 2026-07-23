@@ -182,12 +182,16 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     def _get_default_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
         """Create the default compute spec for SLURM.
 
+        A deferred step has no blueprint to read `cpus_needed` from and
+        defaults to 1 cpu; the workplan author predicts a deferred step's
+        needs via `compute_overrides`.
+
         Returns
         -------
         SlurmComputeSpec
         """
         return SlurmComputeSpec(
-            num_cpus=step.blueprint.cpus_needed,
+            num_cpus=step.blueprint.cpus_needed if step.blueprint else 1,
             max_walltime=SlurmLauncher.configured_walltime(),
             queue_name=SlurmLauncher.configured_queue(),
             account_name=SlurmLauncher.configured_account(),
@@ -274,7 +278,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        if not step.blueprint:
+        if step.blueprint is None and not step.is_deferred:
             msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
             raise CstarError(msg)
 
