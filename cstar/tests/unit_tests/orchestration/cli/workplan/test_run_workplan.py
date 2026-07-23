@@ -90,12 +90,10 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
         )
     )
 
-    with (
-        mock.patch(
-            "cstar.cli.workplan.run.build_and_run_dag",
-            mock_build_and_run_dag,
-        ) as mock_exec,
-    ):
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
+    ) as mock_exec:
         runner = CliRunner()
         result = runner.invoke(
             app,
