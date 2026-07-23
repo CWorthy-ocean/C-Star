@@ -9,6 +9,21 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import yaml
 
+from cstar.applications.roms_marbl.adapter import (
+    AddtlCodeAdapter,
+    BoundaryForcingAdapter,
+    CdrForcingAdapter,
+    CodebaseAdapter,
+    DiscretizationAdapter,
+    ForcingCorrectionAdapter,
+    GridAdapter,
+    InitialConditionAdapter,
+    MARBLAdapter,
+    NestingInfoAdapter,
+    RiverForcingAdapter,
+    SurfaceForcingAdapter,
+    TidalForcingAdapter,
+)
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
@@ -33,21 +48,6 @@ from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.orchestration.adapter import (
-    AddtlCodeAdapter,
-    BoundaryForcingAdapter,
-    CdrForcingAdapter,
-    CodebaseAdapter,
-    DiscretizationAdapter,
-    ForcingCorrectionAdapter,
-    GridAdapter,
-    InitialConditionAdapter,
-    MARBLAdapter,
-    NestingInfoAdapter,
-    RiverForcingAdapter,
-    SurfaceForcingAdapter,
-    TidalForcingAdapter,
-)
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (

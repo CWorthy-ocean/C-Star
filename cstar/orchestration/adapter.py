@@ -1,293 +1,115 @@
+import random
+import textwrap
 import typing as t
+from pathlib import Path
 
-from cstar.applications.roms_marbl.models import CodeRepository, RomsMarblBlueprint
+import yaml
+
 from cstar.base.adapter import ModelAdapter
-from cstar.base.additional_code import AdditionalCode
-from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.orchestration import models
-from cstar.roms.discretization import ROMSDiscretization
-from cstar.roms.external_codebase import ROMSExternalCodeBase
-from cstar.roms.input_dataset import (
-    ROMSBoundaryForcing,
-    ROMSCdrForcing,
-    ROMSForcingCorrections,
-    ROMSInitialConditions,
-    ROMSModelGrid,
-    ROMSNestingInfo,
-    ROMSRiverForcing,
-    ROMSSurfaceForcing,
-    ROMSTidalForcing,
-)
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.feature import is_flag_enabled
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
+from cstar.orchestration import orchestration
+from cstar.orchestration.formatting import RunRequestCommandFormatter
 
 
-class DiscretizationAdapter(ModelAdapter[RomsMarblBlueprint, ROMSDiscretization]):
-    """Create a ROMSDiscretization from a blueprint model."""
+def prepare_directive_file(step: "orchestration.LiveStep") -> Path:
+    """Create a directives file in the step work directory.
 
-    @t.override
-    def adapt(self) -> ROMSDiscretization:
-        return ROMSDiscretization(
-            time_step=self.model.model_params.time_step,
-            n_procs_x=self.model.partitioning.n_procs_x,
-            n_procs_y=self.model.partitioning.n_procs_y,
-        )
+    Parameters
+    ----------
+    step : LiveStep
+        The step to prepare a directive file for.
 
-
-class AddtlCodeAdapter(ModelAdapter[RomsMarblBlueprint, AdditionalCode]):
-    """Create a AdditionalCode from a blueprint model."""
-
-    def __init__(self, model: RomsMarblBlueprint, key: str) -> None:
-        super().__init__(model)
-        self.key = key
-
-    @t.override
-    def adapt(self) -> AdditionalCode:
-        code_attr: CodeRepository = getattr(self.model.code, self.key)
-
-        return AdditionalCode(
-            location=str(code_attr.location),
-            subdir=(str(code_attr.filter.directory) if code_attr.filter else ""),
-            checkout_target=code_attr.checkout_target,
-            files=(code_attr.filter.files if code_attr.filter else []),
-        )
+    Returns
+    -------
+    str
+        The path to the directive file.
+    """
+    directives_path = step.fsm.run_dir / "directives.yaml"
+    if not step.fsm.run_dir.exists():
+        step.fsm.run_dir.mkdir(parents=True)
+    with directives_path.open("w") as fp:
+        model = step.model_dump(include={"directives"})
+        content = yaml.dump(model, sort_keys=False)
+        fp.write(content)
+    return directives_path
 
 
-class CodebaseAdapter(ModelAdapter[RomsMarblBlueprint, ROMSExternalCodeBase]):
-    """Create a ROMSExternalCodeBase from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> ROMSExternalCodeBase:
-        return ROMSExternalCodeBase(
-            source_repo=str(self.model.code.roms.location),
-            checkout_target=self.model.code.roms.checkout_target,
-        )
-
-
-class MARBLAdapter(ModelAdapter[RomsMarblBlueprint, MARBLExternalCodeBase]):
-    """Create a MARBLExternalCodeBase from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> MARBLExternalCodeBase:
-        if self.model.code.marbl is None:
-            msg = "MARBL codebase not found"
-            raise RuntimeError(msg)
-
-        return MARBLExternalCodeBase(
-            source_repo=str(self.model.code.marbl.location),
-            checkout_target=self.model.code.marbl.checkout_target
-            or self.model.code.marbl.branch,
-        )
-
-
-class GridAdapter(ModelAdapter[RomsMarblBlueprint, ROMSModelGrid]):
-    """Create a ROMSModelGrid from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> ROMSModelGrid:
-        return ROMSModelGrid(
-            location=str(self.model.grid.data[0].location),
-            file_hash=(
-                self.model.grid.data[0].hash
-                if isinstance(self.model.grid.data[0], models.VersionedResource)
-                else None
-            ),
-            start_date=None,
-            end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.grid.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.grid.data[0].partitioned
-            else None,
-        )
-
-
-class InitialConditionAdapter(ModelAdapter[RomsMarblBlueprint, ROMSInitialConditions]):
-    """Create a ROMSInitialCondition from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> ROMSInitialConditions:
-        return ROMSInitialConditions(
-            location=str(self.model.initial_conditions.data[0].location),
-            file_hash=(
-                self.model.initial_conditions.data[0].hash
-                if isinstance(
-                    self.model.initial_conditions.data[0], models.VersionedResource
-                )
-                else None
-            ),
-            start_date=None,
-            end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.initial_conditions.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.initial_conditions.data[0].partitioned
-            else None,
-        )
-
-
-class TidalForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSTidalForcing]):
-    """Create a ROMSTidalForcing from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> ROMSTidalForcing | None:
-        if self.model.forcing.tidal is None:
-            return None
-        return ROMSTidalForcing(
-            location=str(self.model.forcing.tidal.data[0].location),
-            file_hash=(
-                self.model.forcing.tidal.data[0].hash
-                if isinstance(
-                    self.model.forcing.tidal.data[0], models.VersionedResource
-                )
-                else None
-            ),
-            start_date=None,
-            end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.forcing.tidal.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.forcing.tidal.data[0].partitioned
-            else None,
-        )
-
-
-class RiverForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSRiverForcing]):
-    """Create a ROMSRiverForcing from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> ROMSRiverForcing | None:
-        if self.model.forcing.river is None:
-            return None
-
-        return ROMSRiverForcing(
-            location=str(self.model.forcing.river.data[0].location),
-            file_hash=(
-                self.model.forcing.river.data[0].hash
-                if isinstance(
-                    self.model.forcing.river.data[0], models.VersionedResource
-                )
-                else None
-            ),
-            start_date=None,
-            end_date=None,
-            source_np_xi=self.model.partitioning.n_procs_x
-            if self.model.forcing.river.data[0].partitioned
-            else None,
-            source_np_eta=self.model.partitioning.n_procs_y
-            if self.model.forcing.river.data[0].partitioned
-            else None,
-        )
-
-
-class BoundaryForcingAdapter(
-    ModelAdapter[RomsMarblBlueprint, list[ROMSBoundaryForcing]]
+class StepToRunRequestAdapter(
+    ModelAdapter["orchestration.LiveStep", orchestration.RunRequest]
 ):
-    """Create a ROMSBoundaryForcing from a blueprint model."""
+    """Convert a `LiveStep` into a `RunRequest`."""
 
-    @t.override
-    def adapt(self) -> list[ROMSBoundaryForcing]:
-        return [
-            ROMSBoundaryForcing(
-                location=str(f.location),
-                file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=None,
-                end_date=None,
-                source_np_xi=self.model.partitioning.n_procs_x
-                if f.partitioned
-                else None,
-                source_np_eta=self.model.partitioning.n_procs_y
-                if f.partitioned
-                else None,
-            )
-            for f in self.model.forcing.boundary.data
+    def __init__(self, model: "orchestration.LiveStep") -> None:
+        """Initialize the adapter.
+
+        Parameters
+        ----------
+        model : LiveStep
+            The step to convert.
+        """
+        self.model = model
+
+    def adapt(self) -> orchestration.RunRequest:
+        """Convert a `Step` into a request for blueprint execution via the C-Star CLI.
+
+        Returns
+        -------
+        RunRequest
+            The instance converted from the source model.
+        """
+        cmd_array = [
+            "cstar",
+            "blueprint",
+            "run",
+            str(self.model.blueprint_path),
         ]
 
+        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
+            cmd_array.append(ARG_CLOBBER)
 
-class SurfaceForcingAdapter(ModelAdapter[RomsMarblBlueprint, list[ROMSSurfaceForcing]]):
-    """Create a ROMSSurfaceForcing from a blueprint model."""
+        if self.model.directives:
+            directives_path = prepare_directive_file(self.model)
+            cmd_array.extend([ARG_DIRECTIVES_URI_LONG, str(directives_path)])
 
-    @t.override
-    def adapt(self) -> list[ROMSSurfaceForcing]:
-        return [
-            ROMSSurfaceForcing(
-                location=str(f.location),
-                file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=None,
-                end_date=None,
-                source_np_xi=self.model.partitioning.n_procs_x
-                if f.partitioned
-                else None,
-                source_np_eta=self.model.partitioning.n_procs_y
-                if f.partitioned
-                else None,
-            )
-            for f in self.model.forcing.surface.data
-        ]
+        return orchestration.RunRequest(command=cmd_array)
 
 
-class CdrForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSCdrForcing]):
-    """Create a ROMSCdrForcing from a blueprint model."""
+class StepToPlaceholderAdapter(StepToRunRequestAdapter):
+    """Convert a `LiveStep` into a `RunRequest` with the original command
+    replaced with a placeholder script.
+    """
 
-    @t.override
-    def adapt(self) -> ROMSCdrForcing | None:
-        if self.model.cdr_forcing is None:
-            return None
+    SCRIPTFILE_NAME: t.Final[str] = "placeholder_script.sh"
 
-        return ROMSCdrForcing(
-            location=str(self.model.cdr_forcing.data[0].location),
-            file_hash=(
-                self.model.cdr_forcing.data[0].hash
-                if isinstance(self.model.cdr_forcing.data[0], models.VersionedResource)
-                else None
-            ),
-            start_date=None,
-            end_date=None,
-        )
+    def adapt(self) -> orchestration.RunRequest:
+        """Convert a `Step` into a placeholder request instead of the
+        originally requested blueprint execution.
 
+        Returns
+        -------
+        RunRequest
+            The instance converted from the source model.
+        """
+        actual = super().adapt()
 
-class NestingInfoAdapter(ModelAdapter[RomsMarblBlueprint, ROMSNestingInfo]):
-    """Create a ROMSNestingInfo from a blueprint model."""
+        if not self.model.fsm.run_dir.exists():
+            self.model.fsm.run_dir.mkdir(parents=True)
 
-    @t.override
-    def adapt(self) -> ROMSNestingInfo | None:
-        if self.model.nesting_info is None:
-            return None
+        original_cmd = RunRequestCommandFormatter().format(actual)
+        sleep_time = random.random()
 
-        return ROMSNestingInfo(
-            location=str(self.model.nesting_info.data[0].location),
-            file_hash=(
-                self.model.nesting_info.data[0].hash
-                if isinstance(self.model.nesting_info.data[0], models.VersionedResource)
-                else None
-            ),
-            start_date=None,
-            end_date=None,
-        )
+        script = textwrap.dedent(f"""\
+            # this is a mock application script that produces verifiable output
+            echo "{self.model.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
+            echo "replacing: {original_cmd}";
+            sleep {sleep_time};
+            echo "{self.model.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
+            """)
 
+        # write it to a script asset
+        script_path = self.model.fsm.run_dir / self.SCRIPTFILE_NAME
+        script_path.write_text(script)
 
-class ForcingCorrectionAdapter(
-    ModelAdapter[RomsMarblBlueprint, list[ROMSForcingCorrections]]
-):
-    """Create a ROMSForcingCorrections from a blueprint model."""
-
-    @t.override
-    def adapt(self) -> list[ROMSForcingCorrections] | None:
-        if self.model.forcing.corrections is None:
-            return None
-        return [
-            ROMSForcingCorrections(
-                location=str(f.location),
-                file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
-                start_date=None,
-                end_date=None,
-                source_np_xi=self.model.partitioning.n_procs_x
-                if f.partitioned
-                else None,
-                source_np_eta=self.model.partitioning.n_procs_y
-                if f.partitioned
-                else None,
-            )
-            for f in self.model.forcing.corrections.data
-        ]
+        return orchestration.RunRequest(command=["sh", str(script_path)])
