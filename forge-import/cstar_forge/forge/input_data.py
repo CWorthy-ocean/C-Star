@@ -884,6 +884,15 @@ class RomsMarblInputData(InputData):
                     cfg[field_name], time_window=time_window
                 )
 
+        # If subchunking swapped a source/bgc_source path for a kerchunk reference,
+        # pass chunks={} so xarray/dask honors the reference's native (subchunked)
+        # layout instead of whatever the roms-tools default would pick. An explicit
+        # chunks= from options/extra wins (checked after merging below).
+        subchunked = any(
+            self._block_is_subchunked(cfg.get(field_name))
+            for field_name in ("source", "bgc_source")
+        )
+
         # Unpack any `options` passthrough dict from the item config before merging.
         # These are forwarded verbatim to the rt constructor and win over typed defaults
         # but lose to `extra` (which contains hardcoded run-time injections like dates).
@@ -892,8 +901,28 @@ class RomsMarblInputData(InputData):
         # extra overrides defaults; item_options sit between cfg and extra
         merged = {**cfg, **item_options}
         if extra:
-            return {**merged, **extra}
+            merged = {**merged, **extra}
+        if subchunked and "chunks" not in merged:
+            merged["chunks"] = {}
         return merged
+
+    def _block_is_subchunked(self, block: Any) -> bool:
+        """True if a resolved source/bgc_source block's path is a built subchunk
+        reference (see ``_subchunked_glorys_path``).
+
+        A subchunk reference is always a single ``Path``; a multi-file (list) path
+        is definitionally not one. The isinstance guard is required -- this runs on
+        every ``_build_input_args`` call, including ones with a list-valued path
+        (multi-file sources with subchunking off, or the time_window-trimmed IC
+        path), where ``Path(path)`` / set-membership on a list would raise
+        ``TypeError``.
+        """
+        if not isinstance(block, dict):
+            return False
+        path = block.get("path")
+        if not isinstance(path, (str, Path)):
+            return False
+        return Path(path) in {Path(p) for p in self._subchunk_refs.values()}
 
     def _stage_source_files(self, input_args: dict[str, Any]) -> dict[str, Any]:
         """

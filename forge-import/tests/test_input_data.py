@@ -804,6 +804,81 @@ class TestRomsMarblInputDataHelperMethods:
 
         assert result["correct_radiation"] is True  # Extra should override
 
+    def test_build_input_args_injects_chunks_when_subchunked(
+        self, sample_roms_marbl_input_data
+    ):
+        """When a source resolves to a memoized subchunk ref, chunks={} is injected."""
+        ref = Path("/data/subchunk/GLORYS_REGIONAL_20120101_20120102.json")
+        sample_roms_marbl_input_data._subchunk_refs["GLORYS_REGIONAL"] = ref
+        base_kwargs = {"source": {"name": "GLORYS", "path": ref}, "type": "physics"}
+
+        result = sample_roms_marbl_input_data._build_input_args(
+            "forcing.boundary", base_kwargs=base_kwargs
+        )
+
+        assert result["chunks"] == {}
+
+    def test_build_input_args_no_chunks_when_not_subchunked(
+        self, sample_roms_marbl_input_data
+    ):
+        """A normal (non-subchunked) multi-file source path does not get chunks=."""
+        files = [
+            Path(f"/data/GLORYS_REGIONAL_test_201201{d:02d}.nc") for d in range(1, 11)
+        ]
+        base_kwargs = {"source": {"name": "GLORYS", "path": files}, "type": "physics"}
+
+        result = sample_roms_marbl_input_data._build_input_args(
+            "forcing.boundary", base_kwargs=base_kwargs
+        )
+
+        assert "chunks" not in result
+
+    def test_build_input_args_explicit_chunks_wins_over_subchunk(
+        self, sample_roms_marbl_input_data
+    ):
+        """An explicit chunks= (e.g. from options) is not overwritten by subchunking."""
+        ref = Path("/data/subchunk/GLORYS_REGIONAL_20120101_20120102.json")
+        sample_roms_marbl_input_data._subchunk_refs["GLORYS_REGIONAL"] = ref
+        base_kwargs = {
+            "source": {"name": "GLORYS", "path": ref},
+            "type": "physics",
+            "options": {"chunks": {"time": 1}},
+        }
+
+        result = sample_roms_marbl_input_data._build_input_args(
+            "forcing.boundary", base_kwargs=base_kwargs
+        )
+
+        assert result["chunks"] == {"time": 1}
+
+    def test_build_input_args_injects_chunks_for_subchunked_bgc_source(
+        self, sample_roms_marbl_input_data
+    ):
+        """bgc_source subchunking also triggers the chunks= injection."""
+        ref = Path("/data/subchunk/GLORYS_REGIONAL_20120101_20120102.json")
+        sample_roms_marbl_input_data._subchunk_refs["GLORYS_REGIONAL"] = ref
+        base_kwargs = {
+            "source": {"name": "UNIFIED", "path": "/data/UNIFIED_clim.nc"},
+            "bgc_source": {"name": "GLORYS", "path": ref},
+            "type": "bgc",
+        }
+
+        result = sample_roms_marbl_input_data._build_input_args(
+            "forcing.boundary", base_kwargs=base_kwargs
+        )
+
+        assert result["chunks"] == {}
+
+    def test_block_is_subchunked_handles_list_path(self, sample_roms_marbl_input_data):
+        """A list-valued path (e.g. a multi-file source, subchunking off) must not
+        raise -- Path(list) and `list in set(...)` both throw TypeError.
+        """
+        block = {
+            "name": "GLORYS",
+            "path": [Path("/data/a.nc"), Path("/data/b.nc")],
+        }
+        assert sample_roms_marbl_input_data._block_is_subchunked(block) is False
+
     def test_pio_mangle_noop_when_pio_off(self, sample_roms_marbl_input_data):
         """With PIO off, _pio_mangle returns the path unchanged."""
         assert sample_roms_marbl_input_data.use_pio is False
