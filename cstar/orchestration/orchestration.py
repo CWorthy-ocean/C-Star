@@ -233,17 +233,6 @@ class LiveStep(Step):
     working_dir: Path | None = Field(default=None, frozen=True)
     """The root directory where this step can write outputs."""
 
-    @staticmethod
-    def get_root_fsm() -> JobFileSystemManager:
-        """Return the default, run-aware job file-system manager.
-
-        Returns
-        -------
-        JobFileSystemManager
-        """
-        run_dir = StateDirectoryManager.data_dir()
-        return JobFileSystemManager(run_dir)
-
     @property
     def fsm(self) -> JobFileSystemManager:
         """Retrieve a file system manager rooted on the step working directory.
@@ -326,7 +315,8 @@ class LiveStep(Step):
             data["working_dir"] = wd
             fsm = JobFileSystemManager(Path(wd))
         else:
-            fsm = LiveStep.get_root_fsm().get_subtask_manager(name)
+            root_fsm = JobFileSystemManager(StateDirectoryManager.data_dir())
+            fsm = root_fsm.get_subtask_manager(name)
             data["working_dir"] = fsm.root_dir
 
         return data
