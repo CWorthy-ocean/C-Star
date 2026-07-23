@@ -27,10 +27,10 @@ from cstar.orchestration.serialization import register_representer, strenum_repr
 from cstar.orchestration.transforms import (
     DirectiveConfig,
 )
-from cstar.roms import ROMSSimulation
 
 if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
+    from cstar.roms import ROMSSimulation
 
 
 _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
@@ -41,7 +41,7 @@ _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
 class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
     """Worker class to run c-star simulations."""
 
-    simulation: Final[ROMSSimulation]
+    simulation: Final["ROMSSimulation"]
     """The simulation instance created from the blueprint."""
     _handler: ExecutionHandler | None = None
     """The execution handler for the simulation."""
@@ -67,6 +67,8 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
             walltime, job name, and priority.
         """
         super().__init__(request, service_cfg, job_cfg)
+
+        from cstar.roms import ROMSSimulation
 
         self.simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
         self.simulation.name = slugify(self.simulation.name)
