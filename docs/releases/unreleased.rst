@@ -12,6 +12,8 @@ Breaking Changes
 
 - The return type of `Launcher.update_status` has been modified (`#579 <https://github.com/CWorthy-ocean/C-Star/pull/579>`_)
 - Registration of _step-to-command_ mapping functions is removed. (`#585 <https://github.com/CWorthy-ocean/C-Star/pull/585>`_)
+- `cstar.orchestration.converter` is removed (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
+- ROMS-specific adapters in `cstar.orchestration.adapter` moved to `cstar.applications.roms_marbl.adapter` (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -28,6 +30,7 @@ Bug Fixes
 - Fix bug filling templates with `str(None)` (`#588 <https://github.com/CWorthy-ocean/C-Star/pull/588>`_)
 - Mitigate test regressions (`#596 <https://github.com/CWorthy-ocean/C-Star/pull/596>`_)
 - Fix attempt to use local file paths that do not exist. (`#597 <https://github.com/CWorthy-ocean/C-Star/pull/597>`_)
+- Fix bug in `test_compose` hidden by `@pytest.mark.skip` (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
 
 Improvements
 ~~~~~~~~~~~~
