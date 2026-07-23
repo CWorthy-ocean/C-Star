@@ -68,21 +68,6 @@ class ConfiguredBaseModel(BaseModel):
     """Configures the behavior of the pydantic model."""
 
 
-class PolymorphicBaseModel(BaseModel):
-    """Base-model configuring common instantiation and validation behavior
-    for serialization of covariant references.
-    """
-
-    model_config: t.ClassVar[ConfigDict] = ConfigDict(
-        extra="allow",
-        from_attributes=True,
-        str_strip_whitespace=True,
-        use_attribute_docstrings=True,
-        polymorphic_serialization=True,
-    )
-    """Configures the behavior of the pydantic model."""
-
-
 class Resource(ConfiguredBaseModel):
     location: FilePath | HttpUrl | str
     """Location of the file to retrieve."""
@@ -236,11 +221,8 @@ class WorkplanState(StrEnum):
     """A workflow that has been validated."""
 
 
-class Step(PolymorphicBaseModel):
+class Step(ConfiguredBaseModel):
     """An individual unit of execution within a workplan."""
-
-    resolver: t.ClassVar[dict[str, type["Step"]]] = {}
-    """Subclass registry for type resolution during deserialization."""
 
     name: RequiredString
     """The user-friendly name of the step."""
@@ -288,6 +270,11 @@ class Step(PolymorphicBaseModel):
     )
     """A collection of key-value pairs specifying configuration for runtime directives."""
 
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        polymorphic_serialization=True,
+    )
+    """Configures the behavior of the pydantic model."""
+
     @property
     def safe_name(self) -> str:
         """Return a URL-safe version of the step name.
@@ -298,20 +285,8 @@ class Step(PolymorphicBaseModel):
         """
         return slugify(self.name)
 
-    @classmethod
-    def discriminator(cls) -> str:
-        """Return the sub-type discriminator."""
-        raise NotImplementedError("Subclasses must implement")
 
-    def __init_subclass__(cls, **kwargs: t.Any):
-        """Register `Step` subclasses with a unique _kind_ value that will be used
-        for discrimination during deserialization.
-        """
-        super().__init_subclass__(**kwargs)
-        cls.resolver[cls.discriminator()] = cls
-
-
-class Workplan(PolymorphicBaseModel):
+class Workplan(ConfiguredBaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
@@ -341,6 +316,11 @@ class Workplan(PolymorphicBaseModel):
         frozen=True,
     )
     """A collection of user-defined variables that will be populated at runtime."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        polymorphic_serialization=True,
+    )
+    """Configures the behavior of the pydantic model."""
 
     @field_validator("steps", mode="before")
     @classmethod
@@ -427,26 +407,6 @@ class Workplan(PolymorphicBaseModel):
             raise ValueError(msg)
 
         return value
-
-    @model_validator(mode="before")
-    @classmethod
-    def _model_validator(cls, data: t.Any) -> t.Any:
-        """Validate attribute relationships."""
-        if (
-            isinstance(data, dict)
-            and isinstance(data.get("steps"), list)
-            and len(data.get("steps", [])) > 0
-            and isinstance(data.get("steps", [None])[0], dict)
-        ):
-            step_data = t.cast("list[dict[str, t.Any]]", data["steps"])
-            if "kind" not in step_data[0]:
-                return data
-
-            data["steps"] = [
-                Step.resolver.get(s.get("kind", ""), Step).model_validate(s)
-                for s in step_data
-            ]
-        return data
 
 
 class UserDefinedVariables(ConfiguredBaseModel):

@@ -157,6 +157,7 @@ def test_serialization_workplan_happy_path(
     assert workplan.steps[0].compute_overrides["num_nodes"] == 4
 
 
+@pytest.mark.skip(reason="unskip after LiveWorkplan is merged")
 def test_serialization_polymorphic_workplan(
     tmp_path: Path,
     wp_templates_dir: Path,

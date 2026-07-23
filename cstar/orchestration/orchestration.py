@@ -232,8 +232,6 @@ class LiveStep(Step):
     """The step for which this step is a sub-task."""
     working_dir: Path | None = Field(default=None, frozen=True)
     """The root directory where this step can write outputs."""
-    kind: str = Field(default="", frozen=True, init=False)
-    """The instance discriminator."""
 
     @staticmethod
     def get_root_fsm() -> JobFileSystemManager:
@@ -346,12 +344,6 @@ class LiveStep(Step):
         )
         object.__setattr__(self, "blueprint_path", Path(self.blueprint_path))
         return self
-
-    @t.override
-    @classmethod
-    def discriminator(cls) -> str:
-        """Return the sub-type discriminator."""
-        return "live"
 
 
 class LiveWorkplan(Workplan):
