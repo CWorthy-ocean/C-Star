@@ -26,7 +26,7 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import (
     Directive,
@@ -604,34 +604,56 @@ class BoundaryFileTrxAdapter:
         }
 
 
-class ContinuanceDirective(Directive, OverrideTransform):
-    """A transform that locates a restart file with an unknown path at the
-    time the task was scheduled.
-    """
+class OverrideDirective(Directive, OverrideTransform):
+    _overrides: dict[str, t.Any]
 
-    KEY_PATH: t.Final[str] = "path"
-    """Key used to specify a path as the source for continuance."""
-
-    def __init__(self, config: dict[str, t.Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, t.Any],
+        *,
+        workplan: LiveWorkplan | None = None,
+    ) -> None:
         """Initialize the instance.
 
         Parameters
         ----------
         config : dict[str, t.Any] | None
             A dictionary containing configuration for the directive.
+        workplan : LiveWorkplan | None
+            The workplan instance containing contextual information for the directive.
         """
-        Directive.__init__(self, config)
-        OverrideTransform.__init__(self, self._create_initial_condition_overrides())
+        Directive.__init__(self, config, workplan=workplan)
+        OverrideTransform.__init__(self, self._generate_overrides())
+
+    def _generate_overrides(self) -> dict[str, t.Any]:
+        """Generate any system overrides required by the directive.
+
+        Returns
+        -------
+        dict[str, t.Any]
+        """
+        return {}
+
+
+class ContinuanceDirective(OverrideDirective):
+    """A transform that locates a restart file with an unknown path at the
+    time the task was scheduled.
+    """
+
+    KEY_PATH: t.Final[str] = "path"
+    """Key used to specify a path as the source for continuance."""
+    KEY_STEP: t.Final[str] = "step"
+    """Key used to specify a step name as the source for continuance."""
 
     @classmethod
     def key(cls) -> str:
         return "continue-from"
 
-    def _create_initial_condition_overrides(
-        self,
-    ) -> dict[str, t.Any]:
-        """Create an overrides dictionary that will result in the modified blueprint
-        using a
+    def _generate_overrides(self) -> dict[str, t.Any]:
+        """Create an overrides dictionary that will result in the modified blueprint.
+
+        ContinuanceDirective creates overrides to modify the initial conditions
+        using the output from another step or a fixed directory path.
 
         Returns
         -------
@@ -644,12 +666,32 @@ class ContinuanceDirective(Directive, OverrideTransform):
         ValueError
             If a restart file cannot be located with the supplied configuration.
         """
-        if "path" not in self._config:
-            msg = "Invalid continuance transform configuration. Only restart paths are supported."
+        found_keys = set(self._config.keys())
+        minimal_keys = {self.KEY_PATH, self.KEY_STEP}
+
+        if found_keys and not found_keys.intersection(minimal_keys):
+            msg = (
+                "Invalid continuance transform configuration; supported configuration: "
+                f"{', '.join(minimal_keys)}, provided configuration: {', '.join(found_keys)}"
+            )
             raise NotImplementedError(msg)
 
-        search_path = Path(self._config["path"])
-        if restart_file := RestartFile.find(search_path, notfound_ok=False):
+        search_path: Path | None = None
+
+        if target_path := self._config.get(self.KEY_PATH, None):
+            search_path = Path(target_path)
+
+        if name := self._config.get(self.KEY_STEP, None):
+            if name in self.workplan:
+                step = self.workplan[name]
+                search_path = step.fsm.output_dir
+            else:
+                msg = f"Unable to locate step {name!r} in workplan"
+                raise KeyError(msg)
+
+        if search_path and (
+            restart_file := RestartFile.find(search_path, notfound_ok=False)
+        ):
             return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
@@ -667,28 +709,18 @@ class ContinuanceDirective(Directive, OverrideTransform):
         return "cfrom"
 
 
-class NestingDirective(Directive, OverrideTransform):
+class NestingDirective(OverrideDirective):
     """A transform that uses a restart file and boundary conditions from a previous parent simulation."""
-
-    def __init__(self, config: dict[str, t.Any]) -> None:
-        """Initialize the instance.
-
-        Parameters
-        ----------
-        config : dict[str, t.Any] | None
-            A dictionary containing configuration for the directive.
-        """
-        Directive.__init__(self, config)
-        OverrideTransform.__init__(
-            self, self._create_initial_condition_and_bc_overrides()
-        )
 
     @classmethod
     def key(cls) -> str:
         return "nest-from"
 
-    def _create_initial_condition_and_bc_overrides(self) -> dict[str, t.Any]:
+    def _generate_overrides(self) -> dict[str, t.Any]:
         """Create an overrides dictionary that will result in the modified blueprint.
+
+        NestingDirective creates overrides that will modify the initial conditions
+        and boundary conditions.
 
         Returns
         -------

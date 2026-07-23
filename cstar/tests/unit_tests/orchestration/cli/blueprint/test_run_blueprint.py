@@ -19,7 +19,7 @@ from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.roms.simulation import ROMSSimulation
 
 
@@ -208,6 +208,16 @@ def test_blueprint_run_apply_directives(
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(
+                return_value=LiveWorkplan(
+                    name="test-workplan",
+                    description="a live workplan used to create a `WorkplanRun` to test directives",
+                    steps=[temp_step],
+                )
+            ),
+        ),
     ):
         runner = CliRunner()
         _ = runner.invoke(
