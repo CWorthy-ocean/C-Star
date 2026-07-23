@@ -31,6 +31,7 @@ Bug Fixes
 - Mitigate test regressions (`#596 <https://github.com/CWorthy-ocean/C-Star/pull/596>`_)
 - Fix attempt to use local file paths that do not exist. (`#597 <https://github.com/CWorthy-ocean/C-Star/pull/597>`_)
 - Fix bug in `test_compose` hidden by `@pytest.mark.skip` (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
+- Fix circular import when importing RomsMarbl pieces from Forge (`#603 <https://github.com/CWorthy-ocean/C-Star/pull/603>`_)
 
 Improvements
 ~~~~~~~~~~~~
