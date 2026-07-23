@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from prefect import State, task
 from prefect import Task as PrefectTask
 from prefect.client.schemas import TaskRun
+from pydantic import BaseModel
 
+from cstar.base.adapter import ModelAdapter
 from cstar.base.env import (
     ENV_CSTAR_RUNID,
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
@@ -23,6 +25,7 @@ from cstar.execution.scheduler_job import (
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import RunRequestCommandFormatter
+from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -80,6 +83,27 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
 
     log.trace("Cache check: %s", cache_key)
     return cache_key
+
+
+class SlurmComputeSpec(BaseModel):
+    num_cpus: str | None = None
+    num_nodes: str | None = None
+    cpus_per_node: str | None = None
+    max_walltime: str | None = None
+
+
+class SlurmComputeOverrideAdapter(ModelAdapter[KeyValueStore, SlurmComputeSpec | None]):
+    def adapt(self) -> SlurmComputeSpec | None:
+        if overrides_ := self.model.get("slurm", {}):
+            overrides = t.cast("dict[str, str]", overrides_)
+
+            return SlurmComputeSpec(
+                num_cpus=str(overrides.get("num-cpus", "")) or None,
+                num_nodes=str(overrides.get("num-nodes", "")) or None,
+                cpus_per_node=str(overrides.get("num-cpus-per-node", "")) or None,
+                max_walltime=str(overrides.get("max-walltime", "")) or None,
+            )
+        return None
 
 
 class SlurmHandle(ProcessHandle):
@@ -176,8 +200,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         run_id = os.getenv(ENV_CSTAR_RUNID, "")
         step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
-        adapter = StepToRunRequestAdapter(step)
-        command = RunRequestCommandFormatter().format(adapter.adapt())
+        adapter = StepToRunRequestAdapter()
+        command = RunRequestCommandFormatter().format(adapter.adapt(step))
 
         job = create_scheduler_job(
             commands=command,

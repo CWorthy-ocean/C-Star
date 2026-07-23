@@ -975,6 +975,7 @@ class Orchestrator(LoggingMixin):
 class RunRequest(ConfiguredBaseModel):
     command: list[str] = Field(default_factory=list[str])
     environment: dict[str, str] = Field(default_factory=dict[str, str])
+    # compute: dict[str, str] = Field(default_factory=dict[str, str])
 
 
 def check_environment() -> None:

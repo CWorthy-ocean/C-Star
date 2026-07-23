@@ -25,6 +25,28 @@ class ModelAdapter(t.Protocol, t.Generic[_Tin, _Tout_co]):
         ...
 
 
+_Tin_contra = t.TypeVar("_Tin_contra", contravariant=True)
+
+
+class ConfiguredModelAdapter(t.Protocol, t.Generic[_Tin_contra, _Tout_co]):
+    """Contract exposing a mechanism to adapt a source model to a target type."""
+
+    # model: _Tin
+
+    # def __init__(self, model: _Tin) -> None:
+    #     self.model = model
+
+    def adapt(self, model: _Tin_contra) -> _Tout_co | None:
+        """Adapt the source model to the target output type.
+
+        Returns
+        -------
+        _Tout
+            The instance converted from the source model
+        """
+        ...
+
+
 class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
     """Contract exposing a mechanism to adapt a source model to a target type."""
 

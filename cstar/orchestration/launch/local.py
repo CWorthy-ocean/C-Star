@@ -9,17 +9,20 @@ from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
-from pydantic import PrivateAttr
+from pydantic import BaseModel, PrivateAttr
 
+from cstar.base.adapter import ConfiguredModelAdapter, ModelAdapter
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import RunRequestCommandFormatter
+from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
     ProcessHandle,
+    RunRequest,
     Status,
     Task,
 )
@@ -84,6 +87,40 @@ class LocalHandle(ProcessHandle):
         return not hasattr(self, "_process")
 
 
+class LocalComputeSpec(BaseModel):
+    max_walltime: str | None = None
+
+
+class LocalComputeAdapter(ModelAdapter[KeyValueStore, LocalComputeSpec | None]):
+    def adapt(self) -> LocalComputeSpec | None:
+        if overrides_ := self.model.get("local", {}):
+            overrides = t.cast("dict[str, str]", overrides_)
+
+            return LocalComputeSpec(
+                max_walltime=str(overrides.get("max-walltime", "")) or None,
+            )
+        return None
+
+
+class ComputeEnrichmentAdapter(ConfiguredModelAdapter[RunRequest, RunRequest]):
+    """Format a `RunRequest` as a request as a CLI command."""
+
+    compute: LocalComputeSpec
+
+    def __init__(self, compute: LocalComputeSpec) -> None:
+        self.compute = compute
+
+    def adapt(self, model: RunRequest) -> RunRequest:
+        if self.compute.model_dump(exclude_defaults=True):
+            # use specified compute overrides to enrich the command.
+            return RunRequest(
+                command=["timout", "-k", "1s", "90s", *model.command],
+                environment=model.environment,
+            )
+
+        return model
+
+
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
@@ -93,6 +130,20 @@ class LocalLauncher(Launcher[LocalHandle]):
     @classmethod
     def check_preconditions(cls) -> None:
         """Perform launcher-specific startup validation."""
+
+    @staticmethod
+    def _adapt_step(step: "LiveStep") -> str:
+        compute_adapter = LocalComputeAdapter(step.compute_overrides)
+        adapter = StepToRunRequestAdapter()
+
+        if compute := compute_adapter.adapt():
+            adapter.enrich(ComputeEnrichmentAdapter(compute))
+
+        request = adapter.adapt(step)
+        formatter = RunRequestCommandFormatter()
+        command = formatter.format(request)
+
+        return command
 
     @staticmethod
     def _create_dep_aware_script(
@@ -105,10 +156,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         str
         """
+        command = LocalLauncher._adapt_step(step)
         blueprint_path = str(step.blueprint_path)
-
-        adapter = StepToRunRequestAdapter(step)
-        command = RunRequestCommandFormatter().format(adapter.adapt())
         command = command.replace(blueprint_path, '"$BLUEPRINT_PATH"')
 
         pids = " ".join([f'"{h.pid}"' for h in dependencies])
@@ -146,7 +195,11 @@ class LocalLauncher(Launcher[LocalHandle]):
             update_status $RUNNING $SENTINEL_PATH
 
             # run the target command
-            {command}
+            # timout -k 1s 90s {command} &
+            {command} &
+            JOB_PID=$!
+
+            wait $JOB_PID
 
             # update the status to `Done` if target command is successful, otherwise `Failed`
             RC=$?
@@ -177,8 +230,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         if LocalLauncher.use_proxy:
             script = LocalLauncher._create_dep_aware_script(step, dependencies)
         else:
-            adapter = StepToRunRequestAdapter(step)
-            script = RunRequestCommandFormatter().format(adapter.adapt())
+            script = LocalLauncher._adapt_step(step)
 
         step.fsm.prepare()
         step.script_path.write_text(script)
@@ -295,6 +347,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         failure_found = any(map(Status.is_failure, statuses))
 
         if not LocalLauncher.use_proxy:
+            # without the proxy, the launcher must sit and wait for processes to end.
             active_found = any(map(Status.is_in_progress, statuses))
 
             # wait for the dependencies to complete before launching

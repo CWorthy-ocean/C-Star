@@ -49,8 +49,8 @@ def test_converter_defaults(
     )
 
     # confirm a command was returned
-    adapter = StepToRunRequestAdapter(step)
-    assert adapter.adapt()
+    adapter = StepToRunRequestAdapter()
+    assert adapter.adapt(step)
 
 
 @pytest.mark.parametrize(
@@ -85,8 +85,8 @@ def test_converter_steptoplaceholderadapter(
         working_dir=tmp_path / "unit-test-work-dir",
     )
 
-    adapter = StepToPlaceholderAdapter(step)
-    ph_request = adapter.adapt()
+    adapter = StepToPlaceholderAdapter()
+    ph_request = adapter.adapt(step)
 
     # confirm placeholder executes an alternative script
     ph_command = RunRequestCommandFormatter().format(ph_request)
@@ -97,8 +97,8 @@ def test_converter_steptoplaceholderadapter(
     assert ph_path.exists()
 
     # confirm the original script is documented in placeholder
-    cmd_adapter = StepToRunRequestAdapter(step)
-    cmd_request = cmd_adapter.adapt()
+    cmd_adapter = StepToRunRequestAdapter()
+    cmd_request = cmd_adapter.adapt(step)
     cmd = RunRequestCommandFormatter().format(cmd_request)
 
     ph_content = ph_path.read_text()
@@ -119,7 +119,7 @@ def test_convert_step_with_directives(
     step = preprocessable_roms_livestep
     bp_path = str(step.blueprint_path)
 
-    result = StepToRunRequestAdapter(step).adapt()
+    result = StepToRunRequestAdapter().adapt(step)
 
     # confirm the parameter is sent
     assert ARG_DIRECTIVES_URI_LONG in result.command
