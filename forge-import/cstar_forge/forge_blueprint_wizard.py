@@ -2951,8 +2951,8 @@ class ForgeBlueprintWizard:
     def _populate_from(self, cfg: ForgeBlueprint):
         """Set the widgets from a loaded ForgeBlueprint, then re-resolve once.
 
-        Round-trips the authoring inputs (identity / run / domain / partitioning /
-        nesting / dt). Any value in the file that differs from what the composed pieces
+        Round-trips the authoring inputs (name / description / run / domain /
+        partitioning / nesting / dt). Any value in the file that differs from what the composed pieces
         would produce is reconstructed as a manual override (so load is non-lossy and
         the overrides layer is rebuilt), then applied on top in ``_rebuild``.
 
@@ -2965,8 +2965,8 @@ class ForgeBlueprintWizard:
             if cfg.composition.model.name in self.model_dd.options:
                 self.model_dd.value = cfg.composition.model.name
             self.grid_name.value = cfg.domain.grid_name
-            self.description.value = cfg.identity.description
-            self.name.value = cfg.identity.name
+            self.description.value = cfg.description
+            self.name.value = cfg.name
             self._name_touched = (
                 True  # a loaded name is a deliberate choice, not a default
             )

@@ -194,7 +194,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
     those from :mod:`cstar_forge.config` on the run host.
     """
     kwargs = dict(
-        description=cfg.identity.description,
+        description=cfg.description,
         name=cfg.name,
         grid_name=cfg.domain.grid_name,
         grid_kwargs=dict(cfg.domain.grid_kwargs),

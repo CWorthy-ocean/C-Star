@@ -91,20 +91,30 @@ def test_bare_default_working_dir_expands_and_explicit_survives():
     assert ForgeBlueprint(**data).working_dir == "/custom/spot"
 
 
-def test_forge_blueprint_is_portable_no_forge_or_cstar_imports():
+def test_forge_blueprint_is_portable_no_forge_or_heavy_cstar_imports():
     """forge_blueprint.py is the C-Star-relocatable blueprint model: it must depend on
-    nothing from cstar_forge / cstar (only stdlib + pydantic + yaml).
+    nothing from cstar_forge (only stdlib + pydantic + yaml), and the only ``cstar``
+    dependency it's allowed is the lightweight ``cstar.orchestration.models.Blueprint``
+    base (see ``cstar_forge.forge.app.ForgeApplication`` -- this is what makes forge a
+    real C-Star application). It must NOT reach into heavier cstar submodules (e.g.
+    ``cstar.roms``, ``cstar.applications.roms_marbl``) that would drag in the
+    ROMS/MARBL build + roms-tools stack.
     """
     src = Path(cstar_forge.__file__).parent / "forge" / "forge_blueprint.py"
     text = src.read_text()
     import re
 
+    allowed_cstar_import = "from cstar.orchestration.models import Blueprint"
     bad = [
         ln.strip()
         for ln in text.splitlines()
         if re.match(r"\s*(from|import)\s+(cstar_forge|cstar|\.)", ln)
+        and ln.strip() != allowed_cstar_import
     ]
-    assert not bad, f"forge_blueprint.py must stay forge/cstar-free; found: {bad}"
+    assert not bad, (
+        "forge_blueprint.py must stay forge-free and depend on nothing beyond "
+        f"{allowed_cstar_import!r} for cstar; found: {bad}"
+    )
 
 
 def test_application_discriminator_default():
@@ -142,12 +152,11 @@ def test_content_hash_ignores_excluded_sections():
 
     cfg = _build()
     h = cfg.content_hash()
-    # editing identity / composition / provenance does NOT change the hash
+    # editing name/description/composition/provenance does NOT change the hash
     c2 = cfg.model_copy(
         update={
-            "identity": cfg.identity.model_copy(
-                update={"description": "totally different"}
-            ),
+            "name": "totally-different-name",
+            "description": "totally different",
             "composition": cfg.composition.model_copy(
                 update={"forcing": PieceRef(name="x", origin="custom")}
             ),
@@ -157,10 +166,14 @@ def test_content_hash_ignores_excluded_sections():
     assert c2.content_hash() == h
     assert _HASH_EXCLUDE == {
         "forge_blueprint_version",
-        "identity",
+        "name",
+        "description",
         "composition",
         "provenance",
         "working_dir",
+        "state",
+        "schema_version",
+        "$schema",
     }
 
 

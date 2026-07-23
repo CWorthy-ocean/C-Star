@@ -14,6 +14,12 @@ forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
 ``ForgeBlueprint`` is the contract between the two phases: plain, validated data with
 **no** ``rt.Grid`` objects, **no** source downloads, and **no** file I/O.
 
+``ForgeBlueprint`` subclasses ``cstar.orchestration.models.Blueprint`` (see
+``cstar/applications/hello_world.py`` for the minimal shape of this contract), which is
+what makes forge a real C-Star application: ``cstar_forge.forge.app.ForgeRunner`` +
+``ForgeApplication`` (registered via ``CSTAR_APP_MODULES=cstar_forge.forge.app``) let
+C-Star's own entrypoint (``cstar blueprint run``) discover and drive it directly.
+
 Single governing principle
 --------------------------
 The config stores ONLY host-independent, single-source-of-truth inputs. Anything
@@ -24,11 +30,12 @@ mechanically derivable is computed at **processing** time, never stored:
   processing time from ``cstar_forge.config`` on the machine that runs the work.
   ``run_output_dir`` and the namelist ``output_root_name`` (which embed the scratch
   path) are therefore derived there too.
-* **Naming** — the canonical ``name`` is a user-editable atomic input (``identity.name``),
-  defaulting to a derived value (``{model_name}_{grid_name}_{n_procs}procs``) computed
-  once by the resolver. ``casename``, the namelist ``title``, ``output_root_name``, and
-  ``run_output_dir`` are deterministic functions of ``name`` + the run dates and are
-  exposed as computed properties / helpers — never stored as independent values.
+* **Naming** — the canonical ``name`` is a user-editable atomic input (required by the
+  ``Blueprint`` base), defaulting to a derived value
+  (``{model_name}_{grid_name}_{n_procs}procs``) computed once by the resolver.
+  ``casename``, the namelist ``title``, ``output_root_name``, and ``run_output_dir`` are
+  deterministic functions of ``name`` + the run dates and are exposed as computed
+  properties / helpers — never stored as independent values.
 * **Artifacts** — ``s_coord`` (theta_s/theta_b/tcline, read from the generated grid
   file) and all file paths (grid / initial / forcing) are processing outputs and
   belong in the resulting blueprint, not here.
@@ -53,6 +60,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from cstar.orchestration.models import Blueprint
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ===========================================================================
@@ -235,16 +243,22 @@ class TopographySource(str, Enum):
 
 
 # Top-level sections EXCLUDED from the integrity hash: provenance (where the hash
-# lives), composition + identity (labels/provenance, not results-affecting), and the
-# schema version. Everything else (application, run, domain, sources, properties,
-# model_settings, code) is hashed.
+# lives), composition + name/description (labels/provenance, not results-affecting),
+# and the schema version/state (Blueprint-base metadata, not content). Everything else
+# (application, run, domain, sources, properties, model_settings, code) is hashed.
 _HASH_EXCLUDE = {
     "forge_blueprint_version",
-    "identity",
+    "name",
+    "description",
     "composition",
     "provenance",
     # host/location only — runtime-overridden per host; must not change the content hash.
     "working_dir",
+    # Blueprint-base (cstar.orchestration.models) metadata, not blueprint content.
+    "state",
+    "schema_version",
+    # injected only by Blueprint's serializer (never a real field) -- pop unconditionally.
+    "$schema",
 }
 # Note: "properties" is no longer a top-level ForgeBlueprint field (removed); n_tracers
 # and marbl are derived from model_settings at processing time.
@@ -257,7 +271,12 @@ _HASH_EXCLUDE = {
 # favor of a single user-editable ``name``; ``grid_name`` moved onto ``domain`` (it is
 # results-affecting -- SourceData keys cache filenames off it -- so it belongs in the
 # hashed section, not the excluded ``identity`` block). ``from_yaml`` migrates v2 files.
-FORGE_BLUEPRINT_VERSION = 3
+# v4 (2026-07): ``ForgeBlueprint`` became a ``cstar.orchestration.models.Blueprint``
+# subclass, which requires top-level ``name``/``description`` fields; the ``identity``
+# sub-model is gone, flattened onto the blueprint directly. Migration folded into a
+# ``model_validator(mode="before")`` so it fires on every entry point (C-Star's own
+# ``deserialize``/``model_validate`` included), not just ``from_yaml``.
+FORGE_BLUEPRINT_VERSION = 4
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
@@ -294,12 +313,24 @@ def sanitize_name(raw: str) -> str:
 def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     """Version-check + forward-migrate a parsed ``forge_blueprint.yaml`` dict.
 
-    Rejects a file declaring a *newer* version than this build understands. For
-    v<=2 files (pre-v3 ``identity`` shape: ``model_name``/``grid_name``/
-    ``ensemble_id`` instead of a single ``name``), rewrites ``identity`` to the v3
-    shape and moves ``grid_name`` onto ``domain``, reproducing the exact old
+    Rejects a file declaring a *newer* version than this build understands.
+
+    **v2 -> v3**: pre-v3 ``identity`` shape (``model_name``/``grid_name``/
+    ``ensemble_id`` instead of a single ``name``) is rewritten to a single derived
+    name and ``grid_name`` is moved onto ``domain``, reproducing the exact old
     derived name (including the ``_{ensemble_id:03d}`` suffix) so ``name``/
     ``casename``/``working_dir`` are preserved bit-for-bit for existing files.
+
+    **v3 -> v4**: the ``identity`` sub-model (``name``/``description``) is flattened
+    onto the blueprint's own top-level ``name``/``description`` fields -- required by
+    ``ForgeBlueprint``'s ``cstar.orchestration.models.Blueprint`` base, which declares
+    ``name``/``description`` as its own top-level fields.
+
+    Idempotent and a no-op on already-current data (e.g. direct keyword
+    construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
+    ``model_validator(mode="before")`` so it fires on every entry point
+    (``from_yaml``, ``from_yaml_data``, and C-Star's own ``deserialize``/
+    ``model_validate``), not just ``from_yaml``.
 
     Note: a migrated file's *recorded* ``provenance.content_hash`` was computed
     without ``domain.grid_name`` in the hashed data, so it no longer matches the
@@ -313,31 +344,37 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
             f"forge_blueprint_version {version} is newer than this build supports "
             f"({FORGE_BLUEPRINT_VERSION}); upgrade cstar-forge to read this file."
         )
-    if version is not None and version >= 3:
-        return data
-    identity = dict(data.get("identity") or {})
-    model_name = identity.get("model_name")
-    grid_name = identity.get("grid_name")
-    if model_name is None or grid_name is None:
-        # Already v3-shaped identity (e.g. a hand-authored dict without a version
-        # stamp) -- nothing to migrate.
-        data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
-        return data
-    ensemble_id = identity.get("ensemble_id")
-    domain = dict(data.get("domain") or {})
-    partitioning = domain.get("partitioning") or {}
-    n_procs = int(partitioning.get("n_procs_x", 1)) * int(
-        partitioning.get("n_procs_y", 1)
-    )
-    name = f"{model_name}_{grid_name}_{n_procs}procs"
-    if ensemble_id is not None:
-        name += f"_{int(ensemble_id):03d}"
-    domain["grid_name"] = grid_name
-    data["domain"] = domain
-    data["identity"] = {
-        "name": sanitize_name(name),
-        "description": identity.get("description", "Generated blueprint"),
-    }
+
+    if version is None or version < 3:
+        identity = dict(data.get("identity") or {})
+        model_name = identity.get("model_name")
+        grid_name = identity.get("grid_name")
+        if model_name is not None and grid_name is not None:
+            ensemble_id = identity.get("ensemble_id")
+            domain = dict(data.get("domain") or {})
+            partitioning = domain.get("partitioning") or {}
+            n_procs = int(partitioning.get("n_procs_x", 1)) * int(
+                partitioning.get("n_procs_y", 1)
+            )
+            name = f"{model_name}_{grid_name}_{n_procs}procs"
+            if ensemble_id is not None:
+                name += f"_{int(ensemble_id):03d}"
+            domain["grid_name"] = grid_name
+            data["domain"] = domain
+            data["identity"] = {
+                "name": sanitize_name(name),
+                "description": identity.get("description", "Generated blueprint"),
+            }
+        # else: already v3-shaped identity (or no identity at all) -- nothing to do.
+
+    if version is None or version < 4:
+        identity = data.pop("identity", None)
+        if identity is not None:
+            data.setdefault("name", identity.get("name"))
+            data.setdefault(
+                "description", identity.get("description", "Generated blueprint")
+            )
+
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data
 
@@ -348,30 +385,8 @@ class _Section(BaseModel):
 
 
 # ===========================================================================
-# Identity (atomic naming inputs only) & run window
+# Run window
 # ===========================================================================
-class Identity(_Section):
-    """The blueprint's canonical name + human description.
-
-    ``name`` is the single source of truth for ``ForgeBlueprint.name``: everything
-    else derived from it (``casename``, namelist ``title``, ``output_root_name``,
-    ``run_output_dir``, the default ``working_dir``, ``B_{name}.yaml``) is a
-    deterministic function -- see :class:`ForgeBlueprint` properties. The resolver
-    computes a sensible default (``{model_name}_{grid_name}_{n_procs}procs``) but a
-    user may override it; ``model_name``/``grid_name`` themselves live in
-    ``composition.model.name``/``domain.grid_name`` (they are provenance/functional
-    inputs, not naming inputs, once ``name`` is stored directly).
-    """
-
-    name: str  # canonical blueprint name (user-editable; defaults to a derived value)
-    description: str = "Generated blueprint"
-
-    @field_validator("name")
-    @classmethod
-    def _sanitize(cls, v: str) -> str:
-        return sanitize_name(v)
-
-
 class RunWindow(_Section):
     start_date: datetime
     end_date: datetime
@@ -703,8 +718,10 @@ class Provenance(_Section):
 # ===========================================================================
 # Top-level authoritative config
 # ===========================================================================
-class ForgeBlueprint(_Section):
-    """The complete, sufficient, reviewable input to processing.
+class ForgeBlueprint(Blueprint):
+    """The complete, sufficient, reviewable input to processing -- and the forge
+    C-Star application's own blueprint (see ``cstar.orchestration.models.Blueprint``,
+    ``cstar_forge.forge.app.ForgeApplication``).
 
     Round-trips to a single ``forge_blueprint.yaml`` via :meth:`to_yaml` / :meth:`from_yaml`.
 
@@ -712,25 +729,44 @@ class ForgeBlueprint(_Section):
     time) sits at the same level as every namelist section (``lateral_visc``,
     ``bottom_drag``, ``param``, ``ocean_vars``, ``time_stepping``, ``v_sponge``, …).
     It deliberately OMITS the sections that are filled at processing time:
-    ``title`` and ``output_root_name`` (derived from identity + host scratch path),
+    ``title`` and ``output_root_name`` (derived from name + host scratch path),
     ``s_coord`` (read from the generated grid), and ``grid`` / ``initial`` /
     ``forcing`` (artifact file paths). Validate ``model_settings`` through
     ``cstar_forge.forge.namelist_model.RunTimeSettings`` (after the processing step fills
     the omitted sections) before writing the namelist.
     """
 
+    # Strict by default (overriding the ``Blueprint``/``ConfiguredBaseModel`` base's
+    # extra="allow"): an unknown key is a bug in the resolver or a stale file. The
+    # ``$schema`` key the base's serializer injects is stripped in
+    # ``_migrate_and_clean`` below, before validation ever sees "forbid".
+    model_config = ConfigDict(extra="forbid")
+
     forge_blueprint_version: int = FORGE_BLUEPRINT_VERSION
     application: str = (
         DEFAULT_APPLICATION  # which C-Star application consumes this blueprint
     )
+    # The blueprint's canonical name + human description (``Blueprint`` base fields).
+    # ``name`` is the single source of truth for every derived name (``casename``,
+    # namelist ``title``, ``output_root_name``, ``run_output_dir``, the default
+    # ``working_dir``, ``B_{name}.yaml``) -- see the properties below. The resolver
+    # computes a sensible default (``{model_name}_{grid_name}_{n_procs}procs``) but a
+    # user may override it; ``model_name``/``grid_name`` themselves live in
+    # ``composition.model.name``/``domain.grid_name`` (they are provenance/functional
+    # inputs, not naming inputs, once ``name`` is stored directly).
+    name: str
+    description: str = "Generated blueprint"
     # Per-run artifact root: everything the executor PRODUCES (input netCDFs, namelist,
     # cppdefs, the emitted roms_marbl blueprint, build dirs) lands under here. Stored with a
     # sensible default but OVERRIDDEN at runtime by C-Star / the Forge executor for the host.
     # Host/location only -> excluded from content_hash (see _HASH_EXCLUDE).
     # The bare root is a sentinel: a validator expands it to ``<root>/<name>`` so each
     # run gets its own subdirectory (see ``_default_working_dir_includes_name``).
+    #
+    # Redeclared (``str``, not the base's ``Path``) to keep this sentinel behavior --
+    # see ``_resolve_out_dir`` below, which overrides the base's eager
+    # expanduser()/resolve() so the sentinel stays recognizable until then.
     working_dir: str = DEFAULT_WORKING_ROOT
-    identity: Identity
     run: RunWindow
     domain: Domain
     forcing: Forcing
@@ -747,6 +783,38 @@ class ForgeBlueprint(_Section):
     composition: Composition = Field(default_factory=Composition)
     provenance: Provenance = Field(default_factory=Provenance)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_and_clean(cls, data: Any) -> Any:
+        """Forward-migrate + strip the injected ``$schema`` key before validation.
+
+        Runs on *every* entry point -- direct construction, ``from_yaml``,
+        ``from_yaml_data``, and (critically) C-Star's own
+        ``deserialize()``/``model_validate()`` path, which does not go through
+        ``ForgeBlueprint.from_yaml`` at all. See ``migrate_forge_blueprint_data``.
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        data.pop("$schema", None)
+        return migrate_forge_blueprint_data(data)
+
+    @field_validator("name")
+    @classmethod
+    def _sanitize_name(cls, v: str) -> str:
+        return sanitize_name(v)
+
+    @field_validator("working_dir", mode="after")
+    @classmethod
+    def _resolve_out_dir(cls, value: str, _info: Any) -> str:
+        """Override the ``Blueprint`` base validator of the same name, which expects
+        a ``Path`` and eagerly expands/resolves it. Forge's ``working_dir`` is a
+        ``str`` sentinel that ``_default_working_dir_includes_name`` (below) rewrites
+        relative to the blueprint name; expansion to an absolute host path happens
+        later, at processing time, once the real host's scratch root is known.
+        """
+        return value
+
     @model_validator(mode="after")
     def _default_working_dir_includes_name(self) -> ForgeBlueprint:
         """Expand a bare default ``working_dir`` to include the run name.
@@ -759,10 +827,15 @@ class ForgeBlueprint(_Section):
             self.working_dir = f"{DEFAULT_WORKING_ROOT}/{self.name}"
         return self
 
-    # ---- derived naming (single source of truth: identity.name + dates) ----
+    # ---- derived naming (single source of truth: name + dates) ----
     @property
     def n_procs(self) -> int:
         return self.domain.partitioning.n_procs_x * self.domain.partitioning.n_procs_y
+
+    @property
+    def cpus_needed(self) -> int:
+        """Overrides the ``Blueprint`` base default of 1."""
+        return self.n_procs
 
     @property
     def n_tracers(self) -> int:
@@ -771,14 +844,6 @@ class ForgeBlueprint(_Section):
         """
         param = self.model_settings.get("param", {}) or {}
         return 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
-
-    @property
-    def name(self) -> str:
-        """The stored, authoritative canonical name (``identity.name``). The
-        resolver computes its default (``{model_name}_{grid_name}_{n_procs}procs``)
-        once at build time; this property no longer re-derives it.
-        """
-        return self.identity.name
 
     @property
     def datestr(self) -> str:
@@ -849,13 +914,18 @@ class ForgeBlueprint(_Section):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ForgeBlueprint:
-        """Load and validate a ``forge_blueprint.yaml`` (Phase 2 entry point)."""
+        """Load and validate a ``forge_blueprint.yaml`` (Phase 2 entry point).
+
+        Version-check + migration happen automatically via the
+        ``_migrate_and_clean`` before-validator -- no need to call
+        ``migrate_forge_blueprint_data`` here.
+        """
         data = yaml.safe_load(Path(path).read_text())
-        return cls.model_validate(migrate_forge_blueprint_data(data))
+        return cls.model_validate(data)
 
     @classmethod
     def from_yaml_data(cls, data: dict[str, Any]) -> ForgeBlueprint:
-        """Validate an already-parsed dict (e.g. a browser upload), applying the
-        same version check + migration as :meth:`from_yaml`.
+        """Validate an already-parsed dict (e.g. a browser upload). Same automatic
+        migration as :meth:`from_yaml`.
         """
-        return cls.model_validate(migrate_forge_blueprint_data(data))
+        return cls.model_validate(data)

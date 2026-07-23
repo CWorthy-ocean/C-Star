@@ -71,8 +71,14 @@ cstar_forge/
   forge/                      THE FORGE APPLICATION — execution engine, target: relocates
                                into C-Star as one unit. Nothing here reads the catalog.
     forge_blueprint.py            ForgeBlueprint (the blueprint) + item models + enums.
-                               Dependency-light: stdlib + pydantic + yaml only (portability
-                               guard test enforces this — no cstar_forge/cstar imports)
+                               Dependency-light: stdlib + pydantic + yaml, plus
+                               cstar.orchestration.models.Blueprint (see §3a) — a
+                               portability guard test enforces no cstar_forge imports
+                               and no other cstar import
+    app.py                        ForgeRunner + ForgeApplication (see §3a) — makes forge
+                               a real, C-Star-discoverable application. NOT part of the
+                               relocatable boundary above (like run.py, it's disposable
+                               host-resolution glue: imports cstar_forge.config)
     forge_blueprint_engine.py      process_forge_blueprint(); ForgeBlueprintExecutor Protocol (the
                                C-Star substitution seam); sources_to_forcing_override();
                                forge_blueprint_to_builder_kwargs(); verify_content_hash()
@@ -97,34 +103,83 @@ cstar_forge/
 
 ## 3. `ForgeBlueprint` — the forge blueprint
 
-Defined in `cstar_forge/forge/forge_blueprint.py`. Top-level shape:
-`forge_blueprint_version` (int, bump only on breaking change; currently 3) · `application`
-(=`"forge"`, C-Star app discriminator) · `identity` (`name`, `description` — `name` is the
-single user-editable canonical name; `ForgeBlueprint.name` returns it directly, `casename`/
-`working_dir`/`B_{name}.yaml`/netCDF stems all derive from it. `model_name`/`grid_name` moved
-out: `model_name` lives only in `composition.model.name`, `grid_name` moved onto `domain`
-since it's results-affecting — `SourceData` keys cache filenames off it. `ensemble_id` was
-removed entirely, a dead concept with no effect beyond a cosmetic name suffix. A v2→v3
-migration in `ForgeBlueprint.from_yaml`/`from_yaml_data` reproduces the old derived name
-bit-for-bit for existing files — see `migrate_forge_blueprint_data`.)
+Defined in `cstar_forge/forge/forge_blueprint.py`, which subclasses
+`cstar.orchestration.models.Blueprint` (as of 2026-07-23) — this is what makes forge a
+real C-Star application (see §3a below), not just a Pydantic model that happens to
+carry an `application` string. It's still the ONLY `cstar` import in this module —
+everything else in `forge/` stays free of `cstar_forge`'s authoring/host layer (see §4)
+— so it remains lightweight (no ROMS/MARBL build, no roms-tools) even though it's no
+longer literally cstar-free; `cstar-ocean` is a required pip dependency of this package
+regardless (see `pyproject.toml`).
+
+Top-level shape: `forge_blueprint_version` (int, bump only on breaking change;
+currently 4) · `application` (=`"forge"`, C-Star app discriminator, required by the
+`Blueprint` base) · `name`/`description` (required top-level fields on the `Blueprint`
+base; `name` is the single user-editable canonical name — `casename`/`working_dir`/
+`B_{name}.yaml`/netCDF stems all derive from it. Pre-2026-07-23 these lived under a
+now-removed `identity` sub-model; a v3→v4 migration in `ForgeBlueprint`'s
+`model_validator(mode="before")` flattens old files automatically — see
+`migrate_forge_blueprint_data`. `model_name`/`grid_name` live in
+`composition.model.name`/`domain.grid_name` since `grid_name` is results-affecting —
+`SourceData` keys cache filenames off it. `ensemble_id` was removed entirely long ago,
+a dead concept with no effect beyond a cosmetic name suffix; a v2→v3 migration
+(same before-validator) reproduces the old derived name bit-for-bit for those files.)
 · `run` (start/end date, model_reference_date) · `domain` (`grid_name`, grid_kwargs,
 topography_source, open_boundaries, partitioning, nesting) · `forcing` (flat: initial_conditions,
 surface/boundary/tidal/river lists, cdr_forcing, resolved_datasets) · `datasets`
 (host-independent list of resolved dataset keys) · `model_settings` (flat dict: cppdefs +
 ~35 namelist sections) · `code` (roms/marbl repos + `templates_compile_time`/`_run_time`
 repo refs) · `composition` (which catalog pieces produced this + overrides layer) ·
-`provenance` (generated_at, content_hash, notes).
+`provenance` (generated_at, content_hash, notes). The `Blueprint` base also adds
+`state`/`schema_version` (its own versioning metadata, distinct from
+`forge_blueprint_version`) and injects a `$schema` key on serialization (stripped back
+out on load by the same before-validator).
 
 - **`working_dir`** (default `~/cstar-forge-data`) is the single per-run artifact root —
   everything the executor *produces* lands under it. It's host/location, not
-  results-affecting, so it's excluded from `content_hash`.
+  results-affecting, so it's excluded from `content_hash`. Redeclared as `str` (the
+  `Blueprint` base's is `Path`) to preserve the sentinel-expansion behavior below —
+  see `ForgeBlueprint._resolve_out_dir`, which overrides the base's eager
+  `expanduser()`/`resolve()` for exactly this reason.
 - **`content_hash()`** — sha256 over everything *except* `forge_blueprint_version`,
-  `identity`, `composition`, `provenance`, `working_dir`, plus (as of 2026-07-09) each
+  `name`, `description`, `composition`, `provenance`, `working_dir`, `state`,
+  `schema_version`, `$schema` (see `_HASH_EXCLUDE`), plus (as of 2026-07-09) each
   code repo's `location` field (`code.roms`/`marbl`/`templates_compile_time`/
   `templates_run_time` — the fetch address, not the pinned commit/branch/files). Stamped
   on `to_yaml`; `verify_content_hash` warns (doesn't block) on a mismatched hand-edit at
   load. See §6 item 4 for the remaining piece (templates still pinned by branch, not
   commit).
+
+### 3a. Forge as a real C-Star application
+
+`cstar_forge/forge/app.py` (NOT part of the `forge/` boundary guarded by §4/
+`test_forge_app_boundary.py` — like `run.py`, it's disposable host-resolution glue)
+defines the three pieces the
+[C-Star custom-applications contract](https://c-star.readthedocs.io/en/latest/custom_applications.html)
+requires:
+
+- `ForgeRunner(BlueprintRunner[ForgeBlueprint])` — `run()` delegates to
+  `cstar_forge.run.process` (host resolution) → `process_forge_blueprint` →
+  `ensure_source_data`/`generate_inputs`/`configure_build`, then reports
+  `ExecutionStatus.COMPLETED`. Scope (2026-07, first cut): generates inputs and emits
+  the downstream `roms_marbl` blueprint (`B_{name}.yaml`), then stops — it does not
+  chain into actually running the ROMS-MARBL simulation; the existing `roms_marbl`
+  application consumes that blueprint separately.
+- `ForgeApplication` — `@register_application`-decorated `ApplicationDefinition`
+  wiring `ForgeBlueprint` + `ForgeRunner` together under `name = "forge"`.
+
+Discoverable via C-Star's `CSTAR_APP_MODULES` environment variable (comma-separated
+importable module paths, each imported before app lookup):
+
+```
+export CSTAR_APP_MODULES=cstar_forge.forge.app
+```
+
+which lets C-Star's own entrypoint run a forge blueprint directly (`cstar blueprint
+run forge_blueprint.yaml`), in addition to the existing `python -m cstar_forge.run`
+CLI. The app currently lives in this repo (not relocated into the C-Star repo) —
+deliberate, per §1's target: the blueprint/executor design is still iterating, so
+relocation stays a later step.
 
 ## 4. The call chain end to end
 
@@ -238,8 +293,10 @@ Ranked roughly by what's worth doing next:
    (physics/bgc) — inferred from the current template, not confirmed with a ROMS-MARBL
    domain expert, but no missing wiring was found. Both comments deleted; 488 tests still
    green.
-7. **Stale docstring** in `forge/forge_blueprint.py` (L42-44) still says "this module is not
-   yet wired into `ForgeExecutor`" — it has been for a while now; delete/update.
+7. ~~Stale docstring in `forge/forge_blueprint.py`~~ **DONE** (found already resolved
+   during the 2026-07-23 real-C-Star-application work, §3a): the module docstring
+   already says "fully wired into `ForgeExecutor`", not the old "not yet wired" text
+   this item described.
 8. **`examples/forge_blueprint.yaml` / `forge_blueprint2.yaml` / `forge_blueprint3.yaml`** still stamp
    `application: roms_marbl` (pre-rename); `forge_blueprint_new.yaml` and
    `docs/forge-blueprint-example.test-tiny.yaml` already say `forge`. Regenerate or delete the
@@ -250,6 +307,14 @@ Ranked roughly by what's worth doing next:
     `docs/architecture-decomposition-plan.md` and `docs/executor-portability-plan.md` had
     stale "proposal"/"executing" status headers even though the decomposition they describe
     is complete (see this guide for current state) — both status lines now point here.
+11. **Forge app relocation into C-Star not yet done** (2026-07-23, see §3a): `ForgeBlueprint`
+    is a real `cstar.orchestration.models.Blueprint` subclass and `cstar_forge/forge/app.py`
+    registers it with C-Star via `CSTAR_APP_MODULES`, but the app still lives in this repo
+    rather than in the C-Star repo's `cstar/applications/` — a deliberate, explicit choice
+    (the blueprint/executor design is still iterating); relocation is a follow-on once that
+    settles. Also open: `ForgeRunner.run()` calls the synchronous, heavy
+    `process_forge_blueprint` inline on the event loop (blocking it for the duration) rather
+    than via `asyncio.to_thread` — fine for a first cut, candidate refinement later.
 
 **Good news / already resolved that older memory implied was still open:**
 - A **settings-level** golden test exists: `test_golden_model_settings_test_tiny`

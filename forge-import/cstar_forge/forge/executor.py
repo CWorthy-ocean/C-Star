@@ -162,7 +162,7 @@ class ForgeExecutor(BaseModel):
 
     # User inputs
     description: str = "Generated blueprint"
-    name: str  # the blueprint's canonical name (ForgeBlueprint.identity.name, stored)
+    name: str  # the blueprint's canonical name (ForgeBlueprint.name, stored)
     grid_name: str  # results-affecting: SourceData keys its cache filenames off it
     grid_kwargs: dict[str, Any]
     grid_kwargs_parent: dict[str, Any] | None = Field(

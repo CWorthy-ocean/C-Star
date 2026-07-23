@@ -6,16 +6,19 @@ This is the *collection / curation* half of the planned split (see
 ``docs/forge-blueprint-inventory.md``). It is intentionally **dependency-light**: it
 reads the ModelSpec YAML directly and computes everything it can from plain inputs,
 so a UI backend or a user's laptop can assemble and review a config without ROMS /
-C-Star / roms_tools installed. The only value that needs a grid (``dt`` via the CFL
-criterion, which needs the grid spacing ``ds``) is optional: pass ``dt=`` to stay
-fully lightweight, or leave it ``None`` to have it computed (lazily importing
-``roms_tools`` + ``cstar_forge.forge.util``).
+roms_tools installed or built (``ForgeBlueprint`` itself now imports
+``cstar.orchestration.models.Blueprint`` -- ``cstar-ocean`` is a required pip
+dependency of this package regardless, see ``pyproject.toml``, so this doesn't add a
+new heavy install; it's the ROMS/MARBL build + roms_tools stack this stays free of).
+The only value that needs a grid (``dt`` via the CFL criterion, which needs the grid
+spacing ``ds``) is optional: pass ``dt=`` to stay fully lightweight, or leave it
+``None`` to have it computed (lazily importing ``roms_tools`` + ``cstar_forge.forge.util``).
 
 What this does NOT do (by design — it is host- and artifact-independent):
 * no machine / path resolution (Phase 2, on the run host),
 * no source downloads or grid/forcing file generation (Phase 2),
 * no ``s_coord`` / file paths / ``title`` / ``output_root_name`` (filled at
-  processing or derived from identity).
+  processing or derived from the blueprint's own ``name``).
 
 NOTE: the dataset registry below is a *snapshot* of ``cstar_forge.forge.source_data``
 mappings, duplicated here to keep this module importable without the heavy stack.
@@ -41,7 +44,6 @@ try:  # pragma: no cover - exercised both ways
         Domain,
         Forcing,
         ForgeBlueprint,
-        Identity,
         InitialConditions,
         OpenBoundaries,
         Partitioning,
@@ -66,7 +68,6 @@ except ImportError:  # pragma: no cover
         Domain,
         Forcing,
         ForgeBlueprint,
-        Identity,
         InitialConditions,
         OpenBoundaries,
         Partitioning,
@@ -386,8 +387,9 @@ def build_forge_blueprint(
     via :func:`read_cdr_forcing_yaml`. This is the wizard's upload path made
     resolver-native; a caller may pass either kwarg, not both meaningfully at once.
 
-    ``name`` is the blueprint's canonical name (``identity.name``); if omitted, this
-    computes and sanitizes the default (``{model_name}_{grid_name}_{n_procs}procs``).
+    ``name`` is the blueprint's canonical name (``ForgeBlueprint.name``, a top-level
+    field); if omitted, this computes and sanitizes the default
+    (``{model_name}_{grid_name}_{n_procs}procs``).
 
     ``model_reference_date`` is the ROMS model reference date (t=0), passed to every
     rt object that accepts it. If ``None`` (the default), ``RunWindow`` falls back to
@@ -628,10 +630,8 @@ def build_forge_blueprint(
 
     default_name = sanitize_name(f"{model_name}_{grid_name}_{npx * npy}procs")
     return ForgeBlueprint(
-        identity=Identity(
-            name=name or default_name,
-            description=description,
-        ),
+        name=name or default_name,
+        description=description,
         run=RunWindow(
             start_date=start_date,
             end_date=end_date,

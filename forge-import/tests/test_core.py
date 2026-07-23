@@ -18,6 +18,7 @@ Tests cover:
 - deep-merge helper
 """
 
+import asyncio
 import os
 import tempfile
 from datetime import datetime
@@ -30,13 +31,19 @@ import numpy as np
 import pytest
 import xarray as xr
 import yaml
+from cstar.applications.core import RunnerRequest
+from cstar.entrypoint.config import get_job_config, get_service_config
+from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Resource
 from pydantic import ValidationError
 
 import cstar_forge
 from cstar_forge import models as forge_models
 from cstar_forge.domain_catalog import default_catalog as _CATALOG
+from cstar_forge.forge.app import ForgeRunner
 from cstar_forge.forge.executor import ForgeExecutor, _deep_merge_settings_dict
+from cstar_forge.forge.forge_blueprint import ForgeBlueprint
+from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
@@ -291,7 +298,7 @@ class TestForgeExecutorProperties:
     """Tests for ForgeExecutor properties."""
 
     def test_name_property(self, minimal_cstar_spec_builder_args):
-        """Test the name property (now the stored ForgeBlueprint.identity.name,
+        """Test the name property (now the stored ForgeBlueprint.name,
         which defaults to {model_name}_{grid_name}_{n_procs}procs).
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
@@ -1663,6 +1670,157 @@ class TestGoldenNamelist:
             "review the diff, and commit the updated fixture; otherwise this is a "
             "regression."
         )
+
+
+class TestForgeRunnerEndToEnd:
+    """Proves forge is a real, C-Star-discoverable application (see
+    ``cstar_forge.forge.app.ForgeRunner``): drives ``ForgeRunner`` -- C-Star's own
+    ``BlueprintRunner``/``RunnerRequest`` machinery -- all the way down to real
+    ``ForgeExecutor.generate_inputs()``/``configure_build()``, the same
+    roms-tools-mocked chain ``TestGoldenNamelist`` exercises directly.
+
+    ``ForgeRunner.run()`` delegates to ``cstar_forge.run.process`` (the disposable
+    host-resolution glue), which this test intercepts to inject a fake ``HostPaths``
+    and an ``executor_factory`` that stands in ``src_data`` (avoiding real dataset
+    downloads) -- mirroring how ``TestGoldenNamelist`` swaps ``builder.src_data``
+    after construction. Everything else (``ForgeExecutor``, ``process_forge_blueprint``,
+    roms-tools construction classes) is real.
+    """
+
+    _GRID_KWARGS: ClassVar[dict] = TestGoldenNamelist._GRID_KWARGS
+    _BOUNDARIES: ClassVar[dict] = TestGoldenNamelist._BOUNDARIES
+    _PARTITIONING: ClassVar[dict] = TestGoldenNamelist._PARTITIONING
+
+    def _make_blueprint_yaml(self, tmp_path) -> Path:
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-tiny",
+            grid_kwargs=self._GRID_KWARGS,
+            open_boundaries=self._BOUNDARIES,
+            partitioning=self._PARTITIONING,
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            description="ForgeRunner e2e test",
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        bp_path = tmp_path / "forge_blueprint.yaml"
+        cfg.to_yaml(bp_path)
+        return bp_path
+
+    def test_forge_runner_generates_inputs_and_completes(self, mock_grid, tmp_path):
+        grid_mock = _create_grid_mock()
+        grid_mock.nx = self._GRID_KWARGS["nx"]
+        grid_mock.ny = self._GRID_KWARGS["ny"]
+        grid_mock.N = self._GRID_KWARGS["N"]
+        grid_mock.theta_s = self._GRID_KWARGS["theta_s"]
+        grid_mock.theta_b = self._GRID_KWARGS["theta_b"]
+        grid_mock.hc = self._GRID_KWARGS["hc"]
+        grid_mock.save.side_effect = TestGoldenNamelist._touch_save
+        mock_grid.return_value = grid_mock
+
+        bp_path = self._make_blueprint_yaml(tmp_path)
+        run_dir = tmp_path / "run"
+        fake_host = HostPaths(
+            working_dir=run_dir,
+            source_data_cache=run_dir,
+            system="test",
+            machine_config=None,
+        )
+
+        def fake_process(spec, **_kwargs):
+            def factory(cfg, host, verbose):
+                builder = ForgeExecutor.from_forge_blueprint(
+                    cfg, host=host, verbose=verbose
+                )
+                builder.src_data = TestGoldenNamelist._mock_source_data(tmp_path)
+                return builder
+
+            # ensure_data=False: skip real dataset staging (ForgeExecutor.ensure_source_data
+            # is exercised elsewhere; this test's scope is the ForgeRunner -> engine wiring).
+            return process_forge_blueprint(
+                spec,
+                host=fake_host,
+                executor_factory=factory,
+                use_dask=False,
+                ensure_data=False,
+            )
+
+        with (
+            patch("cstar_forge.run.process", side_effect=fake_process),
+            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
+            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
+            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
+            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch(
+                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                {"ERA5"},
+            ),
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+        ):
+            mock_ic_instance = MagicMock()
+            mock_ic_instance.save.side_effect = TestGoldenNamelist._touch_save_list
+            mock_ic.return_value = mock_ic_instance
+
+            mock_surface_instance = MagicMock()
+            mock_surface_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_surface_instance.use_coarse_grid = False
+            mock_surface.return_value = mock_surface_instance
+
+            mock_boundary_instance = MagicMock()
+            mock_boundary_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_boundary.return_value = mock_boundary_instance
+
+            mock_tidal_instance = MagicMock()
+            mock_tidal_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_tidal_instance.ntides = 15
+            mock_tidal.return_value = mock_tidal_instance
+
+            mock_river_instance = MagicMock()
+            mock_river_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_river_instance.ds = xr.Dataset(
+                {
+                    "river_volume": (["nriver", "time"], np.zeros((3, 2))),
+                    "river_tracer": (
+                        ["nriver", "time", "tracer"],
+                        np.zeros((3, 2, 2)),
+                    ),
+                }
+            )
+            mock_river.return_value = mock_river_instance
+
+            mock_cdr_instance = MagicMock()
+            mock_cdr_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_releases = MagicMock()
+            mock_releases.__len__.return_value = 2
+            mock_releases.release_type = "volume"
+            mock_cdr_instance.releases = mock_releases
+            mock_cdr.return_value = mock_cdr_instance
+
+            mock_render.return_value = {
+                "location": str(run_dir),
+                "filter": {"files": ["cppdefs.opt"]},
+                "branch": "main",
+            }
+
+            job_cfg = get_job_config()
+            service_cfg = get_service_config("INFO", name="ForgeRunnerTest")
+            request = RunnerRequest(str(bp_path), ForgeBlueprint)
+            runner = ForgeRunner(request, service_cfg, job_cfg)
+
+            asyncio.run(runner.execute())
+
+        assert runner.state.status == ExecutionStatus.COMPLETED, runner.result.errors
+        assert not runner.result.errors
+
+        namelist_path = run_dir / "builds" / "run-time" / "namelist.nml"
+        assert namelist_path.exists()
+
+        blueprint_yaml_paths = list((run_dir / "blueprints").glob("B_*.yaml"))
+        assert blueprint_yaml_paths, "expected an emitted roms_marbl B_{name}.yaml"
 
 
 class TestOnlyInputsReuseIsIdempotent:
