@@ -230,7 +230,7 @@ class LiveStep(Step):
 
     parent: t.Self | None = Field(default=None, exclude=True, frozen=True)
     """The step for which this step is a sub-task."""
-    working_dir: Path | None = Field(default=None, frozen=True)
+    working_dir: Path = Field(frozen=True)
     """The root directory where this step can write outputs."""
 
     @property
@@ -241,8 +241,6 @@ class LiveStep(Step):
         -------
         JobFileSystemManager
         """
-        if not self.working_dir:
-            raise RuntimeError
         return JobFileSystemManager(self.working_dir)
 
     @property
