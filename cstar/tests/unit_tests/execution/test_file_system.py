@@ -135,9 +135,9 @@ def test_live_step(tmp_path: Path) -> None:
     data_home = tmp_path / "data"
     run_id = "fake-run-id"
 
-    step_1 = Step(name="A", application="roms_marbl", blueprint=bp.as_posix())
-    step_2 = Step(name="B", application="roms_marbl", blueprint=bp.as_posix())
-    step_3 = Step(name="C", application="roms_marbl", blueprint=bp.as_posix())
+    step_1 = Step(name="A", application="roms_marbl", blueprint=bp)
+    step_2 = Step(name="B", application="roms_marbl", blueprint=bp)
+    step_3 = Step(name="C", application="roms_marbl", blueprint=bp)
 
     with mock.patch.dict(
         os.environ,

@@ -297,7 +297,7 @@ class LiveStep(Step):
         LiveStep
         """
         name = str(data.get("name", ""))
-        wd = t.cast("Path | str | None", data.get("working_dir", None))
+        wd = t.cast("Path | None", data.get("working_dir", None))
         parent = t.cast("Step | None", data.get("parent", None))
 
         if parent and not isinstance(parent, LiveStep):
@@ -316,20 +316,6 @@ class LiveStep(Step):
             data["working_dir"] = fsm.root_dir
 
         return data
-
-    @model_validator(mode="after")
-    def _model_validator_post(self) -> "LiveStep":
-        """Ensure string paths are converted to Path.
-
-        Returns
-        -------
-        LiveStep
-        """
-        object.__setattr__(
-            self, "working_dir", Path(self.working_dir) if self.working_dir else None
-        )
-        object.__setattr__(self, "blueprint_path", Path(self.blueprint_path))
-        return self
 
 
 class LiveWorkplan(Workplan):

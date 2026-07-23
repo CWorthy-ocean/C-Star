@@ -1,5 +1,3 @@
-import os
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -8,6 +6,7 @@ from typer.testing import CliRunner
 from cstar.cli.workplan.check import app
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     "workplan_name",
     ["fanout", "linear", "parallel", "single_step"],
@@ -15,7 +14,6 @@ from cstar.cli.workplan.check import app
 def test_cli_workplan_check_action_tpl(
     workplan_name: str,
     wp_templates_dir: Path,
-    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that CLI check action validates the stored templates.
 
@@ -29,9 +27,7 @@ def test_cli_workplan_check_action_tpl(
         Fixture returning the path to the directory containing workplan template files
     """
     template_file = f"{workplan_name}.yaml"
-    template_path = wp_templates_dir / template_file
-
-    wp_path = ready_workplan_paths(template_path)
+    wp_path = wp_templates_dir / template_file
 
     runner = CliRunner()
     result = runner.invoke(app, [wp_path.as_posix()], color=False)
@@ -104,6 +100,7 @@ def test_cli_workplan_check_file_bad_content(
     assert "is invalid" in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     "repo_relative_path",
     [
@@ -114,7 +111,6 @@ def test_cli_workplan_check_file_bad_content(
 def test_cli_workplan_check_valid_input(
     repo_relative_path: Path,
     package_path: Path,
-    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that a valid workplan passes the CLI check.
 
@@ -128,10 +124,7 @@ def test_cli_workplan_check_valid_input(
     package_path : Path
         Absolute path to the c-star package on disk
     """
-    wp_template = package_path / repo_relative_path
-    directory = wp_template.parent
-    os.chdir(directory)
-    wp_path = ready_workplan_paths(wp_template)
+    wp_path = package_path / repo_relative_path
 
     runner = CliRunner()
     result = runner.invoke(app, [wp_path.as_posix()], color=False)
@@ -204,6 +197,7 @@ def test_workplan_incomplete_input(
     assert "is invalid" in result.stderr, err_msg
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     ("start_removal", "end_removal"),
     [
@@ -226,7 +220,6 @@ def test_workplan_optional_input(
     end_removal: str | None,
     tmp_path: Path,
     wp_templates_dir: Path,
-    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that an incomplete workplan fails the CLI check.
 
@@ -246,8 +239,7 @@ def test_workplan_optional_input(
         The default bp path in template workplans; used to replace with a valid value.
     """
     wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = ready_workplan_paths(wp_template)
-    content = wp_path.read_text().splitlines()
+    content = wp_template.read_text().splitlines()
 
     remaining_content: list[str] = []
     cutting = False
@@ -288,6 +280,7 @@ def test_workplan_check_remote_workplan_dne() -> None:
     assert "not found" in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     "wp_uri",
     [

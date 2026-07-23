@@ -896,9 +896,6 @@ def test_workplan_yaml_deserialize(
     _ = serialize(yaml_path, plan)
 
     plan2 = deserialize(yaml_path, Workplan)
-    # todo: fix so this str conversion isn't required.
-    for step in plan.steps:
-        step.blueprint_path = str(step.blueprint_path)
 
     assert plan == plan2
 

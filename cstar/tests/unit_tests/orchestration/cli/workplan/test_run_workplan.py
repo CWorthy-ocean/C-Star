@@ -1,5 +1,4 @@
 import os
-from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -63,6 +62,7 @@ def test_workplan_run_remote_workplan_dne() -> None:
     assert "not found" in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     "wp_uri",
     [
@@ -90,9 +90,12 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
         )
     )
 
-    with mock.patch(
-        "cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag
-    ) as mock_exec:
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            mock_build_and_run_dag,
+        ) as mock_exec,
+    ):
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -235,10 +238,10 @@ def test_workplan_run_variable_validation_multi_value_mismatch(
     assert failed_validation in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_variable_multiple_sources(
     tmp_path: Path,
     wp_templates_dir: Path,
-    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that using the var and varfile parameter together results in a failure.
 
@@ -249,8 +252,7 @@ def test_workplan_run_variable_multiple_sources(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = ready_workplan_paths(wp_template)
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     varfile_path = tmp_path / "variables.env"
     varfile_path.write_text("key=value")
@@ -306,6 +308,7 @@ def test_workplan_run_variable_file_dne(
     assert "varfile" in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     "content",
     [
@@ -320,7 +323,6 @@ def test_workplan_run_variable_file_malformed(
     tmp_path: Path,
     wp_templates_dir: Path,
     content: str,
-    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that using a varfile with invalid content
 
@@ -331,8 +333,7 @@ def test_workplan_run_variable_file_malformed(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = ready_workplan_paths(wp_template)
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     varfile_path = tmp_path / "variables.env"
     varfile_path.write_text(content)
