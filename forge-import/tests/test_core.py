@@ -1088,15 +1088,15 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert call_kwargs["domain_name"] == builder.name
             assert call_kwargs["start_date"] == builder.start_date
             assert call_kwargs["end_date"] == builder.end_date
-            assert call_kwargs["netcdf_format"] == "NETCDF4"
+            assert call_kwargs["use_pio"] is False
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
-    def test_generate_inputs_use_pio_sets_classic_netcdf_format(
+    def test_generate_inputs_use_pio_forwards_use_pio(
         self,
         mock_input_data_class,
         minimal_cstar_spec_builder_args,
     ):
-        """With use_pio, inputs are written classic-format (CDF-5) for PnetCDF."""
+        """With use_pio, RomsMarblInputData is told to do its own CDF-5 conversion."""
         mock_input_data_instance = MagicMock()
         mock_roms_marbl_blueprint_elements = MagicMock()
         mock_roms_marbl_blueprint_elements.grid = MagicMock()
@@ -1115,7 +1115,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             builder.generate_inputs(clobber=True, test=True)
 
             call_kwargs = mock_input_data_class.call_args[1]
-            assert call_kwargs["netcdf_format"] == "NETCDF3_64BIT_DATA"
+            assert call_kwargs["use_pio"] is True
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_does_not_persist(

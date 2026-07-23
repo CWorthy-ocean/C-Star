@@ -804,20 +804,71 @@ class TestRomsMarblInputDataHelperMethods:
 
         assert result["correct_radiation"] is True  # Extra should override
 
-    def test_save_kwargs_empty_at_default_format(self, sample_roms_marbl_input_data):
-        """At the default format no format= kwarg is passed, so released
-        roms-tools (no such kwarg) keeps working when PIO is off.
-        """
-        assert sample_roms_marbl_input_data.netcdf_format == "NETCDF4"
-        assert sample_roms_marbl_input_data._save_kwargs == {}
+    def test_pio_mangle_noop_when_pio_off(self, sample_roms_marbl_input_data):
+        """With PIO off, _pio_mangle returns the path unchanged."""
+        assert sample_roms_marbl_input_data.use_pio is False
+        path = Path("/tmp/foo_grid.nc")
+        assert sample_roms_marbl_input_data._pio_mangle(path) == path
 
-    def test_save_kwargs_forwards_non_default_format(
+    def test_pio_mangle_inserts_nc4_token_when_pio_on(
         self, sample_roms_marbl_input_data
     ):
-        sample_roms_marbl_input_data.netcdf_format = "NETCDF3_64BIT_DATA"
-        assert sample_roms_marbl_input_data._save_kwargs == {
-            "format": "NETCDF3_64BIT_DATA"
-        }
+        sample_roms_marbl_input_data.use_pio = True
+        path = Path("/tmp/foo_grid.nc")
+        assert sample_roms_marbl_input_data._pio_mangle(path) == Path(
+            "/tmp/foo_grid_nc4.nc"
+        )
+
+    def test_pio_finalize_noop_when_pio_off(self, sample_roms_marbl_input_data):
+        result = ["/tmp/foo_grid.nc"]
+        assert sample_roms_marbl_input_data._pio_finalize(result) is result
+
+    def test_pio_finalize_converts_and_removes_nc4_token(
+        self, sample_roms_marbl_input_data, tmp_path
+    ):
+        """When PIO is on, _pio_finalize nccopy-converts the _nc4 file to the
+        de-mangled name and removes the _nc4 source.
+        """
+        sample_roms_marbl_input_data.use_pio = True
+        nc4_path = tmp_path / "foo_grid_nc4.nc"
+        nc4_path.touch()
+        final_path = tmp_path / "foo_grid.nc"
+
+        with patch("cstar_forge.forge.input_data.subprocess.run") as mock_run:
+
+            def _fake_nccopy(cmd, check):
+                Path(cmd[-1]).touch()
+
+            mock_run.side_effect = _fake_nccopy
+            result = sample_roms_marbl_input_data._pio_finalize(str(nc4_path))
+
+        mock_run.assert_called_once_with(
+            ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
+            check=True,
+        )
+        assert result == str(final_path)
+        assert not nc4_path.exists()
+        assert final_path.exists()
+
+    def test_pio_finalize_preserves_list_shape(
+        self, sample_roms_marbl_input_data, tmp_path
+    ):
+        sample_roms_marbl_input_data.use_pio = True
+        nc4_paths = [tmp_path / "a_nc4.nc", tmp_path / "b_nc4.nc"]
+        for p in nc4_paths:
+            p.touch()
+
+        with patch("cstar_forge.forge.input_data.subprocess.run") as mock_run:
+
+            def _fake_nccopy(cmd, check):
+                Path(cmd[-1]).touch()
+
+            mock_run.side_effect = _fake_nccopy
+            result = sample_roms_marbl_input_data._pio_finalize(
+                [str(p) for p in nc4_paths]
+            )
+
+        assert result == [str(tmp_path / "a.nc"), str(tmp_path / "b.nc")]
 
 
 class TestRomsMarblInputDataGeneration:
@@ -863,15 +914,18 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
+    @patch("cstar_forge.forge.input_data.subprocess.run")
     @patch("cstar_forge.forge.input_data.rt.Grid")
-    def test_generate_grid_forwards_netcdf_format(
-        self, mock_grid_class, sample_roms_marbl_input_data, tmp_path
+    def test_generate_grid_with_use_pio_converts_to_cdf5(
+        self, mock_grid_class, mock_run, sample_roms_marbl_input_data, tmp_path
     ):
-        """A non-default netcdf_format is forwarded to grid.save as format=."""
+        """With use_pio, grid.save writes to a _nc4-mangled name and the result is
+        nccopy-converted to the real target name; the _nc4 intermediate is removed.
+        """
         mock_grid = MagicMock()
         mock_grid_class.return_value = sample_roms_marbl_input_data.grid
         sample_roms_marbl_input_data.grid = mock_grid
-        sample_roms_marbl_input_data.netcdf_format = "NETCDF3_64BIT_DATA"
+        sample_roms_marbl_input_data.use_pio = True
 
         sample_roms_marbl_input_data.input_data_dir = (
             tmp_path / f"{sample_roms_marbl_input_data.domain_name}"
@@ -880,13 +934,33 @@ class TestRomsMarblInputDataGeneration:
 
         out_path = sample_roms_marbl_input_data._forcing_filename(input_name="grid")
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.touch()
+        nc4_path = out_path.with_name(out_path.stem + "_nc4" + out_path.suffix)
+
+        def _fake_save(path, *args, **kwargs):
+            Path(path).touch()  # simulate roms-tools writing the _nc4 file
+            return [str(path)]
+
+        mock_grid.save.side_effect = _fake_save
+
+        def _fake_nccopy(cmd, check):
+            Path(cmd[-1]).touch()  # simulate nccopy writing the final file
+
+        mock_run.side_effect = _fake_nccopy
 
         mock_ds = xr.Dataset({"var": (["x"], [1, 2, 3])})
         with patch("xarray.open_dataset", return_value=mock_ds):
             sample_roms_marbl_input_data._generate_grid()
 
-        assert mock_grid.save.call_args.kwargs["format"] == "NETCDF3_64BIT_DATA"
+        # roms-tools was pointed at the _nc4-mangled name, never at NETCDF3.
+        assert mock_grid.save.call_args.args[0] == nc4_path
+        assert "format" not in mock_grid.save.call_args.kwargs
+
+        mock_run.assert_called_once_with(
+            ["nccopy", "-k", "cdf5", str(nc4_path), str(out_path)],
+            check=True,
+        )
+        assert out_path.exists()
+        assert not nc4_path.exists()
 
     @patch("cstar_forge.forge.input_data.rt.InitialConditions")
     def test_generate_initial_conditions(
@@ -988,23 +1062,46 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
+    @patch("cstar_forge.forge.input_data.subprocess.run")
     @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
-    def test_generate_surface_forcing_forwards_netcdf_format(
-        self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
+    def test_generate_surface_forcing_with_use_pio_converts_to_cdf5(
+        self, mock_sf_class, mock_run, sample_roms_marbl_input_data, tmp_path
     ):
-        """A non-default netcdf_format is forwarded to save as format=."""
+        """With use_pio, SurfaceForcing.save writes to a _nc4-mangled name and the
+        result is nccopy-converted to the real target name.
+        """
         mock_sf = MagicMock()
-        surface_path = tmp_path / "surface.nc"
-        surface_path.touch()
-        mock_sf.save.return_value = surface_path
         mock_sf_class.return_value = mock_sf
-        sample_roms_marbl_input_data.netcdf_format = "NETCDF3_64BIT_DATA"
+        sample_roms_marbl_input_data.use_pio = True
+
+        out_path = sample_roms_marbl_input_data._forcing_filename(
+            input_name="surface-physics"
+        )
+        nc4_path = out_path.with_name(out_path.stem + "_nc4" + out_path.suffix)
+
+        def _fake_save(path, *args, **kwargs):
+            Path(path).touch()
+            return path
+
+        mock_sf.save.side_effect = _fake_save
+
+        def _fake_nccopy(cmd, check):
+            Path(cmd[-1]).touch()
+
+        mock_run.side_effect = _fake_nccopy
 
         sample_roms_marbl_input_data._generate_surface_forcing(
             key="forcing.surface", source={"name": "ERA5"}, type="physics"
         )
 
-        assert mock_sf.save.call_args.kwargs["format"] == "NETCDF3_64BIT_DATA"
+        assert mock_sf.save.call_args.args[0] == nc4_path
+        assert "format" not in mock_sf.save.call_args.kwargs
+        mock_run.assert_called_once_with(
+            ["nccopy", "-k", "cdf5", str(nc4_path), str(out_path)],
+            check=True,
+        )
+        assert out_path.exists()
+        assert not nc4_path.exists()
 
     @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_forwards_regrid_options(

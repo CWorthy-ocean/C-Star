@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import subprocess
 import time
 import warnings
 from collections.abc import Callable, Iterable
@@ -306,10 +307,13 @@ class RomsMarblInputData(InputData):
     grid_child: rt.Grid | None = None
     metadata_child: dict[str, Any] | None = None
     use_dask: bool = True
-    netcdf_format: str = "NETCDF4"
-    """NetCDF format forwarded to every roms-tools save (grid, IC, forcing,
-    nesting, partitioning). At the default ("NETCDF4") no ``format=`` kwarg is
-    passed, so released roms-tools (no such kwarg) keeps working."""
+    use_pio: bool = False
+    """Whether ROMS is built against ParallelIO. Every roms-tools save is left at
+    its default format (NETCDF4/HDF5 -- fast); when ``use_pio`` is True, each
+    output is additionally routed through :meth:`_pio_mangle`/:meth:`_pio_finalize`
+    to produce a CDF-5 (``NETCDF3_64BIT_DATA``) file via an ``nccopy -k cdf5``
+    subprocess instead of roms-tools' native (much slower at scale) CDF-5 writer.
+    Off by default; mirrors ``ForgeExecutor._use_pio``."""
     subchunk: bool = False
     """Interim/experimental (see ``glorys_subchunk.py``): when True, just-in-time
     build a kerchunk-subchunked reference for multi-file GLORYS sources and hand its
@@ -430,12 +434,53 @@ class RomsMarblInputData(InputData):
         self._settings_compile_time = {}
         self._settings_run_time = {}
 
-    @property
-    def _save_kwargs(self) -> dict[str, Any]:
-        """``format=`` for roms-tools save calls; omitted at the default so released
-        roms-tools (no format kwarg) keeps working when PIO is off.
+    def _pio_mangle(self, path: Path) -> Path:
+        """When ``use_pio``, insert an ``_nc4`` token before the final ``.nc`` suffix
+        of ``path`` so roms-tools writes its (fast, NETCDF4-default) output under a
+        distinct name -- leaving the real target name free for :meth:`_pio_finalize`
+        to claim only once the CDF-5 conversion has actually succeeded. A no-op when
+        PIO is off.
         """
-        return {} if self.netcdf_format == "NETCDF4" else {"format": self.netcdf_format}
+        if not self.use_pio:
+            return path
+        return path.with_name(path.stem + "_nc4" + path.suffix)
+
+    def _pio_finalize(self, result):
+        """Convert roms-tools' ``_nc4``-mangled NETCDF4 output(s) to CDF-5 in place
+        of roms-tools' own (much slower at scale) CDF-5 writer.
+
+        For each path in ``result`` (a single path, or a list/tuple of them --
+        the container shape is preserved), runs ``nccopy -k cdf5`` from the
+        ``_nc4``-mangled file to the corresponding de-mangled final name, then
+        deletes the ``_nc4`` source. De-mangling only touches the basename, so an
+        ``_nc4`` substring anywhere in the containing directory path is untouched.
+        Raises on a non-zero ``nccopy`` exit; the ``_nc4`` file is left in place
+        (and nothing is recorded as final) so a re-run regenerates cleanly. A no-op
+        (returns ``result`` unchanged) when PIO is off.
+        """
+        if not self.use_pio:
+            return result
+
+        is_scalar = not isinstance(result, (list, tuple))
+        entries = [result] if is_scalar else list(result)
+
+        finalized: list[str] = []
+        for entry in entries:
+            nc4_path = Path(entry)
+            if nc4_path.suffix != ".nc":
+                nc4_path = nc4_path.with_suffix(".nc")
+            final_path = nc4_path.with_name(nc4_path.name.replace("_nc4", "", 1))
+
+            with mem_log(f"pio_nccopy[{nc4_path.name}]", enabled=self.verbose):
+                subprocess.run(
+                    ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
+                    check=True,
+                )
+            nc4_path.unlink()
+
+            finalized.append(str(final_path))
+
+        return finalized[0] if is_scalar else finalized
 
     def generate_all(
         self,
@@ -596,11 +641,15 @@ class RomsMarblInputData(InputData):
         """
         True if this planned output is already on disk: exact path, or roms_tools-style
         suffixed files sharing the same stem (``stem*.nc``).
+
+        Excludes leftover ``_nc4``-mangled files (see ``_pio_mangle``): those are
+        the pre-nccopy intermediate from a prior run that didn't finish converting,
+        not a valid finished output, so they must not count as "already present".
         """
         if path.exists():
             return True
         pattern = f"{path.stem}*.nc"
-        return bool(list(path.parent.glob(pattern)))
+        return any("_nc4" not in p.name for p in path.parent.glob(pattern))
 
     def _should_reuse_existing_output(self, path: Path) -> bool:
         """Return True when this planned output already exists and clobber=False."""
@@ -615,6 +664,10 @@ class RomsMarblInputData(InputData):
         Some roms_tools writers produce suffixed outputs that share the same stem.
         For example, planning may include ``foo_surface-physics.nc`` while existing
         files are ``foo_surface-physics_0001.nc`` etc.
+
+        Excludes leftover ``_nc4``-mangled files (see ``_pio_mangle``): those are
+        the pre-nccopy intermediate from a prior run that didn't finish converting,
+        not a valid finished output.
         """
         if self._clobber:
             return []
@@ -624,7 +677,9 @@ class RomsMarblInputData(InputData):
             matches.append(path)
         else:
             pattern = f"{path.stem}_*.nc"
-            matches.extend(sorted(path.parent.glob(pattern)))
+            matches.extend(
+                sorted(p for p in path.parent.glob(pattern) if "_nc4" not in p.name)
+            )
 
         # De-duplicate while preserving order.
         unique: list[str] = []
@@ -870,7 +925,8 @@ class RomsMarblInputData(InputData):
             print(f"   ↪ Reusing existing file: {out_path}")
         else:
             with mem_log("grid.save", enabled=self.verbose):
-                self.grid.save(out_path, **self._save_kwargs)
+                grid_saved = self.grid.save(self._pio_mangle(out_path))
+                self._pio_finalize(grid_saved)
 
         out_path_nesting = None
         if self.grid_child is not None:
@@ -890,7 +946,10 @@ class RomsMarblInputData(InputData):
                 print(f"   ↪ Reusing existing file: {out_path_child}")
             else:
                 with mem_log("grid_child.save", enabled=self.verbose):
-                    self.grid_child.save(out_path_child, **self._save_kwargs)
+                    grid_child_saved = self.grid_child.save(
+                        self._pio_mangle(out_path_child)
+                    )
+                    self._pio_finalize(grid_child_saved)
 
             out_path_nesting = self._forcing_filename(input_name="nesting")
             if self._should_reuse_existing_output(out_path_nesting):
@@ -900,7 +959,6 @@ class RomsMarblInputData(InputData):
                 # defaults to false when we are making child boundary conditions, but it needs to be set to true in order to
                 # save the BGC variables.
                 nesting_kwargs = dict(self.metadata_child or {})
-                nesting_kwargs.update(self._save_kwargs)
                 has_marbl = bool(
                     (self._settings_compile_time.get("cppdefs") or {}).get(
                         "marbl", False
@@ -910,13 +968,15 @@ class RomsMarblInputData(InputData):
                     # ROMS-Tools: include_bgc=True sets output_vars to include "bgc" on nesting.nc.
                     nesting_kwargs.setdefault("include_bgc", True)
                 nesting_kwargs.setdefault("verbose", self.verbose)
+                out_path_nesting_mangled = self._pio_mangle(out_path_nesting)
                 with mem_log("make_nesting_info", enabled=self.verbose):
                     rt.make_nesting_info(
                         self.grid,
                         self.grid_child,
-                        str(out_path_nesting),
+                        str(out_path_nesting_mangled),
                         **nesting_kwargs,
                     )
+                    self._pio_finalize(out_path_nesting_mangled)
             self.roms_marbl_blueprint_elements.nesting_info = cstar_models.Dataset(
                 data=[Resource(location=str(out_path_nesting), partitioned=False)]
             )
@@ -1006,9 +1066,8 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
 
-            log.info("InitialConditions.save kwargs: %r", self._save_kwargs)
             with mem_log("InitialConditions.save", enabled=self.verbose):
-                paths = ic.save(output_path, **self._save_kwargs)
+                paths = self._pio_finalize(ic.save(self._pio_mangle(output_path)))
 
         # Append Resources directly to roms_marbl_blueprint_elements.initial_conditions
         if isinstance(paths, (list, tuple)):
@@ -1096,7 +1155,7 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
             with mem_log("SurfaceForcing.save", enabled=self.verbose):
-                paths = frc.save(output_path, **self._save_kwargs)
+                paths = self._pio_finalize(frc.save(self._pio_mangle(output_path)))
 
         if input_args["type"] == "restoring":
             if "sss" in input_args["restoring_forces"]:
@@ -1288,7 +1347,7 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
             with mem_log("BoundaryForcing.save", enabled=self.verbose):
-                paths = bry.save(output_path, **self._save_kwargs)
+                paths = self._pio_finalize(bry.save(self._pio_mangle(output_path)))
         # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
@@ -1373,7 +1432,7 @@ class RomsMarblInputData(InputData):
                     stacklevel=2,
                 )
             with mem_log("TidalForcing.save", enabled=self.verbose):
-                paths = tidal.save(output_path, **self._save_kwargs)
+                paths = self._pio_finalize(tidal.save(self._pio_mangle(output_path)))
 
         # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
@@ -1494,7 +1553,7 @@ class RomsMarblInputData(InputData):
             )
         else:
             with mem_log("RiverForcing.save", enabled=self.verbose):
-                paths = river.save(output_path, **self._save_kwargs)
+                paths = self._pio_finalize(river.save(self._pio_mangle(output_path)))
         # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
         if isinstance(paths, (list, tuple)):
             for path in paths:
@@ -1557,7 +1616,7 @@ class RomsMarblInputData(InputData):
             paths = [str(output_path)]
         else:
             with mem_log("CDRForcing.save", enabled=self.verbose):
-                paths = cdr.save(output_path, **self._save_kwargs)
+                paths = self._pio_finalize(cdr.save(self._pio_mangle(output_path)))
 
         # Normalize output paths to absolute strings so downstream template
         # settings can reliably embed full file locations.
@@ -1611,13 +1670,17 @@ class RomsMarblInputData(InputData):
 
         Uses the paths stored in `roms_marbl_blueprint_elements` to build the list of whole-field files,
         and records the partitioned paths in the Resource objects.
+
+        Always writes NETCDF4 (roms-tools' default) regardless of ``use_pio``: the
+        executor never passes ``partition_files=True`` alongside PIO today, so the
+        two don't co-occur. If that changes, tile outputs would need the same
+        ``_pio_mangle``/``_pio_finalize`` nccopy treatment as the whole-field saves.
         """
         input_args = dict(
             np_eta=self.partitioning.n_procs_y,
             np_xi=self.partitioning.n_procs_x,
             output_dir=self.input_data_dir,
             include_coarse_dims=self.include_coarse_dims,
-            **self._save_kwargs,
         )
 
         for function_key, _ in self.input_list:

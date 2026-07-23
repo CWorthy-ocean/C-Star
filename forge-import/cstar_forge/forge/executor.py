@@ -1355,7 +1355,7 @@ class ForgeExecutor(BaseModel):
                 use_dask=use_dask,
                 subchunk=subchunk,
                 stage_ic_sources=stage_ic_sources,
-                netcdf_format="NETCDF3_64BIT_DATA" if self._use_pio else "NETCDF4",
+                use_pio=self._use_pio,
                 verbose=self.verbose,
             ).generate_all(clobber=clobber, test=test, only=only)
         )
