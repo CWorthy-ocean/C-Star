@@ -10,7 +10,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from cstar.orchestration.models import KeyValueStore, Step, Workplan, WorkplanState
+from cstar.orchestration.models import (
+    DeferredBlueprintRef,
+    KeyValueStore,
+    Step,
+    Workplan,
+    WorkplanState,
+)
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 
@@ -1138,3 +1144,193 @@ def test_liveworkplan_step_lookup(
         assert s in live_plan
         # confirm __getitem__
         assert live_plan[s].name == s
+
+
+def test_deferred_blueprint_ref_parsing(fake_blueprint_path: Path) -> None:
+    """Verify a mapping in the blueprint field parses to a `DeferredBlueprintRef`
+    and other value types behave as before.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    deferred = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer", "filename": "generated.yaml"},
+            "depends_on": ["producer"],
+        },
+    )
+    assert deferred.is_deferred
+    assert isinstance(deferred.blueprint_path, DeferredBlueprintRef)
+    assert deferred.blueprint_path.from_step == "producer"
+    assert deferred.blueprint_path.filename == "generated.yaml"
+
+    concrete = Step(
+        name="concrete",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+    )
+    assert not concrete.is_deferred
+    assert isinstance(concrete.blueprint_path, Path)
+
+    missing = Step(
+        name="missing",
+        application="hello_world",
+        blueprint="does-not-exist.yaml",
+    )
+    assert not missing.is_deferred
+    assert isinstance(missing.blueprint_path, str)
+
+
+@pytest.mark.parametrize(
+    ("from_step", "filename"),
+    [
+        ("producer", None),
+        ("producer", "generated.yaml"),
+        ("step with spaces", "file with spaces.yaml"),
+        ("step/with/slashes", None),
+    ],
+)
+def test_deferred_blueprint_ref_uri_roundtrip(
+    from_step: str,
+    filename: str | None,
+) -> None:
+    """Verify the `step://` wire form of a deferred reference is reversible.
+
+    Parameters
+    ----------
+    from_step : str
+        The name of the producing step.
+    filename : str | None
+        An optional file name within the producing step's output directory.
+    """
+    ref = DeferredBlueprintRef(from_step=from_step, filename=filename)
+    uri = str(ref)
+
+    assert DeferredBlueprintRef.matches(uri)
+
+    parsed = DeferredBlueprintRef.from_uri(uri)
+    assert parsed.from_step == from_step
+    assert parsed.filename == filename
+
+
+def test_deferred_blueprint_ref_from_uri_rejects_other_schemes() -> None:
+    """Verify parsing a non-deferred URI raises an error."""
+    with pytest.raises(ValueError, match="Not a deferred blueprint URI"):
+        _ = DeferredBlueprintRef.from_uri("https://example.com/blueprint.yaml")
+
+
+def test_workplan_deferred_unknown_producer(fake_blueprint_path: Path) -> None:
+    """Verify a deferred blueprint referencing a step that is not in the
+    workplan is rejected.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    producer = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "no-such-step"},
+            "depends_on": ["producer"],
+        },
+    )
+
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(
+            name="test-plan",
+            description="test-description",
+            steps=[producer, consumer],
+        )
+
+    assert "unknown" in str(error.value)
+    assert "no-such-step" in str(error.value)
+
+
+def test_workplan_deferred_producer_not_dependency(
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a deferred blueprint whose producer is not listed in the step's
+    `depends_on` is rejected.
+
+    Parameters
+    ----------
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    producer = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer"},
+        },
+    )
+
+    with pytest.raises(ValidationError) as error:
+        _ = Workplan(
+            name="test-plan",
+            description="test-description",
+            steps=[producer, consumer],
+        )
+
+    assert "depends_on" in str(error.value)
+
+
+def test_workplan_deferred_roundtrip(
+    tmp_path: Path,
+    fake_blueprint_path: Path,
+) -> None:
+    """Verify a workplan with a deferred blueprint serializes and deserializes
+    without losing the reference type.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    fake_blueprint_path : Path
+        A path to a file that meets minimum expectations (it exists).
+    """
+    producer = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=fake_blueprint_path,
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer", "filename": "generated.yaml"},
+            "depends_on": ["producer"],
+        },
+    )
+    plan = Workplan(
+        name="test-plan",
+        description="test-description",
+        steps=[producer, consumer],
+    )
+
+    wp_path = tmp_path / "deferred_wp.yaml"
+    assert serialize(wp_path, plan)
+
+    reloaded = deserialize(wp_path, Workplan)
+    reloaded_consumer = next(s for s in reloaded.steps if s.name == "consumer")
+
+    assert reloaded_consumer.is_deferred
+    assert isinstance(reloaded_consumer.blueprint_path, DeferredBlueprintRef)
+    assert reloaded_consumer.blueprint_path.from_step == "producer"
+    assert reloaded_consumer.blueprint_path.filename == "generated.yaml"

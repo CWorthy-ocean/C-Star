@@ -27,7 +27,13 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
-from cstar.orchestration.models import Blueprint, ConfiguredBaseModel, Step, Workplan
+from cstar.orchestration.models import (
+    Blueprint,
+    ConfiguredBaseModel,
+    DeferredBlueprintRef,
+    Step,
+    Workplan,
+)
 from cstar.orchestration.serialization import (
     deserialize,
     intenum_representer,
@@ -244,8 +250,15 @@ class LiveStep(Step):
         return JobFileSystemManager(self.working_dir)
 
     @property
-    def blueprint(self) -> Blueprint:
-        """Load and return the blueprint associated with this step."""
+    def blueprint(self) -> Blueprint | None:
+        """Load and return the blueprint associated with this step.
+
+        Returns `None` for a deferred blueprint, which does not exist
+        until its producing step has run.
+        """
+        if isinstance(self.blueprint_path, DeferredBlueprintRef):
+            return None
+
         path = Path(self.blueprint_path)
         app = get_app_for_blueprint(path)
 

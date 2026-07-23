@@ -298,6 +298,20 @@ class Transform(t.Protocol, t.Generic[TTransformable]):
         """
         ...
 
+    @classmethod
+    def is_active(cls) -> bool:
+        """Return `True` when the transform will modify steps under the
+        current configuration.
+
+        Transforms gated behind feature flags override this to report
+        their effective state.
+
+        Returns
+        -------
+        bool
+        """
+        return True
+
 
 TRunner = t.TypeVar("TRunner")
 
