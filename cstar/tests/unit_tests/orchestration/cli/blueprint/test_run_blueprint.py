@@ -20,6 +20,7 @@ from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.transforms import ApplyOverridesDirective
 from cstar.roms.simulation import ROMSSimulation
 
 
@@ -231,3 +232,113 @@ def test_blueprint_run_apply_directives(
         )
 
     mock_exec_runner.assert_called_once()
+
+
+def test_blueprint_run_deferred_blueprint(
+    tmp_path: Path,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify a `step://` URI is resolved against the producing step's output
+    directory and the generated blueprint is executed with the packaged
+    overrides applied.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = LiveStep(
+        name="producer",
+        application="hello_world",
+        blueprint=(tmp_path / "unused.yaml").as_posix(),
+        working_dir=tmp_path / "producer",
+    )
+    producer.fsm.output_dir.mkdir(parents=True, exist_ok=True)
+    generated = producer.fsm.output_dir / "generated.yaml"
+    generated.write_text(hello_world_bp_content)
+
+    consumer = LiveStep.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer", "filename": "generated.yaml"},
+            "depends_on": ["producer"],
+            "working_dir": tmp_path / "consumer",
+            "directives": {
+                ApplyOverridesDirective.key(): {
+                    ApplyOverridesDirective.KEY_OVERRIDES: {
+                        "target": "@overridden-target",
+                        "working_dir": (tmp_path / "consumer").as_posix(),
+                    },
+                    ApplyOverridesDirective.KEY_APPLICATION: "hello_world",
+                },
+            },
+        },
+    )
+    directive_path = prepare_directive_file(consumer)
+
+    live_plan = LiveWorkplan(
+        name="deferred-run",
+        description="a live workplan providing producer-step context",
+        steps=[producer],
+    )
+
+    with mock.patch(
+        "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+        mock.Mock(return_value=live_plan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                str(consumer.blueprint_path),
+                ARG_DIRECTIVES_URI_LONG,
+                directive_path.as_posix(),
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Hello, @overridden-target" in result.stdout
+
+
+def test_blueprint_run_deferred_blueprint_unresolvable(
+    tmp_path: Path,
+) -> None:
+    """Verify a `step://` URI that cannot be resolved fails with a clear
+    error and a non-zero exit code.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    """
+    producer = LiveStep(
+        name="producer",
+        application="hello_world",
+        blueprint=(tmp_path / "unused.yaml").as_posix(),
+        working_dir=tmp_path / "producer",
+    )
+    producer.fsm.output_dir.mkdir(parents=True, exist_ok=True)
+
+    live_plan = LiveWorkplan(
+        name="deferred-run",
+        description="a live workplan providing producer-step context",
+        steps=[producer],
+    )
+
+    with mock.patch(
+        "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+        mock.Mock(return_value=live_plan),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["step://producer/never-generated.yaml"],
+            color=False,
+        )
+
+    assert result.exit_code == 1
+    assert "Unable to resolve deferred blueprint" in result.stdout
