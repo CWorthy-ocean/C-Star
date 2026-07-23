@@ -313,7 +313,6 @@ class LiveStep(Step):
 
         if wd:
             data["working_dir"] = wd
-            fsm = JobFileSystemManager(Path(wd))
         else:
             root_fsm = JobFileSystemManager(StateDirectoryManager.data_dir())
             fsm = root_fsm.get_subtask_manager(name)
