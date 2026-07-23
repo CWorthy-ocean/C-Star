@@ -15,6 +15,7 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.exceptions import CstarError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
@@ -26,12 +27,12 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.models import DeferredBlueprintRef
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import (
-    Directive,
     DirectiveConfig,
-    OverrideTransform,
+    OverrideDirective,
     SplitFrequency,
     get_time_slices,
 )
@@ -50,6 +51,16 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         """Initialize the transform instance."""
         freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
         self.frequency = freq_config.lower()
+
+    @classmethod
+    def is_active(cls) -> bool:
+        """Return `True` when time splitting is enabled via feature flag.
+
+        Returns
+        -------
+        bool
+        """
+        return is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT)
 
     def get_subtask_name(
         self,
@@ -91,6 +102,13 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         """
         if not is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             return [step]
+
+        if isinstance(step.blueprint_path, DeferredBlueprintRef):
+            msg = (
+                f"Cannot split step {step.name!r}: its deferred blueprint "
+                "does not exist at schedule time"
+            )
+            raise CstarError(msg)
 
         blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
         start_date = blueprint.runtime_params.start_date
@@ -602,37 +620,6 @@ class BoundaryFileTrxAdapter:
                 },
             },
         }
-
-
-class OverrideDirective(Directive, OverrideTransform):
-    _overrides: dict[str, t.Any]
-
-    def __init__(
-        self,
-        config: dict[str, t.Any],
-        *,
-        workplan: LiveWorkplan | None = None,
-    ) -> None:
-        """Initialize the instance.
-
-        Parameters
-        ----------
-        config : dict[str, t.Any] | None
-            A dictionary containing configuration for the directive.
-        workplan : LiveWorkplan | None
-            The workplan instance containing contextual information for the directive.
-        """
-        Directive.__init__(self, config, workplan=workplan)
-        OverrideTransform.__init__(self, self._generate_overrides())
-
-    def _generate_overrides(self) -> dict[str, t.Any]:
-        """Generate any system overrides required by the directive.
-
-        Returns
-        -------
-        dict[str, t.Any]
-        """
-        return {}
 
 
 class ContinuanceDirective(OverrideDirective):

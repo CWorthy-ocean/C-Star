@@ -9,6 +9,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import (
     ContinuanceDirective,
@@ -17,18 +18,21 @@ from cstar.applications.roms_marbl.transforms import (
     RomsMarblTimeSplitter,
 )
 from cstar.base.env import FLAG_OFF
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.orchestration.models import (
     Application,
     BlueprintState,
+    DeferredBlueprintRef,
     Step,
     UserDefinedVariables,
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
+    ApplyOverridesDirective,
     OverrideTransform,
     TemplateFillTransform,
     WorkplanTransformer,
@@ -37,6 +41,7 @@ from cstar.orchestration.transforms import (
     get_system_overrides,
     get_transforms,
     mustache,
+    resolve_deferred_blueprint,
 )
 
 
@@ -1186,3 +1191,468 @@ def test_apply_automatic_overrides(
 
     # the mocked system overrides should be applied
     assert step.blueprint.state == value
+
+
+@pytest.fixture
+def deferred_workplan(hello_world_bp_path: Path) -> Workplan:
+    """Generate a workplan whose second step defers its blueprint to the first.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+
+    Returns
+    -------
+    Workplan
+    """
+    producer = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer", "filename": "generated.yaml"},
+            "depends_on": ["producer"],
+            "blueprint_overrides": {"target": "@overridden"},
+        },
+    )
+
+    return Workplan(
+        name="deferred-workplan",
+        description="A workplan with a deferred blueprint.",
+        steps=[producer, consumer],
+    )
+
+
+def test_workplan_transformer_deferred_step(deferred_workplan: Workplan) -> None:
+    """Verify the transformer skips blueprint reads for a deferred step and
+    packages its overrides into an `apply-overrides` directive.
+
+    Parameters
+    ----------
+    deferred_workplan : Workplan
+        A workplan whose second step defers its blueprint to the first.
+    """
+    transformer = WorkplanTransformer(deferred_workplan)
+    transformed = transformer.apply()
+
+    assert len(transformed.steps) == 2
+
+    consumer = t.cast(
+        "LiveStep",
+        next(s for s in transformed.steps if s.name == "consumer"),
+    )
+
+    # the deferred reference survives transformation untouched
+    assert consumer.is_deferred
+    ref = t.cast("DeferredBlueprintRef", consumer.blueprint_path)
+    assert ref.from_step == "producer"
+
+    # user overrides moved out of the step and into the runtime directive
+    assert not consumer.blueprint_overrides
+    directives = t.cast("dict[str, dict[str, t.Any]]", consumer.directives)
+    assert ApplyOverridesDirective.key() in directives
+
+    config = directives[ApplyOverridesDirective.key()]
+    overrides = config[ApplyOverridesDirective.KEY_OVERRIDES]
+    assert overrides["target"] == "@overridden"
+
+    # the system working_dir override is deferred to runtime as well
+    assert overrides["working_dir"] == consumer.fsm.root_dir.as_posix()
+
+    # the declared application is packaged for the runtime mismatch check
+    assert config[ApplyOverridesDirective.KEY_APPLICATION] == "hello_world"
+
+
+def test_workplan_transformer_deferred_untouched_by_producer_transform(
+    deferred_workplan: Workplan,
+) -> None:
+    """Verify the producer step is transformed normally while the deferred
+    consumer is left for runtime resolution.
+
+    Parameters
+    ----------
+    deferred_workplan : Workplan
+        A workplan whose second step defers its blueprint to the first.
+    """
+    transformer = WorkplanTransformer(deferred_workplan)
+    transformed = transformer.apply()
+
+    producer = next(s for s in transformed.steps if s.name == "producer")
+
+    # the producer blueprint was baked into an override copy as usual
+    assert OverrideTransform.suffix() in str(producer.blueprint_path)
+    assert Path(producer.blueprint_path).exists()
+
+
+def test_workplan_transformer_deferred_active_transform_raises(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify that a deferred step whose application has an active transform
+    is rejected at schedule time.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    producer = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": Application.ROMS_MARBL.value,
+            "blueprint": {"from_step": "producer"},
+            "depends_on": ["producer"],
+        },
+    )
+    wp = Workplan(
+        name="deferred-workplan",
+        description="A workplan with a deferred roms-marbl blueprint.",
+        steps=[producer, consumer],
+    )
+
+    with mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: "1"}):
+        transformer = WorkplanTransformer(wp)
+
+        with pytest.raises(CstarExpectationFailed) as error:
+            _ = transformer.apply()
+
+    assert "deferred" in str(error.value)
+    assert RomsMarblTimeSplitter.__name__ in str(error.value)
+
+
+def test_workplan_transformer_deferred_inactive_transform_ok(
+    hello_world_bp_path: Path,
+    test_bp_path: Path,
+    bp_templates_dir: Path,
+) -> None:
+    """Verify that a deferred roms-marbl step is permitted when the time
+    splitter feature flag is disabled.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    test_bp_path : Path
+        Default path for writing a blueprint into the test output directory.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint templates.
+    """
+    producer = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": Application.ROMS_MARBL.value,
+            "blueprint": {"from_step": "producer"},
+            "depends_on": ["producer"],
+        },
+    )
+    wp = Workplan(
+        name="deferred-workplan",
+        description="A workplan with a deferred roms-marbl blueprint.",
+        steps=[producer, consumer],
+    )
+
+    with mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_OFF}):
+        transformed = WorkplanTransformer(wp).apply()
+
+    consumer_trx = next(s for s in transformed.steps if s.name == "consumer")
+    assert consumer_trx.is_deferred
+
+
+def test_apply_overrides_directive(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify the directive applies packaged overrides to a blueprint at runtime.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="directive-step",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "wd",
+    )
+
+    config: dict[str, t.Any] = {
+        ApplyOverridesDirective.KEY_OVERRIDES: {"target": "@overridden"},
+        ApplyOverridesDirective.KEY_APPLICATION: "hello_world",
+    }
+    directive = ApplyOverridesDirective(config)
+    transformed = directive(step)[0]
+
+    assert Path(transformed.blueprint_path) != hello_world_bp_path
+
+    bp = deserialize(Path(transformed.blueprint_path), HelloWorldBlueprint)
+    assert bp.target == "@overridden"
+
+
+def test_apply_overrides_directive_application_mismatch(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify the directive rejects a blueprint whose application differs from
+    the one declared by the step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="directive-step",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "wd",
+    )
+
+    config: dict[str, t.Any] = {
+        ApplyOverridesDirective.KEY_OVERRIDES: {"target": "@overridden"},
+        ApplyOverridesDirective.KEY_APPLICATION: "plotter",
+    }
+    directive = ApplyOverridesDirective(config)
+
+    with pytest.raises(CstarExpectationFailed) as error:
+        _ = directive(step)
+
+    assert "hello_world" in str(error.value)
+    assert "plotter" in str(error.value)
+
+
+def test_apply_overrides_directive_requires_overrides() -> None:
+    """Verify the directive rejects configuration without an overrides mapping."""
+    with pytest.raises(ValueError, match="overrides"):
+        _ = ApplyOverridesDirective({"application": "hello_world"})
+
+
+@pytest.fixture
+async def deferred_run_context(
+    tmp_path: Path,
+    mock_run_id: str,
+    hello_world_bp_path: Path,
+) -> LiveWorkplan:
+    """Persist a WorkplanRun and transformed workplan so deferred blueprint
+    resolution can locate the producer step at runtime.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+
+    Returns
+    -------
+    LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    """
+    producer = LiveStep(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "producer",
+    )
+    live_plan = LiveWorkplan(
+        name="deferred-run",
+        description="A workplan for deferred blueprint resolution.",
+        steps=[producer],
+    )
+
+    trx_wp_path = tmp_path / "deferred_run_trx.yaml"
+    assert serialize(trx_wp_path, live_plan)
+
+    repo = TrackingRepository()
+    await repo.put_workplan_run(
+        WorkplanRun(
+            workplan_path=tmp_path / "deferred_run.yaml",
+            trx_workplan_path=trx_wp_path,
+            output_path=tmp_path,
+            run_id=mock_run_id,
+        ),
+    )
+
+    producer.fsm.output_dir.mkdir(parents=True, exist_ok=True)
+    return live_plan
+
+
+async def test_resolve_deferred_blueprint_by_filename(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify resolution locates the named blueprint in the producer output.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    generated = producer.fsm.output_dir / "generated.yaml"
+    generated.write_text(hello_world_bp_content)
+
+    # a decoy that would make auto-discovery ambiguous but not filename matching
+    (producer.fsm.output_dir / "other.yaml").write_text(hello_world_bp_content)
+
+    ref = DeferredBlueprintRef(from_step="producer", filename="generated.yaml")
+    assert resolve_deferred_blueprint(ref) == generated
+
+
+async def test_resolve_deferred_blueprint_auto_discovery(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify resolution finds a single blueprint without a filename.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    generated = producer.fsm.output_dir / "anything.yaml"
+    generated.write_text(hello_world_bp_content)
+
+    ref = DeferredBlueprintRef(from_step="producer")
+    assert resolve_deferred_blueprint(ref) == generated
+
+
+async def test_resolve_deferred_blueprint_ambiguous(
+    deferred_run_context: LiveWorkplan,
+    hello_world_bp_content: str,
+) -> None:
+    """Verify resolution fails when multiple candidates exist and no filename
+    is specified.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    hello_world_bp_content : str
+        The content of a minimal hello-world blueprint.
+    """
+    producer = deferred_run_context["producer"]
+    (producer.fsm.output_dir / "one.yaml").write_text(hello_world_bp_content)
+    (producer.fsm.output_dir / "two.yaml").write_text(hello_world_bp_content)
+
+    ref = DeferredBlueprintRef(from_step="producer")
+
+    with pytest.raises(CstarError, match="Multiple candidate blueprints"):
+        _ = resolve_deferred_blueprint(ref)
+
+
+async def test_resolve_deferred_blueprint_missing(
+    deferred_run_context: LiveWorkplan,
+) -> None:
+    """Verify resolution fails when the producer did not generate a blueprint.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    """
+    ref = DeferredBlueprintRef(from_step="producer", filename="generated.yaml")
+
+    with pytest.raises(CstarError, match="did not produce"):
+        _ = resolve_deferred_blueprint(ref)
+
+
+async def test_resolve_deferred_blueprint_unknown_step(
+    deferred_run_context: LiveWorkplan,
+) -> None:
+    """Verify resolution fails when the reference names an unknown step.
+
+    Parameters
+    ----------
+    deferred_run_context : LiveWorkplan
+        The persisted, transformed workplan containing the producer step.
+    """
+    ref = DeferredBlueprintRef(from_step="no-such-step")
+
+    with pytest.raises(CstarError, match="does not exist in the workplan"):
+        _ = resolve_deferred_blueprint(ref)
+
+
+def test_resolve_deferred_blueprint_requires_run_context() -> None:
+    """Verify resolution fails with a clear error when no run-id is configured."""
+    ref = DeferredBlueprintRef(from_step="producer")
+
+    with (
+        mock.patch.dict(os.environ, {}, clear=True),
+        pytest.raises(RuntimeError, match="run-id"),
+    ):
+        _ = resolve_deferred_blueprint(ref)
+
+
+def test_workplan_transformer_deferred_split_producer_raises(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> None:
+    """Verify that a deferred blueprint referencing a producer that is split
+    into sub-steps is rejected at schedule time.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint templates.
+    """
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_content = bp_tpl_path.read_text()
+    bp_content = bp_content.replace(
+        "working_dir: .",
+        f"working_dir: {tmp_path.as_posix()}",
+    )
+    bp_path.write_text(bp_content)
+
+    producer = Step(
+        name="producer",
+        application=Application.ROMS_MARBL.value,
+        blueprint=bp_path.as_posix(),
+    )
+    consumer = Step.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer"},
+            "depends_on": ["producer"],
+        },
+    )
+    wp = Workplan(
+        name="deferred-split-workplan",
+        description="A deferred blueprint referencing a split producer.",
+        steps=[producer, consumer],
+    )
+
+    with (
+        mock.patch.dict(os.environ, {ENV_FF_ORCH_TRX_TIMESPLIT: "1"}),
+        pytest.raises(CstarExpectationFailed, match="split"),
+    ):
+        _ = WorkplanTransformer(wp).apply()

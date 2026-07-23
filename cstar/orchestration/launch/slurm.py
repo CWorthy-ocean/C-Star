@@ -92,6 +92,33 @@ class SlurmHandle(ProcessHandle):
     """The launcher used to launch the process."""
 
 
+def resolve_cpus(step: "LiveStep") -> int:
+    """Determine the number of CPUs to allocate for a step.
+
+    An explicit `compute_overrides["cpus"]` declaration wins; otherwise the
+    blueprint's `cpus_needed` is used. A deferred blueprint with no
+    declaration defaults to 1, so the workplan author is responsible for
+    predicting the cpu needs of a deferred step.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step being submitted.
+
+    Returns
+    -------
+    int
+        The number of CPUs to request from the scheduler.
+    """
+    if (cpus_override := step.compute_overrides.get("cpus")) is not None:
+        return int(t.cast("str | float", cpus_override))
+
+    if (blueprint := step.blueprint) is not None:
+        return blueprint.cpus_needed
+
+    return 1
+
+
 class SlurmLauncher(Launcher[SlurmHandle]):
     """A launcher that executes steps in a SLURM-enabled cluster."""
 
@@ -160,9 +187,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        if not step.blueprint:
+        if step.blueprint is None and not step.is_deferred:
             msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
             raise CstarError(msg)
+
+        cpus = resolve_cpus(step)
 
         job_name = step.safe_name
         job_dep_ids = [d.pid for d in dependencies]
@@ -182,7 +211,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),
-            cpus=step.blueprint.cpus_needed,
+            cpus=cpus,
             nodes=None,  # let existing logic handle this
             cpus_per_node=None,  # let existing logic handle this
             script_path=script_path,

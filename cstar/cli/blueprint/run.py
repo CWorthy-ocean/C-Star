@@ -15,6 +15,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     get_env_item,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.feature import ENV_FF_CLI_BP_MIGRATE_AUTO, is_feature_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
@@ -39,8 +40,9 @@ from cstar.entrypoint.utils import (
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
+from cstar.orchestration.models import DeferredBlueprintRef
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
-from cstar.orchestration.transforms import DirectiveConfig
+from cstar.orchestration.transforms import DirectiveConfig, resolve_deferred_blueprint
 from cstar.system.migration import CStarMigrationNotRegisteredError
 
 if t.TYPE_CHECKING:
@@ -75,6 +77,10 @@ def path_callback(
     str
         The path to the blueprint (or the newly migrated blueprint file).
     """
+    if DeferredBlueprintRef.matches(path):
+        # the blueprint does not exist yet; it is resolved at runtime
+        return path
+
     try:
         with local_copy(path) as local_path:
             bp_path = local_path
@@ -187,6 +193,17 @@ def run(
     ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
+    if DeferredBlueprintRef.matches(uri):
+        ref = DeferredBlueprintRef.from_uri(uri)
+        try:
+            uri = str(resolve_deferred_blueprint(ref))
+        except (CstarError, RuntimeError) as ex:
+            print(f"Unable to resolve deferred blueprint: {ex}")
+            raise typer.Exit(code=1) from ex
+
+        msg = f"Resolved deferred blueprint from step {ref.from_step!r} to {uri!r}"
+        log.info(msg)
+
     bp_path = Path(uri)
     app_config = get_app_for_blueprint(bp_path)
 
