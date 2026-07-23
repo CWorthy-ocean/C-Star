@@ -1,3 +1,5 @@
+import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -11,9 +13,9 @@ from cstar.cli.workplan.check import app
     ["fanout", "linear", "parallel", "single_step"],
 )
 def test_cli_workplan_check_action_tpl(
-    tmp_path: Path,
     workplan_name: str,
     wp_templates_dir: Path,
+    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that CLI check action validates the stored templates.
 
@@ -29,8 +31,7 @@ def test_cli_workplan_check_action_tpl(
     template_file = f"{workplan_name}.yaml"
     template_path = wp_templates_dir / template_file
 
-    wp_path = tmp_path / template_file
-    wp_path.write_text(template_path.read_text())
+    wp_path = ready_workplan_paths(template_path)
 
     runner = CliRunner()
     result = runner.invoke(app, [wp_path.as_posix()], color=False)
@@ -113,6 +114,7 @@ def test_cli_workplan_check_file_bad_content(
 def test_cli_workplan_check_valid_input(
     repo_relative_path: Path,
     package_path: Path,
+    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that a valid workplan passes the CLI check.
 
@@ -126,7 +128,10 @@ def test_cli_workplan_check_valid_input(
     package_path : Path
         Absolute path to the c-star package on disk
     """
-    wp_path = package_path / repo_relative_path
+    wp_template = package_path / repo_relative_path
+    directory = wp_template.parent
+    os.chdir(directory)
+    wp_path = ready_workplan_paths(wp_template)
 
     runner = CliRunner()
     result = runner.invoke(app, [wp_path.as_posix()], color=False)
@@ -152,7 +157,7 @@ def test_workplan_incomplete_input(
     start_removal: str,
     end_removal: str | None,
     tmp_path: Path,
-    package_path: Path,
+    wp_templates_dir: Path,
 ) -> None:
     """Verify that an incomplete workplan fails the CLI check.
 
@@ -169,7 +174,7 @@ def test_workplan_incomplete_input(
     package_path : Path
         Absolute path to the c-star package on disk
     """
-    wp_path = package_path / "cstar/additional_files/templates/wp/workplan.yaml"
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     content = wp_path.read_text().splitlines()
     remaining_content: list[str] = []
@@ -220,7 +225,8 @@ def test_workplan_optional_input(
     start_removal: str,
     end_removal: str | None,
     tmp_path: Path,
-    package_path: Path,
+    wp_templates_dir: Path,
+    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that an incomplete workplan fails the CLI check.
 
@@ -236,10 +242,13 @@ def test_workplan_optional_input(
         Temporary directory to read/write test inputs and outputs
     package_path : Path
         Absolute path to the c-star package on disk
+    default_blueprint_path : str
+        The default bp path in template workplans; used to replace with a valid value.
     """
-    wp_path = package_path / "cstar/additional_files/templates/wp/workplan.yaml"
-
+    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_path = ready_workplan_paths(wp_template)
     content = wp_path.read_text().splitlines()
+
     remaining_content: list[str] = []
     cutting = False
     cut_once = False
@@ -257,7 +266,7 @@ def test_workplan_optional_input(
         if end_removal is None or end_removal in line:
             cutting = False
 
-    wp_path = tmp_path / "bp.yaml"
+    wp_path = tmp_path / "wp.yaml"
     wp_path.write_text("\n".join(remaining_content))
 
     runner = CliRunner()

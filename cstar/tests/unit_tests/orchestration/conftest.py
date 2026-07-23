@@ -150,6 +150,37 @@ def blueprint_schema_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def ready_workplan_paths(
+    tmp_path: Path,
+    default_blueprint_path: str,
+    fake_blueprint_path: Path,
+) -> Callable[[Path], Path]:
+    """Return a function that takes a path to a workplan template and returns
+    a new path to a modified version of that template with valid paths to
+    blueprint files.
+    """
+
+    def _inner(wp_template: Path, replacements: dict[str, str] | None = None) -> Path:
+        """Create a copy of the workplan template with the default blueprint path
+        replaced with a path to a file that does exist.
+        """
+        wp_name = wp_template.name
+        wp_path = tmp_path / wp_name
+
+        wp_content = wp_template.read_text().replace(
+            default_blueprint_path, str(fake_blueprint_path)
+        )
+        if replacements:
+            for original, replacement in replacements.items():
+                wp_content = wp_content.replace(original, replacement)
+
+        wp_path.write_text(wp_content)
+        return wp_path
+
+    return _inner
+
+
+@pytest.fixture
 def fill_workplan_template(
     empty_workplan_template_input: dict[str, t.Any],
     workplan_schema_path: Path,

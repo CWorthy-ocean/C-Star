@@ -361,7 +361,7 @@ def test_step_compute_overrides_set(
         A path to a file that meets minimum expectations (it exists).
 
     """
-    overrides = {"a": 1, "b": 2, "c": "xyz"}
+    overrides: dict[str, int | str] = {"a": 1, "b": 2, "c": "xyz"}
 
     step_name = f"test-step-{uuid.uuid4()}"
     app_name = f"test-app-{uuid.uuid4()}"

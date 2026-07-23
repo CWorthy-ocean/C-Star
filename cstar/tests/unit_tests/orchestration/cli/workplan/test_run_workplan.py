@@ -1,4 +1,5 @@
 import os
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -237,6 +238,7 @@ def test_workplan_run_variable_validation_multi_value_mismatch(
 def test_workplan_run_variable_multiple_sources(
     tmp_path: Path,
     wp_templates_dir: Path,
+    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that using the var and varfile parameter together results in a failure.
 
@@ -248,8 +250,7 @@ def test_workplan_run_variable_multiple_sources(
         Fixture providing the path to a directory containing template workplans
     """
     wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = tmp_path / "workplan.yml"
-    wp_path.write_text(wp_template.read_text())
+    wp_path = ready_workplan_paths(wp_template)
 
     varfile_path = tmp_path / "variables.env"
     varfile_path.write_text("key=value")
@@ -319,6 +320,7 @@ def test_workplan_run_variable_file_malformed(
     tmp_path: Path,
     wp_templates_dir: Path,
     content: str,
+    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify that using a varfile with invalid content
 
@@ -330,8 +332,7 @@ def test_workplan_run_variable_file_malformed(
         Fixture providing the path to a directory containing template workplans
     """
     wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = tmp_path / "workplan.yml"
-    wp_path.write_text(wp_template.read_text())
+    wp_path = ready_workplan_paths(wp_template)
 
     varfile_path = tmp_path / "variables.env"
     varfile_path.write_text(content)

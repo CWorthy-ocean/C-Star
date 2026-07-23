@@ -2052,6 +2052,7 @@ def preprocessable_workplan_path(
     tmp_path: Path,
     mocked_simulation_outputs: tuple[Path, Path, Path],
     wp_templates_dir: Path,
+    ready_workplan_paths: Callable[[Path], Path],
 ) -> Path:
     """Modify a basic workplan template to include directives in the last step.
 
@@ -2064,7 +2065,7 @@ def preprocessable_workplan_path(
     wp_templates_dir : Path
         Used to load a workplan template that can be modified to include directives
     """
-    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_template = ready_workplan_paths(wp_templates_dir / "workplan.yaml")
 
     # add directives to the last step in the workplan file
     _, continue_from_dir, _ = mocked_simulation_outputs

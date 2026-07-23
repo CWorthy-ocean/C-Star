@@ -1,6 +1,7 @@
 import asyncio
 import os
 import unittest.mock as mock
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -185,6 +186,7 @@ async def test_tracking_retrieve_variant(
 @pytest.mark.asyncio
 async def test_default_run_id(
     wp_templates_dir: Path,
+    ready_workplan_paths: Callable[[Path], Path],
 ) -> None:
     """Verify the default run id matches the workplan safe name.
 
@@ -195,7 +197,8 @@ async def test_default_run_id(
     wp_templates_dir : Path
         Fixture returning the path to the directory containing workplan template files
     """
-    wp_path = wp_templates_dir / "workplan.yaml"
+    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_path = ready_workplan_paths(wp_template)
 
     # load the sample workplan from disk to verify the default name provenance
     wp = deserialize(wp_path, Workplan)
