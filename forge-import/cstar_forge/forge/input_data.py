@@ -37,6 +37,14 @@ log = logging.getLogger(__name__)
 # substring ``cdr.nc`` so C-Star's ROMS build check on ``cdr_frc.opt`` passes.
 CDR_FORCING_NETCDF_STEM = "cdr"
 
+# Matches the part of a candidate filename's stem that follows a planned output's
+# stem, for the known roms-tools multi-file suffixes: grouped time chunks
+# (``_YYYYMM``/``_YYYY``, e.g. ``_202001``), climatology (``_clim``), and
+# ``partition_netcdf`` tiles (``.N``, e.g. ``.0``). Empty match = exact stem.
+# Deliberately does NOT match arbitrary suffixes like ``_child`` -- see
+# ``RomsMarblInputData._matches_planned_output``.
+_PLANNED_OUTPUT_TAIL_RE = re.compile(r"^(_\d+|_clim|\.\d+)?$")
+
 
 def filter_paths_by_time_window(
     paths: list[Path],
@@ -348,6 +356,10 @@ class RomsMarblInputData(InputData):
     include_coarse_dims: bool | None = field(default=None)
     _clobber: bool = field(default=False, init=False)
     _existing_planned_outputs: set[Path] = field(default_factory=set, init=False)
+    _planned_output_paths: set[Path] = field(default_factory=set, init=False)
+    """All planned NetCDF outputs for this run (resolved paths), computed once in
+    ``generate_all``. Used to exclude a *different* planned output's file (e.g. a
+    child grid) from counting as evidence that *this* planned output exists."""
 
     def __post_init__(self):
         """Initialize paths, storage, and input list."""
@@ -531,6 +543,7 @@ class RomsMarblInputData(InputData):
 
         # Compute planned outputs once at the start of execution, and record which already exist.
         planned = self._planned_netcdf_outputs(step_kwargs_list)
+        self._planned_output_paths = {path.resolve() for path in planned}
         self._existing_planned_outputs = {
             path.resolve()
             for path in planned
@@ -541,7 +554,8 @@ class RomsMarblInputData(InputData):
         if n_already:
             print(
                 f"ℹ️  Planned NetCDF outputs this run: {n_planned}; "
-                f"{n_already} already on disk (exact or stem match, e.g. *_0001.nc) — "
+                f"{n_already} already on disk (exact match, or a grouped/climatology/"
+                "partition suffix, e.g. _202001.nc, _clim.nc, .0.nc) — "
                 "generation/save will be skipped for those."
             )
 
@@ -637,19 +651,45 @@ class RomsMarblInputData(InputData):
                 deduped.append(p)
         return deduped
 
+    def _matches_planned_output(self, planned: Path, candidate: Path) -> bool:
+        """
+        True if ``candidate`` is valid disk evidence that ``planned`` exists.
+
+        Accepts an exact match, or a roms_tools-style multi-file suffix sharing
+        ``planned``'s stem: grouped time chunks (``_YYYYMM``/``_YYYY``), climatology
+        (``_clim``), or ``partition_netcdf`` tiles (``.N``) -- see
+        ``_PLANNED_OUTPUT_TAIL_RE``.
+
+        Excludes two things that would otherwise cause a false "already present":
+        - Leftover ``_nc4``-mangled files (see ``_pio_mangle``): the pre-nccopy
+          intermediate from a prior run that didn't finish converting, not a valid
+          finished output.
+        - Any *other* planned output's file (e.g. a child grid's NetCDF must not
+          count as evidence the parent grid's NetCDF exists, even though both share
+          the ``{domain}_grid`` prefix) -- checked via ``_planned_output_paths``.
+        """
+        if candidate.suffix != ".nc" or "_nc4" in candidate.name:
+            return False
+        resolved = candidate.resolve()
+        if resolved != planned.resolve() and resolved in self._planned_output_paths:
+            return False
+        if not candidate.stem.startswith(planned.stem):
+            return False
+        tail = candidate.stem[len(planned.stem) :]
+        return bool(_PLANNED_OUTPUT_TAIL_RE.fullmatch(tail))
+
     def _planned_netcdf_already_present(self, path: Path) -> bool:
         """
-        True if this planned output is already on disk: exact path, or roms_tools-style
-        suffixed files sharing the same stem (``stem*.nc``).
-
-        Excludes leftover ``_nc4``-mangled files (see ``_pio_mangle``): those are
-        the pre-nccopy intermediate from a prior run that didn't finish converting,
-        not a valid finished output, so they must not count as "already present".
+        True if this planned output is already on disk: exact path, or a
+        roms_tools-style multi-file suffix sharing the same stem (see
+        ``_matches_planned_output``).
         """
         if path.exists():
             return True
-        pattern = f"{path.stem}*.nc"
-        return any("_nc4" not in p.name for p in path.parent.glob(pattern))
+        return any(
+            self._matches_planned_output(path, candidate)
+            for candidate in path.parent.glob(f"{path.stem}*.nc")
+        )
 
     def _should_reuse_existing_output(self, path: Path) -> bool:
         """Return True when this planned output already exists and clobber=False."""
@@ -663,11 +703,9 @@ class RomsMarblInputData(InputData):
 
         Some roms_tools writers produce suffixed outputs that share the same stem.
         For example, planning may include ``foo_surface-physics.nc`` while existing
-        files are ``foo_surface-physics_0001.nc`` etc.
-
-        Excludes leftover ``_nc4``-mangled files (see ``_pio_mangle``): those are
-        the pre-nccopy intermediate from a prior run that didn't finish converting,
-        not a valid finished output.
+        files are ``foo_surface-physics_202001.nc`` etc. See
+        ``_matches_planned_output`` for exactly which suffixes count and which are
+        excluded.
         """
         if self._clobber:
             return []
@@ -676,9 +714,12 @@ class RomsMarblInputData(InputData):
         if path.exists():
             matches.append(path)
         else:
-            pattern = f"{path.stem}_*.nc"
             matches.extend(
-                sorted(p for p in path.parent.glob(pattern) if "_nc4" not in p.name)
+                sorted(
+                    candidate
+                    for candidate in path.parent.glob(f"{path.stem}*.nc")
+                    if self._matches_planned_output(path, candidate)
+                )
             )
 
         # De-duplicate while preserving order.

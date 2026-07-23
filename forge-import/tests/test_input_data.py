@@ -871,6 +871,99 @@ class TestRomsMarblInputDataHelperMethods:
         assert result == [str(tmp_path / "a.nc"), str(tmp_path / "b.nc")]
 
 
+class TestPlannedOutputReuseDetection:
+    """Tests for the reuse-detection matcher (_matches_planned_output and friends).
+
+    Regression coverage for the false-positive where a deleted file was still
+    reported "already present" because presence was inferred from an unanchored
+    stem-prefix glob rather than the specific expected output(s) -- e.g. deleting
+    a parent grid's NetCDF while a sibling child-grid NetCDF remained.
+    """
+
+    def _set_planned(self, data, *paths):
+        data._planned_output_paths = {Path(p).resolve() for p in paths}
+
+    def test_grid_not_reused_when_deleted_despite_sibling_child_grid(
+        self, sample_roms_marbl_input_data
+    ):
+        """Deleting the parent grid file must not be masked by a sibling child grid file."""
+        data = sample_roms_marbl_input_data
+        grid_path = data._forcing_filename("grid")
+        child_path = data._forcing_filename("grid_child")
+        child_path.write_bytes(b"child")
+        self._set_planned(data, grid_path, child_path)
+
+        assert not data._planned_netcdf_already_present(grid_path)
+
+    def test_exact_match_is_present(self, sample_roms_marbl_input_data):
+        data = sample_roms_marbl_input_data
+        grid_path = data._forcing_filename("grid")
+        grid_path.write_bytes(b"grid")
+        self._set_planned(data, grid_path)
+
+        assert data._planned_netcdf_already_present(grid_path)
+
+    def test_grouped_monthly_suffix_counts_as_present(
+        self, sample_roms_marbl_input_data
+    ):
+        """Grouped time-chunk output (e.g. roms-tools ``_202001``) still reuses."""
+        data = sample_roms_marbl_input_data
+        surface_path = data._forcing_filename("surface-physics")
+        grouped = surface_path.parent / f"{surface_path.stem}_202001.nc"
+        grouped.write_bytes(b"grouped")
+        self._set_planned(data, surface_path)
+
+        assert data._planned_netcdf_already_present(surface_path)
+        assert data._existing_output_paths(surface_path) == [str(grouped)]
+
+    def test_climatology_suffix_counts_as_present(self, sample_roms_marbl_input_data):
+        """Climatology output (``_clim``) still reuses despite being non-numeric."""
+        data = sample_roms_marbl_input_data
+        surface_path = data._forcing_filename("surface-physics")
+        clim = surface_path.parent / f"{surface_path.stem}_clim.nc"
+        clim.write_bytes(b"clim")
+        self._set_planned(data, surface_path)
+
+        assert data._planned_netcdf_already_present(surface_path)
+        assert data._existing_output_paths(surface_path) == [str(clim)]
+
+    def test_partition_dot_suffix_counts_as_present(self, sample_roms_marbl_input_data):
+        """``partition_netcdf`` tiles (``.0``, ``.1``, ...) still reuse."""
+        data = sample_roms_marbl_input_data
+        grid_path = data._forcing_filename("grid")
+        tile = grid_path.parent / f"{grid_path.stem}.0.nc"
+        tile.write_bytes(b"tile")
+        self._set_planned(data, grid_path)
+
+        assert data._planned_netcdf_already_present(grid_path)
+
+    def test_nc4_mangled_file_not_counted_as_present(
+        self, sample_roms_marbl_input_data
+    ):
+        """An unfinished PIO ``_nc4`` intermediate must not count as a valid output."""
+        data = sample_roms_marbl_input_data
+        grid_path = data._forcing_filename("grid")
+        mangled = grid_path.with_name(grid_path.stem + "_nc4" + grid_path.suffix)
+        mangled.write_bytes(b"mangled")
+        self._set_planned(data, grid_path)
+
+        assert not data._planned_netcdf_already_present(grid_path)
+
+    def test_unrelated_suffix_not_counted_as_present(
+        self, sample_roms_marbl_input_data
+    ):
+        """A sibling planned output's file (e.g. ``_nesting``) never counts, even if
+        it isn't registered in ``_planned_output_paths``.
+        """
+        data = sample_roms_marbl_input_data
+        grid_path = data._forcing_filename("grid")
+        nesting = grid_path.parent / f"{grid_path.stem}_nesting.nc"
+        nesting.write_bytes(b"nesting")
+        self._set_planned(data, grid_path)
+
+        assert not data._planned_netcdf_already_present(grid_path)
+
+
 class TestRomsMarblInputDataGeneration:
     """Tests for input generation methods."""
 
