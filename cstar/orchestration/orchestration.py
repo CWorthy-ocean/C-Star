@@ -299,7 +299,6 @@ class LiveStep(Step):
         name = str(data.get("name", ""))
         wd = t.cast("Path | str | None", data.get("working_dir", None))
         parent = t.cast("Step | None", data.get("parent", None))
-        data["kind"] = "live"
 
         if parent and not isinstance(parent, LiveStep):
             parent = LiveStep(**parent.model_dump(by_alias=True))
