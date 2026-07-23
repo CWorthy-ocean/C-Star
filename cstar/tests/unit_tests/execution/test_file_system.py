@@ -176,6 +176,7 @@ def test_live_step(tmp_path: Path) -> None:
 
         actual = ls_4.working_dir
         # confirm the parent carries over and ls4 is a child of ls2
+        assert ls_2.working_dir
         expected = ls_2.working_dir / task_dir_name / ls_4.safe_name
         assert actual == expected
 
