@@ -557,10 +557,8 @@ def mock_env(
 @pytest.fixture(params=["fanout", "linear", "parallel", "single_step"])
 def prepared_workplan(
     request: pytest.FixtureRequest,
-    tmp_path: Path,
     wp_templates_dir: Path,
-    default_blueprint_path: str,
-    bp_templates_dir: Path,
+    read_yaml_intercept: None,
 ) -> tuple[Path, Workplan]:
     """Verify that CLI plan action generates an output image from a workplan.
 
@@ -568,28 +566,12 @@ def prepared_workplan(
     ----------
     tmp_path : Path
         Temporary directory for test outputs
-    workplan_name : str
-        The name of a workplan fixture to use for workplan creation
     wp_templates_dir: Path
         Fixture returning the path to the directory containing workplan template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
     """
     workplan_name = request.param
-    template_file = f"{workplan_name}.yaml"  # "single_step.yaml"
-    template_path = wp_templates_dir / template_file
-
-    bp_template_path = bp_templates_dir / "blueprint.yaml"
-    bp_content = bp_template_path.read_text()
-
-    test_bp_path = tmp_path / "blueprint.yaml"
-    test_bp_path.write_text(bp_content)
-
-    content = template_path.read_text()
-    content = content.replace(default_blueprint_path, test_bp_path.as_posix())
-
-    wp_path = tmp_path / template_file
-    wp_path.write_text(content)
+    template_file = f"{workplan_name}.yaml"
+    wp_path = wp_templates_dir / template_file
 
     wp = deserialize(wp_path, Workplan)
 

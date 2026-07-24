@@ -265,11 +265,9 @@ async def test_prepare_composed_dag(
     bp_template_path = bp_templates_dir / bp_template_file
 
     working_dir = tmp_path / "original-output-dir"
-    working_dir_override = tmp_path / "overridden-output-dir"
     run_id = "my-run"
 
     mock_env = {
-        ENV_CSTAR_STATE_HOME: working_dir_override.as_posix(),
         ENV_CSTAR_SLURM_ACCOUNT: "xyz",
         ENV_CSTAR_SLURM_QUEUE: "wholenode",
         ENV_CSTAR_SLURM_MAX_WALLTIME: "00:5:00",
@@ -283,7 +281,7 @@ async def test_prepare_composed_dag(
 
     with (
         mock.patch("cstar.orchestration.orchestration.Planner.__init__", _raise_ex),
-        mock.patch.dict(os.environ, mock_env, clear=True),
+        mock.patch.dict(os.environ, mock_env),
     ):
         generated_wp_path = compose(
             wp_template_path.as_posix(),

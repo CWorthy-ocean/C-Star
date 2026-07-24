@@ -157,12 +157,10 @@ def test_serialization_workplan_happy_path(
     assert workplan.steps[0].compute_overrides["num_nodes"] == 4
 
 
-@pytest.mark.skip(reason="unskip after LiveWorkplan is merged")
+@pytest.mark.usefixtures("read_yaml_intercept")
 def test_serialization_polymorphic_workplan(
     tmp_path: Path,
     wp_templates_dir: Path,
-    bp_templates_dir: Path,
-    default_blueprint_path: str,
 ) -> None:
     """Verify that a workplan serialized with steps of a subclass of `Step` results
     in deserialization to the correct subclass/type.
@@ -175,17 +173,7 @@ def test_serialization_polymorphic_workplan(
         Fixture returning the path to the directory containing workplan template files
     """
     template_file = "workplan.yaml"
-    template_path = wp_templates_dir / template_file
-
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    bp_path.write_text(bp_tpl_path.read_text())
-
-    wp_content = template_path.read_text()
-    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
-
-    wp_path = tmp_path / template_file
-    wp_path.write_text(wp_content)
+    wp_path = wp_templates_dir / template_file
 
     wp = deserialize(wp_path, Workplan)
 

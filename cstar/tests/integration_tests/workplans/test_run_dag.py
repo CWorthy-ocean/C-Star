@@ -79,6 +79,7 @@ def test_dep_keys(tmp_path: Path) -> None:
 
 
 @pytest.mark.skip(reason="Fix LocalLauncher infinite loop bug in schedule mode")
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "workplan_name",
@@ -88,8 +89,6 @@ async def test_build_and_run_local(
     tmp_path: Path,
     workplan_name: str,
     wp_templates_dir: Path,
-    bp_templates_dir: Path,
-    default_blueprint_path: str,
 ) -> None:
     """Test the dag runner with a local launcher.
 
@@ -101,26 +100,12 @@ async def test_build_and_run_local(
         The name of a workplan template file to use during workplan creation
     wp_templates_dir : Path
         Fixture returning the path to the directory containing workplan template files
-    bp_templates_dir : Path
-        Fixture returning the path to the directory containing blueprint template files
-    default_blueprint_path : str
-        Fixture returning the default blueprint path contained in template workplans
     """
     # avoid running sims during tests
     os.environ["CSTAR_CMD_CONVERTER_OVERRIDE"] = "sleep"
 
     template_file = f"{workplan_name}.yaml"
-    template_path = wp_templates_dir / template_file
-
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    bp_path.write_text(bp_tpl_path.read_text())
-
-    wp_content = template_path.read_text()
-    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
-
-    wp_path = tmp_path / template_file
-    wp_path.write_text(wp_content)
+    wp_path = wp_templates_dir / template_file
 
     # create unique run name only once per hour, cache otherwise.
     my_run_name = f"{tmp_path.stem}_{workplan_name}"
@@ -128,6 +113,7 @@ async def test_build_and_run_local(
 
 
 # @pytest.mark.skipif(not slurm())
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.skip(reason="tests are very slow when scheduling many tasks with slurm")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -138,8 +124,6 @@ async def test_build_and_run(
     tmp_path: Path,
     workplan_name: str,
     wp_templates_dir: Path,
-    bp_templates_dir: Path,
-    default_blueprint_path: str,
 ) -> None:
     """Test the dag runner with a SlurmLauncher.
 
@@ -160,17 +144,7 @@ async def test_build_and_run(
     os.environ["CSTAR_CMD_CONVERTER_OVERRIDE"] = "sleep"
 
     template_file = f"{workplan_name}.yaml"
-    template_path = wp_templates_dir / template_file
-
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    bp_path.write_text(bp_tpl_path.read_text())
-
-    wp_content = template_path.read_text()
-    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
-
-    wp_path = tmp_path / template_file
-    wp_path.write_text(wp_content)
+    wp_path = wp_templates_dir / template_file
 
     # create unique run name only once per hour, cache otherwise.
     my_run_name = f"{tmp_path.stem}_{workplan_name}"
