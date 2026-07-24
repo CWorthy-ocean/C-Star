@@ -11,7 +11,6 @@ import pytest
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.pio.external_codebase import PIOExternalCodeBase
@@ -701,20 +700,14 @@ class TestROMSSimulationInitialization:
             sim._check_inputdataset_partitioning(sim.model_grid)
 
 
-class TestStrAndRepr:
-    """Test class for the `__str__`, `__repr__`, and `tree` methods of `ROMSSimulation`.
+class TestTree:
+    """Test class for the `tree` method of `ROMSSimulation`.
 
-    This test suite ensures that the string representations and tree structure output
-    of `ROMSSimulation` instances are correctly formatted and contain the expected
-    information.
+    This test suite ensures that the tree structure output of `ROMSSimulation`
+    instances is correctly formatted and contains the expected information.
 
     Tests
     -----
-    - `test_str()`: Verifies that the `__str__` method outputs a well-formatted summary
-      of the `ROMSSimulation` instance, including attributes such as name, directory,
-      dates, discretization settings, codebases, input datasets, and setup status.
-    - `test_repr()`: Ensures that the `__repr__` method provides a valid Python
-      expression that reconstructs the `ROMSSimulation` instance with all its attributes.
     - `test_tree()`: Confirms that the `tree` method correctly formats a hierarchical
       directory structure representing runtime code, compile-time code, and input datasets.
 
@@ -723,112 +716,6 @@ class TestStrAndRepr:
     - `stub_romssimulation`: A fixture providing an initialized `ROMSSimulation`
       instance with a populated directory structure.
     """
-
-    @mock.patch.object(AdditionalCode, "exists_locally", new_callable=mock.PropertyMock)
-    @mock.patch.object(
-        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
-    )
-    def test_str(self, mock_runtime_settings, mock_exists_locally, stub_romssimulation):
-        """Test the `__str__` method of `ROMSSimulation`.
-
-        Ensures that calling `str()` on a `ROMSSimulation` instance produces a properly
-        formatted string containing key attributes, including name, directory, dates,
-        discretization settings, codebases, input datasets, and setup status.
-
-        The expected output is compared against a predefined string representation.
-
-        Mocks & Fixtures
-        ----------------
-        - `mock_runtime_settings` : mocked roms_runtime_settings property
-        - `mock_exists_locally` : mocks ROMSSimulation.runtime_code.exists_locally so
-           runtime settings are included in the __str__
-        - `stub_romssimulation` : A fixture providing an initalized `ROMSSimulation`
-           instance
-
-        Assertions
-        ----------
-        - The string representation matches a predefined string.
-        """
-        sim = stub_romssimulation
-
-        mock_settings = RomsNamelist.read(EXAMPLE_NAMELIST)
-
-        mock_runtime_settings.return_value = mock_settings
-
-        expected_str = f"""\
-ROMSSimulation
---------------
-Name: ROMSTest
-Directory: {sim.directory}
-Start date: 2025-01-01 00:00:00
-End date: 2025-12-31 00:00:00
-Valid start date: 2024-01-01 00:00:00
-Valid end date: 2026-01-01 00:00:00
-
-Discretization: ROMSDiscretization(time_step = 60, n_procs_x = 2, n_procs_y = 3)
-
-Code:
-Codebase: ROMSExternalCodeBase instance (query using ROMSSimulation.codebase)
-Runtime code: AdditionalCode instance with 5 files (query using ROMSSimulation.runtime_code)
-Compile-time code: AdditionalCode instance with 2 files (query using ROMSSimulation.compile_time_code)
-Runtime Settings: RomsNamelist instance (query using ROMSSimulation.roms_runtime_settings)
-
-MARBL Codebase: MARBLExternalCodeBase instance (query using ROMSSimulation.marbl_codebase)
-
-Input Datasets:
-Model grid: <ROMSModelGrid instance>
-Initial conditions: <ROMSInitialConditions instance>
-Tidal forcing: <ROMSTidalForcing instance>
-River forcing: <ROMSRiverForcing instance>
-Surface forcing: <list of 1 ROMSSurfaceForcing instances>
-Boundary forcing: <list of 1 ROMSBoundaryForcing instances>
-Forcing corrections: <list of 1 ROMSForcingCorrections instances>
-
-Is setup: False"""
-
-        assert sim.__str__() == expected_str
-
-    def test_repr(self, stub_romssimulation):
-        """Test the `__repr__` method of `ROMSSimulation`.
-
-        Ensures that calling `repr()` on a `ROMSSimulation` instance returns a
-        properly formatted string representation that includes all key attributes.
-        This output should be a valid Python expression that can be used to
-        reconstruct the instance.
-
-        The expected output is compared against a predefined representation.
-
-        Parameters
-        ----------
-        stub_romssimulation : fixture
-            A fixture providing an initialized `ROMSSimulation` instance.
-
-        Assertions
-        ----------
-        - The string representation matches a predefined string.
-        """
-        sim = stub_romssimulation
-        expected_repr = f"""\
-ROMSSimulation(
-name = ROMSTest,
-directory = {sim.directory},
-start_date = 2025-01-01 00:00:00,
-end_date = 2025-12-31 00:00:00,
-valid_start_date = 2024-01-01 00:00:00,
-valid_end_date = 2026-01-01 00:00:00,
-discretization = ROMSDiscretization(time_step = 60, n_procs_x = 2, n_procs_y = 3),
-codebase = <ROMSExternalCodeBase instance>,
-runtime_code = <AdditionalCode instance>,
-compile_time_code = <AdditionalCode instance>
-model_grid = <ROMSModelGrid instance>,
-initial_conditions = <ROMSInitialConditions instance>,
-tidal_forcing = <ROMSTidalForcing instance>,
-river_forcing = <ROMSRiverForcing instance>,
-surface_forcing = <list of 1 ROMSSurfaceForcing instances>,
-boundary_forcing = <list of 1 ROMSBoundaryForcing instances>,
-forcing_corrections = <list of 1 ROMSForcingCorrections instances>
-)"""
-        assert expected_repr == sim.__repr__()
 
     def test_tree(self, stub_romssimulation, log: logging.Logger):
         """Test the `tree` method of `ROMSSimulation`.
@@ -1309,7 +1196,6 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        sim.persist = mock.MagicMock()  # type: ignore[method-assign]
         with tempfile.TemporaryDirectory() as tmpdir:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
@@ -1419,7 +1305,6 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        sim.persist = mock.MagicMock()  # type: ignore[method-assign]
         with tempfile.TemporaryDirectory() as tmpdir:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
@@ -1464,7 +1349,6 @@ class TestProcessingAndExecution:
         mock_subprocess.return_value = mock.MagicMock(returncode=1, stderr="")
         mock_get_hash.return_value = "mockhash123"
 
-        sim.persist = mock.MagicMock()
         with tempfile.TemporaryDirectory() as tmpdir:
             sim.codebase = mock.MagicMock()
             sim.codebase.working_copy = mock.MagicMock()
@@ -1582,14 +1466,12 @@ class TestProcessingAndExecution:
             ):
                 sim.run()
 
-    @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
     def test_run_local_execution(
         self,
         mock_runtime_settings,
-        mock_persist,
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
@@ -1637,8 +1519,6 @@ class TestProcessingAndExecution:
             # Ensure execution handler was set correctly
             assert execution_handler == mock_process_instance
 
-            mock_persist.assert_called_once()
-
     @pytest.mark.parametrize(
         "mock_system_name,exp_mpi_prefix",
         [
@@ -1648,14 +1528,12 @@ class TestProcessingAndExecution:
             ["perlmutter", "srun"],
         ],
     )
-    @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
     )
     def test_run_with_scheduler(
         self,
         mock_runtime_settings,
-        mock_persist,
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
         mock_system_name: str,
@@ -1729,8 +1607,6 @@ class TestProcessingAndExecution:
             mock_job_instance.submit.assert_called_once()
 
             assert execution_handler == mock_job_instance
-
-            mock_persist.assert_called_once()
 
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
@@ -1824,10 +1700,9 @@ class TestProcessingAndExecution:
         ):
             sim.post_run()
 
-    @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch("subprocess.run")  # Mock ncjoin execution
     def test_post_run_merges_netcdf_files(
-        self, mock_subprocess, mock_persist, stub_romssimulation: ROMSSimulation
+        self, mock_subprocess, stub_romssimulation: ROMSSimulation
     ) -> None:
         """Tests that `post_run` correctly merges partitioned NetCDF output files.
 
@@ -1901,12 +1776,10 @@ class TestProcessingAndExecution:
         assert not (output_dir / "ocean_ext.20240101000000.001.nc").exists()
         assert (output_dir / "ocean_rst.20240101000000.001.nc").exists()
 
-    @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(
         self,
         mock_glob,
-        mock_persist,
         stub_romssimulation,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -1933,8 +1806,6 @@ class TestProcessingAndExecution:
 
         # Ensure glob was called once
         mock_glob.assert_called_once()
-
-        mock_persist.assert_called_once()
 
     @mock.patch("subprocess.run")  # Mock subprocess.run to simulate a failure
     @mock.patch.object(Path, "glob")  # Mock glob to return fake files
@@ -1983,126 +1854,6 @@ class TestProcessingAndExecution:
             text=True,
             shell=True,
         )
-
-
-class TestROMSSimulationRestart:
-    """Tests for the `restart` method of `ROMSSimulation`.
-
-    This test class verifies that the `restart` method correctly initializes a new
-    `ROMSSimulation` instance from an existing simulation's restart file. It ensures
-    that the new instance properly inherits the configuration and updates its
-    initial conditions.
-    """
-
-    @mock.patch.object(Path, "glob")  # Mock file search
-    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
-    def test_restart(
-        self,
-        mock_glob,
-        stub_romssimulation: ROMSSimulation,
-        mocksourcedata_local_file,
-    ) -> None:
-        """Test that `restart` creates a new `ROMSSimulation` instance with updated
-        initial conditions.
-
-        This test ensures that when calling `restart` with a new end date, the method:
-        - Creates a new `ROMSSimulation` instance.
-        - Searches for the appropriate restart file in the output directory.
-        - Assigns the found restart file as the new instance’s initial conditions.
-        """
-        # Setup mock simulation
-        sim = stub_romssimulation
-        new_end_date = datetime(2026, 6, 1)
-
-        # Mock restart file found
-        restart_file = sim.fs_manager.output_dir / "restart_rst.20251231000000.nc"
-        mock_glob.return_value = [restart_file]
-
-        # Call method
-        restart_source = mocksourcedata_local_file(location=restart_file)
-        with mock.patch(
-            "cstar.roms.input_dataset.SourceData", return_value=restart_source
-        ):
-            new_sim = sim.restart(new_end_date=new_end_date)
-
-        # Verify restart logic
-        mock_glob.assert_called_once_with("*_rst.20251231000000.nc")
-        assert isinstance(new_sim.initial_conditions, ROMSInitialConditions)
-        assert new_sim.initial_conditions.source.location == str(restart_file.resolve())
-
-    @mock.patch.object(Path, "glob")  # Mock file search
-    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
-    def test_restart_raises_if_no_restart_files(self, mock_glob, stub_romssimulation):
-        """Test that `restart` raises a `FileNotFoundError` if no restart files are
-        found.
-
-        This test ensures that if the method is unable to locate a valid ROMS restart file,
-        it raises a `FileNotFoundError` and does not proceed with simulation creation.
-
-        Mocks & Fixtures
-        ----------------
-        mock_exists : Mock
-            Mocks `Path.exists` to return `True`, ensuring the output directory exists.
-        mock_glob : Mock
-            Mocks `Path.glob` to return an empty list, simulating no restart files found.
-        stub_romssimulation : Fixture
-            Provides an instance of `ROMSSimulation` and a temporary directory for testing.
-
-        Assertions
-        ----------
-        - The method searches for restart files with the expected filename pattern.
-        - A `FileNotFoundError` is raised if no matching restart files are found.
-        """
-        # Setup mock simulation
-        sim = stub_romssimulation
-        new_end_date = datetime(2026, 6, 1)
-
-        # Mock restart file found
-        mock_glob.return_value = []
-        exp_dir_name = JobFileSystemManager._OUTPUT_NAME  # noqa: SLF001
-
-        # Call method
-        with pytest.raises(
-            FileNotFoundError, match=f"No files in {sim.directory / exp_dir_name} match"
-        ):
-            sim.restart(new_end_date=new_end_date)
-
-        mock_glob.assert_called_once_with("*_rst.20251231000000.nc")
-
-    @mock.patch.object(Path, "glob")
-    def test_restart_raises_if_multiple_restarts_found(
-        self, mock_glob: mock.Mock, stub_romssimulation: ROMSSimulation
-    ) -> None:
-        """Test that `restart` raises a `ValueError` if multiple restart files are
-        found.
-
-        This test ensures that when multiple distinct restart files are found matching
-        the expected pattern, a `ValueError` is raised due to ambiguity.
-
-        Mocks & Fixtures
-        ----------------
-        mock_glob : Mock
-            Mocks `Path.glob` to return multiple restart files, simulating an ambiguous case.
-        stub_romssimulation : Fixture
-            Provides an instance of `ROMSSimulation` and a temporary directory for testing.
-
-        Assertions
-        ----------
-        - The method searches for restart files with the expected filename pattern.
-        - A `ValueError` is raised if multiple restart files are found.
-        """
-        sim = stub_romssimulation
-        restart_dir = sim.fs_manager.output_dir
-        new_end_date = datetime(2025, 6, 1)
-
-        # Fake multiple unique restart files
-        mock_glob.return_value = [
-            restart_dir / "restart_rst.20250601000000.nc",
-            restart_dir / "ocean_rst.20250601000000.nc",
-        ]
-
-        with pytest.raises(ValueError, match="Found multiple distinct restart files"):
-            sim.restart(new_end_date=new_end_date)
 
 
 class TestROMSSimulationUsePIO:
@@ -2179,10 +1930,9 @@ class TestROMSSimulationUsePIO:
         assert sim.codebases[-1] is pioexternalcodebase
 
     @mock.patch("cstar.roms.ROMSSimulation._validate_pio_inputs")
-    @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch.object(ROMSInputDataset, "partition")
     def test_pre_run_skips_partitioning(
-        self, mock_partition, mock_persist, mock_validate, stub_romssimulation
+        self, mock_partition, mock_validate, stub_romssimulation
     ):
         """Test that `pre_run` validates inputs but skips partitioning when
         `use_pio` is True.
@@ -2200,7 +1950,6 @@ class TestROMSSimulationUsePIO:
 
         dataset.partition.assert_not_called()
         mock_validate.assert_called_once()
-        mock_persist.assert_called_once()
 
     @pytest.mark.parametrize(
         "file_format, dtype, expected_problem",
@@ -2296,10 +2045,9 @@ class TestROMSSimulationUsePIO:
         assert str(bad_path) in str(exc_info.value)
         assert str(good_path) not in str(exc_info.value)
 
-    @mock.patch("cstar.roms.ROMSSimulation.persist")
     @mock.patch("subprocess.run")
     def test_post_run_moves_files_without_joining(
-        self, mock_subprocess, mock_persist, stub_romssimulation: ROMSSimulation
+        self, mock_subprocess, stub_romssimulation: ROMSSimulation
     ) -> None:
         """Test that `post_run` with `use_pio` moves the (already-joined) outputs to
         the joined output directory without calling any joining tools.
@@ -2326,12 +2074,8 @@ class TestROMSSimulationUsePIO:
         assert not (output_dir / "ocean_his.20240101000000.nc").exists()
         assert not (output_dir / "ocean_rst.20240101000000.nc").exists()
 
-        mock_persist.assert_called_once()
-
-    @mock.patch("cstar.roms.ROMSSimulation.persist")
     def test_post_run_prints_message_if_no_files(
         self,
-        mock_persist,
         stub_romssimulation,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -2348,7 +2092,6 @@ class TestROMSSimulationUsePIO:
         sim.post_run()
 
         assert "No suitable output found" in caplog.text
-        mock_persist.assert_called_once()
 
     @pytest.mark.parametrize(
         "use_pio, cppdefs_content, should_raise",
@@ -2397,34 +2140,6 @@ class TestROMSSimulationUsePIO:
         sim = stub_romssimulation
         sim.use_pio = True
         sim._validate_pio_cppdefs(tmp_path)  # Should not raise
-
-    @mock.patch.object(Path, "glob")
-    @mock.patch("pathlib.Path.exists", mock.Mock(return_value=True))
-    def test_restart_searches_joined_output_dir(
-        self,
-        mock_glob,
-        stub_romssimulation: ROMSSimulation,
-        mocksourcedata_local_file,
-    ) -> None:
-        """Test that `restart` with `use_pio` searches the joined output directory,
-        where `post_run` moves the restart file.
-        """
-        sim = stub_romssimulation
-        sim.use_pio = True
-        new_end_date = datetime(2026, 6, 1)
-
-        restart_file = (
-            sim.fs_manager.joined_output_dir / "restart_rst.20251231000000.nc"
-        )
-        mock_glob.return_value = [restart_file]
-
-        restart_source = mocksourcedata_local_file(location=restart_file)
-        with mock.patch(
-            "cstar.roms.input_dataset.SourceData", return_value=restart_source
-        ):
-            new_sim = sim.restart(new_end_date=new_end_date)
-
-        assert new_sim.initial_conditions.source.location == str(restart_file.resolve())  # type: ignore[union-attr]
 
     def test_dict_roundtrip_with_pio(
         self,

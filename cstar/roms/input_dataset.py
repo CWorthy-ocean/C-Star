@@ -190,24 +190,6 @@ class ROMSInputDataset(InputDataset, ABC):
             input_dataset_dict["source_np_eta"] = self.source_np_eta
         return input_dataset_dict
 
-    def __str__(self) -> str:
-        base_str = super().__str__()
-        if self.partitioning is not None:
-            base_str += f"\nPartitioning: {self.partitioning}"
-        return base_str
-
-    def __repr__(self) -> str:
-        repr_str = super().__repr__()
-        if self.partitioning is not None:
-            info_str = f"partitioning  = {self.partitioning}"
-            if "State:" in repr_str:
-                repr_str = repr_str.strip(",>")
-                repr_str += ",\n" + (" " * 8) + info_str + "\n>"
-            else:
-                repr_str += f"\nState: <{info_str}>"
-
-        return repr_str
-
     def partition(
         self, np_xi: int, np_eta: int, overwrite_existing_files: bool = False
     ) -> None:

@@ -1,10 +1,8 @@
 from datetime import datetime
 from pathlib import Path
-from textwrap import dedent
 from unittest import mock
 
 from cstar.io.source_data import SourceData
-from cstar.io.staged_data import StagedData
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeInputDataset
 
 
@@ -34,111 +32,6 @@ class TestInputDatasetInit:
             "Expected an instance of FakeInputDataset"
         )
         assert ind
-
-
-class TestStrAndRepr:
-    """Test class for the __str__ and __repr__ methods on an InputDataset."""
-
-    def test_local_str(self, fakeinputdataset_local):
-        """Test the string representation of a local InputDataset."""
-        expected_str = dedent(
-            """\
-    ----------------
-    FakeInputDataset
-    ----------------
-    Source location: some/local/source/path/local_file.nc
-    Source file hash: test_target
-    start date: 2024-10-22 12:34:56
-    end date: 2024-12-31 23:59:59
-    Local copy: None"""
-        )
-
-        assert str(fakeinputdataset_local) == expected_str
-
-    def test_local_repr(self, fakeinputdataset_local):
-        """Test the repr representation of a local InputDataset."""
-        expected_repr = dedent(
-            """\
-    FakeInputDataset(
-    location = 'some/local/source/path/local_file.nc',
-    file_hash = 'test_target',
-    start_date = datetime.datetime(2024, 10, 22, 12, 34, 56),
-    end_date = datetime.datetime(2024, 12, 31, 23, 59, 59)
-    )"""
-        )
-        assert repr(fakeinputdataset_local) == expected_repr
-
-    def test_remote_repr(self, fakeinputdataset_remote):
-        """Test the repr representation of a remote InputDataset."""
-        expected_repr = dedent(
-            """\
-    FakeInputDataset(
-    location = 'http://example.com/remote_file.nc',
-    file_hash = 'abc123',
-    start_date = datetime.datetime(2024, 10, 22, 12, 34, 56),
-    end_date = datetime.datetime(2024, 12, 31, 23, 59, 59)
-    )"""
-        )
-        assert repr(fakeinputdataset_remote) == expected_repr
-
-    def test_remote_str(self, fakeinputdataset_remote):
-        """Test the string representation of a remote InputDataset."""
-        expected_str = dedent(
-            """\
-    ----------------
-    FakeInputDataset
-    ----------------
-    Source location: http://example.com/remote_file.nc
-    Source file hash: abc123
-    start date: 2024-10-22 12:34:56
-    end date: 2024-12-31 23:59:59
-    Local copy: None"""
-        )
-        assert str(fakeinputdataset_remote) == expected_str
-
-    @mock.patch.object(
-        FakeInputDataset, "exists_locally", new_callable=mock.PropertyMock
-    )  # Mock exists_locally
-    @mock.patch.object(FakeInputDataset, "working_copy", new_callable=mock.PropertyMock)
-    def test_str_with_working_copy(
-        self,
-        mock_working_copy,
-        mock_exists_locally,
-        fakeinputdataset_local,
-    ):
-        """Test the string output when the dataset has been staged."""
-        mock_staged = mock.create_autospec(StagedData)
-        mock_staged.path = "/some/local/path"
-        mock_working_copy.return_value = mock_staged
-        fakeinputdataset_local.working_copy.path = Path("/some/local/path")
-
-        # Simulate exists_locally being True
-        mock_exists_locally.return_value = True
-        assert "Local copy: /some/local/path" in str(fakeinputdataset_local), (
-            f"substring not in {str(fakeinputdataset_local)}"
-        )
-
-    @mock.patch.object(
-        FakeInputDataset, "exists_locally", new_callable=mock.PropertyMock
-    )  # Mock exists_locally
-    @mock.patch.object(FakeInputDataset, "working_copy", new_callable=mock.PropertyMock)
-    def test_repr_with_working_copy(
-        self,
-        mock_working_copy,
-        mock_exists_locally,
-        fakeinputdataset_local,
-    ):
-        """Test the repr output when the dataset has been staged."""
-        mock_staged = mock.create_autospec(StagedData)
-        mock_staged.path = "/some/local/path"
-        mock_working_copy.return_value = mock_staged
-        fakeinputdataset_local.working_copy.path = Path("/some/local/path")
-
-        # Simulate exists_locally being True
-        mock_exists_locally.return_value = True
-        assert "State: <working_copy = /some/local/path>" in repr(
-            fakeinputdataset_local
-        ), f"substring not in {repr(fakeinputdataset_local)}"
 
 
 class TestExistsLocally:

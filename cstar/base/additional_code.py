@@ -72,33 +72,6 @@ class AdditionalCode(LoggingMixin):
         # Initialize object state
         self._working_copy: StagedDataCollection | None = None
 
-    def __str__(self) -> str:
-        base_str = self.__class__.__name__ + "\n"
-        base_str += "-" * (len(base_str) - 1)
-        base_str += "\nLocations:\n   "
-        base_str += "\n   ".join(self.source.locations)
-        base_str += f"\nWorking copy: {self.working_copy}"
-        base_str += f"\nExists locally: {self.exists_locally}"
-        if not self.exists_locally:
-            base_str += " (get with AdditionalCode.get())"
-        return base_str
-
-    def __repr__(self) -> str:
-        # Constructor-style section:
-        repr_str = f"{self.__class__.__name__}("
-        for k, v in self._constructor_args.items():
-            repr_str += f"\n{k}={v},"
-        repr_str = repr_str[:-2] + ")"
-
-        # Additional info:
-        info_str = ""
-        if self.working_copy is not None:
-            info_str += f"working_copy = {self.working_copy},"
-            info_str += f"exists_locally = {self.exists_locally}"
-        if len(info_str) > 0:
-            repr_str += f"\nState: <{info_str}>"
-        return repr_str
-
     @property
     def working_copy(self) -> StagedDataCollection | None:
         """The staged, local version of this AdditionalCode (if available).

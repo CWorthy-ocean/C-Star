@@ -1,4 +1,3 @@
-from textwrap import dedent
 from unittest import mock
 
 import cstar
@@ -49,72 +48,6 @@ class TestInit:
             "https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_2.py",
             "https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_3.opt",
         ]
-
-
-class TestStrAndRepr:
-    """Test class for the `__str__` and `__repr__` methods of the AdditionalCode class."""
-
-    def test_repr_remote(self, additionalcode_remote):
-        """Test that the __repr__ method returns the correct string for the example
-        remote AdditionalCode instance defined in the above fixture.
-        """
-        ac = additionalcode_remote()
-        expected_repr = dedent("""\
-AdditionalCode(
-location=https://github.com/test/repo.git,
-subdir=test/subdir,
-checkout_target=test123,
-files=['test_file_1.F', 'test_file_2.py', 'test_file_3.opt')""")
-        assert repr(ac) == expected_repr, (
-            f"expected \n{repr(ac)}\n, got \n{expected_repr}"
-        )
-
-    def test_repr_local(self, additionalcode_local):
-        """Test that the __repr__ method returns the correct string for the example
-        local AdditionalCode instance defined in the above fixture.
-        """
-        expected_repr = dedent("""\
-AdditionalCode(
-location=/some/local/directory,
-subdir=some/subdirectory,
-checkout_target=,
-files=['test_file_1.F', 'test_file_2.py', 'test_file_3.opt')""")
-        assert repr(additionalcode_local()) == expected_repr
-
-    def test_str_remote(self, additionalcode_remote):
-        """Test that the __str__ method returns the correct string for the example
-        remote AdditionalCode instance defined in the above fixture.
-        """
-        expected_str = dedent("""\
-        AdditionalCode
-        --------------
-        Locations:
-           https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_1.F
-           https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_2.py
-           https://raw.githubusercontent.com/test/repo/test123/test/subdir/test_file_3.opt
-        Working copy: None
-        Exists locally: False (get with AdditionalCode.get())""")
-
-        assert str(additionalcode_remote()) == expected_str, (
-            f"expected \n{str(additionalcode_remote())}\n, got \n{expected_str}"
-        )
-
-    def test_str_local(self, additionalcode_local):
-        """Test that the __str__ method returns the correct string for the example local
-        AdditionalCode instance defined in the above fixture.
-        """
-        ac = additionalcode_local()
-        expected_str = dedent("""\
-        AdditionalCode
-        --------------
-        Locations:
-           /some/local/directory/some/subdirectory/test_file_1.F
-           /some/local/directory/some/subdirectory/test_file_2.py
-           /some/local/directory/some/subdirectory/test_file_3.opt
-        Working copy: None
-        Exists locally: False (get with AdditionalCode.get())""")
-
-        assert str(ac) == expected_str, f"expected \n{str(ac)}\n, got \n{expected_str}"
 
 
 class TestExistsLocallyAndGet:

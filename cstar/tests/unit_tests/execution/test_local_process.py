@@ -1,7 +1,6 @@
 import logging
 import subprocess
 from pathlib import Path
-from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -88,44 +87,6 @@ class TestLocalProcess:
         assert mock_local_process.run_path == Path.cwd()
         assert mock_local_process.output_file.name.startswith("cstar_process_")
         assert mock_local_process.status == ExecutionStatus.UNSUBMITTED
-
-    def test_str(self):
-        mock_local_process = LocalProcess(
-            commands='echo "Hello, World"',
-            run_path="test/path",
-            output_file="outfile.out",
-        )
-        test_str = dedent(
-            """\
-        LocalProcess
-        ------------
-        Commands: echo "Hello, World"
-        Run path: test/path
-        Output file: outfile.out
-        Status: unsubmitted"""
-        )
-
-        assert mock_local_process.__str__() == test_str
-
-    def test_repr(self):
-        mock_local_process = LocalProcess(
-            commands='echo "Hello, World"',
-            run_path="test/path",
-            output_file="outfile.out",
-        )
-        test_repr = dedent(
-            """\
-        LocalProcess(
-        commands = 'echo "Hello, World"',
-        output_file = PosixPath('outfile.out'),
-        run_path = PosixPath('test/path')
-        )
-        State: <status = <ExecutionStatus.UNSUBMITTED: 1>>"""
-        )
-
-        assert mock_local_process.__repr__() == test_repr, (
-            f"expected \n{test_repr}\n, got \n{mock_local_process.__repr__()}\n"
-        )
 
     def test_start_success(self, tmp_path, mock_local_process):
         """Verifies that the subprocess starts successfully with valid commands.

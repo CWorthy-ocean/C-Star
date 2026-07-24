@@ -26,20 +26,3 @@ def test_defaults():
 def test_n_procs_tot(roms_discretization):
     """Test the n_procs_tot property correctly multiplies n_procs_x and n_procs_y."""
     assert roms_discretization.n_procs_tot == 2 * 123
-
-
-def test_repr(roms_discretization):
-    """Test the repr representation is correct."""
-    expected_repr = "ROMSDiscretization(time_step = 3, n_procs_x = 2, n_procs_y = 123)"
-    assert repr(roms_discretization) == expected_repr
-
-
-def test_str(roms_discretization):
-    """Test the string representation is correct."""
-    expected_str = """ROMSDiscretization
-------------------
-time_step: 3s
-n_procs_x: 2 (Number of x-direction processors)
-n_procs_y: 123 (Number of y-direction processors)"""
-
-    assert expected_str == str(roms_discretization)

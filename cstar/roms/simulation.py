@@ -222,8 +222,6 @@ class ROMSSimulation(Simulation):
         Submits the ROMS simulation for execution.
     post_run()
         Processes model outputs after execution.
-    restart(new_end_date)
-        Creates a new ROMS simulation instance from a restart file.
 
     See Also
     --------
@@ -594,103 +592,6 @@ class ROMSSimulation(Simulation):
                     f"End date of InputDataset {i.end_date} does not match that of Simulation "
                     f"{self.end_date} or any corresponding InputDataset's 'start_date': \n {i}"
                 )
-
-    def __str__(self) -> str:
-        """Returns a string representation of the simulation.
-
-        Returns
-        -------
-        str
-            A formatted string summarizing the simulation's attributes.
-        """
-        class_name = self.__class__.__name__
-        base_str = super().__str__()
-
-        if self.runtime_code.exists_locally:
-            base_str += f"\nRuntime Settings: {self.roms_runtime_settings.__class__.__name__} instance (query using {class_name}.roms_runtime_settings)\n"
-
-        if self.marbl_codebase is not None:
-            base_str += f"\nMARBL Codebase: {self.marbl_codebase.__class__.__name__} instance (query using {class_name}.marbl_codebase)\n"
-
-        if self.pio_codebase is not None:
-            base_str += f"\nPIO Codebase: {self.pio_codebase.__class__.__name__} instance (query using {class_name}.pio_codebase)\n"
-
-        base_str += "\nInput Datasets:\n"
-        if self.model_grid is not None:
-            base_str += f"Model grid: <{self.model_grid.__class__.__name__} instance>"
-        if self.initial_conditions is not None:
-            base_str += f"\nInitial conditions: <{self.initial_conditions.__class__.__name__} instance>"
-        if self.tidal_forcing is not None:
-            base_str += (
-                f"\nTidal forcing: <{self.tidal_forcing.__class__.__name__} instance>"
-            )
-        if self.river_forcing is not None:
-            base_str += (
-                f"\nRiver forcing: <{self.river_forcing.__class__.__name__} instance>"
-            )
-        if len(self.surface_forcing) > 0:
-            base_str += (
-                f"\nSurface forcing: <list of {len(self.surface_forcing)} "
-                + f"{self.surface_forcing[0].__class__.__name__} instances>"
-            )
-        if len(self.boundary_forcing) > 0:
-            base_str += (
-                f"\nBoundary forcing: <list of {len(self.boundary_forcing)} "
-                + f"{self.boundary_forcing[0].__class__.__name__} instances>"
-            )
-        if len(self.forcing_corrections) > 0:
-            base_str += (
-                f"\nForcing corrections: <list of {len(self.forcing_corrections)} "
-                + f"{self.forcing_corrections[0].__class__.__name__} instances>\n"
-            )
-
-        base_str += f"\nIs setup: {self.is_setup}"
-
-        return base_str
-
-    def __repr__(self) -> str:
-        """Returns a detailed string representation of the simulation.
-
-        Returns
-        -------
-        str
-            A string representation of the simulation suitable for debugging.
-        """
-        repr_str = super().__repr__().rstrip(")")
-
-        if hasattr(self, "model_grid") and self.model_grid is not None:
-            repr_str += (
-                f"\nmodel_grid = <{self.model_grid.__class__.__name__} instance>,"
-            )
-        if hasattr(self, "initial_conditions") and self.initial_conditions is not None:
-            repr_str += f"\ninitial_conditions = <{self.initial_conditions.__class__.__name__} instance>,"
-        if hasattr(self, "tidal_forcing") and self.tidal_forcing is not None:
-            repr_str += (
-                f"\ntidal_forcing = <{self.tidal_forcing.__class__.__name__} instance>,"
-            )
-        if hasattr(self, "river_forcing") and self.river_forcing is not None:
-            repr_str += (
-                f"\nriver_forcing = <{self.river_forcing.__class__.__name__} instance>,"
-            )
-        if hasattr(self, "surface_forcing") and len(self.surface_forcing) > 0:
-            repr_str += (
-                f"\nsurface_forcing = <list of {len(self.surface_forcing)} "
-                + f"{self.surface_forcing[0].__class__.__name__} instances>,"
-            )
-        if hasattr(self, "boundary_forcing") and len(self.boundary_forcing) > 0:
-            repr_str += (
-                f"\nboundary_forcing = <list of {len(self.boundary_forcing)} "
-                + f"{self.boundary_forcing[0].__class__.__name__} instances>,"
-            )
-        if hasattr(self, "forcing_corrections") and len(self.forcing_corrections) > 0:
-            repr_str += (
-                f"\nforcing_corrections = <list of {len(self.forcing_corrections)} "
-                + f"{self.forcing_corrections[0].__class__.__name__} instances>"
-            )
-
-        repr_str += "\n)"
-
-        return repr_str
 
     @classmethod
     def _get_filesystem_manager(cls, directory: Path) -> "JobFileSystemManager":
@@ -1521,8 +1422,6 @@ class ROMSSimulation(Simulation):
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
 
-        self.persist()
-
     def _validate_pio_cppdefs(self, build_dir: Path) -> None:
         """Ensure `use_pio` agrees with the compile-time `cppdefs.opt`.
 
@@ -1621,7 +1520,6 @@ class ROMSSimulation(Simulation):
                 "use_pio is True: skipping input-dataset partitioning "
                 "(ParallelIO reads joined files directly)"
             )
-            self.persist()
             return
 
         datasets_to_partition = [
@@ -1633,8 +1531,6 @@ class ROMSSimulation(Simulation):
                 np_eta=self.discretization.n_procs_y,
                 overwrite_existing_files=overwrite_existing_files,
             )
-
-        self.persist()
 
     def _validate_pio_inputs(self) -> None:
         """Ensure all locally staged input datasets are readable by ROMS with
@@ -1815,7 +1711,6 @@ class ROMSSimulation(Simulation):
 
             job_instance.submit()
             self._execution_handler = job_instance
-            self.persist()
             return job_instance
 
         else:  # cstar_sysmgr.scheduler is None
@@ -1825,7 +1720,6 @@ class ROMSSimulation(Simulation):
                 output_file=output_file,
             )
             self._execution_handler = romsprocess
-            self.persist()
             romsprocess.start()
             return romsprocess
 
@@ -1881,7 +1775,6 @@ class ROMSSimulation(Simulation):
             files = list(output_dir.glob("*.nc"))
             if not files:
                 self.log.warning(f"No suitable output found in `{output_dir}`")
-                self.persist()
                 return
             self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
             for f in files:
@@ -1890,13 +1783,11 @@ class ROMSSimulation(Simulation):
                 f"use_pio is True: moved {len(files)} joined output files to "
                 f"`{self.fs_manager.joined_output_dir}` without joining"
             )
-            self.persist()
             return
 
         files = list(output_dir.glob("*.??????????????.*.nc"))
         if not files:
             self.log.warning(f"No suitable output found in `{output_dir}`")
-            self.persist()
             return
 
         self.fs_manager.joined_output_dir.mkdir(exist_ok=True, parents=True)
@@ -1924,96 +1815,3 @@ class ROMSSimulation(Simulation):
             # list() exhausts the returned iterator, which is needed to surface any errors
             # that were raised in the threaded join operations
             list(executor.map(_spatial_join, unique_wildcards))
-
-        self.persist()
-
-    def restart(self, new_end_date: str | datetime) -> "ROMSSimulation":
-        """Restart the ROMS simulation from the end of the current simulation, if
-        possible.
-
-        This method creates a new `ROMSSimulation` instance that continues from
-        the date specified by `end_date` in the current ROMSSimulation. The
-        method searches for a restart file generated by the simulation corresponding
-        to this date, and proceeds if one is found.
-        The new instance inherits the configuration of the current simulation but updates the
-        initial conditions based on the restart file.
-
-        Parameters
-        ----------
-        new_end_date : str or datetime
-            The new end date for the restarted simulation. If given as a string,
-            it will be parsed into a `datetime` object.
-
-        Returns
-        -------
-        ROMSSimulation
-            A new instance of `ROMSSimulation` that starts from `end_date`
-            and runs until `new_end_date`.
-
-        Raises
-        ------
-        FileNotFoundError
-            If no restart file corresponding to the new start date is found in
-            the output directory.
-        ValueError
-            If multiple distinct restart files match the expected restart pattern.
-
-        Notes
-        -----
-        - This method searches the output directory for restart files that
-          match the timestamped pattern `*_rst.YYYYMMDDHHMMSS.nc`.
-        - The new simulation instance will have its `initial_conditions`
-          set to the detected restart file.
-        - Cached dataset information is reset for the new instance.
-
-        Examples
-        --------
-        >>> new_sim = simulation.restart(new_end_date="2025-06-01")
-        >>> print(new_sim.initial_conditions.location)
-        /path/to/output/restart_rst.20250601000000.nc
-
-        See Also
-        --------
-        post_run : Handles post-processing of ROMS output files.
-        run : Executes the ROMS simulation.
-        """
-        new_sim = cast("ROMSSimulation", super().restart(new_end_date=new_end_date))
-
-        # With PIO, post_run moves the (already-joined) restart file to the joined
-        # output directory rather than leaving it in the output directory.
-        restart_dir = (
-            self.fs_manager.joined_output_dir
-            if self.use_pio
-            else self.fs_manager.output_dir
-        )
-
-        new_start_date = new_sim.start_date
-        restart_date_string = new_start_date.strftime("%Y%m%d%H%M%S")
-        restart_wildcard = f"*_rst.{restart_date_string}.nc"
-        restart_files = list(restart_dir.glob(restart_wildcard))
-        if len(restart_files) == 0:
-            raise FileNotFoundError(
-                f"No files in {restart_dir} match the pattern "
-                + f"'*_rst.{restart_date_string}.nc"
-            )
-
-        unique_restarts = {fname for fname in restart_files}
-
-        if len(unique_restarts) > 1:
-            raise ValueError(
-                "Found multiple distinct restart files corresponding to "
-                + f"{restart_date_string}: "
-                + "\n ".join([str(rst) for rst in list(unique_restarts)])
-            )
-
-        restart_file = restart_dir / list(unique_restarts)[0]
-        new_ic = ROMSInitialConditions(
-            location=str(restart_file.resolve()), start_date=new_start_date
-        )
-        new_sim.initial_conditions = new_ic
-
-        # Reset cached data for input datasets
-        for inp in new_sim.input_datasets:
-            inp._working_copy = None
-
-        return new_sim

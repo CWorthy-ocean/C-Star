@@ -1,7 +1,6 @@
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from textwrap import dedent
 from unittest import mock
 
 import pytest
@@ -13,128 +12,6 @@ from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.roms import ROMSPartitioning
 from cstar.roms.input_dataset import DatasetLinker, ROMSInputDataset
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
-
-
-class TestStrAndRepr:
-    """Test class for verifying the string and repr outputs of ROMSInputDataset.
-
-    This class contains tests to validate the correct representation of the
-    `ROMSInputDataset` object in its string and repr outputs, including support
-    for additional attributes like `partitioned_files` and `working_path`.
-
-    Tests:
-    ------
-    - `test_str_with_partitioned_files`: Validates the string output includes
-      the `partitioned_files` attribute in the correct format.
-    - `test_repr_with_partitioned_files`: Validates the repr output includes
-      the `partitioned_files` attribute in the correct format.
-    - `test_repr_with_partitioned_files_and_working_path`: Ensures the repr
-      output includes both `working_path` and `partitioned_files` in the
-      correct format.
-    """
-
-    def test_str_with_partitioned_files(self, romsinputdataset_local_netcdf):
-        """Test the ROMSInputDataset string representation has correct substring for
-        partitioned_files.
-
-        Fixtures
-        --------
-        - romsinputdataset_local_netcdf: Provides a ROMSInputDataset with a local NetCDF source.
-
-        Asserts
-        -------
-        - String representation of the dataset includes the list of
-          partitioned files in the correct format.
-        """
-        romsinputdataset_local_netcdf.partitioning = ROMSPartitioning(
-            np_xi=1,
-            np_eta=2,
-            files=[
-                "local_file.001.nc",
-                "local_file.002.nc",
-            ],
-        )
-        expected_str = (
-            "Partitioning: ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc',\n"
-            + " " * 43
-            + "'local_file.002.nc'])"
-        )
-
-        actual_str = str(romsinputdataset_local_netcdf).strip()
-        assert expected_str in actual_str, (
-            f"Expected:\n{expected_str}\nBut got:\n{actual_str}"
-        )
-
-    def test_repr_with_partitioned_files(self, romsinputdataset_local_netcdf):
-        """Test the ROMSInputDataset repr includes `partitioned_files`.
-
-        This test ensures that the `repr` output of a `ROMSInputDataset` object
-        contains the `partitioned_files` attribute formatted as expected.
-
-        Fixtures
-        --------
-        - `romsinputdataset_local_netcdf`: Provides a mock ROMSInputDataset object
-          with a local NetCDF source.
-
-        Asserts
-        -------
-        - The `partitioned_files` attribute is included in the repr output.
-        - The format of the `partitioned_files` list matches the expected string output.
-        """
-        romsinputdataset_local_netcdf.partitioning = ROMSPartitioning(
-            np_xi=1,
-            np_eta=2,
-            files=[
-                "local_file.001.nc",
-                "local_file.002.nc",
-            ],
-        )
-        expected_repr = dedent(
-            """\
-            State: <partitioning = ROMSPartitioning(np_xi=1, np_eta=2, files=['local_file.001.nc', 'local_file.002.nc'])>
-        """
-        ).strip()
-        actual_repr = repr(romsinputdataset_local_netcdf)
-
-        # Normalize whitespace for comparison
-        expected_repr_normalized = " ".join(expected_repr.split())
-        actual_repr_normalized = " ".join(actual_repr.split())
-
-        assert expected_repr_normalized in actual_repr_normalized, (
-            f"Expected:\n{expected_repr}\nBut got:\n{actual_repr}"
-        )
-
-    def test_repr_with_partitioned_files_and_working_copy(
-        self,
-        stagedfile_remote_source,
-        romsinputdataset_remote_netcdf,
-    ):
-        """Test the ROMSInputDataset repr includes `partitioned_files` and
-        `working_copy`.
-        """
-        romsinputdataset_remote_netcdf.partitioning = ROMSPartitioning(
-            np_xi=1,
-            np_eta=2,
-            files=[
-                "remote_file.001.nc",
-                "remote_file.002.nc",
-            ],
-        )
-
-        romsinputdataset_remote_netcdf._working_copy = stagedfile_remote_source()
-        expected_repr = dedent(
-            """\
-            State: <working_copy = some/local/dir/remote_file.nc, partitioning = ROMSPartitioning(np_xi=1, np_eta=2, files=['remote_file.001.nc', 'remote_file.002.nc']) >
-        """
-        ).strip()
-        actual_repr = repr(romsinputdataset_remote_netcdf)
-
-        # Normalize whitespace for comparison
-        expected_repr_normalized = " ".join(expected_repr.split())
-        actual_repr_normalized = " ".join(actual_repr.split())
-        assert expected_repr_normalized in actual_repr_normalized, (
-            f"Expected:\n{expected_repr_normalized}\n to be in \n{actual_repr_normalized}"
-        )
 
 
 class TestROMSInputDatasetGet:
