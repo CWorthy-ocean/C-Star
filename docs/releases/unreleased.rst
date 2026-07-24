@@ -66,6 +66,7 @@ Improvements
 - Remove unnecessary multiple inheritance (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
 - Upgrade `pydantic` pin, replace `SerializeAsAny` with use of `polymorphic_serialization=True` (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
 - Convert `LiveStep` attributes to `frozen` (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Speed up simple data fetch operations by only validating sha256/stat if a value was explicitly passed (`#605 <https://github.com/CWorthy-ocean/C-Star/pull/605>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
