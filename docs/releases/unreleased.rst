@@ -81,4 +81,4 @@ Improvements
 Miscellaneous
 ~~~~~~~~~~~~~
 
-- N/A
+- Remove outdated code (pickle persistence, restart, etc.) and documentation (`#609 <https://github.com/CWorthy-ocean/C-Star/pull/609>`_)
