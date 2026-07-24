@@ -93,6 +93,7 @@ class LocalLauncher(Launcher[LocalHandle]):
     @classmethod
     def check_preconditions(cls) -> None:
         """Perform launcher-specific startup validation."""
+        ...
 
     @staticmethod
     def _create_dep_aware_script(
