@@ -704,6 +704,45 @@ class TestROMSInputDatasetPartition:
         ):
             romsinputdataset_local_netcdf.path_for_roms
 
+    def test_path_for_roms_unpartitioned_single_file(
+        self, romsinputdataset_local_netcdf
+    ):
+        """Test `path_for_roms_unpartitioned` with a single staged file."""
+        dataset = romsinputdataset_local_netcdf
+        dataset._working_copy = mock.MagicMock(
+            spec=StagedFile, path=Path("/some/dir/local_file.nc")
+        )
+        assert dataset.path_for_roms_unpartitioned == [Path("/some/dir/local_file.nc")]
+
+    def test_path_for_roms_unpartitioned_collection(
+        self, romsinputdataset_local_netcdf, stageddatacollection_remote_files
+    ):
+        """Test `path_for_roms_unpartitioned` with a staged collection of files."""
+        dataset = romsinputdataset_local_netcdf
+        paths = [Path("/some/dir/file1.nc"), Path("/some/dir/file2.nc")]
+        dataset._working_copy = stageddatacollection_remote_files(paths=paths)
+        assert dataset.path_for_roms_unpartitioned == paths
+
+    def test_path_for_roms_unpartitioned_empty_if_not_staged(
+        self, romsinputdataset_local_netcdf
+    ):
+        """Test `path_for_roms_unpartitioned` returns an empty list when the dataset
+        has not been staged.
+        """
+        assert romsinputdataset_local_netcdf.path_for_roms_unpartitioned == []
+
+    def test_path_for_roms_unpartitioned_raises_for_partitioned_source(
+        self, romsinputdataset_local_netcdf
+    ):
+        """Test `path_for_roms_unpartitioned` raises for a partitioned source, which
+        has no local joined file for ROMS with PIO to read.
+        """
+        dataset = romsinputdataset_local_netcdf
+        dataset.source_np_xi = 4
+        dataset.source_np_eta = 3
+        with pytest.raises(ValueError, match="staged from a partitioned source"):
+            dataset.path_for_roms_unpartitioned
+
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     def test_partition_skips_if_not_partitionable(
         self,

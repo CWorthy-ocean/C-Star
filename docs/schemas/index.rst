@@ -21,6 +21,7 @@ executes a ROMS simulation.
 
 - :download:`ROMS-MARBL Blueprint Schema v1.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.1.0.0.json>`
 - :download:`ROMS-MARBL Blueprint Schema v2.0.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.0.0.json>`
+- :download:`ROMS-MARBL Blueprint Schema v2.1.0 <https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.1.0.json>`
 
 
 Hello World Blueprint
