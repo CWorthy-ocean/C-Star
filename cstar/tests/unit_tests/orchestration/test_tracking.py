@@ -182,6 +182,7 @@ async def test_tracking_retrieve_variant(
         lp_fn.assert_called_once()  # no new call made
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 async def test_default_run_id(
     wp_templates_dir: Path,
@@ -207,6 +208,7 @@ async def test_default_run_id(
     assert run_id == slugify(wp.name)
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 async def test_default_run_id_remote(
     remote_workplan_uri: str,

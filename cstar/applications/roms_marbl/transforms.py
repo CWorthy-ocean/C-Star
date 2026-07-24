@@ -27,7 +27,7 @@ from cstar.base.utils import (
     slugify,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
     Directive,
     DirectiveConfig,
@@ -92,7 +92,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         if not is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
             return [step]
 
-        blueprint = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
 
@@ -149,8 +149,9 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                 "blueprint_overrides": overrides,
                 "depends_on": depends_on,
                 "name": child_step_name,
+                "parent": step,
             }
-            child_step = LiveStep.from_step(step, parent=step, update=updates)
+            child_step = LiveStep.from_step(step, update=updates)
             results.append(child_step)
 
             if i == len(time_slices) - 1:

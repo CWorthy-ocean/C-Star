@@ -41,7 +41,7 @@ class ForcingConfiguration(ConfiguredBaseModel):
     """Wind or other forcing corrections."""
 
 
-class CodeRepository(DocLocMixin, ConfiguredBaseModel):
+class CodeRepository(DocLocMixin):
     """Reference to a remote code repository with optional path filtering
     and point-in-time specification.
     """
@@ -96,7 +96,7 @@ class ROMSCompositeCodeRepository(ConfiguredBaseModel):
     """Codebase used to add MARBL to the simulation."""
 
 
-class ParameterSet(DocLocMixin, ConfiguredBaseModel):
+class ParameterSet(DocLocMixin):
     """A base class for parameter sets exposed on a blueprint."""
 
     hash: str | None = Field(default=None, init=False, validate_default=False)
@@ -195,7 +195,7 @@ class ModelParameterSet(ParameterSet):
     """The time step the model integrates over."""
 
 
-class RomsMarblBlueprint(Blueprint, ConfiguredBaseModel):
+class RomsMarblBlueprint(Blueprint):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
     schema_version: str = Field("2.0.0", frozen=True)

@@ -16,7 +16,6 @@ from pydantic import (
     PlainSerializer,
     PrivateAttr,
     SerializationInfo,
-    SerializeAsAny,
     StringConstraints,
     ValidationInfo,
     WithJsonSchema,
@@ -60,8 +59,13 @@ class ConfiguredBaseModel(BaseModel):
     for subclasses.
     """
 
-    model_config = ConfigDict(extra="allow", from_attributes=True)
-    """Pydantic ConfigDict with options we want changed."""
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="allow",
+        from_attributes=True,
+        str_strip_whitespace=True,
+        use_attribute_docstrings=True,
+    )
+    """Configures the behavior of the pydantic model."""
 
 
 class Resource(ConfiguredBaseModel):
@@ -217,7 +221,7 @@ class WorkplanState(StrEnum):
     """A workflow that has been validated."""
 
 
-class Step(BaseModel):
+class Step(ConfiguredBaseModel):
     """An individual unit of execution within a workplan."""
 
     name: RequiredString
@@ -226,7 +230,7 @@ class Step(BaseModel):
     application: RequiredString
     """The user-friendly name of the application executed in the step."""
 
-    blueprint_path: FilePath | str = Field(alias="blueprint")
+    blueprint_path: FilePath = Field(alias="blueprint")
     """The blueprint that will be executed in this step."""
 
     depends_on: list[RequiredString] = Field(
@@ -266,6 +270,11 @@ class Step(BaseModel):
     )
     """A collection of key-value pairs specifying configuration for runtime directives."""
 
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        polymorphic_serialization=True,
+    )
+    """Configures the behavior of the pydantic model."""
+
     @property
     def safe_name(self) -> str:
         """Return a URL-safe version of the step name.
@@ -277,7 +286,7 @@ class Step(BaseModel):
         return slugify(self.name)
 
 
-class Workplan(BaseModel):
+class Workplan(ConfiguredBaseModel):
     """A collection of executable steps and the associated configuration to run them."""
 
     name: RequiredString
@@ -286,7 +295,7 @@ class Workplan(BaseModel):
     description: RequiredString
     """A user-friendly description of the workplan."""
 
-    steps: Sequence[SerializeAsAny[Step]] = Field(
+    steps: Sequence[Step] = Field(
         min_length=1,
         frozen=True,
     )
@@ -307,6 +316,11 @@ class Workplan(BaseModel):
         frozen=True,
     )
     """A collection of user-defined variables that will be populated at runtime."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        polymorphic_serialization=True,
+    )
+    """Configures the behavior of the pydantic model."""
 
     @field_validator("steps", mode="before")
     @classmethod
@@ -394,13 +408,8 @@ class Workplan(BaseModel):
 
         return value
 
-    @model_validator(mode="after")
-    def _model_validator(self) -> "Workplan":
-        """Validate attribute relationships."""
-        return self
 
-
-class UserDefinedVariables(BaseModel):
+class UserDefinedVariables(ConfiguredBaseModel):
     """A collection of key-value pairs that provides validation of the static
     keys specified at design time and dynamically configured keys at runtime.
 

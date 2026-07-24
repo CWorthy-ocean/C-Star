@@ -361,7 +361,7 @@ def test_step_compute_overrides_set(
         A path to a file that meets minimum expectations (it exists).
 
     """
-    overrides = {"a": 1, "b": 2, "c": "xyz"}
+    overrides: dict[str, int | str] = {"a": 1, "b": 2, "c": "xyz"}
 
     step_name = f"test-step-{uuid.uuid4()}"
     app_name = f"test-app-{uuid.uuid4()}"
@@ -895,10 +895,7 @@ def test_workplan_yaml_deserialize(
     yaml_path = tmp_path / "test.yaml"
     _ = serialize(yaml_path, plan)
 
-    plan2 = t.cast("Workplan", deserialize(yaml_path, Workplan))
-    # todo: fix so this str conversion isn't required.
-    for step in plan.steps:
-        step.blueprint_path = str(step.blueprint_path)
+    plan2 = deserialize(yaml_path, Workplan)
 
     assert plan == plan2
 

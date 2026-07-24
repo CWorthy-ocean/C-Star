@@ -446,7 +446,7 @@ def single_step_workplan(
             Step(
                 name="s-00",
                 application=Application.SLEEP,
-                blueprint=bp_path.as_posix(),
+                blueprint=bp_path,
             ),
         ],
     )
@@ -655,3 +655,58 @@ async def executed_workplan_with_sideeffects(
         await run_repo.put_sentinel(handle)
 
     yield wp_path, wp, fake_run_id
+
+
+@pytest.fixture
+async def read_yaml_intercept(
+    tmp_path: Path,
+    default_blueprint_path: str,
+) -> AsyncGenerator[None]:
+    """Intercept calls to read yaml files from disk to inspect if the content is
+    a Workplan that should be modified to enable the test to run.
+
+    If the `default_blueprint_path` is found, an empty blueprint is created
+    and the associated `Step` is updated.
+
+    If a relative blueprint path is found, the relative path is rewritten as an
+    absolute path. When the relative path does not lead to a local file (e.g. a
+    test with a remote workplan), an empty blueprint file is stubbed out.
+    """
+    import typing as t
+
+    from cstar.orchestration.serialization import read_yaml_to_raw
+
+    def handle_yaml_read(
+        _fn: Callable[[Path], dict[str, t.Any]],
+    ) -> Callable[[Path], dict[str, t.Any]]:
+        def create_blueprints(path: Path) -> dict[str, t.Any]:
+            """When testing with a workplan that references local blueprints that don't exist
+            (because it's a test), we will automatically create a blueprint and adjust the
+            workplan content to a test-relative path.
+            """
+            original_dict = _fn(path)
+
+            if set(original_dict.keys()).intersection({"steps", "runtime_vars"}):
+                steps = original_dict["steps"]
+                for step_dict in steps:
+                    if step_dict["blueprint"] == default_blueprint_path:
+                        bp_path = tmp_path / "blueprint.yaml"
+                        bp_path.touch()
+                        step_dict["blueprint"] = bp_path
+                    elif str(step_dict["blueprint"]).startswith("."):
+                        og_path = Path(step_dict["blueprint"])
+                        rel_path = og_path.parent / og_path
+                        if not rel_path.exists():
+                            rel_path = tmp_path / og_path.name
+                            rel_path.touch()
+                        step_dict["blueprint"] = rel_path.resolve()
+            # else:
+            return original_dict
+
+        return create_blueprints
+
+    with mock.patch(
+        "cstar.orchestration.serialization.read_yaml_to_raw",
+        side_effect=handle_yaml_read(read_yaml_to_raw),
+    ):
+        yield

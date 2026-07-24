@@ -231,7 +231,7 @@ async def test_hello_world_workplan(
     assert len(workplan.steps) == 1
     assert workplan.steps[0].name == step_name
     assert workplan.steps[0].application == app_name
-    assert workplan.steps[0].blueprint_path == bp_path.as_posix()
+    assert workplan.steps[0].blueprint_path == bp_path
 
     # ensure a write succeeds
     wp_copy = tmp_path / "hw-workplan-copy.yaml"

@@ -257,6 +257,7 @@ def test_override_transform_system_precedence(
     assert Path(bp_new.working_dir) == sys_od
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 async def test_continuance_directive_step_resolution(
     tmp_path: Path,
@@ -296,10 +297,12 @@ async def test_continuance_directive_step_resolution(
     live_steps = [LiveStep.from_step(s) for s in wp.steps]
 
     for i, step in enumerate(live_steps):
-        step.blueprint_path = local_bp
-        step.working_dir = tmp_path / run_id / step.safe_name
         if i > 0:
             step.directives[ContinuanceDirective.key()] = {"step": wp.steps[i - 1].name}
+        attributes = step.model_dump(exclude={"working_dir", "blueprint_path"})
+        attributes["working_dir"] = tmp_path / run_id / step.safe_name
+        attributes["blueprint"] = local_bp
+        live_steps[i] = LiveStep(**attributes)
 
     live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
     live_wp_path = tmp_path / wp_template_file
@@ -350,6 +353,7 @@ async def test_continuance_directive_context_not_supplied() -> None:
         ContinuanceDirective(config, workplan=workplan)
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 async def test_continuance_directive_step_DNE(
     tmp_path: Path,
@@ -388,10 +392,12 @@ async def test_continuance_directive_step_DNE(
     live_steps = [LiveStep.from_step(s) for s in wp.steps]
 
     for i, step in enumerate(live_steps):
-        step.blueprint_path = local_bp
-        step.working_dir = tmp_path / run_id / step.safe_name
         if i > 0:
             step.directives[ContinuanceDirective.key()] = {"step": wp.steps[i - 1].name}
+        attributes = step.model_dump(exclude={"working_dir", "blueprint_path"})
+        attributes["working_dir"] = tmp_path / run_id / step.safe_name
+        attributes["blueprint"] = local_bp
+        live_steps[i] = LiveStep(**attributes)
 
     live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
     bad_name = str(uuid.uuid4())

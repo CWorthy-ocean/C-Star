@@ -25,7 +25,7 @@ that this model reads back.)
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import f90nml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -83,7 +83,7 @@ class _NmlGroup(BaseModel):
     # validate_assignment => edits in the read->edit->write flow are re-checked.
     # use_attribute_docstrings => the per-field docstrings below become the field
     # descriptions in the generated JSON schema.
-    model_config = ConfigDict(
+    model_config: ClassVar[ConfigDict] = ConfigDict(
         extra="forbid", validate_assignment=True, use_attribute_docstrings=True
     )
 
@@ -633,7 +633,7 @@ class RomsNamelist(BaseModel):
     Group order matches ``write_roms_namelist`` / the reference namelist.
     """
 
-    model_config = ConfigDict(
+    model_config: ClassVar[ConfigDict] = ConfigDict(
         extra="forbid", validate_assignment=True, use_attribute_docstrings=True
     )
 
