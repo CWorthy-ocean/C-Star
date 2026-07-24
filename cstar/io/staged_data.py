@@ -131,6 +131,14 @@ class StagedFile(StagedData):
         if not resolved_path.exists():
             return True
 
+if stat := self._stat:
+    r_stat = os.stat(resolved_path.resolve())
+
+    if stat.st_mtime != r_stat.st_mtime:
+        return True
+
+    if stat.st_size != r_stat.st_size:
+        return True 
         if (
             self._stat
             and self._stat.st_mtime != os.stat(resolved_path.resolve()).st_mtime
