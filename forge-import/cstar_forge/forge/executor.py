@@ -746,7 +746,16 @@ class ForgeExecutor(BaseModel):
                 mode="json", exclude_none=True
             )
 
+        # The Blueprint serializer injects a "$schema" ref into every dump, but
+        # the canonical C-Star file format carries it as a yaml-language-server
+        # comment, not a document key (cstar's model_to_yaml pops it the same
+        # way). A "$schema" key would also be rejected as an extra field by any
+        # C-Star deserializer that doesn't strip it before validating.
+        schema_url = str(roms_marbl_blueprint_dict.pop("$schema", "") or "")
+
         with bp_path.open("w") as f:
+            if schema_url:
+                f.write(f"# yaml-language-server: $schema={schema_url}\n")
             yaml.safe_dump(
                 roms_marbl_blueprint_dict, f, default_flow_style=False, sort_keys=False
             )

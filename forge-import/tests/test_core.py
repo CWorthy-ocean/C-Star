@@ -1040,9 +1040,18 @@ class TestForgeExecutorPersist:
         assert bp_path.exists()
 
         with bp_path.open("r") as f:
+            first_line = f.readline()
+            f.seek(0)
             data = yaml.safe_load(f)
             assert data is not None
             assert "name" in data
+
+        # "$schema" must travel as the yaml-language-server comment (the
+        # canonical C-Star format), never as a document key -- a key would be
+        # rejected as an extra field by extra="forbid" C-Star deserializers
+        # that don't strip it before validating.
+        assert "$schema" not in data
+        assert first_line.startswith("# yaml-language-server: $schema=")
 
         settings_path = bp_path.parent / f"settings_{bp_path.name}"
         assert settings_path.exists()
