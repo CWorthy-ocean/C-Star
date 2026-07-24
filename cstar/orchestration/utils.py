@@ -17,6 +17,18 @@ ENV_CSTAR_ORCH_DELAYS: t.Annotated[
 ] = "CSTAR_ORCH_DELAYS"
 """Environment variable containing configurable delay for the orchestrator."""
 
+ENV_CSTAR_APP_MODULES: t.Annotated[
+    t.Literal["CSTAR_APP_MODULES"],
+    EnvVar(
+        "A comma-separated list of importable module paths for applications defined "
+        "outside the `cstar.applications` package. Each module is imported before "
+        "application lookup so its `@register_application` decorators run.",
+        _GROUP_ORCH,
+        "",
+    ),
+] = "CSTAR_APP_MODULES"
+"""A comma-separated list of importable module paths for externally-defined applications."""
+
 ENV_CSTAR_ORCH_TRX_FREQ: t.Annotated[
     t.Literal["CSTAR_ORCH_TRX_FREQ"],
     EnvVar(

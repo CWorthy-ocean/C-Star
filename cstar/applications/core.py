@@ -1,5 +1,4 @@
 import importlib
-import os
 import typing as t
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -8,12 +7,14 @@ from itertools import chain
 from pathlib import Path
 
 from cstar.base.adapter import SchemaAdapter
+from cstar.base.env import get_env_item
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import SerializableModel, deserialize
+from cstar.orchestration.utils import ENV_CSTAR_APP_MODULES
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
@@ -375,7 +376,8 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     before lookup so its ``@register_application`` decorators run.
     """
     if name not in _registry:
-        for module in filter(None, os.environ.get("CSTAR_APP_MODULES", "").split(",")):
+        modules = get_env_item(ENV_CSTAR_APP_MODULES).value
+        for module in filter(None, modules.split(",")):
             importlib.import_module(module.strip())
 
     if name not in _registry:

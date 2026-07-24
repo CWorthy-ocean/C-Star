@@ -12,13 +12,20 @@ from cstar.applications.core import (
     get_application,
 )
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import discover_env_vars
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.utils import ENV_CSTAR_APP_MODULES
 
 
 def test_get_application_unknown_name_raises_value_error() -> None:
     """Verify that an unregistered application name raises ValueError."""
     with pytest.raises(ValueError, match="No application for"):
         get_application("no_such_application")
+
+
+def test_app_modules_env_var_is_registered() -> None:
+    """Verify that CSTAR_APP_MODULES is discoverable for CLI display and docs."""
+    assert ENV_CSTAR_APP_MODULES in discover_env_vars()
 
 
 def test_get_application_from_external_module(
