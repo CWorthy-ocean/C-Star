@@ -376,11 +376,10 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     before lookup so its ``@register_application`` decorators run.
     """
     if name not in _registry:
-        modules = get_env_item(ENV_CSTAR_APP_MODULES).value
-        for module in filter(None, modules.split(",")):
-            importlib.import_module(module.strip())
+        if modules := get_env_item(ENV_CSTAR_APP_MODULES).value:
+            for module in filter(lambda x: name in x, modules.split(",")):
+                importlib.import_module(module.strip())
 
-    if name not in _registry:
         try:
             importlib.import_module(f"cstar.applications.{name}")
         except ModuleNotFoundError:
