@@ -911,6 +911,7 @@ def test_worker_main_exec(
 def test_worker_main_exec_continue_from(
     blueprint_path: Path,
     continuance_directive_path: Path,
+    tmp_path: Path,
 ) -> None:
     """Verify that the continuance transform is executed when included in
     the directives file.
@@ -964,6 +965,7 @@ def test_worker_main_exec_continue_from(
                             name="test-step",
                             application="roms_marbl",
                             blueprint=blueprint_path,
+                            working_dir=tmp_path / "test-step",
                         )
                     ],
                 )
@@ -1016,6 +1018,7 @@ def test_worker_main_cstar_error(
 def test_worker_main_directive_args_parsed(
     mocked_simulation_outputs: tuple[Path, Path, Path],
     continuance_directive_path: Path,
+    tmp_path: Path,
 ) -> None:
     """Verify that the worker receives directives and they are supplied
     to the runner.
@@ -1074,7 +1077,7 @@ def test_worker_main_directive_args_parsed(
                             name="step-for-testing",
                             application="roms_marbl",
                             blueprint=bp_path,
-                            working_dir=Path(),
+                            working_dir=tmp_path / "step-for-testing",
                             directives={
                                 "continue-from": {"path": step_dir.as_posix()},
                             },

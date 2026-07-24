@@ -8,7 +8,6 @@ from unittest import mock
 import networkx as nx
 import pytest
 
-from cstar.applications.roms_marbl.app import RomsMarblApplication  # noqa: F401
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_ON
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
@@ -102,9 +101,7 @@ def diamond_workplan(
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(
-        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
-    )
+    bp_content = bp_content.replace(default_working_dir, f"working_dir: {tmp_path}")
     bp_path.write_text(bp_content)
 
     return Workplan(
@@ -161,9 +158,7 @@ def multi_entrypoint_workplan(
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(
-        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
-    )
+    bp_content = bp_content.replace(default_working_dir, f"working_dir: {tmp_path}")
     bp_path.write_text(bp_content)
 
     return Workplan(

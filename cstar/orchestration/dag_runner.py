@@ -499,7 +499,7 @@ class ExecutiveRunSummary(BaseModel):
                 name=step.name,
                 log_path=str(step.log_path),
                 script_path=str(step.script_path),
-                working_dir=str(step.working_dir) if step.working_dir else "",
+                working_dir=str(step.working_dir),
                 blueprint_path=str(step.blueprint_path),
                 launcher=handle.launcher_name if handle else "",
                 task_id=handle.pid if handle else "",

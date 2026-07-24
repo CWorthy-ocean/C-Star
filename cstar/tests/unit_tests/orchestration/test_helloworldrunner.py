@@ -215,7 +215,7 @@ async def test_hello_world_workplan(
                 {
                     "name": step_name,
                     "application": app_name,
-                    "blueprint": bp_path.as_posix(),
+                    "blueprint": bp_path,
                 },
             ],
         }
@@ -231,7 +231,7 @@ async def test_hello_world_workplan(
     assert len(workplan.steps) == 1
     assert workplan.steps[0].name == step_name
     assert workplan.steps[0].application == app_name
-    assert workplan.steps[0].blueprint_path == bp_path.as_posix()
+    assert workplan.steps[0].blueprint_path == str(bp_path)
 
     # ensure a write succeeds
     wp_copy = tmp_path / "hw-workplan-copy.yaml"
@@ -239,14 +239,12 @@ async def test_hello_world_workplan(
 
     # and sanity check the copy that was loaded
     workplan_copy = deserialize(wp_copy, Workplan)
-    assert workplan_copy.name == workplan_copy.name
-    assert workplan_copy.description == workplan_copy.description
-    assert workplan_copy.state == workplan_copy.state
-    assert workplan_copy.steps[0].name == workplan_copy.steps[0].name
-    assert workplan_copy.steps[0].application == workplan_copy.steps[0].application
-    assert (
-        workplan_copy.steps[0].blueprint_path == workplan_copy.steps[0].blueprint_path
-    )
+    assert workplan_copy.name == workplan.name
+    assert workplan_copy.description == workplan.description
+    assert workplan_copy.state == workplan.state
+    assert workplan_copy.steps[0].name == workplan.steps[0].name
+    assert workplan_copy.steps[0].application == workplan.steps[0].application
+    assert workplan_copy.steps[0].blueprint_path == workplan.steps[0].blueprint_path
 
 
 @pytest.mark.usefixtures("prefect_server_url")

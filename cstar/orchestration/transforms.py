@@ -13,7 +13,12 @@ from pydantic import (
     BaseModel,
 )
 
-from cstar.applications.core import ApplicationDefinition, Transform, get_application
+from cstar.applications.core import (
+    ApplicationDefinition,
+    Transform,
+    get_app_for_blueprint,
+    get_application,
+)
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin
@@ -600,9 +605,10 @@ class OverrideTransform(Transform[LiveStep]):
         live_step = LiveStep.from_step(step, update=update)
 
         bp_renamed = bp_path.with_stem(f"{bp_path.stem}.{self.suffix()}").name
-        live_step.blueprint_path = live_step.fsm.run_dir / bp_renamed
+        bp_path = live_step.fsm.run_dir / bp_renamed
+        serialize(bp_path, updated_bp)
 
-        serialize(live_step.blueprint_path, updated_bp)
+        live_step.blueprint_path = bp_path
         return (live_step,)
 
     @staticmethod
@@ -743,15 +749,20 @@ class DirectiveConfig(BaseModel):
             if not directives:
                 return blueprint_uri
 
-            step = LiveStep(
-                name="directive-step",
-                application=Application.ROMS_MARBL,
-                blueprint=local_bp,
-            )
             directive_map = DirectiveConfig.directive_map
             workplan: LiveWorkplan | None = None
             if os.getenv(ENV_CSTAR_RUNID, None):
                 workplan = DirectiveConfig.load_workplan()
+
+            app = get_app_for_blueprint(local_bp)
+            blueprint = t.cast("Blueprint", deserialize(local_bp, app.blueprint))
+
+            step = LiveStep(
+                name="directive-step",
+                application=Application.ROMS_MARBL,
+                blueprint=local_bp,
+                working_dir=blueprint.working_dir,
+            )
 
             transforms = {
                 directive_map[key](

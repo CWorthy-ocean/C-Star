@@ -5,7 +5,13 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from enum import IntEnum, StrEnum, auto
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 
 from cstar.applications.core import (
     get_app_for_blueprint,
@@ -222,25 +228,10 @@ _THandle = t.TypeVar("_THandle", bound=ProcessHandle)
 class LiveStep(Step):
     """A Step enriched with runtime metadata."""
 
-    parent: t.Self | None = Field(default=None, exclude=True)
+    parent: t.Self | None = Field(default=None, exclude=True, frozen=True)
     """The step for which this step is a sub-task."""
-    working_dir: Path | None = Field(default=None)
+    working_dir: Path = Field(frozen=True)
     """The root directory where this step can write outputs."""
-    _fsm: JobFileSystemManager | None = None
-    """Manages the structure of outputs from the step."""
-
-    @property
-    def get_working_dir(self) -> Path:
-        if self.working_dir is None:
-            if self.parent:
-                root_fsm = self.parent.fsm
-            else:
-                root_dir = StateDirectoryManager.data_dir()
-                root_fsm = JobFileSystemManager(root_dir)
-
-            self.working_dir = root_fsm.tasks_dir / self.safe_name
-
-        return self.working_dir
 
     @property
     def fsm(self) -> JobFileSystemManager:
@@ -250,9 +241,7 @@ class LiveStep(Step):
         -------
         JobFileSystemManager
         """
-        if self._fsm is None:
-            self._fsm = JobFileSystemManager(self.get_working_dir)
-        return self._fsm
+        return JobFileSystemManager(self.working_dir)
 
     @property
     def blueprint(self) -> Blueprint:
@@ -276,7 +265,6 @@ class LiveStep(Step):
     def from_step(
         cls,
         step: Step,
-        parent: "LiveStep | Step | None" = None,
         update: Mapping[str, t.Any] | None = None,
     ) -> "LiveStep":
         """Convert a step from orchestration planning into a LiveStep.
@@ -290,25 +278,44 @@ class LiveStep(Step):
         update : Mapping[str, t.Any]
             A mapping of updates to apply to the step
         """
-        step_attrs = step.model_dump(by_alias=True)
+        attributes = step.model_dump(by_alias=True)
+        update = update or {}
 
-        if update:
-            step_attrs.update(update)
+        if "name" in update:
+            attributes.pop("working_dir", None)
 
-        effective_parent: LiveStep | None = (
-            parent
-            if isinstance(parent, LiveStep)
-            else (LiveStep.from_step(parent) if parent else None)
-        )
-        # when no parent is given, inherit the parent from the source step (if it has one)
-        if effective_parent is None and isinstance(step, LiveStep):
-            effective_parent = step.parent
+        attributes.update(update)
+        return LiveStep(**attributes)
 
-        if effective_parent is not None:
-            step_attrs.pop("working_dir", None)
-            step_attrs["parent"] = effective_parent
+    @model_validator(mode="before")
+    @classmethod
+    def _model_validator_pre(cls, data: t.Any) -> "t.Any":
+        """Ensure the working directory and fsm are computed.
 
-        return LiveStep(**step_attrs)
+        Returns
+        -------
+        LiveStep
+        """
+        name = str(data.get("name", ""))
+        wd = t.cast("Path | None", data.get("working_dir", None))
+        parent = t.cast("Step | None", data.get("parent", None))
+
+        if parent and not isinstance(parent, LiveStep):
+            parent = LiveStep(**parent.model_dump(by_alias=True))
+
+        if parent:
+            fsm = parent.fsm.get_subtask_manager(name)
+            wd = fsm.root_dir
+            data["parent"] = parent
+
+        if wd:
+            data["working_dir"] = wd
+        else:
+            root_fsm = JobFileSystemManager(StateDirectoryManager.data_dir())
+            fsm = root_fsm.get_subtask_manager(name)
+            data["working_dir"] = fsm.root_dir
+
+        return data
 
 
 class LiveWorkplan(Workplan):

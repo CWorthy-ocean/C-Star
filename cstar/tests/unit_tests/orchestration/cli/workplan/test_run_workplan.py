@@ -62,6 +62,7 @@ def test_workplan_run_remote_workplan_dne() -> None:
     assert "not found" in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     "wp_uri",
     [
@@ -90,7 +91,8 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     )
 
     with mock.patch(
-        "cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
     ) as mock_exec:
         runner = CliRunner()
         result = runner.invoke(
@@ -234,6 +236,7 @@ def test_workplan_run_variable_validation_multi_value_mismatch(
     assert failed_validation in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_variable_multiple_sources(
     tmp_path: Path,
     wp_templates_dir: Path,
@@ -247,9 +250,7 @@ def test_workplan_run_variable_multiple_sources(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = tmp_path / "workplan.yml"
-    wp_path.write_text(wp_template.read_text())
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     varfile_path = tmp_path / "variables.env"
     varfile_path.write_text("key=value")
@@ -305,6 +306,7 @@ def test_workplan_run_variable_file_dne(
     assert "varfile" in result.stderr
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     "content",
     [
@@ -329,9 +331,7 @@ def test_workplan_run_variable_file_malformed(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = tmp_path / "workplan.yml"
-    wp_path.write_text(wp_template.read_text())
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     varfile_path = tmp_path / "variables.env"
     varfile_path.write_text(content)
