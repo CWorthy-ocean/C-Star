@@ -105,12 +105,9 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     mock_exec.assert_called_once()
 
 
-@pytest.mark.usefixtures("prefect_server_url")
+@pytest.mark.usefixtures("prefect_server_url", "read_yaml_intercept")
 def test_workplan_run_variable_unknown(
-    tmp_path: Path,
-    bp_templates_dir: Path,
     wp_templates_dir: Path,
-    default_blueprint_path: str,
 ) -> None:
     """Verify that attempting to run a workplan with runtime variables that are
     not declared by the workplan results in a failure.
@@ -122,16 +119,7 @@ def test_workplan_run_variable_unknown(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    bp_path = tmp_path / "blueprint.yaml"
-    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
-    bp_path.write_text(bp_tpl_path.read_text())
-
-    wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = tmp_path / "workplan.yaml"
-
-    wp_content = wp_template.read_text()
-    wp_content = wp_content.replace(default_blueprint_path, bp_path.as_posix())
-    wp_path.write_text(wp_content)
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     # template `workplan.yaml` declares: `runtime_vars: [var1, var2]`
     runtime_vars = ["--var", "undeclared=AAA"]
@@ -545,8 +533,6 @@ def test_workplan_run_nonexistent_runid(
 def test_workplan_run_default_run_id(
     tmp_path: Path,
     wp_templates_dir: Path,
-    bp_templates_dir: Path,
-    default_blueprint_path: str,
 ) -> None:
     """Verify that attempting to run without a run-id causes a default run-id to be
     reused.
@@ -557,19 +543,9 @@ def test_workplan_run_default_run_id(
         Temporary directory to read/write test inputs and outputs
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
-    wp_templates_dir : Path
-        Fixture providing the path to a directory containing template blueprints
-    default_blueprint_path : str
-        The default path found in sample blueprints that must be replaced
     """
     state_dir = tmp_path / "state"
-    bp_path = bp_templates_dir / "blueprint.yaml"
-    wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = tmp_path / "workplan.yml"
-
-    content = wp_template.read_text()
-    content = content.replace(default_blueprint_path, bp_path.as_posix())
-    wp_path.write_text(content)
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     runner = CliRunner()
 
@@ -642,8 +618,6 @@ def test_workplan_run_invalid_file_content(
 async def test_workplan_run_reload_prior_run(
     tmp_path: Path,
     wp_templates_dir: Path,
-    bp_templates_dir: Path,
-    default_blueprint_path: str,
 ) -> None:
     """Verify that passing a valid run-id and no path causes the prior run to be loaded.
 
@@ -653,19 +627,9 @@ async def test_workplan_run_reload_prior_run(
         Temporary directory to read/write test inputs and outputs
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
-    wp_templates_dir : Path
-        Fixture providing the path to a directory containing template blueprints
-    default_blueprint_path : str
-        The default path found in sample blueprints that must be replaced
     """
     state_dir = tmp_path / "state"
-    bp_path = bp_templates_dir / "blueprint.yaml"
-    wp_template = wp_templates_dir / "workplan.yaml"
-    wp_path = tmp_path / "workplan.yml"
-
-    content = wp_template.read_text()
-    content = content.replace(default_blueprint_path, bp_path.as_posix())
-    wp_path.write_text(content)
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     fake_run = WorkplanRun(
         workplan_path=wp_path,
@@ -678,7 +642,7 @@ async def test_workplan_run_reload_prior_run(
     repo = TrackingRepository()
     await repo.put_workplan_run(fake_run)
 
-    def typer_exit(*args, **kwargs) -> None:  # noqa: ANN002, ANN003, ARG001
+    def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
         raise typer.Exit(0)
 
     mock_get_wp = mock.Mock(return_value=fake_run)
