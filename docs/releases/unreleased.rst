@@ -56,6 +56,7 @@ Improvements
 - Reduce usage of remote blueprints in test suite (`#600 <https://github.com/CWorthy-ocean/C-Star/pull/600>`_)
 - Mitigate use of deprecated `typing.Optional`. (`#602 <https://github.com/CWorthy-ocean/C-Star/pull/602>`_)
 - Improved logging, input validation, and test coverage for `file_system` module (`#597 <https://github.com/CWorthy-ocean/C-Star/pull/597>`_)
+- Reduced type checker warnings in unit tests (`#604 <https://github.com/CWorthy-ocean/C-Star/pull/604>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
