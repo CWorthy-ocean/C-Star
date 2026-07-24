@@ -39,7 +39,14 @@ from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_MAX_WALLTIME,
     ENV_CSTAR_SLURM_QUEUE,
 )
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    model_validator,
+)
 
 from cstar_forge.forge import input_data, source_data
 from cstar_forge.forge.forge_blueprint import DEFAULT_WORKING_ROOT, OpenBoundaries
@@ -295,6 +302,7 @@ class ForgeExecutor(BaseModel):
     _datasets: dict[str, xr.Dataset | list[xr.Dataset]] | None = PrivateAttr(
         default=None
     )
+    _inputs_generated: bool = PrivateAttr(default=False)
     _cstar_simulation: Any | None = PrivateAttr(default=None)
     _settings_compile_time: dict[str, Any] = PrivateAttr(default_factory=dict)
     _settings_run_time: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -616,12 +624,14 @@ class ForgeExecutor(BaseModel):
         Get default runtime parameters.
 
         Returns a RuntimeParameterSet with default values based on the builder's
-        configuration (start_date, end_date, output_dir).
+        configuration (start_date, end_date). The run output location is NOT
+        carried here: ``runtime_params.output_dir`` is a pre-2.0.0 blueprint
+        field (C-Star migrates it to the blueprint ``working_dir``, which the
+        executor sets explicitly in ``configure_build``).
         """
         return cstar_models.RuntimeParameterSet(
             start_date=self.start_date,
             end_date=self.end_date,
-            output_dir=self.run_output_dir,
         )
 
     @property
@@ -645,6 +655,44 @@ class ForgeExecutor(BaseModel):
         return bool(
             (self._settings_compile_time.get("cppdefs") or {}).get("use_pio", False)
         )
+
+    def _validated_roms_marbl_blueprint(self) -> cstar_models.RomsMarblBlueprint:
+        """Re-validate the assembled blueprint against the installed C-Star models.
+
+        The blueprint is assembled with ``model_construct`` because the
+        pre-generation stages are deliberately partial (placeholder resources;
+        ``model_params``/``runtime_params`` live in the sidecar until
+        ``configure_build``), so nothing checks it against the cstar models --
+        which are ``extra="forbid"`` -- until C-Star loads the persisted file.
+        Round-tripping the exact serialized form (the same ``model_dump`` that
+        ``persist`` writes, minus the ``$schema`` key that ``deserialize``
+        strips) through ``model_validate`` fails at emit time instead, pointing
+        at the offending field. Returns the validated instance so the executor
+        holds -- and persists -- a fully validated blueprint from here on.
+
+        Only meaningful once ``generate_inputs`` has filled in real data
+        (``_inputs_generated``); the placeholder blueprint cannot validate.
+        """
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=".*Pydantic.*", category=UserWarning
+            )
+            warnings.filterwarnings(
+                "ignore", message=".*serialization.*", category=UserWarning
+            )
+            data = self.roms_marbl_blueprint.model_dump(mode="json", exclude_none=True)
+        data.pop("$schema", None)
+        try:
+            return cstar_models.RomsMarblBlueprint.model_validate(data)
+        except ValidationError as exc:
+            msg = (
+                "The emitted ROMS-MARBL blueprint does not validate against the "
+                f"installed C-Star models ({cstar_models.__file__}); C-Star would "
+                "reject it at load time. Most likely Forge emits a field this "
+                "C-Star version does not declare (its models are extra='forbid'), "
+                f"or a value fails a cstar validator:\n{exc}"
+            )
+            raise ValueError(msg) from exc
 
     def persist(self) -> None:
         """
@@ -933,16 +981,23 @@ class ForgeExecutor(BaseModel):
                 kwargs["branch"] = "main"
             return cstar_models.CodeRepository(**kwargs)
 
+        # The cstar models are extra="forbid": optional repos must be omitted
+        # (not passed as None) so the blueprint validates against C-Star
+        # versions that predate the optional field (e.g. ``pio``, cstar #594).
+        repo_kwargs: dict[str, Any] = {}
+        if self.code_spec.marbl:
+            repo_kwargs["marbl"] = _repo(self.code_spec.marbl)
+        if self.code_spec.pio:
+            repo_kwargs["pio"] = _repo(self.code_spec.pio)
         return cstar_models.ROMSCompositeCodeRepository(
             roms=_repo(self.code_spec.roms),
-            marbl=_repo(self.code_spec.marbl) if self.code_spec.marbl else None,
-            pio=_repo(self.code_spec.pio) if self.code_spec.pio else None,
             run_time=cstar_models.CodeRepository(
                 location="placeholder://run_time", branch="main"
             ),
             compile_time=cstar_models.CodeRepository(
                 location="placeholder://compile_time", branch="main"
             ),
+            **repo_kwargs,
         )
 
     def _template_repo_args(self, stage: str) -> dict[str, Any]:
@@ -1426,6 +1481,9 @@ class ForgeExecutor(BaseModel):
         self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
             **roms_marbl_blueprint_dict
         )
+        # The blueprint now carries real input locations (not placeholders), so
+        # configure_build can re-validate it against the cstar models at emit time.
+        self._inputs_generated = True
         return self.roms_marbl_blueprint
 
     def _init_settings_compile_time(self) -> None:
@@ -1648,8 +1706,11 @@ class ForgeExecutor(BaseModel):
              static run-time files (e.g., marbl_in)
         5. Updates blueprint with rendered code locations and file lists
         6. Sets blueprint model_params and runtime_params
-        7. Persists the blueprint to disk -- the only time it is written
-        8. Creates ROMSSimulation instance from blueprint
+        7. Re-validates the final blueprint against the installed C-Star models
+           (only when `generate_inputs()` has run -- the placeholder blueprint
+           cannot validate), so an extra="forbid" mismatch fails at emit time
+        8. Persists the blueprint to disk -- the only time it is written
+        9. Creates ROMSSimulation instance from blueprint
 
         This is expected to run after `generate_inputs()` has populated the
         in-memory blueprint with real input data file locations.
@@ -1827,16 +1888,22 @@ class ForgeExecutor(BaseModel):
             }
             if self._use_pio:
                 roms_marbl_blueprint_dict["model_params"]["use_pio"] = True
+            # No output_dir here: it is a pre-2.0.0 field superseded by the
+            # blueprint working_dir (set just below).
             roms_marbl_blueprint_dict["runtime_params"] = {
                 "start_date": self.start_date,
                 "end_date": self.end_date,
-                "output_dir": self.run_output_dir,
             }
             roms_marbl_blueprint_dict["working_dir"] = self.roms_blueprint_working_dir
 
             self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                 **roms_marbl_blueprint_dict
             )
+            # With real (generated) inputs the blueprint is complete: re-validate
+            # it against the installed C-Star models before it is persisted, so a
+            # mismatch fails here instead of when C-Star loads the file.
+            if self._inputs_generated:
+                self.roms_marbl_blueprint = self._validated_roms_marbl_blueprint()
             self.persist()
 
         return

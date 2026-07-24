@@ -18,6 +18,21 @@ from cstar_forge.forge_blueprint_wizard import (
     _ForcingEditor,
 )
 
+try:
+    from cstar.orchestration.models import DeferredBlueprintRef  # noqa: F401
+
+    _CSTAR_HAS_DEFERRED_BLUEPRINT = True
+except ImportError:
+    _CSTAR_HAS_DEFERRED_BLUEPRINT = False
+
+requires_workplan_support = pytest.mark.skipif(
+    not _CSTAR_HAS_DEFERRED_BLUEPRINT,
+    reason=(
+        "installed C-Star lacks workplan deferred-blueprint support "
+        "(DeferredBlueprintRef not in cstar.orchestration.models)"
+    ),
+)
+
 
 @pytest.fixture
 def editor():
@@ -886,6 +901,7 @@ def test_workplan_path_strips_forge_blueprint_suffix():
     assert f(Path("/x/foo.yaml")) == Path("/x/foo.workplan.yaml")
 
 
+@requires_workplan_support
 def test_build_workplan_two_steps_with_deferred_blueprint(tmp_path):
     """The workplan pairs a `forge` step (the saved blueprint) with a `roms_marbl`
     step consuming the B_{name}.yaml that step 1 generates -- a deferred blueprint
@@ -929,6 +945,7 @@ def test_on_save_workplan_guards_on_invalid_config(tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+@requires_workplan_support
 def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
     """With a local catalog, the workplan lands in catalog/workplans/ (not next
     to the blueprint in catalog/blueprints/).
@@ -962,6 +979,7 @@ def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
     assert "CSTAR_APP_MODULES=cstar_forge.forge.app" in wiz.workplan_status.value
 
 
+@requires_workplan_support
 def test_on_save_workplan_falls_back_to_blueprint_sibling(tmp_path, monkeypatch):
     """When the catalog isn't a writable local filesystem, the workplan is saved
     next to the blueprint (mirroring the blueprint save-path fallback).

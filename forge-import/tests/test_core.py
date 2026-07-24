@@ -50,6 +50,14 @@ from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
+requires_cstar_pio = pytest.mark.skipif(
+    "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields,
+    reason=(
+        "installed C-Star predates ParallelIO support "
+        "(code.pio / model_params.use_pio fields, cstar #594)"
+    ),
+)
+
 _MODEL_DIR = (
     Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
 )
@@ -175,7 +183,6 @@ def sample_runtime_params():
         start_date=datetime(2012, 1, 1),
         end_date=datetime(2012, 1, 2),
         checkpoint_frequency="1d",
-        output_dir=Path(),
     )
 
 
@@ -831,6 +838,7 @@ class TestForgeExecutorBuildAndRun:
             # was materialized into the staged directory.
             assert (Path(template_dir) / "cppdefs.opt.j2").exists()
 
+    @requires_cstar_pio
     def test_build_with_use_pio_emits_code_pio_and_model_param(
         self, minimal_cstar_spec_builder_args
     ):
@@ -1051,19 +1059,87 @@ class TestForgeExecutorPersist:
         assert "blueprint is not initialized" in str(exc_info.value)
 
 
+class TestValidatedRomsMarblBlueprint:
+    """Tests for the emit-time validation gate (_validated_roms_marbl_blueprint).
+
+    The blueprint is assembled with model_construct (placeholder stages are
+    deliberately partial), so an extra field smuggled onto a cstar model --
+    they are extra="forbid" -- would otherwise only fail when C-Star loads the
+    persisted file. configure_build re-validates the final blueprint whenever
+    generate_inputs has filled in real data.
+    """
+
+    def _complete_blueprint(self, builder, tmp_path, runtime_params_extra=None):
+        """Overlay real-looking data on the placeholder blueprint, mimicking
+        what generate_inputs + configure_build assemble.
+        """
+        placeholder_file = tmp_path / "input.nc"
+        placeholder_file.touch()
+        ds = cstar_models.Dataset(
+            data=[Resource(location=str(placeholder_file), partitioned=False)]
+        )
+        bp_dict = builder.roms_marbl_blueprint.model_dump()
+        bp_dict.pop("$schema", None)
+        bp_dict.update(
+            grid=ds,
+            initial_conditions=ds,
+            forcing=cstar_models.ForcingConfiguration(boundary=ds, surface=ds),
+            model_params={"time_step": 60},
+            runtime_params={
+                "start_date": builder.start_date,
+                "end_date": builder.end_date,
+                **(runtime_params_extra or {}),
+            },
+        )
+        return cstar_models.RomsMarblBlueprint.model_construct(**bp_dict)
+
+    def test_validated_blueprint_round_trips(
+        self, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """A complete blueprint validates and comes back as a real (validated)
+        RomsMarblBlueprint instance.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        builder.roms_marbl_blueprint = self._complete_blueprint(builder, tmp_path)
+
+        validated = builder._validated_roms_marbl_blueprint()
+
+        assert isinstance(validated, cstar_models.RomsMarblBlueprint)
+        assert validated.runtime_params.start_date == builder.start_date
+        assert validated.model_params.time_step == 60
+
+    def test_validated_blueprint_rejects_smuggled_extra_field(
+        self, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """An undeclared key on a cstar sub-model (the old runtime_params.output_dir
+        bug) fails at emit time with a clear error, not at C-Star load time.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        builder.roms_marbl_blueprint = self._complete_blueprint(
+            builder, tmp_path, runtime_params_extra={"output_dir": str(tmp_path)}
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            builder._validated_roms_marbl_blueprint()
+        assert "does not validate against the installed C-Star" in str(exc_info.value)
+        assert "output_dir" in str(exc_info.value)
+
+
 class TestForgeExecutorDefaultRuntimeParams:
     """Tests for default_runtime_params property."""
 
     def test_default_runtime_params(self, minimal_cstar_spec_builder_args):
-        """Test default_runtime_params property (output_dir routes under host)."""
+        """Test default_runtime_params property (dates only; the run output
+        location travels on the blueprint ``working_dir``, not runtime_params).
+        """
         builder = _make_builder(minimal_cstar_spec_builder_args)
         runtime_params = builder.default_runtime_params
 
         assert runtime_params.start_date == builder.start_date
         assert runtime_params.end_date == builder.end_date
-        # run_output_dir is the injected host working_dir.
-        assert runtime_params.output_dir == builder.run_output_dir
-        assert runtime_params.output_dir == builder.host.working_dir
+        # output_dir is a pre-2.0.0 field: it must not be emitted (the cstar
+        # models are extra="forbid").
+        assert "output_dir" not in runtime_params.model_dump()
 
 
 class TestForgeExecutorRomsBlueprintWorkingDir:
@@ -1248,6 +1324,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert call_kwargs["use_pio"] is False
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    @requires_cstar_pio
     def test_generate_inputs_use_pio_forwards_use_pio(
         self,
         mock_input_data_class,
@@ -1444,7 +1521,6 @@ class TestForgeExecutorGetDsComprehensive:
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
                 checkpoint_frequency="1d",
-                output_dir=Path(),
             ),
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
@@ -1490,7 +1566,6 @@ class TestForgeExecutorGetDsComprehensive:
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
                 checkpoint_frequency="1d",
-                output_dir=Path(),
             ),
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
@@ -1530,7 +1605,6 @@ class TestForgeExecutorGetDsComprehensive:
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
                 checkpoint_frequency="1d",
-                output_dir=Path(),
             ),
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
