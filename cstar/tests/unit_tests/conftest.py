@@ -3,12 +3,12 @@ import logging
 import os
 import random
 import uuid
-from collections.abc import Awaitable, Callable, Generator
+from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
 from subprocess import Popen
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from unittest import mock
 
 import dotenv
@@ -129,8 +129,8 @@ class MockRetriever(Retriever):
     def read(self, bytes_to_have_read: bytes = b"fake_bytes") -> bytes:
         return bytes_to_have_read
 
-    def _save(self, path_to_have_saved_to) -> Path:
-        return path_to_have_saved_to
+    def _save(self, target_dir: Path) -> Path:
+        return target_dir
 
 
 class MockStagedData(StagedData):
@@ -236,8 +236,60 @@ def mocksourcedata_factory() -> Callable[
     return factory
 
 
+class AdditionalCodeFn(Protocol):
+    def __call__(
+        self,
+        location: str,
+        subdir: str = "",
+        checkout_target: str = "",
+        files: Iterable[str] = (),
+    ) -> AdditionalCode: ...
+
+
+class SourceDataFn(Protocol):
+    def __call__(
+        self,
+        location: str | Path,
+        identifier: str | None = None,
+        classification: SourceClassification = SourceClassification.LOCAL_TEXT_FILE,
+    ) -> SourceData: ...
+
+
+class DefaultSourceDataFn(Protocol):
+    def __call__(
+        self,
+    ) -> SourceData: ...
+
+
+class SourceDataCollectionFn(Protocol):
+    def __call__(
+        self,
+        locations: Sequence[str | Path] | None = None,
+        identifiers: Sequence[str] | None = None,
+        classification: SourceClassification = SourceClassification.REMOTE_BINARY_FILE,
+    ) -> SourceDataCollection: ...
+
+
+class StagedRepoFn(Protocol):
+    def __call__(
+        self,
+        path: Path,
+        source: SourceData,
+        changed_from_source: bool,
+    ) -> StagedRepository: ...
+
+
+class StagedFileFn(Protocol):
+    def __call__(
+        self,
+        path: Path,
+        source: SourceData,
+        changed_from_source: bool,
+    ) -> StagedFile: ...
+
+
 @pytest.fixture
-def mocksourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_remote_repo() -> SourceDataFn:
     """Fixture to create a MockSourceData instance with remote repository-like characteristics
 
     Parameters
@@ -249,18 +301,22 @@ def mocksourcedata_remote_repo() -> Callable[[str, str], MockSourceData]:
 
     """
 
-    def _create(location="https://github.com/test/repo.git", identifier="test_target"):
+    def _create(
+        location: str | Path = "https://github.com/test/repo.git",
+        identifier: str | None = "test_target",
+        classification: SourceClassification = SourceClassification.REMOTE_REPOSITORY,
+    ) -> SourceData:
         return MockSourceData(
-            classification=SourceClassification.REMOTE_REPOSITORY,
             location=location,
             identifier=identifier,
+            classification=classification,
         )
 
     return _create
 
 
 @pytest.fixture
-def mocksourcedata_local_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_local_file() -> SourceDataFn:
     """Fixture to create a MockSourceData instance with local-path-like characteristics
 
     Parameters
@@ -272,10 +328,12 @@ def mocksourcedata_local_file() -> Callable[[str, str], MockSourceData]:
     """
 
     def _create(
-        location="some/local/source/path/local_file.nc", identifier="test_target"
-    ):
+        location: str | Path = "some/local/source/path/local_file.nc",
+        identifier: str | None = "test_target",
+        classification: SourceClassification = SourceClassification.LOCAL_BINARY_FILE,
+    ) -> SourceData:
         return MockSourceData(
-            classification=SourceClassification.LOCAL_BINARY_FILE,
+            classification=classification,
             location=location,
             identifier=identifier,
         )
@@ -284,7 +342,7 @@ def mocksourcedata_local_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mocksourcedata_local_text_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_local_text_file() -> SourceDataFn:
     """Fixture to create a MockSourceData instance with local-textfile-like characteristics
 
     Parameters
@@ -296,10 +354,12 @@ def mocksourcedata_local_text_file() -> Callable[[str, str], MockSourceData]:
     """
 
     def _create(
-        location="some/local/source/path/local_file.yaml", identifier="test_target"
-    ):
+        location: str | Path = "some/local/source/path/local_file.yaml",
+        identifier: str | None = "test_target",
+        classification: SourceClassification = SourceClassification.LOCAL_TEXT_FILE,
+    ) -> SourceData:
         return MockSourceData(
-            classification=SourceClassification.LOCAL_TEXT_FILE,
+            classification=classification,
             location=location,
             identifier=identifier,
         )
@@ -308,7 +368,7 @@ def mocksourcedata_local_text_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mocksourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_remote_file() -> SourceDataFn:
     """Fixture to create a MockSourceData instance with remote-binary-file-like characteristics
 
     Parameters
@@ -319,9 +379,13 @@ def mocksourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
         The desired identifier associated with this MockSourceData
     """
 
-    def _create(location="http://example.com/remote_file.nc", identifier="abc123"):
+    def _create(
+        location: str | Path = "http://example.com/remote_file.nc",
+        identifier: str | None = "abc123",
+        classification: SourceClassification = SourceClassification.REMOTE_BINARY_FILE,
+    ) -> SourceData:
         return MockSourceData(
-            classification=SourceClassification.REMOTE_BINARY_FILE,
+            classification=classification,
             location=location,
             identifier=identifier,
         )
@@ -330,7 +394,7 @@ def mocksourcedata_remote_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mocksourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
+def mocksourcedata_remote_text_file() -> Callable[[str, str], SourceData]:
     """Fixture to create a MockSourceData instance with remote textfile-like characteristics
 
     Parameters
@@ -341,7 +405,10 @@ def mocksourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
         The desired identifier associated with this MockSourceData
     """
 
-    def _create(location="http://example.com/remote_file.yaml", identifier="abc123"):
+    def _create(
+        location: str | Path = "http://example.com/remote_file.yaml",
+        identifier: str = "abc123",
+    ) -> SourceData:
         return MockSourceData(
             classification=SourceClassification.REMOTE_TEXT_FILE,
             location=location,
@@ -352,7 +419,7 @@ def mocksourcedata_remote_text_file() -> Callable[[str, str], MockSourceData]:
 
 
 @pytest.fixture
-def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
+def mock_sourcedatacollection() -> SourceDataCollectionFn:
     """Factory fixture to create a MockSourceDataCollection instance with user-supplied classification.
 
     Parameters
@@ -373,11 +440,12 @@ def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
     default_classification = SourceClassification.REMOTE_BINARY_FILE
 
     def _create(
-        locations=default_locations,
-        identifiers=default_identifiers,
-        classification=default_classification,
-    ):
-        source_data_instances = []
+        locations: Sequence[str | Path] | None = default_locations,
+        identifiers: Sequence[str] | None = default_identifiers,
+        classification: SourceClassification = default_classification,
+    ) -> SourceDataCollection:
+        source_data_instances: list[SourceData] = []
+        locations = locations or []
         for i in range(len(locations)):
             identifier = identifiers[i] if identifiers else None
             source_data_instances.append(
@@ -398,8 +466,8 @@ def mock_sourcedatacollection() -> Callable[[str, str], SourceDataCollection]:
 ################################################################################
 @pytest.fixture
 def stagedfile_remote_source(
-    mocksourcedata_remote_file,
-) -> Generator[Callable[[Path, "MockSourceData", bool], "StagedFile"], None, None]:
+    mocksourcedata_remote_file: Callable[[], SourceData],
+) -> Generator[StagedFileFn]:
     """Factory fixture to produce a fake StagedFile from a remote source.
 
     Parameters
@@ -411,21 +479,21 @@ def stagedfile_remote_source(
     changed_from_source: bool, optional, default False
         User-specified override to the changed_from_source property
     """
-    patchers: list[mock._patch] = []
+    patchers: list[mock._patch[Any]] = []
     local_dir = Path("some/local/dir")
     default_source = mocksourcedata_remote_file()
     default_path = local_dir / default_source.basename
 
     def _create(
         path: Path = default_path,
-        source: "MockSourceData" = default_source,
+        source: "SourceData" = default_source,
         changed_from_source: bool = False,
     ) -> "StagedFile":
         sf: StagedFile
         with mock.patch("cstar.io.staged_data.os.stat", return_value=None):
             sf = StagedFile(source=source, path=Path(path), sha256=source.identifier)
 
-        patcher: mock._patch = mock.patch.object(
+        patcher = mock.patch.object(
             type(sf), "changed_from_source", new_callable=mock.PropertyMock
         )
         prop: mock.PropertyMock = patcher.start()
@@ -442,10 +510,8 @@ def stagedfile_remote_source(
 
 @pytest.fixture
 def stagedrepository(
-    mocksourcedata_remote_repo,
-) -> Generator[
-    Callable[[Path, "MockSourceData", bool], "StagedRepository"], None, None
-]:
+    mocksourcedata_remote_repo: Callable[[], SourceData],
+) -> Generator[StagedRepoFn]:
     """Factory fixture to produce a fake StagedRepository from a remote source.
 
     Parameters
@@ -457,14 +523,14 @@ def stagedrepository(
     changed_from_source: bool, optional, default False
         User-specified override to the changed_from_source property
     """
-    patchers: list[mock._patch] = []
+    patchers: list[mock._patch[Any]] = []
     default_path_parent = Path("some/local/dir")
     default_source = mocksourcedata_remote_repo()
     default_path = default_path_parent / default_source.basename
 
     def _create(
         path: Path = default_path,
-        source: "MockSourceData" = default_source,
+        source: "SourceData" = default_source,
         changed_from_source: bool = False,
     ) -> "StagedRepository":
         sr: StagedRepository
@@ -473,7 +539,7 @@ def stagedrepository(
         ):
             sr = StagedRepository(source=source, path=path)
 
-        patcher: mock._patch = mock.patch.object(
+        patcher = mock.patch.object(
             type(sr), "changed_from_source", new_callable=mock.PropertyMock
         )
         prop: mock.PropertyMock = patcher.start()
@@ -490,8 +556,9 @@ def stagedrepository(
 
 @pytest.fixture
 def stageddatacollection_remote_files(
-    mock_sourcedatacollection, stagedfile_remote_source
-) -> Callable[[str, str], StagedDataCollection]:
+    mock_sourcedatacollection: Callable[..., SourceDataCollection],
+    stagedfile_remote_source: StagedFileFn,
+) -> Callable[..., StagedDataCollection]:
     """Fixture to create a MockStagedDataCollection instance with characteristics of remote binary files.
 
     Parameters
@@ -506,15 +573,17 @@ def stageddatacollection_remote_files(
     default_paths = [local_dir / f.basename for f in default_sources.sources]
 
     def _create(
-        paths=default_paths, sources=default_sources, changed_from_source: bool = False
-    ):
-        staged_data_instances = []
+        paths: list[Path] = default_paths,
+        sources: SourceDataCollection = default_sources,
+        changed_from_source: bool = False,
+    ) -> "StagedDataCollection":
+        staged_data_instances: list[StagedData] = []
         for i in range(len(paths)):
             source = sources[i] if sources else None
             staged_data_instances.append(
                 stagedfile_remote_source(
                     path=paths[i],
-                    source=source,
+                    source=source,  # type: ignore
                     changed_from_source=changed_from_source,
                 )
             )
@@ -530,8 +599,8 @@ def stageddatacollection_remote_files(
 
 @pytest.fixture
 def additionalcode_remote(
-    mock_sourcedatacollection,
-) -> Callable[[str, str, str, list[str]], AdditionalCode]:
+    mock_sourcedatacollection: SourceDataCollectionFn,
+) -> AdditionalCodeFn:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     a remote repository.
     """
@@ -541,29 +610,30 @@ def additionalcode_remote(
     default_files = ["test_file_1.F", "test_file_2.py", "test_file_3.opt"]
 
     def _create(
-        location=default_location,
-        checkout_target=default_checkout_target,
-        subdir=default_subdir,
-        files=default_files,
-    ):
+        location: str = default_location,
+        subdir: str = default_subdir,
+        checkout_target: str = default_checkout_target,
+        files: Iterable[str] = default_files,
+    ) -> "AdditionalCode":
         sd = mock_sourcedatacollection(
             locations=[
-                git_location_to_raw(location, checkout_target, f, subdir) for f in files
+                git_location_to_raw(str(location), checkout_target, f, subdir)
+                for f in files
             ],
-            identifiers=["fake_hash" for i in range(len(files))],
+            identifiers=["fake_hash" for _ in range(len(list(files)))],
             classification=SourceClassification.REMOTE_TEXT_FILE,
         )
         mock_classify_side_effect = [
             SourceClassification.REMOTE_REPOSITORY,
         ]
-        for i in range(len(files)):
+        for _ in range(len(list(files))):
             mock_classify_side_effect.append(SourceClassification.REMOTE_TEXT_FILE)
         with mock.patch(
             "cstar.base.additional_code.SourceDataCollection.from_common_location",
             return_value=sd,
         ):
             ac = AdditionalCode(
-                location=location,
+                location=str(location),
                 checkout_target=checkout_target,
                 subdir=subdir,
                 files=files,
@@ -576,7 +646,7 @@ def additionalcode_remote(
 
 @pytest.fixture
 def additionalcode_local(
-    mock_sourcedatacollection,
+    mock_sourcedatacollection: SourceDataCollectionFn,
 ) -> Callable[[str, str, list[str]], AdditionalCode]:
     """Pytest fixture that provides an instance of the AdditionalCode class representing
     code located on the local filesystem.
@@ -585,22 +655,26 @@ def additionalcode_local(
     default_subdir = "some/subdirectory"
     default_files = ["test_file_1.F", "test_file_2.py", "test_file_3.opt"]
 
-    def _create(location=default_location, subdir=default_subdir, files=default_files):
+    def _create(
+        location: str | Path = default_location,
+        subdir: str = default_subdir,
+        files: list[str] = default_files,
+    ):
         sd = mock_sourcedatacollection(
             locations=[f"{location}/{subdir}/{f}" for f in files],
-            identifiers=["fake_hash" for i in range(len(files))],
+            identifiers=["fake_hash" for _ in range(len(files))],
             classification=SourceClassification.LOCAL_TEXT_FILE,
         )
         mock_classify_side_effect = [
             SourceClassification.LOCAL_DIRECTORY,
         ]
-        for i in range(len(files)):
+        for _ in range(len(files)):
             mock_classify_side_effect.append(SourceClassification.LOCAL_TEXT_FILE)
         with mock.patch(
             "cstar.base.additional_code.SourceDataCollection.from_common_location",
             return_value=sd,
         ):
-            ac = AdditionalCode(location=location, subdir=subdir, files=files)
+            ac = AdditionalCode(location=str(location), subdir=subdir, files=files)
             return ac
 
     return _create
@@ -613,7 +687,7 @@ def additionalcode_local(
 
 @pytest.fixture
 def fakeexternalcodebase(
-    mocksourcedata_remote_repo,
+    mocksourcedata_remote_repo: DefaultSourceDataFn,
 ) -> Generator[ExternalCodeBase, None, None]:
     """Pytest fixture that provides an instance of the FakeExternalCodeBase class
     with a mocked SourceData instance.
@@ -631,7 +705,7 @@ def fakeexternalcodebase(
 
 @pytest.fixture
 def fakeexternalcodebase_with_mock_get(
-    mocksourcedata_remote_repo,
+    mocksourcedata_remote_repo: DefaultSourceDataFn,
 ) -> Generator[ExternalCodeBase, None, None]:
     """Pytest fixutre that provides an instance of the MockExternalCodeBase class
     with a mocked SourceData instance.
@@ -650,13 +724,13 @@ def fakeexternalcodebase_with_mock_get(
 
     with patch_source_data, patch_get:
         mecb = FakeExternalCodeBase()
-        mecb._source = source
+        mecb._source = source  # type: ignore
         yield mecb
 
 
 @pytest.fixture
 def marblexternalcodebase(
-    mocksourcedata_remote_repo,
+    mocksourcedata_remote_repo: SourceDataFn,
 ) -> Generator[MARBLExternalCodeBase, None, None]:
     """Fixture providing a `MARBLExternalCodeBase` instance for testing.
 
@@ -675,7 +749,9 @@ def marblexternalcodebase(
 
 @pytest.fixture
 def marblexternalcodebase_staged(
-    marblexternalcodebase, stagedrepository, marbl_path
+    marblexternalcodebase: MARBLExternalCodeBase,
+    stagedrepository: StagedRepoFn,
+    marbl_path: Path,
 ) -> Generator[MARBLExternalCodeBase, None, None]:
     """Fixture providing a staged `MARBLExternalCodeBase` instance for testing.
 
@@ -685,7 +761,7 @@ def marblexternalcodebase_staged(
     staged_data = stagedrepository(
         path=marbl_path, source=mecb.source, changed_from_source=False
     )
-    mecb._working_copy = staged_data
+    mecb._working_copy = staged_data  # type: ignore
     yield mecb
 
 
@@ -696,7 +772,7 @@ def marblexternalcodebase_staged(
 
 @pytest.fixture
 def fakeinputdataset_local(
-    mocksourcedata_local_file,
+    mocksourcedata_local_file: SourceDataFn,
 ) -> Generator[InputDataset, None, None]:
     """Fixture to provide a mock local InputDataset instance.
 
@@ -720,8 +796,8 @@ def fakeinputdataset_local(
 
 @pytest.fixture
 def fakeinputdataset_remote(
-    mocksourcedata_remote_file,
-) -> Generator[InputDataset, None, None]:
+    mocksourcedata_remote_file: SourceDataFn,
+) -> Generator[InputDataset]:
     """Fixture to provide a mock remote InputDataset instance.
 
     This fixture patches properties of the SourceData class to simulate a remote dataset,
@@ -761,7 +837,9 @@ def fakeinputdataset_remote(
 
 @pytest.fixture
 def stub_simulation(
-    fakeexternalcodebase_with_mock_get, additionalcode_local, tmp_path
+    fakeexternalcodebase_with_mock_get: ExternalCodeBase,
+    additionalcode_local: Callable[[], AdditionalCode],
+    tmp_path: Path,
 ) -> StubSimulation:
     """Fixture providing a `StubSimulation` instance for testing.
 
@@ -910,7 +988,7 @@ from cstar.tests.unit_tests.fake_abc_subclasses import (  # noqa: E402
 
 @pytest.fixture
 def romsexternalcodebase(
-    mocksourcedata_remote_repo,
+    mocksourcedata_remote_repo: type[SourceData],
 ) -> Generator[ROMSExternalCodeBase, None, None]:
     """Fixture providing a `ROMSExternalCodeBase` instance for testing.
 
@@ -928,9 +1006,9 @@ def romsexternalcodebase(
 
 @pytest.fixture
 def romsexternalcodebase_staged(
-    romsexternalcodebase,
-    stagedrepository,
-    roms_path,
+    romsexternalcodebase: ROMSExternalCodeBase,
+    stagedrepository: StagedRepoFn,
+    roms_path: Path,
 ) -> Generator[ROMSExternalCodeBase, None, None]:
     """Fixture providing a staged `ROMSExternalCodeBase` instance for testing.
 
@@ -940,7 +1018,7 @@ def romsexternalcodebase_staged(
     staged_data = stagedrepository(
         path=roms_path, source=recb.source, changed_from_source=False
     )
-    recb._working_copy = staged_data
+    recb._working_copy = staged_data  # type: ignore
     yield recb
 
 
@@ -948,7 +1026,7 @@ def romsexternalcodebase_staged(
 # Runtime and compile-time code
 ################################################################################
 @pytest.fixture
-def roms_runtime_code(additionalcode_local) -> AdditionalCode:
+def roms_runtime_code(additionalcode_local: type[AdditionalCode]) -> AdditionalCode:
     """Provides an example of ROMSSimulation.runtime_code with fake values for testing"""
     rc = additionalcode_local(
         location="/some/local/dir",
@@ -965,7 +1043,9 @@ def roms_runtime_code(additionalcode_local) -> AdditionalCode:
 
 
 @pytest.fixture
-def roms_compile_time_code(additionalcode_local) -> AdditionalCode:
+def roms_compile_time_code(
+    additionalcode_local: type[AdditionalCode],
+) -> AdditionalCode:
     """Provides an example of ROMSSimulation.compile_time_code with fake values for testing"""
     cc = additionalcode_local(
         location="/some/local/dir",
@@ -980,8 +1060,8 @@ def roms_compile_time_code(additionalcode_local) -> AdditionalCode:
 ################################################################################
 @pytest.fixture
 def romsinputdataset_local_netcdf(
-    mocksourcedata_local_file,
-) -> Generator[ROMSInputDataset, None, None]:
+    mocksourcedata_local_file: type[SourceData],
+) -> Generator[ROMSInputDataset]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
     Yields:
@@ -1005,8 +1085,8 @@ def romsinputdataset_local_netcdf(
 
 @pytest.fixture
 def romsinputdataset_remote_netcdf(
-    mocksourcedata_remote_file,
-) -> Generator[ROMSInputDataset, None, None]:
+    mocksourcedata_remote_file: type[SourceData],
+) -> Generator[ROMSInputDataset]:
     """Fixture to provide a ROMSInputDataset with a local NetCDF source.
 
     Yields:
@@ -1030,9 +1110,9 @@ def romsinputdataset_remote_netcdf(
 
 @pytest.fixture
 def romsinputdataset_remote_partitioned_source(
-    mocksourcedata_remote_file,
-    mock_sourcedatacollection,
-) -> Generator[ROMSInputDataset, None, None]:
+    mocksourcedata_remote_file: SourceDataFn,
+    mock_sourcedatacollection: SourceDataCollectionFn,
+) -> Generator[ROMSInputDataset]:
     """Fixture to provide a ROMSInputDataset with a remote, partitioned NetCDF source.
 
     Yields:
@@ -1078,8 +1158,8 @@ def romsinputdataset_remote_partitioned_source(
 
 @pytest.fixture
 def romsinputdataset_local_yaml(
-    mocksourcedata_local_text_file,
-) -> Generator[ROMSInputDataset, None, None]:
+    mocksourcedata_local_text_file: type[SourceData],
+) -> Generator[ROMSInputDataset]:
     """Fixture to provide a ROMSInputDataset with a local YAML source.
 
     Yields:
@@ -1103,7 +1183,7 @@ def romsinputdataset_local_yaml(
 
 @pytest.fixture
 def romsinputdataset_remote_yaml(
-    mocksourcedata_remote_text_file,
+    mocksourcedata_remote_text_file: type[SourceData],
 ) -> Generator[ROMSInputDataset, None, None]:
     """Fixture to provide a ROMSInputDataset with a remote YAML source.
 
@@ -1130,7 +1210,7 @@ def romsinputdataset_remote_yaml(
 
 @pytest.fixture
 def roms_model_grid(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[[str, str, SourceData], ROMSModelGrid]:
     """Provides a ROMSModelGrid instance with fake attrs for testing."""
     default_location = "http://my.files/grid.nc"
@@ -1141,9 +1221,9 @@ def roms_model_grid(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
+        location: str = default_location,
+        file_hash: str = default_hash,
+        sourcedata: SourceData = default_sourcedata,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1159,7 +1239,7 @@ def roms_model_grid(
 
 @pytest.fixture
 def roms_initial_conditions(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[
     [str, str, SourceData, datetime | None, datetime | None], ROMSInitialConditions
 ]:
@@ -1174,11 +1254,11 @@ def roms_initial_conditions(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1195,7 +1275,7 @@ def roms_initial_conditions(
 
 @pytest.fixture
 def roms_tidal_forcing(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[
     [str, str, SourceData, datetime | None, datetime | None], ROMSTidalForcing
 ]:
@@ -1210,11 +1290,11 @@ def roms_tidal_forcing(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1232,7 +1312,7 @@ def roms_tidal_forcing(
 
 @pytest.fixture
 def roms_cdr_forcing(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[[str, str, SourceData, datetime | None, datetime | None], ROMSCdrForcing]:
     """Provides a ROMSCdrForcing instance with fake attrs for testing"""
     default_location = "http://my.files/cdr.nc"
@@ -1245,11 +1325,11 @@ def roms_cdr_forcing(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1267,7 +1347,7 @@ def roms_cdr_forcing(
 
 @pytest.fixture
 def roms_nesting_info(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[
     [str, str, SourceData, datetime | None, datetime | None], ROMSNestingInfo
 ]:
@@ -1282,11 +1362,11 @@ def roms_nesting_info(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1304,7 +1384,7 @@ def roms_nesting_info(
 
 @pytest.fixture
 def roms_river_forcing(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[
     [str, str, SourceData, datetime | None, datetime | None], ROMSRiverForcing
 ]:
@@ -1319,11 +1399,11 @@ def roms_river_forcing(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1341,7 +1421,7 @@ def roms_river_forcing(
 
 @pytest.fixture
 def roms_boundary_forcing(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[
     [str, str, SourceData, datetime | None, datetime | None], ROMSBoundaryForcing
 ]:
@@ -1356,11 +1436,11 @@ def roms_boundary_forcing(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1378,7 +1458,7 @@ def roms_boundary_forcing(
 
 @pytest.fixture
 def roms_surface_forcing(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[
     [str, str, SourceData, datetime | None, datetime | None], ROMSSurfaceForcing
 ]:
@@ -1393,11 +1473,11 @@ def roms_surface_forcing(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1415,7 +1495,7 @@ def roms_surface_forcing(
 
 @pytest.fixture
 def roms_forcing_corrections(
-    mocksourcedata_remote_file,
+    mocksourcedata_remote_file: type[SourceData],
 ) -> Callable[
     [str, str, SourceData, datetime | None, datetime | None], ROMSForcingCorrections
 ]:
@@ -1430,11 +1510,11 @@ def roms_forcing_corrections(
     )
 
     def _create(
-        location=default_location,
-        file_hash=default_hash,
-        sourcedata=default_sourcedata,
-        start_date=default_start_date,
-        end_date=default_end_date,
+        location: str = default_location,
+        file_hash: str | None = default_hash,
+        sourcedata: SourceData = default_sourcedata,
+        start_date: datetime | None = default_start_date,
+        end_date: datetime | None = default_end_date,
     ):
         patch_source_data = mock.patch(
             "cstar.roms.input_dataset.SourceData", return_value=sourcedata
@@ -1457,20 +1537,20 @@ def roms_forcing_corrections(
 
 @pytest.fixture
 def stub_romssimulation(
-    marblexternalcodebase,
-    romsexternalcodebase,
-    roms_runtime_code,
-    roms_compile_time_code,
-    roms_model_grid,
-    roms_initial_conditions,
-    roms_tidal_forcing,
-    roms_river_forcing,
-    roms_boundary_forcing,
-    roms_surface_forcing,
-    roms_cdr_forcing,
-    roms_nesting_info,
-    roms_forcing_corrections,
-    tmp_path,
+    marblexternalcodebase: MARBLExternalCodeBase,
+    romsexternalcodebase: ROMSExternalCodeBase,
+    roms_runtime_code: AdditionalCode,
+    roms_compile_time_code: AdditionalCode,
+    roms_model_grid: Callable[[], ROMSModelGrid],
+    roms_initial_conditions: Callable[[], ROMSInitialConditions],
+    roms_tidal_forcing: Callable[[], ROMSTidalForcing],
+    roms_river_forcing: Callable[[], ROMSRiverForcing],
+    roms_boundary_forcing: Callable[[], ROMSBoundaryForcing],
+    roms_surface_forcing: Callable[[], ROMSSurfaceForcing],
+    roms_cdr_forcing: Callable[[], ROMSCdrForcing],
+    roms_nesting_info: Callable[[], ROMSNestingInfo],
+    roms_forcing_corrections: Callable[[], ROMSForcingCorrections],
+    tmp_path: Path,
 ) -> ROMSSimulation:
     """Fixture providing a `ROMSSimulation` instance for testing.
 
@@ -1521,13 +1601,22 @@ def stub_romssimulation(
 
 
 @pytest.fixture
-def stub_romssimulation_dict(stub_romssimulation) -> dict[str, Any]:
+def stub_romssimulation_dict(stub_romssimulation: ROMSSimulation) -> dict[str, Any]:
     """Fixture returning the dictionary associated with the `stub_romssimulation` fixture.
 
     Used for independently testing to/from_dict methods.
     """
     sim = stub_romssimulation
-    return_dict = {
+    assert sim.cdr_forcing
+    assert sim.runtime_code
+    assert sim.compile_time_code
+    assert sim.initial_conditions
+    assert sim.marbl_codebase
+    assert sim.model_grid
+    assert sim.tidal_forcing
+    assert sim.river_forcing
+    assert sim.nesting_info
+    return_dict: dict[str, Any] = {
         "name": sim.name,
         "valid_start_date": sim.valid_start_date,
         "valid_end_date": sim.valid_end_date,
@@ -1540,8 +1629,8 @@ def stub_romssimulation_dict(stub_romssimulation) -> dict[str, Any]:
             "n_procs_x": sim.discretization.n_procs_x,
             "n_procs_y": sim.discretization.n_procs_y,
         },
-        "runtime_code": sim.runtime_code._constructor_args,
-        "compile_time_code": sim.compile_time_code._constructor_args,
+        "runtime_code": sim.runtime_code._constructor_args,  # type: ignore
+        "compile_time_code": sim.compile_time_code._constructor_args,  # type: ignore
         "marbl_codebase": {
             "source_repo": sim.marbl_codebase.source.location,
             "checkout_target": sim.marbl_codebase.source.checkout_target,
@@ -1594,7 +1683,7 @@ def stub_romssimulation_dict(stub_romssimulation) -> dict[str, Any]:
 
 @pytest.fixture
 def stub_romssimulation_dict_no_forcing_lists(
-    stub_romssimulation_dict,
+    stub_romssimulation_dict: dict[str, Any],
 ) -> dict[str, Any]:
     """As stub_romssimulation_dict, but without list values for certain forcing types."""
     sim_dict = stub_romssimulation_dict
@@ -1605,10 +1694,10 @@ def stub_romssimulation_dict_no_forcing_lists(
 
 @pytest.fixture
 def patch_romssimulation_init_sourcedata(
-    stub_romssimulation,
-    mocksourcedata_remote_repo,
-    mocksourcedata_remote_file,
-    mock_sourcedatacollection,
+    stub_romssimulation: ROMSSimulation,
+    mocksourcedata_remote_repo: SourceDataFn,
+    mocksourcedata_remote_file: SourceDataFn,
+    mock_sourcedatacollection: SourceDataCollectionFn,
 ) -> Callable[[], AbstractContextManager[None]]:
     """Fixture returning a contextmanager patching all ROMSSimulation.__init__ SourceData calls.
 
@@ -1621,24 +1710,29 @@ def patch_romssimulation_init_sourcedata(
         location=sim.codebase.source.location,
         identifier=sim.codebase.source.identifier,
     )
+    assert sim.marbl_codebase
     mock_marbl_externalcodebase_sourcedata = mocksourcedata_remote_repo(
         location=sim.marbl_codebase.source.location,
         identifier=sim.marbl_codebase.source.identifier,
     )
 
     # ROMS input dataset SourceData mocks
+    assert sim.model_grid
     mock_model_grid_sourcedata = mocksourcedata_remote_file(
         location=sim.model_grid.source.location,
         identifier=sim.model_grid.source.identifier,
     )
+    assert sim.initial_conditions
     mock_initial_conditions_sourcedata = mocksourcedata_remote_file(
         location=sim.initial_conditions.source.location,
         identifier=sim.initial_conditions.source.identifier,
     )
+    assert sim.tidal_forcing
     mock_tidal_forcing_sourcedata = mocksourcedata_remote_file(
         location=sim.tidal_forcing.source.location,
         identifier=sim.tidal_forcing.source.identifier,
     )
+    assert sim.river_forcing
     mock_river_forcing_sourcedata = mocksourcedata_remote_file(
         location=sim.river_forcing.source.location,
         identifier=sim.river_forcing.source.identifier,
@@ -1656,11 +1750,13 @@ def patch_romssimulation_init_sourcedata(
         identifier=sim.forcing_corrections[0].source.identifier,
     )
 
+    assert sim.cdr_forcing
     mock_cdr_forcing_sourcedata = mocksourcedata_remote_file(
         location=sim.cdr_forcing.source.location,
         identifier=sim.cdr_forcing.source.identifier,
     )
 
+    assert sim.nesting_info
     mock_nesting_info_sourcedata = mocksourcedata_remote_file(
         location=sim.nesting_info.source.location,
         identifier=sim.nesting_info.source.identifier,
@@ -1669,16 +1765,17 @@ def patch_romssimulation_init_sourcedata(
     # AdditionalCode SourceData mocks
     mock_runtime_code_sourcedata = mock_sourcedatacollection(
         locations=sim.runtime_code.source.locations,
-        identifiers=["fake_hash" for i in sim.runtime_code.source],
+        identifiers=["fake_hash" for _ in sim.runtime_code.source],
         classification=SourceClassification.LOCAL_TEXT_FILE,
     )
     mock_runtime_code_classify_side_effect = [
         SourceClassification.LOCAL_DIRECTORY,
     ]
 
+    assert sim.compile_time_code
     mock_compile_time_code_sourcedata = mock_sourcedatacollection(
         locations=sim.compile_time_code.source.locations,
-        identifiers=["fake_hash" for i in sim.compile_time_code.source],
+        identifiers=["fake_hash" for _ in sim.compile_time_code.source],
         classification=SourceClassification.LOCAL_TEXT_FILE,
     )
     mock_compile_time_code_classify_side_effect = [
@@ -1770,7 +1867,7 @@ def prefect_server() -> Generator[str, None, None]:
         return
 
     process: Popen[str] | None = None
-    for i in range(3):
+    for _ in range(3):
         try:
             prefect_port = random.randint(9000, 20000)
             process = Popen(
@@ -2052,6 +2149,7 @@ def preprocessable_workplan_path(
     tmp_path: Path,
     mocked_simulation_outputs: tuple[Path, Path, Path],
     wp_templates_dir: Path,
+    read_yaml_intercept: Callable[..., None],
 ) -> Path:
     """Modify a basic workplan template to include directives in the last step.
 
