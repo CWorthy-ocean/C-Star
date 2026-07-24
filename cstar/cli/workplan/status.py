@@ -14,8 +14,7 @@ from cstar.orchestration.dag_runner import (
     get_status_detail_map,
     load_run_state,
 )
-from cstar.orchestration.models import Workplan
-from cstar.orchestration.orchestration import Planner
+from cstar.orchestration.orchestration import LiveWorkplan, Planner
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
@@ -45,7 +44,7 @@ def status(
     launcher = get_launcher()
 
     try:
-        workplan = deserialize(workplan_run.trx_workplan_path, Workplan)
+        workplan = deserialize(workplan_run.trx_workplan_path, LiveWorkplan)
 
         planner = Planner(workplan)
         status = asyncio.run(load_run_state(run_id, launcher))

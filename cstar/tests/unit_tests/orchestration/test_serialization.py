@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 from cstar.applications.plotter import PlotterBlueprint
 from cstar.orchestration.launch.slurm import SlurmHandle
 from cstar.orchestration.models import Application, Workplan
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
@@ -166,6 +166,13 @@ def test_serialization_polymorphic_workplan(
 ) -> None:
     """Verify that a workplan serialized with steps of a subclass of `Step` results
     in deserialization to the correct subclass/type.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    wp_templates_dir: Path
+        Fixture returning the path to the directory containing workplan template files
     """
     template_file = "workplan.yaml"
     template_path = wp_templates_dir / template_file
@@ -195,8 +202,12 @@ def test_serialization_polymorphic_workplan(
     print(wp_content)
     assert "working_dir" in wp_content
 
+    # confirm deserialize to Workplan blows up due to strict model validation
+    with pytest.raises(ValidationError, match="working_dir"):
+        result = deserialize(poly_path, Workplan)
+
     # now, deserialize and confirm the workplan contains LiveStep
-    result = deserialize(poly_path, Workplan)
+    result = deserialize(poly_path, LiveWorkplan)
 
     for step in result.steps:
         assert isinstance(step, LiveStep)

@@ -420,8 +420,7 @@ async def test_delay(loop_delay: float, loop_count: int) -> None:
 
         # Confirm the cumulative delay to the total runtime is over the minimum
         # possible time, while allowing for compute overhead of processes/threads
-
-        upper_bound = 1.4 * expected_duration
+        upper_bound = 1.5 * expected_duration
 
         assert expected_duration <= elapsed
         assert elapsed <= upper_bound

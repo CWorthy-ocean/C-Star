@@ -20,6 +20,7 @@ from cstar.orchestration.models import Step, UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
+    LiveWorkplan,
     Orchestrator,
     Planner,
     ProcessHandle,
@@ -249,7 +250,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     -------
     DagStatus
     """
-    wp = deserialize(wp_run.trx_workplan_path, Workplan)
+    wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
     msg = f"Reloading workplan run: {wp.name}"
     log.debug(msg)
 
@@ -479,7 +480,7 @@ class ExecutiveRunSummary(BaseModel):
         cls,
         run: WorkplanRun,
     ) -> "ExecutiveRunSummary":
-        workplan = deserialize(run.trx_workplan_path, Workplan)
+        workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
         steps = [LiveStep.from_step(s) for s in workplan.steps]
         step_summaries: list[ExecutiveStepSummary] = []
 

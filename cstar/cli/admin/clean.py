@@ -23,7 +23,7 @@ from cstar.cli.common import (
 from cstar.cli.workplan.shared import colored, list_runs
 from cstar.entrypoint.utils import ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
@@ -396,10 +396,10 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
     rundata_paths: list[Path] = []
 
     run_repo = TrackingRepository()
-    workplan: Workplan | None = None
+    workplan: LiveWorkplan | None = None
 
     if run := asyncio.run(run_repo.get_workplan_run(run_id)):
-        workplan = deserialize(run.trx_workplan_path, Workplan)
+        workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
         rundata_paths.append(run.output_path)
     else:
         # if we can't load a run, check the default data path.
