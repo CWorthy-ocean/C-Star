@@ -116,15 +116,9 @@ class StagedFile(StagedData):
         """
         super().__init__(source, path)
 
-        if sha256:
-            self._sha256 = sha256
-        else:
-            self._sha256 = _get_sha256_hash(self.path)
+        self._sha256 = sha256
 
-        if stat:
-            self._stat = stat
-        else:
-            self._stat = os.stat(self.path)
+        self._stat = stat
 
     @property
     def changed_from_source(self) -> bool:
@@ -136,12 +130,19 @@ class StagedFile(StagedData):
         resolved_path = self._path.resolve()
         if not resolved_path.exists():
             return True
-        if self._stat.st_mtime != os.stat(resolved_path.resolve()).st_mtime:
+
+        if stat := self._stat:
+            r_stat = os.stat(resolved_path.resolve())
+
+            if stat.st_mtime != r_stat.st_mtime:
+                return True
+
+            if stat.st_size != r_stat.st_size:
+                return True
+
+        if self._sha256 and self._sha256 != _get_sha256_hash(resolved_path.resolve()):
             return True
-        if self._stat.st_size != os.stat(resolved_path.resolve()).st_size:
-            return True
-        if self._sha256 != _get_sha256_hash(resolved_path.resolve()):
-            return True
+
         return False
 
     def _clear_cache(self):

@@ -87,9 +87,16 @@ class TestStagedFileChangedFromSource:
         with mock.patch("os.stat", return_value=fake_stat):
             assert sf.changed_from_source is True
 
+    def test_no_sha256_mismatch_if_none(self, tmp_path):
+        """Test that `changed_from_source` is True when file checksum changes"""
+        testfile, _, sf = self.setup_file(tmp_path)
+        with mock.patch("cstar.io.staged_data._get_sha256_hash", return_value="wrong"):
+            assert sf.changed_from_source is False
+
     def test_detects_sha256_mismatch(self, tmp_path):
         """Test that `changed_from_source` is True when file checksum changes"""
         testfile, _, sf = self.setup_file(tmp_path)
+        sf._sha256 = "some_value"
         with mock.patch("cstar.io.staged_data._get_sha256_hash", return_value="wrong"):
             assert sf.changed_from_source is True
 
