@@ -14,6 +14,7 @@ Breaking Changes
 - Registration of _step-to-command_ mapping functions is removed. (`#585 <https://github.com/CWorthy-ocean/C-Star/pull/585>`_)
 - `cstar.orchestration.converter` is removed (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
 - ROMS-specific adapters in `cstar.orchestration.adapter` moved to `cstar.applications.roms_marbl.adapter` (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
+- `LiveStep.working_dir` is no longer optional (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -34,6 +35,8 @@ Bug Fixes
 - Fix attempt to use local file paths that do not exist. (`#597 <https://github.com/CWorthy-ocean/C-Star/pull/597>`_)
 - Fix bug in `test_compose` hidden by `@pytest.mark.skip` (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
 - Fix circular import when importing RomsMarbl pieces from Forge (`#603 <https://github.com/CWorthy-ocean/C-Star/pull/603>`_)
+- Fix bug caused by computed properties resulting in incorrect serialization behavior (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Fix bug where applying a `Directive` writes outputs to the incorrect directory (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -57,6 +60,12 @@ Improvements
 - Mitigate use of deprecated `typing.Optional`. (`#602 <https://github.com/CWorthy-ocean/C-Star/pull/602>`_)
 - Improved logging, input validation, and test coverage for `file_system` module (`#597 <https://github.com/CWorthy-ocean/C-Star/pull/597>`_)
 - Reduced type checker warnings in unit tests (`#604 <https://github.com/CWorthy-ocean/C-Star/pull/604>`_)
+- Mitigate type and linter warnings (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Enable discriminated deserialization of workplans containing `Step` subtypes (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Add test verifying serialization and deserialization of Workplans (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Remove unnecessary multiple inheritance (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Upgrade `pydantic` pin, replace `SerializeAsAny` with use of `polymorphic_serialization=True` (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Convert `LiveStep` attributes to `frozen` (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
