@@ -1063,6 +1063,46 @@ class TestForgeExecutorDefaultRuntimeParams:
         assert runtime_params.output_dir == builder.host.working_dir
 
 
+class TestForgeExecutorRomsBlueprintWorkingDir:
+    """Tests for roms_blueprint_working_dir property."""
+
+    def test_swaps_cstar_forge_run_segment(self, minimal_cstar_spec_builder_args):
+        """When run_output_dir has the known cstar-forge-run root, the blueprint
+        working dir is the sibling cstar-blueprint-run root, name preserved.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        run_dir = Path("/home/user/cstar-forge-data/cstar-forge-run/my_run_name")
+        builder.host = HostPaths(
+            working_dir=run_dir,
+            source_data_cache=builder.host.source_data_cache,
+            system="test",
+            machine_config=None,
+        )
+
+        assert builder.roms_blueprint_working_dir == Path(
+            "/home/user/cstar-forge-data/cstar-blueprint-run/my_run_name"
+        )
+
+    def test_falls_back_to_subdir_when_unrecognized(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """When run_output_dir doesn't contain the known cstar-forge-run segment,
+        fall back to a cstar-blueprint-run subdirectory under it.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        run_dir = Path("/custom/spot")
+        builder.host = HostPaths(
+            working_dir=run_dir,
+            source_data_cache=builder.host.source_data_cache,
+            system="test",
+            machine_config=None,
+        )
+
+        assert builder.roms_blueprint_working_dir == Path(
+            "/custom/spot/cstar-blueprint-run"
+        )
+
+
 class TestForgeExecutorGenerateInputsComprehensive:
     """Comprehensive tests for generate_inputs method covering full workflow."""
 

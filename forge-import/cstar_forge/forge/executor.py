@@ -42,7 +42,7 @@ from cstar.orchestration.utils import (
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from cstar_forge.forge import input_data, source_data
-from cstar_forge.forge.forge_blueprint import OpenBoundaries
+from cstar_forge.forge.forge_blueprint import DEFAULT_WORKING_ROOT, OpenBoundaries
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
 from cstar_forge.utils import mem_log
@@ -593,6 +593,22 @@ class ForgeExecutor(BaseModel):
         artifacts live under it).
         """
         return self._require_host().working_dir
+
+    @property
+    def roms_blueprint_working_dir(self) -> Path:
+        """Working dir for the emitted ROMS blueprint.
+
+        Mirrors ``run_output_dir`` but under a ``cstar-blueprint-run`` root instead of
+        the forge run's ``cstar-forge-run`` root, so the two stages don't share a dir.
+        """
+        forge_seg = Path(DEFAULT_WORKING_ROOT).name  # "cstar-forge-run"
+        blueprint_seg = forge_seg.replace("cstar-forge-run", "cstar-blueprint-run")
+        run_dir = self.run_output_dir
+        if forge_seg in run_dir.parts:
+            return Path(
+                *(blueprint_seg if p == forge_seg else p for p in run_dir.parts)
+            )
+        return run_dir / blueprint_seg
 
     @property
     def default_runtime_params(self) -> cstar_models.RuntimeParameterSet:
@@ -1816,7 +1832,7 @@ class ForgeExecutor(BaseModel):
                 "end_date": self.end_date,
                 "output_dir": self.run_output_dir,
             }
-            roms_marbl_blueprint_dict["working_dir"] = self.run_output_dir
+            roms_marbl_blueprint_dict["working_dir"] = self.roms_blueprint_working_dir
 
             self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                 **roms_marbl_blueprint_dict
