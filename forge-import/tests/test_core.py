@@ -1972,6 +1972,14 @@ class TestForgeRunnerEndToEnd:
         blueprint_yaml_paths = list((run_dir / "blueprints").glob("B_*.yaml"))
         assert blueprint_yaml_paths, "expected an emitted roms_marbl B_{name}.yaml"
 
+        # ForgeRunner also publishes a copy to <working root>/output/ -- where
+        # C-Star's deferred-blueprint resolution looks for a producer step's
+        # artifact. Only the blueprint (no settings sidecar), so a filename-less
+        # deferred reference resolves to a unique candidate.
+        published = list((run_dir / "output").glob("*.yaml"))
+        assert [p.name for p in published] == [blueprint_yaml_paths[0].name]
+        assert published[0].read_bytes() == blueprint_yaml_paths[0].read_bytes()
+
 
 class TestOnlyInputsReuseIsIdempotent:
     """Proves the `--only-inputs` design's load-bearing assumption: no state file

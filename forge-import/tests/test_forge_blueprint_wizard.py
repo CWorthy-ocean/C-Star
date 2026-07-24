@@ -880,6 +880,104 @@ def test_build_run_command_uses_current_interpreter():
     assert cmd == [sys.executable, "-m", "cstar_forge.run", "/tmp/some_blueprint.yaml"]
 
 
+def test_workplan_path_strips_forge_blueprint_suffix():
+    f = ForgeBlueprintWizard._workplan_path
+    assert f(Path("/x/foo.forge_blueprint.yaml")) == Path("/x/foo.workplan.yaml")
+    assert f(Path("/x/foo.yaml")) == Path("/x/foo.workplan.yaml")
+
+
+def test_build_workplan_two_steps_with_deferred_blueprint(tmp_path):
+    """The workplan pairs a `forge` step (the saved blueprint) with a `roms_marbl`
+    step consuming the B_{name}.yaml that step 1 generates -- a deferred blueprint
+    reference, since the file does not exist until the forge step has run.
+    """
+    from cstar.orchestration.models import DeferredBlueprintRef
+
+    wiz = ForgeBlueprintWizard()
+    assert wiz.config is not None
+    bp_path = tmp_path / f"{wiz.config.name}.forge_blueprint.yaml"
+    bp_path.write_text("placeholder")  # Step's FilePath branch requires existence
+
+    wp = wiz._build_workplan(bp_path)
+
+    assert wp.name == wiz.config.name
+    forge_step, roms_step = wp.steps
+    assert (forge_step.name, forge_step.application) == ("forge", "forge")
+    assert Path(str(forge_step.blueprint_path)) == bp_path.resolve()
+    assert (roms_step.name, roms_step.application) == ("roms_marbl", "roms_marbl")
+    assert list(roms_step.depends_on) == ["forge"]
+    ref = roms_step.blueprint_path
+    assert isinstance(ref, DeferredBlueprintRef)
+    assert ref.from_step == "forge"
+    assert ref.filename == f"B_{wiz.config.name}.yaml"
+    # a deferred blueprint can't be inspected at submit time (SLURM would default
+    # to 1 CPU) -- the step must carry the partitioning size explicitly
+    assert roms_step.compute_overrides["cpus"] == wiz.config.n_procs
+    # the forge step carries no cpus override: the scheduler falls back to
+    # ForgeBlueprint.cpus_needed, the grid-sized forge estimate
+    assert "cpus" not in forge_step.compute_overrides
+    assert wiz.config.cpus_needed >= 16
+
+
+def test_on_save_workplan_guards_on_invalid_config(tmp_path):
+    wiz = ForgeBlueprintWizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.config = None
+    wiz.save_path.value = str(tmp_path / "never.forge_blueprint.yaml")
+    wiz._on_save_workplan(None)
+    assert "invalid" in wiz.workplan_status.value
+    assert not list(tmp_path.iterdir())
+
+
+def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
+    """With a local catalog, the workplan lands in catalog/workplans/ (not next
+    to the blueprint in catalog/blueprints/).
+    """
+    import shutil
+
+    from cstar.orchestration.models import Workplan
+    from cstar.orchestration.serialization import deserialize
+
+    from cstar_forge.domain_catalog import DomainCatalog, default_catalog
+
+    root = tmp_path / "catalog"
+    shutil.copytree(default_catalog.catalog_root, root)
+    wiz = ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=root))
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    assert wiz.config is not None
+
+    wiz._on_save_workplan(None)
+
+    assert "color:#080" in wiz.workplan_status.value, wiz.workplan_status.value
+    bp_path = Path(wiz.save_path.value)
+    wp_path = root / "workplans" / f"{wiz.config.name}.workplan.yaml"
+    assert bp_path.exists() and wp_path.exists()
+    assert bp_path.parent == root / "blueprints"
+    # the saved YAML round-trips through C-Star's own workplan loader, including
+    # its producer-must-be-a-dependency validation of the deferred reference
+    wp = deserialize(wp_path, Workplan)
+    assert [s.name for s in wp.steps] == ["forge", "roms_marbl"]
+    assert wp.steps[1].is_deferred
+    assert "cstar workplan run" in wiz.workplan_status.value
+    assert "CSTAR_APP_MODULES=cstar_forge.forge.app" in wiz.workplan_status.value
+
+
+def test_on_save_workplan_falls_back_to_blueprint_sibling(tmp_path, monkeypatch):
+    """When the catalog isn't a writable local filesystem, the workplan is saved
+    next to the blueprint (mirroring the blueprint save-path fallback).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    assert wiz.config is not None
+    monkeypatch.setattr(type(wiz.catalog), "_is_local", False)
+    wiz.save_path.value = str(tmp_path / f"{wiz.config.name}.forge_blueprint.yaml")
+
+    wiz._on_save_workplan(None)
+
+    assert "color:#080" in wiz.workplan_status.value, wiz.workplan_status.value
+    assert (tmp_path / f"{wiz.config.name}.workplan.yaml").exists()
+
+
 def test_on_run_guards_on_invalid_config(monkeypatch):
     """Clicking Run with no resolved config shows an error and spawns nothing."""
     import asyncio

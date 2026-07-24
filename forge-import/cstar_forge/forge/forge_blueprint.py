@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from datetime import datetime
 from enum import Enum
@@ -400,6 +401,19 @@ class RunWindow(_Section):
 # A. Grid / domain geometry (incl. partitioning — a host-independent
 #    decomposition choice that belongs to the domain)
 # ===========================================================================
+def estimate_forge_cpus(nx: int, ny: int, n_levels: int) -> int:
+    """Ballpark CPU count for a forge run (input generation) on a grid this size.
+
+    Deliberately imprecise -- roughly one CPU per 150k grid cells
+    (``nx * ny * N``), clamped to [16, 128]. 128 is a strict cap. Calibration
+    anchors: a toy domain (20x20x10) gets the 16 floor; hvalfjordur-0
+    (512x384x100, ~2.0e7 cells) saturates the cap; an exceptionally large
+    domain (1856x960x100, ~1.8e8 cells) is far past it.
+    """
+    cells = nx * ny * n_levels
+    return max(16, min(128, math.ceil(cells / 150_000)))
+
+
 class OpenBoundaries(_Section):
     north: bool = False
     south: bool = False
@@ -804,6 +818,17 @@ class ForgeBlueprint(Blueprint):
     def _sanitize_name(cls, v: str) -> str:
         return sanitize_name(v)
 
+    @field_validator("working_dir", mode="before")
+    @classmethod
+    def _coerce_working_dir(cls, value: Any) -> Any:
+        """Accept a ``Path`` where the field is declared ``str``: C-Star's workplan
+        scheduler system-override (``get_system_overrides``) injects
+        ``step.fsm.root_dir`` as a ``Path``, which pydantic will not coerce.
+        """
+        if isinstance(value, Path):
+            return value.as_posix()
+        return value
+
     @field_validator("working_dir", mode="after")
     @classmethod
     def _resolve_out_dir(cls, value: str, _info: Any) -> str:
@@ -834,8 +859,18 @@ class ForgeBlueprint(Blueprint):
 
     @property
     def cpus_needed(self) -> int:
-        """Overrides the ``Blueprint`` base default of 1."""
-        return self.n_procs
+        """Ballpark CPU count for *processing* this blueprint (the forge run
+        itself: roms-tools input generation), overriding the ``Blueprint`` base
+        default of 1. Deliberately NOT ``n_procs`` -- that is the ROMS
+        partitioning the downstream simulation uses, not what generating the
+        inputs needs. See :func:`estimate_forge_cpus`.
+        """
+        gk = self.domain.grid_kwargs
+        return estimate_forge_cpus(
+            int(gk.get("nx", 0) or 0),
+            int(gk.get("ny", 0) or 0),
+            int(gk.get("N", 0) or 0),
+        )
 
     @property
     def n_tracers(self) -> int:

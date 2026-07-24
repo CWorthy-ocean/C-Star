@@ -91,6 +91,44 @@ def test_bare_default_working_dir_expands_and_explicit_survives():
     assert ForgeBlueprint(**data).working_dir == "/custom/spot"
 
 
+def test_working_dir_accepts_path_from_scheduler_override():
+    """C-Star's workplan scheduler (``get_system_overrides``) overrides working_dir
+    with ``step.fsm.root_dir`` -- a ``Path``, which pydantic won't coerce to the
+    field's ``str`` type on its own.
+    """
+    from pathlib import Path
+
+    cfg = _build()
+    data = cfg.model_dump(mode="json")
+    data["working_dir"] = Path("/scratch/run-id/step-root")
+    assert ForgeBlueprint(**data).working_dir == "/scratch/run-id/step-root"
+
+
+def test_estimate_forge_cpus_anchors_and_strict_cap():
+    from cstar_forge.forge.forge_blueprint import estimate_forge_cpus
+
+    # toy domain (wio-toy) hits the 16 floor
+    assert estimate_forge_cpus(20, 20, 10) == 16
+    # hvalfjordur-0 (~2.0e7 cells) saturates the cap
+    assert estimate_forge_cpus(512, 384, 100) == 128
+    # an exceptionally large domain is far past the strict 128 cap
+    assert estimate_forge_cpus(1856, 960, 100) == 128
+    assert estimate_forge_cpus(10_000, 10_000, 1_000) == 128
+    # mid-size domains scale between the bounds
+    assert 16 < estimate_forge_cpus(350, 350, 100) < 128
+
+
+def test_cpus_needed_is_grid_sized_forge_estimate():
+    """cpus_needed sizes the forge run itself (scheduler fallback for the
+    workplan's forge step) -- the grid estimate, not the ROMS partitioning.
+    """
+    from cstar_forge.forge.forge_blueprint import estimate_forge_cpus
+
+    cfg = _build()
+    gk = cfg.domain.grid_kwargs
+    assert cfg.cpus_needed == estimate_forge_cpus(gk["nx"], gk["ny"], gk["N"])
+
+
 def test_forge_blueprint_is_portable_no_forge_or_heavy_cstar_imports():
     """forge_blueprint.py is the C-Star-relocatable blueprint model: it must depend on
     nothing from cstar_forge (only stdlib + pydantic + yaml), and the only ``cstar``

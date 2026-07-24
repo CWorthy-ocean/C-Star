@@ -90,6 +90,39 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
+  - source:
+      name: MBL_co2
+      climatology: false
+      glorys_layout: null
+      path: null
+    type: bgc
+    correct_radiation: false
+    coarse_grid_mode: never
+    restoring_forces: null
+    wind_dropoff: false
+    prefill: null
+    prefill_kwargs: null
+    regrid_method: null
+    extrap_method: null
+    extrap_kwargs: null
+    options: {}
+  - source:
+      name: WOA
+      climatology: true
+      glorys_layout: null
+      path: null
+    type: restoring
+    correct_radiation: false
+    coarse_grid_mode: never
+    restoring_forces:
+    - sss
+    wind_dropoff: false
+    prefill: null
+    prefill_kwargs: null
+    regrid_method: null
+    extrap_method: null
+    extrap_kwargs: null
+    options: {}
   boundary:
   - source:
       name: GLORYS
@@ -130,7 +163,18 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
-  river: []
+  river:
+  - source:
+      name: DAI
+      climatology: false
+      glorys_layout: null
+      path: null
+    include_bgc: true
+    convert_to_climatology: if_any_missing
+    bgc_source: null
+    coast_snap_buffer_km: null
+    domain_edge_buffer: 20
+    options: {}
   cdr_forcing: null
   resolved_datasets:
     GLORYS:
@@ -148,22 +192,40 @@ forcing:
       dataset_id: null
       url: null
       streamable: true
+    MBL_co2:
+      dataset_key: MBL_CO2
+      dataset_id: null
+      url: https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt
+      streamable: false
+    WOA:
+      dataset_key: WOA
+      dataset_id: null
+      url: https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/
+      streamable: false
     TPXO:
       dataset_key: TPXO
       dataset_id: null
       url: null
       streamable: false
+    DAI:
+      dataset_key: DAI
+      dataset_id: null
+      url: null
+      streamable: true
     ETOPO5:
       dataset_key: ETOPO5
       dataset_id: null
       url: null
       streamable: false
 datasets:
+- DAI
 - ERA5
 - ETOPO5
 - GLORYS_REGIONAL
+- MBL_CO2
 - TPXO
 - UNIFIED_BGC
+- WOA
 model_settings:
   cppdefs:
     sponge_tune: false
@@ -174,10 +236,10 @@ model_settings:
     obc_north: true
     obc_south: true
     cdr_forcing: false
-    use_pio: true
+    use_pio: false
     marbl: true
-    co2_tvarying: false
-    sal_restore: false
+    co2_tvarying: true
+    sal_restore: true
     tides: true
   lateral_visc:
     visc2: 0.0
@@ -226,7 +288,7 @@ model_settings:
     bry_tides: true
     pot_tides: true
     ana_tides: false
-    ntides: 10
+    ntides: 15
   sponge_tune:
     pflx_w_vname: up_west
     pflx_w_tname: bry_time
@@ -440,16 +502,13 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: main
+    commit: 0.2.0
     branch: null
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
     commit: marbl0.45.0
     branch: null
-  pio:
-    location: https://github.com/NCAR/ParallelIO.git
-    commit: pio2_7_0
-    branch: null
+  pio: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/cstar-forge.git
     commit: 4208f4384431852daccea1ccad01d03c0cb473d9
@@ -468,26 +527,24 @@ composition:
   model:
     name: cson_roms-marbl_v0.1
     origin: catalog
-    modified: true
+    modified: false
   domain:
     name: wio-toy
-    origin: custom
+    origin: catalog
     modified: false
   forcing:
     name: glorys-era5-unified
     origin: catalog
-    modified: true
+    modified: false
   output:
     name: standard
     origin: catalog
     modified: false
-  overrides:
-    tides:
-      ntides: 10
+  overrides: {}
 provenance:
   generated_at: null
   forge_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 878a11f772dfafca1ab461b91dc5f7e9abdb08cee25a6424ad2a66a53211f8da
+  content_hash: a5e667bf35a38cce52da64f56f89fef34c7448364ff6b56f9bcb43d3832cd0bf
   notes: null

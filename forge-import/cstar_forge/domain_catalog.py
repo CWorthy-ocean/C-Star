@@ -469,6 +469,11 @@ class DomainCatalog:
         """Path to the blueprints directory (catalog_root/blueprints)."""
         return self.catalog_root / "blueprints"
 
+    @property
+    def workplans_dir(self) -> Path:
+        """Path to the workplans directory (catalog_root/workplans)."""
+        return self.catalog_root / "workplans"
+
     # ------------------------------------------------------------------
     # Path helpers (used by ForgeExecutor)
     # ------------------------------------------------------------------

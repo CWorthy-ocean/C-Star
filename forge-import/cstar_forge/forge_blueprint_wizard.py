@@ -2218,6 +2218,18 @@ class ForgeBlueprintWizard:
         )
         self.run_btn = W.Button(description="Run", icon="play")
         self.run_status = W.HTML("")
+
+        # --- workplan export (two-step C-Star workplan: forge -> roms_marbl) ---
+        self.workplan_note = W.HTML(
+            "<span style='color:#666'>ℹ Saves the blueprint plus a two-step C-Star "
+            "workplan: step <code>forge</code> generates the ROMS-MARBL inputs and "
+            "blueprint, step <code>roms_marbl</code> runs the simulation from that "
+            "generated (deferred) blueprint. The workplan is saved only — run it "
+            "yourself with the printed command.</span>"
+        )
+        self.workplan_btn = W.Button(description="Save workplan", icon="sitemap")
+        self.workplan_status = W.HTML("")
+
         self.run_output = W.Output(
             layout=W.Layout(
                 border="1px solid #ccc",
@@ -2248,6 +2260,7 @@ class ForgeBlueprintWizard:
         self.save_domain_btn.on_click(self._on_save_domain)
         self.save_forcing_btn.on_click(self._on_save_forcing)
         self.run_btn.on_click(self._on_run)
+        self.workplan_btn.on_click(self._on_save_workplan)
         self.load_btn.on_click(self._on_load_path)
         self.upload.observe(self._on_upload, names="value")
         self.cdr_upload.observe(self._on_cdr_upload, names="value")
@@ -3882,6 +3895,119 @@ class ForgeBlueprintWizard:
         finally:
             self.run_btn.disabled = False
 
+    # ---- workplan export -------------------------------------------------------
+    @staticmethod
+    def _workplan_path(blueprint_path: Path) -> Path:
+        """Sibling ``{name}.workplan.yaml`` for a saved blueprint path (stripping a
+        ``.forge_blueprint.yaml`` suffix when present, so the default save path
+        ``{name}.forge_blueprint.yaml`` yields ``{name}.workplan.yaml``).
+        """
+        name = blueprint_path.name
+        suffix = ".forge_blueprint.yaml"
+        stem = name[: -len(suffix)] if name.endswith(suffix) else blueprint_path.stem
+        return blueprint_path.with_name(f"{stem}.workplan.yaml")
+
+    def _workplan_dest(self, blueprint_path: Path) -> Path:
+        """Destination for a saved workplan: the active catalog's ``workplans/``
+        directory when the catalog is local (mirroring ``_default_blueprint_path``'s
+        preference for the catalog), else a sibling of the blueprint.
+        """
+        fname = self._workplan_path(blueprint_path).name
+        cat = getattr(self, "catalog", None)
+        try:
+            if cat is not None and getattr(cat, "_is_local", False):
+                return cat.workplans_dir / fname
+        except Exception:
+            pass
+        return blueprint_path.with_name(fname)
+
+    def _build_workplan(self, blueprint_path: Path):
+        """Build the two-step C-Star workplan for the current config: step ``forge``
+        runs the forge application on the saved blueprint; step ``roms_marbl`` runs
+        the ``B_{name}.yaml`` blueprint the forge step generates -- a *deferred*
+        blueprint (``from_step``), since it does not exist until step 1 has run.
+
+        Returns
+        -------
+        cstar.orchestration.models.Workplan
+        """
+        try:
+            from cstar.orchestration.models import (
+                DeferredBlueprintRef,
+                Step,
+                Workplan,
+            )
+        except ImportError as exc:
+            msg = (
+                "Workplan export requires a C-Star version with workplan and "
+                "deferred-blueprint support"
+            )
+            raise RuntimeError(msg) from exc
+
+        cfg = self.config
+        # No cpus override for the forge step: the scheduler falls back to
+        # ForgeBlueprint.cpus_needed, which is the grid-sized estimate.
+        forge_step = Step(
+            name="forge",
+            application="forge",
+            blueprint=blueprint_path.expanduser().resolve(),
+        )
+        roms_step = Step(
+            name="roms_marbl",
+            application="roms_marbl",
+            depends_on=["forge"],
+            blueprint=DeferredBlueprintRef(
+                from_step="forge",
+                filename=f"B_{cfg.name}.yaml",
+            ),
+            # A deferred blueprint cannot be inspected at submit time, so the
+            # scheduler defaults the step to 1 CPU -- size it from the
+            # partitioning explicitly.
+            compute_overrides={"cpus": cfg.n_procs},
+        )
+        return Workplan(
+            name=cfg.name,
+            description=f"Forge inputs + ROMS-MARBL run for {cfg.name}",
+            steps=[forge_step, roms_step],
+        )
+
+    def _on_save_workplan(self, _):
+        if not self._ensure_boundaries_derived():
+            self.workplan_status.value = (
+                "<span style='color:#b00'>Save aborted — open boundaries could "
+                "not be derived from the grid (see the Domain-derived properties "
+                "status above). Fix the grid or set boundaries manually, then "
+                "retry.</span>"
+            )
+            return
+        if self.config is None:
+            self.workplan_status.value = (
+                "<span style='color:#b00'>Nothing to save — config is invalid.</span>"
+            )
+            return
+        try:
+            bp_path = self.config.to_yaml(Path(self.save_path.value))
+            workplan = self._build_workplan(Path(bp_path))
+            wp_path = self._workplan_dest(Path(bp_path))
+
+            from cstar.orchestration.serialization import serialize
+
+            serialize(wp_path, workplan)
+            # CSTAR_APP_MODULES makes the forge app discoverable to C-Star's
+            # registry at schedule time; it propagates to spawned jobs
+            # automatically (all CSTAR_* vars are captured with the run).
+            cmd = (
+                f"CSTAR_APP_MODULES=cstar_forge.forge.app cstar workplan run {wp_path}"
+            )
+            self.workplan_status.value = (
+                f"<span style='color:#080'>Saved {bp_path} and {wp_path}</span><br>"
+                f"Run it with: <code>{cmd}</code>"
+            )
+        except Exception as exc:
+            self.workplan_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
     # ---- layout / display ----------------------------------------------------
     @property
     def widget(self):
@@ -4100,6 +4226,12 @@ class ForgeBlueprintWizard:
                     self.download_link,
                     W.HBox([self.save_path, self.save_btn]),
                     self.save_status,
+                ),
+                section(
+                    "Workplan",
+                    self.workplan_note,
+                    W.HBox([self.workplan_btn]),
+                    self.workplan_status,
                 ),
                 section(
                     "Run",

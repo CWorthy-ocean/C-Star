@@ -29,7 +29,9 @@ applications.
 
 from __future__ import annotations
 
+import shutil
 import typing as t
+from pathlib import Path
 
 from cstar.applications.core import (
     ApplicationDefinition,
@@ -37,6 +39,7 @@ from cstar.applications.core import (
     register_application,
 )
 from cstar.entrypoint.runner import BlueprintRunner
+from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
 
 from cstar_forge.forge.forge_blueprint import DEFAULT_APPLICATION, ForgeBlueprint
@@ -78,8 +81,34 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
         self.log.debug(
             f"Forge blueprint emitted: {executor.path_roms_marbl_blueprint()}"
         )
+        published = self._publish_blueprint(executor)
+        self.log.info(f"Forge blueprint published for downstream steps: {published}")
         self.add_state(ExecutionStatus.COMPLETED)
         return self.result
+
+    @staticmethod
+    def _publish_blueprint(executor: t.Any) -> Path:
+        """Copy the emitted ``roms_marbl`` blueprint into ``<working root>/output/``.
+
+        Under a workplan, C-Star's deferred-blueprint resolution
+        (``cstar.orchestration.transforms.resolve_deferred_blueprint``) looks for the
+        producer step's artifact in its ``output/`` dir (the step's ``working_dir``
+        root, which the scheduler system-override points the forge blueprint at) --
+        not in the ``blueprints/`` dir the executor writes to. Only the blueprint is
+        copied (not the ``settings_B_{name}.yaml`` sidecar), so a deferred reference
+        that omits ``filename`` still resolves to a unique candidate.
+
+        Returns
+        -------
+        Path
+            The published blueprint path.
+        """
+        src = executor.path_roms_marbl_blueprint()
+        out_dir = JobFileSystemManager(src.parent.parent).output_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dest = out_dir / src.name
+        shutil.copy2(src, dest)
+        return dest
 
 
 @register_application

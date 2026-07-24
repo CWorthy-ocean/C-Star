@@ -1,0 +1,15 @@
+name: cson_roms-marbl_v0.1_wio-toy_10procs
+description: Forge inputs + ROMS-MARBL run for cson_roms-marbl_v0.1_wio-toy_10procs
+steps:
+- name: forge
+  application: forge
+  blueprint: /Users/eilerman/git/cstar-forge/cstar_forge/catalog/blueprints/cson_roms-marbl_v0.1_wio-toy_10procs.forge_blueprint.yaml
+- name: roms_marbl
+  application: roms_marbl
+  blueprint:
+    from_step: forge
+    filename: B_cson_roms-marbl_v0.1_wio-toy_10procs.yaml
+  depends_on:
+  - forge
+  compute_overrides:
+    cpus: 10.0
