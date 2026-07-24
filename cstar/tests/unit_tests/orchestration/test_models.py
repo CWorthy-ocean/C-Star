@@ -897,6 +897,9 @@ def test_workplan_yaml_deserialize(
 
     plan2 = deserialize(yaml_path, Workplan)
 
+    for step in plan.steps:
+        step.blueprint_path = str(step.blueprint_path)
+
     assert plan == plan2
 
 
