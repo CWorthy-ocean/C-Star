@@ -1,5 +1,3 @@
-import copy
-import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -8,8 +6,6 @@ from typing import TYPE_CHECKING, Any
 import dateutil
 
 from cstar.base.log import LoggingMixin
-from cstar.execution.handler import ExecutionStatus
-from cstar.execution.local_process import LocalProcess
 
 if TYPE_CHECKING:
     from cstar.base.additional_code import AdditionalCode
@@ -65,12 +61,6 @@ class Simulation(ABC, LoggingMixin):
         Execute the simulation.
     post_run()
         Execute any post-processing actions required after running the simulation.
-    persist()
-        Save the state of this Simulation instance to disk.
-    restore(directory)
-        Restore a previously saved Simulation instance from disk.
-    restart(new_end_date)
-        Create a new Simulation instance starting from the end of this one.
     """
 
     _fs_manager: "JobFileSystemManager"
@@ -268,125 +258,6 @@ class Simulation(ABC, LoggingMixin):
                 f"start_date {self.start_date} is after end_date {self.end_date}."
             )
 
-    def __str__(self) -> str:
-        """Returns a string representation of the simulation.
-
-        The representation includes the simulation's name, directory,
-        start and end dates, valid date range, discretization settings,
-        and code-related information.
-
-        Returns
-        -------
-        str
-            A formatted string summarizing the simulation's attributes.
-        """
-        class_name = self.__class__.__name__
-        base_str = f"{class_name}\n" + ("-" * len(class_name)) + "\n"
-
-        base_str += f"Name: {self.name}\n"
-        base_str += f"Directory: {self.directory}\n"
-
-        # Dates
-        base_str += f"Start date: {self.start_date}\n"
-        base_str += f"End date: {self.end_date}\n"
-        base_str += f"Valid start date: {self.valid_start_date}\n"
-        base_str += f"Valid end date: {self.valid_end_date}\n"
-
-        if self.discretization is not None:
-            base_str += "\nDiscretization: "
-            base_str += self.discretization.__repr__() + "\n"
-
-        # Codebase
-        base_str += "\nCode:"
-        base_str += f"\nCodebase: {self.codebase.__class__.__name__} instance (query using {class_name}.codebase)\n"
-
-        # Runtime code:
-        if self.runtime_code is not None:
-            NN = len(self.runtime_code.source)
-            base_str += f"Runtime code: {self.runtime_code.__class__.__name__} instance with {NN} files (query using {class_name}.runtime_code)\n"
-
-        # Compile-time code:
-        if self.compile_time_code is not None:
-            NN = len(self.compile_time_code.source)
-            base_str += f"Compile-time code: {self.compile_time_code.__class__.__name__} instance with {NN} files (query using {class_name}.compile_time_code)"
-
-        exe_path = getattr(self, "exe_path", None)
-        if exe_path is not None:
-            base_str += "\nIs compiled: True"
-            base_str += "\nExecutable path: " + str(exe_path)
-
-        return base_str
-
-    def __repr__(self) -> str:
-        """Returns a detailed string representation of the simulation.
-
-        The representation includes all relevant attributes, such as
-        name, directory, start and end dates, valid date range,
-        discretization settings, and code-related components.
-
-        Returns
-        -------
-        str
-            A string representation of the simulation suitable for debugging.
-        """
-        repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nname = {self.name},"
-        repr_str += f"\ndirectory = {self.directory},"
-        repr_str += f"\nstart_date = {self.start_date},"
-        repr_str += f"\nend_date = {self.end_date},"
-        repr_str += f"\nvalid_start_date = {self.valid_start_date},"
-        repr_str += f"\nvalid_end_date = {self.valid_end_date},"
-        if self.discretization is not None:
-            repr_str += f"\ndiscretization = {self.discretization.__repr__()},"
-
-        repr_str += f"\ncodebase = <{self.codebase.__class__.__name__} instance>,"
-        if self.runtime_code is not None:
-            repr_str += (
-                "\nruntime_code = "
-                + f"<{self.runtime_code.__class__.__name__} instance>,"
-            )
-        if self.compile_time_code is not None:
-            repr_str += (
-                "\ncompile_time_code = "
-                + f"<{self.compile_time_code.__class__.__name__} instance>,"
-            )
-        repr_str = repr_str.rstrip(",")
-        repr_str += ")"
-
-        return repr_str
-
-    @classmethod
-    def state_file_from(cls, directory: Path) -> Path:
-        """The path where a state file containing a pickled Simulation will be created
-        upon successful completion of a simulation, when that simulation uses the
-        supplied directory as it's working directory.
-
-        Parameters
-        ----------
-        directory : Path
-            The target working directory for an inaccessible simulation instance,
-            such as during a restart.
-
-        Returns
-        -------
-        Path
-           The path where the state file will be created.
-        """
-        fs = cls._get_filesystem_manager(directory)
-        return fs.run_dir / "simulation_state.pkl"
-
-    @property
-    def state_file(self) -> Path:
-        """The path where a state file containing the pickled Simulation will be created
-        upon successful completion of the simulation.
-
-        Returns
-        -------
-        Path
-           The path where the state file will be created.
-        """
-        return self.state_file_from(self.directory)
-
     @property
     @abstractmethod
     def default_codebase(self) -> "ExternalCodeBase":
@@ -513,85 +384,6 @@ class Simulation(ABC, LoggingMixin):
         """
         pass
 
-    def __getstate__(self):
-        """Return a pickle-able representation of the object."""
-        state = vars(self).copy()
-
-        # Remove the un-pickleable logger attribute
-        state.pop("_log", None)
-
-        return state
-
-    def __setstate__(self, state: dict[str, Any]):
-        """Restore the object from a pickle."""
-        vars(self).update(state)
-
-    def persist(self) -> None:
-        """Save the current state of the simulation to a file.
-
-        This method serializes the simulation object and writes it to a file named
-        `simulation_state.pkl` within the simulation directory, allowing the exact state
-        to be restored later.
-
-        Raises
-        ------
-        RuntimeError
-            If the simulation is currently running in a local process, as a running
-            LocalProcess instance cannot be serialized.
-
-        See Also
-        --------
-        restore : Restores a previously saved simulation state.
-        """
-        if (
-            self._execution_handler is not None
-            and (isinstance(self._execution_handler, LocalProcess))
-            and (self._execution_handler.status == ExecutionStatus.RUNNING)
-        ):
-            raise RuntimeError(
-                "Simulation.persist() was called, but at least one "
-                "local process is currently running. Await "
-                "completion or use LocalProcess.cancel(), then try again"
-            )
-
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.state_file, "wb") as state_file:
-            pickle.dump(self, state_file)
-
-    @classmethod
-    def restore(cls, directory: str | Path) -> "Simulation":
-        """Restore a previously saved simulation state.
-
-        This method loads a serialized simulation object from the `simulation_state.pkl`
-        file located in the specified directory and returns the restored instance.
-
-        Parameters
-        ----------
-        directory : str or Path
-            The directory containing the saved simulation state.
-
-        Returns
-        -------
-        Simulation
-            The restored simulation instance.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the `simulation_state.pkl` file is not found in the specified directory.
-        pickle.UnpicklingError
-            If the file cannot be deserialized, indicating possible corruption.
-
-        See Also
-        --------
-        persist : Saves the current simulation state.
-        """
-        directory = Path(directory)
-        with open(cls.state_file_from(directory), "rb") as state_file:
-            simulation: Simulation = pickle.load(state_file)
-
-        return simulation
-
     @abstractmethod
     def build(self, rebuild: bool = False) -> None:
         """Abstract method to compile any necessary code for this simulation.
@@ -679,50 +471,3 @@ class Simulation(ABC, LoggingMixin):
     def _get_filesystem_manager(cls, directory: Path) -> "JobFileSystemManager":
         """Retrieve the manager for the simulation output directory structure."""
         raise NotImplementedError("Failed to implement abstract method.")
-
-    def restart(self, new_end_date: str | datetime) -> "Simulation":
-        """Create a new Simulation instance starting from the end date of the current
-        simulation.
-
-        This method generates a deep copy of the current simulation and updates its
-        start date to match the current simulation's end date. The new simulation
-        may require additional modifications, such as setting restart files, which
-        should be implemented in subclasses.
-
-        Parameters
-        ----------
-        new_end_date : str or datetime
-            The end date for the restarted simulation.
-
-        Returns
-        -------
-        Simulation
-            A new simulation instance with updated parameters for continuing the
-            previous simulation.
-
-        Raises
-        ------
-        ValueError
-            If `new_end_date` is not of type str or datetime.
-
-        See Also
-        --------
-        persist : Saves the state of the current simulation.
-        restore : Restores a saved simulation instance.
-        """
-        new_sim = copy.deepcopy(self)
-        new_sim.start_date = self.end_date
-        new_sim.directory = (
-            new_sim.directory
-            / f"RESTART_{new_sim.start_date.strftime('%Y%m%d_%H%M%S')}"
-        )
-        if isinstance(new_end_date, str):
-            new_sim.end_date = dateutil.parser.parse(new_end_date)
-        elif isinstance(new_end_date, datetime):
-            new_sim.end_date = new_end_date
-        else:
-            raise ValueError(
-                f"Expected str or datetime for `new_end_date`, got {type(new_end_date)}"
-            )
-
-        return new_sim

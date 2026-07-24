@@ -63,4 +63,3 @@ A key strength of C-Star lies in its ability to run regional ocean simulations u
     contributing
     custom_applications
     releases
-    python_api_guides

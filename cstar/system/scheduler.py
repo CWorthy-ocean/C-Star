@@ -378,30 +378,6 @@ class Scheduler(ABC, LoggingMixin):
         else:
             return queue
 
-    def __str__(self) -> str:
-        """Return a readable string representation of the PBSQueue instance."""
-        queues_str = "\n".join([f"- {queue.name}" for queue in self.queues])
-        return (
-            f"{self.__class__.__name__}\n"
-            f"{'-' * len(self.__class__.__name__)}\n"
-            f"primary_queue: {self.primary_queue_name}\n"
-            f"queues:\n{queues_str}\n"
-            f"other_scheduler_directives: {self.other_scheduler_directives}\n"
-            f"global max cpus per node: {self.global_max_cpus_per_node}\n"
-            f"global max mem per node: {self.global_max_mem_per_node_gb}GB\n"
-            f"documentation: {self.documentation}"
-        )
-
-    def __repr__(self) -> str:
-        """Return a string representation of the PBSQueue instance."""
-        base_repr = (
-            f"{self.__class__.__name__}("
-            f"queues={self.queues!r}, primary_queue_name={self.primary_queue_name!r}, "
-            f"other_scheduler_directives={self.other_scheduler_directives!r}, "
-            f"documentation={self.documentation!r})"
-        )
-        return base_repr
-
     @property
     @abstractmethod
     def global_max_cpus_per_node(self) -> int | None:

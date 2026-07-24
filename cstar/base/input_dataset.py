@@ -83,41 +83,6 @@ class InputDataset(ABC, LoggingMixin):
             return [self.working_copy.path]
         return []
 
-    def __str__(self) -> str:
-        name = self.__class__.__name__
-        base_str = f"{name}"
-        base_str = "-" * len(name) + "\n" + base_str
-        base_str += "\n" + "-" * len(name)
-        base_str += f"\nSource location: {self.source.location}"
-        if self.source.file_hash is not None:
-            base_str += f"\nSource file hash: {self.source.file_hash}"
-        if self.start_date is not None:
-            base_str += f"\nstart date: {self.start_date}"
-        if self.end_date is not None:
-            base_str += f"\nend date: {self.end_date}"
-        strlocal = " ".join([str(p) for p in self._local]) if self._local else None
-        base_str += f"\nLocal copy: {strlocal}"
-        return base_str
-
-    def __repr__(self) -> str:
-        # Constructor-style section:
-        repr_str = f"{self.__class__.__name__}("
-        repr_str += f"\nlocation = {self.source.location!r},"
-        repr_str += f"\nfile_hash = {self.source.file_hash!r},"
-        if self.start_date is not None:
-            repr_str += f"\nstart_date = {self.start_date!r},"
-        if self.end_date is not None:
-            repr_str += f"\nend_date = {self.end_date!r}"
-        repr_str += "\n)"
-        info_str = ""
-
-        if self.working_copy:
-            info_str += f"working_copy = {' '.join([str(p) for p in self._local])}"
-        if len(info_str) > 0:
-            repr_str += f"\nState: <{info_str}>"
-
-        return repr_str
-
     def to_dict(self) -> dict[str, Any]:
         """Represent this InputDataset object as a dictionary of kwargs.
 
