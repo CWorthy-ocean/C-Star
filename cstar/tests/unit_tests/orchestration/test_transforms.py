@@ -257,6 +257,7 @@ def test_override_transform_system_precedence(
     assert Path(bp_new.working_dir) == sys_od
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 async def test_continuance_directive_step_resolution(
     tmp_path: Path,
@@ -352,6 +353,7 @@ async def test_continuance_directive_context_not_supplied() -> None:
         ContinuanceDirective(config, workplan=workplan)
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 async def test_continuance_directive_step_DNE(
     tmp_path: Path,
