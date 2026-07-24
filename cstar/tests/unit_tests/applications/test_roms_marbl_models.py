@@ -6,8 +6,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
+from cstar.applications.roms_marbl.adapter import PIOAdapter
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.orchestration.adapter import PIOAdapter
 from cstar.pio.external_codebase import PIOExternalCodeBase
 
 
