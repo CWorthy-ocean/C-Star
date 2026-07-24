@@ -2040,7 +2040,9 @@ def mocked_simulation_outputs(
     user_data_dir.mkdir(parents=True, exist_ok=True)
 
     tpl_path = bp_templates_dir / "blueprint.yaml"
-    tpl_content = tpl_path.read_text()
+    tpl_content = tpl_path.read_text().replace(
+        "working_dir: .", f"working_dir: {tmp_path}"
+    )
 
     bp_path = user_data_dir / "blueprint.yaml"
     bp_path.write_text(tpl_content)

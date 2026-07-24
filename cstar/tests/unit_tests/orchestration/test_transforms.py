@@ -103,11 +103,11 @@ def step_overiding_wp(
     Workplan
     """
     bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    default_working_dir = "working_dir: ."
 
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(
-        "working_dir: .",
-        f"working_dir: {test_working_dir.as_posix()}",
+        default_working_dir, f"working_dir: {test_working_dir}"
     )
     test_bp_path.write_text(bp_content)
 

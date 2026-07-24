@@ -102,9 +102,7 @@ def diamond_workplan(
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(
-        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
-    )
+    bp_content = bp_content.replace(default_working_dir, f"working_dir: {tmp_path}")
     bp_path.write_text(bp_content)
 
     return Workplan(
@@ -161,9 +159,7 @@ def multi_entrypoint_workplan(
 
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
-    bp_content = bp_content.replace(
-        default_working_dir, f"working_dir: {tmp_path.as_posix()}"
-    )
+    bp_content = bp_content.replace(default_working_dir, f"working_dir: {tmp_path}")
     bp_path.write_text(bp_content)
 
     return Workplan(
