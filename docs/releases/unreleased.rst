@@ -15,6 +15,7 @@ Breaking Changes
 - `cstar.orchestration.converter` is removed (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
 - ROMS-specific adapters in `cstar.orchestration.adapter` moved to `cstar.applications.roms_marbl.adapter` (`#601 <https://github.com/CWorthy-ocean/C-Star/pull/601>`_)
 - `LiveStep.working_dir` is no longer optional (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Deserialization of a workplan with `LiveStep` to `Workplan` will now fail (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -24,6 +25,9 @@ New features
 - added `cstar admin clean` CLI command (`#589 <https://github.com/CWorthy-ocean/C-Star/pull/589>`_)
 - Add `Directive.workplan` attribute for access to run context information from within the `Directive` (`#584 <https://github.com/CWorthy-ocean/C-Star/pull/584>`_)
 - Add support for building and linking ParallelIO with ROMS (`#594 <https://github.com/CWorthy-ocean/C-Star/pull/594>`_)
+- Enable strict validation in user-facing models (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
+- Create `BlueprintCore` model for bootstrapping the model loading process (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
+- Orchestrator exclusively uses `LiveWorkplan` internally (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -37,6 +41,9 @@ Bug Fixes
 - Fix circular import when importing RomsMarbl pieces from Forge (`#603 <https://github.com/CWorthy-ocean/C-Star/pull/603>`_)
 - Fix bug caused by computed properties resulting in incorrect serialization behavior (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
 - Fix bug where applying a `Directive` writes outputs to the incorrect directory (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
+- Fix incorrectly named schema version keys in sample and test blueprints (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
+- Fix model fields not serializing (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
+- Fix symlink failures when persisting latest run (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -68,6 +75,8 @@ Improvements
 - Convert `LiveStep` attributes to `frozen` (`#587 <https://github.com/CWorthy-ocean/C-Star/pull/587>`_)
 - Speed up simple data fetch operations by only validating sha256/stat if a value was explicitly passed (`#605 <https://github.com/CWorthy-ocean/C-Star/pull/605>`_)
 - Reduced manual input manipulation of blueprints and workplans in tests (`#607 <https://github.com/CWorthy-ocean/C-Star/pull/607>`_)
+- Avoid extraneous reloading of blueprints from disk (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
+- Remove unused method(s) (`#595 <https://github.com/CWorthy-ocean/C-Star/pull/595>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
