@@ -2,7 +2,6 @@ import json
 import os
 import textwrap
 import typing as t
-import uuid
 from collections.abc import AsyncGenerator, Callable, Generator
 from datetime import datetime
 from pathlib import Path
@@ -546,14 +545,6 @@ def plotter_v2_0_0_bp(tmp_path: Path, plotter_v2_0_0_model: dict[str, t.Any]) ->
     bp_path.parent.mkdir(parents=True, exist_ok=True)
     bp_path.write_text(content)
     return bp_path
-
-
-@pytest.fixture
-def mock_run_id() -> Generator[str]:
-    """Configure the CSTAR_RUNID environment variable."""
-    run_id = str(uuid.uuid4())
-    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: run_id}):
-        yield run_id
 
 
 @pytest.fixture(autouse=True)

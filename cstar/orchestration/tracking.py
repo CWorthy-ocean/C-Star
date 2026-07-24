@@ -305,6 +305,37 @@ class TrackingRepository(LoggingMixin):
 
         return deserialize(run_path, WorkplanRun)
 
+    def get_workplan_run_sync(
+        self, run_id: str, run_date: datetime | None = None
+    ) -> WorkplanRun | None:
+        """Locate a WorkplanRun record.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+        run_date : datetime | None
+            The datetime the run was executed or `None`.
+
+        Returns
+        -------
+        WorkplanRun | None
+            The record when it can be located in history or latest runs, otherwise `None`.
+        """
+        if not run_id:
+            msg = "A valid run-id was not provided; unable to retrieve run"
+            raise ValueError(msg)
+
+        run_path = self._find_run_path(run_id, run_date)
+
+        if not run_path.exists():
+            rd_out = run_date or "latest"
+            msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
+            self.log.warning(msg)
+            return None
+
+        return deserialize(run_path, WorkplanRun)
+
     async def put_workplan_run(self, run: WorkplanRun) -> Path:
         """Persist a run record to disk.
 

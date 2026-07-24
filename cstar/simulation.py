@@ -3,7 +3,7 @@ import pickle
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import dateutil
 
@@ -84,9 +84,9 @@ class Simulation(ABC, LoggingMixin):
         name: str,
         directory: str | Path,
         discretization: "Discretization",
-        runtime_code: Optional["AdditionalCode"] = None,
-        compile_time_code: Optional["AdditionalCode"] = None,
-        codebase: Optional["ExternalCodeBase"] = None,
+        runtime_code: "AdditionalCode | None" = None,
+        compile_time_code: "AdditionalCode | None" = None,
+        codebase: "ExternalCodeBase | None" = None,
         start_date: str | datetime | None = None,
         end_date: str | datetime | None = None,
         valid_start_date: str | datetime | None = None,
@@ -405,7 +405,7 @@ class Simulation(ABC, LoggingMixin):
 
     @classmethod
     @abstractmethod
-    def from_dict(cls, simulation_dict: dict, directory: str | Path):
+    def from_dict(cls, simulation_dict: dict[str, Any], directory: str | Path):
         """Abstract method to create a Simulation instance from a dictionary.
 
         This method must be implemented by subclasses to construct a simulation
@@ -430,7 +430,7 @@ class Simulation(ABC, LoggingMixin):
         """
         pass
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the Simulation instance into a dictionary representation.
 
         This method serializes the attributes of the Simulation instance into a
@@ -447,7 +447,7 @@ class Simulation(ABC, LoggingMixin):
         from_dict : Constructs a Simulation instance from a dictionary.
         to_blueprint: Writes an equivalent representation to a yaml file.
         """
-        simulation_dict: dict[Any, Any] = {}
+        simulation_dict: dict[str, Any] = {}
 
         # Top-level information
         simulation_dict["name"] = self.name
@@ -515,16 +515,16 @@ class Simulation(ABC, LoggingMixin):
 
     def __getstate__(self):
         """Return a pickle-able representation of the object."""
-        state = self.__dict__.copy()
+        state = vars(self).copy()
 
         # Remove the un-pickleable logger attribute
         state.pop("_log", None)
 
         return state
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: dict[str, Any]):
         """Restore the object from a pickle."""
-        self.__dict__.update(state)
+        vars(self).update(state)
 
     def persist(self) -> None:
         """Save the current state of the simulation to a file.
@@ -593,7 +593,7 @@ class Simulation(ABC, LoggingMixin):
         return simulation
 
     @abstractmethod
-    def build(self, rebuild=False) -> None:
+    def build(self, rebuild: bool = False) -> None:
         """Abstract method to compile any necessary code for this simulation.
 
         This method should be implemented by subclasses to handle steps

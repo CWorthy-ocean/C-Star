@@ -17,9 +17,9 @@ from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.converter.converter import prepare_directive_file
+from cstar.orchestration.adapter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.roms.simulation import ROMSSimulation
 
 
@@ -112,7 +112,7 @@ def test_blueprint_run_remote_blueprint() -> None:
         "https://www.google.com/directive-dne.json",
     ],
 )
-def test_blueprint_run_apply_directive_dne(tmp_path: Path, directive_path: str) -> None:
+def test_blueprint_run_apply_directive_dne(directive_path: str) -> None:
     """Verify that an exception is raised if a path to a non-existent directive file is passed."""
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
@@ -138,9 +138,12 @@ def test_blueprint_run_apply_directive_dne(tmp_path: Path, directive_path: str) 
     mock_exec.assert_not_called()
 
 
-def test_blueprint_run_apply_directive_empty(tmp_path: Path) -> None:
+def test_blueprint_run_apply_directive_empty(
+    tmp_path: Path,
+    package_path: Path,
+) -> None:
     """Verify that an exception is raised if an empty directive file is passed."""
-    bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
+    bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
     directive_file_path = tmp_path / "directive-dne.json"
     directive_file_path.touch()
 
@@ -160,12 +163,14 @@ def test_blueprint_run_apply_directive_empty(tmp_path: Path) -> None:
 
 
 def test_blueprint_run_apply_directives(
-    tmp_path: Path, mocked_simulation_outputs: tuple[Path, Path, Path]
+    tmp_path: Path,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    package_path: Path,
 ) -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is executed.
     """
-    bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
+    bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
     _, step_dir, _ = mocked_simulation_outputs
 
     temp_step = LiveStep(
@@ -203,6 +208,16 @@ def test_blueprint_run_apply_directives(
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(
+                return_value=LiveWorkplan(
+                    name="test-workplan",
+                    description="a live workplan used to create a `WorkplanRun` to test directives",
+                    steps=[temp_step],
+                )
+            ),
+        ),
     ):
         runner = CliRunner()
         _ = runner.invoke(

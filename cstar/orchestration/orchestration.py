@@ -7,7 +7,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from cstar.applications.core import ApplicationDefinition, get_application
+from cstar.applications.core import (
+    get_app_for_blueprint,
+)
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
@@ -19,10 +21,7 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
-from cstar.orchestration.converter.converter import (
-    convert_step_to_blueprint_run_command,
-)
-from cstar.orchestration.models import Blueprint, Step, Workplan
+from cstar.orchestration.models import Blueprint, ConfiguredBaseModel, Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
     intenum_representer,
@@ -39,8 +38,6 @@ KEY_TASK: t.Literal["task"] = "task"
 
 if t.TYPE_CHECKING:
     from networkx import DiGraph
-
-    from cstar.entrypoint.runner import BlueprintRunner
 
 
 class RunMode(StrEnum):
@@ -260,22 +257,10 @@ class LiveStep(Step):
     @property
     def blueprint(self) -> Blueprint:
         """Load and return the blueprint associated with this step."""
-        base_bp = deserialize(self.blueprint_path, Blueprint)
-        app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
-            get_application(base_bp.application)
-        )
-        bp_type = app.blueprint
-        return bp_type(**base_bp.model_dump())
+        path = Path(self.blueprint_path)
+        app = get_app_for_blueprint(path)
 
-    @property
-    def command(self) -> str:
-        """Generate the shell command that will execute the underlying application.
-
-        Returns
-        -------
-        str
-        """
-        return convert_step_to_blueprint_run_command(self)
+        return deserialize(path, app.blueprint)
 
     @property
     def script_path(self) -> Path:
@@ -324,6 +309,59 @@ class LiveStep(Step):
             step_attrs["parent"] = effective_parent
 
         return LiveStep(**step_attrs)
+
+
+class LiveWorkplan(Workplan):
+    steps: Sequence[LiveStep]
+
+    _lookup: Mapping[str, LiveStep] | None = None
+
+    def _get_step_lookup(self) -> Mapping[str, LiveStep]:
+        """Build a mapping from step name to step for the steps
+        contained in the workplan.
+
+        Returns
+        -------
+        Mapping[str, LiveStep]
+        """
+        if self._lookup is None:
+            self._lookup = {s.name: s for s in self.steps}
+        return self._lookup
+
+    def __getitem__(self, step_name: str) -> LiveStep:
+        """Return the step with the given name.
+
+        Parameters
+        ----------
+        step_name : str
+            The name of the step to retrieve.
+
+        Returns
+        -------
+        LiveStep
+
+        Raises
+        ------
+        KeyError
+            If a step with the supplied name cannot be found.
+        """
+        lookup = self._get_step_lookup()
+        return lookup[step_name]
+
+    def __contains__(self, step_name: str) -> bool:
+        """Return `True` when the `Workplan` contains a step with the supplied name.
+
+        Parameters
+        ----------
+        step_name : str
+            The name of the step.
+
+        Returns
+        -------
+        bool
+        """
+        lookup = self._get_step_lookup()
+        return step_name in lookup
 
 
 class Task(BaseModel, t.Generic[_THandle]):
@@ -409,7 +447,7 @@ class Planner(LoggingMixin):
             A traversal of the execution plan honoring all dependencies.
         """
 
-        def f(step: Step) -> bool:
+        def f(step: Step | None) -> bool:
             """Filter steps that are non-null."""
             return step is not None
 
@@ -925,6 +963,11 @@ class Orchestrator(LoggingMixin):
                 raise ValueError(msg)
 
         setattr(self, attr_name, func)
+
+
+class RunRequest(ConfiguredBaseModel):
+    command: list[str] = Field(default_factory=list[str])
+    environment: dict[str, str] = Field(default_factory=dict[str, str])
 
 
 def check_environment() -> None:

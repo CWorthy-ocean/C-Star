@@ -444,8 +444,17 @@ def is_remote_resource(uri: str) -> bool:
     Returns
     -------
     bool
+
+    Raises
+    ------
+    ValueError
+        If an empty URI is received.
     """
-    remote_schemes = {"http", "https", "smb", "ftp", "s3"}
+    uri = uri.strip()
+    if not uri:
+        raise ValueError("Invalid resource URI received")
+
+    remote_schemes = {"http", "https", "smb", "ftp", "sftp", "s3"}
     split_url = urlsplit(uri.casefold())
     return split_url.scheme in remote_schemes
 
@@ -460,9 +469,15 @@ def write_local_copy(url: str, directory: Path) -> Path:
 
     Raises
     ------
+    ValueError
+        If an empty URL is received.
     FileNotFoundError
         If the remote URL cannot be retrieved.
     """
+    url = url.strip()
+    if not url:
+        raise ValueError("Invalid resource URI received")
+
     parsed_url = urlsplit(url)
     resource_path = Path(parsed_url.path)
     resource_name = resource_path.name
@@ -500,7 +515,10 @@ def local_copy(uri: str) -> Generator[Path, None, None]:
             bp_path = write_local_copy(uri, Path(tmp_dir))
             yield bp_path
     else:
-        yield Path(uri).expanduser().resolve()
+        bp_path = Path(uri).expanduser().resolve()
+        if not bp_path.exists():
+            raise FileNotFoundError(f"File not found at path: {bp_path}")
+        yield bp_path
 
 
 @asynccontextmanager
@@ -540,11 +558,27 @@ def remove_files(file_dir: Path, wildcard_pattern: str) -> bool:
     Returns
     -------
     True if any files were removed, False otherwise
+
+    Raises
+    ------
+    ValueError
+        If the provided search path is not a directory.
     """
     log.debug(f"Removing files matching wildcard pattern {wildcard_pattern}...")
+    if not file_dir.exists():
+        log.trace(f"Directory {str(file_dir)!r} does not exist; skipping deletion.")
+        return False
+
+    if file_dir.is_file():
+        msg = f"Directory is required. Received file path: {file_dir}"
+        raise ValueError(msg)
+
     removed = False
     for p in file_dir.glob(wildcard_pattern):
-        p.unlink()
+        if p.is_file():
+            p.unlink()
+        elif p.is_dir():
+            shutil.rmtree(p)
         removed = True
 
     return removed

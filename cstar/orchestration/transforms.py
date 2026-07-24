@@ -1,5 +1,6 @@
 import functools
 import itertools
+import os
 import re
 import typing as t
 from collections import defaultdict
@@ -13,7 +14,8 @@ from pydantic import (
 )
 
 from cstar.applications.core import ApplicationDefinition, Transform, get_application
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import deep_merge
 from cstar.execution.file_system import JobFileSystemManager, local_copy
@@ -23,8 +25,9 @@ from cstar.orchestration.models import (
     KeyValueStore,
     Workplan,
 )
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
@@ -650,8 +653,15 @@ def apply_automatic_overrides(step: LiveStep) -> LiveStep:
 class Directive(Transform[LiveStep], t.Protocol):
     _config: Mapping[str, t.Any]
     """Contract of a transform that can be used as a directive."""
+    _workplan: LiveWorkplan | None = None
+    """The workplan instance containing contextual information for the directive."""
 
-    def __init__(self, config: dict[str, t.Any]) -> None:
+    def __init__(
+        self,
+        config: dict[str, t.Any],
+        *,
+        workplan: LiveWorkplan | None = None,
+    ) -> None:
         """Initialize the instance.
 
         Parameters
@@ -664,6 +674,7 @@ class Directive(Transform[LiveStep], t.Protocol):
             raise ValueError(msg)
 
         self._config = config
+        self._workplan = workplan
 
     @classmethod
     def key(cls) -> str:
@@ -675,6 +686,24 @@ class Directive(Transform[LiveStep], t.Protocol):
         str
         """
         ...
+
+    @property
+    def workplan(self) -> LiveWorkplan:
+        """Return the live workplan.
+
+        Returns
+        -------
+        LiveWorkplan
+
+        Raises
+        ------
+        CStarError
+            If the workplan was not injected into the directives by the runner.
+        """
+        if self._workplan:
+            return self._workplan
+
+        raise CstarError("Directive did not receive workplan")
 
 
 class DirectiveConfig(BaseModel):
@@ -720,14 +749,58 @@ class DirectiveConfig(BaseModel):
                 blueprint=local_bp,
             )
             directive_map = DirectiveConfig.directive_map
+            workplan: LiveWorkplan | None = None
+            if os.getenv(ENV_CSTAR_RUNID, None):
+                workplan = DirectiveConfig.load_workplan()
+
             transforms = {
-                directive_map[key](config=t.cast("dict[str, dict[str, t.Any]]", config))
+                directive_map[key](
+                    config=t.cast("dict[str, dict[str, t.Any]]", config),
+                    workplan=workplan,
+                )
                 for key, config in directives.items()
             }
             for transform in transforms:
                 step = transform(step)[0]
 
         return str(step.blueprint_path)
+
+    @classmethod
+    def load_workplan(
+        cls,
+    ) -> LiveWorkplan:
+        """Identify the path to the output directory for another step.
+
+        Parameters
+        ----------
+        name : str
+            The name of the step to locate
+
+        Returns
+        -------
+        Path
+        """
+        run_id = os.getenv(ENV_CSTAR_RUNID, None)
+        run: WorkplanRun | None = None
+
+        if run_id:
+            repo = TrackingRepository()
+            run = repo.get_workplan_run_sync(run_id)
+        else:
+            msg = f"No run-id could be found in environment variable: {ENV_CSTAR_RUNID}"
+            raise RuntimeError(msg)
+
+        if not run:
+            msg = f"Workplan context could not be provided to directives for run: {run_id}"
+            raise RuntimeError(msg)
+
+        wp_path = run.trx_workplan_path
+
+        if wp := deserialize(run.trx_workplan_path, LiveWorkplan):
+            return wp
+
+        msg = f"Unable to load workplan for run-id {run_id!r} from {wp_path}"
+        raise RuntimeError(msg)
 
     @classmethod
     def register(cls, key: str, directive: type[Directive]) -> None:

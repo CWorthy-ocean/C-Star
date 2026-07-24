@@ -4,12 +4,16 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from itertools import chain
+from pathlib import Path
+
+import yaml
 
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.serialization import SerializableModel, deserialize
 
 if t.TYPE_CHECKING:
@@ -322,6 +326,27 @@ _registry: dict[str, type[_TAnyApp]] = {}
 _AppDef = t.TypeVar("_AppDef", bound=_TAnyApp)
 
 
+def get_application_name(path: Path) -> str:
+    """Retrieve the application name from a blueprint file.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing a blueprint.
+
+    Returns
+    -------
+    str
+    """
+    if not path.exists():
+        msg = f"Blueprint file not found at {str(path)!r}"
+        raise FileNotFoundError(msg)
+
+    content = yaml.safe_load(path.open())
+    base_bp = Blueprint.model_validate(content, extra="allow")
+    return base_bp.application
+
+
 def register_application(
     klass: type[_AppDef],
 ) -> type[_AppDef]:
@@ -353,3 +378,19 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
 
     msg = f"No application for {name!r}"
     raise ValueError(msg)
+
+
+def get_app_for_blueprint(path: Path) -> ApplicationDefinition[t.Any, t.Any]:
+    """Retrieve the appropriate application for a blueprint.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing a blueprint.
+
+    Returns
+    -------
+    ApplicationDefinition[t.Any, t.Any]
+    """
+    name = get_application_name(path)
+    return get_application(name)
