@@ -403,18 +403,22 @@ async def test_tracking_get_run_paths(
         expected_paths = [repo.latest_path(run_id=run_id)]  # type: ignore
 
         # insert some runs that re-use the same run-id
-        for _ in range(num_runs):
-            expected_paths.append(
-                await repo.put_workplan_run(
-                    WorkplanRun(
-                        workplan_path=wp_path,
-                        trx_workplan_path=wp_trx_path,
-                        output_path=output_path,
-                        run_id=run_id,
-                        environment=captured_env,
-                    )
+        start_times = [datetime(2020, 1, 1 + i) for i in range(num_runs)]
+        inserts = [
+            repo.put_workplan_run(
+                WorkplanRun(
+                    workplan_path=wp_path,
+                    trx_workplan_path=wp_trx_path,
+                    output_path=output_path,
+                    run_id=run_id,
+                    environment=captured_env,
+                    start_at=start_at,
                 )
             )
+            for start_at in start_times
+        ]
+        run_paths = await asyncio.gather(*inserts)
+        expected_paths.extend(run_paths)
 
         # retrieve the list of run paths
         actual_paths = repo.list_runtracking_paths(run_id, all_history)
