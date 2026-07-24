@@ -1003,7 +1003,7 @@ class SlurmJob(SchedulerJob):
         self.save_script()
         self.run_path.mkdir(parents=True, exist_ok=True)
         # remove any slurm variables in case submitting from inside another slurm job
-        env_vars_to_exclude = []
+        env_vars_to_exclude: list[str] = []
         for k in os.environ.keys():
             if k.startswith("SLURM_"):
                 if k not in {"SLURM_CONF", "SLURM_VERSION"}:
