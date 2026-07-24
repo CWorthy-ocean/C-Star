@@ -204,7 +204,7 @@ class ModelParameterSet(ParameterSet):
 class RomsMarblBlueprint(Blueprint):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    schema_version: str = Field("2.1.0", frozen=True)
+    schema_version: str = "2.1.0"
     """The blueprint schema version."""
 
     application: str = APP_NAME
