@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 
 import yaml
 
@@ -21,6 +21,7 @@ from cstar.applications.roms_marbl.adapter import (
     InitialConditionAdapter,
     MARBLAdapter,
     NestingInfoAdapter,
+    PIOAdapter,
     RiverForcingAdapter,
     SurfaceForcingAdapter,
     TidalForcingAdapter,
@@ -49,6 +50,7 @@ from cstar.execution.scheduler_job import create_scheduler_job
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
+from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (

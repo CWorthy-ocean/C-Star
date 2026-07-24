@@ -5,6 +5,7 @@ from cstar.base.adapter import ModelAdapter
 from cstar.base.additional_code import AdditionalCode
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.orchestration import models
+from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -78,6 +79,25 @@ class MARBLAdapter(ModelAdapter[RomsMarblBlueprint, MARBLExternalCodeBase]):
         )
 
 
+class PIOAdapter(ModelAdapter[RomsMarblBlueprint, PIOExternalCodeBase]):
+    """Create a PIOExternalCodeBase from a blueprint model.
+
+    Unlike MARBL, a missing `code.pio` section is not an error: the default
+    ParallelIO source repository and checkout target are used instead.
+    """
+
+    @t.override
+    def adapt(self) -> PIOExternalCodeBase:
+        if self.model.code.pio is None:
+            return PIOExternalCodeBase()
+
+        return PIOExternalCodeBase(
+            source_repo=str(self.model.code.pio.location),
+            checkout_target=self.model.code.pio.checkout_target
+            or self.model.code.pio.branch,
+        )
+
+
 class GridAdapter(ModelAdapter[RomsMarblBlueprint, ROMSModelGrid]):
     """Create a ROMSModelGrid from a blueprint model."""
 
@@ -92,16 +112,12 @@ class GridAdapter(ModelAdapter[RomsMarblBlueprint, ROMSModelGrid]):
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=(
-                self.model.partitioning.n_procs_x
-                if self.model.grid.data[0].partitioned
-                else None
-            ),
-            source_np_eta=(
-                self.model.partitioning.n_procs_y
-                if self.model.grid.data[0].partitioned
-                else None
-            ),
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.grid.data[0].partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.grid.data[0].partitioned
+            else None,
         )
 
 
@@ -121,16 +137,12 @@ class InitialConditionAdapter(ModelAdapter[RomsMarblBlueprint, ROMSInitialCondit
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=(
-                self.model.partitioning.n_procs_x
-                if self.model.initial_conditions.data[0].partitioned
-                else None
-            ),
-            source_np_eta=(
-                self.model.partitioning.n_procs_y
-                if self.model.initial_conditions.data[0].partitioned
-                else None
-            ),
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.initial_conditions.data[0].partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.initial_conditions.data[0].partitioned
+            else None,
         )
 
 
@@ -152,16 +164,12 @@ class TidalForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSTidalForcing]):
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=(
-                self.model.partitioning.n_procs_x
-                if self.model.forcing.tidal.data[0].partitioned
-                else None
-            ),
-            source_np_eta=(
-                self.model.partitioning.n_procs_y
-                if self.model.forcing.tidal.data[0].partitioned
-                else None
-            ),
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.forcing.tidal.data[0].partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.forcing.tidal.data[0].partitioned
+            else None,
         )
 
 
@@ -184,16 +192,12 @@ class RiverForcingAdapter(ModelAdapter[RomsMarblBlueprint, ROMSRiverForcing]):
             ),
             start_date=None,
             end_date=None,
-            source_np_xi=(
-                self.model.partitioning.n_procs_x
-                if self.model.forcing.river.data[0].partitioned
-                else None
-            ),
-            source_np_eta=(
-                self.model.partitioning.n_procs_y
-                if self.model.forcing.river.data[0].partitioned
-                else None
-            ),
+            source_np_xi=self.model.partitioning.n_procs_x
+            if self.model.forcing.river.data[0].partitioned
+            else None,
+            source_np_eta=self.model.partitioning.n_procs_y
+            if self.model.forcing.river.data[0].partitioned
+            else None,
         )
 
 
@@ -210,12 +214,12 @@ class BoundaryForcingAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=None,
                 end_date=None,
-                source_np_xi=(
-                    self.model.partitioning.n_procs_x if f.partitioned else None
-                ),
-                source_np_eta=(
-                    self.model.partitioning.n_procs_y if f.partitioned else None
-                ),
+                source_np_xi=self.model.partitioning.n_procs_x
+                if f.partitioned
+                else None,
+                source_np_eta=self.model.partitioning.n_procs_y
+                if f.partitioned
+                else None,
             )
             for f in self.model.forcing.boundary.data
         ]
@@ -232,12 +236,12 @@ class SurfaceForcingAdapter(ModelAdapter[RomsMarblBlueprint, list[ROMSSurfaceFor
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=None,
                 end_date=None,
-                source_np_xi=(
-                    self.model.partitioning.n_procs_x if f.partitioned else None
-                ),
-                source_np_eta=(
-                    self.model.partitioning.n_procs_y if f.partitioned else None
-                ),
+                source_np_xi=self.model.partitioning.n_procs_x
+                if f.partitioned
+                else None,
+                source_np_eta=self.model.partitioning.n_procs_y
+                if f.partitioned
+                else None,
             )
             for f in self.model.forcing.surface.data
         ]
@@ -298,12 +302,12 @@ class ForcingCorrectionAdapter(
                 file_hash=(f.hash if isinstance(f, models.VersionedResource) else None),
                 start_date=None,
                 end_date=None,
-                source_np_xi=(
-                    self.model.partitioning.n_procs_x if f.partitioned else None
-                ),
-                source_np_eta=(
-                    self.model.partitioning.n_procs_y if f.partitioned else None
-                ),
+                source_np_xi=self.model.partitioning.n_procs_x
+                if f.partitioned
+                else None,
+                source_np_eta=self.model.partitioning.n_procs_y
+                if f.partitioned
+                else None,
             )
             for f in self.model.forcing.corrections.data
         ]
