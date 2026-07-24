@@ -19,7 +19,9 @@ Tests cover:
 """
 
 import asyncio
+import logging
 import os
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +41,7 @@ from pydantic import ValidationError
 
 import cstar_forge
 from cstar_forge import models as forge_models
+from cstar_forge import run as forge_run
 from cstar_forge.domain_catalog import default_catalog as _CATALOG
 from cstar_forge.forge.app import ForgeRunner
 from cstar_forge.forge.executor import ForgeExecutor, _deep_merge_settings_dict
@@ -1101,6 +1104,113 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
         assert builder.roms_blueprint_working_dir == Path(
             "/custom/spot/cstar-blueprint-run"
         )
+
+
+class TestCaptureOutput:
+    """Tests for cstar_forge.run._capture_output (tees print + logging into
+    <working_dir>/logs/forge_<timestamp>.log, in addition to the existing screen
+    output).
+    """
+
+    def test_tees_print_and_logging_into_log_file(self, tmp_path, capsys):
+        test_logger = logging.getLogger("cstar_forge.test_capture_output")
+        with forge_run._capture_output(tmp_path, verbose=False) as log_path:
+            print("hello from print")
+            test_logger.info("hello from logging")
+
+        assert log_path.parent == tmp_path / "logs"
+        assert log_path.exists()
+        content = log_path.read_text()
+        assert "hello from print" in content
+        assert "hello from logging" in content
+
+        # Screen output is teed, not redirected -- print() still shows on screen.
+        assert "hello from print" in capsys.readouterr().out
+
+    def test_restores_streams_and_logger_levels_on_exit(self, tmp_path):
+        old_out, old_err = sys.stdout, sys.stderr
+        prev_level = logging.getLogger("cstar_forge").level
+        root_handlers_before = list(logging.getLogger().handlers)
+        try:
+            with forge_run._capture_output(tmp_path):
+                assert sys.stdout is not old_out
+                assert sys.stderr is not old_err
+        finally:
+            logging.getLogger("cstar_forge").setLevel(prev_level)
+
+        assert sys.stdout is old_out
+        assert sys.stderr is old_err
+        assert logging.getLogger("cstar_forge").level == prev_level
+        # The file handler added for the run is removed again -- no leak onto root.
+        assert logging.getLogger().handlers == root_handlers_before
+
+    def test_lowers_info_level_so_app_path_logs_reach_the_file(self, tmp_path):
+        """The C-Star app path never calls logging.basicConfig, so the whole
+        cstar_forge.* hierarchy sits at NOTSET and inherits root's default
+        (WARNING) -- _capture_output must lower the cstar_forge logger itself or
+        an INFO message never reaches the file.
+        """
+        parent = logging.getLogger("cstar_forge")
+        child = logging.getLogger("cstar_forge.test_capture_output")
+        prev_parent_level, prev_child_level = parent.level, child.level
+        parent.setLevel(logging.NOTSET)
+        child.setLevel(logging.NOTSET)
+        try:
+            # Sanity: unconfigured, INFO wouldn't clear root's WARNING default.
+            assert child.getEffectiveLevel() >= logging.WARNING
+            with forge_run._capture_output(tmp_path, verbose=False) as log_path:
+                child.info("info-level message")
+        finally:
+            parent.setLevel(prev_parent_level)
+            child.setLevel(prev_child_level)
+
+        assert "info-level message" in log_path.read_text()
+
+
+class TestProcessCapturesRunOutput:
+    """Verifies cstar_forge.run.process wraps the engine call in _capture_output, so
+    both entry points (CLI ``main()`` and the C-Star app's ``ForgeRunner`` -> process())
+    get a per-run log under the resolved host's working_dir.
+    """
+
+    def test_process_writes_log_under_host_working_dir(
+        self,
+        tmp_path,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+    ):
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-grid",
+            grid_kwargs=sample_grid_kwargs,
+            open_boundaries=sample_open_boundaries.model_dump(),
+            partitioning=sample_partitioning.model_dump(),
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            description="capture-output test",
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+
+        captured_host = {}
+
+        def fake_process_forge_blueprint(spec, *, host=None, **kwargs):
+            logging.getLogger("cstar_forge.fake_engine").info("engine ran")
+            captured_host["host"] = host
+            return object()
+
+        with patch(
+            "cstar_forge.run.process_forge_blueprint",
+            side_effect=fake_process_forge_blueprint,
+        ):
+            forge_run.process(cfg, working_dir=str(tmp_path))
+
+        host = captured_host["host"]
+        log_files = list((Path(host.working_dir) / "logs").glob("forge_*.log"))
+        assert len(log_files) == 1
+        assert "engine ran" in log_files[0].read_text()
 
 
 class TestForgeExecutorGenerateInputsComprehensive:
