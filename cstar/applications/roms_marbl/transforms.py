@@ -117,6 +117,7 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
                     exclude_unset=True,
                     exclude_defaults=True,
                     exclude_computed_fields=True,
+                    exclude={"$schema"},
                 ),
             )
 

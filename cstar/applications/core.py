@@ -6,14 +6,12 @@ from datetime import datetime, timezone
 from itertools import chain
 from pathlib import Path
 
-import yaml
-
 from cstar.base.adapter import SchemaAdapter
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import Blueprint
+from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import SerializableModel, deserialize
 
 if t.TYPE_CHECKING:
@@ -342,8 +340,7 @@ def get_application_name(path: Path) -> str:
         msg = f"Blueprint file not found at {str(path)!r}"
         raise FileNotFoundError(msg)
 
-    content = yaml.safe_load(path.open())
-    base_bp = Blueprint.model_validate(content, extra="allow")
+    base_bp = deserialize(path, BlueprintCore)
     return base_bp.application
 
 

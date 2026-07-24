@@ -3,4 +3,4 @@ description: This blueprint says hello to a very nice guy
 application: hello_world
 state: draft
 target: '@ankona'
-version: '1.0.0'
+schema_version: '1.0.0'

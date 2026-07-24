@@ -22,6 +22,7 @@ from cstar.execution.file_system import (
 )
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint, Workplan
+from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
@@ -85,7 +86,7 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
         repo = TrackingRepository()
 
         if wp_run := await repo.get_workplan_run(run_id):
-            wp = deserialize(wp_run.trx_workplan_path, Workplan)
+            wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
             step_names = [str(s.name) for s in wp.steps]
 
             if incomplete:

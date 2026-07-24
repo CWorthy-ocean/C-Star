@@ -15,7 +15,11 @@ from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
 from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
 from cstar.orchestration.models import Application, Workplan
-from cstar.orchestration.orchestration import check_environment, configure_environment
+from cstar.orchestration.orchestration import (
+    LiveWorkplan,
+    check_environment,
+    configure_environment,
+)
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.transforms import WorkplanTransformer
 from cstar.orchestration.utils import (
@@ -293,7 +297,7 @@ async def test_prepare_composed_dag(
         check_environment()
         wp, wp_path = await prepare_workplan(generated_wp_path, working_dir, run_id)
 
-    wp = deserialize(wp_path, Workplan)
+    wp = deserialize(wp_path, LiveWorkplan)
     steps = list(wp.steps)
 
     # default blueprint is 366 days; confirm 366 steps after tranform is applied.
