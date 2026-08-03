@@ -16,7 +16,7 @@ from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.orchestration.adapter import StepToRunRequestAdapter
-from cstar.orchestration.formatting import RunRequestCommandFormatter
+from cstar.orchestration.formatting import ModelFormatter, RunRequestScriptFormatter
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
