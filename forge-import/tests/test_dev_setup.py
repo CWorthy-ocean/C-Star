@@ -168,6 +168,29 @@ class TestDevSetupScript:
         assert "ipykernel" in content, "Script missing Jupyter kernel setup"
         assert "KernelSpecManager" in content, "Script missing kernel detection"
 
+    def test_script_registers_kernel_via_activation_wrapper(self, dev_setup_script):
+        """Test that the kernel is launched through an activating wrapper script.
+
+        Without this, kernel.json launches the env's python by absolute path
+        without activating it, so subprocesses started from a Jupyter server
+        hosted outside the env (e.g. HPC hosted Jupyter) don't see the env's
+        PATH or activate.d hook vars.
+        """
+        with open(dev_setup_script) as f:
+            content = f.read()
+
+        assert "start-kernel.sh" in content, "Script missing kernel activation wrapper"
+        assert "ipykernel_launcher" in content, (
+            "Wrapper missing ipykernel_launcher exec"
+        )
+        assert "micromamba activate" in content or "conda activate" in content, (
+            "Wrapper missing real env activation"
+        )
+        assert '"argv"' in content, "Script missing kernel.json argv rewrite"
+        assert "resource_dir" in content, (
+            "Script missing kernel dir resolution via KernelSpecManager"
+        )
+
     def test_script_does_not_clone_cstar(self, dev_setup_script):
         """Test that script does not clone C-Star (C-Star is installed via environment.yml)."""
         with open(dev_setup_script) as f:
