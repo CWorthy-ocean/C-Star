@@ -15,6 +15,8 @@ class ModelFormatter(t.Protocol, t.Generic[TFormattable]):
         ----------
         value : TFormattable
             The value to be formatted.
+        updates : dict[str, str]
+            A mapping of string replacements to perform prior to final formatting.
 
         Returns
         -------

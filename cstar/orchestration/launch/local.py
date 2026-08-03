@@ -9,7 +9,7 @@ from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from cstar.base.adapter import ConfiguredModelAdapter, ModelAdapter
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
@@ -88,7 +88,14 @@ class LocalHandle(ProcessHandle):
 
 
 class LocalComputeSpec(BaseModel):
+    """Compute configuration options when using the local launcher."""
+
     max_walltime: str | None = None
+    """Maximum amount of time a process should be allowed to run."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
+    """Configure model to ignore empty strings."""
+
 
 
 class LocalComputeAdapter(ModelAdapter[KeyValueStore, LocalComputeSpec | None]):
@@ -106,6 +113,7 @@ class ComputeEnrichmentAdapter(ConfiguredModelAdapter[RunRequest, RunRequest]):
     """Format a `RunRequest` as a request as a CLI command."""
 
     compute: LocalComputeSpec
+    """User-supplied compute customizations."""
 
     def __init__(self, compute: LocalComputeSpec) -> None:
         self.compute = compute
@@ -126,6 +134,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     tasks: t.ClassVar[dict[str, str]] = {}
     use_proxy: t.ClassVar[bool] = False
+    """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
     @classmethod
     def check_preconditions(cls) -> None:

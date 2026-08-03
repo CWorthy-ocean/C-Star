@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from prefect import State, task
 from prefect import Task as PrefectTask
 from prefect.client.schemas import TaskRun
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from cstar.base.adapter import ModelAdapter
 from cstar.base.env import (
@@ -86,13 +86,24 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
 
 
 class SlurmComputeSpec(BaseModel):
-    num_cpus: str | None = None
-    num_nodes: str | None = None
-    cpus_per_node: str | None = None
-    max_walltime: str | None = None
+    num_cpus: int = 0
+    """Total number of CPUs required by the job."""
+    num_nodes: int = 0
+    """The number of nodes to request."""
+    cpus_per_node: int = 0
+    """The number of CPUs to request per node."""
+    max_walltime: str = ""
+    """The maximum walltime for the job."""
+    queue_name: str = ""
+    """The priority of the job."""
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
+    """Configure model to ignore empty strings."""
 
 
 class SlurmComputeOverrideAdapter(ModelAdapter[KeyValueStore, SlurmComputeSpec | None]):
+    """Converts a raw `KeyValueStore` containing optional overrides into a SLURM compute spec."""
+
     def adapt(self) -> SlurmComputeSpec | None:
         if overrides_ := self.model.get("slurm", {}):
             overrides = t.cast("dict[str, str]", overrides_)

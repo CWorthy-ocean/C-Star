@@ -12,6 +12,13 @@ class ModelAdapter(t.Protocol, t.Generic[_Tin, _Tout_co]):
     model: _Tin
 
     def __init__(self, model: _Tin) -> None:
+        """Initialize the adapter instance.
+
+        Parameters
+        ----------
+        model : _Tin
+            The model to be adapted.
+        """
         self.model = model
 
     def adapt(self) -> _Tout_co | None:
@@ -29,7 +36,14 @@ _Tin_contra = t.TypeVar("_Tin_contra", contravariant=True)
 
 
 class ConfiguredModelAdapter(t.Protocol, t.Generic[_Tin_contra, _Tout_co]):
-    """Contract exposing a mechanism to adapt a source model to a target type."""
+    """Contract exposing a mechanism to adapt a source model to a target type.
+
+    `ConfiguredModelAdapter` instances do not store the model as local state;
+    Instead, the model is passed to `adapt` instead of the contstructor.
+
+    NOTE: this is a workaround until the `ModelAdapter` contract can be adjusted to
+    instantiate a new adapter instance via a factory method instead of hijacking __init__.
+    """
 
     def adapt(self, model: _Tin_contra) -> _Tout_co | None:
         """Adapt the source model to the target output type.

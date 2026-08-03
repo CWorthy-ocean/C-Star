@@ -43,6 +43,7 @@ class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
     """Convert a `LiveStep` into a `RunRequest`."""
 
     _enrichment: ConfiguredModelAdapter["RunRequest", "RunRequest"] | None = None
+    """A model enricher that modifies the run request."""
 
     def adapt(
         self,
