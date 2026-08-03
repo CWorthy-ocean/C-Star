@@ -174,7 +174,8 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
-    tasks: t.ClassVar[dict[str, str]] = {}
+    tasks: t.ClassVar[dict[str, tuple[str, datetime.datetime | None]]] = {}
+    """Mapping of task name to tuple containing [process ID, process creation time]"""
     use_proxy: t.ClassVar[bool] = False
     """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
@@ -250,7 +251,6 @@ class LocalLauncher(Launcher[LocalHandle]):
                 log.debug(msg)
                 msg = f"Logs for step {step.safe_name!r} can be found at: {log_file}"
                 log.info(msg)
-                LocalLauncher.tasks[step.name] = str(pid)
 
                 try:
                     ps_process = PsProcess(pid)
@@ -262,6 +262,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     msg = f"Unable to retrieve exact start time for pid: {pid}"
                     log.debug(msg)
 
+                LocalLauncher.tasks[step.name] = str(pid), create_time
                 handle = LocalHandle(
                     pid=str(pid),
                     name=step.name,
