@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from cstar.base.adapter import ConfiguredModelAdapter
+from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
@@ -42,8 +42,18 @@ def prepare_directive_file(step: "LiveStep") -> Path:
 class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
     """Convert a `LiveStep` into a `RunRequest`."""
 
-    _enrichment: ConfiguredModelAdapter["RunRequest", "RunRequest"] | None = None
+    _enricher: ModelEnricher["RunRequest"] | None = None
     """A model enricher that modifies the run request."""
+
+    def __init__(self, enricher: ModelEnricher["RunRequest"] | None = None) -> None:
+        """Initialize the adapter instance.
+
+        Parameters
+        ----------
+        enricher : ModelEnricher[RunRequest | None]
+            An enricher to be applied after the default adaptation is performed.
+        """
+        self._enricher = enricher
 
     def adapt(
         self,
@@ -71,15 +81,10 @@ class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
             cmd_array.extend([ARG_DIRECTIVES_URI_LONG, str(directives_path)])
 
         request = RunRequest(command=cmd_array)
-        if self._enrichment and (enriched_request := self._enrichment.adapt(request)):
+        if self._enricher and (enriched_request := self._enricher.enrich(request)):
             request = enriched_request
         return request
 
-    def enrich(
-        self,
-        adapter: ConfiguredModelAdapter["RunRequest", "RunRequest"],
-    ) -> None:
-        self._enrichment = adapter
 
 
 class StepToPlaceholderAdapter(StepToRunRequestAdapter):

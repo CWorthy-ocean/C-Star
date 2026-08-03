@@ -56,6 +56,20 @@ class ConfiguredModelAdapter(t.Protocol, t.Generic[_Tin_contra, _Tout_co]):
         ...
 
 
+class ModelEnricher(t.Protocol, t.Generic[_Tin]):
+    """Contract exposing a mechanism to enrich the content of an entity"""
+
+    def enrich(self, model: _Tin) -> _Tin:
+        """Create an enriched version of the input model.
+
+        Returns
+        -------
+        _Tin
+            The instance enriched from the source model
+        """
+        ...
+
+
 class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
     """Contract exposing a mechanism to adapt a source model to a target type."""
 

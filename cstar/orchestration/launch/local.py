@@ -11,7 +11,7 @@ from psutil import NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
-from cstar.base.adapter import ConfiguredModelAdapter, ModelAdapter
+from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
@@ -97,10 +97,9 @@ class LocalComputeSpec(BaseModel):
     """Configure model to ignore empty strings."""
 
 
-
-class LocalComputeAdapter(ModelAdapter[KeyValueStore, LocalComputeSpec | None]):
-    def adapt(self) -> LocalComputeSpec | None:
-        if overrides_ := self.model.get("local", {}):
+class LocalComputeAdapter(
+    ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec | None]
+):
             overrides = t.cast("dict[str, str]", overrides_)
 
             return LocalComputeSpec(
@@ -109,20 +108,50 @@ class LocalComputeAdapter(ModelAdapter[KeyValueStore, LocalComputeSpec | None]):
         return None
 
 
-class ComputeEnrichmentAdapter(ConfiguredModelAdapter[RunRequest, RunRequest]):
-    """Format a `RunRequest` as a request as a CLI command."""
+class ComputeEnrichmentAdapter(ModelEnricher[RunRequest]):
+    """Format a `RunRequest` as a request as a CLI command that honors user-supplied
+    computing resource overrides.
+    """
 
     compute: LocalComputeSpec
     """User-supplied compute customizations."""
 
+    TIMEOUT_EXE: t.Final[str] = "timeout"
+    """The executable used to timeout a process."""
+    ARG_FORCEKILL_TIMEOUT: t.Final[str] = "-k"
+    """A CLI argument used to specify a grace period before force-killing a run."""
+
     def __init__(self, compute: LocalComputeSpec) -> None:
+        """Initialize the enricher with compute overrides."""
         self.compute = compute
 
-    def adapt(self, model: RunRequest) -> RunRequest:
-        if self.compute.model_dump(exclude_defaults=True):
-            # use specified compute overrides to enrich the command.
+    def enrich(
+        self,
+        model: RunRequest,
+        compute: LocalComputeSpec | None = None,
+    ) -> RunRequest:
+
+        lhs = self.compute.model_dump()
+
+        if compute:
+            rhs = compute.model_dump(exclude_defaults=True)
+            combined = LocalComputeSpec.model_validate(lhs.update(rhs))
+        else:
+            combined = self.compute
+
+        if combined and combined.model_dump(exclude_defaults=True):
+            # use compute overrides to enrich the command.
+            cmd = [
+                self.TIMEOUT_EXE,
+                combined.max_walltime,
+                self.ARG_FORCEKILL_TIMEOUT,
+                combined.force_kill_timeout,
+            ]
+
+            cmd.extend(model.command)
+
             return RunRequest(
-                command=["timout", "-k", "1s", "90s", *model.command],
+                command=cmd,
                 environment=model.environment,
             )
 
@@ -132,7 +161,7 @@ class ComputeEnrichmentAdapter(ConfiguredModelAdapter[RunRequest, RunRequest]):
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
-    tasks: t.ClassVar[dict[str, str]] = {}
+    """Mapping of task name to process ID."""
     use_proxy: t.ClassVar[bool] = False
     """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
