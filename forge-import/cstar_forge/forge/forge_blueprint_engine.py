@@ -295,6 +295,7 @@ def process_forge_blueprint(
     configure: bool = True,
     clobber: bool = False,
     use_dask: bool = True,
+    dask_num_workers: int = 8,
     subchunk: bool = False,
     stage_ic_sources: bool = False,
     validate: bool = True,
@@ -341,6 +342,11 @@ def process_forge_blueprint(
         existing complete blueprint. Re-run without ``only_inputs`` later to
         generate the remaining inputs (existing ones are reused, per the normal
         skip-existing logic) and emit the blueprint.
+    dask_num_workers :
+        Cap on dask's default threaded-scheduler worker count during input
+        generation (paired with pinning BLAS/OpenMP to 1 thread), to avoid thread
+        oversubscription hangs on high-core HPC nodes. Only applied when
+        ``use_dask`` is True. Default 8.
     subchunk :
         Interim hack (see ``glorys_subchunk.py``): just-in-time build a
         kerchunk-subchunked reference for multi-file GLORYS sources and read from
@@ -406,6 +412,7 @@ def process_forge_blueprint(
         executor.generate_inputs(
             clobber=clobber,
             use_dask=use_dask,
+            dask_num_workers=dask_num_workers,
             subchunk=subchunk,
             stage_ic_sources=stage_ic_sources,
             only=resolved_only,

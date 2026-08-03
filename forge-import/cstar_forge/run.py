@@ -165,6 +165,16 @@ def main(argv: list | None = None) -> int:
         "--no-dask", action="store_true", help="disable dask in input generation"
     )
     parser.add_argument(
+        "--dask-num-workers",
+        type=int,
+        default=8,
+        help="cap on dask's default local threaded-scheduler worker count during "
+        "input generation, paired with pinning BLAS/OpenMP to 1 thread, to avoid "
+        "thread oversubscription hangs on high-core HPC nodes. Ignored with "
+        "--no-dask. Distinct from --dask-workers, which sizes the opt-in "
+        "--dask distributed Client.",
+    )
+    parser.add_argument(
         "--subchunk",
         action="store_true",
         help="interim hack: just-in-time build a kerchunk-subchunked reference for "
@@ -288,6 +298,7 @@ def main(argv: list | None = None) -> int:
                 configure=not args.no_configure,
                 clobber=args.clobber,
                 use_dask=not args.no_dask,
+                dask_num_workers=args.dask_num_workers,
                 subchunk=args.subchunk,
                 stage_ic_sources=args.stage_ic_sources,
                 only_inputs=args.only_inputs,

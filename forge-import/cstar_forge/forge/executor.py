@@ -1337,6 +1337,7 @@ class ForgeExecutor(BaseModel):
         self,
         clobber: bool = False,
         use_dask: bool = True,
+        dask_num_workers: int = 8,
         subchunk: bool = False,
         stage_ic_sources: bool = False,
         test: bool = False,
@@ -1357,6 +1358,11 @@ class ForgeExecutor(BaseModel):
             If True, delete and regenerate existing NetCDF input files. Default False.
         use_dask : bool, optional
             Use dask for parallel computations. Default True.
+        dask_num_workers : int, optional
+            Cap on dask's default threaded-scheduler worker count while generating
+            inputs (paired with pinning BLAS/OpenMP to 1 thread), to avoid thread
+            oversubscription hangs on high-core HPC nodes. Only applied when
+            ``use_dask`` is True. Default 8.
         subchunk : bool, optional
             Interim hack (see ``glorys_subchunk.py``): just-in-time build a
             kerchunk-subchunked reference for multi-file GLORYS sources and read
@@ -1433,6 +1439,7 @@ class ForgeExecutor(BaseModel):
                 partitioning=self.partitioning,
                 cdr_forcing=self.cdr_forcing,
                 use_dask=use_dask,
+                dask_num_workers=dask_num_workers,
                 subchunk=subchunk,
                 stage_ic_sources=stage_ic_sources,
                 use_pio=self._use_pio,

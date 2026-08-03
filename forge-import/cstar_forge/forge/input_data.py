@@ -8,6 +8,7 @@ the ROMS-MARBL specific implementation.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import shutil
@@ -21,11 +22,13 @@ from pathlib import Path
 from typing import Any
 
 import cstar.applications.roms_marbl.models as cstar_models
+import dask
 import roms_tools as rt
 import xarray as xr
 import yaml
 from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
+from threadpoolctl import threadpool_limits
 
 from cstar_forge.forge import source_data
 from cstar_forge.forge.forge_blueprint import OpenBoundaries
@@ -315,6 +318,14 @@ class RomsMarblInputData(InputData):
     grid_child: rt.Grid | None = None
     metadata_child: dict[str, Any] | None = None
     use_dask: bool = True
+    dask_num_workers: int = 8
+    """Cap on dask's default threaded-scheduler worker count during ``generate_all``'s
+    per-step loop, paired with pinning BLAS/OpenMP to 1 thread (via ``threadpoolctl``).
+    Without this, on high-core HPC nodes each dask worker's own BLAS call spawns a
+    core-sized thread pool, causing N-workers x N-threads oversubscription that can
+    hang. Only applied when ``use_dask`` is True -- the eager (non-dask) path has no
+    dask-driven parallelism to protect against. Default 8; configurable via
+    ``--dask-num-workers``."""
     use_pio: bool = False
     """Whether ROMS is built against ParallelIO. Every roms-tools save is left at
     its default format (NETCDF4/HDF5 -- fast); when ``use_pio`` is True, each
@@ -559,41 +570,58 @@ class RomsMarblInputData(InputData):
                 "generation/save will be skipped for those."
             )
 
-        # Execute
-        for idx, (step, kwargs) in enumerate(step_kwargs_list, start=1):
-            if step.name == "forcing.boundary" and not any(
-                self.boundaries.model_dump().values()
-            ):
+        # On high-core HPC nodes, dask's default threaded scheduler spawns ~one
+        # worker per core, and each worker's own BLAS/OpenMP call spawns its own
+        # core-sized thread pool -- N-workers x N-threads oversubscription that can
+        # hang. Cap dask's worker count and pin BLAS/OpenMP to 1 thread so dask alone
+        # provides the parallelism. Only meaningful when dask is actually driving the
+        # computation; the eager (use_dask=False) path has nothing to oversubscribe.
+        dask_cm = (
+            dask.config.set(num_workers=self.dask_num_workers)
+            if self.use_dask
+            else contextlib.nullcontext()
+        )
+        threadpool_cm = (
+            threadpool_limits(limits=1) if self.use_dask else contextlib.nullcontext()
+        )
+        with dask_cm, threadpool_cm:
+            # Execute
+            for idx, (step, kwargs) in enumerate(step_kwargs_list, start=1):
+                if step.name == "forcing.boundary" and not any(
+                    self.boundaries.model_dump().values()
+                ):
+                    print(
+                        f"\n⏭️  [{idx}/{total}] Skipping boundary forcing (all open boundaries are False)."
+                    )
+                    continue
+                if test and step.name != "forcing.boundary":
+                    continue
+                if only is not None and step.name != "grid" and step.name not in only:
+                    print(
+                        f"\n⏭️  [{idx}/{total}] Skipping {step.label} (not in --only-inputs)."
+                    )
+                    continue
+                print(f"\n▶️  [{idx}/{total}] {step.label}...")
+                log.debug("generate_all: step %d/%d %r starting", idx, total, step.name)
+                # Coarse per-step timing/memory. On Linux this block's own peak reset can
+                # mask an early inner sub-block's peak (e.g. a large constructor that frees
+                # before a smaller .save() runs) -- the finer per-operation mem_log blocks
+                # inside each step (constructor/save, above) remain the accurate signal.
+                with mem_log(f"step:{step.name}", enabled=self.verbose):
+                    step.handler(self, key=step.name, **kwargs)
+                # Truncate after 2 iterations if test mode is enabled
+                if test and idx >= 2:
+                    print(f"\n⚠️  Test mode: truncated after {idx} iterations\n")
+                    break
+            # Partition step (optional)
+            if partition_files:
                 print(
-                    f"\n⏭️  [{idx}/{total}] Skipping boundary forcing (all open boundaries are False)."
+                    f"\n▶️  [{total}/{total}] Partitioning input files across tiles..."
                 )
-                continue
-            if test and step.name != "forcing.boundary":
-                continue
-            if only is not None and step.name != "grid" and step.name not in only:
-                print(
-                    f"\n⏭️  [{idx}/{total}] Skipping {step.label} (not in --only-inputs)."
-                )
-                continue
-            print(f"\n▶️  [{idx}/{total}] {step.label}...")
-            log.debug("generate_all: step %d/%d %r starting", idx, total, step.name)
-            # Coarse per-step timing/memory. On Linux this block's own peak reset can
-            # mask an early inner sub-block's peak (e.g. a large constructor that frees
-            # before a smaller .save() runs) -- the finer per-operation mem_log blocks
-            # inside each step (constructor/save, above) remain the accurate signal.
-            with mem_log(f"step:{step.name}", enabled=self.verbose):
-                step.handler(self, key=step.name, **kwargs)
-            # Truncate after 2 iterations if test mode is enabled
-            if test and idx >= 2:
-                print(f"\n⚠️  Test mode: truncated after {idx} iterations\n")
-                break
-        # Partition step (optional)
-        if partition_files:
-            print(f"\n▶️  [{total}/{total}] Partitioning input files across tiles...")
-            self._partition_files()
-            print("\n✅ All input files generated and partitioned.\n")
-        else:
-            print("\n✅ All input files generated.\n")
+                self._partition_files()
+                print("\n✅ All input files generated and partitioned.\n")
+            else:
+                print("\n✅ All input files generated.\n")
 
         return (
             self.roms_marbl_blueprint_elements,
