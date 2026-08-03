@@ -51,6 +51,11 @@ from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.pio.external_codebase import PIOExternalCodeBase
+from cstar.roms.build_verification import (
+    assert_single_toolchain_stack,
+    explicit_mpi_wrapper,
+    verify_roms_linkage,
+)
 from cstar.roms.discretization import ROMSDiscretization
 from cstar.roms.external_codebase import ROMSExternalCodeBase
 from cstar.roms.input_dataset import (
@@ -1410,14 +1415,22 @@ class ROMSSimulation(Simulation):
 
         cstar_sysmgr = get_sysmgr()
 
+        mpi_wrapper = explicit_mpi_wrapper()
+        assert_single_toolchain_stack(mpi_wrapper)
+        wrapper_clause = (
+            f"MPI_WRAPPER={mpi_wrapper} " if mpi_wrapper is not None else ""
+        )
+
         _run_cmd(
-            f"make {mode_clause}COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {mode_clause}{wrapper_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             msg_pre="Compiling UCLA-ROMS configuration...",
             msg_post=f"UCLA-ROMS compiled at {build_dir}",
             msg_err="Error when compiling ROMS.",
             raise_on_error=True,
         )
+
+        verify_roms_linkage(exe_path)
 
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
