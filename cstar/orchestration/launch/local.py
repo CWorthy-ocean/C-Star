@@ -175,7 +175,7 @@ class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
     tasks: t.ClassVar[dict[str, str]] = {}
-    """Mapping of task name to process ID"""
+    """Mapping of task name to process ID."""
     use_proxy: t.ClassVar[bool] = False
     """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
