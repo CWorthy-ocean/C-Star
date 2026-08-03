@@ -40,15 +40,35 @@ class _Tee:
         self._stream = stream
         self._fh = fh
 
+    def detach(self):
+        """Stop writing to the file.
+
+        Something that grabbed this stream by reference during the run (a lazily
+        created logging handler, a tqdm/dask progress bar, a background thread) can
+        keep writing through it after ``_capture_output`` exits and the log file is
+        closed. Call this before closing the file so those late writes fall through
+        to the screen only, instead of raising on the closed file.
+        """
+        self._fh = None
+
     def write(self, data):
         self._stream.write(data)
-        if data and not (data.startswith("\r") and "\n" not in data):
-            self._fh.write(data)
+        fh = self._fh
+        if fh is not None and data and not (data.startswith("\r") and "\n" not in data):
+            try:
+                fh.write(data)
+            except (ValueError, OSError):
+                self._fh = None
         return len(data)
 
     def flush(self):
         self._stream.flush()
-        self._fh.flush()
+        fh = self._fh
+        if fh is not None:
+            try:
+                fh.flush()
+            except (ValueError, OSError):
+                self._fh = None
 
     def __getattr__(self, name):
         return getattr(self._stream, name)
@@ -74,7 +94,8 @@ def _capture_output(working_dir, *, verbose=False):
         fh.write(f"=== forge run started {datetime.now().isoformat()} ===\n")
 
         old_out, old_err = sys.stdout, sys.stderr
-        sys.stdout, sys.stderr = _Tee(old_out, fh), _Tee(old_err, fh)
+        out_tee, err_tee = _Tee(old_out, fh), _Tee(old_err, fh)
+        sys.stdout, sys.stderr = out_tee, err_tee
 
         level = logging.DEBUG if verbose else logging.INFO
         handler = logging.StreamHandler(fh)
@@ -98,6 +119,11 @@ def _capture_output(working_dir, *, verbose=False):
             for name, prev_level in prev_levels.items():
                 logging.getLogger(name).setLevel(prev_level)
             sys.stdout, sys.stderr = old_out, old_err
+            # Detach the tees we created (by reference, not by re-reading sys.stdout
+            # /sys.stderr here) before the `with` above closes fh, so anything that
+            # captured out_tee/err_tee mid-run keeps writing safely afterwards.
+            out_tee.detach()
+            err_tee.detach()
 
 
 def process(spec, *, working_dir=None, **kwargs):

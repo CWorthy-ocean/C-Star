@@ -1251,6 +1251,45 @@ class TestCaptureOutput:
 
         assert "info-level message" in log_path.read_text()
 
+    def test_late_write_through_tee_after_exit_does_not_raise(self, tmp_path, capsys):
+        """Something (a logging handler, tqdm, a background thread) can grab
+        sys.stdout/sys.stderr by reference while the block is open and keep writing
+        through it afterwards. That write must not blow up on the now-closed log
+        file -- it should just reach the real screen stream.
+        """
+        with forge_run._capture_output(tmp_path) as log_path:
+            tee = sys.stdout
+
+        tee.write("late write\n")
+        tee.flush()
+
+        assert "late write" in capsys.readouterr().out
+        assert "late write" not in log_path.read_text()
+
+    def test_logging_handler_created_during_capture_survives_exit(
+        self, tmp_path, capsys
+    ):
+        """Mimics cstar.base.log.get_logger, which lazily attaches a
+        logging.StreamHandler(sys.stdout) to a logger the first time it's used.
+        If that first use happens inside the capture block, the handler captures
+        the tee and must not error (as '--- Logging error ---' on stderr) when the
+        logger is used again after the block exits.
+        """
+        logger = logging.getLogger("cstar_forge.test_late_handler")
+        handler = None
+        try:
+            with forge_run._capture_output(tmp_path):
+                handler = logging.StreamHandler(sys.stdout)
+                logger.addHandler(handler)
+                logger.warning("during capture")
+
+            logger.warning("after capture")
+
+            assert "--- Logging error ---" not in capsys.readouterr().err
+        finally:
+            if handler is not None:
+                logger.removeHandler(handler)
+
 
 class TestProcessCapturesRunOutput:
     """Verifies cstar_forge.run.process wraps the engine call in _capture_output, so
