@@ -63,12 +63,14 @@ class TestROMSExternalCodeBaseInit:
 
 
 class TestROMSExternalCodeBaseConfigure:
+    @mock.patch("cstar.roms.external_codebase.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.external_codebase.assert_single_toolchain_stack")
     @mock.patch("cstar.roms.external_codebase.explicit_mpi_wrapper", return_value=None)
     def test_configure_success(
         self,
         mock_explicit_mpi_wrapper,
         mock_assert_toolchain,
+        mock_rpath_flags,
         romsexternalcodebase_staged,
         roms_path: pathlib.Path,
     ):
@@ -96,10 +98,12 @@ class TestROMSExternalCodeBaseConfigure:
         )
         mock_assert_toolchain.assert_called_once_with(None)
 
+    @mock.patch("cstar.roms.external_codebase.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.external_codebase.assert_single_toolchain_stack")
     def test_configure_uses_explicit_mpi_wrapper(
         self,
         mock_assert_toolchain,
+        mock_rpath_flags,
         romsexternalcodebase_staged,
         roms_path: pathlib.Path,
         tmp_path: pathlib.Path,
@@ -131,6 +135,7 @@ class TestROMSExternalCodeBaseConfigure:
         )
         mock_assert_toolchain.assert_called_once_with(wrapper_path)
 
+    @mock.patch("cstar.roms.external_codebase.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.external_codebase.assert_single_toolchain_stack")
     @mock.patch("cstar.roms.external_codebase.explicit_mpi_wrapper", return_value=None)
     @mock.patch("cstar.base.utils.subprocess.run")
@@ -139,6 +144,7 @@ class TestROMSExternalCodeBaseConfigure:
         mock_subprocess,
         mock_explicit_mpi_wrapper,
         mock_assert_toolchain,
+        mock_rpath_flags,
         romsexternalcodebase_staged,
     ):
         """Test that the _configure method raises an error when 'Tools-Roms/make' fails."""

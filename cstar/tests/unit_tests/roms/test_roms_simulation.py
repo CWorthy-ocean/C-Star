@@ -1169,6 +1169,7 @@ class TestProcessingAndExecution:
                 sim.end_date = sim_end
                 assert sim.is_setup == expected
 
+    @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
     @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
     @mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
@@ -1181,6 +1182,7 @@ class TestProcessingAndExecution:
         mock_explicit_mpi_wrapper,
         mock_assert_toolchain,
         mock_verify_linkage,
+        mock_rpath_flags,
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
     ):
@@ -1232,6 +1234,7 @@ class TestProcessingAndExecution:
         assert sim.exe_path == build_dir / "roms"
         assert sim._exe_hash == "mockhash123"
 
+    @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
     @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
@@ -1242,6 +1245,7 @@ class TestProcessingAndExecution:
         mock_get_hash,
         mock_assert_toolchain,
         mock_verify_linkage,
+        mock_rpath_flags,
         stub_romssimulation: ROMSSimulation,
         stageddatacollection_remote_files,
         tmp_path: Path,
@@ -1285,6 +1289,58 @@ class TestProcessingAndExecution:
             text=True,
         )
         mock_assert_toolchain.assert_called_once_with(wrapper_path)
+
+    @mock.patch("cstar.roms.simulation.rpath_link_flags")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
+    @mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
+    def test_build_uses_rpath_link_flags(
+        self,
+        mock_subprocess,
+        mock_get_hash,
+        mock_explicit_mpi_wrapper,
+        mock_assert_toolchain,
+        mock_verify_linkage,
+        mock_rpath_flags,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Tests that `build` includes a `USER_LDFLAGS=` clause in the `make`
+        command when `rpath_link_flags` returns link flags.
+        """
+        sim = stub_romssimulation
+        build_dir = sim.fs_manager.compile_time_code_dir
+        (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+
+        assert sim.compile_time_code
+        sim.compile_time_code._working_copy = stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
+        mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
+        mock_get_hash.return_value = "mockhash123"
+
+        rpath_flags = "-Wl,-rpath,/apps/netcdff/lib -Wl,-rpath,/apps/netcdf/lib"
+        mock_rpath_flags.return_value = rpath_flags
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            sim.build()
+
+        cstar_sysmgr = get_sysmgr()
+        mock_subprocess.assert_any_call(
+            f"make USER_LDFLAGS='{rpath_flags}' "
+            f"COMPILER={cstar_sysmgr.environment.compiler}",
+            cwd=build_dir,
+            shell=True,
+            capture_output=True,
+            text=True,
+        )
 
     @mock.patch(
         "cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash"
@@ -1386,6 +1442,7 @@ class TestProcessingAndExecution:
             text=True,
         )
 
+    @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
     @mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
     @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
@@ -1396,6 +1453,7 @@ class TestProcessingAndExecution:
         mock_get_hash,
         mock_explicit_mpi_wrapper,
         mock_assert_toolchain,
+        mock_rpath_flags,
         stub_romssimulation,
         stageddatacollection_remote_files,
     ):

@@ -111,6 +111,37 @@ def explicit_mpi_wrapper() -> str | None:
     return None
 
 
+def rpath_link_flags() -> str | None:
+    """Build explicit `-Wl,-rpath` link flags from the declared `LD_RUN_PATH`.
+
+    Setting `LD_RUN_PATH` alone is not sufficient to embed a RUNPATH: the
+    linker only consults it when no `-rpath` option is passed, and MPI
+    wrappers frequently inject their own `-rpath` flags (e.g. spack-built
+    OpenMPI embeds its gcc/openmpi/hwloc lib dirs). Explicit `-Wl,-rpath`
+    flags merge with the wrapper's instead of being ignored, so every
+    directory in `LD_RUN_PATH` ends up in the binary's RUNPATH.
+
+    Returns
+    -------
+    str | None
+        Space-separated `-Wl,-rpath,<dir>` flags for each directory declared
+        in the system environment file's `LD_RUN_PATH`, or `None` on
+        non-Linux platforms or when `LD_RUN_PATH` is not declared/empty.
+    """
+    if sys.platform != "linux":
+        return None
+
+    ld_run_path = get_sysmgr().environment.environment_variables.get("LD_RUN_PATH")
+    if not ld_run_path:
+        return None
+
+    dirs = [d for d in ld_run_path.split(":") if d.strip()]
+    if not dirs:
+        return None
+
+    return " ".join(f"-Wl,-rpath,{d}" for d in dirs)
+
+
 def assert_single_toolchain_stack(mpi_wrapper: str | None) -> None:
     """Assert that the tools that will participate in a ROMS build resolve to a
     single, consistent toolchain stack.

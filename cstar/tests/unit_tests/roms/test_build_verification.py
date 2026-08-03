@@ -8,6 +8,7 @@ import pytest
 from cstar.roms.build_verification import (
     assert_single_toolchain_stack,
     explicit_mpi_wrapper,
+    rpath_link_flags,
     verify_roms_linkage,
 )
 
@@ -25,6 +26,50 @@ def _fake_sysmgr(
     sysmgr.environment.uses_lmod = uses_lmod
     sysmgr.environment.system_env_path = system_env_path
     return sysmgr
+
+
+class TestRpathLinkFlags:
+    """Tests for `rpath_link_flags`."""
+
+    def test_returns_flags_from_declared_ld_run_path(self):
+        env_vars = {"LD_RUN_PATH": "/apps/netcdff/lib:/apps/netcdf/lib"}
+        sysmgr = _fake_sysmgr(environment_variables=env_vars)
+
+        with (
+            mock.patch("cstar.roms.build_verification.sys.platform", "linux"),
+            mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+        ):
+            assert rpath_link_flags() == (
+                "-Wl,-rpath,/apps/netcdff/lib -Wl,-rpath,/apps/netcdf/lib"
+            )
+
+    def test_returns_none_on_non_linux(self):
+        env_vars = {"LD_RUN_PATH": "/apps/netcdff/lib"}
+        sysmgr = _fake_sysmgr(environment_variables=env_vars)
+
+        with (
+            mock.patch("cstar.roms.build_verification.sys.platform", "darwin"),
+            mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+        ):
+            assert rpath_link_flags() is None
+
+    def test_returns_none_when_ld_run_path_not_declared(self):
+        sysmgr = _fake_sysmgr(environment_variables={})
+
+        with (
+            mock.patch("cstar.roms.build_verification.sys.platform", "linux"),
+            mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+        ):
+            assert rpath_link_flags() is None
+
+    def test_returns_none_when_ld_run_path_empty(self):
+        sysmgr = _fake_sysmgr(environment_variables={"LD_RUN_PATH": ":"})
+
+        with (
+            mock.patch("cstar.roms.build_verification.sys.platform", "linux"),
+            mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+        ):
+            assert rpath_link_flags() is None
 
 
 class TestExplicitMpiWrapper:

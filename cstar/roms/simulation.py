@@ -54,6 +54,7 @@ from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.roms.build_verification import (
     assert_single_toolchain_stack,
     explicit_mpi_wrapper,
+    rpath_link_flags,
     verify_roms_linkage,
 )
 from cstar.roms.discretization import ROMSDiscretization
@@ -1420,9 +1421,11 @@ class ROMSSimulation(Simulation):
         wrapper_clause = (
             f"MPI_WRAPPER={mpi_wrapper} " if mpi_wrapper is not None else ""
         )
+        rpath_flags = rpath_link_flags()
+        rpath_clause = f"USER_LDFLAGS='{rpath_flags}' " if rpath_flags else ""
 
         _run_cmd(
-            f"make {mode_clause}{wrapper_clause}COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {mode_clause}{wrapper_clause}{rpath_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=build_dir,
             msg_pre="Compiling UCLA-ROMS configuration...",
             msg_post=f"UCLA-ROMS compiled at {build_dir}",

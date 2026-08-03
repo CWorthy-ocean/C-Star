@@ -7,6 +7,7 @@ from cstar.base.utils import _run_cmd
 from cstar.roms.build_verification import (
     assert_single_toolchain_stack,
     explicit_mpi_wrapper,
+    rpath_link_flags,
 )
 from cstar.system.manager import get_sysmgr
 
@@ -53,9 +54,11 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         wrapper_clause = (
             f"MPI_WRAPPER={mpi_wrapper} " if mpi_wrapper is not None else ""
         )
+        rpath_flags = rpath_link_flags()
+        rpath_clause = f"USER_LDFLAGS='{rpath_flags}' " if rpath_flags else ""
 
         _run_cmd(
-            f"make {wrapper_clause}COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {wrapper_clause}{rpath_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=roms_root / "Tools-Roms",
             msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
             msg_post="Compiled Tools-Roms",
