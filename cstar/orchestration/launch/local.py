@@ -170,22 +170,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         """Perform launcher-specific startup validation."""
 
     @staticmethod
-    def _adapt_step(step: "LiveStep") -> str:
-        compute_adapter = LocalComputeAdapter(step.compute_overrides)
-        adapter = StepToRunRequestAdapter()
-
-        if compute := compute_adapter.adapt():
-            adapter.enrich(ComputeEnrichmentAdapter(compute))
-
-        request = adapter.adapt(step)
-        formatter = RunRequestCommandFormatter()
-        command = formatter.format(request)
-
-        return command
-
-    @staticmethod
-    def _create_dep_aware_script(
-        step: "LiveStep", dependencies: list[LocalHandle]
+    def _adapt_step(
+        step: "LiveStep",
+        formatter: ModelFormatter[RunRequest],
     ) -> str:
         """Create a script that will execute the desired command for a
         `Step` while also waiting for any dependencies to complete.
@@ -194,60 +181,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         str
         """
-        command = LocalLauncher._adapt_step(step)
-        blueprint_path = str(step.blueprint_path)
-        command = command.replace(blueprint_path, '"$BLUEPRINT_PATH"')
+        compute = LocalComputeAdapter().adapt(step.compute_overrides)
+        enricher: ModelEnricher[RunRequest] | None = None
+        if compute:
+            enricher = TimeConstrainedRunRequestEnricher(compute)
+        request = StepToRunRequestAdapter(enricher).adapt(step)
 
-        pids = " ".join([f'"{h.pid}"' for h in dependencies])
-        local_dep_delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
-
-        return textwrap.dedent(f"""\
-            #!/bin/bash
-            SENTINEL_PATH="{StateRepository.sentinel_path(step.name)}"
-            BLUEPRINT_PATH="{step.blueprint_path}"
-            DEP_PIDS=({pids})
-
-            # values from `Status` enum
-            RUNNING={Status.Running.value}
-            DONE={Status.Done.value}
-            FAILED={Status.Failed.value}
-
-            update_status() {{
-                local status=$1
-                if [ "$(uname)" = "Darwin" ]; then
-                    sed -i '' "s/^status:.*$/status: $status/" "$2"
-                else
-                    sed -i "s/^status:.*$/status: $status/" "$2"
-                fi
-            }}
-
-            # wait for dependencies to complete.
-            for DEP_PID in "${{DEP_PIDS[@]}}"; do
-                while kill -0 "$DEP_PID" 2>/dev/null; do
-                    echo "Awaiting process $DEP_PID"
-                    sleep {local_dep_delay}
-                done
-            done
-
-            # update status to running
-            update_status $RUNNING $SENTINEL_PATH
-
-            # run the target command
-            # timout -k 1s 90s {command} &
-            {command} &
-            JOB_PID=$!
-
-            wait $JOB_PID
-
-            # update the status to `Done` if target command is successful, otherwise `Failed`
-            RC=$?
-            STATUS=$FAILED
-            if [ $RC -eq 0 ]; then
-                STATUS=$DONE
-            fi
-            update_status $STATUS $SENTINEL_PATH
-            exit $RC
-        """)
+        return formatter.format(request)
 
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[LocalHandle]) -> LocalHandle:
@@ -265,10 +205,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
+        formatter: ModelFormatter[RunRequest] = RunRequestScriptFormatter()
         if LocalLauncher.use_proxy:
-            script = LocalLauncher._create_dep_aware_script(step, dependencies)
-        else:
-            script = LocalLauncher._adapt_step(step)
+            formatter = ProxiedRunRequestFormatter(step, dependencies)
+
+        script = LocalLauncher._adapt_step(step, formatter)
 
         step.fsm.prepare()
         step.script_path.write_text(script)
@@ -493,3 +434,89 @@ class LocalLauncher(Launcher[LocalHandle]):
     @classmethod
     def handle_klass(cls) -> type[LocalHandle]:
         return LocalHandle
+
+
+class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
+    """Format a `RunRequest` as script content that will proxy the original command
+    to enable the local launcher to support status checks and dependencies.
+    """
+
+    dependencies: list[LocalHandle]
+    delay: float | str
+    step: "LiveStep"
+    updates: dict[str, str]
+
+    def __init__(
+        self,
+        step: LiveStep,
+        dependencies: list[LocalHandle] | None = None,
+        updates: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__()
+        self.dependencies = dependencies or []
+        self.step = step
+        self.updates = updates or {}
+        self.updates[str(step.blueprint_path)] = '"$BLUEPRINT_PATH"'
+        self.delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
+
+    @t.override
+    def _to_string(self, value: RunRequest) -> str:
+        """Create a script that will execute the desired command for a
+        `Step` while also waiting for any dependencies to complete.
+
+        Returns
+        -------
+        str
+        """
+        sentinel_path = StateRepository.sentinel_path(self.step.name)
+        blueprint_path = self.step.blueprint_path
+        pids = " "
+        if self.dependencies:
+            pids = " ".join([f'"{h.pid}"' for h in self.dependencies])
+
+        return textwrap.dedent(f"""\
+            #!/bin/bash
+            SENTINEL_PATH="{sentinel_path}"
+            BLUEPRINT_PATH="{blueprint_path}"
+            DEP_PIDS=({pids})
+
+            # values from `Status` enum
+            RUNNING={Status.Running.value}
+            DONE={Status.Done.value}
+            FAILED={Status.Failed.value}
+
+            update_status() {{
+                local status=$1
+                if [ "$(uname)" = "Darwin" ]; then
+                    sed -i '' "s/^status:.*$/status: $status/" "$2"
+                else
+                    sed -i "s/^status:.*$/status: $status/" "$2"
+                fi
+            }}
+
+            # wait for dependencies to complete.
+            for DEP_PID in "${{DEP_PIDS[@]}}"; do
+                while kill -0 "$DEP_PID" 2>/dev/null; do
+                    echo "Awaiting process $DEP_PID"
+                    sleep {self.delay}
+                done
+            done
+
+            # update status to running
+            update_status $RUNNING $SENTINEL_PATH
+
+            # run the target command
+            {value.command} &
+            JOB_PID=$!
+
+            wait $JOB_PID
+
+            # update the status to `Done` if target command is successful, otherwise `Failed`
+            RC=$?
+            STATUS=$FAILED
+            if [ $RC -eq 0 ]; then
+                STATUS=$DONE
+            fi
+            update_status $STATUS $SENTINEL_PATH
+            exit $RC
+        """)
