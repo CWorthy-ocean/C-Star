@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from prefect import State, task
 from prefect import Task as PrefectTask
 from prefect.client.schemas import TaskRun
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from cstar.base.adapter import ModelAdapter
 from cstar.base.env import (
@@ -105,15 +105,17 @@ class SlurmComputeOverrideAdapter(ModelAdapter[KeyValueStore, SlurmComputeSpec |
     """Converts a raw `KeyValueStore` containing optional overrides into a SLURM compute spec."""
 
     def adapt(self) -> SlurmComputeSpec | None:
-        if overrides_ := self.model.get("slurm", {}):
-            overrides = t.cast("dict[str, str]", overrides_)
+        if overrides_ := t.cast("dict[str, str | int]", self.model.get("slurm", {})):
+            # overrides = {k: str(v) for k, v in overrides_.items()}
+            try:
+                compute = SlurmComputeSpec.model_validate(overrides_)
 
-            return SlurmComputeSpec(
-                num_cpus=str(overrides.get("num-cpus", "")) or None,
-                num_nodes=str(overrides.get("num-nodes", "")) or None,
-                cpus_per_node=str(overrides.get("num-cpus-per-node", "")) or None,
-                max_walltime=str(overrides.get("max-walltime", "")) or None,
-            )
+                if compute.model_dump(exclude_defaults=True):
+                    # only return spec if it was modified
+                    return compute
+            except ValidationError:
+                msg = "Invalid compute overrides were specified"
+                log.error(msg)
         return None
 
 
@@ -214,18 +216,26 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         adapter = StepToRunRequestAdapter()
         command = RunRequestCommandFormatter().format(adapter.adapt(step))
 
+        compute_overrides = SlurmComputeOverrideAdapter(step.compute_overrides).adapt()
+        compute = compute_overrides or SlurmComputeSpec()
+
+        compute.queue_name = compute.queue_name or SlurmLauncher.configured_queue()
+        compute.max_walltime = (
+            compute.max_walltime or SlurmLauncher.configured_walltime()
+        )
+
         job = create_scheduler_job(
             commands=command,
             account_key=SlurmLauncher.configured_account(),
-            cpus=step.blueprint.cpus_needed,
-            nodes=None,  # let existing logic handle this
-            cpus_per_node=None,  # let existing logic handle this
+            cpus=compute.num_cpus,
+            nodes=compute.num_cpus,
+            cpus_per_node=compute.cpus_per_node,
             script_path=script_path,
             run_path=script_path.parent,
             job_name=job_name,
             output_file=output_file,
-            queue_name=SlurmLauncher.configured_queue(),
-            walltime=SlurmLauncher.configured_walltime(),
+            queue_name=compute.queue_name,
+            walltime=compute.max_walltime,
             depends_on=job_dep_ids,
         )
 
