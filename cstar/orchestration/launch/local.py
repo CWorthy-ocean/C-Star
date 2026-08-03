@@ -108,7 +108,7 @@ class LocalComputeAdapter(
         return None
 
 
-class ComputeEnrichmentAdapter(ModelEnricher[RunRequest]):
+class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
     """Format a `RunRequest` as a request as a CLI command that honors user-supplied
     computing resource overrides.
     """
