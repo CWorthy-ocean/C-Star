@@ -856,24 +856,48 @@ class DomainCatalog:
         model_settings: dict[str, Any],
         base_model_dir: Path | str,
         description: str = "",
+        *,
+        bgc_mode: str | None = None,
+        use_pio: bool | None = None,
+        roms_ref: str | None = None,
     ) -> None:
         """Create a new ModelSpec entry (``ModelSpec/<name>/model.yaml``).
 
-        Clones ``code``/``bgc_mode``/``use_pio``/``templates_commit`` verbatim from
-        ``base_model_dir``'s ``model.yaml`` and swaps in ``model_settings`` (the
-        model-owned subset -- see the wizard's ``_model_owned_settings``).
-        Refuses to overwrite an existing entry.
+        Clones ``code``/``templates_commit`` verbatim from ``base_model_dir``'s
+        ``model.yaml`` and swaps in ``model_settings`` (the model-owned subset --
+        see the wizard's ``_model_owned_settings``). ``bgc_mode``/``use_pio``/
+        ``roms_ref`` clone the base value when left ``None``, or take the given
+        override when not -- these are the live per-run toggles the wizard's
+        widgets carry (``use_pio`` and ``code.marbl``/``bgc_mode`` don't survive
+        in ``model_settings`` since they're resolver-derived leaves stripped by
+        ``_model_owned_settings``, and ``code.roms.commit`` isn't part of
+        ``model_settings`` at all). Refuses to overwrite an existing entry.
         """
         model_dir = self.catalog_root / "ModelSpec" / name
         if model_dir.exists():
             raise FileExistsError(f"ModelSpec '{name}' already exists at {model_dir}")
         base_model_path = self._resolve_stem_file(Path(base_model_dir), "model")
         base = yaml.safe_load(base_model_path.read_text()) or {}
+        code = dict(base.get("code") or {})
+        if roms_ref and code.get("roms"):
+            # Mirror forge_blueprint_resolve.py's roms_ref handling: commit/branch/
+            # tag are all valid checkout targets, so store the override in `commit`
+            # and drop `branch` (C-Star requires exactly one of the two). Keep every
+            # other repo (pio/marbl) verbatim -- even if currently unused -- so the
+            # saved spec stays toggleable for use_pio/bgc_mode later.
+            roms = dict(code["roms"])
+            roms["commit"] = roms_ref
+            roms.pop("branch", None)
+            code["roms"] = roms
         data = {
             "description": description or base.get("description", ""),
-            "bgc_mode": base.get("bgc_mode", "marbl"),
-            "use_pio": base.get("use_pio", False),
-            "code": base.get("code", {}),
+            "bgc_mode": (
+                bgc_mode if bgc_mode is not None else base.get("bgc_mode", "marbl")
+            ),
+            "use_pio": (
+                bool(use_pio) if use_pio is not None else base.get("use_pio", False)
+            ),
+            "code": code,
             "model_settings": model_settings,
         }
         model_dir.mkdir(parents=True)

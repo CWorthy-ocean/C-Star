@@ -159,3 +159,28 @@ def test_register_model_from_settings_clones_code_block(isolated_catalog):
     base = _cat.model_data("cson_roms-marbl_v0.1")
     assert data["code"] == base["code"]
     assert data["bgc_mode"] == base["bgc_mode"]
+    assert data["use_pio"] == base["use_pio"]
+
+
+def test_register_model_from_settings_applies_live_overrides(isolated_catalog):
+    from cstar_forge.domain_catalog import default_catalog as _cat
+
+    base_dir = _cat.model_dir("cson_roms-marbl_v0.1")
+    base_code = _cat.model_data("cson_roms-marbl_v0.1")["code"]
+    isolated_catalog.register_model_from_settings(
+        "my-model-pio",
+        {"param": {"nt_passive": 0}},
+        base_dir,
+        description="m",
+        bgc_mode="none",
+        use_pio=True,
+        roms_ref="main",
+    )
+    data = isolated_catalog.model_data("my-model-pio")
+    assert data["use_pio"] is True
+    assert data["bgc_mode"] == "none"
+    assert data["code"]["roms"]["commit"] == "main"
+    assert "branch" not in data["code"]["roms"]
+    # Unused repos (pio/marbl) survive verbatim so the toggles stay usable later.
+    assert data["code"]["pio"] == base_code["pio"]
+    assert data["code"]["marbl"] == base_code["marbl"]

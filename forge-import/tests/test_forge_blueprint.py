@@ -2354,6 +2354,105 @@ class TestSaveModifiedPiecesToCatalog:
         assert wiz.model_dd.value == "my-model"
         assert wiz.config.composition.model.modified is False
 
+    def test_save_model_piece_marks_unmodified_with_blank_roms_ref(
+        self, isolated_catalog
+    ):
+        # A blank roms_ref means "clone the base pin" -- must not itself count
+        # as a deviation.
+        wiz = self._wizard(isolated_catalog)
+        wiz.roms_ref.value = ""
+
+        wiz.save_model_name.value = "my-model-blank-ref"
+        wiz._on_save_model(None)
+
+        assert wiz.config.composition.model.modified is False
+
+    def test_save_model_piece_persists_use_pio_and_roms_ref(self, isolated_catalog):
+        wiz = self._wizard(isolated_catalog)
+        wiz.use_pio_chk.value = True
+        wiz.roms_ref.value = "main"
+        assert wiz.config.composition.model.modified is True  # spec deviation
+
+        wiz.save_model_name.value = "pio-dev"
+        wiz._on_save_model(None)
+
+        data = isolated_catalog.model_data("pio-dev")
+        assert data["use_pio"] is True
+        assert data["code"]["roms"]["commit"] == "main"
+        assert "branch" not in data["code"]["roms"]
+        assert data["code"]["pio"] is not None
+
+        assert wiz.model_dd.value == "pio-dev"
+        assert wiz.config.composition.model.modified is False
+        assert "✓" in wiz.save_model_status.value
+
+        # A fresh wizard picking this ModelSpec must reload the same toggles --
+        # this is the part that actually failed for the reported bug.
+        wiz2 = self._wizard(isolated_catalog)
+        wiz2.model_dd.value = "pio-dev"
+        assert wiz2.use_pio_chk.value is True
+        assert wiz2.roms_ref.value == "main"
+        assert wiz2.config.model_settings["cppdefs"]["use_pio"] is True
+        assert wiz2.config.code.pio is not None
+        assert wiz2.config.code.roms.commit == "main"
+
+    def test_verify_model_roundtrip_false_when_spec_loses_use_pio(
+        self, isolated_catalog
+    ):
+        from cstar_forge.forge_blueprint_wizard import _model_owned_settings
+
+        wiz = self._wizard(isolated_catalog)
+        wiz.use_pio_chk.value = True
+        # Simulate the pre-fix writer: a spec saved without the live use_pio.
+        isolated_catalog.register_model_from_settings(
+            "no-pio",
+            _model_owned_settings(wiz.config.model_settings),
+            isolated_catalog.model_dir(wiz.model_dd.value),
+            use_pio=False,
+            roms_ref=wiz.roms_ref.value.strip() or None,
+        )
+        assert wiz._verify_piece_roundtrip("model", "no-pio") is False
+
+    def test_verify_model_roundtrip_false_when_spec_loses_roms_ref(
+        self, isolated_catalog
+    ):
+        from cstar_forge.forge_blueprint_wizard import _model_owned_settings
+
+        wiz = self._wizard(isolated_catalog)
+        wiz.roms_ref.value = "main"
+        # Simulate the pre-fix writer: a spec saved without the live roms_ref.
+        isolated_catalog.register_model_from_settings(
+            "stale-ref",
+            _model_owned_settings(wiz.config.model_settings),
+            isolated_catalog.model_dir(wiz.model_dd.value),
+            use_pio=wiz.use_pio_chk.value,
+            roms_ref=None,
+        )
+        assert wiz._verify_piece_roundtrip("model", "stale-ref") is False
+
+    def test_model_modified_reflects_use_pio_and_roms_ref_toggles(
+        self, isolated_catalog
+    ):
+        # Toggling PIO/roms_ref must flag the Model piece as modified even
+        # without ever touching "Save as new spec" -- these live outside
+        # model_settings, so composition.model.modified must not silently
+        # stay False while resolving with a different code/use_pio than the
+        # selected catalog spec declares.
+        wiz = self._wizard(isolated_catalog)
+        assert wiz.config.composition.model.modified is False
+
+        wiz.use_pio_chk.value = not wiz.use_pio_chk.value
+        assert wiz.config.composition.model.modified is True
+
+        wiz.use_pio_chk.value = not wiz.use_pio_chk.value  # flip back
+        assert wiz.config.composition.model.modified is False
+
+        wiz.roms_ref.value = "main"
+        assert wiz.config.composition.model.modified is True
+
+        wiz.roms_ref.value = ""  # blank => clone the base pin, not a deviation
+        assert wiz.config.composition.model.modified is False
+
     def test_save_forcing_piece_marks_unmodified(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
         wiz._forcing_editor.ic_bgc_clim.value = (

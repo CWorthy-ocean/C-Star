@@ -2438,30 +2438,36 @@ class ForgeBlueprintWizard:
             self._forcing_editor.clear_category("boundary")
 
     # ---- forcing piece -------------------------------------------------------
-    def _model_default_roms_ref(self) -> str:
-        """The selected model's pinned ucla-roms checkout target (commit or branch)."""
+    def _model_spec_declared(self) -> dict[str, Any]:
+        """The selected ModelSpec's declared ``roms_ref``/``bgc_mode``/``use_pio``.
+
+        Single re-parse of ``model.yaml`` backing ``_model_default_*`` below and
+        the spec-deviation check in ``_rebuild`` -- both need the same three
+        catalog-declared values to compare live widget state against.
+        """
         try:
             data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
-            roms = data["model"].get("code", {}).get("roms", {}) or {}
-            return roms.get("commit") or roms.get("branch") or ""
+            model = data["model"]
+            roms = model.get("code", {}).get("roms", {}) or {}
+            return {
+                "roms_ref": roms.get("commit") or roms.get("branch") or "",
+                "bgc_mode": model.get("bgc_mode", "marbl"),
+                "use_pio": bool(model.get("use_pio", False)),
+            }
         except Exception:
-            return ""
+            return {"roms_ref": "", "bgc_mode": "marbl", "use_pio": False}
+
+    def _model_default_roms_ref(self) -> str:
+        """The selected model's pinned ucla-roms checkout target (commit or branch)."""
+        return self._model_spec_declared()["roms_ref"]
 
     def _model_default_bgc_mode(self) -> str:
         """The selected model's ModelSpec-declared bgc_mode (prepopulates self.bgc_dd)."""
-        try:
-            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
-            return data["model"].get("bgc_mode", "marbl")
-        except Exception:
-            return "marbl"
+        return self._model_spec_declared()["bgc_mode"]
 
     def _model_default_use_pio(self) -> bool:
         """The selected model's ModelSpec-declared use_pio (prepopulates self.use_pio_chk)."""
-        try:
-            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
-            return bool(data["model"].get("use_pio", False))
-        except Exception:
-            return False
+        return self._model_spec_declared()["use_pio"]
 
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
@@ -2562,6 +2568,13 @@ class ForgeBlueprintWizard:
                 }
             elif piece == "model":
                 kw["model_dir"] = self.catalog.model_dir(new_name)
+                # Let the saved spec speak for these: the resolver falls back to the
+                # ModelSpec when use_pio/bgc_mode are None (resolve.py:418-421) and to
+                # code.roms verbatim when roms_ref is absent. Re-applying the live
+                # widget values here would apply them to BOTH sides and make the
+                # verifier structurally blind to a spec that dropped them.
+                for k in ("use_pio", "bgc_mode", "roms_ref"):
+                    kw.pop(k, None)
                 overrides2 = {k: v for k, v in overrides2.items() if _is_output_key(*k)}
             elif piece == "forcing":
                 fi, cdr = _split_forcing_data(self.catalog.forcing_data(new_name))
@@ -3257,7 +3270,24 @@ class ForgeBlueprintWizard:
         # no-op edit never counts); domain/forcing are widget-based pieces compared
         # against a snapshot captured at the moment of the last catalog pick.
         deviations = _diff_overrides(effective, composed)
-        model_modified = any(not _is_output_key(s, f) for s, f in deviations)
+        # model_settings-level deviations (accordion overrides) plus the three
+        # per-run toggles that live outside model_settings entirely (use_pio,
+        # bgc_mode, roms_ref) -- these are resolver kwargs, not settings leaves, so
+        # _diff_overrides can never see them (see _model_owned_settings /
+        # _CPPDEFS_DERIVED_LEAVES). Without this, flipping PIO or editing the roms
+        # ref and saving the blueprint (without pressing "Save as new spec") would
+        # silently record composition.model.modified=False.
+        declared = self._model_spec_declared()
+        spec_deviation = (
+            self.use_pio_chk.value != declared["use_pio"]
+            or self.bgc_dd.value != declared["bgc_mode"]
+            or bool(
+                (ref := self.roms_ref.value.strip()) and ref != declared["roms_ref"]
+            )
+        )
+        model_modified = (
+            any(not _is_output_key(s, f) for s, f in deviations) or spec_deviation
+        )
         output_modified = any(_is_output_key(s, f) for s, f in deviations)
         domain_modified = (
             self.domain_dd.value != "<custom>"
@@ -3705,6 +3735,13 @@ class ForgeBlueprintWizard:
                 _model_owned_settings(self.config.model_settings),
                 self.catalog.model_dir(self.model_dd.value),
                 description=self.description.value,
+                # Live widget values, using _gather()'s exact conventions (use_pio/
+                # bgc_mode unconditional, roms_ref only when non-blank) -- the
+                # round-trip verifier below compares against _gather()'s kw, so any
+                # divergence here would be a spurious mismatch.
+                bgc_mode=self.bgc_dd.value,
+                use_pio=self.use_pio_chk.value,
+                roms_ref=self.roms_ref.value.strip() or None,
             )
         except FileExistsError:
             self.save_model_status.value = (
