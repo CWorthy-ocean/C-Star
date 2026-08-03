@@ -86,7 +86,6 @@ class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
         return request
 
 
-
 class StepToPlaceholderAdapter(StepToRunRequestAdapter):
     """Convert a `LiveStep` into a `RunRequest` with the original command
     replaced with a placeholder script.
