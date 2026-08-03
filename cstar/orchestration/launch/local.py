@@ -90,8 +90,18 @@ class LocalHandle(ProcessHandle):
 class LocalComputeSpec(BaseModel):
     """Compute configuration options when using the local launcher."""
 
-    max_walltime: str | None = None
+    DEFAULT_WALLTIME: t.Final[str] = "600s"
+    """Default maximum walltime for a local process."""
+    DEFAULT_FK_TIMEOUT: t.Final[str] = "2s"
+    """Default grace period before force-killing a local process after walltime elapses."""
+
+    max_walltime: str = DEFAULT_WALLTIME
     """Maximum amount of time a process should be allowed to run."""
+    force_kill_timeout: str = DEFAULT_FK_TIMEOUT
+    """Grace period before force-killing a local process after timeout is exceeded."""
+
+    # TODO: use the same time format as slurm and convert to a valid input to `timeout`...
+    # e.g. from "01:00:00"
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure model to ignore empty strings."""
