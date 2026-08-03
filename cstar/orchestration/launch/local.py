@@ -110,10 +110,13 @@ class LocalComputeSpec(BaseModel):
 class LocalComputeAdapter(
     ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec | None]
 ):
+    def adapt(self, model: KeyValueStore) -> LocalComputeSpec | None:
+        if overrides_ := model.get("local", {}):
             overrides = t.cast("dict[str, str]", overrides_)
 
             return LocalComputeSpec(
-                max_walltime=str(overrides.get("max-walltime", "")) or None,
+                max_walltime=overrides.get("max-walltime", ""),
+                force_kill_timeout=overrides.get("force-kill-timeout", ""),
             )
         return None
 
@@ -171,7 +174,7 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
 class LocalLauncher(Launcher[LocalHandle]):
     """A launcher that executes steps in a local process."""
 
-    """Mapping of task name to process ID."""
+    tasks: t.ClassVar[dict[str, str]] = {}
     use_proxy: t.ClassVar[bool] = False
     """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
