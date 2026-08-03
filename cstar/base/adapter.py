@@ -45,7 +45,7 @@ class ConfiguredModelAdapter(t.Protocol, t.Generic[_Tin_contra, _Tout_co]):
     instantiate a new adapter instance via a factory method instead of hijacking __init__.
     """
 
-    def adapt(self, model: _Tin_contra) -> _Tout_co | None:
+    def adapt(self, model: _Tin_contra) -> _Tout_co:
         """Adapt the source model to the target output type.
 
         Returns
