@@ -290,10 +290,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         state_repo = StateRepository()
 
-        prior_handle = t.cast(
-            "SlurmHandle",
-            await state_repo.get_sentinel(step.name, SlurmHandle),
-        )
+        prior_handle = await state_repo.get_sentinel(step.name, SlurmHandle)
         submit_fn = SlurmLauncher._submit
 
         if prior_handle:
