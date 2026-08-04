@@ -24,11 +24,11 @@ from cstar.execution.scheduler_job import (
     get_slurm_batches,
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
-from cstar.orchestration.formatting import RunRequestCommandFormatter
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
+    RunRequestCommandFormatter,
     Status,
     Task,
 )

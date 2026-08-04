@@ -9,8 +9,7 @@ from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
-from cstar.orchestration.formatting import RunRequestCommandFormatter
-from cstar.orchestration.orchestration import RunRequest
+from cstar.orchestration.orchestration import RunRequest, RunRequestCommandFormatter
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveStep

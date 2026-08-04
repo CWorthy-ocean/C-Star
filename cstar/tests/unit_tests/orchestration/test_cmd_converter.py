@@ -11,9 +11,8 @@ from cstar.orchestration.adapter import (
     StepToPlaceholderAdapter,
     StepToRunRequestAdapter,
 )
-from cstar.orchestration.formatting import RunRequestCommandFormatter
 from cstar.orchestration.models import Application
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, RunRequestCommandFormatter
 from cstar.orchestration.serialization import deserialize
 
 

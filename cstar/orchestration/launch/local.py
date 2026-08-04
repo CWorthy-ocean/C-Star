@@ -16,13 +16,14 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import additional_files_dir
 from cstar.orchestration.adapter import StepToRunRequestAdapter
-from cstar.orchestration.formatting import ModelFormatter, RunRequestScriptFormatter
+from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
     ProcessHandle,
     RunRequest,
+    RunRequestScriptFormatter,
     Status,
     Task,
 )
