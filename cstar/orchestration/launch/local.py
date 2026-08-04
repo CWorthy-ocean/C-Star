@@ -473,7 +473,6 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
         self.dependencies = dependencies or []
         self.step = step
         self.updates = updates or {}
-        # self.updates[str(step.blueprint_path)] = '"$BLUEPRINT_PATH"'
         self.delay = ""
 
     @t.override
