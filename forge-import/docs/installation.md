@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.8 or higher
+- Python 3.11 or higher (the managed `cstar-forge-v0` conda environment pins Python 3.12)
 - Git
 - Conda, Mamba, or Micromamba (the setup script will automatically install Micromamba if needed)
 
@@ -50,7 +50,7 @@ Run the setup script:
 
 **Options:**
 - `--clean`: Remove and rebuild the environment if it already exists
-- `--batch` or `-f`: Run without user prompts (useful for CI/automation)
+- `--batch`, `-f`, or `--force`: Run without user prompts (useful for CI/automation)
 
 **Examples:**
 ```bash
@@ -61,7 +61,7 @@ Run the setup script:
 ./dev-setup.sh --clean
 
 # Automated setup without prompts
-./dev-setup.sh --force
+./dev-setup.sh --batch
 ```
 
 :::{note}
