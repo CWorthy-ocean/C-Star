@@ -90,15 +90,12 @@ class LocalHandle(ProcessHandle):
 class LocalComputeSpec(BaseModel):
     """Compute configuration options when using the local launcher."""
 
-    DEFAULT_WALLTIME: t.Final[str] = "600s"
-    """Default maximum walltime for a local process."""
-    DEFAULT_FK_TIMEOUT: t.Final[str] = "2s"
-    """Default grace period before force-killing a local process after walltime elapses."""
-
-    max_walltime: str = DEFAULT_WALLTIME
+    max_walltime: str = "600s"
     """Maximum amount of time a process should be allowed to run."""
-    force_kill_timeout: str = DEFAULT_FK_TIMEOUT
+    force_kill_timeout: str = "2s"
     """Grace period before force-killing a local process after timeout is exceeded."""
+
+    # TODO: specify the format as a regex and ensure it's validated by pydantic.
 
     # TODO: use the same time format as slurm and convert to a valid input to `timeout`...
     # e.g. from "01:00:00"
@@ -131,48 +128,52 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
     """
 
     compute: LocalComputeSpec
-    """User-supplied compute customizations."""
+    """The compute spec to use when enriching a run request."""
 
-    TIMEOUT_EXE: t.Final[str] = "timeout"
+    TIMEOUT_EXE: t.ClassVar[str] = "timeout"
     """The executable used to timeout a process."""
-    ARG_FORCEKILL_TIMEOUT: t.Final[str] = "-k"
+    ARG_FORCEKILL_TIMEOUT: t.ClassVar[str] = "-k"
     """A CLI argument used to specify a grace period before force-killing a run."""
 
     def __init__(self, compute: LocalComputeSpec) -> None:
-        """Initialize the enricher with compute overrides."""
+        """Enrich the run request to support constraining the time allotted for the request
+        to complete.
+
+        Parameters
+        ----------
+        compute : LocalComputeSpec | None
+            Local compute overrides used to configure timeout behavior.
+        """
         self.compute = compute
 
     def enrich(
         self,
         model: RunRequest,
-        compute: LocalComputeSpec | None = None,
     ) -> RunRequest:
+        """Enrich the run request to support constraining the time allotted for the request
+        to complete.
 
-        lhs = self.compute.model_dump()
+        Configures the total duration and force-kill grace period of a command run via `timeout`.
 
-        if compute:
-            rhs = compute.model_dump(exclude_defaults=True)
-            combined = LocalComputeSpec.model_validate(lhs.update(rhs))
-        else:
-            combined = self.compute
+        Parameters
+        ----------
+        model : RunRequest
+            The  original `RunRequest` to enrich
+        compute : LocalComputeSpec | None
+            Local compute overrides used to configure timeout behavior.
+        """
+        enriched_cmd = [
+            self.TIMEOUT_EXE,
+            self.compute.max_walltime,
+            self.ARG_FORCEKILL_TIMEOUT,
+            self.compute.force_kill_timeout,
+            *model.command,
+        ]
 
-        if combined and combined.model_dump(exclude_defaults=True):
-            # use compute overrides to enrich the command.
-            cmd = [
-                self.TIMEOUT_EXE,
-                combined.max_walltime,
-                self.ARG_FORCEKILL_TIMEOUT,
-                combined.force_kill_timeout,
-            ]
-
-            cmd.extend(model.command)
-
-            return RunRequest(
-                command=cmd,
-                environment=model.environment,
-            )
-
-        return model
+        return RunRequest(
+            command=enriched_cmd,
+            environment=model.environment,
+        )
 
 
 class LocalLauncher(Launcher[LocalHandle]):
