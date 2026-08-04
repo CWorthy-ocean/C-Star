@@ -1,16 +1,29 @@
 """Unit tests for `cstar.roms.build_verification`."""
 
+import os
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
+from cstar.base.env import ENV_CSTAR_DISABLE_BUILD_VERIFICATION, FLAG_OFF, FLAG_ON
 from cstar.roms.build_verification import (
     assert_single_toolchain_stack,
     explicit_mpi_wrapper,
     rpath_link_flags,
     verify_roms_linkage,
 )
+
+
+@pytest.fixture(autouse=True)
+def _build_verification_enabled():
+    """Pin the disable-flag off for every test in this module.
+
+    `mock.patch.dict` only adds/overrides keys, so a developer's shell already
+    having this variable set would otherwise silently neuter these tests.
+    """
+    with mock.patch.dict(os.environ, {ENV_CSTAR_DISABLE_BUILD_VERIFICATION: FLAG_OFF}):
+        yield
 
 
 def _fake_sysmgr(
@@ -589,3 +602,62 @@ class TestVerifyRomsLinkageDarwin:
             ),
         ):
             verify_roms_linkage(exe)
+
+
+class TestBuildVerificationDisabled:
+    """Tests for the `CSTAR_DISABLE_BUILD_VERIFICATION` escape hatch."""
+
+    def test_assert_single_toolchain_stack_skipped_when_disabled(self, tmp_path: Path):
+        # An empty declared prefix var would normally raise `OSError`.
+        env_vars = {"MPIHOME": "   "}
+        sysmgr = _fake_sysmgr(environment_variables=env_vars)
+
+        with (
+            mock.patch.dict(
+                os.environ, {ENV_CSTAR_DISABLE_BUILD_VERIFICATION: FLAG_ON}
+            ),
+            mock.patch("cstar.roms.build_verification.get_sysmgr") as mock_get_sysmgr,
+        ):
+            mock_get_sysmgr.return_value = sysmgr
+            assert_single_toolchain_stack(None)
+
+        mock_get_sysmgr.assert_not_called()
+
+    def test_verify_roms_linkage_skipped_when_disabled(self, tmp_path: Path):
+        exe = tmp_path / "roms"
+        exe.touch()
+
+        with (
+            mock.patch.dict(
+                os.environ, {ENV_CSTAR_DISABLE_BUILD_VERIFICATION: FLAG_ON}
+            ),
+            mock.patch(
+                "cstar.roms.build_verification._verify_linkage_linux"
+            ) as mock_linux,
+            mock.patch(
+                "cstar.roms.build_verification._verify_linkage_darwin"
+            ) as mock_darwin,
+        ):
+            verify_roms_linkage(exe)
+
+        mock_linux.assert_not_called()
+        mock_darwin.assert_not_called()
+
+    def test_assert_single_toolchain_stack_runs_when_flag_off(self):
+        # Covered by the autouse fixture pinning the flag to FLAG_OFF: the
+        # empty-prefix-var check still raises normally.
+        sysmgr = _fake_sysmgr(environment_variables={"MPIHOME": "   "})
+        with (
+            mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+            pytest.raises(OSError, match="MPIHOME"),
+        ):
+            assert_single_toolchain_stack(None)
+
+    def test_assert_single_toolchain_stack_runs_when_flag_unset(self, monkeypatch):
+        monkeypatch.delenv(ENV_CSTAR_DISABLE_BUILD_VERIFICATION, raising=False)
+        sysmgr = _fake_sysmgr(environment_variables={"MPIHOME": "   "})
+        with (
+            mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+            pytest.raises(OSError, match="MPIHOME"),
+        ):
+            assert_single_toolchain_stack(None)

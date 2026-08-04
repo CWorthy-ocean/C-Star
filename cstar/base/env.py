@@ -192,6 +192,18 @@ ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
 ] = "CSTAR_CLOBBER_WORKING_DIR"
 """Set to `1` to automatically clear the working directory specified in a blueprint before launching a SLURM job. Use at your own risk."""
 
+ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
+    t.Literal["CSTAR_DISABLE_BUILD_VERIFICATION"],
+    EnvVar(
+        "Set to `1` to skip the pre- and post-build toolchain consistency checks "
+        "performed when compiling ROMS. Use at your own risk: the resulting binary "
+        "may be linked against a mixed set of libraries.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_DISABLE_BUILD_VERIFICATION"
+"""Set to `1` to skip the pre- and post-build toolchain consistency checks performed when compiling ROMS."""
+
 ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
     t.Literal["CSTAR_FRESH_CODEBASES"],
     EnvVar(

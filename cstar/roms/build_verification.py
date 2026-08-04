@@ -18,6 +18,9 @@ This module provides:
   binary is not linked against a mismatched set of libraries, and (where
   relevant) embeds a RUNPATH so it does not depend on `LD_LIBRARY_PATH`
   at runtime.
+
+Both checks can be skipped by setting `CSTAR_DISABLE_BUILD_VERIFICATION=1`, for the
+rare case where a correct but unusual environment trips a false positive.
 """
 
 import os
@@ -25,11 +28,36 @@ import shutil
 import sys
 from pathlib import Path
 
+from cstar.base.env import ENV_CSTAR_DISABLE_BUILD_VERIFICATION
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import get_sysmgr
 
 log = get_logger(__name__)
+
+
+def _build_verification_disabled() -> bool:
+    """Return True when the user has opted out of build verification.
+
+    Emits a warning when the checks are being skipped so the bypass is visible
+    in the build log.
+
+    Returns
+    -------
+    bool
+    """
+    if not is_flag_enabled(ENV_CSTAR_DISABLE_BUILD_VERIFICATION):
+        return False
+
+    log.warning(
+        f"Build verification is disabled via "
+        f"{ENV_CSTAR_DISABLE_BUILD_VERIFICATION}=1. Skipping toolchain "
+        "consistency checks; the resulting ROMS binary may be linked against "
+        "a mixed set of libraries."
+    )
+    return True
+
 
 _DECLARED_PREFIX_VARS: tuple[str, ...] = (
     "MPIHOME",
@@ -170,8 +198,12 @@ def assert_single_toolchain_stack(mpi_wrapper: str | None) -> None:
     OSError
         If a declared prefix variable is empty, if the NetCDF tooling
         cannot be found on `PATH`, or if the resolved tools do not form a
-        single consistent toolchain stack for the current system.
+        single consistent toolchain stack for the current system. Skipped
+        entirely when `CSTAR_DISABLE_BUILD_VERIFICATION=1`.
     """
+    if _build_verification_disabled():
+        return
+
     cstar_sysmgr = get_sysmgr()
     env_vars = cstar_sysmgr.environment.environment_variables
 
@@ -404,8 +436,12 @@ def verify_roms_linkage(exe_path: Path) -> None:
     ------
     RuntimeError
         If the linkage check fails. See `_verify_linkage_linux` and
-        `_verify_linkage_darwin` for platform-specific details.
+        `_verify_linkage_darwin` for platform-specific details. Skipped
+        entirely when `CSTAR_DISABLE_BUILD_VERIFICATION=1`.
     """
+    if _build_verification_disabled():
+        return
+
     if sys.platform == "linux":
         _verify_linkage_linux(exe_path)
     elif sys.platform == "darwin":
