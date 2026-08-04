@@ -16,6 +16,8 @@ TEST_DIR=$(mktemp -d)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEV_SETUP_SCRIPT="$PROJECT_ROOT/dev-setup.sh"
+HARDEN_ENV_SCRIPT="$PROJECT_ROOT/scripts/harden-env.sh"
+REGISTER_KERNEL_SCRIPT="$PROJECT_ROOT/scripts/register-kernel.sh"
 
 # Test counter
 TESTS_PASSED=0
@@ -37,12 +39,15 @@ test_start() {
 
 test_pass() {
   echo -e "${GREEN}✓ PASS: $1${NC}"
-  ((TESTS_PASSED++))
+  # NOT `((TESTS_PASSED++))`: under `set -e`, that arithmetic-command form
+  # returns the *pre-increment* value as its exit status, so incrementing
+  # from 0 evaluates to 0 (falsy) and aborts the whole suite after test 1.
+  TESTS_PASSED=$((TESTS_PASSED + 1))
 }
 
 test_fail() {
   echo -e "${RED}✗ FAIL: $1${NC}"
-  ((TESTS_FAILED++))
+  TESTS_FAILED=$((TESTS_FAILED + 1))
 }
 
 # Setup test environment
@@ -83,6 +88,10 @@ EOF
   # Copy dev-setup.sh to test directory
   cp "$DEV_SETUP_SCRIPT" ./dev-setup.sh
   chmod +x ./dev-setup.sh
+
+  # Copy scripts/ (harden-env.sh, register-kernel.sh): dev-setup.sh sources
+  # them relative to its own directory, so a subprocess run needs them present.
+  cp -r "$PROJECT_ROOT/scripts" ./scripts
 }
 
 # Test 1: Script exists and is executable
@@ -144,7 +153,7 @@ test_missing_package_manager() {
   export PATH="/usr/bin:/bin"
 
   # Run script and check for appropriate error message
-  if ./dev-setup.sh 2>&1 | grep -q "Neither micromamba nor conda is available"; then
+  if ./dev-setup.sh 2>&1 | grep -q "None of micromamba, mamba, or conda are available"; then
     test_pass "Script correctly detects missing package managers"
   else
     test_fail "Script did not detect missing package managers"
@@ -201,6 +210,37 @@ test_env_file_valid() {
   fi
 }
 
+# Test 8: Extracted helper scripts (Phase 3c) exist, are executable, and have
+# valid bash syntax.
+test_helper_scripts_valid() {
+  test_start "scripts/harden-env.sh and scripts/register-kernel.sh are valid"
+
+  if [[ -f "$HARDEN_ENV_SCRIPT" ]] && bash -n "$HARDEN_ENV_SCRIPT" 2>/dev/null; then
+    test_pass "scripts/harden-env.sh exists and has valid bash syntax"
+  else
+    test_fail "scripts/harden-env.sh missing or has syntax errors"
+  fi
+
+  if [[ -f "$REGISTER_KERNEL_SCRIPT" ]] && bash -n "$REGISTER_KERNEL_SCRIPT" 2>/dev/null; then
+    test_pass "scripts/register-kernel.sh exists and has valid bash syntax"
+  else
+    test_fail "scripts/register-kernel.sh missing or has syntax errors"
+  fi
+}
+
+# Test 9: dev-setup.sh delegates to the extracted helper scripts rather than
+# inlining HPC hardening / kernel registration itself.
+test_dev_setup_sources_helpers() {
+  test_start "dev-setup.sh sources the extracted helper scripts"
+
+  if grep -q "scripts/harden-env.sh" "$DEV_SETUP_SCRIPT" \
+    && grep -q "scripts/register-kernel.sh" "$DEV_SETUP_SCRIPT"; then
+    test_pass "dev-setup.sh sources scripts/harden-env.sh and scripts/register-kernel.sh"
+  else
+    test_fail "dev-setup.sh does not source the extracted helper scripts"
+  fi
+}
+
 # Run all tests
 echo "=========================================="
 echo "Running dev-setup.sh test suite"
@@ -213,6 +253,8 @@ test_os_detection
 test_mock_package
 test_env_file_valid
 test_clean_flag
+test_helper_scripts_valid
+test_dev_setup_sources_helpers
 # Skip test_missing_package_manager as it requires isolating PATH which is tricky
 
 echo ""

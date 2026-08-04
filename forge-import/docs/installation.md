@@ -40,9 +40,38 @@ For more information on HTTPS and SSH access, see the [GitHub documentation on c
 :::
 
 
-### 3. Run the Setup Script
+### 3. Install C-STAR Forge
 
-Run the setup script:
+Pick whichever of the following matches your workflow. All three produce the same
+`cstar-forge-v0` conda environment with `cstar_forge` installed in editable mode.
+
+#### (a) I already have conda/mamba/micromamba
+
+The most direct path — no wrapper script involved:
+
+```bash
+conda env create -f environment.yml
+conda activate cstar-forge-v0
+./set-repo-versions.sh --roms-tools-ref main --c-star-ref main  # pip --no-deps from GitHub
+pip install -e . --no-deps
+```
+
+(Substitute `mamba`/`micromamba` for `conda` if that's what you use.) `environment.yml`
+doesn't carry `roms-tools`/`cstar-ocean`, so the `set-repo-versions.sh` step is required,
+not optional — swap `main` for a specific branch/tag/commit if you need a pinned ref.
+Optionally register the Jupyter kernel (with the activation wrapper described below) once
+the env is active:
+
+```bash
+bash scripts/register-kernel.sh
+```
+
+#### (b) Easy mode: `dev-setup.sh`
+
+`dev-setup.sh` is a thin orchestrator that finds or bootstraps a package manager
+(micromamba, falling back to mamba/conda, downloading micromamba locally as a last
+resort), creates/reuses the `environment.yml` env, installs `cstar_forge` in editable
+mode, and registers the Jupyter kernel:
 
 ```bash
 ./dev-setup.sh
@@ -51,27 +80,40 @@ Run the setup script:
 **Options:**
 - `--clean`: Remove and rebuild the environment if it already exists
 - `--batch`, `-f`, or `--force`: Run without user prompts (useful for CI/automation)
+- `--with-compilers`: Also install compilers/mpich/netcdf-fortran, without the interactive prompt
+- `--roms-tools-ref REF` / `--c-star-ref REF`: pip-install roms-tools/C-Star from a specific
+  git branch, tag, or commit instead of `main`
 
 **Examples:**
 ```bash
-# Normal setup (will prompt for confirmation)
+# Normal setup (will prompt for confirmation, and for compiler install)
 ./dev-setup.sh
 
-# Clean rebuild (removes existing environment first)
-./dev-setup.sh --clean
-
-# Automated setup without prompts
-./dev-setup.sh --batch
+# Clean rebuild, no prompts, with compilers
+./dev-setup.sh --clean --batch --with-compilers
 ```
 
-:::{note}
-The `dev-setup.sh` script automates the setup process:
-- [Installing Micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) (if needed)
-- [Creating the conda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file)
-- [Installing the `cstar-forge` package in editable mode](https://pip.pypa.io/en/stable/topics/local-project-installs/#editable-installs)
-- [Installing `C-Star`](https://c-star.readthedocs.io)
-- [Setting up the Jupyter kernel](https://ipython.readthedocs.io/en/stable/install/index.html)
-:::
+The HPC hardening (keeping pip off `~/.local`, persisting `PYTHONNOUSERSITE` into the env)
+lives in `scripts/harden-env.sh`; Jupyter kernel registration lives in
+`scripts/register-kernel.sh`. Both are sourced by `dev-setup.sh` and can also be run or
+read standalone.
+
+#### (c) Pixi users
+
+[Pixi](https://pixi.sh) reads dependencies straight from `pyproject.toml` (`[tool.pixi.*]`)
+and manages its own lockfile (`pixi.lock`), so it doesn't need `dev-setup.sh` or
+`environment.yml` at all:
+
+```bash
+pixi install                        # default environment
+pixi run -e dev pytest tests/ -v    # dev environment (adds the `dev`/`app` extras)
+```
+
+#### (d) Planned: `conda install cstar-forge`
+
+Once the `cstar-forge` conda-forge feedstock is published, `conda install -c conda-forge
+cstar-forge` will be the recommended path for users who don't need an editable/dev
+checkout. Not available yet — use (a), (b), or (c) above until then.
 
 ### 4. Verify Installation
 
@@ -80,9 +122,10 @@ To verify that everything is installed correctly:
 **a) Activate the environment and test the installation:**
 
 ```bash
-# Activate the environment (using micromamba or conda)
-eval "$(./bin/micromamba shell hook --shell bash)"  # or use conda if micromamba not available
-micromamba activate cstar-forge-v0  # or: conda activate cstar-forge-v0
+# Activate with whichever tool created the environment above (conda/mamba/micromamba).
+# dev-setup.sh's local-micromamba fallback prints the exact activation command to use,
+# including sourcing ./bin/micromamba-path.sh first if it installed micromamba locally.
+conda activate cstar-forge-v0  # or: micromamba activate cstar-forge-v0
 
 # Test that cstar_forge can be imported
 cd workflows
