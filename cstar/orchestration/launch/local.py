@@ -2,7 +2,6 @@ import asyncio
 import datetime
 import os
 import subprocess
-import textwrap
 import typing as t
 from pathlib import Path
 from subprocess import run as sprun
@@ -15,6 +14,7 @@ from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
+from cstar.base.utils import additional_files_dir
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import ModelFormatter, RunRequestScriptFormatter
 from cstar.orchestration.models import KeyValueStore
@@ -456,7 +456,6 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
     """
 
     dependencies: list[LocalHandle]
-    delay: float | str
     step: "LiveStep"
     updates: dict[str, str]
 
@@ -467,11 +466,15 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
         updates: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
+        if not step:
+            msg = "Step is required for formatting"
+            raise CstarExpectationFailed(msg)
+
         self.dependencies = dependencies or []
         self.step = step
         self.updates = updates or {}
-        self.updates[str(step.blueprint_path)] = '"$BLUEPRINT_PATH"'
-        self.delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
+        # self.updates[str(step.blueprint_path)] = '"$BLUEPRINT_PATH"'
+        self.delay = ""
 
     @t.override
     def _to_string(self, value: RunRequest) -> str:
@@ -482,55 +485,27 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
         -------
         str
         """
-        sentinel_path = StateRepository.sentinel_path(self.step.name)
-        blueprint_path = self.step.blueprint_path
         pids = " "
         if self.dependencies:
             pids = " ".join([f'"{h.pid}"' for h in self.dependencies])
 
-        return textwrap.dedent(f"""\
-            #!/bin/bash
-            SENTINEL_PATH="{sentinel_path}"
-            BLUEPRINT_PATH="{blueprint_path}"
-            DEP_PIDS=({pids})
+        delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
+        declarations = [f"export {k}='{v}'\n" for k, v in value.environment.items()]
+        env_vars = " ".join(declarations)
 
-            # values from `Status` enum
-            RUNNING={Status.Running.value}
-            DONE={Status.Done.value}
-            FAILED={Status.Failed.value}
+        proxyscript_model = {
+            "sentinel_path": str(StateRepository.sentinel_path(self.step.name)),
+            "blueprint_path": str(self.step.blueprint_path),
+            "pids": pids,
+            "running": str(Status.Running.value),
+            "done": str(Status.Done.value),
+            "failed": str(Status.Failed.value),
+            "delay": delay,
+            "command": str(value.command),
+            "env_vars": env_vars,
+        }
+        files_dir = additional_files_dir()
+        proxy_tpl_path = files_dir / "templates/launchers/local_job_proxy.sh"
 
-            update_status() {{
-                local status=$1
-                if [ "$(uname)" = "Darwin" ]; then
-                    sed -i '' "s/^status:.*$/status: $status/" "$2"
-                else
-                    sed -i "s/^status:.*$/status: $status/" "$2"
-                fi
-            }}
-
-            # wait for dependencies to complete.
-            for DEP_PID in "${{DEP_PIDS[@]}}"; do
-                while kill -0 "$DEP_PID" 2>/dev/null; do
-                    echo "Awaiting process $DEP_PID"
-                    sleep {self.delay}
-                done
-            done
-
-            # update status to running
-            update_status $RUNNING $SENTINEL_PATH
-
-            # run the target command
-            {value.command} &
-            JOB_PID=$!
-
-            wait $JOB_PID
-
-            # update the status to `Done` if target command is successful, otherwise `Failed`
-            RC=$?
-            STATUS=$FAILED
-            if [ $RC -eq 0 ]; then
-                STATUS=$DONE
-            fi
-            update_status $STATUS $SENTINEL_PATH
-            exit $RC
-        """)
+        tpl = proxy_tpl_path.read_text()
+        return tpl.format(**proxyscript_model)
