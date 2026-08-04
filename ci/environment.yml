@@ -13,7 +13,7 @@ dependencies:
   - numpy>2.0,<2.4
   - pip
   - python>=3.10,<3.14
-  - roms-tools>=3.5,<4
+  - roms-tools>=4.0.0,<5
   - rsync
   - xarray
   # only needed for building docs
