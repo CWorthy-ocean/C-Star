@@ -111,12 +111,16 @@ class LocalComputeAdapter(
     ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec | None]
 ):
     def adapt(self, model: KeyValueStore) -> LocalComputeSpec | None:
+        if not model:
+            msg = "Compute overrides were not supplied to the LocalComputeAdapter"
+            raise CstarExpectationFailed(msg)
+
         if overrides_ := model.get("local", {}):
             overrides = t.cast("dict[str, str]", overrides_)
 
             return LocalComputeSpec(
-                max_walltime=overrides.get("max-walltime", ""),
-                force_kill_timeout=overrides.get("force-kill-timeout", ""),
+                max_walltime=overrides.get("max_walltime", ""),
+                force_kill_timeout=overrides.get("force_kill_timeout", ""),
             )
         return None
 
