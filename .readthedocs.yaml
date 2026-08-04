@@ -16,7 +16,7 @@ sphinx:
 
 # Conda environment
 conda:
-  environment: ci/environment.yml
+  environment: environment-laptop.yml
 
 # Python dependencies and install method
 python:

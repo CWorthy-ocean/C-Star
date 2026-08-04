@@ -16,7 +16,7 @@ jobs:
           cache-downloads: true
           cache-environment: true
           micromamba-version: 'latest'
-          environment-file: ci/environment.yml
+          environment-file: environment-laptop.yml
           create-args: |
             python=3.12
       - name: Install C-Star
