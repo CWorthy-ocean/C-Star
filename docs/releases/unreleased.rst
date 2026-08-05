@@ -26,7 +26,8 @@ Bug Fixes
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- Harden ROMS build process by handling separate NETCDFF paths, ensuring linked libraries come from a single source, and baking library locations into the roms binary (`#611 <https://github.com/CWorthy-ocean/C-Star/pull/611>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
