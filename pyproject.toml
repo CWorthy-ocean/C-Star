@@ -91,6 +91,11 @@ exclude = "properties|asv_bench|docs"
 fix = true
 show-fixes = true
 line-length = 88
+# Keep lint behavior stable across the requires-python 3.10->3.12 bump: without this,
+# ruff infers py312 and demands PEP 695 syntax (UP040/UP046/UP047) in applications/core.py.
+# That modernization is a deliberate, separate change - do it repo-wide when ready and
+# bump this to py312.
+target-version = "py311"
 
 [tool.ruff.lint]
 extend-select = ["I", "F", "E", "W", "D", "UP", "TCH"] #  "RUF", "UP"]

@@ -1,7 +1,7 @@
 import asyncio
 import os
 import unittest.mock as mock
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -97,7 +97,7 @@ async def test_tracking_retrieve(tmp_path: Path) -> None:
     wp_path = tmp_path / "fake_workplan.yaml"
     wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     run_id = "test-tracking-retrieve-run-id"
-    start_at = datetime.now(tz=timezone.utc)
+    start_at = datetime.now(tz=UTC)
     captured_env = {"foo": "foo-value"}
 
     wp_run = WorkplanRun(
