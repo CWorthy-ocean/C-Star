@@ -91,9 +91,12 @@ class LocalHandle(ProcessHandle):
 class LocalComputeSpec(BaseModel):
     """Compute configuration options when using the local launcher."""
 
-    max_walltime: str = "600s"
+    DEFAULT_MAX_WALLTIME: t.ClassVar[str] = "600s"
+    DEFAULT_FK_TIMEOUT: t.ClassVar[str] = "2s"
+
+    max_walltime: str = DEFAULT_MAX_WALLTIME
     """Maximum amount of time a process should be allowed to run."""
-    force_kill_timeout: str = "2s"
+    force_kill_timeout: str = DEFAULT_FK_TIMEOUT
     """Grace period before force-killing a local process after timeout is exceeded."""
 
     # TODO: specify the format as a regex and ensure it's validated by pydantic.
@@ -117,8 +120,14 @@ class LocalComputeAdapter(
             overrides = t.cast("dict[str, str]", overrides_)
 
             return LocalComputeSpec(
-                max_walltime=overrides.get("max_walltime", ""),
-                force_kill_timeout=overrides.get("force_kill_timeout", ""),
+                max_walltime=overrides.get(
+                    "max_walltime",
+                    LocalComputeSpec.DEFAULT_MAX_WALLTIME,
+                ),
+                force_kill_timeout=overrides.get(
+                    "force_kill_timeout",
+                    LocalComputeSpec.DEFAULT_FK_TIMEOUT,
+                ),
             )
         return None
 
@@ -190,9 +199,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         """Perform launcher-specific startup validation."""
 
     @staticmethod
-    def _adapt_step(
+    def adapt_step(
         step: "LiveStep",
-        formatter: ModelFormatter[RunRequest],
+        dependencies: list[LocalHandle],
     ) -> str:
         """Create a script that will execute the desired command for a
         `Step` while also waiting for any dependencies to complete.
@@ -201,11 +210,18 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         str
         """
-        compute = LocalComputeAdapter().adapt(step.compute_overrides)
+        formatter: ModelFormatter[RunRequest] = RunRequestScriptFormatter()
+        if LocalLauncher.use_proxy:
+            formatter = ProxiedRunRequestFormatter(step, dependencies)
+
         enricher: ModelEnricher[RunRequest] | None = None
-        if compute:
-            enricher = TimeConstrainedRunRequestEnricher(compute)
-        request = StepToRunRequestAdapter(enricher).adapt(step)
+
+        if step.compute_overrides:
+            if compute := LocalComputeAdapter().adapt(step.compute_overrides):
+                enricher = TimeConstrainedRunRequestEnricher(compute)
+
+        adapter = StepToRunRequestAdapter(enricher)
+        request = adapter.adapt(step)
 
         return formatter.format(request)
 
@@ -225,11 +241,7 @@ class LocalLauncher(Launcher[LocalHandle]):
         LocalHandle | None
             A ProcessHandle identifying the newly submitted job.
         """
-        formatter: ModelFormatter[RunRequest] = RunRequestScriptFormatter()
-        if LocalLauncher.use_proxy:
-            formatter = ProxiedRunRequestFormatter(step, dependencies)
-
-        script = LocalLauncher._adapt_step(step, formatter)
+        script = LocalLauncher.adapt_step(step, dependencies)
 
         step.fsm.prepare()
         step.script_path.write_text(script)
