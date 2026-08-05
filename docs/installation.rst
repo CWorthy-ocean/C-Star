@@ -19,8 +19,8 @@ Create a python virtual environment
 Select **one** of the following environment configuration files provided
 in the repository to create your environment.
 
-* Use ``ci/environment_hpc.yml`` on a supported HPC system (environment management by Linux Environment Modules)
-* Use ``ci/environment.yml`` on a generic machine like a laptop (environment managed by conda)
+* Use ``environment-hpc.yml`` on a supported HPC system (environment management by Linux Environment Modules)
+* Use ``environment-laptop.yml`` on a generic machine like a laptop (environment managed by conda)
 
 .. tab-set::
 
@@ -29,21 +29,21 @@ in the repository to create your environment.
       .. code-block:: console
          :caption: Creating a virtual environment on HPC
 
-         conda env create -f ci/environment_hpc.yml
+         conda env create -f environment-hpc.yml
 
    .. tab-item:: Standard environment
 
       .. code-block:: console
          :caption: Creating a virtual environment on non-HPC
 
-         conda env create -f ci/environment.yml
+         conda env create -f environment-laptop.yml
 
 Once the environment is created, ensure it is activated:
 
 .. code-block:: console
    :caption: Activating the virtual environment
 
-   conda activate cstar_env
+   conda activate cstar-env
 
 Install C-Star
 --------------

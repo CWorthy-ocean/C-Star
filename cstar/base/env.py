@@ -4,7 +4,7 @@ import typing as t
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
@@ -149,7 +149,7 @@ def nprocs_factory() -> str:
 
 def generate_run_id() -> str:
     """Generate a unique run identifier based on the current time."""
-    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
 ENV_CSTAR_LOG_LEVEL: t.Annotated[

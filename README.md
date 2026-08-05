@@ -24,13 +24,13 @@ cd C-Star
 Next, install **one** of the following conda environments, depending on whether you are working on a supported HPC system (environment management by Linux Environment Modules) or a generic machine like a laptop (environment managed by conda):
 
 ```
-conda env create -f ci/environment_hpc.yml  # conda environment for supported HPC system
-# conda env create -f ci/environment.yml  # conda environment for generic machine 
+conda env create -f environment-hpc.yml  # conda environment for supported HPC system
+# conda env create -f environment-laptop.yml  # conda environment for generic machine 
 ```
 
 Activate the conda environment:
 ```
-conda activate cstar_env
+conda activate cstar-env
 ```
 
 Finally, install `C-Star` in the same environment:
@@ -42,7 +42,7 @@ pip install -e .
 
 Before running the tests, you can activate the conda environment created in the previous section:
 ```
-conda activate cstar_env
+conda activate cstar-env
 ```
 
 Check the installation of `C-Star` has worked by running the test suite
