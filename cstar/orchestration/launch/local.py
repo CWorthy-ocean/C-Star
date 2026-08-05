@@ -518,7 +518,7 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
             "done": str(Status.Done.value),
             "failed": str(Status.Failed.value),
             "delay": delay,
-            "command": str(value.command),
+            "command": " ".join(value.command),
             "env_vars": env_vars,
         }
         files_dir = additional_files_dir()
