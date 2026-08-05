@@ -43,7 +43,7 @@ Once the environment is created, ensure it is activated:
 .. code-block:: console
    :caption: Activating the virtual environment
 
-   conda activate cstar_env
+   conda activate cstar-env
 
 Install C-Star
 --------------

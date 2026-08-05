@@ -30,7 +30,7 @@ conda env create -f environment-hpc.yml  # conda environment for supported HPC s
 
 Activate the conda environment:
 ```
-conda activate cstar_env
+conda activate cstar-env
 ```
 
 Finally, install `C-Star` in the same environment:
@@ -42,7 +42,7 @@ pip install -e .
 
 Before running the tests, you can activate the conda environment created in the previous section:
 ```
-conda activate cstar_env
+conda activate cstar-env
 ```
 
 Check the installation of `C-Star` has worked by running the test suite

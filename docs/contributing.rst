@@ -15,7 +15,7 @@ laptop (environment managed by conda)::
 
 Activate the conda environment::
 
-   conda activate cstar_env
+   conda activate cstar-env
 
 Install ``C-Star`` in the same environment::
 
@@ -33,7 +33,7 @@ Running the tests
 You can check the functionality of the C-Star code by running the test
 suite::
 
-   conda activate cstar_env
+   conda activate cstar-env
    cd C-Star
    pytest
 
@@ -46,7 +46,7 @@ all tests pass. The next step is to make sure that the code is formatted
 properly. Activate the environment (created above) and run all linters
 as follows::
 
-   conda activate cstar_env
+   conda activate cstar-env
    pre-commit run --all-files
 
 Some things will automatically be reformatted, others may need manual
@@ -100,7 +100,7 @@ Building the documentation locally
 
 Activate the environment::
 
-   conda activate cstar_env
+   conda activate cstar-env
 
 Then navigate to the docs folder and build the docs via::
 

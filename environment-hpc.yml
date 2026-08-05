@@ -1,4 +1,4 @@
-name: cstar_env
+name: cstar-env
 channels:
   - conda-forge
 dependencies:
