@@ -9,7 +9,8 @@ Unreleased
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+
+- Formally drop support for python 3.10 and 3.11 (`#613 <https://github.com/CWorthy-ocean/C-Star/pull/613>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -32,4 +33,7 @@ Improvements
 Miscellaneous
 ~~~~~~~~~~~~~
 
-- N/A
+- Rename default environment from cstar_env to cstar-env (`#613 <https://github.com/CWorthy-ocean/C-Star/pull/613>`_)
+- Move environment yamls to root directory (`#613 <https://github.com/CWorthy-ocean/C-Star/pull/613>`_)
+- Overhaul installation instructions (`#613 <https://github.com/CWorthy-ocean/C-Star/pull/613>`_)
+- no-op changes to ``UTC`` usage to satisfy new linting under python 3.12 (`#613 <https://github.com/CWorthy-ocean/C-Star/pull/613>`_)
