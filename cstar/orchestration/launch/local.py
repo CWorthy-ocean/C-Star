@@ -10,7 +10,11 @@ from psutil import NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
-from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
+from cstar.base.adapter import (
+    ConfiguredModelAdapter,
+    CstarAdaptationError,
+    ModelEnricher,
+)
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
@@ -108,28 +112,64 @@ class LocalComputeSpec(BaseModel):
     """Configure model to ignore empty strings."""
 
 
-class LocalComputeAdapter(
-    ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec | None]
-):
-    def adapt(self, model: KeyValueStore) -> LocalComputeSpec | None:
+class LocalComputeAdapter(ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec]):
+    """Adapts a `KeyValueStore` containing optional overrides into a `LocalComputeSpec`."""
+
+    allow_unmodified: bool = False
+    """When set to `True` the adapter will return a default LocalComputeSpec if
+    no user-supplied customizations were supplied.
+    """
+
+    def __init__(self, allow_unmodified: bool = False) -> None:
+        """Initialize the adapter.
+
+        Parameters
+        ----------
+        allow_unmodified : bool
+            Pass `True` to return a default `LocalComputeSpec` instance when no custom
+            configuration is supplied.
+        """
+        self.allow_unmodified = allow_unmodified
+
+    def adapt(self, model: KeyValueStore) -> LocalComputeSpec:
+        """Adapt the input into a `LocalComputeSpec`.
+
+        Returns `None` when no appropriate compute specification is provided.
+
+        Parameters
+        ----------
+        model : KeyValueStore
+            The `KeyValueStore` to be adapted.
+
+        Returns
+        -------
+        LocalComputeSpec
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If the input cannot be used to attempt adaptation.
+        CstarAdaptationError
+            If the input cannot be successfully adapted to the target type.
+        """
         if not model:
             msg = "Compute overrides were not supplied to the LocalComputeAdapter"
             raise CstarExpectationFailed(msg)
 
         if overrides_ := model.get("local", {}):
-            overrides = t.cast("dict[str, str]", overrides_)
+            compute = LocalComputeSpec.model_validate(overrides_)
 
-            return LocalComputeSpec(
-                max_walltime=overrides.get(
-                    "max_walltime",
-                    LocalComputeSpec.DEFAULT_MAX_WALLTIME,
-                ),
-                force_kill_timeout=overrides.get(
-                    "force_kill_timeout",
-                    LocalComputeSpec.DEFAULT_FK_TIMEOUT,
-                ),
-            )
-        return None
+            if not compute.model_dump(exclude_defaults=True):
+                msg = "Non-default local compute overrides were not specified."
+                log.debug(msg)
+
+            return compute
+
+        if self.allow_unmodified:
+            return LocalComputeSpec()
+
+        msg = f"Unable to adapt model {model!r} into LocalComputeSpec"
+        raise CstarAdaptationError(msg)
 
 
 class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
@@ -217,8 +257,11 @@ class LocalLauncher(Launcher[LocalHandle]):
         enricher: ModelEnricher[RunRequest] | None = None
 
         if step.compute_overrides:
-            if compute := LocalComputeAdapter().adapt(step.compute_overrides):
-                enricher = TimeConstrainedRunRequestEnricher(compute)
+            try:
+                if compute := LocalComputeAdapter().adapt(step.compute_overrides):
+                    enricher = TimeConstrainedRunRequestEnricher(compute)
+            except CstarAdaptationError:
+                log.debug("")
 
         adapter = StepToRunRequestAdapter(enricher)
         request = adapter.adapt(step)

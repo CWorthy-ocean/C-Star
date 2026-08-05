@@ -8,13 +8,13 @@ from prefect import Task as PrefectTask
 from prefect.client.schemas import TaskRun
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from cstar.base.adapter import ModelAdapter
+from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
 from cstar.base.env import (
     ENV_CSTAR_RUNID,
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
@@ -101,22 +101,49 @@ class SlurmComputeSpec(BaseModel):
     """Configure model to ignore empty strings."""
 
 
-class SlurmComputeOverrideAdapter(ModelAdapter[KeyValueStore, SlurmComputeSpec | None]):
-    """Converts a raw `KeyValueStore` containing optional overrides into a SLURM compute spec."""
+class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec]):
+    """Adapts a `KeyValueStore` containing optional overrides into a `SlurmComputeSpec`."""
 
-    def adapt(self) -> SlurmComputeSpec | None:
-        if overrides_ := t.cast("dict[str, str | int]", self.model.get("slurm", {})):
-            # overrides = {k: str(v) for k, v in overrides_.items()}
+    def adapt(self, model: KeyValueStore) -> SlurmComputeSpec:
+        """Adapt the input into a `SlurmComputeSpec`.
+
+        Returns `None` when no appropriate compute specification is provided.
+
+        Parameters
+        ----------
+        model : KeyValueStore
+            The `KeyValueStore` to be adapted.
+
+        Returns
+        -------
+        SlurmComputeSpec
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If the input cannot be used to attempt adaptation.
+        CstarAdaptationError
+            If the input cannot be successfully adapted to the target type.
+        """
+        if not model:
+            msg = "Compute overrides were not supplied to the LocalComputeAdapter"
+            raise CstarExpectationFailed(msg)
+
+        if overrides_ := t.cast("dict[str, str | int]", model.get("slurm", {})):
             try:
                 compute = SlurmComputeSpec.model_validate(overrides_)
 
-                if compute.model_dump(exclude_defaults=True):
-                    # only return spec if it was modified
-                    return compute
+                if not compute.model_dump(exclude_defaults=True):
+                    msg = "Non-default SLURM compute overrides were not specified."
+                    log.debug(msg)
+
+                return compute
             except ValidationError:
                 msg = "Invalid compute overrides were specified"
                 log.error(msg)
-        return None
+
+        msg = f"Unable to adapt model {model!r} into LocalComputeSpec"
+        raise CstarAdaptationError(msg)
 
 
 class SlurmHandle(ProcessHandle):
@@ -216,7 +243,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         adapter = StepToRunRequestAdapter()
         command = RunRequestCommandFormatter().format(adapter.adapt(step))
 
-        compute_overrides = SlurmComputeOverrideAdapter(step.compute_overrides).adapt()
+        compute_overrides = SlurmComputeAdapter().adapt(step.compute_overrides)
         compute = compute_overrides or SlurmComputeSpec()
 
         compute.queue_name = compute.queue_name or SlurmLauncher.configured_queue()

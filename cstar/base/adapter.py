@@ -128,3 +128,9 @@ class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
             migrated[self.SCHEMA_VERSION_KEY] = self.target()
 
         return migrated
+
+
+class CstarAdaptationError(Exception):
+    """Raise this error when an input cannot be adapted to the target type."""
+
+    ...
