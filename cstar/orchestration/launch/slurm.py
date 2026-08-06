@@ -88,14 +88,16 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
 class SlurmComputeSpec(BaseModel):
     num_cpus: int = 0
     """Total number of CPUs required by the job."""
-    num_nodes: int = 0
+    num_nodes: int | None = None
     """The number of nodes to request."""
-    cpus_per_node: int = 0
+    cpus_per_node: int | None = None
     """The number of CPUs to request per node."""
     max_walltime: str = ""
     """The maximum walltime for the job."""
     queue_name: str = ""
     """The priority of the job."""
+    account_name: str = ""
+    """The SLURM account to run the job under."""
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure model to ignore empty strings."""
