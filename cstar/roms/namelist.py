@@ -307,6 +307,7 @@ class ExtractDataSettings(_NmlGroup):
     """`theta_b` of nested domain"""
     hc_chd: float
     """`hc` of nested domain"""
+    extract_root_name: str
 
 
 class SpongeTuneSettings(_NmlGroup):
