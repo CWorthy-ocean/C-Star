@@ -19,6 +19,7 @@ from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
+    SchedulerJob,
     create_scheduler_job,
     get_slurm_batch,
     get_slurm_batches,
@@ -205,6 +206,65 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
 
+    @staticmethod
+    def _get_default_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
+        """Create the default compute spec for SLURM.
+
+        Returns
+        -------
+        SlurmComputeSpec
+        """
+        return SlurmComputeSpec(
+            num_cpus=step.blueprint.cpus_needed,
+            max_walltime=SlurmLauncher.configured_walltime(),
+            queue_name=SlurmLauncher.configured_queue(),
+            account_name=SlurmLauncher.configured_account(),
+        )
+
+    @staticmethod
+    def adapt_step(
+        step: "LiveStep",
+        dependencies: list[SlurmHandle],
+    ) -> SchedulerJob:
+        """Create a `SchedulerJob` that will execute the desired command for a
+        `Step` while also waiting for any dependencies to complete.
+
+        Returns
+        -------
+        str
+        """
+        job_dep_ids = [d.pid for d in dependencies]
+
+        request_adapter = StepToRunRequestAdapter()
+        command = RunRequestCommandFormatter().format(request_adapter.adapt(step))
+
+        default_compute = SlurmLauncher._get_default_compute_spec(step)
+        try:
+            overrides: SlurmComputeSpec | None = None
+            if step.compute_overrides:
+                overrides = SlurmComputeAdapter().adapt(step.compute_overrides)
+
+            compute = default_compute.model_copy(
+                update=overrides.model_dump(exclude_defaults=True) if overrides else {}
+            )
+        except CstarAdaptationError:
+            compute = default_compute
+
+        return create_scheduler_job(
+            commands=command,
+            account_key=compute.account_name,
+            cpus=compute.num_cpus,
+            nodes=compute.num_nodes,
+            cpus_per_node=compute.cpus_per_node,
+            script_path=step.script_path,
+            run_path=step.script_path.parent,
+            job_name=step.safe_name,
+            output_file=step.log_path,
+            queue_name=compute.queue_name,
+            walltime=compute.max_walltime,
+            depends_on=job_dep_ids,
+        )
+
     @task(
         persist_result=True,
         cache_key_fn=cache_key_func,
@@ -230,45 +290,14 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
             raise CstarError(msg)
 
-        job_name = step.safe_name
-        job_dep_ids = [d.pid for d in dependencies]
-
-        script_path = step.script_path
-        output_file = step.log_path
-
-        script_path.parent.mkdir(parents=True, exist_ok=True)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
+        step.script_path.parent.mkdir(parents=True, exist_ok=True)
+        step.log_path.parent.mkdir(parents=True, exist_ok=True)
 
         run_id = os.getenv(ENV_CSTAR_RUNID, "")
         step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
 
-        adapter = StepToRunRequestAdapter()
-        command = RunRequestCommandFormatter().format(adapter.adapt(step))
-
-        compute_overrides = SlurmComputeAdapter().adapt(step.compute_overrides)
-        compute = compute_overrides or SlurmComputeSpec()
-
-        compute.queue_name = compute.queue_name or SlurmLauncher.configured_queue()
-        compute.max_walltime = (
-            compute.max_walltime or SlurmLauncher.configured_walltime()
-        )
-
-        job = create_scheduler_job(
-            commands=command,
-            account_key=SlurmLauncher.configured_account(),
-            cpus=compute.num_cpus,
-            nodes=compute.num_cpus,
-            cpus_per_node=compute.cpus_per_node,
-            script_path=script_path,
-            run_path=script_path.parent,
-            job_name=job_name,
-            output_file=output_file,
-            queue_name=compute.queue_name,
-            walltime=compute.max_walltime,
-            depends_on=job_dep_ids,
-        )
-
-        short_command = command.replace("\n", "")[:40]  # shorten and omit newlines
+        job = SlurmLauncher.adapt_step(step, dependencies)
+        short_command = job.commands.replace("\n", "")[:40]  # shorten and omit newlines
 
         msg = f"Submitting command `{short_command}...` for step `{step.name}`."
         log.debug(msg)
