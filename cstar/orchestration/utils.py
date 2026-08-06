@@ -27,7 +27,7 @@ ENV_CSTAR_APP_MODULES: t.Annotated[
         "",
     ),
 ] = "CSTAR_APP_MODULES"
-"""A comma-separated list of importable module paths for externally-defined applications."""
+"""A comma-separated list of package names where external applications are defined."""
 
 ENV_CSTAR_ORCH_TRX_FREQ: t.Annotated[
     t.Literal["CSTAR_ORCH_TRX_FREQ"],
