@@ -7,12 +7,14 @@ from itertools import chain
 from pathlib import Path
 
 from cstar.base.adapter import SchemaAdapter
+from cstar.base.env import get_env_item
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import SerializableModel, deserialize
+from cstar.orchestration.utils import ENV_CSTAR_APP_MODULES
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
@@ -365,9 +367,37 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     ------
     ValueError
         if no registered application is associated with this classification
+
+    Notes
+    -----
+    Applications defined outside the ``cstar.applications`` package can be made
+    discoverable by setting the ``CSTAR_APP_MODULES`` environment variable to a
+    comma-separated list of importable module paths. Each module is imported
+    before lookup so its ``@register_application`` decorators run.
     """
     if name not in _registry:
-        importlib.import_module(f"cstar.applications.{name}")
+        if modules := get_env_item(ENV_CSTAR_APP_MODULES).value:
+            if matches := {m.strip() for m in modules.split(",") if name in m}:
+                if len(matches) > 1:
+                    msg = f"An application name collision may occur using {name!r} for modules {','.join(matches)}"
+                    log.warning(msg)
+
+                module = next(iter(matches))
+
+                try:
+                    importlib.import_module(module)
+                except ModuleNotFoundError:
+                    log.warning(
+                        f"Unable to load external application {name!r} from {module!r}"
+                    )
+                    raise
+
+        module = f"cstar.applications.{name}"
+
+        try:
+            importlib.import_module(module)
+        except ModuleNotFoundError:
+            log.warning(f"Unable to load C-Star application {name!r} from {module!r}")
 
     if application := _registry.get(name):
         log.trace(f"Located application context {application.__name__!r} for {name!r}")

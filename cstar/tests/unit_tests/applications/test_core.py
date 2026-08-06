@@ -1,11 +1,85 @@
 # ruff: noqa: S101
+import textwrap
 from pathlib import Path
 
 import pytest
 
-from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
+from cstar.applications.core import (
+    RunnerRequest,
+    RunnerResult,
+    RunnerState,
+    _registry,
+    get_application,
+)
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import discover_env_vars
 from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.utils import ENV_CSTAR_APP_MODULES
+
+
+def test_get_application_unknown_name_raises_value_error() -> None:
+    """Verify that an unregistered application name raises ValueError."""
+    with pytest.raises(ValueError, match="No application for"):
+        get_application("no_such_application")
+
+
+def test_app_modules_env_var_is_registered() -> None:
+    """Verify that CSTAR_APP_MODULES is discoverable for CLI display and docs."""
+    assert ENV_CSTAR_APP_MODULES in discover_env_vars()
+
+
+def test_get_application_from_external_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that applications defined outside `cstar.applications` are discovered
+    via the CSTAR_APP_MODULES environment variable.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary path fixture for writing per-test outputs. Used to create the
+        external application module.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to set the environment variable and import path.
+    """
+    app_name = "external_test_app"
+    module = tmp_path / f"{app_name}_module.py"
+    module.write_text(
+        textwrap.dedent(
+            f"""
+            from cstar.applications.core import (
+                ApplicationDefinition,
+                register_application,
+            )
+            from cstar.applications.hello_world import (
+                HelloWorldBlueprint,
+                HelloWorldRunner,
+            )
+
+
+            @register_application
+            class ExternalApplication(
+                ApplicationDefinition[HelloWorldBlueprint, HelloWorldRunner]
+            ):
+                name: str = "{app_name}"
+                long_name: str = "Externally Defined App"
+                runner = HelloWorldRunner
+                blueprint = HelloWorldBlueprint
+                applicable_transforms = ()
+            """
+        )
+    )
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv(ENV_CSTAR_APP_MODULES, f"{app_name}_module")
+
+    try:
+        app = get_application(app_name)
+        assert app.name == app_name
+        assert app.blueprint.__name__ == "HelloWorldBlueprint"
+    finally:
+        _registry.pop(app_name, None)
 
 
 def test_runnerresult_initial_state(tmp_path: Path) -> None:
