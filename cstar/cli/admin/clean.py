@@ -23,8 +23,6 @@ from cstar.cli.common import (
 from cstar.cli.workplan.shared import colored, list_runs
 from cstar.entrypoint.utils import ARG_DRY_RUN
 from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
-from cstar.orchestration.orchestration import LiveWorkplan
-from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
 log = get_logger(__name__)
@@ -210,16 +208,6 @@ class FileSystemCleanupAction(CleanupAction):
         return header
 
 
-def get_prefect_storage_path() -> Path:
-    """Return the path to the directory containing cached assets in prefect.
-
-    Returns
-    -------
-    Path
-    """
-    return Path("~/.prefect/storage").expanduser().resolve()
-
-
 def get_default_cleanup_actions() -> list[CleanupAction]:
     """Return a list of all available clean-up actions.
 
@@ -230,35 +218,32 @@ def get_default_cleanup_actions() -> list[CleanupAction]:
     -------
     list[CleanupAction]
     """
-    return list(
-        sorted(
-            [
-                FileSystemCleanupAction(
-                    name="C-Star package cache",
-                    description="Cached copies of previously retrieved github repositories",
-                    asset_paths=[DirectoryManager.cache_home()],
-                ),
-                FileSystemCleanupAction(
-                    name="C-Star state files",
-                    description="Internal C-Star state information related to run history.",
-                    asset_paths=[
-                        DirectoryManager.state_home(),
-                        get_prefect_storage_path(),
-                    ],
-                ),
-                FileSystemCleanupAction(
-                    name="C-Star Data",
-                    description="All datasets and assets created during a run.",
-                    asset_paths=[DirectoryManager.data_home()],
-                ),
-                FileSystemCleanupAction(
-                    name="C-Star configuration",
-                    description="Local user-specific C-Star configuration files",
-                    asset_paths=[DirectoryManager.config_home()],
-                ),
-            ],
-            key=lambda x: x.name,
-        )
+    return sorted(
+        [
+            FileSystemCleanupAction(
+                name="C-Star package cache",
+                description="Cached copies of previously retrieved github repositories",
+                asset_paths=[DirectoryManager.cache_home()],
+            ),
+            FileSystemCleanupAction(
+                name="C-Star state files",
+                description="Internal C-Star state information related to run history.",
+                asset_paths=[
+                    DirectoryManager.state_home(),
+                ],
+            ),
+            FileSystemCleanupAction(
+                name="C-Star Data",
+                description="All datasets and assets created during a run.",
+                asset_paths=[DirectoryManager.data_home()],
+            ),
+            FileSystemCleanupAction(
+                name="C-Star configuration",
+                description="Local user-specific C-Star configuration files",
+                asset_paths=[DirectoryManager.config_home()],
+            ),
+        ],
+        key=lambda x: x.name,
     )
 
 
@@ -396,10 +381,8 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
     rundata_paths: list[Path] = []
 
     run_repo = TrackingRepository()
-    workplan: LiveWorkplan | None = None
 
     if run := asyncio.run(run_repo.get_workplan_run(run_id)):
-        workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
         rundata_paths.append(run.output_path)
     else:
         # if we can't load a run, check the default data path.
@@ -409,19 +392,11 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
         else:
             log.debug(f"Run {run_id!r} not found")
 
-    storage_root: t.Final[Path] = get_prefect_storage_path()
-    if workplan:
-        fn_name: t.Final[str] = "_submit"
-
-        for step in workplan.steps:
-            cache_key = f"{run_id}_{step.name}_{fn_name}"
-            cache_paths.append(storage_root / cache_key)
-    else:
-        cache_paths.extend(
-            p
-            for p in storage_root.iterdir()
-            if p.is_dir() and p.name.startswith(run_id)
-        )
+    # the run's sentinel files are the resubmission guard: removing them
+    # makes a re-run with this run-id submit every step fresh
+    sentinel_dir = StateDirectoryManager.run_state_dir(run_id=run_id)
+    if sentinel_dir.exists():
+        cache_paths.append(sentinel_dir)
 
     if run_paths := run_repo.list_runtracking_paths(run_id, all_history=True):
         runstate_paths.extend(run_paths)

@@ -105,7 +105,7 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     mock_exec.assert_called_once()
 
 
-@pytest.mark.usefixtures("prefect_server_url", "read_yaml_intercept")
+@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_variable_unknown(
     wp_templates_dir: Path,
 ) -> None:
@@ -642,7 +642,7 @@ async def test_workplan_run_reload_prior_run(
     repo = TrackingRepository()
     await repo.put_workplan_run(fake_run)
 
-    def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
+    def typer_exit(*args, **kwargs) -> None:  # type: ignore
         raise typer.Exit(0)
 
     mock_get_wp = mock.Mock(return_value=fake_run)

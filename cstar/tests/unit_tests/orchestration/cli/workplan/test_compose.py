@@ -152,7 +152,6 @@ async def test_compose_host_run_parameter(
         mock_run.assert_not_called()
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     ("drop_var", "key", "settings_klass"),
     [

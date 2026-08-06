@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
 
-from prefect import flow
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
@@ -529,7 +528,6 @@ async def on_status_changed(handle: ProcessHandle) -> None:
             await run_repo.put_workplan_run(run)
 
 
-@flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",

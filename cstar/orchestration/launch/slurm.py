@@ -3,10 +3,6 @@ import os
 import typing as t
 from collections.abc import Mapping
 
-from prefect import State, task
-from prefect import Task as PrefectTask
-from prefect.client.schemas import TaskRun
-
 from cstar.base.env import (
     ENV_CSTAR_RUNID,
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
@@ -40,46 +36,9 @@ from cstar.orchestration.utils import (
 )
 
 if t.TYPE_CHECKING:
-    from prefect.context import TaskRunContext
-
     from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
-
-
-async def on_submit_complete(
-    task: PrefectTask[["LiveStep", list["SlurmHandle"]], "SlurmHandle"],
-    task_run: TaskRun,
-    state: State["SlurmHandle"],
-) -> None:
-    """Perform actions required when a job submission completes
-    successfully.
-    """
-    if state.is_completed() and state.name == "Cached":
-        handle = await state.aresult()
-        log.debug(f"Re-using result from cached SLURM job: {handle}")
-
-
-def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
-    """Cache on a combination of the task name and user-assigned run id.
-
-    Parameters
-    ----------
-    context : TaskRunContext
-        The prefect context object for the currently running task
-    params : dict[str, t.Any]
-        A dictionary containing all thee input values to the task
-
-    Returns
-    -------
-    str
-        The cache key for the current context.
-    """
-    run_id = os.getenv(ENV_CSTAR_RUNID)
-    cache_key = f"{run_id}_{params['step'].name}_{context.task.name}"
-
-    log.trace("Cache check: %s", cache_key)
-    return cache_key
 
 
 class SlurmHandle(ProcessHandle):
@@ -139,11 +98,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         return get_env_item(ENV_CSTAR_SLURM_ACCOUNT).value
 
-    @task(
-        persist_result=True,
-        cache_key_fn=cache_key_func,
-        on_completion=[on_submit_complete],
-    )
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
@@ -270,35 +224,42 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             "SlurmHandle",
             await state_repo.get_sentinel(step.name, SlurmHandle),
         )
-        submit_fn = SlurmLauncher._submit
 
         if prior_handle:
             # use persisted task as sentinel only; query SLURM for up-to-date status
             last_status = await SlurmLauncher.query_status(prior_handle)
 
-            if Status.is_failure(last_status):
-                # force cache refresh for any tasks that didn't succeed
-                step.fsm.clear_prior()
-                submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
+            if not Status.is_failure(last_status):
+                # already submitted for this run id: re-use the prior job
+                # instead of resubmitting
+                msg = f"Re-using previously submitted SLURM job: {prior_handle}"
+                log.info(msg)
+                await SlurmLauncher.update_status(prior_handle)
 
-                # SLURM cannot use dependencies on previously completed jobs
-                pid_to_task = await cls._locate_priors()
-                batch_map = await get_slurm_batches(pid_to_task.keys())
-                successes = {
-                    k
-                    for k, v in batch_map.items()
-                    if v.status == ExecutionStatus.COMPLETED
-                }
-                if dependencies and successes:
-                    reusable = set(x.pid for x in dependencies).intersection(successes)
-                    msg = f"Dependencies previously satisfied: {', '.join(reusable)}"
-                    log.info(msg)
+                return Task(
+                    step=step,
+                    handle=prior_handle,
+                )
 
-                    # only keep dependencies that are not re-usable
-                    active = set(x.pid for x in dependencies).difference(successes)
-                    dependencies = list(filter(lambda x: x.pid in active, dependencies))
+            # the prior attempt failed: clear its outputs and resubmit
+            step.fsm.clear_prior()
 
-        handle = await submit_fn(step, dependencies)
+            # SLURM cannot use dependencies on previously completed jobs
+            pid_to_task = await cls._locate_priors()
+            batch_map = await get_slurm_batches(pid_to_task.keys())
+            successes = {
+                k for k, v in batch_map.items() if v.status == ExecutionStatus.COMPLETED
+            }
+            if dependencies and successes:
+                reusable = set(x.pid for x in dependencies).intersection(successes)
+                msg = f"Dependencies previously satisfied: {', '.join(reusable)}"
+                log.info(msg)
+
+                # only keep dependencies that are not re-usable
+                active = set(x.pid for x in dependencies).difference(successes)
+                dependencies = list(filter(lambda x: x.pid in active, dependencies))
+
+        handle = await SlurmLauncher._submit(step, dependencies)
         await SlurmLauncher.update_status(handle)
 
         return Task(

@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 import os
 import typing as t
 import uuid
@@ -247,7 +246,6 @@ async def test_hello_world_workplan(
     assert workplan_copy.steps[0].blueprint_path == workplan.steps[0].blueprint_path
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     "dry_run",
     [
@@ -267,8 +265,6 @@ def test_hello_world_workplan_dry_run(
         The path to the workplan containing a single step that runs the hello_world application.
     dry_run : bool
         Whether to run the workplan in dry-run mode.
-    prefect_server_url: str
-        Implicitly declare dependence on the prefect server
     """
     runner = CliRunner()
     custom_env = {
@@ -305,7 +301,6 @@ def test_hello_world_workplan_dry_run(
     assert result.exit_code == 0
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     "dry_run",
     [
@@ -326,8 +321,6 @@ def test_heterogeneous_workplan(
         and a step relying on the ROMS-MARBL application.
     dry_run : bool
         Whether to run the workplan in dry-run mode.
-    prefect_server_url: str
-        Implicitly declare dependence on the prefect server
     """
     runner = CliRunner()
     custom_env = {
@@ -363,7 +356,6 @@ def test_heterogeneous_workplan(
     assert result.exit_code == 0
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 def test_hw_runner_bp_only(
     hello_world_bp_path: Path,
 ) -> None:
@@ -374,8 +366,6 @@ def test_hw_runner_bp_only(
     ----------
     hello_world_bp_path : Path
         A fixture that stores an HW blueprint and returns the path.
-    prefect_server_url: str
-        Implicitly declare dependence on the prefect server
     """
     runner = CliRunner()
     custom_env: dict[str, str] = {

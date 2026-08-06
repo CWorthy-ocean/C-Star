@@ -1,7 +1,6 @@
 import itertools
 import os
 import typing as t
-from collections.abc import Generator
 from pathlib import Path
 from unittest import mock
 
@@ -24,38 +23,8 @@ from cstar.orchestration.models import Workplan
 from cstar.orchestration.tracking import TrackingRepository
 
 
-@pytest.fixture(autouse=True)
-def prefect_path(tmp_path: Path) -> Generator[Path]:
-    """Replace the function returning the path to the prefect storage location
-    to avoid wiping out "real data" during tests.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Temporary directory to read/write test inputs and outputs
-
-    Returns
-    -------
-    Path
-    """
-    path = tmp_path / "prefect-test-storage"
-    path.mkdir(parents=True, exist_ok=True)
-
-    with mock.patch(
-        "cstar.cli.admin.clean.get_prefect_storage_path",
-        mock.Mock(return_value=path),
-    ):
-        yield path
-
-
-def test_cli_admin_clean_get_default_cleanup_actions(prefect_path: Path) -> None:
-    """Verify that the default cleanup actions include all 4 XDG-compliant directories.
-
-    Parameters
-    ----------
-    prefect_path : Path
-        The path returned by the mocked `get_prefect_storage_path` function.
-    """
+def test_cli_admin_clean_get_default_cleanup_actions() -> None:
+    """Verify that the default cleanup actions include all 4 XDG-compliant directories."""
     default_actions = t.cast(
         "list[FileSystemCleanupAction]", get_default_cleanup_actions()
     )
@@ -68,7 +37,6 @@ def test_cli_admin_clean_get_default_cleanup_actions(prefect_path: Path) -> None
     assert DirectoryManager.config_home() in default_paths
     assert DirectoryManager.data_home() in default_paths
     assert DirectoryManager.state_home() in default_paths
-    assert prefect_path in default_paths
 
 
 @pytest.mark.parametrize(
