@@ -258,10 +258,12 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         if step.compute_overrides:
             try:
-                if compute := LocalComputeAdapter().adapt(step.compute_overrides):
+                if step.compute_overrides:
+                    compute = LocalComputeAdapter().adapt(step.compute_overrides)
                     enricher = TimeConstrainedRunRequestEnricher(compute)
             except CstarAdaptationError:
-                log.debug("")
+                msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
+                log.warning(msg, exc_info=True)
 
         adapter = StepToRunRequestAdapter(enricher)
         request = adapter.adapt(step)

@@ -239,16 +239,17 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         command = RunRequestCommandFormatter().format(request_adapter.adapt(step))
 
         default_compute = SlurmLauncher._get_default_compute_spec(step)
-        try:
-            overrides: SlurmComputeSpec | None = None
-            if step.compute_overrides:
-                overrides = SlurmComputeAdapter().adapt(step.compute_overrides)
+        compute = default_compute
 
-            compute = default_compute.model_copy(
-                update=overrides.model_dump(exclude_defaults=True) if overrides else {}
-            )
-        except CstarAdaptationError:
-            compute = default_compute
+        if step.compute_overrides:
+            try:
+                overrides = SlurmComputeAdapter().adapt(step.compute_overrides)
+                compute = default_compute.model_copy(
+                    update=overrides.model_dump(exclude_defaults=True)
+                )
+            except CstarAdaptationError:
+                msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
+                log.warning(msg, exc_info=True)
 
         return create_scheduler_job(
             commands=command,
