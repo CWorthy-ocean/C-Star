@@ -435,7 +435,7 @@ def get_environment_info() -> EnvironmentInfo:
         if not kernel_name:
             # Try to infer from Python executable path
             if "cstar-forge" in python_executable:
-                kernel_name = "cstar-forge-v0"
+                kernel_name = "cstar-forge-env"
             else:
                 kernel_name = None
         try:

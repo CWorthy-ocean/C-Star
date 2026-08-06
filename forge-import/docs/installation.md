@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.11 or higher (the managed `cstar-forge-v0` conda environment pins Python 3.12)
+- Python 3.11 or higher (the managed `cstar-forge-env` conda environment pins Python 3.12)
 - Git
 - Conda, Mamba, or Micromamba (the setup script will automatically install Micromamba if needed)
 
@@ -43,7 +43,7 @@ For more information on HTTPS and SSH access, see the [GitHub documentation on c
 ### 3. Install C-STAR Forge
 
 Pick whichever of the following matches your workflow. All three produce the same
-`cstar-forge-v0` conda environment with `cstar_forge` installed in editable mode.
+`cstar-forge-env` conda environment with `cstar_forge` installed in editable mode.
 
 #### (a) I already have conda/mamba/micromamba
 
@@ -51,7 +51,7 @@ The most direct path — no wrapper script involved:
 
 ```bash
 conda env create -f environment.yml
-conda activate cstar-forge-v0
+conda activate cstar-forge-env
 ./set-repo-versions.sh --roms-tools-ref main --c-star-ref main  # pip --no-deps from GitHub
 pip install -e . --no-deps
 ```
@@ -125,7 +125,7 @@ To verify that everything is installed correctly:
 # Activate with whichever tool created the environment above (conda/mamba/micromamba).
 # dev-setup.sh's local-micromamba fallback prints the exact activation command to use,
 # including sourcing ./bin/micromamba-path.sh first if it installed micromamba locally.
-conda activate cstar-forge-v0  # or: micromamba activate cstar-forge-v0
+conda activate cstar-forge-env  # or: micromamba activate cstar-forge-env
 
 # Test that cstar_forge can be imported
 cd workflows
@@ -135,10 +135,10 @@ python -c "import cstar_forge; print('✓ cstar_forge works')"
 **b) Check that the Jupyter kernel is installed:**
 
 ```bash
-jupyter kernelspec list | grep cstar-forge-v0
+jupyter kernelspec list | grep cstar-forge-env
 ```
 
-You should see `cstar-forge-v0` in the list. If not, the kernel installation may have failed.
+You should see `cstar-forge-env` in the list. If not, the kernel installation may have failed.
 
 **c) Check that the package can be imported in Python:**
 
@@ -168,6 +168,59 @@ Paths:
   scratch      -> /path/to/scratch-directory
   ...
 ```
+
+## Reproducible installs (lockfile)
+
+`pixi.lock` is the single source of truth for the fully-solved dependency closure
+(conda-channel layer + pypi layer, per platform). There are three ways to replay it,
+in order of preference:
+
+**a) pixi, on any machine — including HPC (recommended)**
+
+pixi ships as a single static binary that installs into `$HOME`, no admin access
+required, so it works on shared/HPC systems as readily as a laptop:
+
+```bash
+pixi install -e dev
+```
+
+This reproduces the exact locked environment (conda + pypi layers together, in the
+correct order) with full fidelity. See Setup step 3(c) above for day-to-day pixi usage.
+
+**b) Plain conda, via the exported lockfile artifacts**
+
+For machines/CI that only have plain conda and either can't or don't want to run pixi,
+`scripts/export-lock-artifacts.py` renders the lockfile into two layers per
+environment/platform — a conda explicit-spec file (the conda-channel layer, via `pixi
+workspace export conda-explicit-spec`) and a `requirements-<env>-<platform>.txt` (the
+pinned pypi layer, parsed straight from `pixi.lock`). These are published as GitHub
+release assets (`.github/workflows/lock-artifacts.yaml`) and can also be regenerated
+locally with `python scripts/export-lock-artifacts.py --env dev --outdir <dir>`.
+Replay recipe:
+
+```bash
+conda create -n cstar-forge-env --file conda-explicit-dev-linux-64.txt
+conda install -n cstar-forge-env pip   # pixi's pypi installer is uv-based, so pip
+                                       # is NOT in the explicit spec above
+conda activate cstar-forge-env
+python -m pip install --no-deps -r requirements-dev-linux-64.txt
+```
+
+`--no-deps` is required, not optional: the requirements file is already the complete
+resolved closure, and pip must not re-resolve it. `python -m pip` (rather than a bare
+`pip`) ensures the newly-created env's own pip is used. `cstar-forge` itself is
+excluded from the requirements file (it's the editable/local package, not a pinned
+pypi release) — install it separately with `python -m pip install -e . --no-deps`, or
+`python -m pip install cstar-forge==<version>` once a release is published. This path
+works with any conda version.
+
+**c) `conda env create --file pixi.lock` via the conda-lockfiles plugin (future — not yet usable)**
+
+The [conda-lockfiles](https://github.com/conda/conda-lockfiles) plugin aims to let plain
+conda consume `pixi.lock` directly, no export step needed. Not usable yet for this repo:
+its newest release (0.2.1) only reads lock-file schema ≤6, while pixi ≥0.76 (used here)
+writes schema v7, and it requires a fairly recent conda (~26+). Revisit path (b) above
+once the plugin and conda versions catch up.
 
 ## Register for data access
 
@@ -200,7 +253,7 @@ SSH-forward the port from your laptop:
 jupyter lab cstar_forge/forge-blueprint-wizard.ipynb
 ```
 
-Make sure the kernel is set to `cstar-forge-v0` (change it in the Kernel menu if
+Make sure the kernel is set to `cstar-forge-env` (change it in the Kernel menu if
 needed). Run the cells to display the wizard inline; the wizard object stays
 available for inspection and scripting.
 
