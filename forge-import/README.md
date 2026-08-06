@@ -5,6 +5,18 @@ A utility for generating new regional oceanographic modeling domains and creatin
 [![Run Tests](https://github.com/CWorthy-ocean/cstar-forge/actions/workflows/tests.yaml/badge.svg)](https://github.com/CWorthy-ocean/cstar-forge/actions/workflows/tests.yaml?query=branch%3Amain)
 [![codecov](https://codecov.io/gh/CWorthy-ocean/cstar-forge/graph/badge.svg)](https://codecov.io/gh/CWorthy-ocean/cstar-forge)
 
+```{image} docs/assets/csforge.png
+:alt: C-STAR Forge Logo
+:class: csforge-logo
+:align: center
+```
+
+```{warning}
+This project is still in an early phase of development.
+
+You are welcome to try out using the package, but be aware that development is ongoing and we cannot yet guarantee backwards compatibility. 
+```
+
 ## How it works
 
 C-STAR Forge takes you from "I want a regional ROMS-MARBL domain here" to a running
@@ -49,7 +61,7 @@ verification steps.
 Two interactive front-ends assemble a `ForgeBlueprint` (the authoritative input to
 processing). Both are thin shells over
 `cstar_forge.forge_blueprint_resolve.build_forge_blueprint`; all resolution/validation
-lives in the resolver. See `docs/developer-guide.md` for the architecture.
+lives in the resolver.
 
 ### In a Jupyter notebook
 
@@ -111,14 +123,4 @@ verbosity, dask controls). Outputs — input NetCDF files, rendered model settin
 the ROMS-MARBL blueprint — are written under the blueprint's working directory, and
 the emitted ROMS-MARBL blueprint is then handed to C-Star to run the simulation.
 
-```{image} docs/assets/csforge.png
-:alt: C-STAR Forge Logo
-:class: csforge-logo
-:align: center
-```
 
-```{warning}
-This project is still in an early phase of development.
-
-You are welcome to try out using the package, but be aware that development is ongoing and we cannot yet guarantee backwards compatibility. 
-```

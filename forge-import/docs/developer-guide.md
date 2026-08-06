@@ -1,4 +1,9 @@
-# Developer Guide (current state, 2026-07-17, branch `refactor`)
+# Developer Guide (internal — not published in the rendered docs)
+
+> **TODO (dev-docs cleanup):** this guide and its companions still narrate how the
+> repo *got* here — dated banners, "supersedes X", ~~struck-through~~ completed
+> follow-ups, and references to previous states of the code. Rewrite them to describe
+> only the current state; move any history worth keeping into `docs/dev-notes/`.
 
 This supersedes the mental model in `docs/overview.md` / `docs/domain-generation-overview.md`
 / `docs/machine-config.md` / `docs/dev-notes/forge-blueprint-inventory.md`, which describe the
