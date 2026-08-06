@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from prefect import State, task
 from prefect import Task as PrefectTask
 from prefect.client.schemas import TaskRun
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
 from cstar.base.env import (
@@ -16,7 +16,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd
+from cstar.base.utils import WALLTIME_RE, _run_cmd
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     SchedulerJob,
@@ -93,8 +93,8 @@ class SlurmComputeSpec(BaseModel):
     """The number of nodes to request."""
     cpus_per_node: int | None = None
     """The number of CPUs to request per node."""
-    max_walltime: str = ""
-    """The maximum walltime for the job."""
+    max_walltime: str = Field(default="", pattern=WALLTIME_RE)
+    """The maximum walltime for the job in the format `HH:MM:SS`."""
     queue_name: str = ""
     """The priority of the job."""
     account_name: str = ""

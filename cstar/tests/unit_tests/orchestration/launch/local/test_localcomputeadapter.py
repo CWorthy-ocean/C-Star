@@ -51,7 +51,7 @@ def test_localcomputeadapter_adapt_happy_path() -> None:
     correctly configured compute spec being returned.
     """
     exp_walltime = "00:05:00"
-    exp_fk_timeout = "2s"
+    exp_fk_timeout = "00:02"
 
     # provide SLURM and local to verify the adapter uses the local overrides
     model: KeyValueStore = {

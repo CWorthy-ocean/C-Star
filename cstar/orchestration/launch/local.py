@@ -8,7 +8,7 @@ from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
-from pydantic import BaseModel, ConfigDict, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from cstar.base.adapter import (
     ConfiguredModelAdapter,
@@ -18,7 +18,7 @@ from cstar.base.adapter import (
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
-from cstar.base.utils import additional_files_dir
+from cstar.base.utils import WALLTIME_RE, additional_files_dir
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.models import KeyValueStore
@@ -32,6 +32,7 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.state import StateRepository
+from cstar.system.scheduler import parse_walltime_parts
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
@@ -95,21 +96,26 @@ class LocalHandle(ProcessHandle):
 class LocalComputeSpec(BaseModel):
     """Compute configuration options when using the local launcher."""
 
-    DEFAULT_MAX_WALLTIME: t.ClassVar[str] = "600s"
-    DEFAULT_FK_TIMEOUT: t.ClassVar[str] = "2s"
+    DEFAULT_MAX_WALLTIME: t.ClassVar[str] = "00:10:00"
+    DEFAULT_FK_TIMEOUT: t.ClassVar[str] = "00:00:02"
 
-    max_walltime: str = DEFAULT_MAX_WALLTIME
-    """Maximum amount of time a process should be allowed to run."""
-    force_kill_timeout: str = DEFAULT_FK_TIMEOUT
-    """Grace period before force-killing a local process after timeout is exceeded."""
-
-    # TODO: specify the format as a regex and ensure it's validated by pydantic.
-
-    # TODO: use the same time format as slurm and convert to a valid input to `timeout`...
-    # e.g. from "01:00:00"
+    max_walltime: str = Field(default=DEFAULT_MAX_WALLTIME, pattern=WALLTIME_RE)
+    """Maximum amount of time a process should be allowed to run (D-HH:MM:SS format)."""
+    force_kill_timeout: str = Field(default=DEFAULT_FK_TIMEOUT, pattern=WALLTIME_RE)
+    """Grace period before force-killing a local process after timeout is exceeded (D-HH:MM:SS format)."""
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure model to ignore empty strings."""
+
+    @property
+    def walltime_seconds(self) -> int:
+        hh, mm, ss = parse_walltime_parts(self.max_walltime)
+        return hh * 3600 + mm * 60 + ss
+
+    @property
+    def force_kill_seconds(self) -> int:
+        hh, mm, ss = parse_walltime_parts(self.force_kill_timeout)
+        return hh * 3600 + mm * 60 + ss
 
 
 class LocalComputeAdapter(ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec]):
@@ -214,9 +220,9 @@ class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
         """
         enriched_cmd = [
             self.TIMEOUT_EXE,
-            self.compute.max_walltime,
+            f"{self.compute.walltime_seconds}s",
             self.ARG_FORCEKILL_TIMEOUT,
-            self.compute.force_kill_timeout,
+            f"{self.compute.force_kill_seconds}s",
             *model.command,
         ]
 

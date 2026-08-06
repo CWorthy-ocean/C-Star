@@ -7,8 +7,9 @@ from cstar.base.log import LoggingMixin
 from cstar.base.utils import _run_cmd
 
 
-def _parse_walltime(walltime_str: str) -> str:
-    """Parse and format a SLURM walltime string into the format "HH:MM:SS".
+def parse_walltime_parts(walltime_str: str) -> tuple[int, int, int]:
+    """Parse a SLURM walltime in the format "D-HH:MM:SS" into a tuple
+    containing [hours, minutes, seconds].
 
     Parameters
     ----------
@@ -35,7 +36,27 @@ def _parse_walltime(walltime_str: str) -> str:
         mw_m, mw_s = map(int, mw_hms.split(":"))
     elif mw_hms.count(":") == 2:  # HH:MM:SS
         mw_h, mw_m, mw_s = map(int, mw_hms.split(":"))
-    return f"{mw_d * 24 + mw_h:02}:{mw_m:02}:{mw_s:02}"
+    return mw_d * 24 + mw_h, mw_m, mw_s
+
+
+def format_walltime(walltime_str: str) -> str:
+    """Parse and format a SLURM walltime string into the format "HH:MM:SS".
+
+    Parameters
+    ----------
+    walltime_str : str
+        The walltime string to parse. This can be in one of the following formats:
+        - "D-HH:MM:SS" (days, hours, minutes, seconds)
+        - "HH:MM:SS" (hours, minutes, seconds)
+        - "MM:SS" (minutes, seconds)
+
+    Returns
+    -------
+    str
+        The formatted walltime string in the "HH:MM:SS" format.
+    """
+    mw_h, mw_m, mw_s = parse_walltime_parts(walltime_str)
+    return f"{mw_h:02}:{mw_m:02}:{mw_s:02}"
 
 
 def query_max_walltime_via_sinfo(name: str) -> str | None:
@@ -56,7 +77,7 @@ def query_max_walltime_via_sinfo(name: str) -> str | None:
     """
     sp_cmd = f"sinfo --noheader --format='%l' --partition={name}"
     mw = _run_cmd(sp_cmd)
-    return _parse_walltime(mw) if mw else None
+    return format_walltime(mw) if mw else None
 
 
 def query_max_walltime_via_sacctmgr(name: str) -> str | None:
@@ -77,7 +98,7 @@ def query_max_walltime_via_sacctmgr(name: str) -> str | None:
     """
     sp_cmd = f"sacctmgr show qos {name} format=MaxWall --noheader"
     mw = _run_cmd(sp_cmd)
-    return _parse_walltime(mw) if mw else None
+    return format_walltime(mw) if mw else None
 
 
 class Queue(ABC):

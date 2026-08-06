@@ -3,7 +3,7 @@ from unittest import mock
 
 import pytest
 
-from cstar.orchestration.launch.local import LocalComputeSpec, LocalLauncher
+from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.orchestration import LiveStep, Workplan
 from cstar.orchestration.serialization import deserialize
 
@@ -59,44 +59,44 @@ def test_locallauncher_adapt_step_formatter_selection(
     [
         pytest.param(
             True,
-            {"local": {"max_walltime": "90s"}},
+            {"local": {"max_walltime": "01:30"}},
             "90s",
-            LocalComputeSpec.DEFAULT_FK_TIMEOUT,
-            id="Proxied; default fk-to",
+            "2s",
+            id="Proxied; default fk-timeout",
         ),
         pytest.param(
             True,
-            {"local": {"force_kill_timeout": "5s"}},
-            LocalComputeSpec.DEFAULT_MAX_WALLTIME,
+            {"local": {"force_kill_timeout": "00:00:05"}},
+            "600s",
             "5s",
-            id="Proxied; default to",
+            id="Proxied; default duration",
         ),
         pytest.param(
             True,
-            {"local": {"max_walltime": "90s", "force_kill_timeout": "5s"}},
-            "90s",
-            "5s",
+            {"local": {"max_walltime": "00:01:00", "force_kill_timeout": "00:00:42"}},
+            "60s",
+            "42s",
             id="Proxied; no defaults",
         ),
         pytest.param(
             False,
-            {"local": {"max_walltime": "90s"}},
-            "90s",
-            LocalComputeSpec.DEFAULT_FK_TIMEOUT,
-            id="Unproxied; default fk-to",
+            {"local": {"max_walltime": "00:60"}},
+            "60s",
+            "2s",
+            id="Unproxied; default fk-timeout",
         ),
         pytest.param(
             False,
-            {"local": {"force_kill_timeout": "5s"}},
-            LocalComputeSpec.DEFAULT_MAX_WALLTIME,
-            "5s",
-            id="Unproxied; default to",
+            {"local": {"force_kill_timeout": "00:01:00"}},
+            "600s",
+            "60s",
+            id="Unproxied; default duration",
         ),
         pytest.param(
             False,
-            {"local": {"max_walltime": "90s", "force_kill_timeout": "5s"}},
-            "90s",
-            "5s",
+            {"local": {"max_walltime": "00:60:00", "force_kill_timeout": "00:00:00"}},
+            "3600s",
+            "0s",
             id="Unproxied; no defaults",
         ),
     ],
