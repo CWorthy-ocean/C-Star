@@ -110,8 +110,6 @@ class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec
     def adapt(self, model: KeyValueStore) -> SlurmComputeSpec:
         """Adapt the input into a `SlurmComputeSpec`.
 
-        Returns `None` when no appropriate compute specification is provided.
-
         Parameters
         ----------
         model : KeyValueStore

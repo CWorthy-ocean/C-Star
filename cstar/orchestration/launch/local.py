@@ -140,8 +140,6 @@ class LocalComputeAdapter(ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec
     def adapt(self, model: KeyValueStore) -> LocalComputeSpec:
         """Adapt the input into a `LocalComputeSpec`.
 
-        Returns `None` when no appropriate compute specification is provided.
-
         Parameters
         ----------
         model : KeyValueStore
