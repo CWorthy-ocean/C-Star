@@ -1591,18 +1591,9 @@ class TestRomsMarblInputDataGeneration:
         asserts were *called*. This is the "grid-less construction really works"
         guarantee the resolver/wizard's "no grid injection" design decision depends on.
         """
-        import cstar_forge
         from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
 
-        sample = (
-            Path(cstar_forge.__file__).parent
-            / "catalog"
-            / "blueprints"
-            / "legacy"
-            / "MacOS"
-            / "cson_roms-marbl_v0.1_test-tiny_1procs"
-            / "_cdr_forcing.yaml"
-        )
+        sample = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml"
         cdr_kwargs = read_cdr_forcing_yaml(sample)
 
         sample_roms_marbl_input_data.roms_marbl_blueprint_elements.cdr_forcing = (

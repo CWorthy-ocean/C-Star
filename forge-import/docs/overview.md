@@ -80,12 +80,8 @@ cstar-forge/
 ├── templates/                  # Render templates (cppdefs.opt.j2, marbl_in), decoupled
 │                                # from ModelSpec — fetched by ForgeExecutor via C-Star's
 │                                # AdditionalCode
-├── workflows/                 # Example notebooks and workflows
-│   ├── computing-benchmarks/
-│   ├── generate-models/       # Domain generation notebooks
-│   ├── skill-assessment/
-│   ├── source-data/
-│   └── visualization/
+├── legacy/                    # Deprecated pre-wizard tooling: notebook workflows,
+│                                # the nb_engine runner, and legacy-layout blueprints
 ├── docs/                      # Documentation (dev-notes/ holds historical planning docs)
 └── README.md
 ```

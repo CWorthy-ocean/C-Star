@@ -892,15 +892,7 @@ def test_cppdefs_obc_from_boundaries_and_cdr_flag():
     assert c["cdr_forcing"] is True and c["marbl"] is True
 
 
-_CDR_SAMPLE_YAML = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "blueprints"
-    / "legacy"
-    / "MacOS"
-    / "cson_roms-marbl_v0.1_test-tiny_1procs"
-    / "_cdr_forcing.yaml"
-)
+_CDR_SAMPLE_YAML = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml"
 
 
 def test_read_cdr_forcing_yaml_from_sample():

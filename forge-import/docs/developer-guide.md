@@ -297,11 +297,12 @@ Ranked roughly by what's worth doing next:
    during the 2026-07-23 real-C-Star-application work, §3a): the module docstring
    already says "fully wired into `ForgeExecutor`", not the old "not yet wired" text
    this item described.
-8. **`examples/forge_blueprint2.yaml` / `forge_blueprint3.yaml`** still stamp
-   `application: roms_marbl` (pre-rename). Regenerate or delete the stale ones — not
-   load-tested by anything, low urgency. (The docs example was regenerated 2026-08-06 as
-   `docs/forge-blueprint-example.wio-toy.yaml`, schema v4, load-tested by
-   `test_committed_example_validates`.)
+8. ~~Stale `examples/forge_blueprint*.yaml`~~ **DONE (2026-08-06):** the whole
+   `examples/` directory (unreferenced dev artifacts) was deleted, along with the
+   `env-fix.forge_blueprint.yaml` / `*.workplan.yaml` dev artifacts in
+   `catalog/blueprints/`. The maintained example is
+   `docs/forge-blueprint-example.wio-toy.yaml` (schema v4, load-tested by
+   `test_committed_example_validates`).
 9. **`domain_catalog_sketch.py`** (167 lines) — dead prototype, zero references anywhere
    (code, tests, notebooks, docs). Safe to delete.
 10. ~~Architecture doc headers understated progress.~~ **DONE (2026-07-17):**

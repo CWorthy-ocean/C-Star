@@ -111,7 +111,7 @@ verbosity, dask controls). Outputs — input NetCDF files, rendered model settin
 the ROMS-MARBL blueprint — are written under the blueprint's working directory, and
 the emitted ROMS-MARBL blueprint is then handed to C-Star to run the simulation.
 
-```{image} workflows/visualization/assets/csforge.png
+```{image} docs/assets/csforge.png
 :alt: C-STAR Forge Logo
 :class: csforge-logo
 :align: center

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-import cstar_forge
 from cstar_forge.forge_blueprint_wizard import (
     ForgeBlueprintWizard,
     _ForcingEditor,
@@ -495,15 +494,7 @@ def test_use_pio_chk_emit_is_unconditional():
     assert wiz.config.code.pio is not None
 
 
-_CDR_SAMPLE_YAML = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "blueprints"
-    / "legacy"
-    / "MacOS"
-    / "cson_roms-marbl_v0.1_test-tiny_1procs"
-    / "_cdr_forcing.yaml"
-)
+_CDR_SAMPLE_YAML = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml"
 
 
 def _upload_change(content: bytes):
