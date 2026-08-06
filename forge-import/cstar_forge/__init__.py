@@ -3,15 +3,24 @@ cstar_forge: A utility for generating regional oceanographic modeling domains
 and spawning reproducible C-Star workflows.
 """
 
-from . import models
-from . import config
-from . import source_data
-from . import settings
-from . import catalog
-from . import diagnostics
-from ._core import CstarSpecBuilder, CstarSpecEngine, resolve_catalog_dir
-from .domain_catalog import DomainCatalog, default_catalog
-from .nb_engine import save_notebook_copy, run_notebook
+# silence UCX warnings
+import os
 
-__all__ = ["source_data", "models", "config", "settings", "catalog", "diagnostics", "CstarSpecBuilder", "CstarSpecEngine", "resolve_catalog_dir", "DomainCatalog", "default_catalog", "save_notebook_copy", "run_notebook"]
+os.environ["UCX_LOG_LEVEL"] = "error"
 
+from cstar_forge import catalog, config, diagnostics, models
+from cstar_forge.domain_catalog import DomainCatalog, default_catalog
+from cstar_forge.forge import settings, source_data
+from cstar_forge.forge.executor import ForgeExecutor
+
+__all__ = [
+    "DomainCatalog",
+    "ForgeExecutor",
+    "catalog",
+    "config",
+    "default_catalog",
+    "diagnostics",
+    "models",
+    "settings",
+    "source_data",
+]

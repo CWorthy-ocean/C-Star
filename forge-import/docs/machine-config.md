@@ -36,10 +36,14 @@ config.paths = config.with_catalog(config.paths, Path("/scratch/me/cstar-catalog
 
 Create the new `blueprints` and `builds` directories if needed before running workflows.
 
-Per-domain or per-builder overrides use ``CstarSpecBuilder(catalog_root=...)`` (outer anchor:
-``<catalog_root>/catalog/blueprints`` and ``<catalog_root>/catalog/builds``) or
-``catalog_root="local"`` for the in-repo ``cson_forge/catalog`` layout. See ``CstarSpecEngine`` for a
-default ``catalog_root`` applied to all domains from YAML.
+At processing time, `cstar_forge.config.resolve_host(working_dir)` builds the forge
+application's `HostPaths` (`cstar_forge.forge.host.HostPaths`) from this auto-detected
+config: `source_data_cache` comes from `config.paths.source_data`, plus the detected
+`system` tag and `machine_config`. `working_dir` (the per-run artifact root that
+`ForgeExecutor` writes everything under) is supplied separately — see
+`docs/developer-guide.md` §2–4 for the full authoring/execution split. This is Forge's
+own *disposable* host provider; when the forge application relocates into C-Star,
+C-Star supplies its own `HostPaths` and this resolver is not carried over.
 
 ### Accessing Configuration in Code
 
@@ -80,7 +84,7 @@ python -m cstar_forge.config show-paths --json
 
 ## Machine Configuration
 
-Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/machines.yml`. The `config.machine` object provides access to these settings:
+Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/machines.yaml`. The `config.machine` object provides access to these settings:
 
 ```python
 from cstar_forge import config
@@ -91,7 +95,7 @@ pes_per_node = config.machine.pes_per_node  # Cores per node
 default_queue = config.machine.queues.get("default")  # Default queue name
 ```
 
-If a machine is not found in `machines.yml` or the file doesn't exist, an empty `MachineConfig` is returned.
+If a machine is not found in `machines.yaml` or the file doesn't exist, an empty `MachineConfig` is returned.
 
 ### Cluster Types
 
@@ -141,8 +145,8 @@ The `get_data_paths()` function automatically creates these directories if they 
 ## Reference
 
 For further reference, see:
-- [API Reference: Core](api-core.md) - Configuration module source code
-- [Machines (machines.yml)](reference-machines.md) - Machine-specific settings
+- [Developer Guide](developer-guide.md) - module map, including `config.py` (`DataPaths`/`MachineConfig`/`resolve_host()`)
+- [Machines (machines.yaml)](reference-machines.md) - Machine-specific settings
 
 
 

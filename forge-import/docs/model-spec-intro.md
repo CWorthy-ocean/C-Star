@@ -2,129 +2,95 @@
 
 The `ModelSpec` abstraction is designed to formalize and preserve a notion of a trusted model configuration by aggregrating the information required to build and configure a particular model as a named entity. 
 
-Model specifications are defined per-model in `cstar_forge/catalog/ModelSpec/<model>/model.yml` (see [here](reference-models-yml.md)). Models are discovered by scanning `catalog/ModelSpec/*/model.yml`. 
+Model specifications are defined per-model in `cstar_forge/catalog/ModelSpec/<model>/model.yaml` (see [here](reference-models-yml.md)). Models are discovered by scanning `catalog/ModelSpec/*/model.yaml`. 
 
 Each model includes:
 
-- Template configurations (compile-time and run-time)
-- Settings specifications (compile-time and run-time)
-- Code repository configurations (ROMS, MARBL)
-- Input dataset defaults (a list of required source datasets is derived from inputs)
+- Code repository configurations (ROMS, MARBL, PIO) and template refs (compile-time and run-time)
+- Per-run build-mode toggles (`bgc_mode`, `use_pio`)
+- Model-specific physics/numerics settings defaults (`model_settings`)
+
+Everything a Domain/Forcing/Output spec already owns (grid/IC/forcing source selection, output write-lists,
+open-boundary and tidal/river presence, grid partitioning, etc.) is deliberately *not* duplicated here — those
+values come from the selected `DomainSpec`/`ForcingSpec`/`OutputSpec` and are merged in by the resolver
+(`build_forge_blueprint`) when it assembles a `ForgeBlueprint`.
 
 
-## `model.yml` Schema
+## `model.yaml` Schema
 
 Here's a view of the schema:
 ```yaml
-templates:
-  compile_time:
-    location: "templates/compile-time"
-    filter:
-      files:
-        - cppdefs.opt.j2
-  run_time:
-    location: "templates/run-time"
-    filter:
-      files:
-        - marbl_in
-
-settings:
-  properties:
-    n_tracers: 34
-  compile_time:
-    _default_config_yaml: "templates/compile-time-defaults.yml"
-  run_time:
-    _default_config_yaml: "templates/run-time-defaults.yml"
+bgc_mode: marbl  # marbl|none -- prepopulates the wizard; resolver derives cppdefs.marbl from it
+use_pio: false  # prepopulates the wizard's PIO checkbox; resolver derives cppdefs.use_pio from it
 
 code:
   roms:
     location: https://github.com/org/repo.git
-    branch: main  # or use 'commit: <hash>' instead
+    commit: <hash>  # or 'branch: main' instead
+
   marbl:  # optional
-    location: https://github.com/org/marbl.git
-    commit: v1.0.0
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
 
-inputs: # default keyword arguments to input generation functions
-  grid:
-    topography_source: ETOPO5  # or SRTM15
+  pio:  # optional; required if use_pio can be set true
+    location: https://github.com/NCAR/ParallelIO.git
+    commit: pio2_7_0
 
-  initial_conditions:
-    source:
-      name: GLORYS
-    bgc_source:  # optional
-      name: UNIFIED
-      climatology: true
+  # Render templates live at the forge repo root (templates/), decoupled from this
+  # ModelSpec. `directory` is relative to the repo root; `templates_commit` pins the
+  # forge commit they're fetched from (defaults to branch `main` if omitted).
+  templates_commit: <forge-commit-sha>
+  templates_compile_time:
+    directory: "templates/compile-time"
+    files:
+      - cppdefs.opt.j2
+  templates_run_time:
+    directory: "templates/run-time"
+    files:
+      - marbl_in
 
-  forcing:
-    surface:
-      - source:
-          name: ERA5
-        type: physics
-        correct_radiation: true
-      - source:
-          name: UNIFIED
-          climatology: true
-        type: bgc
-    boundary:
-      - source:
-          name: GLORYS
-        type: physics
-      - source:
-          name: UNIFIED
-          climatology: true
-        type: bgc
-    tidal:  # optional
-      - source:
-          name: TPXO
-        ntides: 15
-    river:  # optional
-      - source:
-          name: DAI
-          climatology: false
-        include_bgc: true
+model_settings:
+  cppdefs:
+    sponge_tune: false
+    nhy_forcing: true
+    nox_forcing: true
+  # ...one section per model_settings namelist key (lateral_visc, vertical_mixing,
+  # tracer_diff2, bottom_drag, param, bgc, blk_frc, tides, marbl_bgc, etc.)
 ```
 
 
 ### Field Descriptions:
 
-- `templates`  
-  Template specifications for compile-time and run-time stages. Each stage specifies:
-  - `location`: Path to template directory (may contain template variables)
-  - `filter.files`: List of template files to process: 
-     `*.j2` files have Jinja2 templating applied; files without this extension are simply copied to build directories.
+- `bgc_mode`  
+  Per-run BGC toggle (`marbl` or `none`). Prepopulates the wizard's BGC dropdown; the resolver uses it to
+  derive `model_settings.cppdefs.marbl` (and gate `nhy_forcing`/`nox_forcing`) and to decide whether
+  `code.marbl` is populated. Not itself part of `model_settings` — it's a build mode, not a namelist section.
 
-- `settings`  
-  Settings specifications containing:
-  - `properties`: Model properties (e.g., `n_tracers`)
-  - `compile_time`: Compile-time settings stage with `_default_config_yaml` pointing to default configuration YAML
-  - `run_time`: Run-time settings stage with `_default_config_yaml` pointing to default configuration YAML
+- `use_pio`  
+  Per-run ParallelIO (PIO) build toggle. Prepopulates the wizard's PIO checkbox; the resolver uses it to
+  derive `model_settings.cppdefs.use_pio` and to decide whether `code.pio` is populated (raising if PIO is
+  requested but the model has no `code.pio` pin).
 
 - `code`  
-  Code repository specifications:
+  Code repository and template specifications:
   - `roms`: ROMS source code repository (required; specify `location` and `branch` or `commit`)
   - `marbl`: MARBL source code repository (optional; specify `location` and `branch` or `commit`)
+  - `pio`: ParallelIO source code repository (optional; specify `location` and `branch` or `commit`)
+  - `templates_commit`: forge-repo commit that `templates_compile_time`/`templates_run_time` are fetched
+    from (defaults to branch `main` when omitted)
+  - `templates_compile_time` / `templates_run_time`: each a `directory` (relative to the forge repo root)
+    plus a `files` list. `*.j2` files have Jinja2 templating applied; files without that extension (e.g.
+    `marbl_in`) are copied as-is.
 
-- `inputs`  
-  Model input specifications:
-  - `grid`: Grid configuration with `topography_source` (e.g., "ETOPO5")
-  - `initial_conditions`: Initial conditions with `source` (physics) and optional `bgc_source` (biogeochemistry)
-  - `forcing`: Forcing data organized by type:
-    - `surface`: List of surface forcing items (each with `source`, `type` ["physics"|"bgc"], and optional `correct_radiation`)
-    - `boundary`: List of boundary forcing items (each with `source` and `type`)
-    - `tidal`: List of tidal forcing items (each with `source` and optional `ntides`)
-    - `river`: List of river forcing items (each with `source`, optional `climatology`, and optional `include_bgc`)
+- `model_settings`  
+  A flat dict of model-specific physics/numerics defaults, mirroring `ForgeBlueprint.model_settings` 1:1
+  (each top-level key is a namelist section, e.g. `cppdefs`, `param`, `tides`, `marbl_bgc`). Every
+  compile-time `.j2` template file listed under `code.templates_compile_time.files` must have a
+  corresponding top-level key here (e.g. `cppdefs.opt.j2` requires a `cppdefs:` section) — this is
+  enforced by a `ModelSpec` validator. Many fields within these sections are still overwritten by the
+  resolver at build time from Domain/Forcing/Output selections (e.g. `param`'s grid-partitioning fields,
+  `cppdefs.obc_*`/`marbl`/`tides`, `tides.ntides`); they're included in `model.yaml` only where the
+  *other* fields in that same section are real, model-level defaults.
 
-- `datasets`  
-  (Derived field, not specified in YAML) List of SourceData dataset keys required for this model, automatically derived from the `inputs` configuration.
-
-**Source Specifications:**
-
-Each `source` in the inputs can be:
-- A string (source name)
-- An object with:
-  - `name`: Source name (e.g., "GLORYS", "ERA5", "UNIFIED", "TPXO", "DAI")
-  - `climatology`: Boolean indicating whether to use climatology data (default: `false`)
-
-You can add new models by creating a new directory under `cstar_forge/catalog/ModelSpec/<model>/` containing a `model.yml` with the schema above.
-
-
+You can add new models by creating a new directory under `cstar_forge/catalog/ModelSpec/<model>/` containing
+a `model.yaml` with the schema above.

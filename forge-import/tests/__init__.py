@@ -1,4 +1,1 @@
-"""
-Test suite for cstar-forge.
-"""
-
+"""Test suite for cstar-forge."""

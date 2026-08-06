@@ -1,5 +1,5 @@
 """
-Tests for ``cstar_forge.settings.write_roms_namelist`` (the ``namelist.nml``
+Tests for ``cstar_forge.forge.settings.write_roms_namelist`` (the ``namelist.nml``
 writer) and its MARBL string-list helper / bounds guard.
 
 These exercise the heart of the namelist refactor end-to-end: a populated flat
@@ -7,35 +7,110 @@ run-time settings dict is written to ``namelist.nml`` and read back with
 ``f90nml`` to assert the key renames, per-tracer array expansion, forcing-file
 assembly, MARBL string-array emission, and the array-bounds warning.
 """
-from pathlib import Path
-import warnings
 
+import warnings
+from pathlib import Path
+
+import f90nml
 import pytest
 import yaml
-import f90nml
-
-import cstar_forge
-from cstar_forge.settings import write_roms_namelist
 from cstar.roms.namelist import (
-    _namelist_str_list,
-    MARBL_TRACERS_TO_WRITE_MAX,
     MARBL_DIAGNOSTICS_TO_WRITE_MAX,
+    MARBL_TRACERS_TO_WRITE_MAX,
+    _namelist_str_list,
 )
 
-_TPL = (Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec"
-        / "cson_roms-marbl_v0.1" / "templates")
+import cstar_forge
+from cstar_forge.domain_catalog import default_catalog
+from cstar_forge.forge.settings import write_roms_namelist
+from cstar_forge.forge_blueprint_resolve import load_model_spec_data
+
+_MODEL_DIR = (
+    Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
+)
 
 
 def _base_settings():
-    """Load the real run-time defaults and fill the dynamic fields that
-    ``generate_inputs()`` / ``_init_settings_run_time`` would populate, yielding
-    a complete run-time settings dict ready for ``write_roms_namelist``."""
-    rt = yaml.safe_load((_TPL / "run-time-defaults.yml").read_text())
+    """A complete flat run-time settings dict: the ModelSpec's model_settings
+    (physics/numerics defaults) deep-merged with the bundled 'standard' OutputSpec's
+    output sections, plus the dynamic fields ``generate_inputs()`` /
+    ``_init_settings_run_time`` would populate (title/s_coord/grid/initial/
+    output_root_name/time_stepping/v_sponge, and a null-placeholder ``forcing``
+    dict ready for the ``nml`` fixture to fill in) -- a complete dict ready for
+    ``write_roms_namelist``.
+    """
+    model = load_model_spec_data(_MODEL_DIR)["model"]
+    rt = yaml.safe_load(yaml.safe_dump(model["model_settings"]))  # deep copy
+    output = default_catalog.output_data("standard")
+    for k, v in output.items():
+        if isinstance(v, dict) and isinstance(rt.get(k), dict):
+            rt[k].update(v)
+        else:
+            rt[k] = v
     rt["title"] = {"casename": "test_case"}
     rt["output_root_name"] = {"output_root_name": "/run/out"}
+    rt["reference_date_settings"] = {"reference_date": [2000, 1, 1]}
     rt["s_coord"] = {"theta_s": 5.0, "theta_b": 2.0, "tcline": 250.0}
     rt["grid"] = {"grid_file": "/in/grid.nc"}
     rt["initial"] = {"initial_file": "/in/init.nc"}
+    rt["time_stepping"] = {"ntimes": 12, "dt": 7200, "ndtfast": 60, "ninfo": 1}
+    rt["v_sponge"] = {"v_sponge": 8333.33}
+    # param's grid/partitioning dims, tides.ntides, river_frc/cdr_frc, and
+    # extract_data are likewise resolver-derived (from Domain/Forcing/a nesting
+    # child domain, not a ModelSpec default) -- fill in representative values for
+    # this direct-model fixture.
+    rt["param"].update({"llm": 512, "mmm": 512, "n": 60, "np_xi": 16, "np_eta": 16})
+    rt["tides"]["ntides"] = 15
+    rt["extract_data"] = {
+        "do_extract": False,
+        "extract_file": "sample_edata.nc",
+        "nrpf": 24,
+        "n_chd": 90,
+        "theta_s_chd": 5.0,
+        "theta_b_chd": 2.0,
+        "hc_chd": 250.0,
+        "extract_period": 3600.0,
+    }
+    rt["river_frc"] = {
+        "river_source": False,
+        "analytical": False,
+        "nriv": 0,
+        "rvol_vname": "river_volume",
+        "rvol_tname": "river_time",
+        "rtrc_vname": "river_tracer",
+        "rtrc_tname": "river_time",
+    }
+    rt["cdr_frc"] = {
+        "cdr_source": False,
+        "cdr_file": "cdr.nc",
+        "ncdr_parm": 1,
+        "forcing_depth_profiles": False,
+        "forcing_3d": False,
+        "forcing_parameterized": True,
+        "time_interpolation": False,
+        "relocate_to_wet_pts": True,
+        "cdr_volume": False,
+        "cdrvol_vname": "cdr_volume",
+        "cdrvol_tname": "cdr_time",
+        "cdrtrc_vname": "cdr_tracer",
+        "cdrtrc_tname": "cdr_time",
+        "cdrflx_vname": "cdr_trcflx",
+        "cdrflx_tname": "cdr_time",
+        "cdr_loc_lon": "cdr_lon",
+        "cdr_loc_lat": "cdr_lat",
+        "cdr_loc_dep": "cdr_dep",
+        "cdr_scl_hor": "cdr_hsc",
+        "cdr_scl_vrt": "cdr_vsc",
+        "nz_chd": 50,
+    }
+    rt["forcing"] = {
+        "surface_forcing_path": None,
+        "surface_forcing_bgc_path": None,
+        "boundary_forcing_path": None,
+        "boundary_forcing_bgc_path": None,
+        "tidal_forcing_path": None,
+        "river_path": None,
+    }
     return rt
 
 
@@ -63,9 +138,16 @@ def test_namelist_file_written(tmp_path):
 
 
 def test_core_groups_present(nml):
-    for group in ("simulation_name_settings", "time_stepping", "s_coord",
-                  "param_settings", "initial_conditions", "forcing_files",
-                  "bgc_settings", "marbl_biogeochemistry_settings"):
+    for group in (
+        "simulation_name_settings",
+        "time_stepping",
+        "s_coord",
+        "param_settings",
+        "initial_conditions",
+        "forcing_files",
+        "bgc_settings",
+        "marbl_biogeochemistry_settings",
+    ):
         assert group in nml, f"missing &{group}"
 
 
@@ -73,14 +155,16 @@ def test_core_groups_present(nml):
 # Key renames (dict/YAML key -> namelist key)
 # ---------------------------------------------------------------------------
 def test_key_renames(nml):
-    assert nml["s_coord"]["hc"] == 250.0                       # tcline -> hc
-    assert nml["grid_settings"]["grdname"] == "/in/grid.nc"    # grid_file -> grdname
-    assert nml["initial_conditions"]["inifile"] == "/in/init.nc"  # initial_file -> inifile
+    assert nml["s_coord"]["hc"] == 250.0  # tcline -> hc
+    assert nml["grid_settings"]["grdname"] == "/in/grid.nc"  # grid_file -> grdname
+    assert (
+        nml["initial_conditions"]["inifile"] == "/in/init.nc"
+    )  # initial_file -> inifile
     assert nml["simulation_name_settings"]["title"] == "test_case"  # casename -> title
     # blk_frc.interp_frc (0) -> interp_bulk_frc (logical False) in merged surf_frc_settings
     assert nml["surf_frc_settings"]["interp_bulk_frc"] is False
-    # bgc.interp_frc (1) -> interp_bgc_frc (logical True); wrt_his -> wrt_bgc_his
-    assert nml["bgc_settings"]["interp_bgc_frc"] is True
+    # bgc.interp_frc (0) -> interp_bgc_frc (logical False); wrt_his -> wrt_bgc_his
+    assert nml["bgc_settings"]["interp_bgc_frc"] is False
     assert nml["bgc_settings"]["wrt_bgc_his"] is False
     # river_frc.analytical -> river_analytical
     assert nml["river_frc_settings"]["river_analytical"] is False
@@ -90,6 +174,13 @@ def test_key_renames(nml):
     # param dims
     assert nml["param_settings"]["np_xi"] == 16
     assert nml["param_settings"]["llm"] == 512
+
+
+def test_reference_date_round_trips(tmp_path):
+    rt = _base_settings()
+    rt["reference_date_settings"] = {"reference_date": [2012, 3, 15]}
+    nml = _write_and_read(tmp_path, rt)
+    assert nml["reference_date_settings"]["reference_date"] == [2012, 3, 15]
 
 
 def test_code_check_mode_in_stdout_diag_not_diagnostics(tmp_path):
@@ -127,7 +218,10 @@ def test_per_tracer_arrays_expand_to_n_tracers(tmp_path):
 def test_frcfile_canonical_order_non_none(nml):
     # surface, boundary, river set (surface_bgc/boundary_bgc/tidal left None)
     assert nml["forcing_files"]["frcfiles"] == [
-        "/in/surf.nc", "/in/bry.nc", "/in/river.nc"]
+        "/in/surf.nc",
+        "/in/bry.nc",
+        "/in/river.nc",
+    ]
 
 
 def test_frcfile_omitted_when_all_none(tmp_path):
@@ -158,14 +252,18 @@ def test_marbl_empty_list_renders_as_empty_string(tmp_path):
 
 def test_marbl_over_bounds_warns(tmp_path):
     rt = _base_settings()
-    rt["marbl_bgc"]["marbl_tracers_to_write"] = [f"T{i}" for i in range(MARBL_TRACERS_TO_WRITE_MAX + 1)]
+    rt["marbl_bgc"]["marbl_tracers_to_write"] = [
+        f"T{i}" for i in range(MARBL_TRACERS_TO_WRITE_MAX + 1)
+    ]
     with pytest.warns(UserWarning, match="marbl_tracers_to_write.*overflow"):
         write_roms_namelist(rt, tmp_path, n_tracers=34)
 
 
 def test_marbl_within_bounds_does_not_warn(tmp_path):
     rt = _base_settings()
-    rt["marbl_bgc"]["marbl_diagnostics_to_write"] = [f"D{i}" for i in range(MARBL_DIAGNOSTICS_TO_WRITE_MAX)]
+    rt["marbl_bgc"]["marbl_diagnostics_to_write"] = [
+        f"D{i}" for i in range(MARBL_DIAGNOSTICS_TO_WRITE_MAX)
+    ]
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
         write_roms_namelist(rt, tmp_path, n_tracers=34)  # must not raise

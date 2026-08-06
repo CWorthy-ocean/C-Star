@@ -9,36 +9,36 @@ Tests cover:
 - Machine configuration loading
 - CLI functionality
 """
-from pathlib import Path
+
+import json
 import os
+from dataclasses import FrozenInstanceError
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 import yaml
-import json
-from dataclasses import FrozenInstanceError
-from unittest.mock import patch, MagicMock
 
 import cstar_forge.config as config_module
-
 from cstar_forge.config import (
+    SYSTEM_LAYOUT_REGISTRY,
     DataPaths,
     MachineConfig,
+    _default_cluster_type,
     _detect_system,
     _get_hostname,
-    _default_cluster_type,
+    default_catalog_inner_dir,
     get_data_paths,
     load_machine_config,
-    SYSTEM_LAYOUT_REGISTRY,
-    register_system,
     main,
+    register_system,
     with_catalog,
-    default_catalog_inner_dir,
 )
-from cstar_forge._core import resolve_catalog_dir
 
 
 class TestDataPaths:
     """Tests for DataPaths dataclass."""
-    
+
     def test_datapaths_creation(self, tmp_path):
         """Test creating DataPaths with all required fields."""
         cat = tmp_path / "catalog"
@@ -49,9 +49,9 @@ class TestDataPaths:
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yml",
-            builds_yaml=tmp_path / "builds.yml",
-            machines_yaml=tmp_path / "machines.yml",
+            models_yaml=tmp_path / "models.yaml",
+            builds_yaml=tmp_path / "builds.yaml",
+            machines_yaml=tmp_path / "machines.yaml",
         )
 
         assert paths.here == tmp_path
@@ -60,10 +60,10 @@ class TestDataPaths:
         assert paths.scratch == tmp_path / "run-dir"
         assert paths.catalog == cat
         assert paths.blueprints == cat / "blueprints"
-        assert paths.models_yaml == tmp_path / "models.yml"
-        assert paths.builds_yaml == tmp_path / "builds.yml"
-        assert paths.machines_yaml == tmp_path / "machines.yml"
-    
+        assert paths.models_yaml == tmp_path / "models.yaml"
+        assert paths.builds_yaml == tmp_path / "builds.yaml"
+        assert paths.machines_yaml == tmp_path / "machines.yaml"
+
     def test_datapaths_frozen(self, tmp_path):
         """Test that DataPaths is frozen (immutable)."""
         cat = tmp_path / "catalog"
@@ -74,9 +74,9 @@ class TestDataPaths:
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yml",
-            builds_yaml=tmp_path / "builds.yml",
-            machines_yaml=tmp_path / "machines.yml",
+            models_yaml=tmp_path / "models.yaml",
+            builds_yaml=tmp_path / "builds.yaml",
+            machines_yaml=tmp_path / "machines.yaml",
         )
 
         with pytest.raises(FrozenInstanceError):
@@ -92,9 +92,9 @@ class TestDataPaths:
             scratch=tmp_path / "run-dir",
             catalog=cat,
             blueprints=cat / "blueprints",
-            models_yaml=tmp_path / "models.yml",
-            builds_yaml=tmp_path / "builds.yml",
-            machines_yaml=tmp_path / "machines.yml",
+            models_yaml=tmp_path / "models.yaml",
+            builds_yaml=tmp_path / "builds.yaml",
+            machines_yaml=tmp_path / "machines.yaml",
         )
         other = tmp_path / "other_catalog"
         moved = with_catalog(paths, other)
@@ -103,22 +103,9 @@ class TestDataPaths:
         assert moved.here == paths.here
 
 
-class TestResolveCatalogDir:
-    def test_resolve_none_uses_config_catalog(self):
-        from cstar_forge import config as cfg
+# NB: catalog_root anchoring (resolve_catalog_dir) was removed with the executor's
+# config/catalog decoupling — the forge app writes under the injected host.working_dir.
 
-        p = cfg.paths.catalog
-        assert resolve_catalog_dir(None) == p
-
-    def test_resolve_local_package_catalog(self):
-        from cstar_forge import config as cfg
-
-        assert resolve_catalog_dir("local") == cfg.paths.here / "catalog"
-        assert resolve_catalog_dir("LOCAL") == cfg.paths.here / "catalog"
-
-    def test_resolve_path(self, tmp_path):
-        outer = (tmp_path / "x").resolve()
-        assert resolve_catalog_dir(tmp_path / "x") == outer / "catalog"
 
 class TestDefaultCatalogInnerDir:
     def test_under_cstar_forge_data_base(self, tmp_path):
@@ -126,30 +113,34 @@ class TestDefaultCatalogInnerDir:
         # Catalog is a sibling of source-data inside that same base.
         sd = tmp_path / "cstar-forge-data" / "source-data"
         sd.mkdir(parents=True)
-        assert default_catalog_inner_dir(sd) == tmp_path / "cstar-forge-data" / "catalog"
+        assert (
+            default_catalog_inner_dir(sd) == tmp_path / "cstar-forge-data" / "catalog"
+        )
 
     def test_when_source_data_already_under_cstar_forge_data(self, tmp_path):
         sd = tmp_path / "cstar_forge_data" / "source-data"
         sd.mkdir(parents=True)
-        assert default_catalog_inner_dir(sd) == tmp_path / "cstar_forge_data" / "catalog"
+        assert (
+            default_catalog_inner_dir(sd) == tmp_path / "cstar_forge_data" / "catalog"
+        )
 
 
 class TestMachineConfig:
     """Tests for MachineConfig dataclass."""
-    
+
     def test_machineconfig_creation_minimal(self):
         """Test creating MachineConfig with no fields."""
         config = MachineConfig()
         assert config.account is None
         assert config.pes_per_node is None
         assert config.queues is None
-    
+
     def test_machineconfig_creation_with_fields(self):
         """Test creating MachineConfig with all fields."""
         config = MachineConfig(
             account="test_account",
             pes_per_node=64,
-            queues={"default": "normal", "premium": "high"}
+            queues={"default": "normal", "premium": "high"},
         )
         assert config.account == "test_account"
         assert config.pes_per_node == 64
@@ -158,18 +149,18 @@ class TestMachineConfig:
 
 class TestSystemDetection:
     """Tests for system detection functions."""
-    
-    @patch('cstar_forge.config.platform.system')
-    @patch('cstar_forge.config._get_hostname')
+
+    @patch("cstar_forge.config.platform.system")
+    @patch("cstar_forge.config._get_hostname")
     @patch.dict(os.environ, {}, clear=True)
     def test_detect_system_macos(self, mock_hostname, mock_system):
         """Test system detection for MacOS."""
         mock_system.return_value = "Darwin"
         result = _detect_system()
         assert result == "MacOS"
-    
-    @patch('cstar_forge.config.platform.system')
-    @patch('cstar_forge.config._get_hostname')
+
+    @patch("cstar_forge.config.platform.system")
+    @patch("cstar_forge.config._get_hostname")
     @patch.dict(os.environ, {}, clear=True)
     def test_detect_system_anvil(self, mock_hostname, mock_system):
         """Test system detection for RCAC Anvil."""
@@ -177,9 +168,9 @@ class TestSystemDetection:
         mock_hostname.return_value = "anvil-login01"
         result = _detect_system()
         assert result == "RCAC_anvil"
-    
-    @patch('cstar_forge.config.platform.system')
-    @patch('cstar_forge.config._get_hostname')
+
+    @patch("cstar_forge.config.platform.system")
+    @patch("cstar_forge.config._get_hostname")
     @patch.dict(os.environ, {"NERSC_HOST": "perlmutter"})
     def test_detect_system_perlmutter(self, mock_hostname, mock_system):
         """Test system detection for NERSC Perlmutter."""
@@ -187,9 +178,9 @@ class TestSystemDetection:
         mock_hostname.return_value = "unknown"
         result = _detect_system()
         assert result == "NERSC_perlmutter"
-    
-    @patch('cstar_forge.config.platform.system')
-    @patch('cstar_forge.config._get_hostname')
+
+    @patch("cstar_forge.config.platform.system")
+    @patch("cstar_forge.config._get_hostname")
     @patch.dict(os.environ, {}, clear=True)
     def test_detect_system_unknown(self, mock_hostname, mock_system):
         """Test system detection for unknown system."""
@@ -197,20 +188,20 @@ class TestSystemDetection:
         mock_hostname.return_value = "unknown-host"
         result = _detect_system()
         assert result == "unknown"
-    
+
     @patch.dict(os.environ, {"HOSTNAME": "test-host"})
-    @patch('cstar_forge.config.socket.gethostname', return_value="")
-    @patch('cstar_forge.config.platform.node', return_value="")
+    @patch("cstar_forge.config.socket.gethostname", return_value="")
+    @patch("cstar_forge.config.platform.node", return_value="")
     def test_get_hostname_from_env(self, mock_node, mock_gethostname):
         """Test getting hostname from HOSTNAME environment variable."""
         result = _get_hostname()
         assert result == "test-host"
         mock_gethostname.assert_called_once()
         mock_node.assert_called_once()
-    
+
     @patch.dict(os.environ, {}, clear=True)
-    @patch('cstar_forge.config.socket.gethostname')
-    @patch('cstar_forge.config.platform.node')
+    @patch("cstar_forge.config.socket.gethostname")
+    @patch("cstar_forge.config.platform.node")
     def test_get_hostname_from_socket(self, mock_node, mock_gethostname):
         """Test getting hostname from socket.gethostname()."""
         mock_gethostname.return_value = "socket-host"
@@ -218,20 +209,20 @@ class TestSystemDetection:
         result = _get_hostname()
         assert result == "socket-host"
         mock_node.assert_not_called()
-    
+
     @patch.dict(os.environ, {}, clear=True)
-    @patch('cstar_forge.config.socket.gethostname')
-    @patch('cstar_forge.config.platform.node')
+    @patch("cstar_forge.config.socket.gethostname")
+    @patch("cstar_forge.config.platform.node")
     def test_get_hostname_from_platform(self, mock_node, mock_gethostname):
         """Test getting hostname from platform.node() as fallback."""
         mock_gethostname.return_value = None
         mock_node.return_value = "platform-host"
         result = _get_hostname()
         assert result == "platform-host"
-    
+
     @patch.dict(os.environ, {}, clear=True)
-    @patch('cstar_forge.config.socket.gethostname')
-    @patch('cstar_forge.config.platform.node')
+    @patch("cstar_forge.config.socket.gethostname")
+    @patch("cstar_forge.config.platform.node")
     def test_get_hostname_unknown(self, mock_node, mock_gethostname):
         """Test getting hostname when all methods fail."""
         mock_gethostname.return_value = None
@@ -242,107 +233,200 @@ class TestSystemDetection:
 
 class TestSystemLayoutRegistry:
     """Tests for system layout registry."""
-    
+
     def test_system_layout_registry_has_defaults(self):
         """Test that default system layouts are registered."""
         assert "MacOS" in SYSTEM_LAYOUT_REGISTRY
         assert "RCAC_anvil" in SYSTEM_LAYOUT_REGISTRY
         assert "NERSC_perlmutter" in SYSTEM_LAYOUT_REGISTRY
         assert "unknown" in SYSTEM_LAYOUT_REGISTRY
-    
+
     def test_register_system_decorator(self):
         """Test registering a custom system layout."""
+
         @register_system("test_system")
         def test_layout(home: Path, env: dict):
             return (
                 home / "test-source",
                 home / "test-input",
                 home / "test-run",
-                home / "test-code"
+                home / "test-code",
             )
-        
+
         assert "test_system" in SYSTEM_LAYOUT_REGISTRY
         assert SYSTEM_LAYOUT_REGISTRY["test_system"] == test_layout
-        
+
         # Clean up
         del SYSTEM_LAYOUT_REGISTRY["test_system"]
-    
+
     def test_macos_layout(self, tmp_path):
         """Test MacOS layout function."""
         layout_fn = SYSTEM_LAYOUT_REGISTRY["MacOS"]
         source_data, input_data, scratch = layout_fn(tmp_path, {})
-        
+
         assert source_data == tmp_path / "cstar-forge-data" / "source-data"
         assert input_data == tmp_path / "cstar-forge-data" / "input-data"
         assert scratch == tmp_path / "cstar-forge-data" / "cstar-forge-run"
-    
+
     def test_unknown_layout(self, tmp_path):
         """Test unknown layout function."""
         layout_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
         source_data, input_data, scratch = layout_fn(tmp_path, {})
-        
+
         assert source_data == tmp_path / "cstar-forge-data" / "source-data"
         assert input_data == tmp_path / "cstar-forge-data" / "input-data"
         assert scratch == tmp_path / "cstar-forge-data" / "cstar-forge-run"
-    
+
     def test_anvil_layout(self, tmp_path):
         """Test RCAC Anvil layout function."""
         from cstar_forge.config import USER
+
         layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
         env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
         source_data, input_data, scratch = layout_fn(tmp_path, env)
-        
+
         assert source_data == tmp_path / "work" / "cstar-forge-data" / "source-data"
-        assert input_data == tmp_path / "work" / "cstar-forge-data" / USER / "input-data"
+        assert (
+            input_data == tmp_path / "work" / "cstar-forge-data" / USER / "input-data"
+        )
         assert scratch == tmp_path / "scratch" / "cstar-forge-run"
-    
+
     def test_perlmutter_layout(self, tmp_path):
         """Test NERSC Perlmutter layout function."""
         from cstar_forge.config import USER
+
         layout_fn = SYSTEM_LAYOUT_REGISTRY["NERSC_perlmutter"]
         env = {"SCRATCH": str(tmp_path / "scratch")}
         source_data, input_data, scratch = layout_fn(tmp_path, env)
-        
+
         assert source_data == tmp_path / "scratch" / "cstar-forge-data" / "source-data"
-        assert input_data == tmp_path / "scratch" / "cstar-forge-data" / USER / "input-data"
+        assert (
+            input_data
+            == tmp_path / "scratch" / "cstar-forge-data" / USER / "input-data"
+        )
         assert scratch == tmp_path / "scratch" / "cstar-forge-data" / "cstar-forge-run"
+
+
+class TestRelocateWorkingDir:
+    """Tests for relocate_working_dir (default-form paths rebase onto HPC scratch)."""
+
+    def test_default_path_rebases_to_scratch_on_perlmutter(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        env = {"SCRATCH": str(tmp_path / "scratch")}
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="NERSC_perlmutter",
+            env=env,
+            home=home,
+        )
+        assert wd == tmp_path / "scratch" / "cstar-forge-data" / "my-run"
+
+    def test_default_path_rebases_to_scratch_on_anvil(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="RCAC_anvil",
+            env=env,
+            home=home,
+        )
+        assert wd == tmp_path / "scratch" / "cstar-forge-data" / "my-run"
+
+    def test_anvil_falls_back_to_work_scratch(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        env = {"WORK": str(tmp_path / "work")}
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="RCAC_anvil",
+            env=env,
+            home=home,
+        )
+        assert wd == tmp_path / "work" / "scratch" / "cstar-forge-data" / "my-run"
+
+    def test_non_hpc_leaves_path_alone(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        wd = relocate_working_dir(
+            home / "cstar-forge-data" / "my-run",
+            system_tag="MacOS",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == home / "cstar-forge-data" / "my-run"
+
+    def test_custom_path_passes_through_on_hpc(self, tmp_path):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        custom = tmp_path / "elsewhere" / "my-run"
+        wd = relocate_working_dir(
+            custom,
+            system_tag="NERSC_perlmutter",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == custom
+
+    def test_tilde_default_expands_then_rebases(self, tmp_path, monkeypatch):
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        monkeypatch.setenv("HOME", str(home))
+        wd = relocate_working_dir(
+            "~/cstar-forge-data/my-run",
+            system_tag="NERSC_perlmutter",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == tmp_path / "scratch" / "cstar-forge-data" / "my-run"
 
 
 class TestGetDataPaths:
     """Tests for get_data_paths function."""
-    
-    @patch('cstar_forge.config._detect_system')
+
+    @patch("cstar_forge.config._detect_system")
     def test_get_data_paths(self, mock_detect, tmp_path):
-        """Test get_data_paths returns DataPaths object."""
+        """Test get_data_paths returns DataPaths object without creating directories.
+
+        Importing cstar_forge.config must not have filesystem side effects, so the
+        default (``create=False``) only builds Path objects.
+        """
         mock_detect.return_value = "MacOS"
-        
+
         # Use a real home directory that exists for the test
         with patch.dict(os.environ, {"HOME": str(tmp_path)}):
             paths = get_data_paths()
-        
+
         assert isinstance(paths, DataPaths)
         # 'here' is the parent of __file__, so it should exist and be a directory
         # (it's not created by get_data_paths, it's the package directory)
         assert paths.here.exists(), f"'here' path does not exist: {paths.here}"
         assert paths.here.is_dir(), f"'here' path is not a directory: {paths.here}"
-        # These directories are created by get_data_paths
-        assert paths.source_data.exists()
-        assert paths.input_data.exists()
-        assert paths.scratch.exists()
-        assert paths.catalog.exists()
-        assert paths.blueprints.exists()
+        # No directories are created by default
+        assert not paths.source_data.exists()
+        assert not paths.input_data.exists()
+        assert not paths.scratch.exists()
+        assert not paths.catalog.exists()
+        assert not paths.blueprints.exists()
         assert paths.catalog == default_catalog_inner_dir(paths.source_data)
         assert paths.blueprints == paths.catalog / "blueprints"
-    
-    @patch('cstar_forge.config._detect_system')
+
+    @patch("cstar_forge.config._detect_system")
     def test_get_data_paths_creates_directories(self, mock_detect, tmp_path):
-        """Test that get_data_paths creates necessary directories."""
+        """Test that get_data_paths(create=True) creates necessary directories."""
         mock_detect.return_value = "MacOS"
-        
+
         # Use a temporary directory as HOME for the test
         with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-            paths = get_data_paths()
-        
+            paths = get_data_paths(create=True)
+
         # Verify directories were created (they should exist after get_data_paths)
         assert paths.source_data.exists()
         assert paths.input_data.exists()
@@ -353,64 +437,57 @@ class TestGetDataPaths:
 
 class TestLoadMachineConfig:
     """Tests for load_machine_config function."""
-    
+
     def test_load_machine_config_nonexistent_file(self, tmp_path):
         """Test loading machine config when file doesn't exist."""
-        machines_yaml = tmp_path / "machines.yml"
+        machines_yaml = tmp_path / "machines.yaml"
         config = load_machine_config("test_system", machines_yaml)
-        
+
         assert isinstance(config, MachineConfig)
         assert config.account is None
         assert config.pes_per_node is None
         assert config.queues is None
-    
+
     def test_load_machine_config_existing_machine(self, tmp_path):
         """Test loading machine config for existing machine."""
-        machines_yaml = tmp_path / "machines.yml"
+        machines_yaml = tmp_path / "machines.yaml"
         machines_data = {
             "NERSC_perlmutter": {
                 "account": "test_account",
                 "pes_per_node": 128,
-                "queues": {
-                    "default": "normal",
-                    "premium": "premium"
-                }
+                "queues": {"default": "normal", "premium": "premium"},
             }
         }
-        
+
         with machines_yaml.open("w") as f:
             yaml.safe_dump(machines_data, f)
-        
+
         config = load_machine_config("NERSC_perlmutter", machines_yaml)
-        
+
         assert config.account == "test_account"
         assert config.pes_per_node == 128
         assert config.queues == {"default": "normal", "premium": "premium"}
-    
+
     def test_load_machine_config_nonexistent_machine(self, tmp_path):
         """Test loading machine config for machine not in file."""
-        machines_yaml = tmp_path / "machines.yml"
-        machines_data = {
-            "NERSC_perlmutter": {
-                "account": "test_account"
-            }
-        }
-        
+        machines_yaml = tmp_path / "machines.yaml"
+        machines_data = {"NERSC_perlmutter": {"account": "test_account"}}
+
         with machines_yaml.open("w") as f:
             yaml.safe_dump(machines_data, f)
-        
+
         config = load_machine_config("unknown_machine", machines_yaml)
-        
+
         assert isinstance(config, MachineConfig)
         assert config.account is None
-    
+
     def test_load_machine_config_invalid_yaml(self, tmp_path):
         """Test loading machine config with invalid YAML."""
-        machines_yaml = tmp_path / "machines.yml"
+        machines_yaml = tmp_path / "machines.yaml"
         machines_yaml.write_text("invalid: yaml: content: [")
-        
+
         config = load_machine_config("test_system", machines_yaml)
-        
+
         # Should return empty config on error
         assert isinstance(config, MachineConfig)
         assert config.account is None
@@ -418,7 +495,7 @@ class TestLoadMachineConfig:
 
 class TestCLI:
     """Tests for CLI functionality."""
-    
+
     def test_cli_show_paths(self, capsys):
         """Test show-paths command."""
         # Create a real DataPaths object for testing
@@ -429,23 +506,25 @@ class TestCLI:
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yml"),
-            builds_yaml=Path("/test/builds.yml"),
-            machines_yaml=Path("/test/machines.yml"),
+            models_yaml=Path("/test/models.yaml"),
+            builds_yaml=Path("/test/builds.yaml"),
+            machines_yaml=Path("/test/machines.yaml"),
         )
-        
+
         # Patch everything in one context manager
-        with patch.object(config_module, 'paths', test_paths), \
-             patch('cstar_forge.config._detect_system', return_value="MacOS"), \
-             patch('cstar_forge.config._get_hostname', return_value="test-host"):
+        with (
+            patch.object(config_module, "paths", test_paths),
+            patch("cstar_forge.config._detect_system", return_value="MacOS"),
+            patch("cstar_forge.config._get_hostname", return_value="test-host"),
+        ):
             exit_code = main(["show-paths"])
-        
+
         assert exit_code == 0
         captured = capsys.readouterr()
         assert "System tag" in captured.out
         assert "MacOS" in captured.out
         assert "test-host" in captured.out
-    
+
     def test_cli_show_paths_json(self, capsys):
         """Test show-paths command with --json flag."""
         # Create a real DataPaths object for testing
@@ -456,17 +535,19 @@ class TestCLI:
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yml"),
-            builds_yaml=Path("/test/builds.yml"),
-            machines_yaml=Path("/test/machines.yml"),
+            models_yaml=Path("/test/models.yaml"),
+            builds_yaml=Path("/test/builds.yaml"),
+            machines_yaml=Path("/test/machines.yaml"),
         )
-        
+
         # Patch everything in one context manager
-        with patch.object(config_module, 'paths', test_paths), \
-             patch('cstar_forge.config._detect_system', return_value="MacOS"), \
-             patch('cstar_forge.config._get_hostname', return_value="test-host"):
+        with (
+            patch.object(config_module, "paths", test_paths),
+            patch("cstar_forge.config._detect_system", return_value="MacOS"),
+            patch("cstar_forge.config._get_hostname", return_value="test-host"),
+        ):
             exit_code = main(["show-paths", "--json"])
-        
+
         assert exit_code == 0
         captured = capsys.readouterr()
         # Should be valid JSON
@@ -474,7 +555,7 @@ class TestCLI:
         assert data["system"] == "MacOS"
         assert data["hostname"] == "test-host"
         assert "paths" in data
-    
+
     def test_cli_default_command(self, capsys):
         """Test that default command is show-paths."""
         # Create a real DataPaths object for testing
@@ -485,78 +566,80 @@ class TestCLI:
             scratch=Path("/test/run"),
             catalog=Path("/test/catalog"),
             blueprints=Path("/test/catalog/blueprints"),
-            models_yaml=Path("/test/models.yml"),
-            builds_yaml=Path("/test/builds.yml"),
-            machines_yaml=Path("/test/machines.yml"),
+            models_yaml=Path("/test/models.yaml"),
+            builds_yaml=Path("/test/builds.yaml"),
+            machines_yaml=Path("/test/machines.yaml"),
         )
-        
-        with patch.object(config_module, 'paths', test_paths), \
-             patch('cstar_forge.config._detect_system') as mock_detect, \
-             patch('cstar_forge.config._get_hostname') as mock_hostname:
-            
+
+        with (
+            patch.object(config_module, "paths", test_paths),
+            patch("cstar_forge.config._detect_system") as mock_detect,
+            patch("cstar_forge.config._get_hostname") as mock_hostname,
+        ):
             mock_detect.return_value = "MacOS"
             mock_hostname.return_value = "test-host"
-            
+
             exit_code = main([])
-            
+
             assert exit_code == 0
             captured = capsys.readouterr()
             assert "System tag" in captured.out
-    
+
     def test_cli_unknown_command(self, capsys):
         """Test CLI with unknown command."""
         # argparse raises SystemExit(2) for invalid commands
         with pytest.raises(SystemExit) as exc_info:
             main(["unknown-command"])
-        
+
         # argparse exits with code 2 for invalid arguments
         assert exc_info.value.code == 2
         captured = capsys.readouterr()
-        assert "error" in captured.err.lower() or "invalid choice" in captured.err.lower()
+        assert (
+            "error" in captured.err.lower() or "invalid choice" in captured.err.lower()
+        )
 
 
 class TestClusterType:
     """Tests for ClusterType class and _default_cluster_type function."""
-    
+
     def test_cluster_type_constants(self):
         """Test that ClusterType constants are defined correctly."""
         assert config_module.ClusterType.LOCAL == "LocalCluster"
         assert config_module.ClusterType.SLURM == "SLURMCluster"
         assert config_module.ClusterType.PBS == "PBSCluster"
-    
+
     def test_default_cluster_type_macos(self):
         """Test default cluster type for MacOS."""
         result = _default_cluster_type("MacOS")
         assert result == config_module.ClusterType.LOCAL
-    
+
     def test_default_cluster_type_unknown(self):
         """Test default cluster type for unknown system."""
         result = _default_cluster_type("unknown")
         assert result == config_module.ClusterType.LOCAL
-    
+
     def test_default_cluster_type_anvil(self):
         """Test default cluster type for RCAC Anvil."""
         result = _default_cluster_type("RCAC_anvil")
         assert result == config_module.ClusterType.SLURM
-    
+
     def test_default_cluster_type_perlmutter(self):
         """Test default cluster type for NERSC Perlmutter."""
         result = _default_cluster_type("NERSC_perlmutter")
         assert result == config_module.ClusterType.SLURM
-    
+
     def test_default_cluster_type_unsupported(self):
         """Test that unsupported systems raise NotImplementedError."""
         with pytest.raises(NotImplementedError) as exc_info:
             _default_cluster_type("unsupported_system")
         assert "unsupported_system" in str(exc_info.value)
-    
+
     def test_cluster_type_module_level(self):
         """Test that config.cluster_type is set correctly."""
         # The cluster_type should be set based on the detected system
-        assert hasattr(config_module, 'cluster_type')
+        assert hasattr(config_module, "cluster_type")
         assert config_module.cluster_type in [
             config_module.ClusterType.LOCAL,
             config_module.ClusterType.SLURM,
-            config_module.ClusterType.PBS
+            config_module.ClusterType.PBS,
         ]
-

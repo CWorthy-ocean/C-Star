@@ -10,16 +10,16 @@ from cstar_forge.parsers import (
     NotebookEntry,
     NotebookList,
     NotebookSection,
+    _parse_notebook_entries,
     load_app_config,
     load_roms_tools_object,
     load_yaml_params,
     normalize_file_type,
-    _parse_notebook_entries,
 )
 
 
 def test_load_yaml_params_single_document(tmp_path):
-    yaml_path = tmp_path / "single.yml"
+    yaml_path = tmp_path / "single.yaml"
     yaml_path.write_text(
         "\n".join(
             [
@@ -60,7 +60,7 @@ def test_load_yaml_params_single_document(tmp_path):
 
 
 def test_load_yaml_params_multiple_documents(tmp_path):
-    yaml_path = tmp_path / "multi.yml"
+    yaml_path = tmp_path / "multi.yaml"
     yaml_path.write_text(
         "---\nroms_tools_version: 3.3.0\n---\nGrid:\n  nx: 10\n",
         encoding="utf-8",
@@ -78,7 +78,7 @@ def test_normalize_file_type():
 
 
 def test_load_roms_tools_object_grid_only(tmp_path):
-    yaml_path = tmp_path / "grid.yml"
+    yaml_path = tmp_path / "grid.yaml"
     yaml_path.write_text("---\nGrid:\n  nx: 10\n", encoding="utf-8")
 
     called = {}
@@ -97,8 +97,10 @@ def test_load_roms_tools_object_grid_only(tmp_path):
 
 
 def test_load_roms_tools_object_other_class(tmp_path):
-    yaml_path = tmp_path / "forcing.yml"
-    yaml_path.write_text("---\nGrid:\n  nx: 10\nTidalForcing:\n  source: test\n", encoding="utf-8")
+    yaml_path = tmp_path / "forcing.yaml"
+    yaml_path.write_text(
+        "---\nGrid:\n  nx: 10\nTidalForcing:\n  source: test\n", encoding="utf-8"
+    )
 
     called = {}
 
@@ -116,7 +118,7 @@ def test_load_roms_tools_object_other_class(tmp_path):
 
 
 def test_load_roms_tools_object_requires_grid(tmp_path):
-    yaml_path = tmp_path / "invalid.yml"
+    yaml_path = tmp_path / "invalid.yaml"
     yaml_path.write_text("---\nTidalForcing:\n  source: test\n", encoding="utf-8")
     module = SimpleNamespace(TidalForcing=object(), Grid=object())
     with pytest.raises(ValueError, match="must include a 'Grid' section"):
@@ -124,12 +126,14 @@ def test_load_roms_tools_object_requires_grid(tmp_path):
 
 
 def test_load_roms_tools_object_multiple_sections(tmp_path):
-    yaml_path = tmp_path / "invalid.yml"
+    yaml_path = tmp_path / "invalid.yaml"
     yaml_path.write_text(
         "---\nGrid:\n  nx: 10\nTidalForcing:\n  source: test\nSurfaceForcing:\n  source: test\n",
         encoding="utf-8",
     )
-    module = SimpleNamespace(TidalForcing=object(), SurfaceForcing=object(), Grid=object())
+    module = SimpleNamespace(
+        TidalForcing=object(), SurfaceForcing=object(), Grid=object()
+    )
     with pytest.raises(ValueError, match="only one non-Grid section"):
         load_roms_tools_object(yaml_path, roms_tools_module=module)
 
@@ -147,7 +151,7 @@ def test_dask_cluster_kwargs_model():
 
 def test_notebook_entry_model():
     config = NotebookConfig(
-        parameters={"grid_yaml": "tests/_grid.yml", "test": True},
+        parameters={"grid_yaml": "tests/_grid.yaml", "test": True},
         output_path="executed/domain-sizing/example.ipynb",
     )
     entry = NotebookEntry(
@@ -160,7 +164,7 @@ def test_notebook_entry_model():
 
 def test_notebook_list_model():
     config = NotebookConfig(
-        parameters={"grid_yaml": "tests/_grid.yml"},
+        parameters={"grid_yaml": "tests/_grid.yaml"},
         output_path="executed/domain-sizing/example.ipynb",
     )
     entry = NotebookEntry(
@@ -174,7 +178,7 @@ def test_notebook_list_model():
 
 def test_parameters_config_model():
     config = NotebookConfig(
-        parameters={"grid_yaml": "tests/_grid.yml"},
+        parameters={"grid_yaml": "tests/_grid.yaml"},
         output_path="executed/domain-sizing/example.ipynb",
     )
     entry = NotebookEntry(
@@ -193,11 +197,14 @@ def test_parameters_config_model():
         notebook_list=notebook_list,
     )
     assert params.dask_cluster_kwargs.account == "m4632"
-    assert next(params.notebook_list.iter_entries()).notebook_name == "regional-domain-sizing"
+    assert (
+        next(params.notebook_list.iter_entries()).notebook_name
+        == "regional-domain-sizing"
+    )
 
 
 def test_load_app_config(tmp_path):
-    config_path = tmp_path / "parameters.yml"
+    config_path = tmp_path / "parameters.yaml"
     config_path.write_text(
         "\n".join(
             [
@@ -211,7 +218,7 @@ def test_load_app_config(tmp_path):
                 "  children:",
                 "  - regional-domain-sizing:",
                 "      parameters:",
-                "        grid_yaml: tests/_grid.yml",
+                "        grid_yaml: tests/_grid.yaml",
                 "        test: true",
                 "        scheduler_file: null",
                 "      output_path: executed/domain-sizing/example.ipynb",
@@ -228,7 +235,7 @@ def test_load_app_config(tmp_path):
     assert first_entry.notebook_name == "regional-domain-sizing"
     assert first_entry.config.parameters["test"] is True
     assert first_entry.config.parameters["grid_yaml"] == str(
-        tmp_path / "tests/_grid.yml"
+        tmp_path / "tests/_grid.yaml"
     )
     assert first_entry.config.output_path == str(
         tmp_path / "executed/domain-sizing/example.ipynb"
@@ -236,7 +243,7 @@ def test_load_app_config(tmp_path):
 
 
 def test_load_app_config_requires_notebooks(tmp_path):
-    config_path = tmp_path / "parameters.yml"
+    config_path = tmp_path / "parameters.yaml"
     config_path.write_text(
         "\n".join(
             [
@@ -269,7 +276,7 @@ def test_parse_notebook_entries_requires_mapping_payload():
 
 
 def test_load_yaml_params_rejects_non_mapping(tmp_path):
-    yaml_path = tmp_path / "bad.yml"
+    yaml_path = tmp_path / "bad.yaml"
     yaml_path.write_text("---\n- 1\n- 2\n", encoding="utf-8")
     with pytest.raises(ValueError, match="must be mappings"):
         load_yaml_params(yaml_path)

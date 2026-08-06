@@ -1,5 +1,33 @@
 # Release notes
 
+## Unreleased
+
+### Breaking Changes
+
+* Renamed `SpecConfig` to `ForgeBlueprint`; forge is now a real C-Star application that processes a `ForgeBlueprint` via `python -m cstar_forge.run`
+* Removed the `CstarSpecBuilder`/`CstarSpecEngine` preconfig/postconfig/build/run "stages" concept in favor of a single in-memory blueprint persisted once, at build time
+* Reorganized the catalog into spec directories (`ModelSpec`, `DomainSpec`, `ForcingSpec`, `OutputSpec`, `Machines`) and switched catalog files from `.yml` to `.yaml`
+* Consolidated model defaults directly into each model's `model.yaml` (no more separate `settings-defaults.yaml`)
+
+### New Features
+
+* Added an interactive `ForgeBlueprint` wizard (Jupyter + Voilà) for building and reviewing blueprints
+* Added an option to build with ParallelIO (PIO)
+* Added support for chunked GLORYS staging on large domains
+* Improved parent/child (nested) grid support
+
+### Bug Fixes
+
+* Fixed several source-data and dataset-loading issues (SRTM15, GLORYS/xgcm skew, dask memory/thread limits)
+
+### Improvements
+
+* Hardened dev-setup scripts against a `~/.local` pip fallback on HPC systems
+* Added CDR (carbon dioxide removal) forcing YAML support
+* Added flexible run-window (`allow_flex_time`) support
+
+### Miscellaneous
+
 ## 0.2.0
 
 ### Breaking Changes

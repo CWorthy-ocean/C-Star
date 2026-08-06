@@ -5,24 +5,24 @@ This package provides utilities for comparing model outputs to observational dat
 and computing diagnostic metrics.
 """
 
-from . import glodap
+from cstar_forge.diagnostics import glodap
 
 # Export public API
 __all__ = [
+    "compute_grid_area",
+    "depth_bnds",
     "glodap",
+    "known_products",
+    "lat_weights_regular_grid",
     # glodap module exports
     "open_glodap",
-    "lat_weights_regular_grid",
-    "compute_grid_area",
-    "known_products",
-    "depth_bnds",
 ]
 
 # Import commonly used functions for convenience
-from .glodap import (
-    open_glodap,
-    lat_weights_regular_grid,
+from cstar_forge.diagnostics.glodap import (
     compute_grid_area,
-    known_products,
     depth_bnds,
+    known_products,
+    lat_weights_regular_grid,
+    open_glodap,
 )

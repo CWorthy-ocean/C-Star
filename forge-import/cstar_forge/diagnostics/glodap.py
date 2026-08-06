@@ -1,15 +1,15 @@
 import os
+import urllib
 from glob import glob
 from subprocess import check_call
-import urllib
 
 import numpy as np
 import xarray as xr
 
 try:
-    cache_dir = os.environ['TMPDIR']
-except:
-    cache_dir = os.environ['HOME']
+    cache_dir = os.environ["TMPDIR"]
+except KeyError:
+    cache_dir = os.environ["HOME"]
 
 known_products = [
     "GLODAPv2.2016b_MappedClimatologies",
@@ -59,7 +59,7 @@ depth_bnds = xr.DataArray(
 
 def _ensure_datafiles(product_name="GLODAPv2.2016b_MappedClimatologies"):
     """
-    get data files from website and return dictionary
+    Get data files from website and return dictionary
 
     product_name='GLODAPv2.2016b_MappedClimatologies'
     Variables returned = 'Cant', 'NO3', 'OmegaA', 'OmegaC', 'PI_TCO2', 'PO4',
@@ -72,7 +72,6 @@ def _ensure_datafiles(product_name="GLODAPv2.2016b_MappedClimatologies"):
                           'pHts25p0',  'pHtsinsitu',  'phosphate',  'salinity',
                           'silicate',  'talk',  'tco2',  'theta',
     """
-
     url = "https://www.nodc.noaa.gov/archive/arc0107/0162565/2.2/data/0-data/mapped"
 
     filename = (
@@ -94,7 +93,7 @@ def _ensure_datafiles(product_name="GLODAPv2.2016b_MappedClimatologies"):
 
 
 def open_glodap(product="GLODAPv2.2016b_MappedClimatologies"):
-    """return GLODAP dataset"""
+    """Return GLODAP dataset"""
     assert product in known_products
 
     obs_files = _ensure_datafiles(product)
@@ -117,17 +116,17 @@ def open_glodap(product="GLODAPv2.2016b_MappedClimatologies"):
         }
     )
     for v in ds.data_vars:
-        if 'units' in ds[v].attrs and ds[v].attrs['units'] == 'micro-mol kg-1':
-            ds[v].attrs['units'] = 'µmol kg$^{-1}$'
+        if "units" in ds[v].attrs and ds[v].attrs["units"] == "micro-mol kg-1":
+            ds[v].attrs["units"] = "µmol kg$^{-1}$"
 
-    ds.DIC.attrs['long_name'] = 'DIC'
-    ds.ALK.attrs['long_name'] = 'Alkalinity'
+    ds.DIC.attrs["long_name"] = "DIC"
+    ds.ALK.attrs["long_name"] = "Alkalinity"
 
     ds["area"] = compute_grid_area(ds)
     ds["depth_bnds"] = depth_bnds
     ds["dz"] = depth_bnds.diff("bnds").squeeze()
-    if 'Comment' in ds.attrs:
-        del ds.attrs['Comment']
+    if "Comment" in ds.attrs:
+        del ds.attrs["Comment"]
     return ds
 
 
@@ -138,7 +137,10 @@ def lat_weights_regular_grid(lat):
     """
     dlat = np.abs(np.diff(lat))
     np.testing.assert_almost_equal(dlat, dlat[0])
-    w = np.abs(np.sin(np.radians(lat + dlat[0] / 2.0)) - np.sin(np.radians(lat - dlat[0] / 2.0)))
+    w = np.abs(
+        np.sin(np.radians(lat + dlat[0] / 2.0))
+        - np.sin(np.radians(lat - dlat[0] / 2.0))
+    )
 
     if np.abs(lat[0]) > 89.9999:
         w[0] = np.abs(1.0 - np.sin(np.radians(np.pi / 2 - dlat[0])))
@@ -154,7 +156,6 @@ def compute_grid_area(ds, check_total=True):
 
     Parameters
     ----------
-
     ds : xarray.Dataset
       Input dataset with latitude and longitude fields
 
@@ -163,14 +164,12 @@ def compute_grid_area(ds, check_total=True):
 
     Returns
     -------
-
     area : xarray.DataArray
        DataArray with area field.
 
     """
-
     radius_earth = 6.37122e6  # m, radius of Earth
-    area_earth = 4.0 * np.pi * radius_earth ** 2  # area of earth [m^2]e
+    area_earth = 4.0 * np.pi * radius_earth**2  # area of earth [m^2]e
 
     lon_name = "lon"
     lat_name = "lat"

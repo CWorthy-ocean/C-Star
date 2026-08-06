@@ -1,7 +1,10 @@
-# Domains (`domains-nested.yml`)
+# Domains (`domains-nested.yaml`)
 
-`workflows/generate-models/templates/domains-nested.yml`
+Example nested-domain configuration in the legacy notebook-workflow format
+(current single-domain grids live in the catalog as `DomainSpec/{grid}/Domain.yaml`):
 
-```{include} ../workflows/generate-models/templates/domains-nested.yml
+`legacy/workflows/generate-models/templates/domains-nested.yaml`
+
+```{include} ../legacy/workflows/generate-models/templates/domains-nested.yaml
 :code: yaml
 ```

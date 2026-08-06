@@ -1,0 +1,196 @@
+# ModelSpec: code refs, template refs, bgc_mode, and model-specific physics/numerics
+# defaults.
+#
+# This intentionally holds nothing that a Domain/Forcing/Output spec already provides:
+# no grid/IC/forcing source selection (that's a ForcingSpec's job -- pick one from the
+# catalog; there is no more "model default" forcing) and no ocean_vars/surf_flux/
+# diagnostics/stdout_diag/ts_output/frc_output/cdr_output/upscale_output/zslice/
+# random_output sections or marbl_bgc write-lists (those are an OutputSpec's job -- pick
+# one from the catalog; there is no more "model default" output either). Nor does it
+# hold anything Domain-owned (open_boundaries -> cppdefs.obc_*; grid_kwargs/
+# partitioning -> param's llm/mmm/n/np_xi/np_eta) or Forcing-owned (tidal presence ->
+# cppdefs.tides + tides.ntides; MBL_co2 surface item -> cppdefs.co2_tvarying;
+# restoring surface forcing with an SSS component -> cppdefs.sal_restore;
+# river_frc/cdr_frc namelist defaults, which the resolver now owns directly and a
+# ForcingSpec may override -- see build_forge_blueprint). Nor does it hold
+# extract_data (child-grid nesting): its active values come from a second,
+# separately-selected DomainSpec (the nesting child), so the resolver owns its
+# disabled fallback directly too.
+#
+# `bgc_mode` (marbl|none) is a per-run toggle: it prepopulates the wizard's BGC
+# dropdown and the resolver uses it to set cppdefs.marbl (and gate nhy_forcing/
+# nox_forcing) and to decide whether code.marbl is populated.
+#
+# `use_pio` (bool) is a per-run toggle mirroring bgc_mode: it prepopulates the
+# wizard's PIO checkbox and the resolver uses it to set cppdefs.use_pio and to
+# decide whether code.pio is populated.
+#
+# `model_settings` is flat and mirrors ForgeBlueprint.model_settings 1:1 (cppdefs sits
+# at the same level as the namelist sections, matching how the resolver treats them).
+# A few sections here are fully overwritten by the resolver at build time regardless of
+# what's written below (time_stepping, v_sponge from grid/run-window; param's
+# llm/mmm/n/np_xi/np_eta from grid/partitioning; cppdefs.obc_*/marbl/co2_tvarying/
+# sal_restore/tides/cdr_forcing/use_pio from, respectively, open boundaries/bgc_mode/
+# forcing selection/forcing selection/tidal-forcing presence/CDR-forcing presence/the
+# top-level use_pio toggle; river_frc/cdr_frc entirely; extract_data
+# entirely; tides.ntides from tidal forcing) -- they're included
+# below only where the remaining fields in that same section (cppdefs' sponge_tune/
+# nhy_forcing/nox_forcing; param's nt_passive/ntrc_bio; tides' bry_tides/pot_tides/
+# ana_tides) are real, still-relevant model defaults. `pipe_frc` stays here in full:
+# there is no pipe forcing item or generation path, so it has no other piece to
+# live in.
+
+bgc_mode: marbl  # marbl|none -- prepopulates the wizard; resolver derives cppdefs.marbl from it
+use_pio: false  # prepopulates the wizard's PIO checkbox; resolver derives cppdefs.use_pio from it
+
+code:
+  roms:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: 0.2.0
+
+  marbl:
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
+
+  pio:
+    location: https://github.com/NCAR/ParallelIO.git
+    commit: pio2_7_0
+
+  # Render templates live at the forge repo root (templates/), decoupled from this
+  # ModelSpec: they track a ROMS version, change infrequently, and may move into the
+  # ucla-roms repo later. `directory` is relative to the repo root. At processing time
+  # the executor fetches these via C-Star's AdditionalCode from the forge git ref.
+  # Pin the serving forge commit with `templates_commit:` (until pinned, the resolver
+  # defaults to branch `main`).
+  templates_commit: 4208f4384431852daccea1ccad01d03c0cb473d9
+  templates_compile_time:
+    directory: "templates/compile-time"
+    files:
+    - cppdefs.opt.j2
+  templates_run_time:
+    directory: "templates/run-time"
+    files:
+    - marbl_in
+
+model_settings:
+  cppdefs:
+    # obc_west/east/north/south, marbl, co2_tvarying, sal_restore, tides, cdr_forcing,
+    # and use_pio are all resolver-derived (from the domain's open_boundaries, bgc_mode,
+    # forcing selection, restoring-forcing SSS component, tidal-forcing presence,
+    # CDR-forcing presence, and the top-level use_pio toggle, respectively) and are
+    # intentionally absent here -- there is no separate cppdefs-level default to
+    # duplicate (use_pio's own default lives at the top level, above).
+    sponge_tune: false  # advanced setting only (nested-domain pressure flux forcing); not resolver-derived
+    nhy_forcing: true  # ammonia atmospheric forcing; forced off by the resolver when bgc_mode="none"
+    nox_forcing: true  # nitrogen oxide atmospheric forcing; forced off by the resolver when bgc_mode="none"
+
+  lateral_visc:
+    visc2: 0.0  # m^2/sec
+    rho0: 1000.0
+
+  vertical_mixing:
+    akv: 0.0  # m^2/sec
+    # akt is a list of values, one per tracer (NT tracers)
+    # Default is all zeros - will be generated in template
+    akt_default: 0.0
+
+  tracer_diff2:
+    # tnu2 is a list of values, one per tracer (NT tracers)
+    # Default is all zeros - will be generated in template
+    tnu2_default: 0.0
+
+  bottom_drag:
+    rdrg: 0.0E-4  # m/s
+    rdrg2: 1.0E-3
+    zob: 1.0E-2  # meters
+
+  gamma2: 1.0  # Slipperiness parameter
+
+  ubind: 0.1  # m/s, OBC binding velocity scale
+
+  param:
+    # llm/mmm/n/np_xi/np_eta are Domain-owned (resolver-derived from grid_kwargs/
+    # partitioning) and intentionally absent here; nsub_x/nsub_e are hardcoded by the
+    # resolver. Only nt_passive/ntrc_bio (real model-level BGC tracer counts) live here.
+    nt_passive: 0
+    ntrc_bio: 32
+
+  # Output-write-control fields (wrt_*/output_period_*/nrpf_*) are an OutputSpec's
+  # job (Output.yaml's own `bgc:` block) and are deep-merged on top of these at
+  # resolve time -- only the physics defaults stay here.
+  bgc:
+    nbgc_flx: 2
+    interp_frc: 0
+    xco2air_default: 284.7  # Atmospheric xCO2 (ppm) when PCO2AIR_FORCING is off
+
+  blk_frc:
+    interp_frc: 0
+    check_bulk_frc_units: false
+
+  tides:
+    # ntides is Forcing-owned (set by the resolver from the tidal item's ntides, or 0
+    # when there is no tidal forcing) and intentionally absent here.
+    bry_tides: true
+    pot_tides: true
+    ana_tides: false
+
+  sponge_tune:
+    pflx_w_vname: 'up_west'
+    pflx_w_tname: 'bry_time'
+    pflx_e_vname: 'up_east'
+    pflx_e_tname: 'bry_time'
+    pflx_s_vname: 'vp_south'
+    pflx_s_tname: 'bry_time'
+    pflx_n_vname: 'vp_north'
+    pflx_n_tname: 'bry_time'
+    ub_tune: false
+    spn_avg: true
+    sp_timscale: 86400  # 24*3600 seconds
+    wrt_sponge: false
+    nrpf: 7
+    output_period: 86400  # 24*3600 seconds
+
+  flux_frc:
+    interp_flux_frc: true
+
+  # calc_pflx absorbs diag_pflx and its timescale from the old diagnostics.opt
+  calc_pflx:
+    calc_pflx: true
+    timescale: 86400  # timescale for filtering pressure fluxes (s)
+
+  pipe_frc:
+    pipe_source: false
+    p_analytical: false
+    npip: 1
+
+  particles:
+    floats: false
+    np: 50
+    extra_space_fac: 1.5
+    exchange_facx: 0.1
+    exchange_facy: 0.1
+    exchange_facc: 0.01
+    output_period: 400
+    nrpf: 100
+    ppm3: 1.0e-6
+    pmin: 200
+
+  lin_rho_eos:
+    tcoef: 0.2    # Thermal expansion coefficient (kg/m2/K); unused if NONLIN_EOS active
+    t0: 1.0       # Reference temperature (*C)
+    scoef: 0.822  # Saline contraction coefficient (kg/m3/psu)
+    s0: 1.0       # Reference salinity (psu)
+
+  sss_correction:
+    dsssdt: 7.777  # SSS correction piston velocity (cm/day); requires SFLX_CORR + SALINITY
+
+  sst_correction:
+    dsstdt: 7.777  # SST correction piston velocity (cm/day); requires QCORRECTION
+
+  dic_alk_correction:
+    dcdt: 7.777  # DIC/ALK correction piston velocity (cm/day); requires CFLX_CORR + MARBL
+
+  marbl_bgc:
+    marbl_config_file: "marbl_in"
+    marbl_timestep: 3600.0
+    # marbl_tracers_to_write / marbl_diagnostics_to_write are OutputSpec's (see Output.yaml)

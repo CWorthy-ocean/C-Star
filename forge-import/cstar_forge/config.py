@@ -1,19 +1,35 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from pathlib import Path
+import argparse
+import getpass
+import json
+import logging
 import os
 import platform
 import socket
-from typing import Callable, Dict, Tuple, Optional, Any
-import argparse
-import json
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from pathlib import Path
+
 import yaml
 
-USER = os.environ.get("USER", None)
-if USER is None:
-    raise ValueError("USER environment variable is not set")
+logger = logging.getLogger(__name__)
+
+
+def _detect_user() -> str:
+    """Best-effort current username; never raises (containers/CI may lack $USER)."""
+    user = os.environ.get("USER")
+    if user:
+        return user
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "unknown"
+
+
+USER = _detect_user()
+
 
 def _ensure_dir(path: Path) -> Path:
     """Create directory if needed and return it."""
@@ -50,7 +66,7 @@ class DataPaths:
 @dataclass(frozen=True)
 class MachineConfig:
     """
-    Machine-specific configuration loaded from machines.yml.
+    Machine-specific configuration loaded from machines.yaml.
 
     Attributes
     ----------
@@ -61,14 +77,16 @@ class MachineConfig:
     queues : dict, optional
         Dictionary of queue names, with 'default' and optionally 'premium' keys.
     """
-    account: Optional[str] = None
-    pes_per_node: Optional[int] = None
-    queues: Optional[Dict[str, str]] = None
+
+    account: str | None = None
+    pes_per_node: int | None = None
+    queues: dict[str, str] | None = None
 
 
 # --------------------------------------------------------
 # Hostname / system detection helpers
 # --------------------------------------------------------
+
 
 def _get_hostname() -> str:
     """Return lowercase hostname from multiple sources."""
@@ -92,7 +110,6 @@ def _detect_system() -> str:
 
     Extendable via SYSTEM_LAYOUT_REGISTRY.
     """
-
     system = platform.system().lower()
     if system == "darwin":
         return "MacOS"
@@ -114,8 +131,8 @@ def _detect_system() -> str:
 
 # Now each layout returns 3 paths:
 # (source_data, input_data, scratch)
-SystemLayoutFn = Callable[[Path, dict], Tuple[Path, Path, Path]]
-SYSTEM_LAYOUT_REGISTRY: Dict[str, SystemLayoutFn] = {}
+SystemLayoutFn = Callable[[Path, dict], tuple[Path, Path, Path]]
+SYSTEM_LAYOUT_REGISTRY: dict[str, SystemLayoutFn] = {}
 
 
 def register_system(tag: str) -> Callable[[SystemLayoutFn], SystemLayoutFn]:
@@ -125,6 +142,7 @@ def register_system(tag: str) -> Callable[[SystemLayoutFn], SystemLayoutFn]:
     The decorated function must accept (home: Path, env: dict)
     and return (source_data, input_data, scratch).
     """
+
     def decorator(func: SystemLayoutFn) -> SystemLayoutFn:
         SYSTEM_LAYOUT_REGISTRY[tag] = func
         return func
@@ -136,8 +154,9 @@ def register_system(tag: str) -> Callable[[SystemLayoutFn], SystemLayoutFn]:
 # Default system layouts
 # --------------------------------------------------------
 
+
 @register_system("MacOS")
-def _layout_mac(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_mac(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
@@ -146,7 +165,7 @@ def _layout_mac(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 
 
 @register_system("RCAC_anvil")
-def _layout_RCAC_anvil(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_RCAC_anvil(home: Path, env: dict) -> tuple[Path, Path, Path]:
     work = Path(env.get("WORK", home / "work"))
     scratch_root = Path(env.get("SCRATCH", work / "scratch"))
 
@@ -158,7 +177,7 @@ def _layout_RCAC_anvil(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 
 
 @register_system("NERSC_perlmutter")
-def _layout_NERSC_perlmutter(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_NERSC_perlmutter(home: Path, env: dict) -> tuple[Path, Path, Path]:
     scratch_root = Path(env.get("SCRATCH", home / "scratch"))
     base = scratch_root / "cstar-forge-data"
 
@@ -169,7 +188,7 @@ def _layout_NERSC_perlmutter(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 
 
 @register_system("unknown")
-def _layout_unknown(home: Path, env: dict) -> Tuple[Path, Path, Path]:
+def _layout_unknown(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
@@ -181,6 +200,7 @@ def _layout_unknown(home: Path, env: dict) -> Tuple[Path, Path, Path]:
 # Path factory
 # --------------------------------------------------------
 
+
 def default_catalog_inner_dir(input_data: Path) -> Path:
     """
     Default inner *catalog* directory: the folder that directly contains ``blueprints/``.
@@ -191,9 +211,12 @@ def default_catalog_inner_dir(input_data: Path) -> Path:
     return input_data.parent.resolve() / "catalog"
 
 
-def get_data_paths() -> DataPaths:
-    """
-    Return canonical data and project paths adapted to the system we're running on.
+def get_data_paths(create: bool = False) -> DataPaths:
+    """Return canonical data and project paths adapted to the system we're running on.
+
+    Only builds ``Path`` objects by default; pass ``create=True`` (or call
+    :func:`ensure_data_dirs` afterwards) to also create the directories on disk.
+    Importing this module must not have filesystem side effects.
     """
     env = os.environ
     home = Path(env.get("SCRATCH", str(Path.home())))
@@ -209,13 +232,13 @@ def get_data_paths() -> DataPaths:
     # Inner catalog dir: .../cstar_forge_data/catalog/blueprints/
     catalog = default_catalog_inner_dir(input_data)
     blueprints_dir = catalog / "blueprints"
-    models_yaml = here / "models.yml"
-    builds_yaml = here / "builds.yml"
-    machines_yaml = here / "machines.yml"
+    models_yaml = here / "models.yaml"
+    builds_yaml = here / "builds.yaml"
+    machines_yaml = here / "machines.yaml"
 
-    # ensure everything exists
-    for p in (source_data, input_data, scratch, catalog, blueprints_dir):
-        _ensure_dir(p)
+    if create:
+        for p in (source_data, input_data, scratch, catalog, blueprints_dir):
+            _ensure_dir(p)
 
     return DataPaths(
         here=here,
@@ -228,6 +251,19 @@ def get_data_paths() -> DataPaths:
         builds_yaml=builds_yaml,
         machines_yaml=machines_yaml,
     )
+
+
+def ensure_data_dirs(dp: DataPaths | None = None) -> DataPaths:
+    """Create the on-disk directories for *dp* (default: the module-level ``paths``).
+
+    Call this from entry points that actually write data (e.g. ``run.py``'s
+    ``main()``); importing :mod:`cstar_forge.config` must not create directories.
+    """
+    if dp is None:
+        dp = paths
+    for p in (dp.source_data, dp.input_data, dp.scratch, dp.catalog, dp.blueprints):
+        _ensure_dir(p)
+    return dp
 
 
 def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
@@ -252,16 +288,17 @@ def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
 # Machine configuration loader
 # --------------------------------------------------------
 
+
 def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineConfig:
     """
-    Load machine-specific configuration from machines.yml.
+    Load machine-specific configuration from machines.yaml.
 
     Parameters
     ----------
     system_tag : str
         System tag (e.g., "NERSC_perlmutter", "RCAC_anvil").
     machines_yaml_path : Path
-        Path to the machines.yml file.
+        Path to the machines.yaml file.
 
     Returns
     -------
@@ -277,15 +314,23 @@ def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineCon
             machines_data = yaml.safe_load(f) or {}
 
         machine_data = machines_data.get(system_tag, {})
+        if not isinstance(machine_data, dict):
+            machine_data = {}
 
         return MachineConfig(
             account=machine_data.get("account"),
             pes_per_node=machine_data.get("pes_per_node"),
             queues=machine_data.get("queues"),
         )
-    except Exception:
-        # If there's any error loading the config, return empty config
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning(
+            "Failed to load machine config for %r from %s: %s",
+            system_tag,
+            machines_yaml_path,
+            exc,
+        )
         return MachineConfig()
+
 
 # =========================================================
 # Model execution (run) functions
@@ -294,6 +339,7 @@ def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineCon
 
 class ClusterType:
     """Constants for cluster/scheduler types."""
+
     LOCAL = "LocalCluster"
     SLURM = "SLURMCluster"
     PBS = "PBSCluster"  # For future extensibility
@@ -318,24 +364,29 @@ def _default_cluster_type(system_tag: str) -> str:
     elif system_tag in ["RCAC_anvil", "NERSC_perlmutter"]:
         return ClusterType.SLURM
     else:
-        raise NotImplementedError(f"Cluster type not implemented for system: {system_tag}")
+        raise NotImplementedError(
+            f"Cluster type not implemented for system: {system_tag}"
+        )
+
 
 # --------------------------------------------------------
 # Environment and Machine Information
 # --------------------------------------------------------
 
+
 @dataclass
 class EnvironmentInfo:
     """Information about the execution environment and machine."""
+
     hostname: str
     system_tag: str
     os_info: str
     python_version: str
     python_executable: str
-    conda_env: Optional[str]
-    conda_prefix: Optional[str]
-    kernel_name: Optional[str]
-    kernel_version: Optional[str]
+    conda_env: str | None
+    conda_prefix: str | None
+    kernel_name: str | None
+    kernel_version: str | None
 
     @property
     def env_info(self) -> str:
@@ -362,7 +413,9 @@ def get_environment_info() -> EnvironmentInfo:
         EnvironmentInfo: Dataclass containing machine and environment details.
     """
     # Get machine information
-    hostname = socket.gethostname() or platform.node() or os.environ.get("HOSTNAME", "unknown")
+    hostname = (
+        socket.gethostname() or platform.node() or os.environ.get("HOSTNAME", "unknown")
+    )
     system_tag = _detect_system()
     os_info = f"{platform.system()} {platform.release()} ({platform.machine()})"
 
@@ -375,7 +428,8 @@ def get_environment_info() -> EnvironmentInfo:
     kernel_version = None
     try:
         from jupyter_client.kernelspec import KernelSpecManager
-        ksm = KernelSpecManager()
+
+        KernelSpecManager()  # verifies jupyter_client is importable
         # Try to get current kernel name from environment or kernel spec
         kernel_name = os.environ.get("JPY_KERNEL_NAME", None)
         if not kernel_name:
@@ -386,8 +440,9 @@ def get_environment_info() -> EnvironmentInfo:
                 kernel_name = None
         try:
             import ipykernel
+
             kernel_version = f"ipykernel {ipykernel.__version__}"
-        except:
+        except Exception:
             kernel_version = None
     except Exception:
         pass
@@ -396,12 +451,14 @@ def get_environment_info() -> EnvironmentInfo:
     conda_env = os.environ.get("CONDA_DEFAULT_ENV", None)
     conda_prefix = None
     if conda_env:
-        conda_prefix = os.environ.get("CONDA_PREFIX", os.environ.get("MAMBA_ROOT_PREFIX", None))
+        conda_prefix = os.environ.get(
+            "CONDA_PREFIX", os.environ.get("MAMBA_ROOT_PREFIX", None)
+        )
 
     # Import the class from the current module to ensure it's accessible
     # This handles autoreload issues where the class might not be in scope
     current_module = sys.modules[__name__]
-    EnvironmentInfo = getattr(current_module, 'EnvironmentInfo')
+    EnvironmentInfo = current_module.EnvironmentInfo
 
     return EnvironmentInfo(
         hostname=hostname,
@@ -416,20 +473,17 @@ def get_environment_info() -> EnvironmentInfo:
     )
 
 
-
-
 # --------------------------------------------------------
 # CLI
 # --------------------------------------------------------
+
 
 def _paths_to_dict(dp: DataPaths) -> dict:
     return {k: str(v) for k, v in dp.__dict__.items()}
 
 
 def main(argv: list[str] | None = None) -> int:
-    """
-    CLI for inspecting detected compute environment and configured paths.
-    """
+    """CLI for inspecting detected compute environment and configured paths."""
     if argv is None:
         argv = sys.argv[1:]
 
@@ -470,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"System tag : {system_tag}")
             print(f"Hostname   : {hostname}")
-            print("")
+            print()
             print("Paths:")
             for key, value in _paths_to_dict(dp).items():
                 print(f"  {key:12s} -> {value}")
@@ -481,19 +535,25 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-
 def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
     """Load machine config from the default DomainCatalog (internal cstar-forge catalog)."""
+    from cstar_forge.domain_catalog import default_catalog
+
     try:
-        from .domain_catalog import default_catalog
         data = default_catalog.machine_data(system_tag)
-        return MachineConfig(
-            account=data.get("account"),
-            pes_per_node=data.get("pes_per_node"),
-            queues=data.get("queues"),
+    except (KeyError, OSError, yaml.YAMLError) as exc:
+        # Machine not in the catalog, or its YAML is missing/unreadable -- fall
+        # back to an empty config rather than failing import-time module setup.
+        logger.warning(
+            "Failed to load machine config for %r from catalog: %s", system_tag, exc
         )
-    except (KeyError, Exception):
         return MachineConfig()
+
+    return MachineConfig(
+        account=data.get("account"),
+        pes_per_node=data.get("pes_per_node"),
+        queues=data.get("queues"),
+    )
 
 
 # Initialize canonical instance
@@ -502,6 +562,77 @@ system = _detect_system()
 system_id = system  # Alias for compatibility
 machine_config = _load_machine_config_from_catalog(system)
 cluster_type = _default_cluster_type(system)
+
+
+def _hpc_scratch_data_root(system_tag: str, env: dict, home: Path) -> Path | None:
+    """Scratch-rooted ``cstar-forge-data`` base for HPC systems, ``None`` elsewhere.
+
+    Mirrors the env-var conventions of the system layouts above ($SCRATCH on
+    Perlmutter; $SCRATCH falling back to $WORK/scratch on Anvil). $SCRATCH is
+    per-user on both machines, so no extra username layer is inserted.
+    """
+    if system_tag == "NERSC_perlmutter":
+        return Path(env.get("SCRATCH", home / "scratch")) / "cstar-forge-data"
+    if system_tag == "RCAC_anvil":
+        work = Path(env.get("WORK", home / "work"))
+        return Path(env.get("SCRATCH", work / "scratch")) / "cstar-forge-data"
+    return None
+
+
+def relocate_working_dir(
+    working_dir,
+    *,
+    system_tag: str | None = None,
+    env: dict | None = None,
+    home: Path | None = None,
+) -> Path:
+    """Rebase a default-form ``working_dir`` onto the host's scratch data root.
+
+    The ForgeBlueprint stores ``working_dir`` with a home-rooted default
+    (``~/cstar-forge-data/<name>``). On HPC systems that path belongs on scratch, so
+    any path under ``~/cstar-forge-data`` is rebased to
+    ``$SCRATCH/cstar-forge-data/<same relative part>``. Paths outside the default
+    root are a deliberate user choice and pass through untouched (expanded only).
+
+    This is a stand-in for C-Star's eventual runtime override of the spec's
+    ``working_dir``; keyword args exist for tests and default to the live host.
+    """
+    env = dict(os.environ) if env is None else env
+    home = Path.home() if home is None else Path(home)
+    system_tag = system if system_tag is None else system_tag
+
+    wd = Path(working_dir).expanduser()
+    scratch_root = _hpc_scratch_data_root(system_tag, env, home)
+    if scratch_root is None:
+        return wd
+    try:
+        rel = wd.relative_to(home / "cstar-forge-data")
+    except ValueError:
+        return wd
+    return scratch_root / rel
+
+
+def resolve_host(working_dir):
+    """Build the forge application's ``HostPaths`` from auto-detected Forge config.
+
+    ``working_dir`` is the per-run artifact root (typically the spec's ``working_dir``,
+    expanded, or a host override); everything the executor produces lands under it.
+    Default-form paths (under ``~/cstar-forge-data``) are rebased onto host scratch on
+    HPC systems via :func:`relocate_working_dir`.
+
+    This is Forge's **disposable** host provider: it auto-detects the machine (NERSC /
+    RCAC / local) for the source-data cache + machine identity. When the forge
+    application relocates into C-Star, C-Star supplies an equivalent ``HostPaths`` from
+    its own host resolution and this function is not carried over.
+    """
+    from cstar_forge.forge.host import HostPaths
+
+    return HostPaths(
+        working_dir=relocate_working_dir(working_dir),
+        source_data_cache=paths.source_data,
+        system=system,
+        machine_config=machine_config,
+    )
 
 
 if __name__ == "__main__":

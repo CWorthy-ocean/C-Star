@@ -30,9 +30,9 @@ NOTE: These tests are currently commented out pending GitHub token setup.
 #
 #
 # @pytest.fixture(scope="module")
-# def blueprint_df(github_catalog):
-#     """Cached blueprintDF(stage=None) — avoids repeated GitHub fetches."""
-#     return github_catalog.blueprintDF(stage=None)
+# def roms_marbl_blueprint_df(github_catalog):
+#     """Cached roms_marbl_blueprint_df() — avoids repeated GitHub fetches."""
+#     return github_catalog.roms_marbl_blueprint_df()
 #
 #
 # class TestGitHubCatalogInit:
@@ -50,29 +50,29 @@ NOTE: These tests are currently commented out pending GitHub token setup.
 #         assert len(github_catalog.model_names) > 0
 #
 #     def test_has_blueprints(self, github_catalog):
-#         assert len(github_catalog.blueprint_names) > 0
+#         assert len(github_catalog.roms_marbl_blueprint_names) > 0
 #
 #
 # class TestGitHubCatalogBlueprintDF:
-#     def test_returns_dataframe(self, blueprint_df):
-#         assert isinstance(blueprint_df, pd.DataFrame)
+#     def test_returns_dataframe(self, roms_marbl_blueprint_df):
+#         assert isinstance(roms_marbl_blueprint_df, pd.DataFrame)
 #
-#     def test_not_empty(self, blueprint_df):
-#         assert not blueprint_df.empty
+#     def test_not_empty(self, roms_marbl_blueprint_df):
+#         assert not roms_marbl_blueprint_df.empty
 #
-#     def test_expected_columns(self, blueprint_df):
-#         for col in ("model_name", "grid_name", "blueprint_name", "stage",
+#     def test_expected_columns(self, roms_marbl_blueprint_df):
+#         for col in ("model_name", "grid_name", "blueprint_name",
 #                     "blueprint_path", "grid_yaml_path"):
-#             assert col in blueprint_df.columns, f"Missing column: {col}"
+#             assert col in roms_marbl_blueprint_df.columns, f"Missing column: {col}"
 #
-#     def test_model_name_populated(self, blueprint_df):
-#         assert blueprint_df["model_name"].notna().all()
+#     def test_model_name_populated(self, roms_marbl_blueprint_df):
+#         assert roms_marbl_blueprint_df["model_name"].notna().all()
 #
-#     def test_grid_name_populated(self, blueprint_df):
-#         assert blueprint_df["grid_name"].notna().all()
+#     def test_grid_name_populated(self, roms_marbl_blueprint_df):
+#         assert roms_marbl_blueprint_df["grid_name"].notna().all()
 #
-#     def test_grid_yaml_is_url_when_present(self, blueprint_df):
-#         non_null = blueprint_df["grid_yaml_path"].dropna()
+#     def test_grid_yaml_is_url_when_present(self, roms_marbl_blueprint_df):
+#         non_null = roms_marbl_blueprint_df["grid_yaml_path"].dropna()
 #         for val in non_null:
 #             assert str(val).startswith("https://"), (
 #                 f"grid_yaml_path should be an https URL for a GitHub catalog, got: {val!r}"

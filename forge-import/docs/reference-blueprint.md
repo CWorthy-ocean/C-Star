@@ -1,7 +1,0 @@
-# Blueprint (`RomsMarblBlueprint`)
-
-`catalog/blueprints/MacOS/cson_roms-marbl_v0.1_PAC_2fth_deg_128procs/B_cson_roms-marbl_v0.1_PAC_2fth_deg_128procs_build.yml`
-
-```{include} ../cstar_forge/blueprints/MacOS/cson_roms-marbl_v0.1_PAC_2fth_deg_128procs/B_cson_roms-marbl_v0.1_PAC_2fth_deg_128procs_build.yml
-:code: yaml
-```
