@@ -1039,12 +1039,12 @@ class ForgeExecutor(BaseModel):
         because ``render_roms_settings`` reads ``template_dir/<file>`` directly. Verified
         against the real ``REMOTE_REPOSITORY`` path once; the offline test seam forces
         ``subdir=""`` so CI never exercises the subdir-preserving case. If C-Star changes
-        its stager layout this breaks silently — see docs/executor-portability-plan.md.
+        its stager layout this breaks silently — see docs/dev-notes/executor-portability-plan.md.
 
         Reproducibility caveat (deferred follow-up): the resolver currently pins the
         template repo by ``branch`` (``main``), not a commit, and ``code.templates_*.location``
         participates in ``content_hash`` — so a template edit changes build output without a
-        hash bump until a commit is pinned. Tracked in docs/executor-portability-plan.md.
+        hash bump until a commit is pinned. Tracked in docs/dev-notes/executor-portability-plan.md.
         """
         dest = self._require_host().working_dir / "templates" / stage
         if dest.exists():

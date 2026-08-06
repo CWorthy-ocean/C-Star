@@ -236,7 +236,7 @@ model_settings:
     obc_north: true
     obc_south: true
     cdr_forcing: false
-    use_pio: false
+    use_pio: true
     marbl: true
     co2_tvarying: true
     sal_restore: true
@@ -508,7 +508,10 @@ code:
     location: https://github.com/marbl-ecosys/MARBL.git
     commit: marbl0.45.0
     branch: null
-  pio: null
+  pio:
+    location: https://github.com/NCAR/ParallelIO.git
+    commit: pio2_7_0
+    branch: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/cstar-forge.git
     commit: 4208f4384431852daccea1ccad01d03c0cb473d9
@@ -527,7 +530,7 @@ composition:
   model:
     name: cson_roms-marbl_v0.1
     origin: catalog
-    modified: false
+    modified: true
   domain:
     name: wio-toy
     origin: catalog
@@ -546,5 +549,5 @@ provenance:
   forge_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: a5e667bf35a38cce52da64f56f89fef34c7448364ff6b56f9bcb43d3832cd0bf
+  content_hash: 37ea0b192598c771c263dc5606412f7de1e30d68da762286425a13e5929b4851
   notes: null

@@ -128,7 +128,7 @@ Paths:
 
 ## Register for data access
 
-CSFORGE Forge facilitates access to a collection of open datasets required to force regional oceanographic models. 
+C-STAR Forge facilitates access to a collection of open datasets required to force regional oceanographic models. 
 These data are documented in ROMS Tools [here](https://roms-tools.readthedocs.io/en/latest/datasets.html).
 
 Access to most of the data is facilitated automatically. 
@@ -136,32 +136,49 @@ Access to most of the data is facilitated automatically.
 - [Sign up for access](https://www.tpxo.net/global) to TPXO data
 
 
-## Try running the `CStarSpecBuilder` Demo:
+## Launch the blueprint wizard
 
-Once your environment is set up, you can try running the `CStarSpecBuilder` demo notebook to create a new domain and run a ROMS simulation:
+Once your environment is set up, launch the wizard to build your first forge blueprint.
 
-1. **Navigate to the workflows directory:**
-   ```bash
-   cd workflows/generate-models
-   ```
+**Option A — Voilà web app (code-free form):**
 
-2. **Start JupyterLab:**
-   ```bash
-   jupyter lab
-   ```
+```bash
+./run-wizard-app.sh        # opens http://localhost:8866
+```
 
-3. **Open the demo notebook:**
-   - Open `CStarSpecBuilder-demo.ipynb` in Jupyter. Located at: `workflows/generate-models/templates/CStarSpecBuilder-demo.ipynb`
-   - Make sure the kernel is set to `cstar-forge-v0` (you can change it in the Kernel menu if needed)
+On an HPC login node (no browser there), run `./run-wizard-app.sh --no-browser` and
+SSH-forward the port from your laptop:
+`ssh -N -L 8866:localhost:8866 <user>@<login-node>`, then open
+`http://localhost:8866` locally.
 
-4. **Run the notebook:**
-   - Execute the cells sequentially to:
-     - Set up the domain configuration (grid size, boundaries, partitioning)
-     - Configure and build the ROMS model
-     - Run the simulation
-   - The notebook will automatically save a timestamped copy to `executed/forge/{system_id}/` for reproducibility
+**Option B — Jupyter notebook:**
 
-For more details on using `CStarSpecBuilder`, see the [Model Specification Introduction](model-spec-intro.md) and [Model Specification Example](model-spec-example.ipynb).
+```bash
+jupyter lab cstar_forge/forge-blueprint-wizard.ipynb
+```
+
+Make sure the kernel is set to `cstar-forge-v0` (change it in the Kernel menu if
+needed). Run the cells to display the wizard inline; the wizard object stays
+available for inspection and scripting.
+
+In either front-end: pick a model spec, pick (or customize) a domain, review the
+resolved YAML in the Review pane, and **Save** (or **Download**) the resulting
+`forge_blueprint.yaml`.
+
+## Process the blueprint
+
+Take the saved `forge_blueprint.yaml` to the machine where the input files should be
+generated (it can be the same machine) and run the forge application:
+
+```bash
+python -m cstar_forge.run path/to/forge_blueprint.yaml
+```
+
+This downloads and prepares source data, generates all ROMS input files, renders
+model settings, and emits a **ROMS-MARBL blueprint** into the blueprint's working
+directory. That ROMS-MARBL blueprint is the handoff to
+[C-Star](https://c-star.readthedocs.io), which builds and runs the actual ROMS-MARBL
+simulation. See `python -m cstar_forge.run --help` for options.
 
 
 

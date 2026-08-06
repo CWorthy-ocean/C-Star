@@ -899,7 +899,7 @@ class TestForgeExecutorBuildAndRun:
     def test_configure_build_does_not_clobber_generated_river_and_tidal_settings(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
     ):
-        """Regression for the §3a bug (docs/forge-blueprint-parameter-audit.md): before
+        """Regression for the §3a bug (docs/dev-notes/forge-blueprint-parameter-audit.md): before
         the fix, ``configure_build``'s overlay applied the *entire* stored
         ``ForgeBlueprint.model_settings`` snapshot on top of whatever ``generate_inputs``
         had just derived from the real generated forcing objects — silently reverting a
@@ -1713,7 +1713,7 @@ class TestGoldenNamelist:
     """Byte-level golden test for the rendered ``namelist.nml``.
 
     This is the deterministic, mocked-forcing golden referenced in the Follow-ups
-    section of ``docs/forge-blueprint-parameter-audit.md`` and in
+    section of ``docs/dev-notes/forge-blueprint-parameter-audit.md`` and in
     ``docs/developer-guide.md`` Sec 6 — it is NOT the real-generated-data integration
     test those docs separately name as still deferred (this one mocks every
     roms-tools construction class; a real run against GLORYS/ERA5/TPXO/DAI data is a

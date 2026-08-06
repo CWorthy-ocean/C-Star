@@ -2046,7 +2046,7 @@ class TestForgeBlueprintEngine:
             assert sec not in run_ov
 
     def test_split_model_settings_excludes_generation_derived_leaves(self):
-        """Regression for the §3a bug (docs/forge-blueprint-parameter-audit.md): the
+        """Regression for the §3a bug (docs/dev-notes/forge-blueprint-parameter-audit.md): the
         overlay passed to ``configure_build`` must not carry the leaf keys that
         ``generate_inputs`` derives from the *actual* generated forcing objects
         (river/CDR "is configured" flags + counts, the true tidal constituent count) —

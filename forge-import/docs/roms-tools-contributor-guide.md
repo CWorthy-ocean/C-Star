@@ -6,8 +6,8 @@ parameter becomes usable through Forge* — first immediately, then (optionally)
 first-class, validated, UI-surfaced option.
 
 It is deliberately narrow: it does **not** cover authoring a whole ForgeBlueprint, the
-catalog, or the execution engine. See `docs/forge-blueprint-inventory.md` for the full
-input model and `docs/roms-tools-options-integration.md` for the historical record of
+catalog, or the execution engine. See `docs/dev-notes/forge-blueprint-inventory.md` for the full
+input model and `docs/dev-notes/roms-tools-options-integration.md` for the historical record of
 how these seams were built.
 
 ---

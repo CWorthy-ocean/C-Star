@@ -1,7 +1,7 @@
 # Developer Guide (current state, 2026-07-17, branch `refactor`)
 
 This supersedes the mental model in `docs/overview.md` / `docs/CStarSpecBuilder-overview.md`
-/ `docs/machine-config.md` / `docs/forge-blueprint-inventory.md`, which describe the
+/ `docs/machine-config.md` / `docs/dev-notes/forge-blueprint-inventory.md`, which describe the
 pre-refactor `_core.py` / `CstarSpecBuilder` design. Those files are stale (see
 "Stale docs" at the end) — start here.
 
@@ -35,8 +35,8 @@ downstream artifact, not forge's own input.
 ```
 
 `CstarSpecBuilder`/`CstarSpecEngine`/`_core.py` **no longer exist** — fully deleted
-and replaced by the above. The `docs/architecture-decomposition-plan.md` and
-`docs/executor-portability-plan.md` planning docs record the history of how that
+and replaced by the above. The `docs/dev-notes/architecture-decomposition-plan.md` and
+`docs/dev-notes/executor-portability-plan.md` planning docs record the history of how that
 decomposition was carried out and are kept as historical reference; this guide is
 the current-state description.
 
@@ -263,7 +263,7 @@ Ranked roughly by what's worth doing next:
    (`ForgeExecutor._stage_templates`, executor.py ~L1017). Rendering silently assumes
    C-Star's `AdditionalCode` stages filtered files *flat*; only manually verified once
    against the real remote. A `@pytest.mark.slow` network test staging from the real repo
-   would close this — flagged in-code and in `docs/executor-portability-plan.md`, still
+   would close this — flagged in-code and in `docs/dev-notes/executor-portability-plan.md`, still
    open.
 3. **Templates are re-fetched every `configure_build`** (rmtree + re-clone under
    `working_dir/templates/<stage>`), not cached like source data / code. A commit-keyed
@@ -278,7 +278,7 @@ Ranked roughly by what's worth doing next:
    when set, and the bundled `cson_roms-marbl_v0.1` ModelSpec now sets it to a real
    commit SHA (post-`refactor`-merge) rather than tracking branch `main`.
 5. **`refactor` has not been merged to `main` yet** (currently `main`+38 commits, 0 behind
-   — a clean fast-forward candidate per `docs/executor-portability-plan.md` and prior
+   — a clean fast-forward candidate per `docs/dev-notes/executor-portability-plan.md` and prior
    audit). The raw-URL template-fetch path
    (`raw.githubusercontent.com/.../main/templates/...`) only resolves post-merge and is
    unverified against the real remote.
@@ -304,7 +304,7 @@ Ranked roughly by what's worth doing next:
 9. **`domain_catalog_sketch.py`** (167 lines) — dead prototype, zero references anywhere
    (code, tests, notebooks, docs). Safe to delete.
 10. ~~Architecture doc headers understated progress.~~ **DONE (2026-07-17):**
-    `docs/architecture-decomposition-plan.md` and `docs/executor-portability-plan.md` had
+    `docs/dev-notes/architecture-decomposition-plan.md` and `docs/dev-notes/executor-portability-plan.md` had
     stale "proposal"/"executing" status headers even though the decomposition they describe
     is complete (see this guide for current state) — both status lines now point here.
 11. **Forge app relocation into C-Star not yet done** (2026-07-23, see §3a): `ForgeBlueprint`
@@ -353,9 +353,9 @@ deleted (that would need TOC restructuring); each was fixed in place instead:
   `config.paths.*`, system detection — is still accurate, verified against current
   `config.py`); replaced the dead `CstarSpecBuilder(catalog_root=...)` example with an
   accurate description of `config.resolve_host()` → `HostPaths`.
-- `docs/roms-tools-options-integration.md` — intentionally a historical record (per its
+- `docs/dev-notes/roms-tools-options-integration.md` — intentionally a historical record (per its
   own banner); added a note that its file paths/class names have since moved, without
   rewriting the historical narrative.
-- `docs/forge-blueprint-inventory.md` — the original planning doc that motivated this whole
+- `docs/dev-notes/forge-blueprint-inventory.md` — the original planning doc that motivated this whole
   refactor; added a "historical/superseded" banner pointing here, kept the content (the
   six-sources-of-truth model and hardcoded-constants table still have reference value).

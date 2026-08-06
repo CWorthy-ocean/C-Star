@@ -3,7 +3,7 @@
 **Status: living document — update this alongside any refactoring that touches
 `ForgeBlueprint`, the catalog Spec pieces, the wizard, or the executor/input_data
 pipeline.** Last verified against branch `refactor` (2026-07-16), against live code —
-not against `docs/forge-blueprint-inventory.md` (superseded, see `docs/developer-guide.md`).
+not against `docs/dev-notes/forge-blueprint-inventory.md` (superseded, see `docs/developer-guide.md`).
 
 ## How to read this
 

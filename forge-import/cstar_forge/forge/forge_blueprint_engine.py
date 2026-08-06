@@ -7,7 +7,7 @@ on the user's machine of choice, where the **host** (machine config + data paths
 resolved from :mod:`cstar_forge.config` — nothing host-specific is read from the
 config file. The reviewed, host-independent ``ForgeBlueprint`` provides everything else.
 
-Strategy (see ``docs/forge-blueprint-inventory.md`` §3): the existing
+Strategy (see ``docs/dev-notes/forge-blueprint-inventory.md`` §3): the existing
 ``ForgeExecutor`` already performs host resolution, grid building, input
 generation, and namelist/cppdefs writing. So Phase 2:
 
@@ -102,7 +102,7 @@ PROCESSING_FILLED_SECTIONS = (
 # Without this exclusion, ``configure_build``'s overlay (which applies the *entire*
 # stored ``model_settings`` snapshot on top of whatever ``generate_inputs`` just derived)
 # silently reverts a correctly-generated river/CDR configuration back to "disabled" and
-# can restore a stale tidal constituent count — see docs/forge-blueprint-parameter-audit.md
+# can restore a stale tidal constituent count — see docs/dev-notes/forge-blueprint-parameter-audit.md
 # §3a for the full trace, and ``tests/test_forge_blueprint.py::TestForgeBlueprintEngine
 # ::test_split_model_settings_excludes_generation_derived_leaves`` /
 # ``test_configure_build_does_not_clobber_generated_river_and_cdr_settings`` for the

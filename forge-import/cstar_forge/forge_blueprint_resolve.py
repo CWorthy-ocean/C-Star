@@ -3,7 +3,7 @@ Phase 1 resolver: ``build_forge_blueprint`` — assemble a validated :class:`For
 from the composable pieces (a ModelSpec + a domain selection + a run window).
 
 This is the *collection / curation* half of the planned split (see
-``docs/forge-blueprint-inventory.md``). It is intentionally **dependency-light**: it
+``docs/dev-notes/forge-blueprint-inventory.md``). It is intentionally **dependency-light**: it
 reads the ModelSpec YAML directly and computes everything it can from plain inputs,
 so a UI backend or a user's laptop can assemble and review a config without ROMS /
 roms_tools installed or built (``ForgeBlueprint`` itself now imports
@@ -857,7 +857,7 @@ def _build_code(
 
     # Optional per-ModelSpec pin of the forge commit serving the templates. When set it
     # overrides the default branch (main); until pinned, template edits change build
-    # output without a content_hash bump (see docs/executor-portability-plan.md).
+    # output without a content_hash bump (see docs/dev-notes/executor-portability-plan.md).
     pinned_commit = code_block.get("templates_commit")
 
     def _template(stage) -> TemplateRepo:

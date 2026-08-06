@@ -5,9 +5,8 @@ These defaults are used in the templating engine to generate source code and inp
 
 Settings are managed in `forge` using 
 1. Templated code files
-2. YAML dictionaries specifying defaults 
-  - Example [compile-time-settings.yaml](reference-settings-compile-time.md)
-  - Example [run-time-settings.yaml](reference-settings-run-time.md)  
+2. YAML dictionaries specifying defaults (consolidated into each model's
+   [`model.yaml`](reference-models-yml.md))
 3. User override settings
 
 

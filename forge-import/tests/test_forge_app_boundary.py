@@ -3,7 +3,7 @@ Phase 0 dependency-direction guard for the forge-application boundary.
 
 The "forge application" (execution code — blueprint = ``ForgeBlueprint``) is being carved
 out of Forge so it can eventually relocate into C-Star as an application (see
-``docs/architecture-decomposition-plan.md``). For that relocation to stay a mechanical
+``docs/dev-notes/architecture-decomposition-plan.md``). For that relocation to stay a mechanical
 move, the forge-application modules must NOT depend on Forge's *authoring / host* layer:
 
 - authoring / curation: ``catalog``, ``domain_catalog``, ``forge_blueprint_resolve``,
@@ -62,7 +62,7 @@ _FORBIDDEN = {
 # ``(forge_app_module, forbidden_module)``. This set may only SHRINK — never add to it.
 # EMPTY: the guarded forge-application modules are fully config/authoring-free. Host is
 # injected (HostPaths via process_forge_blueprint); Forge's disposable resolver lives in
-# cstar_forge.config / cstar_forge.run. See docs/architecture-decomposition-plan.md.
+# cstar_forge.config / cstar_forge.run. See docs/dev-notes/architecture-decomposition-plan.md.
 _KNOWN_VIOLATIONS: set[tuple[str, str]] = set()
 
 
@@ -100,7 +100,7 @@ def test_forge_app_does_not_import_authoring_or_host():
         "New forge-app boundary violation(s) — a forge-application module imports an "
         f"authoring/host module: {sorted(new_violations)}. Inject the dependency (e.g. "
         "pass paths in) or move the shared piece onto ForgeBlueprint instead. See "
-        "docs/architecture-decomposition-plan.md."
+        "docs/dev-notes/architecture-decomposition-plan.md."
     )
 
 
