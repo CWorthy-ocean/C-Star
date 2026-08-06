@@ -8,6 +8,7 @@ import typer
 from pydantic import BaseModel
 
 from cstar.base.env import (
+    ENV_CSTAR_CACHE_DISABLE,
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
@@ -35,6 +36,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_NO_CACHE,
+    ARG_NO_CACHE_HELP,
 )
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import (
@@ -430,6 +433,15 @@ def run(
             callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
             help=ARG_CLOBBER_HELP,
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ),
+    ] = False,
+    no_cache: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_NO_CACHE,
+            callback=set_flag(ENV_CSTAR_CACHE_DISABLE),
+            help=ARG_NO_CACHE_HELP,
+            envvar=ENV_CSTAR_CACHE_DISABLE,
         ),
     ] = False,
 ) -> None:

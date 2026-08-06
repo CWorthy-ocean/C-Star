@@ -6,6 +6,12 @@ ARG_CLOBBER_HELP: t.Final[str] = (
 )
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 
+ARG_NO_CACHE: t.Final[str] = "--no-cache"
+ARG_NO_CACHE_HELP: t.Final[str] = (
+    "Set this flag to bypass the artifact cache: outputs are regenerated and "
+    "written to their normal locations, and no cache entries are recorded."
+)
+
 ARG_DIRECTIVES_URI_LONG: t.Final[str] = "--directives"
 ARG_DIRECTIVES_URI_SHORT: t.Final[str] = "-d"
 

@@ -10,6 +10,7 @@ from cstar.applications.core import (
     get_app_for_blueprint,
 )
 from cstar.base.env import (
+    ENV_CSTAR_CACHE_DISABLE,
     ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
@@ -35,6 +36,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_NO_CACHE,
+    ARG_NO_CACHE_HELP,
     ARG_VERBOSE,
     ARG_VERBOSE_HELP,
 )
@@ -165,6 +168,15 @@ def run(
             callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
             help=ARG_CLOBBER_HELP,
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ),
+    ] = False,
+    no_cache: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_NO_CACHE,
+            callback=set_flag(ENV_CSTAR_CACHE_DISABLE),
+            help=ARG_NO_CACHE_HELP,
+            envvar=ENV_CSTAR_CACHE_DISABLE,
         ),
     ] = False,
     directive_uri: t.Annotated[

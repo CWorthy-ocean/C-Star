@@ -256,6 +256,40 @@ ENV_CSTAR_CACHE_HOME: t.Annotated[
 ] = "CSTAR_CACHE_HOME"
 """Environment variable used to override the home directory for C-Star file cache."""
 
+ENV_CSTAR_CACHE_PERSONAL_ROOT: t.Annotated[
+    t.Literal["CSTAR_CACHE_PERSONAL_ROOT"],
+    EnvVar(
+        "Root directory of the personal (per-user, ephemeral) artifact cache. "
+        "When unset, defaults to `<scratch>/cstar/artifact-cache` on HPC systems "
+        "(via `CSTAR_SCRATCH_DIRS` detection) or `<cache-home>/artifact-cache` elsewhere.",
+        GROUP_FS,
+        default="",
+    ),
+] = "CSTAR_CACHE_PERSONAL_ROOT"
+"""Root directory of the personal (per-user, ephemeral) artifact cache."""
+
+ENV_CSTAR_CACHE_GROUP_ROOT: t.Annotated[
+    t.Literal["CSTAR_CACHE_GROUP_ROOT"],
+    EnvVar(
+        "Root directory of the group (shared, durable) artifact cache, used verbatim. "
+        "When unset, the group cache tier is disabled.",
+        GROUP_FS,
+        default="",
+    ),
+] = "CSTAR_CACHE_GROUP_ROOT"
+"""Root directory of the group (shared, durable) artifact cache."""
+
+ENV_CSTAR_CACHE_DISABLE: t.Annotated[
+    t.Literal["CSTAR_CACHE_DISABLE"],
+    EnvVar(
+        "Set to `1` to bypass the artifact cache: outputs are regenerated and "
+        "written directly to their normal locations, and no cache entries are recorded.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_CACHE_DISABLE"
+"""Set to `1` to bypass the artifact cache entirely."""
+
 ENV_CSTAR_CONFIG_HOME: t.Annotated[
     t.Literal["CSTAR_CONFIG_HOME"],
     EnvVar(

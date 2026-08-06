@@ -39,6 +39,7 @@ A key strength of C-Star lies in its ability to run regional ocean simulations u
 
     blueprints
     workplans
+    caching
 
 
 .. toctree::

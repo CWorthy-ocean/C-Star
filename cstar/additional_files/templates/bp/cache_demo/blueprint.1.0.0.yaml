@@ -1,0 +1,9 @@
+name: Artifact cache demo
+description: Exercises the artifact cache with single- and multi-file generation steps
+application: cache_demo
+state: draft
+working_dir: ~/cstar-cache-demo
+dataset_name: gulf_of_maine
+num_files: 3
+sleep_seconds: 2.0
+schema_version: '1.0.0'

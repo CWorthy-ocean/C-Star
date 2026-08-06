@@ -6,9 +6,9 @@ from pathlib import Path
 import yaml
 
 from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
-from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.env import ENV_CSTAR_CACHE_DISABLE, ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG, ARG_NO_CACHE
 from cstar.orchestration.orchestration import RunRequest, RunRequestCommandFormatter
 
 if t.TYPE_CHECKING:
@@ -74,6 +74,9 @@ class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
 
         if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
             cmd_array.append(ARG_CLOBBER)
+
+        if is_flag_enabled(ENV_CSTAR_CACHE_DISABLE):
+            cmd_array.append(ARG_NO_CACHE)
 
         if model.directives:
             directives_path = prepare_directive_file(model)

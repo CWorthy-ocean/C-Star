@@ -52,6 +52,41 @@ def test_converter_defaults(
     assert adapter.adapt(step)
 
 
+def test_converter_propagates_no_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the no-cache flag is forwarded to detached child processes.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary path fixture for writing per-test outputs.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture for patching the environment.
+    """
+    from cstar.base.env import ENV_CSTAR_CACHE_DISABLE
+    from cstar.entrypoint.utils import ARG_NO_CACHE
+
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step = LiveStep(
+        name="test step",
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+    )
+
+    monkeypatch.delenv(ENV_CSTAR_CACHE_DISABLE, raising=False)
+    request = StepToRunRequestAdapter().adapt(step)
+    assert ARG_NO_CACHE not in request.command
+
+    monkeypatch.setenv(ENV_CSTAR_CACHE_DISABLE, "1")
+    request = StepToRunRequestAdapter().adapt(step)
+    assert ARG_NO_CACHE in request.command
+
+
 @pytest.mark.parametrize(
     ("target_application"),
     [

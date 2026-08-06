@@ -149,6 +149,8 @@ class Application(StrEnum):
     """Sample custom application."""
     PLOTTER = "plotter"
     """Demo plotting application."""
+    CACHE_DEMO = "cache_demo"
+    """Demo application exercising the artifact cache."""
     NEST_IC = "nest_ic"
     """Application performing a nested simulation run."""
     UPSCALER = "upscaler"
