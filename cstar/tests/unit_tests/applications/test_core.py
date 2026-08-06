@@ -72,7 +72,7 @@ def test_get_application_from_external_module(
     )
 
     monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.setenv("CSTAR_APP_MODULES", f"{app_name}_module")
+    monkeypatch.setenv(ENV_CSTAR_APP_MODULES, f"{app_name}_module")
 
     try:
         app = get_application(app_name)
