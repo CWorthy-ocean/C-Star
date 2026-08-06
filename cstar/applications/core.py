@@ -377,13 +377,27 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     """
     if name not in _registry:
         if modules := get_env_item(ENV_CSTAR_APP_MODULES).value:
-            for module in filter(lambda x: name in x, modules.split(",")):
-                importlib.import_module(module.strip())
+            if matches := {m.strip() for m in modules.split(",") if name in m}:
+                if len(matches) > 1:
+                    msg = f"An application name collision may occur using {name!r} for modules {','.join(matches)}"
+                    log.warning(msg)
+
+                module = next(iter(matches))
+
+                try:
+                    importlib.import_module(module)
+                except ModuleNotFoundError:
+                    log.warning(
+                        f"Unable to load external application {name!r} from {module!r}"
+                    )
+                    raise
+
+        module = f"cstar.applications.{name}"
 
         try:
-            importlib.import_module(f"cstar.applications.{name}")
+            importlib.import_module(module)
         except ModuleNotFoundError:
-            pass
+            log.warning(f"Unable to load C-Star application {name!r} from {module!r}")
 
     if application := _registry.get(name):
         log.trace(f"Located application context {application.__name__!r} for {name!r}")
