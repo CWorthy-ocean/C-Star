@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -137,6 +138,7 @@ def process(spec, *, working_dir=None, **kwargs):
     """
     cfg = spec if isinstance(spec, ForgeBlueprint) else ForgeBlueprint.from_yaml(spec)
     wd = working_dir if working_dir is not None else cfg.working_dir
+    config.ensure_data_dirs()
     host = config.resolve_host(wd)
     with _capture_output(host.working_dir, verbose=kwargs.get("verbose", False)):
         return process_forge_blueprint(cfg, host=host, **kwargs)
@@ -263,6 +265,7 @@ def main(argv: list | None = None) -> int:
         logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
     cfg = ForgeBlueprint.from_yaml(args.forge_blueprint)
     wd = args.working_dir if args.working_dir is not None else cfg.working_dir
+    config.ensure_data_dirs()
     host = config.resolve_host(wd)
 
     with _capture_output(host.working_dir, verbose=args.verbose):
@@ -274,7 +277,9 @@ def main(argv: list | None = None) -> int:
         if args.dask:
             from dask.distributed import Client
 
-            client_kwargs = {"local_directory": "/tmp"}
+            # Node-local disk beats network scratch for dask spill; respect TMPDIR
+            # when set, but default to /tmp rather than network-mounted scratch.
+            client_kwargs = {"local_directory": os.environ.get("TMPDIR", "/tmp")}
             if args.dask_workers is not None:
                 client_kwargs["n_workers"] = args.dask_workers
             if args.dask_threads_per_worker is not None:

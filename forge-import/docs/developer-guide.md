@@ -1,6 +1,6 @@
 # Developer Guide (current state, 2026-07-17, branch `refactor`)
 
-This supersedes the mental model in `docs/overview.md` / `docs/CStarSpecBuilder-overview.md`
+This supersedes the mental model in `docs/overview.md` / `docs/domain-generation-overview.md`
 / `docs/machine-config.md` / `docs/dev-notes/forge-blueprint-inventory.md`, which describe the
 pre-refactor `_core.py` / `CstarSpecBuilder` design. Those files are stale (see
 "Stale docs" at the end) — start here.
@@ -297,10 +297,11 @@ Ranked roughly by what's worth doing next:
    during the 2026-07-23 real-C-Star-application work, §3a): the module docstring
    already says "fully wired into `ForgeExecutor`", not the old "not yet wired" text
    this item described.
-8. **`examples/forge_blueprint.yaml` / `forge_blueprint2.yaml` / `forge_blueprint3.yaml`** still stamp
-   `application: roms_marbl` (pre-rename); `forge_blueprint_new.yaml` and
-   `docs/forge-blueprint-example.test-tiny.yaml` already say `forge`. Regenerate or delete the
-   stale ones — not load-tested by anything, low urgency.
+8. **`examples/forge_blueprint2.yaml` / `forge_blueprint3.yaml`** still stamp
+   `application: roms_marbl` (pre-rename). Regenerate or delete the stale ones — not
+   load-tested by anything, low urgency. (The docs example was regenerated 2026-08-06 as
+   `docs/forge-blueprint-example.wio-toy.yaml`, schema v4, load-tested by
+   `test_committed_example_validates`.)
 9. **`domain_catalog_sketch.py`** (167 lines) — dead prototype, zero references anywhere
    (code, tests, notebooks, docs). Safe to delete.
 10. ~~Architecture doc headers understated progress.~~ **DONE (2026-07-17):**
@@ -338,7 +339,7 @@ Ranked roughly by what's worth doing next:
 All 7 were live pages in the published MyST docs site (`myst.yml` TOC), so none were
 deleted (that would need TOC restructuring); each was fixed in place instead:
 
-- `docs/CStarSpecBuilder-overview.md` — added a banner noting the class is gone
+- `docs/domain-generation-overview.md` — added a banner noting the class is gone
   (decomposed into `ForgeBlueprint` + `ForgeExecutor`); updated the mermaid diagram and stage
   descriptions to show `build_forge_blueprint` → `ForgeBlueprint` → `ForgeExecutor.from_forge_blueprint`.
 - `docs/InputData-intro.md`, `docs/InputData-RomsMarblInputData.md` — only ~4 lines of

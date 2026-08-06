@@ -145,7 +145,7 @@ The `get_data_paths()` function automatically creates these directories if they 
 ## Reference
 
 For further reference, see:
-- [API Reference: Core](api-core.md) - Configuration module source code
+- [Developer Guide](developer-guide.md) - module map, including `config.py` (`DataPaths`/`MachineConfig`/`resolve_host()`)
 - [Machines (machines.yaml)](reference-machines.md) - Machine-specific settings
 
 

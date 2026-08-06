@@ -93,9 +93,7 @@ class ProjectionConfig(BaseModel):
         """Override to ensure kwargs is properly handled."""
         if isinstance(obj, dict):
             # Ensure kwargs exists and is a dict
-            if "kwargs" not in obj:
-                obj["kwargs"] = {}
-            elif obj.get("kwargs") is None:
+            if "kwargs" not in obj or obj.get("kwargs") is None:
                 obj["kwargs"] = {}
         return super().model_validate(obj)
 
@@ -289,7 +287,7 @@ def _select_roms_tools_class_name(yaml_params: dict[str, Any]) -> str:
     if "Grid" not in yaml_params:
         raise ValueError("ROMS-Tools YAML must include a 'Grid' section.")
     other_keys = sorted(
-        key for key in yaml_params.keys() if key not in {"Grid", "roms_tools_version"}
+        key for key in yaml_params if key not in {"Grid", "roms_tools_version"}
     )
     if not other_keys:
         return "Grid"

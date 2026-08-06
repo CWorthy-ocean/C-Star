@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
+import logging
 import os
 import platform
 import socket
@@ -12,9 +14,21 @@ from pathlib import Path
 
 import yaml
 
-USER = os.environ.get("USER", None)
-if USER is None:
-    raise ValueError("USER environment variable is not set")
+logger = logging.getLogger(__name__)
+
+
+def _detect_user() -> str:
+    """Best-effort current username; never raises (containers/CI may lack $USER)."""
+    user = os.environ.get("USER")
+    if user:
+        return user
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "unknown"
+
+
+USER = _detect_user()
 
 
 def _ensure_dir(path: Path) -> Path:
@@ -197,8 +211,13 @@ def default_catalog_inner_dir(input_data: Path) -> Path:
     return input_data.parent.resolve() / "catalog"
 
 
-def get_data_paths() -> DataPaths:
-    """Return canonical data and project paths adapted to the system we're running on."""
+def get_data_paths(create: bool = False) -> DataPaths:
+    """Return canonical data and project paths adapted to the system we're running on.
+
+    Only builds ``Path`` objects by default; pass ``create=True`` (or call
+    :func:`ensure_data_dirs` afterwards) to also create the directories on disk.
+    Importing this module must not have filesystem side effects.
+    """
     env = os.environ
     home = Path(env.get("SCRATCH", str(Path.home())))
     system_tag = _detect_system()
@@ -217,9 +236,9 @@ def get_data_paths() -> DataPaths:
     builds_yaml = here / "builds.yaml"
     machines_yaml = here / "machines.yaml"
 
-    # ensure everything exists
-    for p in (source_data, input_data, scratch, catalog, blueprints_dir):
-        _ensure_dir(p)
+    if create:
+        for p in (source_data, input_data, scratch, catalog, blueprints_dir):
+            _ensure_dir(p)
 
     return DataPaths(
         here=here,
@@ -232,6 +251,19 @@ def get_data_paths() -> DataPaths:
         builds_yaml=builds_yaml,
         machines_yaml=machines_yaml,
     )
+
+
+def ensure_data_dirs(dp: DataPaths | None = None) -> DataPaths:
+    """Create the on-disk directories for *dp* (default: the module-level ``paths``).
+
+    Call this from entry points that actually write data (e.g. ``run.py``'s
+    ``main()``); importing :mod:`cstar_forge.config` must not create directories.
+    """
+    if dp is None:
+        dp = paths
+    for p in (dp.source_data, dp.input_data, dp.scratch, dp.catalog, dp.blueprints):
+        _ensure_dir(p)
+    return dp
 
 
 def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
@@ -282,14 +314,21 @@ def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineCon
             machines_data = yaml.safe_load(f) or {}
 
         machine_data = machines_data.get(system_tag, {})
+        if not isinstance(machine_data, dict):
+            machine_data = {}
 
         return MachineConfig(
             account=machine_data.get("account"),
             pes_per_node=machine_data.get("pes_per_node"),
             queues=machine_data.get("queues"),
         )
-    except Exception:
-        # If there's any error loading the config, return empty config
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning(
+            "Failed to load machine config for %r from %s: %s",
+            system_tag,
+            machines_yaml_path,
+            exc,
+        )
         return MachineConfig()
 
 
@@ -419,7 +458,7 @@ def get_environment_info() -> EnvironmentInfo:
     # Import the class from the current module to ensure it's accessible
     # This handles autoreload issues where the class might not be in scope
     current_module = sys.modules[__name__]
-    EnvironmentInfo = getattr(current_module, "EnvironmentInfo")
+    EnvironmentInfo = current_module.EnvironmentInfo
 
     return EnvironmentInfo(
         hostname=hostname,
@@ -485,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"System tag : {system_tag}")
             print(f"Hostname   : {hostname}")
-            print("")
+            print()
             print("Paths:")
             for key, value in _paths_to_dict(dp).items():
                 print(f"  {key:12s} -> {value}")
@@ -498,17 +537,23 @@ def main(argv: list[str] | None = None) -> int:
 
 def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
     """Load machine config from the default DomainCatalog (internal cstar-forge catalog)."""
-    try:
-        from cstar_forge.domain_catalog import default_catalog
+    from cstar_forge.domain_catalog import default_catalog
 
+    try:
         data = default_catalog.machine_data(system_tag)
-        return MachineConfig(
-            account=data.get("account"),
-            pes_per_node=data.get("pes_per_node"),
-            queues=data.get("queues"),
+    except (KeyError, OSError, yaml.YAMLError) as exc:
+        # Machine not in the catalog, or its YAML is missing/unreadable -- fall
+        # back to an empty config rather than failing import-time module setup.
+        logger.warning(
+            "Failed to load machine config for %r from catalog: %s", system_tag, exc
         )
-    except (KeyError, Exception):
         return MachineConfig()
+
+    return MachineConfig(
+        account=data.get("account"),
+        pes_per_node=data.get("pes_per_node"),
+        queues=data.get("queues"),
+    )
 
 
 # Initialize canonical instance

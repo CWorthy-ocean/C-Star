@@ -19,6 +19,7 @@ Tests cover:
 """
 
 import asyncio
+import copy
 import logging
 import os
 import sys
@@ -302,6 +303,23 @@ class TestVSpongeDefault:
 
         builder._update_settings_run_time({"v_sponge": {"v_sponge": 42.0}})
         assert builder._settings_run_time["v_sponge"]["v_sponge"] == 42.0
+
+
+class TestUpdateSettingsRunTime:
+    """Edge cases for the run-time settings merge entry point."""
+
+    def test_empty_update_is_a_noop(self, minimal_cstar_spec_builder_args):
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        before = copy.deepcopy(builder._settings_run_time)
+
+        builder._update_settings_run_time({})
+        assert builder._settings_run_time == before
+
+    def test_unknown_top_level_key_raises(self, minimal_cstar_spec_builder_args):
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+
+        with pytest.raises(ValueError, match="nothing-shared"):
+            builder._update_settings_run_time({"nothing-shared": "foo"})
 
 
 class TestForgeExecutorProperties:

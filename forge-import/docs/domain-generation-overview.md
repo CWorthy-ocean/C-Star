@@ -1,34 +1,33 @@
 # Domain generation overview
 
-> This page described `CstarSpecBuilder`, which no longer exists — it was decomposed
-> into `ForgeBlueprint` (the input) + `ForgeExecutor` (the processing engine, in
-> `cstar_forge/forge/executor.py`). See `docs/developer-guide.md` for the current
-> architecture and module map.
->
-> The executor no longer models a "preconfig/postconfig/build/run" blueprint stage
-> machine. It builds the blueprint up in memory across three steps and persists it
-> to disk exactly once, at the end of `configure_build()`, as a single `B_{name}.yaml`
-> (+ `settings_B_{name}.yaml` sidecar). The flow below reflects that.
+C-STAR Forge turns a set of reusable catalog pieces (plus optional wizard input) into
+a `ForgeBlueprint`, then processes that blueprint into ROMS-MARBL input files, compiled
+code, and a downstream C-Star blueprint that C-Star runs. See `docs/developer-guide.md`
+for the full module map and call chains; this page covers the workflow at a high level.
 
 ## Workflow
 
-The C-STAR Forge workflow progresses through distinct steps, transforming a model specification into an executable simulation:
+The C-STAR Forge workflow progresses through distinct steps, transforming catalog
+specs into an executable simulation:
 
 ```{mermaid}
 flowchart TD
-    S[settings-defaults.yaml] --> A[model.yaml]
-    T["templates:<br/>cppdefs.opt.j2"] --> A[model.yaml]
-    A -->|build_forge_blueprint| B[ForgeBlueprint]
+    MS["ModelSpec:<br/>model.yaml"] -->|build_forge_blueprint| B[ForgeBlueprint]
+    DS["DomainSpec:<br/>Domain.yaml"] -->|build_forge_blueprint| B
+    FS["ForcingSpec"] -->|build_forge_blueprint| B
+    OS["OutputSpec"] -->|build_forge_blueprint| B
 
-    C["User input / wizard UI"] -->|domain, forcing, run window| B
+    C["User input / wizard UI"] -->|domain, forcing, run window, overrides| B
 
-    B -->|from_forge_blueprint| D[ForgeExecutor]
+    B -->|"python -m cstar_forge.run<br/>(from_forge_blueprint)"| D[ForgeExecutor]
 
     D -->|model_post_init| E["Initialize<br/>Create Grid<br/>Init Blueprint (in memory)<br/>Load Default Settings<br/>."]
 
     E -->|ensure_source_data| G["Source Data<br/>GLORYS, UNIFIED<br/>SRTM15, etc.<br/>."]
 
     G -->|generate_inputs| H["Generate Inputs<br/>(in memory)"]
+
+    T["templates:<br/>cppdefs.opt.j2"] -.->|fetched via C-Star<br/>AdditionalCode| J
 
     H -->|configure_build| J["Configure Build<br/>Render Templates<br/>Create Simulation<br/>."]
     J -->|persist| K[B_name.yaml]
@@ -44,12 +43,23 @@ flowchart TD
     style N fill:#fce4ec
 ```
 
+Model defaults (namelist sections, cppdefs, code refs) live directly in each model's
+`model.yaml` under `catalog/ModelSpec/<model>/` — there is no separate
+`settings-defaults.yaml`; the resolver overlays domain-, forcing-, and output-derived
+values on top of that single file.
+
 ### Workflow Steps
 
+0. **Resolve** (`build_forge_blueprint()`, `cstar_forge/forge_blueprint_resolve.py`)
+   - Assemble a `ForgeBlueprint` from the catalog pieces (`ModelSpec`, `DomainSpec`,
+     `ForcingSpec`, `OutputSpec`) plus any wizard-supplied domain/forcing/run overrides
+   - This step, and everything before it, is dependency-light: no ROMS/C-Star/roms-tools
+     required, so a UI backend can call it directly
+
 1. **Initialize** (`model_post_init()` / `_initialize_roms_marbl_blueprint()`)
-   - Load `ModelSpec` from the model's `model.yaml` (under `catalog/ModelSpec/<model>/`)
-   - Build a `ForgeBlueprint` (`build_forge_blueprint`) from the catalog pieces + domain/run
-     inputs, then construct a `ForgeExecutor` from it (`ForgeExecutor.from_forge_blueprint`)
+   - Construct a `ForgeExecutor` from the resolved `ForgeBlueprint`
+     (`ForgeExecutor.from_forge_blueprint`), invoked via
+     `python -m cstar_forge.run forge_blueprint.yaml`
    - Initialize grid object from `grid_kwargs`
    - Create the in-memory blueprint structure with placeholder data
    - Load default settings from the resolved `ForgeBlueprint.model_settings`
@@ -69,7 +79,7 @@ flowchart TD
    - Nothing is persisted yet
 
 3. **Configure build** (`configure_build()`)
-   - Render Jinja2 templates:
+   - Render Jinja2 templates (fetched via C-Star's `AdditionalCode` from the forge git ref):
      - Compile-time template → `cppdefs.opt`
      - Run-time → `namelist.nml` (via f90nml) + `marbl_in`
    - Update blueprint with rendered code locations

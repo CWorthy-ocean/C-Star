@@ -393,7 +393,11 @@ class TestGetDataPaths:
 
     @patch("cstar_forge.config._detect_system")
     def test_get_data_paths(self, mock_detect, tmp_path):
-        """Test get_data_paths returns DataPaths object."""
+        """Test get_data_paths returns DataPaths object without creating directories.
+
+        Importing cstar_forge.config must not have filesystem side effects, so the
+        default (``create=False``) only builds Path objects.
+        """
         mock_detect.return_value = "MacOS"
 
         # Use a real home directory that exists for the test
@@ -405,23 +409,23 @@ class TestGetDataPaths:
         # (it's not created by get_data_paths, it's the package directory)
         assert paths.here.exists(), f"'here' path does not exist: {paths.here}"
         assert paths.here.is_dir(), f"'here' path is not a directory: {paths.here}"
-        # These directories are created by get_data_paths
-        assert paths.source_data.exists()
-        assert paths.input_data.exists()
-        assert paths.scratch.exists()
-        assert paths.catalog.exists()
-        assert paths.blueprints.exists()
+        # No directories are created by default
+        assert not paths.source_data.exists()
+        assert not paths.input_data.exists()
+        assert not paths.scratch.exists()
+        assert not paths.catalog.exists()
+        assert not paths.blueprints.exists()
         assert paths.catalog == default_catalog_inner_dir(paths.source_data)
         assert paths.blueprints == paths.catalog / "blueprints"
 
     @patch("cstar_forge.config._detect_system")
     def test_get_data_paths_creates_directories(self, mock_detect, tmp_path):
-        """Test that get_data_paths creates necessary directories."""
+        """Test that get_data_paths(create=True) creates necessary directories."""
         mock_detect.return_value = "MacOS"
 
         # Use a temporary directory as HOME for the test
         with patch.dict(os.environ, {"HOME": str(tmp_path)}):
-            paths = get_data_paths()
+            paths = get_data_paths(create=True)
 
         # Verify directories were created (they should exist after get_data_paths)
         assert paths.source_data.exists()

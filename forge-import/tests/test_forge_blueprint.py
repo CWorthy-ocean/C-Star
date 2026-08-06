@@ -1227,7 +1227,7 @@ def test_committed_example_validates():
     example = (
         Path(cstar_forge.__file__).parents[1]
         / "docs"
-        / "forge-blueprint-example.test-tiny.yaml"
+        / "forge-blueprint-example.wio-toy.yaml"
     )
     if not example.exists():
         pytest.skip("example file not present")
@@ -2368,28 +2368,33 @@ class TestSaveModifiedPiecesToCatalog:
         assert wiz.config.composition.model.modified is False
 
     def test_save_model_piece_persists_use_pio_and_roms_ref(self, isolated_catalog):
+        # Name deliberately distinct from the bundled "pio-dev" ModelSpec
+        # (cstar_forge/catalog/ModelSpec/pio-dev) -- register_model_from_settings
+        # refuses to overwrite an existing entry, and isolated_catalog copies the
+        # bundled catalog verbatim, so reusing that name here would collide.
+        spec_name = "pio-dev-test"
         wiz = self._wizard(isolated_catalog)
         wiz.use_pio_chk.value = True
         wiz.roms_ref.value = "main"
         assert wiz.config.composition.model.modified is True  # spec deviation
 
-        wiz.save_model_name.value = "pio-dev"
+        wiz.save_model_name.value = spec_name
         wiz._on_save_model(None)
 
-        data = isolated_catalog.model_data("pio-dev")
+        data = isolated_catalog.model_data(spec_name)
         assert data["use_pio"] is True
         assert data["code"]["roms"]["commit"] == "main"
         assert "branch" not in data["code"]["roms"]
         assert data["code"]["pio"] is not None
 
-        assert wiz.model_dd.value == "pio-dev"
+        assert wiz.model_dd.value == spec_name
         assert wiz.config.composition.model.modified is False
         assert "✓" in wiz.save_model_status.value
 
         # A fresh wizard picking this ModelSpec must reload the same toggles --
         # this is the part that actually failed for the reported bug.
         wiz2 = self._wizard(isolated_catalog)
-        wiz2.model_dd.value = "pio-dev"
+        wiz2.model_dd.value = spec_name
         assert wiz2.use_pio_chk.value is True
         assert wiz2.roms_ref.value == "main"
         assert wiz2.config.model_settings["cppdefs"]["use_pio"] is True

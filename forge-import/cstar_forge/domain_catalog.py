@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -13,6 +14,7 @@ import yaml
 if TYPE_CHECKING:
     import pandas as pd
 
+logger = logging.getLogger(__name__)
 
 _DEFAULT_CATALOG_ROOT = Path(__file__).parent / "catalog"
 
@@ -35,8 +37,7 @@ def _parse_github_catalog_url(url: str) -> tuple[str, str, str, Path]:
     else:
         raise ValueError(f"Not a GitHub catalog URL: {url!r}")
 
-    if path.endswith(".git"):
-        path = path[: -len(".git")]
+    path = path.removesuffix(".git")
 
     parts = [p for p in path.split("/") if p]
     if len(parts) < 2:
@@ -267,8 +268,8 @@ class DomainCatalog:
         try:
             for f in sorted(self._fs_glob_dual(machine_dir, "*")):
                 self._machines[f.stem] = f
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to scan machines: %s", exc)
 
     def _scan_models(self) -> None:
         """Scan ModelSpec/ for per-model directories containing model.yaml (or
@@ -280,8 +281,8 @@ class DomainCatalog:
             for f in sorted(self._fs_glob_dual(model_dir_root, "*/model")):
                 model_dir = f.parent
                 self._models[model_dir.name] = model_dir  # store dir, not file
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to scan models: %s", exc)
 
     def _scan_roms_marbl_blueprints(self) -> None:
         """Scan blueprints/ (and Blueprints/) for blueprint directories.
@@ -299,8 +300,12 @@ class DomainCatalog:
                 for machine_dir in sorted(self._fs_iterdir_dirs(bp_root)):
                     for bp_dir in sorted(self._fs_iterdir_dirs(machine_dir)):
                         self._roms_marbl_blueprints[bp_dir.name] = bp_dir
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "Failed to scan roms_marbl_blueprints under %s: %s",
+                    subdir_name,
+                    exc,
+                )
 
     def _scan_domains(self) -> None:
         """Scan DomainSpec/ for domain directories containing Domain.yaml (or
@@ -315,8 +320,8 @@ class DomainCatalog:
             for domain_yaml in sorted(self._fs_glob_dual(domain_spec_dir, "*/Domain")):
                 domain_dir = domain_yaml.parent
                 self._domains[domain_dir.name] = domain_dir
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to scan domains: %s", exc)
 
     def _scan_forcing(self) -> None:
         """Scan ForcingSpec/ for directories containing Forcing.yaml (or legacy
@@ -330,8 +335,8 @@ class DomainCatalog:
             ):
                 forcing_dir = forcing_yaml.parent
                 self._forcing[forcing_dir.name] = forcing_dir
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to scan forcing: %s", exc)
 
     def _scan_output(self) -> None:
         """Scan OutputSpec/ for directories containing Output.yaml (or legacy
@@ -343,8 +348,8 @@ class DomainCatalog:
             for output_yaml in sorted(self._fs_glob_dual(output_spec_dir, "*/Output")):
                 output_dir = output_yaml.parent
                 self._output[output_dir.name] = output_dir
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to scan output: %s", exc)
 
     # ------------------------------------------------------------------
     # Initialization helpers
@@ -1066,14 +1071,16 @@ class DomainCatalog:
                 bp = self._load_roms_marbl_blueprint_yaml(bp_file)
                 roms_marbl_blueprint_name = bp.get("name")
                 if not roms_marbl_blueprint_name:
-                    print(f"Warning: skipping {bp_file}: missing 'name' field")
+                    logger.warning("Skipping %s: missing 'name' field", bp_file)
                     continue
                 model_name, grid_name = self._extract_model_and_grid_name(
                     roms_marbl_blueprint_name
                 )
                 if not model_name or not grid_name:
-                    print(
-                        f"Warning: skipping {bp_file}: could not parse model/grid from '{roms_marbl_blueprint_name}'"
+                    logger.warning(
+                        "Skipping %s: could not parse model/grid from '%s'",
+                        bp_file,
+                        roms_marbl_blueprint_name,
                     )
                     continue
                 is_github = hasattr(self._fs, "org")
@@ -1101,7 +1108,7 @@ class DomainCatalog:
                     }
                 )
             except Exception as e:
-                print(f"Warning: could not parse {bp_file}: {e}")
+                logger.warning("Could not parse %s: %s", bp_file, e)
                 continue
 
         if not records:

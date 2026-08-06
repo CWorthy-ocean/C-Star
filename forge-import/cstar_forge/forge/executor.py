@@ -851,8 +851,11 @@ class ForgeExecutor(BaseModel):
                     self._settings_compile_time = settings_dict["compile_time"]
                 if "run_time" in settings_dict:
                     self._settings_run_time = settings_dict["run_time"]
-        except Exception as e:
+        except (OSError, yaml.YAMLError) as e:
             # If loading fails, issue a warning but don't fail
+            log.warning(
+                "Failed to load settings from %s: %s", settings_path, e, exc_info=True
+            )
             warnings.warn(
                 f"Failed to load settings from {settings_path}: {type(e).__name__}: {e}",
                 UserWarning,
@@ -1133,8 +1136,18 @@ class ForgeExecutor(BaseModel):
                 roms_marbl_blueprint = deserialize(
                     bp_path, cstar_models.RomsMarblBlueprint
                 )
-        except Exception as e:
-            # If validation fails (e.g., files don't exist), try lenient loading
+        except (OSError, yaml.YAMLError, ValidationError) as e:
+            # Strict validation routinely fails for blueprints persisted via
+            # model_construct with placeholder resources (e.g. before
+            # configure_build() runs); that's expected, so log at debug, not
+            # warning, and fall back to lenient loading below.
+            log.debug(
+                "Strict load of blueprint from %s failed, falling back to lenient "
+                "loading: %s",
+                bp_path,
+                e,
+                exc_info=True,
+            )
             try:
                 # Load YAML as dict and use model_construct to bypass validation
                 with bp_path.open("r") as f:
@@ -1143,8 +1156,14 @@ class ForgeExecutor(BaseModel):
                 roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
                     **roms_marbl_blueprint_data
                 )
-            except Exception as e2:
+            except (OSError, yaml.YAMLError, TypeError) as e2:
                 # If lenient loading also fails, issue a warning and return None
+                log.warning(
+                    "Lenient load of blueprint from %s also failed: %s",
+                    bp_path,
+                    e2,
+                    exc_info=True,
+                )
                 warnings.warn(
                     f"Failed to load blueprint from {bp_path}: "
                     f"{type(e).__name__}: {e}. "
@@ -1248,9 +1267,7 @@ class ForgeExecutor(BaseModel):
         # Convert locations to strings (handle Path and HttpUrl objects)
         location_strs = []
         for location in location_list:
-            if isinstance(location, Path):
-                location_strs.append(str(location))
-            elif hasattr(location, "__str__"):
+            if isinstance(location, Path) or hasattr(location, "__str__"):
                 location_strs.append(str(location))
             else:
                 location_strs.append(location)
@@ -1642,8 +1659,6 @@ class ForgeExecutor(BaseModel):
             If a top-level key in `settings_run_time` is not present in
             `_settings_run_time` (unknown setting key).
         """
-        # TODO: Consider adding a test for the merge operation passing {} to make sure it properly handles the edge case of an empty input.
-        # Consider adding a test for the merge operation passing {"nothing-shared": "foo"} to test the no-intersection edge case.
         if not settings_run_time:
             return
 
@@ -1922,8 +1937,6 @@ class ForgeExecutor(BaseModel):
                 self.roms_marbl_blueprint = self._validated_roms_marbl_blueprint()
             self.persist()
 
-        return
-
     def prep_cstar_environment(
         self,
         account_key: str | None = None,
@@ -1981,21 +1994,21 @@ class ForgeExecutor(BaseModel):
                 del os.environ[ENV_CSTAR_NPROCS_POST]
         # implicit: elif n_procs_available is None, do nothing
 
-        if self._require_host().system == "RCAC_anvil":
-            # find the right conda path to this environment and put it in the front of the path
-            # otherwise, it might find the wrong cstar executable
-            bin_dir = Path(sys.executable).parent
-            cstar_exe = bin_dir / "cstar"
-            assert cstar_exe.is_file()
-
-            new_link = Path.cwd() / "cstar"
-            if new_link.exists():
-                new_link.unlink()
-
-            # make symlink in current dir to correct cstar
-            os.symlink(cstar_exe, new_link)
-            _current_path = os.environ["PATH"]
-            os.environ["PATH"] = str(Path.cwd()) + os.pathsep + _current_path
+        # A stale `cstar` on PATH (e.g. a pip fallback under ~/.local/bin on some
+        # HPC systems) can shadow this environment's `cstar` executable. Force the
+        # running env's bin dir to the front of PATH so its `cstar` always wins,
+        # on every host, without relying on a machine-specific check.
+        bin_dir = Path(sys.executable).parent
+        cstar_exe = bin_dir / "cstar"
+        if not cstar_exe.is_file():
+            log.warning(
+                "Expected cstar executable not found at %s; prepending to PATH anyway",
+                cstar_exe,
+            )
+        current_path = os.environ.get("PATH", "")
+        current_path_entries = current_path.split(os.pathsep) if current_path else []
+        if not current_path_entries or current_path_entries[0] != str(bin_dir):
+            os.environ["PATH"] = os.pathsep.join([str(bin_dir), *current_path_entries])
 
     async def run(
         self,

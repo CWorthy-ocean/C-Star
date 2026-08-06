@@ -777,8 +777,13 @@ class RomsMarblInputData(InputData):
                 for dim in ("xi_coarse", "eta_coarse"):
                     if dim in sizes:
                         return 1
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(
+                "_interp_frc_surface_reuse: could not peek dims of %s (%s); "
+                "defaulting interp_frc to 0.",
+                nc_path,
+                e,
+            )
         return 0
 
     def _yaml_filename(self, input_name: str) -> Path:
@@ -1612,15 +1617,24 @@ class RomsMarblInputData(InputData):
             with mem_log("RiverForcing()", enabled=self.verbose):
                 river = rt.RiverForcing(grid=self.grid, **input_args)
         except ValueError as e:
-            warnings.warn(
-                f"Skipping river forcing generation due to invalid river configuration: {e}",
-                UserWarning,
-                stacklevel=2,
-            )
-            if self.roms_marbl_blueprint_elements.forcing is not None:
-                self.roms_marbl_blueprint_elements.forcing.river = None
-            river = rt.RiverForcing.__new__(rt.RiverForcing)
-            return river
+            # roms-tools raises this specific ValueError (see
+            # RiverDataset.extract_relevant_rivers in roms_tools.datasets.river_datasets)
+            # when no river mouths survive the domain bounding-box/coastal filters --
+            # an expected "no rivers here" outcome, not a configuration bug. Log and
+            # skip, returning None rather than an uninitialized RiverForcing instance
+            # (generate_all() discards step-handler return values, but a fabricated,
+            # __init__-bypassed object could crash if anything ever inspected it).
+            if "no relevant rivers found" in str(e).lower():
+                log.info(
+                    "No rivers found in domain for %s; skipping river forcing "
+                    "generation (%s).",
+                    key,
+                    e,
+                )
+                if self.roms_marbl_blueprint_elements.forcing is not None:
+                    self.roms_marbl_blueprint_elements.forcing.river = None
+                return None
+            raise
 
         # river.ds is built during construction, so this reflects the same
         # "no rivers in domain" condition save() used to report via an empty

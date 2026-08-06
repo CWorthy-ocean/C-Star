@@ -1,3 +1,4 @@
+import logging
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -9,6 +10,8 @@ from urllib.request import urlopen
 import copernicusmarine
 import gdown
 import roms_tools as rt
+
+logger = logging.getLogger(__name__)
 
 # -----------------------------------------
 # Dataset registry (name -> handler + metadata)
@@ -516,11 +519,6 @@ def _prepare_srtm15(self: SourceData) -> Path:
     return path
 
 
-@register_dataset("ERA5")
-def _prepare_era5(self: SourceData) -> Path:
-    pass
-
-
 # ---------------------------
 # MBL_CO2 handler
 # ---------------------------
@@ -565,8 +563,24 @@ def _prepare_mblco2(self: SourceData) -> Path:
 
 
 @register_dataset("ERA5")
-def _prepare_era5(self: SourceData) -> Path:
-    pass
+def _prepare_era5(self: SourceData) -> None:
+    """
+    No-op handler for ERA5.
+
+    ERA5 is a ``STREAMABLE_SOURCES`` entry: it is read directly at run time by
+    roms-tools rather than staged to a local file by Forge. ``prepare_all()``
+    skips streamable datasets by default (``include_streamable=False``), so this
+    handler only runs when a caller explicitly opts in with
+    ``include_streamable=True``. In that case there is still nothing for Forge
+    to stage locally, so we log that fact and return ``None`` rather than
+    fabricating a path. ``prepare_all`` stores this ``None`` in ``self.paths["ERA5"]``,
+    which matches what ``path_for_source`` already returns for a streamable
+    source with no staged path.
+    """
+    logger.info(
+        "ERA5 is a streamable source (read directly by roms-tools at run time); "
+        "no local file is staged by Forge."
+    )
 
 
 # ---------------------------
