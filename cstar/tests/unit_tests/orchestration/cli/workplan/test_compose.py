@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -342,7 +342,7 @@ async def test_run_composed_dag(
     bp_template_path = bp_templates_dir / bp_template_file
 
     working_dir = Path("/home/x-cmcbride/dag/jan12001")
-    run_id = f"test-run-{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    run_id = f"test-run-{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
 
     print(f"Composing workplan in: {tmp_path}")
     mock_env = {

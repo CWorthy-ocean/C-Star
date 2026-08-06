@@ -3,7 +3,7 @@ import os
 import typing as t
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -987,7 +987,7 @@ def test_restart_file_happy_path(
 )
 def test_restart_file_find(tmp_path: Path, pad_size: int) -> None:
     """Verify that `RestartFile.find` locates a reset file when expected."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
     segment = "0".zfill(pad_size)
@@ -1029,7 +1029,7 @@ def test_restart_file_from_parts_unparted(tmp_path: Path) -> None:
     """Verify that a `RestartFile` instance is created without a segment ID in the
     path if it is not supplied.
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     ts = now.strftime("%Y%m%d%H%M%S")
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
@@ -1059,7 +1059,7 @@ def test_restart_file_from_parts_parted(
     """Verify that a `RestartFile` instance is created with a segment ID in the
     path if it is supplied.
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
     reset_path = search_path / f"foo_rst.{now.strftime('%Y%m%d%H%M%S')}.000.nc"
@@ -1074,7 +1074,7 @@ def test_restart_file_from_parts_with_base(tmp_path: Path) -> None:
     """Verify that a `RestartFile` instance is created with a segment ID in the
     path if it is supplied.
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)
 
@@ -1094,13 +1094,13 @@ def test_restart_file_from_parts_with_base(tmp_path: Path) -> None:
     ("path", "exp_partition", "exp_is_partitioned"),
     [
         pytest.param(
-            f"foo_rst.{datetime.now(tz=timezone.utc).strftime(RestartFile.FMT_TS)}.010.nc",
+            f"foo_rst.{datetime.now(tz=UTC).strftime(RestartFile.FMT_TS)}.010.nc",
             10,
             True,
             id="parted path",
         ),
         pytest.param(
-            f"foo_rst.{datetime.now(tz=timezone.utc).strftime(RestartFile.FMT_TS)}.nc",
+            f"foo_rst.{datetime.now(tz=UTC).strftime(RestartFile.FMT_TS)}.nc",
             None,
             False,
             id="unparted path",
@@ -1124,7 +1124,7 @@ def test_restart_file_adapter(tmp_path: Path) -> None:
     """Verify that a partitioned reset file contains the correct partition information
     when converted into an override.
     """
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     ts = now.strftime("%Y%m%d%H%M%S")
     search_path = tmp_path / "test-reset-file-find"
     search_path.mkdir(parents=True)

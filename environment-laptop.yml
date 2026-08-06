@@ -1,0 +1,18 @@
+name: cstar-env
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.12,<3.14
+  - pip
+  - roms-tools>=4.0.0,<5
+  # toolchain: provided by modules on HPC
+  - compilers
+  - cmake
+  - mpich
+  - netcdf-fortran
+  - libpnetcdf
+  # ucla-roms Makefiles need GNU-flavored rsync; macOS's system rsync lacks
+  # the required flags (see docs/releases/v0.3.0.rst) — keep for local builds
+  - rsync
+  # docs builds only
+  - pandoc

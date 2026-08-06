@@ -10,12 +10,12 @@ whether you are working on a supported HPC system (environment
 management by Linux Environment Modules) or a generic machine like a
 laptop (environment managed by conda)::
 
-   conda env create -f ci/environment_hpc.yml  # conda environment for supported HPC system
-   # conda env create -f ci/environment.yml  # conda environment for generic machine 
+   conda env create -f environment-hpc.yml  # conda environment for supported HPC system
+   # conda env create -f environment-laptop.yml  # conda environment for generic machine
 
 Activate the conda environment::
 
-   conda activate cstar_env
+   conda activate cstar-env
 
 Install ``C-Star`` in the same environment::
 
@@ -23,7 +23,7 @@ Install ``C-Star`` in the same environment::
 
 This conda environment is useful for any of the following steps:
 
-1. Running the example notebooks
+1. Running the example notebooks (also requires ``conda install jupyterlab``)
 2. Contributing code and running the testing suite
 3. Building the documentation locally
 
@@ -33,7 +33,7 @@ Running the tests
 You can check the functionality of the C-Star code by running the test
 suite::
 
-   conda activate cstar_env
+   conda activate cstar-env
    cd C-Star
    pytest
 
@@ -46,7 +46,7 @@ all tests pass. The next step is to make sure that the code is formatted
 properly. Activate the environment (created above) and run all linters
 as follows::
 
-   conda activate cstar_env
+   conda activate cstar-env
    pre-commit run --all-files
 
 Some things will automatically be reformatted, others may need manual
@@ -100,7 +100,7 @@ Building the documentation locally
 
 Activate the environment::
 
-   conda activate cstar_env
+   conda activate cstar-env
 
 Then navigate to the docs folder and build the docs via::
 

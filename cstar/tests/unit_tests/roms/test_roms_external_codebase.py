@@ -63,8 +63,14 @@ class TestROMSExternalCodeBaseInit:
 
 
 class TestROMSExternalCodeBaseConfigure:
+    @mock.patch("cstar.roms.external_codebase.rpath_link_flags", return_value=None)
+    @mock.patch("cstar.roms.external_codebase.assert_single_toolchain_stack")
+    @mock.patch("cstar.roms.external_codebase.explicit_mpi_wrapper", return_value=None)
     def test_configure_success(
         self,
+        mock_explicit_mpi_wrapper,
+        mock_assert_toolchain,
+        mock_rpath_flags,
         romsexternalcodebase_staged,
         roms_path: pathlib.Path,
     ):
@@ -90,11 +96,55 @@ class TestROMSExternalCodeBaseConfigure:
             msg_err="Error when compiling Tools-Roms.",
             raise_on_error=True,
         )
+        mock_assert_toolchain.assert_called_once_with(None)
 
+    @mock.patch("cstar.roms.external_codebase.rpath_link_flags", return_value=None)
+    @mock.patch("cstar.roms.external_codebase.assert_single_toolchain_stack")
+    def test_configure_uses_explicit_mpi_wrapper(
+        self,
+        mock_assert_toolchain,
+        mock_rpath_flags,
+        romsexternalcodebase_staged,
+        roms_path: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ):
+        """Test that the `make` command includes an `MPI_WRAPPER=` clause when
+        `explicit_mpi_wrapper` resolves a wrapper path.
+        """
+        recb = romsexternalcodebase_staged
+        wrapper_path = str(tmp_path / "bin" / "mpifort")
+
+        with (
+            mock.patch(
+                "cstar.roms.external_codebase.explicit_mpi_wrapper",
+                return_value=wrapper_path,
+            ),
+            mock.patch("cstar.roms.external_codebase._run_cmd") as mock_run_cmd,
+        ):
+            mock_run_cmd.side_effect = [mock.Mock(returncode=0)]
+            recb._configure()
+
+        cstar_sysmgr = get_sysmgr()
+        mock_run_cmd.assert_any_call(
+            f"make MPI_WRAPPER={wrapper_path} COMPILER={cstar_sysmgr.environment.compiler}",
+            cwd=roms_path / "Tools-Roms",
+            msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
+            msg_post="Compiled Tools-Roms",
+            msg_err="Error when compiling Tools-Roms.",
+            raise_on_error=True,
+        )
+        mock_assert_toolchain.assert_called_once_with(wrapper_path)
+
+    @mock.patch("cstar.roms.external_codebase.rpath_link_flags", return_value=None)
+    @mock.patch("cstar.roms.external_codebase.assert_single_toolchain_stack")
+    @mock.patch("cstar.roms.external_codebase.explicit_mpi_wrapper", return_value=None)
     @mock.patch("cstar.base.utils.subprocess.run")
     def test_make_tools_failure(
         self,
         mock_subprocess,
+        mock_explicit_mpi_wrapper,
+        mock_assert_toolchain,
+        mock_rpath_flags,
         romsexternalcodebase_staged,
     ):
         """Test that the _configure method raises an error when 'Tools-Roms/make' fails."""

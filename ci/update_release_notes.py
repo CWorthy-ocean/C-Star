@@ -257,6 +257,9 @@ def parse_pr_body(
     - Drops checklist-style bullets (``- [ ]`` / ``- [x]``) even if they
       appear under a content section, as a belt-and-suspenders guard.
     - Strips inline HTML comments (``<!-- … -->``) before processing.
+    - Converts Markdown inline-code spans (`` `x` ``) to RST inline literals
+      (`` ``x`` ``) via :func:`_md_code_to_rst`, so text copied from PR
+      descriptions renders as code rather than italics.
 
     Args:
         body: Raw Markdown text of the PR description, or ``None`` if the PR has no body.
@@ -306,6 +309,7 @@ def parse_pr_body(
             text = bullet.group(1).strip()
             if not text:
                 continue
+            text = _md_code_to_rst(text)
             if indent == 0:
                 items.append([text, []])
             elif items:
@@ -319,6 +323,41 @@ def parse_pr_body(
 # ---------------------------------------------------------------------------
 # RST helpers
 # ---------------------------------------------------------------------------
+
+# Protect existing RST inline constructs so only plain Markdown code spans are
+# converted to RST inline literals — converting a role or a hyperlink
+# reference in place would break it.
+_RST_PROTECT_RE = re.compile(
+    r"``[^`]*``"  # 1. existing double-backtick literal — already correct
+    r"|:[A-Za-z0-9_+-]+:`[^`\n]*`"  # 2. role:  :name:`content`
+    r"|`[^`\n]*<[^`>\n]*>`__?"  # 3. reference with explicit target: `text <url>`_
+    r"|(?<![\w`])`[^`\n<]+`__?(?![\w])"  # 4. bare ref: `commit history`_
+)
+_MD_CODE_RE = re.compile(r"`([^`\n]+?)`")
+
+
+def _md_code_to_rst(text: str) -> str:
+    """
+    Convert Markdown inline-code spans (`` `x` ``) to RST inline literals
+    (`` ``x`` ``), leaving RST roles, hyperlink references, and already-correct
+    double-backtick literals untouched.
+
+    PR descriptions are written in Markdown, where a single backtick denotes
+    inline code. In RST a single backtick is the default (title-reference)
+    role and renders as italics, so text copied verbatim renders wrong;
+    double backticks are the RST equivalent for inline code.
+
+    Args:
+        text: A bullet's text, as scraped from a PR description.
+    """
+    out: list[str] = []
+    last = 0
+    for m in _RST_PROTECT_RE.finditer(text):
+        out.append(_MD_CODE_RE.sub(r"``\1``", text[last : m.start()]))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(_MD_CODE_RE.sub(r"``\1``", text[last:]))
+    return "".join(out)
 
 
 def _normalize(text: str) -> str:

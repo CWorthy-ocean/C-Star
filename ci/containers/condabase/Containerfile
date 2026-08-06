@@ -21,7 +21,7 @@ RUN mkdir -p "$CONDA_HOME" && \
     echo "conda activate base" >> /etc/profile.d/conda.sh && \
     . /etc/profile && \
     git clone -b $CSTAR_HASH --single-branch "https://github.com/$CSTAR_REPO" /tmp/cstar && \
-    conda env update --prune --name base --file /tmp/cstar/ci/environment.yml && \ 
+    conda env update --prune --name base --file /tmp/cstar/environment-laptop.yml && \
     conda clean -afy && \
     pip install /tmp/cstar --root-user-action ignore --no-cache-dir && \
     rm -rf /tmp/cstar

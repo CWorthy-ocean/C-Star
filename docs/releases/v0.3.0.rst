@@ -10,7 +10,7 @@ Breaking Changes
 ~~~~~~~~~~~~~~~~
 
 - Environment variables ``CSTAR_HOME`` and ``CSTAR_OUTDIR`` are deprecated in favor of ``CSTAR_CONFIG_HOME`` and ``CSTAR_STATE_HOME``
-- Relocated command conversion functions from `cstar.orchestration.launch.slurm` to `cstar.orchestration.converter`
+- Relocated command conversion functions from ``cstar.orchestration.launch.slurm`` to ``cstar.orchestration.converter``
 - Promote blueprint overrides to always-on, deprecate and remove feature flag ``CSTAR_FF_ORCH_TRX_OVERRIDE``
 
 New features
@@ -29,7 +29,7 @@ Bug Fixes
 
 - Fix path concatenation bug resulting in invalid source data paths
 - Fix indentation creating an unreachable code block in git utils
-- Add conda installation of rsync to `environment.yml` (fixes bug related to a flag used in newer ucla-roms makefiles that is not available in MacOS's default rsync installation)
+- Add conda installation of rsync to ``environment.yml`` (fixes bug related to a flag used in newer ucla-roms makefiles that is not available in MacOS's default rsync installation)
 - Reimplement ``CSTAR_CLOBBER_WORKING_DIR`` for single-blueprint cases
 - Fix bug handling user-relative paths in ``JobFileSystemManager``
 

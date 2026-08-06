@@ -13,6 +13,10 @@ jobs:
   test:
     name: integration-${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    env:
+      # Stop UCX from probing RDMA verbs devices: newer Azure runner VMs expose a
+      # MANA NIC whose ud_verbs transport fails in MPI_Init ("Address not valid").
+      UCX_TLS: tcp,sm,self
     strategy:
       matrix:
         python-version: ["3.12",]
@@ -25,7 +29,7 @@ jobs:
           cache-downloads: true
           cache-environment: true
           micromamba-version: 'latest'
-          environment-file: ci/environment.yml
+          environment-file: environment-laptop.yml
           create-args: |
             python=${{ matrix.python-version }}
 

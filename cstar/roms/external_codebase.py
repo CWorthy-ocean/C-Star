@@ -4,6 +4,11 @@ from pathlib import Path
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
+from cstar.roms.build_verification import (
+    assert_single_toolchain_stack,
+    explicit_mpi_wrapper,
+    rpath_link_flags,
+)
 from cstar.system.manager import get_sysmgr
 
 
@@ -44,8 +49,16 @@ class ROMSExternalCodeBase(ExternalCodeBase):
         )
 
         # Compile Tools-Roms
+        mpi_wrapper = explicit_mpi_wrapper()
+        assert_single_toolchain_stack(mpi_wrapper)
+        wrapper_clause = (
+            f"MPI_WRAPPER={mpi_wrapper} " if mpi_wrapper is not None else ""
+        )
+        rpath_flags = rpath_link_flags()
+        rpath_clause = f"USER_LDFLAGS='{rpath_flags}' " if rpath_flags else ""
+
         _run_cmd(
-            f"make COMPILER={cstar_sysmgr.environment.compiler}",
+            f"make {wrapper_clause}{rpath_clause}COMPILER={cstar_sysmgr.environment.compiler}",
             cwd=roms_root / "Tools-Roms",
             msg_pre="Compiling Tools-Roms package for UCLA ROMS...",
             msg_post="Compiled Tools-Roms",

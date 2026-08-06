@@ -1,6 +1,6 @@
 import logging
 import typing as t
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -14,7 +14,7 @@ JOBFILE_DATE_FORMAT: t.Final[str] = "%Y%m%d_%H%M%S"
 
 def _generate_job_name() -> str:
     """Generate a unique job name based on the current date and time."""
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     formatted_now_utc = now_utc.strftime(JOBFILE_DATE_FORMAT)
     return f"cstar_worker_{formatted_now_utc}"
 

@@ -2,7 +2,7 @@ import importlib
 import typing as t
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import chain
 from pathlib import Path
 
@@ -102,7 +102,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
         -------
         str
         """
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         formatted_now_utc = now_utc.strftime(JOBFILE_DATE_FORMAT)
         return f"cstar_worker_{formatted_now_utc}"
 
@@ -116,7 +116,7 @@ class RunnerState:
     errors: list[str] = field(default_factory=list[str])
     """The error messages produced by the application."""
     timestamp: t.Final[str] = field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
+        default_factory=lambda: datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
         init=False,
         compare=False,
     )

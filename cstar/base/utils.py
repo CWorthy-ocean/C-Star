@@ -425,7 +425,7 @@ def utc_now() -> dt.datetime:
     -------
     datetime
     """
-    return dt.datetime.now(tz=dt.timezone.utc)
+    return dt.datetime.now(tz=dt.UTC)
 
 
 def generate_schema_ref(app_name: str, vtarget: str) -> str:

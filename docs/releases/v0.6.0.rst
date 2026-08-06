@@ -8,7 +8,7 @@ Breaking Changes
 ~~~~~~~~~~~~~~~~
 
 
-- Drops support for [C]Worthy ucla-roms versions <0.2: removes support for running roms with `roms.in` and the classic suite of `.opt` files. Replaces that functionality with support for ROMS namelists. This and future versions of C-Star will only run blueprints that point to namelist-compatible versions of ROMS. (`#556 <https://github.com/CWorthy-ocean/C-Star/pull/556>`_)
+- Drops support for [C]Worthy ucla-roms versions <0.2: removes support for running roms with ``roms.in`` and the classic suite of ``.opt`` files. Replaces that functionality with support for ROMS namelists. This and future versions of C-Star will only run blueprints that point to namelist-compatible versions of ROMS. (`#556 <https://github.com/CWorthy-ocean/C-Star/pull/556>`_)
 - Removes DatasetLinker concept, which existed to support inflexible .opt conventions (`#556 <https://github.com/CWorthy-ocean/C-Star/pull/556>`_)
 
 New features

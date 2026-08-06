@@ -76,7 +76,7 @@ class LocalHandle(ProcessHandle):
         -------
         float
         """
-        now = datetime.datetime.now(tz=datetime.timezone.utc).timestamp()
+        now = datetime.datetime.now(tz=datetime.UTC).timestamp()
         return now - self.start_ts
 
     @property
@@ -311,7 +311,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 stderr=subprocess.STDOUT,
             )
 
-            create_time = datetime.datetime.now(tz=datetime.timezone.utc)
+            create_time = datetime.datetime.now(tz=datetime.UTC)
 
             if pid := local_process.pid:
                 msg = f"Local run of {step.application!r} created pid: {pid}"
@@ -324,7 +324,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                     ps_process = PsProcess(pid)
                     create_timestamp = ps_process.create_time()
                     create_time = datetime.datetime.fromtimestamp(
-                        create_timestamp, tz=datetime.timezone.utc
+                        create_timestamp, tz=datetime.UTC
                     )
                 except NoSuchProcess:
                     msg = f"Unable to retrieve exact start time for pid: {pid}"
