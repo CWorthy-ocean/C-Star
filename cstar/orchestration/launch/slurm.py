@@ -127,7 +127,7 @@ class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec
             If the input cannot be successfully adapted to the target type.
         """
         if not model:
-            msg = "Compute overrides were not supplied to the LocalComputeAdapter"
+            msg = "Compute overrides were not supplied to the SlurmComputeAdapter"
             raise CstarExpectationFailed(msg)
 
         if overrides_ := t.cast("dict[str, str | int]", model.get("slurm", {})):
@@ -143,7 +143,7 @@ class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec
                 msg = "Invalid compute overrides were specified"
                 log.error(msg)
 
-        msg = f"Unable to adapt model {model!r} into LocalComputeSpec"
+        msg = f"Unable to adapt model {model!r} into SlurmComputeSpec"
         raise CstarAdaptationError(msg)
 
 
@@ -246,7 +246,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                     update=overrides.model_dump(exclude_defaults=True)
                 )
             except CstarAdaptationError:
-                msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
+                msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
                 log.warning(msg, exc_info=True)
 
         return create_scheduler_job(
