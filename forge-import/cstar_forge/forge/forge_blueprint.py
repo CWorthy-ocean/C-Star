@@ -55,14 +55,65 @@ import hashlib
 import json
 import math
 import re
-from datetime import datetime
+import subprocess
+from datetime import UTC, datetime
 from enum import Enum
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from cstar.orchestration.models import Blueprint
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+# Repo root anchor for ``_forge_version()`` -- three levels up from this file
+# (cstar_forge/forge/forge_blueprint.py -> forge/ -> cstar_forge/ -> repo root).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _forge_version() -> str | None:
+    """Best-effort identifier for the Forge code that saved this blueprint -- lets a
+    later reader know which Forge commit to check out to reproduce it.
+
+    Prefers ``git describe`` on this file's own checkout (a ``-dirty`` suffix flags
+    uncommitted changes at save time); Forge's own package version is static
+    (unlike ``cstar-ocean``/``roms-tools``, it carries no ``setuptools_scm`` commit
+    info), so a wheel/PyPI install without a ``.git`` directory falls back to that
+    static version, and no install info at all falls back to ``None``. Never
+    raises -- this is provenance, not a dependency.
+    """
+    if (_REPO_ROOT / ".git").exists():
+        try:
+            result = subprocess.run(
+                ["git", "describe", "--always", "--dirty"],
+                cwd=_REPO_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=True,
+            )
+            return result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    try:
+        return f"cstar-forge=={_pkg_version('cstar-forge')}"
+    except PackageNotFoundError:
+        return None
+
+
+def _installed_version(package_name: str) -> str | None:
+    """Best-effort installed version of ``package_name``, or ``None`` if it isn't
+    installed. Unlike ``_forge_version``, no separate git-describe step is needed:
+    both ``cstar-ocean`` and ``roms-tools`` version themselves via
+    ``setuptools_scm``, so an editable/dev checkout's installed version already
+    embeds commit info (e.g. ``0.8.1.dev2+gcb931baef``). Never raises.
+    """
+    try:
+        return f"{package_name}=={_pkg_version(package_name)}"
+    except PackageNotFoundError:
+        return None
+
 
 # ===========================================================================
 # Enums for roms-tools constrained string parameters.
@@ -715,12 +766,18 @@ class Composition(_Section):
 
 
 class Provenance(_Section):
-    """Audit trail. Timestamps are passed in (never generated inside a resolver, to
-    keep Phase 1 deterministic/reproducible).
+    """Audit trail. ``generated_at``/``forge_version``/``cstar_version``/
+    ``roms_tools_version`` are never computed inside the resolver (to keep Phase 1
+    deterministic/reproducible, and because ``roms_tools`` isn't guaranteed
+    installed there) -- ``ForgeBlueprint.to_yaml_str`` stamps each on first save
+    only (a later resave preserves the original value, same as an explicit
+    constructor override); a caller may still pass one explicitly (e.g. carrying
+    an original value forward through a re-resolve).
     """
 
     generated_at: datetime | None = None
     forge_version: str | None = None
+    cstar_version: str | None = None
     roms_tools_version: str | None = None
     override_files_applied: list[str] = Field(default_factory=list)
     # sha256 of the results-affecting data (set on save by ForgeBlueprint.to_yaml*).
@@ -935,14 +992,23 @@ class ForgeBlueprint(Blueprint):
         return path
 
     def to_yaml_str(self) -> str:
-        # stamp the integrity hash into provenance on the way out (the hash itself
-        # excludes provenance, so this doesn't perturb it)
+        # Stamp provenance on the way out (the hash itself excludes provenance, so
+        # this doesn't perturb it). content_hash always recomputes (it must reflect
+        # current content, for hand-edit detection); generated_at/forge_version/
+        # cstar_version/roms_tools_version are stamped only if not already set --
+        # first save wins, so a later resave preserves the original values.
+        prov = self.provenance
+        updates: dict[str, Any] = {"content_hash": self.content_hash()}
+        if prov.generated_at is None:
+            updates["generated_at"] = datetime.now(UTC)
+        if prov.forge_version is None:
+            updates["forge_version"] = _forge_version()
+        if prov.cstar_version is None:
+            updates["cstar_version"] = _installed_version("cstar-ocean")
+        if prov.roms_tools_version is None:
+            updates["roms_tools_version"] = _installed_version("roms-tools")
         stamped = self.model_copy(
-            update={
-                "provenance": self.provenance.model_copy(
-                    update={"content_hash": self.content_hash()}
-                )
-            }
+            update={"provenance": prov.model_copy(update=updates)}
         )
         data = stamped.model_dump(mode="json", exclude_none=False)
         return yaml.safe_dump(data, sort_keys=False, default_flow_style=False)

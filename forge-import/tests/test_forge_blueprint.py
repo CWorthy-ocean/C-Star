@@ -11,6 +11,7 @@ NOTE: imports the in-package modules, so these run once the environment's editab
 assertions were validated standalone during development.
 """
 
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
@@ -69,6 +70,27 @@ def test_naming_is_derived_not_stored():
     assert cfg.casename == "cson_roms-marbl_v0.1_test-tiny_1procs_20120101-20120102"
     # output_root_name is host-derived from the scratch path
     assert cfg.output_root_name("/scratch").startswith("/scratch/cson_roms-marbl")
+
+
+def test_resolved_provenance_is_unstamped():
+    """generated_at/forge_version/cstar_version/roms_tools_version are left None by
+    the resolver -- ``ForgeBlueprint.to_yaml_str`` is what stamps them (see
+    TestProvenanceStamping below), keeping Phase 1 resolution deterministic and
+    independent of whether ``roms_tools`` happens to be installed.
+    """
+    cfg = _build()
+    assert cfg.provenance.generated_at is None
+    assert cfg.provenance.forge_version is None
+    assert cfg.provenance.cstar_version is None
+    assert cfg.provenance.roms_tools_version is None
+
+
+def test_forge_version_explicit_override_preserved():
+    """An explicit ``forge_version`` (e.g. re-resolving without touching original
+    provenance) is passed straight through, unstamped by the resolver.
+    """
+    cfg = _build(forge_version="0.2.0")
+    assert cfg.provenance.forge_version == "0.2.0"
 
 
 def test_default_working_dir_includes_run_name():
@@ -1226,6 +1248,189 @@ def test_committed_example_validates():
     cfg = ForgeBlueprint.from_yaml(example)
     assert cfg.composition.model.name == "cson_roms-marbl_v0.1"
     assert cfg.composition.model.origin == "catalog"
+
+
+# ---------------------------------------------------------------------------
+# _forge_version -- best-effort git describe / package-version identifier for
+# provenance.forge_version (see test_forge_version_* above for the resolver wiring)
+# ---------------------------------------------------------------------------
+class TestForgeVersion:
+    """``_REPO_ROOT`` is monkeypatched to a real ``tmp_path`` (with/without an actual
+    ``.git`` subdirectory) rather than stubbing ``Path.exists`` globally, so these
+    don't risk affecting unrelated filesystem checks during the test.
+    """
+
+    def test_uses_git_describe_when_repo_present(self, monkeypatch, tmp_path):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        (tmp_path / ".git").mkdir()
+        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
+        mock_result = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="abc1234-dirty\n"
+        )
+        monkeypatch.setattr(fb.subprocess, "run", lambda *a, **k: mock_result)
+        assert fb._forge_version() == "abc1234-dirty"
+
+    def test_falls_back_to_package_version_when_no_git_dir(self, monkeypatch, tmp_path):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)  # no .git subdir
+        monkeypatch.setattr(fb, "_pkg_version", lambda name: "0.1.0")
+        assert fb._forge_version() == "cstar-forge==0.1.0"
+
+    def test_falls_back_to_package_version_when_git_fails(self, monkeypatch, tmp_path):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        (tmp_path / ".git").mkdir()
+        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
+
+        def _raise(*a, **k):
+            raise FileNotFoundError("git not installed")
+
+        monkeypatch.setattr(fb.subprocess, "run", _raise)
+        monkeypatch.setattr(fb, "_pkg_version", lambda name: "0.1.0")
+        assert fb._forge_version() == "cstar-forge==0.1.0"
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            subprocess.TimeoutExpired(cmd=["git"], timeout=2),
+            subprocess.CalledProcessError(1, ["git"]),
+        ],
+        ids=["timeout", "nonzero_exit"],
+    )
+    def test_falls_back_on_slow_or_failing_git(self, monkeypatch, tmp_path, exc):
+        """A slow/unreachable git (e.g. an HPC home dir) or a non-zero exit
+        (``check=True``) must fall back like a missing git binary -- both
+        ``TimeoutExpired`` and ``CalledProcessError`` are ``SubprocessError``.
+        """
+        from cstar_forge.forge import forge_blueprint as fb
+
+        (tmp_path / ".git").mkdir()
+        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
+
+        def _raise(*a, **k):
+            raise exc
+
+        monkeypatch.setattr(fb.subprocess, "run", _raise)
+        monkeypatch.setattr(fb, "_pkg_version", lambda name: "0.1.0")
+        assert fb._forge_version() == "cstar-forge==0.1.0"
+
+    def test_returns_none_when_neither_git_nor_package_available(
+        self, monkeypatch, tmp_path
+    ):
+        from importlib.metadata import PackageNotFoundError
+
+        from cstar_forge.forge import forge_blueprint as fb
+
+        monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)  # no .git subdir
+
+        def _raise(name):
+            raise PackageNotFoundError(name)
+
+        monkeypatch.setattr(fb, "_pkg_version", _raise)
+        assert fb._forge_version() is None
+
+
+class TestInstalledVersion:
+    """``_installed_version`` backs ``provenance.cstar_version``/``roms_tools_version``
+    -- no git-describe fallback needed, since both packages version themselves via
+    ``setuptools_scm`` (an editable/dev checkout's installed version already embeds
+    commit info).
+    """
+
+    def test_returns_formatted_version_when_installed(self, monkeypatch):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        monkeypatch.setattr(fb, "_pkg_version", lambda name: "4.0.0")
+        assert fb._installed_version("roms-tools") == "roms-tools==4.0.0"
+
+    def test_returns_none_when_not_installed(self, monkeypatch):
+        from importlib.metadata import PackageNotFoundError
+
+        from cstar_forge.forge import forge_blueprint as fb
+
+        def _raise(name):
+            raise PackageNotFoundError(name)
+
+        monkeypatch.setattr(fb, "_pkg_version", _raise)
+        assert fb._installed_version("not-a-real-package") is None
+
+
+class TestProvenanceStamping:
+    """``ForgeBlueprint.to_yaml_str`` stamps generated_at/forge_version/
+    cstar_version/roms_tools_version on first save; a resave preserves whatever
+    was already stamped (or explicitly set), same "first save wins" semantics as
+    ``content_hash`` is exempt from (content_hash always recomputes; these don't).
+    """
+
+    def _patched_fb(self, monkeypatch):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        monkeypatch.setattr(fb, "_forge_version", lambda: "abc1234")
+        monkeypatch.setattr(
+            fb,
+            "_installed_version",
+            lambda name: f"{name}==9.9.9",
+        )
+        return fb
+
+    def test_first_save_stamps_all_unset_fields(self, monkeypatch, tmp_path):
+        fb = self._patched_fb(monkeypatch)
+        cfg = _build()
+        assert cfg.provenance.generated_at is None  # unstamped before saving
+
+        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+        back = fb.ForgeBlueprint.from_yaml(path)
+
+        assert back.provenance.generated_at is not None
+        # must round-trip as tz-aware (UTC), not silently go naive/local through
+        # model_dump(mode="json") -> yaml.safe_dump -> yaml.safe_load -> Pydantic
+        assert back.provenance.generated_at.tzinfo is not None
+        assert back.provenance.forge_version == "abc1234"
+        assert back.provenance.cstar_version == "cstar-ocean==9.9.9"
+        assert back.provenance.roms_tools_version == "roms-tools==9.9.9"
+
+    def test_resave_preserves_original_stamp(self, monkeypatch, tmp_path):
+        fb = self._patched_fb(monkeypatch)
+        cfg = _build()
+        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+        first = fb.ForgeBlueprint.from_yaml(path)
+
+        # a later save, from a different Forge/roms_tools/cstar install, must not
+        # overwrite the original values
+        monkeypatch.setattr(fb, "_forge_version", lambda: "def5678")
+        monkeypatch.setattr(fb, "_installed_version", lambda name: f"{name}==1.0.0")
+        first.to_yaml(path)
+        second = fb.ForgeBlueprint.from_yaml(path)
+
+        assert second.provenance.generated_at == first.provenance.generated_at
+        assert second.provenance.forge_version == "abc1234"
+        assert second.provenance.cstar_version == "cstar-ocean==9.9.9"
+        assert second.provenance.roms_tools_version == "roms-tools==9.9.9"
+
+    def test_explicit_provenance_values_are_preserved(self, monkeypatch, tmp_path):
+        """An explicitly pre-set field (e.g. a caller building a ``ForgeBlueprint``
+        directly, or a re-resolve carrying an original value forward) is never
+        overwritten by ``to_yaml_str``, even on first save.
+        """
+        fb = self._patched_fb(monkeypatch)
+        cfg = _build()
+        explicit_dt = datetime(2020, 1, 1)
+        cfg = cfg.model_copy(
+            update={
+                "provenance": cfg.provenance.model_copy(
+                    update={"generated_at": explicit_dt, "roms_tools_version": "pinned"}
+                )
+            }
+        )
+        path = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+        back = fb.ForgeBlueprint.from_yaml(path)
+
+        assert back.provenance.generated_at == explicit_dt
+        assert back.provenance.roms_tools_version == "pinned"
+        # fields left unset are still stamped as normal
+        assert back.provenance.forge_version == "abc1234"
 
 
 # ---------------------------------------------------------------------------

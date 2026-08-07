@@ -405,6 +405,12 @@ def build_forge_blueprint(
     ``domain.dt`` and the identical ``model_settings["v_sponge"]["v_sponge"]`` /
     ``model_settings["time_stepping"]["dt"]`` leaves -- each pair is always
     written together and must never diverge.
+
+    ``forge_version``/``roms_tools_version`` are left ``None`` here by default --
+    ``ForgeBlueprint.to_yaml_str`` stamps each with a best-effort value on first
+    save (see ``cstar_forge.forge.forge_blueprint._forge_version`` /
+    ``_installed_version``), preserving an explicit value passed here instead
+    (e.g. carrying one forward through a re-resolve).
     """
     if cdr_forcing_yaml is not None:
         cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
