@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from cstar.orchestration.artifact_cache import ArtifactRecord
+from cstar.orchestration.artifact_cache import ArtifactRecord, ChecksumMode
 
 
 @pytest.fixture
@@ -23,6 +23,7 @@ def record() -> ArtifactRecord:
         created_at="2026-08-07T00:00:00+00:00",
         created_by="chris",
         checksum="deadbeef",
+        checksum_mode=ChecksumMode.FULL,
         source="/scratch/raw.nc",
         asset_uri="file:///scratch/app/run-1/foo.nc",
         metadata={"variables": ["x", "y"]},
@@ -38,6 +39,7 @@ def test_optional_fields_default_to_none() -> None:
         created_by="chris",
     )
     assert record.checksum is None
+    assert record.checksum_mode is None
     assert record.source is None
     assert record.asset_uri is None
     assert record.metadata == {}
@@ -63,6 +65,7 @@ def test_to_dict_is_json_compatible(record: ArtifactRecord) -> None:
         "created_at",
         "created_by",
         "checksum",
+        "checksum_mode",
         "source",
         "asset_uri",
         "metadata",
@@ -129,3 +132,40 @@ def test_is_frozen(record: ArtifactRecord) -> None:
     """Records are immutable once created."""
     with pytest.raises(ValidationError, match="frozen"):
         record.name = "other.nc"
+
+
+def test_legacy_checksum_without_mode_reads_as_full() -> None:
+    """Records predating quick signatures are interpreted as full digests."""
+    record = ArtifactRecord.from_dict(
+        {
+            "name": "a.nc",
+            "size_bytes": 1,
+            "created_at": "t",
+            "created_by": "u",
+            "checksum": "deadbeef",
+        }
+    )
+    assert record.checksum_mode is ChecksumMode.FULL
+
+
+def test_absent_checksum_leaves_mode_unset() -> None:
+    """No digest means no inferred mode."""
+    record = ArtifactRecord.from_dict(
+        {"name": "a.nc", "size_bytes": 1, "created_at": "t", "created_by": "u"}
+    )
+    assert record.checksum_mode is None
+
+
+def test_explicit_quick_mode_is_not_overridden() -> None:
+    """An explicitly recorded mode survives validation untouched."""
+    record = ArtifactRecord.from_dict(
+        {
+            "name": "a.nc",
+            "size_bytes": 1,
+            "created_at": "t",
+            "created_by": "u",
+            "checksum": "deadbeef",
+            "checksum_mode": "quick",
+        }
+    )
+    assert record.checksum_mode is ChecksumMode.QUICK

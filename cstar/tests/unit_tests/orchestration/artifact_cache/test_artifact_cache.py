@@ -14,6 +14,7 @@ from cstar.orchestration.artifact_cache import (
     ArtifactCacheError,
     ArtifactExistsError,
     ArtifactNotFoundError,
+    ChecksumMode,
     Tier,
     UnsafePathError,
 )
@@ -210,12 +211,41 @@ def test_stage_records_manifest_entry(cache: ArtifactCache) -> None:
 
 
 def test_stage_can_checksum(cache: ArtifactCache) -> None:
-    """Checksumming is opt-in and produces a SHA-256 digest."""
-    with cache.stage("foo.nc", RUN_ID, compute_checksum=True) as tmp:
+    """Full checksumming is opt-in and produces a SHA-256 digest."""
+    with cache.stage("foo.nc", RUN_ID, checksum=ChecksumMode.FULL) as tmp:
         tmp.write_bytes(b"payload")
-    checksum = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"].checksum
-    assert checksum is not None
-    assert len(checksum) == 64
+    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    assert record.checksum is not None
+    assert len(record.checksum) == 64
+    assert record.checksum_mode is ChecksumMode.FULL
+
+
+def test_stage_can_quick_checksum(cache: ArtifactCache) -> None:
+    """Quick mode records a digest and labels it as such."""
+    with cache.stage("foo.nc", RUN_ID, checksum=ChecksumMode.QUICK) as tmp:
+        tmp.write_bytes(b"payload")
+    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    assert record.checksum is not None
+    assert record.checksum_mode is ChecksumMode.QUICK
+
+
+def test_stage_quick_and_full_digests_differ(cache: ArtifactCache) -> None:
+    """The two strategies are not comparable, hence the recorded mode."""
+    with cache.stage("q.nc", RUN_ID, checksum=ChecksumMode.QUICK) as tmp:
+        tmp.write_bytes(b"payload")
+    with cache.stage("f.nc", RUN_ID, checksum=ChecksumMode.FULL) as tmp:
+        tmp.write_bytes(b"payload")
+    records = cache.read_manifest(RUN_ID, Tier.USER).artifacts
+    assert records["q.nc"].checksum != records["f.nc"].checksum
+
+
+def test_stage_records_no_mode_without_checksum(cache: ArtifactCache) -> None:
+    """Skipping the digest leaves both checksum fields unset."""
+    with cache.stage("foo.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    assert record.checksum is None
+    assert record.checksum_mode is None
 
 
 def test_stage_accepts_explicit_asset_uri(cache: ArtifactCache) -> None:
@@ -338,12 +368,17 @@ def test_ingest_can_move(cache: ArtifactCache, tmp_path: Path) -> None:
     assert cache.locate("foo.nc", RUN_ID, Tier.USER).exists
 
 
-def test_ingest_can_checksum(cache: ArtifactCache, tmp_path: Path) -> None:
-    """Checksumming is available on the ingestion path too."""
+@pytest.mark.parametrize("mode", [ChecksumMode.QUICK, ChecksumMode.FULL])
+def test_ingest_can_checksum(
+    cache: ArtifactCache, tmp_path: Path, mode: ChecksumMode
+) -> None:
+    """Both fingerprinting strategies are available on the ingestion path."""
     source = tmp_path / "transient.nc"
     source.write_bytes(b"external")
-    cache.ingest(source, "foo.nc", RUN_ID, compute_checksum=True)
-    assert cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"].checksum
+    cache.ingest(source, "foo.nc", RUN_ID, checksum=mode)
+    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    assert record.checksum is not None
+    assert record.checksum_mode is mode
 
 
 def test_ingest_rejects_missing_source(cache: ArtifactCache, tmp_path: Path) -> None:

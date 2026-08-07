@@ -39,7 +39,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -51,6 +51,7 @@ __all__ = [
     "ArtifactNotFoundError",
     "ArtifactRecord",
     "CacheModel",
+    "ChecksumMode",
     "Location",
     "Manifest",
     "Tier",
@@ -65,7 +66,8 @@ MANIFEST_VERSION: Final[int] = 1
 
 _LOCK_SUFFIX: Final[str] = ".lock"
 _TMP_SUFFIX: Final[str] = ".tmp"
-_CHECKSUM_CHUNK: Final[int] = 1024 * 1024
+_QUICK_PROBE_BYTES: Final[int] = 1024 * 1024
+"""Bytes sampled from each end of a file by :attr:`ChecksumMode.QUICK`."""
 
 
 class ArtifactCacheError(Exception):
@@ -97,6 +99,29 @@ class Tier(StrEnum):
 
     USER = "user"
     SHARED = "shared"
+
+
+class ChecksumMode(StrEnum):
+    """Strategy used to fingerprint an artifact's contents.
+
+    Attributes
+    ----------
+    NONE : str
+        Skip fingerprinting entirely. The default, because digesting
+        multi-gigabyte outputs doubles the I/O of the write path.
+    QUICK : str
+        Fingerprint the file size plus its leading and trailing blocks. Cost is
+        independent of file size. Detects truncation and wholesale replacement;
+        cannot detect corruption confined to the middle of the file, so it is a
+        smoke test rather than an integrity guarantee.
+    FULL : str
+        SHA-256 over every byte. A true integrity check, at the cost of a
+        complete additional read of the artifact.
+    """
+
+    NONE = "none"
+    QUICK = "quick"
+    FULL = "full"
 
 
 class CacheModel(BaseModel):
@@ -177,7 +202,14 @@ class ArtifactRecord(CacheModel):
     created_by : str
         Operating-system username of the writer.
     checksum : str or None, optional
-        Hex-encoded SHA-256 digest, or ``None`` when checksumming was skipped.
+        Hex-encoded digest, or ``None`` when fingerprinting was skipped. The
+        value is only meaningful alongside :attr:`checksum_mode`, since a
+        quick signature and a full digest are not comparable.
+    checksum_mode : ChecksumMode or None, optional
+        Strategy that produced :attr:`checksum`, or ``None`` when no digest was
+        taken. A record carrying a checksum but no mode predates the
+        introduction of quick signatures and is interpreted as
+        :attr:`ChecksumMode.FULL`.
     source : str or None, optional
         Free-form provenance string, such as the input dataset path.
     asset_uri : str or None, optional
@@ -192,9 +224,35 @@ class ArtifactRecord(CacheModel):
     created_at: str
     created_by: str
     checksum: str | None = None
+    checksum_mode: ChecksumMode | None = None
     source: str | None = None
     asset_uri: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _infer_legacy_checksum_mode(cls, payload: Any) -> Any:
+        """Interpret a mode-less checksum as a full digest.
+
+        Records written before quick signatures existed carry a ``checksum``
+        with no ``checksum_mode``; every such digest was a full SHA-256.
+
+        Parameters
+        ----------
+        payload : Any
+            Raw input to model validation.
+
+        Returns
+        -------
+        Any
+            The payload, with ``checksum_mode`` filled in where it can be
+            inferred.
+        """
+        if not isinstance(payload, dict):
+            return payload
+        if payload.get("checksum") and payload.get("checksum_mode") is None:
+            payload = {**payload, "checksum_mode": ChecksumMode.FULL}
+        return payload
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -544,7 +602,7 @@ class ArtifactCache:
         source: str | None = None,
         asset_uri: str | None = None,
         metadata: Mapping[str, Any] | None = None,
-        compute_checksum: bool = False,
+        checksum: ChecksumMode = ChecksumMode.NONE,
         overwrite: bool = True,
     ) -> Generator[Path]:
         """Stage an artifact for atomic creation.
@@ -570,10 +628,12 @@ class ArtifactCache:
             location's :attr:`Location.uri`.
         metadata : Mapping of str to Any or None, optional
             Descriptive metadata recorded in the manifest.
-        compute_checksum : bool, optional
-            Whether to compute a SHA-256 digest on commit. Default ``False``,
-            since digesting multi-gigabyte files is expensive; enable it where
-            silent corruption matters more than write throughput.
+        checksum : ChecksumMode, optional
+            Fingerprinting strategy applied on commit. Default
+            :attr:`ChecksumMode.NONE`, since digesting multi-gigabyte files
+            doubles the write path's I/O. Use :attr:`ChecksumMode.QUICK` for a
+            size-independent truncation check, or :attr:`ChecksumMode.FULL`
+            where silent corruption matters more than throughput.
         overwrite : bool, optional
             Whether committing may replace an existing artifact. Default
             ``True``.
@@ -611,7 +671,7 @@ class ArtifactCache:
                 )
             if tmp.stat().st_size == 0:
                 raise ArtifactCacheError(f"staged artifact is empty: {tmp}")
-            checksum = self._sha256(tmp) if compute_checksum else None
+            digest = self._digest(tmp, checksum)
             size = tmp.stat().st_size
             os.replace(tmp, location.path)
         except BaseException:
@@ -623,7 +683,8 @@ class ArtifactCache:
             size_bytes=size,
             created_at=self._utcnow(),
             created_by=self._username(),
-            checksum=checksum,
+            checksum=digest,
+            checksum_mode=checksum if digest is not None else None,
             source=source,
             asset_uri=asset_uri or location.uri,
             metadata=dict(metadata or {}),
@@ -637,7 +698,7 @@ class ArtifactCache:
         run_id: str,
         move: bool = False,
         metadata: Mapping[str, Any] | None = None,
-        compute_checksum: bool = False,
+        checksum: ChecksumMode = ChecksumMode.NONE,
         overwrite: bool = True,
     ) -> Location:
         """Copy an externally produced file into the user tier.
@@ -654,7 +715,7 @@ class ArtifactCache:
             Remove ``source_path`` after a successful copy. Default ``False``.
         metadata : Mapping of str to Any or None, optional
             Descriptive metadata recorded in the manifest.
-        compute_checksum : bool, optional
+        checksum : ChecksumMode, optional
             See :meth:`stage`.
         overwrite : bool, optional
             See :meth:`stage`.
@@ -679,7 +740,7 @@ class ArtifactCache:
             tier=Tier.USER,
             source=str(src),
             metadata=metadata,
-            compute_checksum=compute_checksum,
+            checksum=checksum,
             overwrite=overwrite,
         ) as tmp:
             shutil.copy2(src, tmp)
@@ -1197,6 +1258,59 @@ class ArtifactCache:
         except ValueError as exc:
             raise UnsafePathError(f"{path} escapes managed root {root}") from exc
 
+    @classmethod
+    def _digest(cls, path: Path, mode: ChecksumMode) -> str | None:
+        """Fingerprint a file according to the requested strategy.
+
+        Parameters
+        ----------
+        path : Path
+            File to fingerprint.
+        mode : ChecksumMode
+            Strategy to apply.
+
+        Returns
+        -------
+        str or None
+            Hex-encoded digest, or ``None`` for :attr:`ChecksumMode.NONE`.
+        """
+        if mode is ChecksumMode.FULL:
+            return cls._sha256(path)
+        if mode is ChecksumMode.QUICK:
+            return cls._quick_signature(path)
+        return None
+
+    @staticmethod
+    def _quick_signature(path: Path, probe: int = _QUICK_PROBE_BYTES) -> str:
+        """Fingerprint a file from its size and its leading and trailing blocks.
+
+        Cost is independent of file size: at most two reads of ``probe`` bytes
+        plus a ``stat``. Detects truncation, extension, and replacement, which
+        together cover the interrupted-write failure mode. Does not detect
+        corruption confined to the middle of a large file.
+
+        Parameters
+        ----------
+        path : Path
+            File to fingerprint.
+        probe : int, optional
+            Number of bytes read from each end. Defaults to
+            :data:`_QUICK_PROBE_BYTES`.
+
+        Returns
+        -------
+        str
+            Hex-encoded SHA-256 digest over the size and sampled blocks.
+        """
+        size = path.stat().st_size
+        digest = hashlib.sha256(f"{size}:".encode())
+        with path.open("rb") as handle:
+            digest.update(handle.read(probe))
+            if size > probe * 2:
+                handle.seek(-probe, os.SEEK_END)
+                digest.update(handle.read(probe))
+        return digest.hexdigest()
+
     @staticmethod
     def _sha256(path: Path) -> str:
         """Compute the SHA-256 digest of a file.
@@ -1210,12 +1324,15 @@ class ArtifactCache:
         -------
         str
             Hex-encoded digest.
+
+        Notes
+        -----
+        Delegates to :func:`hashlib.file_digest`, which streams the file in C
+        without materialising it in memory. Every byte is hashed; cost is
+        proportional to file size.
         """
-        digest = hashlib.sha256()
         with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(_CHECKSUM_CHUNK), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+            return hashlib.file_digest(handle, "sha256").hexdigest()
 
     @staticmethod
     def _utcnow() -> str:
