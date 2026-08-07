@@ -31,4 +31,5 @@ Improvements
 Miscellaneous
 ~~~~~~~~~~~~~
 
-- N/A
+- Update installation instructions to recommend installation through conda-forge and document "standalone" package (`#617 <https://github.com/CWorthy-ocean/C-Star/pull/617>`_)
+- Exclude ci folder from package (`#617 <https://github.com/CWorthy-ocean/C-Star/pull/617>`_)
