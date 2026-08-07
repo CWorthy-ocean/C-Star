@@ -979,7 +979,7 @@ class RunRequest(ConfiguredBaseModel):
 
 
 class RunRequestCommandFormatter(ModelFormatter[RunRequest]):
-    """Format a `RunRequest` as a request as a CLI command."""
+    """Format a `RunRequest` as a CLI command."""
 
     def _to_string(self, value: RunRequest) -> str:
         variables = " ".join(f"{k}='{v}'" for k, v in value.environment.items())
