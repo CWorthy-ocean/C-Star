@@ -27,6 +27,8 @@
 * Added CDR (carbon dioxide removal) forcing YAML support
 * Added flexible run-window (`allow_flex_time`) support
 * Add support for new "extract_root_name" nml key (only passes through the default value of `child` for now ([#107](https://github.com/CWorthy-ocean/cstar-forge/pull/107))
+* The output from forge blueprints now defaults to `<root-path>/cstar-forge-run` (instead of `<root-path>/cstar-forge-data/cstar-forge-run` ([#110](https://github.com/CWorthy-ocean/cstar-forge/pull/110))
+* The output from roms blueprints now defaults to `<root-path>/cstar-roms-run` (instead of `<root-path>/cstar-forge-data/cstar-blueprint-run` ([#110](https://github.com/CWorthy-ocean/cstar-forge/pull/110))
 
 ### Miscellaneous
 
