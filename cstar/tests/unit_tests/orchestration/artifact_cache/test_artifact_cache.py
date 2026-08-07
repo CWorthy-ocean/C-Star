@@ -10,6 +10,7 @@ import pytest
 
 from cstar.orchestration.artifact_cache import (
     MANIFEST_NAME,
+    SHARED_RECORD_DIR,
     ArtifactCache,
     ArtifactCacheError,
     ArtifactExistsError,
@@ -86,7 +87,7 @@ def test_root_for_maps_tiers(cache: ArtifactCache) -> None:
 
 def test_locate_builds_run_scoped_path(cache: ArtifactCache) -> None:
     """Artifacts live at ``<root>/<run_id>/<name>``."""
-    location = cache.locate("foo.nc", RUN_ID, Tier.USER)
+    location = cache.locate("foo.nc", Tier.USER, RUN_ID)
     assert location.path == cache.user_root / RUN_ID / "foo.nc"
     assert location.tier is Tier.USER
     assert location.name == "foo.nc"
@@ -94,15 +95,15 @@ def test_locate_builds_run_scoped_path(cache: ArtifactCache) -> None:
 
 
 def test_locate_does_not_touch_the_filesystem(cache: ArtifactCache) -> None:
-    """Computing a location never creates directories."""
-    location = cache.locate("foo.nc", RUN_ID, Tier.SHARED)
+    """Computing a location never creates anything."""
+    location = cache.locate("foo.nc", Tier.USER, RUN_ID)
     assert not location.path.parent.exists()
     assert location.exists is False
 
 
 def test_uri_matches_located_path(cache: ArtifactCache) -> None:
     """The asset URI is derived from the same path used for writes."""
-    location = cache.locate("foo.nc", RUN_ID, Tier.SHARED)
+    location = cache.locate("foo.nc", Tier.SHARED)
     assert location.uri == location.path.as_uri()
 
 
@@ -110,14 +111,14 @@ def test_uri_matches_located_path(cache: ArtifactCache) -> None:
 def test_locate_rejects_traversal_in_run_id(cache: ArtifactCache, bad: str) -> None:
     """Run identifiers cannot escape the managed root."""
     with pytest.raises(UnsafePathError):
-        cache.locate("foo.nc", bad, Tier.USER)
+        cache.locate("foo.nc", Tier.USER, bad)
 
 
 @pytest.mark.parametrize("bad", ["../escape", "a/b", "", ".", ".."])
 def test_locate_rejects_traversal_in_name(cache: ArtifactCache, bad: str) -> None:
     """Artifact names cannot escape the managed root."""
     with pytest.raises(UnsafePathError):
-        cache.locate(bad, RUN_ID, Tier.USER)
+        cache.locate(bad, Tier.USER, RUN_ID)
 
 
 def test_candidates_are_shared_then_user(cache: ArtifactCache) -> None:
@@ -167,7 +168,7 @@ def test_resolve_falls_back_when_local_deleted(
 ) -> None:
     """Promoted data survives the user deleting their scratch copy."""
     cache.promote(staged_artifact, RUN_ID)
-    cache.locate(staged_artifact, RUN_ID, Tier.USER).path.unlink()
+    cache.locate(staged_artifact, Tier.USER, RUN_ID).path.unlink()
     resolved = cache.resolve(staged_artifact, RUN_ID, prefer_local=True)
     assert resolved is not None
     assert resolved.tier is Tier.SHARED
@@ -176,7 +177,7 @@ def test_resolve_falls_back_when_local_deleted(
 def test_resolve_is_never_memoized(cache: ArtifactCache, staged_artifact: str) -> None:
     """Deleting a file between calls turns a hit into a miss."""
     assert cache.resolve(staged_artifact, RUN_ID) is not None
-    cache.locate(staged_artifact, RUN_ID, Tier.USER).path.unlink()
+    cache.locate(staged_artifact, Tier.USER, RUN_ID).path.unlink()
     assert cache.resolve(staged_artifact, RUN_ID) is None
 
 
@@ -200,19 +201,19 @@ def test_stage_commits_atomically(cache: ArtifactCache) -> None:
     """Content written to the staged path lands at the canonical path."""
     with cache.stage("foo.nc", RUN_ID) as tmp:
         tmp.write_bytes(b"payload")
-        assert not cache.locate("foo.nc", RUN_ID, Tier.USER).exists
-    assert cache.locate("foo.nc", RUN_ID, Tier.USER).path.read_bytes() == b"payload"
+        assert not cache.locate("foo.nc", Tier.USER, RUN_ID).exists
+    assert cache.locate("foo.nc", Tier.USER, RUN_ID).path.read_bytes() == b"payload"
 
 
 def test_stage_records_manifest_entry(cache: ArtifactCache) -> None:
     """A commit writes a manifest record describing the artifact."""
     with cache.stage("foo.nc", RUN_ID, source="raw.nc", metadata={"k": "v"}) as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.size_bytes == len(b"payload")
     assert record.source == "raw.nc"
     assert record.metadata == {"k": "v"}
-    assert record.asset_uri == cache.locate("foo.nc", RUN_ID, Tier.USER).uri
+    assert record.asset_uri == cache.locate("foo.nc", Tier.USER, RUN_ID).uri
     assert record.checksum is None
 
 
@@ -220,7 +221,7 @@ def test_stage_can_checksum(cache: ArtifactCache) -> None:
     """Full checksumming is opt-in and produces a SHA-256 digest."""
     with cache.stage("foo.nc", RUN_ID, fingerprinter=FullFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.checksum is not None
     assert len(record.checksum) == 64
     assert record.checksum_mode is ChecksumMode.FULL
@@ -230,7 +231,7 @@ def test_stage_can_quick_checksum(cache: ArtifactCache) -> None:
     """Quick mode records a digest and labels it as such."""
     with cache.stage("foo.nc", RUN_ID, fingerprinter=QuickFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.checksum is not None
     assert record.checksum_mode is ChecksumMode.QUICK
 
@@ -241,7 +242,7 @@ def test_stage_quick_and_full_digests_differ(cache: ArtifactCache) -> None:
         tmp.write_bytes(b"payload")
     with cache.stage("f.nc", RUN_ID, fingerprinter=FullFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
-    records = cache.read_manifest(RUN_ID, Tier.USER).artifacts
+    records = cache.read_manifest(RUN_ID).artifacts
     assert records["q.nc"].checksum != records["f.nc"].checksum
 
 
@@ -249,7 +250,7 @@ def test_stage_records_no_mode_without_checksum(cache: ArtifactCache) -> None:
     """Skipping the digest leaves both checksum fields unset."""
     with cache.stage("foo.nc", RUN_ID) as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.checksum is None
     assert record.checksum_mode is None
 
@@ -258,7 +259,7 @@ def test_stage_accepts_explicit_asset_uri(cache: ArtifactCache) -> None:
     """A caller-supplied asset key overrides the derived default."""
     with cache.stage("foo.nc", RUN_ID, asset_uri="s3://bucket/foo.nc") as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.asset_uri == "s3://bucket/foo.nc"
 
 
@@ -302,7 +303,7 @@ def test_stage_overwrites_by_default(
     """Re-staging replaces the previous content."""
     with cache.stage(staged_artifact, RUN_ID) as tmp:
         tmp.write_bytes(b"replacement")
-    path = cache.locate(staged_artifact, RUN_ID, Tier.USER).path
+    path = cache.locate(staged_artifact, Tier.USER, RUN_ID).path
     assert path.read_bytes() == b"replacement"
 
 
@@ -319,9 +320,9 @@ def test_stage_can_refuse_to_overwrite(
 
 def test_stage_can_target_shared_tier(cache: ArtifactCache) -> None:
     """Writing directly to the shared tier is possible though rarely correct."""
-    with cache.stage("foo.nc", RUN_ID, tier=Tier.SHARED) as tmp:
+    with cache.stage("foo.nc", tier=Tier.SHARED) as tmp:
         tmp.write_bytes(b"payload")
-    assert cache.locate("foo.nc", RUN_ID, Tier.SHARED).exists
+    assert cache.locate("foo.nc", Tier.SHARED).exists
 
 
 def test_concurrent_stages_do_not_lose_records(cache: ArtifactCache) -> None:
@@ -337,7 +338,7 @@ def test_concurrent_stages_do_not_lose_records(cache: ArtifactCache) -> None:
     for thread in threads:
         thread.join()
 
-    assert len(cache.read_manifest(RUN_ID, Tier.USER).artifacts) == 8
+    assert len(cache.read_manifest(RUN_ID).artifacts) == 8
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +361,7 @@ def test_ingest_records_provenance(cache: ArtifactCache, tmp_path: Path) -> None
     source = tmp_path / "transient.nc"
     source.write_bytes(b"external")
     cache.ingest(source, "foo.nc", RUN_ID, metadata={"origin": "model"})
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.source == str(source)
     assert record.metadata == {"origin": "model"}
 
@@ -371,7 +372,7 @@ def test_ingest_can_move(cache: ArtifactCache, tmp_path: Path) -> None:
     source.write_bytes(b"external")
     cache.ingest(source, "foo.nc", RUN_ID, move=True)
     assert not source.exists()
-    assert cache.locate("foo.nc", RUN_ID, Tier.USER).exists
+    assert cache.locate("foo.nc", Tier.USER, RUN_ID).exists
 
 
 @pytest.mark.parametrize("strategy", [QuickFingerprinter(), FullFingerprinter()])
@@ -382,7 +383,7 @@ def test_ingest_can_checksum(
     source = tmp_path / "transient.nc"
     source.write_bytes(b"external")
     cache.ingest(source, "foo.nc", RUN_ID, fingerprinter=strategy)
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.checksum is not None
     assert record.checksum_mode is strategy.mode
 
@@ -422,12 +423,12 @@ def test_promote_copies_without_moving(
     shared = cache.promote(staged_artifact, RUN_ID)
     assert shared.tier is Tier.SHARED
     assert shared.exists
-    assert cache.locate(staged_artifact, RUN_ID, Tier.USER).exists
+    assert cache.locate(staged_artifact, Tier.USER, RUN_ID).exists
 
 
 def test_promote_preserves_content(cache: ArtifactCache, staged_artifact: str) -> None:
     """The promoted bytes match the user tier copy."""
-    user = cache.locate(staged_artifact, RUN_ID, Tier.USER)
+    user = cache.locate(staged_artifact, Tier.USER, RUN_ID)
     shared = cache.promote(staged_artifact, RUN_ID)
     assert shared.path.read_bytes() == user.path.read_bytes()
 
@@ -435,15 +436,18 @@ def test_promote_preserves_content(cache: ArtifactCache, staged_artifact: str) -
 def test_promote_carries_metadata(cache: ArtifactCache, staged_artifact: str) -> None:
     """Descriptive metadata follows the artifact into the shared tier."""
     cache.promote(staged_artifact, RUN_ID)
-    record = cache.read_manifest(RUN_ID, Tier.SHARED).artifacts[staged_artifact]
+    record = cache.read_shared_record(staged_artifact)
+    assert record is not None
     assert record.metadata == {"vars": ["x"]}
-    assert record.asset_uri == cache.locate(staged_artifact, RUN_ID, Tier.SHARED).uri
+    assert record.asset_uri == cache.locate(staged_artifact, Tier.SHARED).uri
 
 
 def test_promote_stamps_timestamp(cache: ArtifactCache, staged_artifact: str) -> None:
     """The shared manifest records when the run was promoted."""
     cache.promote(staged_artifact, RUN_ID)
-    assert cache.read_manifest(RUN_ID, Tier.SHARED).promoted_at is not None
+    record = cache.read_shared_record(staged_artifact)
+    assert record is not None
+    assert record.promoted_at is not None
 
 
 def test_promote_requires_user_copy(cache: ArtifactCache) -> None:
@@ -474,7 +478,7 @@ def test_promote_can_overwrite_explicitly(
 
 def test_promote_without_prior_manifest(cache: ArtifactCache) -> None:
     """An artifact placed on disk out of band can still be promoted."""
-    location = cache.locate("orphan.nc", RUN_ID, Tier.USER)
+    location = cache.locate("orphan.nc", Tier.USER, RUN_ID)
     location.path.parent.mkdir(parents=True)
     location.path.write_bytes(b"orphan")
     assert cache.promote("orphan.nc", RUN_ID).exists
@@ -487,34 +491,34 @@ def test_promote_without_prior_manifest(cache: ArtifactCache) -> None:
 
 def test_manifest_path_is_run_scoped(cache: ArtifactCache) -> None:
     """The sidecar sits inside the run directory it describes."""
-    path = cache.manifest_path(RUN_ID, Tier.USER)
+    path = cache.manifest_path(RUN_ID)
     assert path == cache.user_root / RUN_ID / MANIFEST_NAME
 
 
 def test_manifest_path_validates_run_id(cache: ArtifactCache) -> None:
     """Manifest lookups are guarded against traversal too."""
     with pytest.raises(UnsafePathError):
-        cache.manifest_path("../escape", Tier.USER)
+        cache.manifest_path("../escape")
 
 
 def test_read_manifest_returns_empty_when_absent(cache: ArtifactCache) -> None:
     """A run with no manifest reads as empty rather than raising."""
-    manifest = cache.read_manifest("never-run", Tier.USER)
+    manifest = cache.read_manifest("never-run")
     assert manifest.artifacts == {}
     assert manifest.run_id == "never-run"
 
 
 def test_read_manifest_survives_corruption(cache: ArtifactCache) -> None:
     """A truncated manifest degrades to empty instead of breaking listing."""
-    path = cache.manifest_path(RUN_ID, Tier.USER)
+    path = cache.manifest_path(RUN_ID)
     path.parent.mkdir(parents=True)
     path.write_text("{not valid json")
-    assert cache.read_manifest(RUN_ID, Tier.USER).artifacts == {}
+    assert cache.read_manifest(RUN_ID).artifacts == {}
 
 
 def test_write_manifest_is_atomic_and_readable(cache: ArtifactCache) -> None:
     """A written manifest round-trips and leaves no temporary file."""
-    manifest = cache.read_manifest(RUN_ID, Tier.USER)
+    manifest = cache.read_manifest(RUN_ID)
     path = cache.write_manifest(manifest)
     assert json.loads(path.read_text())["run_id"] == RUN_ID
     assert not any(p.name.endswith(".tmp") for p in path.parent.iterdir())
@@ -527,14 +531,14 @@ def test_write_manifest_is_atomic_and_readable(cache: ArtifactCache) -> None:
 
 def test_list_runs_reads_from_disk(cache: ArtifactCache, staged_artifact: str) -> None:
     """Run listing derives from directories, not from an index."""
-    assert cache.list_runs(Tier.USER) == [RUN_ID]
-    assert cache.list_runs(Tier.SHARED) == []
+    assert cache.list_runs() == [RUN_ID]
+    assert [loc.name for loc in cache.list_shared_artifacts()] == []
 
 
 def test_list_runs_handles_absent_root(user_root: Path, shared_root: Path) -> None:
     """An uncreated root lists as empty."""
     cache = ArtifactCache(user_root, shared_root, create_roots=False)
-    assert cache.list_runs(Tier.USER) == []
+    assert cache.list_runs() == []
 
 
 def test_list_artifacts_excludes_bookkeeping(
@@ -542,7 +546,7 @@ def test_list_artifacts_excludes_bookkeeping(
 ) -> None:
     """The manifest, its lock, and dotfiles are not artifacts."""
     (cache.user_root / RUN_ID / ".hidden").write_bytes(b"x")
-    names = [location.name for location in cache.list_artifacts(RUN_ID, Tier.USER)]
+    names = [location.name for location in cache.list_user_artifacts(RUN_ID)]
     assert names == [staged_artifact]
 
 
@@ -551,22 +555,22 @@ def test_list_artifacts_excludes_in_flight_temporaries(
 ) -> None:
     """A concurrent writer's staging file is not reported as an artifact."""
     (cache.user_root / RUN_ID / "other.nc.999.tmp").write_bytes(b"partial")
-    names = [location.name for location in cache.list_artifacts(RUN_ID, Tier.USER)]
+    names = [location.name for location in cache.list_user_artifacts(RUN_ID)]
     assert names == [staged_artifact]
 
 
 def test_list_artifacts_handles_absent_run(cache: ArtifactCache) -> None:
     """An unknown run lists as empty."""
-    assert cache.list_artifacts("never-run", Tier.USER) == []
+    assert cache.list_user_artifacts("never-run") == []
 
 
 def test_describe_reconciles_with_disk(
     cache: ArtifactCache, staged_artifact: str
 ) -> None:
     """Records for purged files are dropped from the description."""
-    assert set(cache.describe(RUN_ID, Tier.USER)) == {staged_artifact}
-    cache.locate(staged_artifact, RUN_ID, Tier.USER).path.unlink()
-    assert cache.describe(RUN_ID, Tier.USER) == {}
+    assert set(cache.describe(RUN_ID)) == {staged_artifact}
+    cache.locate(staged_artifact, Tier.USER, RUN_ID).path.unlink()
+    assert cache.describe(RUN_ID) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -607,7 +611,7 @@ def test_refresh_view_self_heals_after_deletion(
 ) -> None:
     """Rebuilding drops links whose targets no longer exist."""
     cache.refresh_view(RUN_ID)
-    cache.locate(staged_artifact, RUN_ID, Tier.USER).path.unlink()
+    cache.locate(staged_artifact, Tier.USER, RUN_ID).path.unlink()
     assert cache.refresh_view(RUN_ID) == {}
     assert list((view_root / RUN_ID).iterdir()) == []
 
@@ -618,11 +622,13 @@ def test_refresh_view_repoints_after_promotion(
     """A stale link into scratch is repointed at the shared copy."""
     cache.refresh_view(RUN_ID)
     cache.promote(staged_artifact, RUN_ID)
-    cache.locate(staged_artifact, RUN_ID, Tier.USER).path.unlink()
-    cache.refresh_view(RUN_ID)
+    cache.locate(staged_artifact, Tier.USER, RUN_ID).path.unlink()
+
+    linked = cache.refresh_view(RUN_ID, names=[staged_artifact])
     link = view_root / RUN_ID / staged_artifact
     assert link.is_symlink()
     assert link.resolve().is_file()
+    assert cache.shared_root in linked[staged_artifact].parents
 
 
 def test_refresh_view_is_idempotent(cache: ArtifactCache, staged_artifact: str) -> None:
@@ -630,13 +636,34 @@ def test_refresh_view_is_idempotent(cache: ArtifactCache, staged_artifact: str) 
     assert cache.refresh_view(RUN_ID) == cache.refresh_view(RUN_ID)
 
 
-def test_refresh_view_unions_both_tiers(cache: ArtifactCache) -> None:
-    """Artifacts present in only one tier still appear in the view."""
+def test_refresh_view_covers_the_run_by_default(cache: ArtifactCache) -> None:
+    """The flat shared tier is not swept wholesale into every run's view."""
     with cache.stage("user-only.nc", RUN_ID) as tmp:
         tmp.write_bytes(b"u")
-    with cache.stage("shared-only.nc", RUN_ID, tier=Tier.SHARED) as tmp:
+    with cache.stage("shared-only.nc", tier=Tier.SHARED) as tmp:
         tmp.write_bytes(b"s")
-    assert set(cache.refresh_view(RUN_ID)) == {"user-only.nc", "shared-only.nc"}
+
+    assert set(cache.refresh_view(RUN_ID)) == {"user-only.nc"}
+
+
+def test_refresh_view_includes_named_shared_artifacts(cache: ArtifactCache) -> None:
+    """A run opts into the shared artifacts it consumes, by name."""
+    with cache.stage("user-only.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"u")
+    with cache.stage("shared-only.nc", tier=Tier.SHARED) as tmp:
+        tmp.write_bytes(b"s")
+
+    linked = cache.refresh_view(RUN_ID, names=["shared-only.nc"])
+    assert set(linked) == {"user-only.nc", "shared-only.nc"}
+    assert cache.shared_root in linked["shared-only.nc"].parents
+
+
+def test_refresh_view_ignores_named_artifacts_that_are_absent(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """Naming an artifact that does not exist yields no dangling link."""
+    linked = cache.refresh_view(RUN_ID, names=["never-promoted.nc"])
+    assert "never-promoted.nc" not in linked
 
 
 def test_refresh_view_accepts_explicit_directory(
@@ -684,7 +711,7 @@ def test_delete_user_run_removes_directory(
 ) -> None:
     """Deleting a user run clears its directory."""
     assert cache.delete_user_run(RUN_ID) is True
-    assert cache.list_runs(Tier.USER) == []
+    assert cache.list_runs() == []
 
 
 def test_delete_user_run_leaves_shared_intact(
@@ -707,28 +734,35 @@ def test_delete_user_run_can_require_presence(cache: ArtifactCache) -> None:
         cache.delete_user_run("never-run", missing_ok=False)
 
 
-def test_delete_shared_run_requires_confirmation(
+def test_delete_shared_requires_confirmation(
     cache: ArtifactCache, staged_artifact: str
 ) -> None:
     """Shared deletion is guarded because other users may depend on it."""
     cache.promote(staged_artifact, RUN_ID)
     with pytest.raises(PermissionError, match="confirm=True"):
-        cache.delete_shared_run(RUN_ID)
-    assert cache.list_runs(Tier.SHARED) == [RUN_ID]
+        cache.delete_shared(staged_artifact)
+    assert [loc.name for loc in cache.list_shared_artifacts()] == [staged_artifact]
 
 
-def test_delete_shared_run_with_confirmation(
+def test_delete_shared_with_confirmation(
     cache: ArtifactCache, staged_artifact: str
 ) -> None:
-    """An explicit confirmation removes the shared run."""
+    """An explicit confirmation removes the artifact and its sidecar."""
     cache.promote(staged_artifact, RUN_ID)
-    assert cache.delete_shared_run(RUN_ID, confirm=True) is True
-    assert cache.list_runs(Tier.SHARED) == []
+    assert cache.delete_shared(staged_artifact, confirm=True) is True
+    assert cache.list_shared_artifacts() == []
+    assert not cache.shared_record_path(staged_artifact).exists()
 
 
-def test_delete_shared_run_tolerates_absence(cache: ArtifactCache) -> None:
-    """Confirmed deletion of an unknown run is a no-op."""
-    assert cache.delete_shared_run("never-run", confirm=True) is False
+def test_delete_shared_tolerates_absence(cache: ArtifactCache) -> None:
+    """Confirmed deletion of an unknown artifact is a no-op."""
+    assert cache.delete_shared("never-promoted.nc", confirm=True) is False
+
+
+def test_delete_shared_can_require_presence(cache: ArtifactCache) -> None:
+    """``missing_ok=False`` turns absence into an error."""
+    with pytest.raises(ArtifactNotFoundError):
+        cache.delete_shared("never-promoted.nc", confirm=True, missing_ok=False)
 
 
 def test_delete_refuses_symlinked_run_directory(cache: ArtifactCache) -> None:
@@ -811,9 +845,9 @@ def test_manifest_lock_is_reentrant_across_sequential_uses(
 ) -> None:
     """The lock is released on exit so later writers are not blocked."""
     for _ in range(3):
-        with cache._manifest_lock(RUN_ID, Tier.USER):
+        with cache._lock(cache.manifest_path(RUN_ID)):
             pass
-    assert cache.manifest_path(RUN_ID, Tier.USER).with_suffix(".lock").exists()
+    assert cache.manifest_path(RUN_ID).with_name(MANIFEST_NAME + ".lock").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -833,7 +867,7 @@ def test_injected_fingerprinter_applies_to_every_write(
     cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
     with cache.stage("foo.nc", RUN_ID) as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.checksum_mode is ChecksumMode.FULL
 
 
@@ -844,7 +878,7 @@ def test_per_write_fingerprinter_overrides_the_default(
     cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
     with cache.stage("foo.nc", RUN_ID, fingerprinter=QuickFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.checksum_mode is ChecksumMode.QUICK
 
 
@@ -854,7 +888,8 @@ def test_promotion_uses_the_cache_default(user_root: Path, shared_root: Path) ->
     with cache.stage("foo.nc", RUN_ID) as tmp:
         tmp.write_bytes(b"payload")
     cache.promote("foo.nc", RUN_ID)
-    record = cache.read_manifest(RUN_ID, Tier.SHARED).artifacts["foo.nc"]
+    record = cache.read_shared_record("foo.nc")
+    assert record is not None
     assert record.checksum_mode is ChecksumMode.FULL
 
 
@@ -878,7 +913,7 @@ def test_verify_fails_after_modification(user_root: Path, shared_root: Path) -> 
     cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
     with cache.stage("foo.nc", RUN_ID) as tmp:
         tmp.write_bytes(b"payload")
-    cache.locate("foo.nc", RUN_ID, Tier.USER).path.write_bytes(b"tampered")
+    cache.locate("foo.nc", Tier.USER, RUN_ID).path.write_bytes(b"tampered")
     assert cache.verify("foo.nc", RUN_ID) is False
 
 
@@ -901,3 +936,306 @@ def test_verify_raises_for_missing_artifact(cache: ArtifactCache) -> None:
     """Verification of an absent artifact fails like any other lookup."""
     with pytest.raises(ArtifactNotFoundError):
         cache.verify("nope.nc", RUN_ID)
+
+
+# ---------------------------------------------------------------------------
+# Shared tier addressing
+# ---------------------------------------------------------------------------
+
+
+def test_shared_path_carries_no_run_id(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """A promoted artifact sits directly under the shared root.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    shared = cache.promote(staged_artifact, RUN_ID)
+    assert shared.path == cache.shared_root / staged_artifact
+    assert shared.run_id is None
+    assert RUN_ID not in str(shared.path)
+
+
+def test_shared_locate_rejects_a_run_id(cache: ArtifactCache) -> None:
+    """Passing a run id for a shared location is a usage error, not ignored.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    """
+    with pytest.raises(ValueError, match="addressed by name alone"):
+        cache.locate("foo.nc", Tier.SHARED, RUN_ID)
+
+
+def test_user_locate_requires_a_run_id(cache: ArtifactCache) -> None:
+    """The user tier is run-scoped, so a run id is mandatory there.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    """
+    with pytest.raises(ValueError, match="run_id is required"):
+        cache.locate("foo.nc", Tier.USER)
+
+
+def test_consumer_finds_shared_artifact_without_the_producing_run(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """The point of the flat layout: lookup needs no knowledge of the producer.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    cache.promote(staged_artifact, RUN_ID)
+
+    found = cache.resolve(staged_artifact)
+    assert found is not None
+    assert found.tier is Tier.SHARED
+
+
+def test_a_different_run_resolves_to_the_shared_copy(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """A consumer passing its own run id still finds another run's promotion.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    cache.promote(staged_artifact, RUN_ID)
+
+    found = cache.resolve(staged_artifact, run_id="some-other-run")
+    assert found is not None
+    assert found.tier is Tier.SHARED
+
+
+def test_resolve_without_run_id_ignores_user_copies(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """Omitting the run id asks only whether the shared tier has it.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed, unpromoted user-tier artifact.
+    """
+    assert cache.resolve(staged_artifact) is None
+    assert cache.resolve(staged_artifact, RUN_ID) is not None
+
+
+def test_require_names_the_scope_it_searched(cache: ArtifactCache) -> None:
+    """The error distinguishes a shared-only lookup from a run-scoped one.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    """
+    with pytest.raises(ArtifactNotFoundError, match="shared tier"):
+        cache.require("nope.nc")
+
+
+def test_candidates_are_shared_only_without_a_run_id(cache: ArtifactCache) -> None:
+    """With no run id there is exactly one place to look.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    """
+    assert len(cache.candidates("foo.nc")) == 1
+    assert len(cache.candidates("foo.nc", RUN_ID)) == 2
+
+
+# ---------------------------------------------------------------------------
+# Promotion provenance and collisions
+# ---------------------------------------------------------------------------
+
+
+def test_promotion_records_provenance(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """The path no longer carries the producer, so the record must.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    cache.promote(staged_artifact, RUN_ID)
+
+    record = cache.read_shared_record(staged_artifact)
+    assert record is not None
+    assert record.promoted_from_run_id == RUN_ID
+    assert record.promoted_by
+    assert record.promoted_at
+
+
+def test_shared_records_live_in_a_dot_directory(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """Sidecars are namespaced away so they cannot be mistaken for artifacts.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    cache.promote(staged_artifact, RUN_ID)
+
+    sidecar = cache.shared_record_path(staged_artifact)
+    assert sidecar.parent.name == SHARED_RECORD_DIR
+    assert sidecar.is_file()
+    assert [loc.name for loc in cache.list_shared_artifacts()] == [staged_artifact]
+
+
+def test_repromoting_identical_content_is_a_no_op(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Two runs producing the same bytes under one name is not a conflict.
+
+    Parameters
+    ----------
+    user_root : Path
+        User tier root.
+    shared_root : Path
+        Shared tier root.
+    """
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    for run in ("run-A", "run-B"):
+        with cache.stage("shared.nc", run) as tmp:
+            tmp.write_bytes(b"identical")
+
+    first = cache.promote("shared.nc", "run-A")
+    second = cache.promote("shared.nc", "run-B")
+
+    assert first.path == second.path
+    record = cache.read_shared_record("shared.nc")
+    assert record is not None
+    assert record.promoted_from_run_id == "run-A"
+
+
+def test_repromoting_different_content_raises(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Divergence under one shared name is surfaced rather than silently won.
+
+    Parameters
+    ----------
+    user_root : Path
+        User tier root.
+    shared_root : Path
+        Shared tier root.
+    """
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("shared.nc", "run-A") as tmp:
+        tmp.write_bytes(b"original")
+    with cache.stage("shared.nc", "run-B") as tmp:
+        tmp.write_bytes(b"divergent")
+
+    cache.promote("shared.nc", "run-A")
+    with pytest.raises(ArtifactExistsError, match="different content"):
+        cache.promote("shared.nc", "run-B")
+
+
+def test_repromotion_without_a_digest_is_treated_as_a_conflict(
+    cache: ArtifactCache,
+) -> None:
+    """Absent a fingerprint there is no evidence of sameness, so it raises.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test, using the default no-digest strategy.
+    """
+    for run in ("run-A", "run-B"):
+        with cache.stage("shared.nc", run) as tmp:
+            tmp.write_bytes(b"identical")
+
+    cache.promote("shared.nc", "run-A")
+    with pytest.raises(ArtifactExistsError):
+        cache.promote("shared.nc", "run-B")
+
+
+def test_overwrite_forces_republication(user_root: Path, shared_root: Path) -> None:
+    """An explicit flag still allows replacing shared content.
+
+    Parameters
+    ----------
+    user_root : Path
+        User tier root.
+    shared_root : Path
+        Shared tier root.
+    """
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("shared.nc", "run-A") as tmp:
+        tmp.write_bytes(b"original")
+    with cache.stage("shared.nc", "run-B") as tmp:
+        tmp.write_bytes(b"divergent")
+
+    cache.promote("shared.nc", "run-A")
+    cache.promote("shared.nc", "run-B", overwrite=True)
+
+    assert cache.locate("shared.nc", Tier.SHARED).path.read_bytes() == b"divergent"
+    record = cache.read_shared_record("shared.nc")
+    assert record is not None
+    assert record.promoted_from_run_id == "run-B"
+
+
+def test_describe_shared_reconciles_with_disk(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """Records for artifacts removed from disk drop out of the description.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    cache.promote(staged_artifact, RUN_ID)
+    assert set(cache.describe_shared()) == {staged_artifact}
+
+    cache.locate(staged_artifact, Tier.SHARED).path.unlink()
+    assert cache.describe_shared() == {}
+
+
+def test_verify_works_without_a_run_id(user_root: Path, shared_root: Path) -> None:
+    """A consumer can check integrity of shared data it did not produce.
+
+    Parameters
+    ----------
+    user_root : Path
+        User tier root.
+    shared_root : Path
+        Shared tier root.
+    """
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("shared.nc", "run-A") as tmp:
+        tmp.write_bytes(b"payload")
+    cache.promote("shared.nc", "run-A")
+
+    assert cache.verify("shared.nc") is True
+    cache.locate("shared.nc", Tier.SHARED).path.write_bytes(b"tampered")
+    assert cache.verify("shared.nc") is False

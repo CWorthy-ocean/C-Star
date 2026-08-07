@@ -68,6 +68,10 @@ def test_to_dict_is_json_compatible(record: ArtifactRecord) -> None:
         "checksum_mode",
         "source",
         "asset_uri",
+        "run_id",
+        "promoted_from_run_id",
+        "promoted_by",
+        "promoted_at",
         "metadata",
     }
 
@@ -169,3 +173,25 @@ def test_explicit_quick_mode_is_not_overridden() -> None:
         }
     )
     assert record.checksum_mode is ChecksumMode.QUICK
+
+
+def test_promotion_fields_default_to_none() -> None:
+    """A user-tier record carries no promotion provenance."""
+    record = ArtifactRecord(name="a.nc", size_bytes=1, created_at="t", created_by="u")
+    assert record.promoted_from_run_id is None
+    assert record.promoted_by is None
+    assert record.promoted_at is None
+
+
+def test_promotion_fields_round_trip() -> None:
+    """Provenance survives serialisation, since the shared path no longer carries it."""
+    record = ArtifactRecord(
+        name="a.nc",
+        size_bytes=1,
+        created_at="t",
+        created_by="u",
+        promoted_from_run_id="run-A",
+        promoted_by="chris",
+        promoted_at="2026-08-07T00:00:00+00:00",
+    )
+    assert ArtifactRecord.from_dict(record.to_dict()) == record
