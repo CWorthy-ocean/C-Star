@@ -7,7 +7,7 @@ from cstar.base.log import LoggingMixin
 from cstar.base.utils import _run_cmd
 
 
-def parse_walltime_parts(walltime_str: str) -> tuple[int, int, int]:
+def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
     """Parse a SLURM walltime in the format "D-HH:MM:SS" into a tuple
     containing [hours, minutes, seconds].
 
@@ -55,7 +55,7 @@ def format_walltime(walltime_str: str) -> str:
     str
         The formatted walltime string in the "HH:MM:SS" format.
     """
-    mw_h, mw_m, mw_s = parse_walltime_parts(walltime_str)
+    mw_h, mw_m, mw_s = parse_walltime(walltime_str)
     return f"{mw_h:02}:{mw_m:02}:{mw_s:02}"
 
 

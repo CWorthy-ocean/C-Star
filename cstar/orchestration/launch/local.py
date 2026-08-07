@@ -33,7 +33,7 @@ from cstar.orchestration.orchestration import (
     Task,
 )
 from cstar.orchestration.state import StateRepository
-from cstar.system.scheduler import parse_walltime_parts
+from cstar.system.scheduler import parse_walltime
 
 if t.TYPE_CHECKING:
     from cstar.orchestration.models import Step
@@ -110,12 +110,12 @@ class LocalComputeSpec(BaseModel):
 
     @property
     def walltime_seconds(self) -> int:
-        hh, mm, ss = parse_walltime_parts(self.max_walltime)
+        hh, mm, ss = parse_walltime(self.max_walltime)
         return hh * 3600 + mm * 60 + ss
 
     @property
     def force_kill_seconds(self) -> int:
-        hh, mm, ss = parse_walltime_parts(self.force_kill_timeout)
+        hh, mm, ss = parse_walltime(self.force_kill_timeout)
         return hh * 3600 + mm * 60 + ss
 
 
