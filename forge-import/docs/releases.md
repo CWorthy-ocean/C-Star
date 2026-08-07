@@ -32,6 +32,8 @@
 
 ### Miscellaneous
 
+* Overhaul installation procedure, dependency structure, and instructions ([#109](https://github.com/CWorthy-ocean/cstar-forge/pull/109))
+
 ## 0.2.0
 
 ### Breaking Changes
