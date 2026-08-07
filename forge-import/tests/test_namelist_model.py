@@ -237,6 +237,10 @@ def test_model_reads_production_namelist(tmp_path):
     )  # would raise if a group/key is unmodeled
     assert nml.param_settings.nt_bgc == 32
     assert nml.particles_settings.np == 50
+    # extract_root_name has no Fortran initializer (mandatory in every emitted
+    # namelist); _populated_rt_dict()'s extract_data omits it, so this exercises
+    # the Forge-writes -> C-Star-reads default contract end to end.
+    assert nml.extract_data_settings.extract_root_name == "child"
 
 
 # ---------------------------------------------------------------------------
