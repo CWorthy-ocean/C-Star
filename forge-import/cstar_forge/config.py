@@ -160,7 +160,7 @@ def _layout_mac(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
-    scratch = base / "cstar-forge-run"
+    scratch = home / "cstar-forge-run"
     return source_data, input_data, scratch
 
 
@@ -183,7 +183,7 @@ def _layout_NERSC_perlmutter(home: Path, env: dict) -> tuple[Path, Path, Path]:
 
     source_data = base / "source-data"
     input_data = base / USER / "input-data"
-    scratch = base / "cstar-forge-run"
+    scratch = scratch_root / "cstar-forge-run"
     return source_data, input_data, scratch
 
 
@@ -192,7 +192,7 @@ def _layout_unknown(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
-    scratch = base / "cstar-forge-run"
+    scratch = home / "cstar-forge-run"
     return source_data, input_data, scratch
 
 
@@ -564,18 +564,18 @@ machine_config = _load_machine_config_from_catalog(system)
 cluster_type = _default_cluster_type(system)
 
 
-def _hpc_scratch_data_root(system_tag: str, env: dict, home: Path) -> Path | None:
-    """Scratch-rooted ``cstar-forge-data`` base for HPC systems, ``None`` elsewhere.
+def _hpc_scratch_root(system_tag: str, env: dict, home: Path) -> Path | None:
+    """Bare scratch root for HPC systems, ``None`` elsewhere.
 
     Mirrors the env-var conventions of the system layouts above ($SCRATCH on
     Perlmutter; $SCRATCH falling back to $WORK/scratch on Anvil). $SCRATCH is
     per-user on both machines, so no extra username layer is inserted.
     """
     if system_tag == "NERSC_perlmutter":
-        return Path(env.get("SCRATCH", home / "scratch")) / "cstar-forge-data"
+        return Path(env.get("SCRATCH", home / "scratch"))
     if system_tag == "RCAC_anvil":
         work = Path(env.get("WORK", home / "work"))
-        return Path(env.get("SCRATCH", work / "scratch")) / "cstar-forge-data"
+        return Path(env.get("SCRATCH", work / "scratch"))
     return None
 
 
@@ -589,9 +589,9 @@ def relocate_working_dir(
     """Rebase a default-form ``working_dir`` onto the host's scratch data root.
 
     The ForgeBlueprint stores ``working_dir`` with a home-rooted default
-    (``~/cstar-forge-data/<name>``). On HPC systems that path belongs on scratch, so
-    any path under ``~/cstar-forge-data`` is rebased to
-    ``$SCRATCH/cstar-forge-data/<same relative part>``. Paths outside the default
+    (``~/cstar-forge-run/<name>``). On HPC systems that path belongs on scratch, so
+    any path under ``~/cstar-forge-run`` is rebased to
+    ``$SCRATCH/cstar-forge-run/<same relative part>``. Paths outside the default
     root are a deliberate user choice and pass through untouched (expanded only).
 
     This is a stand-in for C-Star's eventual runtime override of the spec's
@@ -602,14 +602,14 @@ def relocate_working_dir(
     system_tag = system if system_tag is None else system_tag
 
     wd = Path(working_dir).expanduser()
-    scratch_root = _hpc_scratch_data_root(system_tag, env, home)
+    scratch_root = _hpc_scratch_root(system_tag, env, home)
     if scratch_root is None:
         return wd
     try:
-        rel = wd.relative_to(home / "cstar-forge-data")
+        rel = wd.relative_to(home / "cstar-forge-run")
     except ValueError:
         return wd
-    return scratch_root / rel
+    return scratch_root / "cstar-forge-run" / rel
 
 
 def resolve_host(working_dir):
@@ -617,7 +617,7 @@ def resolve_host(working_dir):
 
     ``working_dir`` is the per-run artifact root (typically the spec's ``working_dir``,
     expanded, or a host override); everything the executor produces lands under it.
-    Default-form paths (under ``~/cstar-forge-data``) are rebased onto host scratch on
+    Default-form paths (under ``~/cstar-forge-run``) are rebased onto host scratch on
     HPC systems via :func:`relocate_working_dir`.
 
     This is Forge's **disposable** host provider: it auto-detects the machine (NERSC /

@@ -332,7 +332,7 @@ from cstar_forge.forge.source_data import SourceData
 from cstar_forge.config import resolve_host
 from datetime import datetime
 
-host = resolve_host(working_dir="~/cstar-forge-data/my-grid")
+host = resolve_host(working_dir="~/cstar-forge-run/my-grid")
 
 # Create SourceData instance
 src = SourceData(
