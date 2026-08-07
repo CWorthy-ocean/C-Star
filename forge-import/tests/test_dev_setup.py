@@ -36,6 +36,22 @@ def dev_setup_script():
 
 
 @pytest.fixture
+def harden_env_script():
+    """Path to scripts/harden-env.sh (PIP_USER/PYTHONNOUSERSITE hardening,
+    env-active helpers), extracted out of dev-setup.sh.
+    """
+    return Path(__file__).parent.parent / "scripts" / "harden-env.sh"
+
+
+@pytest.fixture
+def register_kernel_script():
+    """Path to scripts/register-kernel.sh (Jupyter kernel registration +
+    activation wrapper), extracted out of dev-setup.sh.
+    """
+    return Path(__file__).parent.parent / "scripts" / "register-kernel.sh"
+
+
+@pytest.fixture
 def test_environment(test_dir, fixtures_dir):
     """Set up a test environment with minimal files."""
     # Copy environment.yml
@@ -56,6 +72,12 @@ def test_environment(test_dir, fixtures_dir):
     dev_setup = Path(__file__).parent.parent / "dev-setup.sh"
     shutil.copy(dev_setup, Path(test_dir) / "dev-setup.sh")
     os.chmod(Path(test_dir) / "dev-setup.sh", 0o755)
+
+    # Copy scripts/ (harden-env.sh, register-kernel.sh) since dev-setup.sh
+    # sources them relative to its own directory.
+    scripts_src = Path(__file__).parent.parent / "scripts"
+    scripts_dst = Path(test_dir) / "scripts"
+    shutil.copytree(scripts_src, scripts_dst)
 
     return test_dir
 
@@ -160,15 +182,32 @@ class TestDevSetupScript:
         assert "Darwin" in content, "Script missing macOS detection"
         assert "compilers" in content, "Script missing compiler installation"
 
-    def test_script_sets_up_jupyter_kernel(self, dev_setup_script):
-        """Test that script sets up Jupyter kernel."""
+    def test_dev_setup_sources_helper_scripts(self, dev_setup_script):
+        """Test that dev-setup.sh delegates HPC hardening and kernel
+        registration to scripts/harden-env.sh and scripts/register-kernel.sh
+        instead of inlining them (Phase 3c extraction).
+        """
         with open(dev_setup_script) as f:
+            content = f.read()
+
+        assert "scripts/harden-env.sh" in content, (
+            "dev-setup.sh should source scripts/harden-env.sh"
+        )
+        assert "scripts/register-kernel.sh" in content, (
+            "dev-setup.sh should source scripts/register-kernel.sh"
+        )
+
+    def test_script_sets_up_jupyter_kernel(self, register_kernel_script):
+        """Test that register-kernel.sh sets up the Jupyter kernel."""
+        with open(register_kernel_script) as f:
             content = f.read()
 
         assert "ipykernel" in content, "Script missing Jupyter kernel setup"
         assert "KernelSpecManager" in content, "Script missing kernel detection"
 
-    def test_script_registers_kernel_via_activation_wrapper(self, dev_setup_script):
+    def test_script_registers_kernel_via_activation_wrapper(
+        self, register_kernel_script
+    ):
         """Test that the kernel is launched through an activating wrapper script.
 
         Without this, kernel.json launches the env's python by absolute path
@@ -176,7 +215,7 @@ class TestDevSetupScript:
         hosted outside the env (e.g. HPC hosted Jupyter) don't see the env's
         PATH or activate.d hook vars.
         """
-        with open(dev_setup_script) as f:
+        with open(register_kernel_script) as f:
             content = f.read()
 
         assert "start-kernel.sh" in content, "Script missing kernel activation wrapper"
@@ -191,6 +230,29 @@ class TestDevSetupScript:
             "Script missing kernel dir resolution via KernelSpecManager"
         )
 
+    def test_harden_env_script_hardens_pip_and_env_checks(self, harden_env_script):
+        """Test that harden-env.sh carries the PIP_USER/PYTHONNOUSERSITE
+        exports and the env-active helper functions extracted from
+        dev-setup.sh.
+        """
+        with open(harden_env_script) as f:
+            content = f.read()
+
+        assert "PIP_USER=0" in content, "Script missing PIP_USER hardening"
+        assert "PYTHONNOUSERSITE=1" in content, (
+            "Script missing PYTHONNOUSERSITE hardening"
+        )
+        assert "_activate_env" in content, "Script missing _activate_env helper"
+        assert "_assert_env_active" in content, (
+            "Script missing _assert_env_active helper"
+        )
+        assert "_ensure_env_active" in content, (
+            "Script missing _ensure_env_active helper"
+        )
+        assert "activate.d" in content and "deactivate.d" in content, (
+            "Script missing persistent activate.d/deactivate.d hook installation"
+        )
+
     def test_script_does_not_clone_cstar(self, dev_setup_script):
         """Test that script does not clone C-Star (C-Star is installed via environment.yml)."""
         with open(dev_setup_script) as f:
@@ -200,10 +262,17 @@ class TestDevSetupScript:
         )
 
     @pytest.mark.skipif(not shutil.which("bash"), reason="bash not available")
-    def test_script_syntax_valid(self, dev_setup_script):
-        """Test that script has valid bash syntax."""
+    @pytest.mark.parametrize(
+        "script_fixture",
+        ["dev_setup_script", "harden_env_script", "register_kernel_script"],
+    )
+    def test_script_syntax_valid(self, script_fixture, request):
+        """Test that dev-setup.sh and its extracted helper scripts have valid
+        bash syntax.
+        """
+        script_path = request.getfixturevalue(script_fixture)
         result = subprocess.run(
-            ["bash", "-n", str(dev_setup_script)], capture_output=True, text=True
+            ["bash", "-n", str(script_path)], capture_output=True, text=True
         )
         assert result.returncode == 0, f"Script has syntax errors: {result.stderr}"
 

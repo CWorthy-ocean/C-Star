@@ -66,7 +66,7 @@ def _require_subchunk_deps() -> None:
         raise ImportError(
             "GLORYS subchunking (--subchunk) requires the 'kerchunk', 'nest_asyncio', "
             "'ujson', and 'fastparquet' packages. These are listed in environment.yml; "
-            "install them into the cstar-forge-v0 environment to use this feature."
+            "install them into the cstar-forge-env environment to use this feature."
         ) from e
 
 
