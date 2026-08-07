@@ -17,6 +17,7 @@ from cstar.base.adapter import (
 )
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import ENV_FF_ENABLE_LOCAL_PROXY, is_feature_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, additional_files_dir
 from cstar.orchestration.adapter import StepToRunRequestAdapter
@@ -235,7 +236,7 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     tasks: t.ClassVar[dict[str, str]] = {}
     """Mapping of task name to process ID."""
-    use_proxy: t.ClassVar[bool] = False
+    use_proxy: t.ClassVar[bool] = is_feature_enabled(ENV_FF_ENABLE_LOCAL_PROXY)
     """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
     @classmethod

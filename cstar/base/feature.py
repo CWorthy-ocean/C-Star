@@ -120,6 +120,17 @@ ENV_FF_SLURM_DISABLE_MT: t.Annotated[
 """Enable passing a hint to SLURM to disable multi-threading."""
 
 
+ENV_FF_ENABLE_LOCAL_PROXY: t.Annotated[
+    t.Literal["CSTAR_FF_ENABLE_LOCAL_PROXY"],
+    EnvVar(
+        "Enable experimental support for asynchronous status updates in the local launcher.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_ENABLE_LOCAL_PROXY"
+"""Enable experimental support for asynchronous status updates in the local launcher."""
+
+
 def is_flag_enabled(flag: str) -> bool:
     """Determine if a boolean environment varible is enabled.
 
