@@ -97,6 +97,7 @@
 &extract_data_settings
     do_extract = .false.
     extract_file = 'sample_edata.nc'
+    extract_root_name = 'child'
     hc_chd = 250.0
     n_chd = 90
     nrpf_extract = 24
