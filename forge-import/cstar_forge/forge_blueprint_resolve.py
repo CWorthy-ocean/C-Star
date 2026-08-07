@@ -281,6 +281,7 @@ _EXTRACT_DATA_DEFAULT: dict[str, Any] = {
     "theta_b_chd": 2.0,
     "hc_chd": 250.0,
     "extract_period": 3600.0,
+    "extract_root_name": "child",
 }
 
 

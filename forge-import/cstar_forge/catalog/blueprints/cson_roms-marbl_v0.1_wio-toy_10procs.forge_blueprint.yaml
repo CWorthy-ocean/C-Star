@@ -402,6 +402,7 @@ model_settings:
     theta_b_chd: 2.0
     hc_chd: 250.0
     extract_period: 3600.0
+    extract_root_name: child
   ocean_vars:
     wrt_file_rst: true
     output_period_rst: 86400
@@ -549,5 +550,5 @@ provenance:
   forge_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 37ea0b192598c771c263dc5606412f7de1e30d68da762286425a13e5929b4851
+  content_hash: 1325160f2d311ae89e5831b3c90a134d7ec7813028a7fc29966d6b2ac9584abb
   notes: null
