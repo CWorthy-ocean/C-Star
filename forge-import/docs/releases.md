@@ -26,6 +26,7 @@
 * Hardened dev-setup scripts against a `~/.local` pip fallback on HPC systems
 * Added CDR (carbon dioxide removal) forcing YAML support
 * Added flexible run-window (`allow_flex_time`) support
+* Add support for new "extract_root_name" nml key (only passes through the default value of `child` for now ([#107](https://github.com/CWorthy-ocean/cstar-forge/pull/107))
 
 ### Miscellaneous
 
