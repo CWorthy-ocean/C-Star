@@ -88,6 +88,7 @@
     "do_extract": false,
     "extract_file": "sample_edata.nc",
     "extract_period": 3600.0,
+    "extract_root_name": "child",
     "hc_chd": 250.0,
     "n_chd": 90,
     "nrpf": 24,

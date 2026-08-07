@@ -251,6 +251,7 @@ class ExtractDataCfg(_SettingsSection):
     theta_b_chd: float
     hc_chd: float
     extract_period: float = Field(serialization_alias="output_period_extract")
+    extract_root_name: str = "child"
 
 
 class SpongeTuneCfg(_SettingsSection):

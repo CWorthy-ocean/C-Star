@@ -198,6 +198,14 @@ def test_calc_pflx_from_section(nml):
     assert nml["calc_pflx_settings"]["pflx_timescale"] == 86400.0
 
 
+def test_extract_root_name_defaults_when_omitted(nml):
+    # ``_base_settings()`` builds ``rt["extract_data"]`` without ``extract_root_name``
+    # (representative of a pre-existing settings dict/blueprint) -- the
+    # ``ExtractDataCfg`` Pydantic default must still land in the written namelist,
+    # since the Fortran declaration has no initializer and requires the key.
+    assert nml["extract_data_settings"]["extract_root_name"] == "child"
+
+
 # ---------------------------------------------------------------------------
 # Per-tracer array expansion
 # ---------------------------------------------------------------------------
