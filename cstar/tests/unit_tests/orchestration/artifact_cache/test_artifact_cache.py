@@ -14,9 +14,15 @@ from cstar.orchestration.artifact_cache import (
     ArtifactCacheError,
     ArtifactExistsError,
     ArtifactNotFoundError,
-    ChecksumMode,
     Tier,
     UnsafePathError,
+)
+from cstar.orchestration.fingerprinting import (
+    ChecksumMode,
+    Fingerprinter,
+    FullFingerprinter,
+    NullFingerprinter,
+    QuickFingerprinter,
 )
 from cstar.tests.unit_tests.orchestration.artifact_cache.conftest import RUN_ID
 
@@ -212,7 +218,7 @@ def test_stage_records_manifest_entry(cache: ArtifactCache) -> None:
 
 def test_stage_can_checksum(cache: ArtifactCache) -> None:
     """Full checksumming is opt-in and produces a SHA-256 digest."""
-    with cache.stage("foo.nc", RUN_ID, checksum=ChecksumMode.FULL) as tmp:
+    with cache.stage("foo.nc", RUN_ID, fingerprinter=FullFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
     record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
     assert record.checksum is not None
@@ -222,7 +228,7 @@ def test_stage_can_checksum(cache: ArtifactCache) -> None:
 
 def test_stage_can_quick_checksum(cache: ArtifactCache) -> None:
     """Quick mode records a digest and labels it as such."""
-    with cache.stage("foo.nc", RUN_ID, checksum=ChecksumMode.QUICK) as tmp:
+    with cache.stage("foo.nc", RUN_ID, fingerprinter=QuickFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
     record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
     assert record.checksum is not None
@@ -231,9 +237,9 @@ def test_stage_can_quick_checksum(cache: ArtifactCache) -> None:
 
 def test_stage_quick_and_full_digests_differ(cache: ArtifactCache) -> None:
     """The two strategies are not comparable, hence the recorded mode."""
-    with cache.stage("q.nc", RUN_ID, checksum=ChecksumMode.QUICK) as tmp:
+    with cache.stage("q.nc", RUN_ID, fingerprinter=QuickFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
-    with cache.stage("f.nc", RUN_ID, checksum=ChecksumMode.FULL) as tmp:
+    with cache.stage("f.nc", RUN_ID, fingerprinter=FullFingerprinter()) as tmp:
         tmp.write_bytes(b"payload")
     records = cache.read_manifest(RUN_ID, Tier.USER).artifacts
     assert records["q.nc"].checksum != records["f.nc"].checksum
@@ -368,17 +374,17 @@ def test_ingest_can_move(cache: ArtifactCache, tmp_path: Path) -> None:
     assert cache.locate("foo.nc", RUN_ID, Tier.USER).exists
 
 
-@pytest.mark.parametrize("mode", [ChecksumMode.QUICK, ChecksumMode.FULL])
+@pytest.mark.parametrize("strategy", [QuickFingerprinter(), FullFingerprinter()])
 def test_ingest_can_checksum(
-    cache: ArtifactCache, tmp_path: Path, mode: ChecksumMode
+    cache: ArtifactCache, tmp_path: Path, strategy: Fingerprinter
 ) -> None:
     """Both fingerprinting strategies are available on the ingestion path."""
     source = tmp_path / "transient.nc"
     source.write_bytes(b"external")
-    cache.ingest(source, "foo.nc", RUN_ID, checksum=mode)
+    cache.ingest(source, "foo.nc", RUN_ID, fingerprinter=strategy)
     record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
     assert record.checksum is not None
-    assert record.checksum_mode is mode
+    assert record.checksum_mode is strategy.mode
 
 
 def test_ingest_rejects_missing_source(cache: ArtifactCache, tmp_path: Path) -> None:
@@ -779,16 +785,6 @@ def test_assert_contained_accepts_child(cache: ArtifactCache) -> None:
     ArtifactCache._assert_contained(cache.user_root / "a" / "b.nc", cache.user_root)
 
 
-def test_sha256_matches_hashlib(tmp_path: Path) -> None:
-    """The streaming digest agrees with a one-shot hash."""
-    import hashlib
-
-    path = tmp_path / "payload.bin"
-    payload = b"x" * (1024 * 1024 + 7)
-    path.write_bytes(payload)
-    assert ArtifactCache._sha256(path) == hashlib.sha256(payload).hexdigest()
-
-
 def test_utcnow_is_iso_utc() -> None:
     """Timestamps are timezone-aware ISO-8601 in UTC."""
     from datetime import datetime
@@ -818,3 +814,90 @@ def test_manifest_lock_is_reentrant_across_sequential_uses(
         with cache._manifest_lock(RUN_ID, Tier.USER):
             pass
     assert cache.manifest_path(RUN_ID, Tier.USER).with_suffix(".lock").exists()
+
+
+# ---------------------------------------------------------------------------
+# Fingerprinter injection
+# ---------------------------------------------------------------------------
+
+
+def test_default_fingerprinter_takes_no_digest(cache: ArtifactCache) -> None:
+    """The cache defaults to the strategy that costs a single pass over data."""
+    assert isinstance(cache.fingerprinter, NullFingerprinter)
+
+
+def test_injected_fingerprinter_applies_to_every_write(
+    user_root: Path, shared_root: Path
+) -> None:
+    """A cache-level strategy is used when a write does not supply one."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("foo.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    assert record.checksum_mode is ChecksumMode.FULL
+
+
+def test_per_write_fingerprinter_overrides_the_default(
+    user_root: Path, shared_root: Path
+) -> None:
+    """An individual write may choose a different strategy."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("foo.nc", RUN_ID, fingerprinter=QuickFingerprinter()) as tmp:
+        tmp.write_bytes(b"payload")
+    record = cache.read_manifest(RUN_ID, Tier.USER).artifacts["foo.nc"]
+    assert record.checksum_mode is ChecksumMode.QUICK
+
+
+def test_promotion_uses_the_cache_default(user_root: Path, shared_root: Path) -> None:
+    """Copying into the shared tier fingerprints with the cache's strategy."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("foo.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    cache.promote("foo.nc", RUN_ID)
+    record = cache.read_manifest(RUN_ID, Tier.SHARED).artifacts["foo.nc"]
+    assert record.checksum_mode is ChecksumMode.FULL
+
+
+# ---------------------------------------------------------------------------
+# Verification
+# ---------------------------------------------------------------------------
+
+
+def test_verify_passes_for_untouched_artifact(
+    user_root: Path, shared_root: Path
+) -> None:
+    """An artifact that has not changed verifies against its record."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("foo.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    assert cache.verify("foo.nc", RUN_ID) is True
+
+
+def test_verify_fails_after_modification(user_root: Path, shared_root: Path) -> None:
+    """Editing an artifact behind the cache's back is detected."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("foo.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    cache.locate("foo.nc", RUN_ID, Tier.USER).path.write_bytes(b"tampered")
+    assert cache.verify("foo.nc", RUN_ID) is False
+
+
+def test_verify_uses_the_recorded_strategy(user_root: Path, shared_root: Path) -> None:
+    """A quick digest is checked with a quick strategy, not a full one."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=QuickFingerprinter())
+    with cache.stage("foo.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    assert cache.verify("foo.nc", RUN_ID) is True
+
+
+def test_verify_returns_none_without_a_digest(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """With no digest recorded there is nothing to check against."""
+    assert cache.verify(staged_artifact, RUN_ID) is None
+
+
+def test_verify_raises_for_missing_artifact(cache: ArtifactCache) -> None:
+    """Verification of an absent artifact fails like any other lookup."""
+    with pytest.raises(ArtifactNotFoundError):
+        cache.verify("nope.nc", RUN_ID)

@@ -29,7 +29,6 @@ with :func:`os.replace`, so readers never observe a partially written file.
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 import shutil
@@ -40,6 +39,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from cstar.orchestration.fingerprinting import (
+    ChecksumMode,
+    Fingerprinter,
+    NullFingerprinter,
+    fingerprinter_for,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -52,6 +58,7 @@ __all__ = [
     "ArtifactRecord",
     "CacheModel",
     "ChecksumMode",
+    "Fingerprinter",
     "Location",
     "Manifest",
     "Tier",
@@ -66,8 +73,6 @@ MANIFEST_VERSION: Final[int] = 1
 
 _LOCK_SUFFIX: Final[str] = ".lock"
 _TMP_SUFFIX: Final[str] = ".tmp"
-_QUICK_PROBE_BYTES: Final[int] = 1024 * 1024
-"""Bytes sampled from each end of a file by :attr:`ChecksumMode.QUICK`."""
 
 
 class ArtifactCacheError(Exception):
@@ -99,29 +104,6 @@ class Tier(StrEnum):
 
     USER = "user"
     SHARED = "shared"
-
-
-class ChecksumMode(StrEnum):
-    """Strategy used to fingerprint an artifact's contents.
-
-    Attributes
-    ----------
-    NONE : str
-        Skip fingerprinting entirely. The default, because digesting
-        multi-gigabyte outputs doubles the I/O of the write path.
-    QUICK : str
-        Fingerprint the file size plus its leading and trailing blocks. Cost is
-        independent of file size. Detects truncation and wholesale replacement;
-        cannot detect corruption confined to the middle of the file, so it is a
-        smoke test rather than an integrity guarantee.
-    FULL : str
-        SHA-256 over every byte. A true integrity check, at the cost of a
-        complete additional read of the artifact.
-    """
-
-    NONE = "none"
-    QUICK = "quick"
-    FULL = "full"
 
 
 class CacheModel(BaseModel):
@@ -400,6 +382,11 @@ class ArtifactCache:
         :meth:`refresh_view`. Required only if views are used.
     create_roots : bool, optional
         Whether to create the roots on construction. Default ``True``.
+    fingerprinter : Fingerprinter or None, optional
+        Default strategy for fingerprinting committed artifacts. Defaults to
+        :class:`~cstar.orchestration.fingerprinting.NullFingerprinter`, which
+        takes no digest, so writing a large artifact costs a single pass over
+        the data. Individual writes may override it.
 
     Attributes
     ----------
@@ -409,6 +396,8 @@ class ArtifactCache:
         Resolved shared-tier root.
     view_root : Path or None
         Resolved view root, if configured.
+    fingerprinter : Fingerprinter
+        Strategy used when a write does not supply its own.
 
     Notes
     -----
@@ -432,12 +421,14 @@ class ArtifactCache:
         shared_root: Path | str,
         view_root: Path | str | None = None,
         create_roots: bool = True,
+        fingerprinter: Fingerprinter | None = None,
     ) -> None:
         self.user_root: Path = Path(user_root).expanduser().resolve()
         self.shared_root: Path = Path(shared_root).expanduser().resolve()
         self.view_root: Path | None = (
             Path(view_root).expanduser().resolve() if view_root is not None else None
         )
+        self.fingerprinter: Fingerprinter = fingerprinter or NullFingerprinter()
         if self.user_root == self.shared_root:
             raise ValueError("user_root and shared_root must differ")
         if create_roots:
@@ -602,7 +593,7 @@ class ArtifactCache:
         source: str | None = None,
         asset_uri: str | None = None,
         metadata: Mapping[str, Any] | None = None,
-        checksum: ChecksumMode = ChecksumMode.NONE,
+        fingerprinter: Fingerprinter | None = None,
         overwrite: bool = True,
     ) -> Generator[Path]:
         """Stage an artifact for atomic creation.
@@ -628,11 +619,12 @@ class ArtifactCache:
             location's :attr:`Location.uri`.
         metadata : Mapping of str to Any or None, optional
             Descriptive metadata recorded in the manifest.
-        checksum : ChecksumMode, optional
-            Fingerprinting strategy applied on commit. Default
-            :attr:`ChecksumMode.NONE`, since digesting multi-gigabyte files
-            doubles the write path's I/O. Use :attr:`ChecksumMode.QUICK` for a
-            size-independent truncation check, or :attr:`ChecksumMode.FULL`
+        fingerprinter : Fingerprinter or None, optional
+            Strategy applied on commit, overriding
+            :attr:`ArtifactCache.fingerprinter` for this write. Use
+            :class:`~cstar.orchestration.fingerprinting.QuickFingerprinter` for
+            a size-independent truncation check, or
+            :class:`~cstar.orchestration.fingerprinting.FullFingerprinter`
             where silent corruption matters more than throughput.
         overwrite : bool, optional
             Whether committing may replace an existing artifact. Default
@@ -671,7 +663,8 @@ class ArtifactCache:
                 )
             if tmp.stat().st_size == 0:
                 raise ArtifactCacheError(f"staged artifact is empty: {tmp}")
-            digest = self._digest(tmp, checksum)
+            strategy = fingerprinter or self.fingerprinter
+            digest = strategy.digest(tmp)
             size = tmp.stat().st_size
             os.replace(tmp, location.path)
         except BaseException:
@@ -684,7 +677,7 @@ class ArtifactCache:
             created_at=self._utcnow(),
             created_by=self._username(),
             checksum=digest,
-            checksum_mode=checksum if digest is not None else None,
+            checksum_mode=strategy.mode if digest is not None else None,
             source=source,
             asset_uri=asset_uri or location.uri,
             metadata=dict(metadata or {}),
@@ -698,7 +691,7 @@ class ArtifactCache:
         run_id: str,
         move: bool = False,
         metadata: Mapping[str, Any] | None = None,
-        checksum: ChecksumMode = ChecksumMode.NONE,
+        fingerprinter: Fingerprinter | None = None,
         overwrite: bool = True,
     ) -> Location:
         """Copy an externally produced file into the user tier.
@@ -715,7 +708,7 @@ class ArtifactCache:
             Remove ``source_path`` after a successful copy. Default ``False``.
         metadata : Mapping of str to Any or None, optional
             Descriptive metadata recorded in the manifest.
-        checksum : ChecksumMode, optional
+        fingerprinter : Fingerprinter or None, optional
             See :meth:`stage`.
         overwrite : bool, optional
             See :meth:`stage`.
@@ -740,7 +733,7 @@ class ArtifactCache:
             tier=Tier.USER,
             source=str(src),
             metadata=metadata,
-            checksum=checksum,
+            fingerprinter=fingerprinter,
             overwrite=overwrite,
         ) as tmp:
             shutil.copy2(src, tmp)
@@ -809,6 +802,47 @@ class ArtifactCache:
 
         self._stamp_promoted(run_id)
         return shared
+
+    def verify(
+        self,
+        name: str,
+        run_id: str,
+        prefer_local: bool = False,
+    ) -> bool | None:
+        """Re-fingerprint an artifact and compare against its manifest record.
+
+        Closes the gap between "the cache says this was produced" and "the
+        bytes on disk are still the ones that were produced". The strategy is
+        chosen from the mode recorded at commit time, so a quick signature is
+        checked against a quick signature.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        run_id : str
+            Run identifier.
+        prefer_local : bool, optional
+            See :meth:`resolve`.
+
+        Returns
+        -------
+        bool or None
+            Whether the artifact still matches its recorded digest, or ``None``
+            when no digest was taken at commit time and there is therefore
+            nothing to check against.
+
+        Raises
+        ------
+        ArtifactNotFoundError
+            If the artifact exists in neither tier.
+        """
+        location = self.require(name, run_id, prefer_local=prefer_local)
+        record = self.read_manifest(run_id, location.tier).artifacts.get(name)
+        if record is None or record.checksum is None or record.checksum_mode is None:
+            return None
+        strategy = fingerprinter_for(record.checksum_mode)
+        return strategy.matches(location.path, record.checksum)
 
     # ------------------------------------------------------------------
     # Manifests
@@ -1257,82 +1291,6 @@ class ArtifactCache:
             path.expanduser().absolute().relative_to(root)
         except ValueError as exc:
             raise UnsafePathError(f"{path} escapes managed root {root}") from exc
-
-    @classmethod
-    def _digest(cls, path: Path, mode: ChecksumMode) -> str | None:
-        """Fingerprint a file according to the requested strategy.
-
-        Parameters
-        ----------
-        path : Path
-            File to fingerprint.
-        mode : ChecksumMode
-            Strategy to apply.
-
-        Returns
-        -------
-        str or None
-            Hex-encoded digest, or ``None`` for :attr:`ChecksumMode.NONE`.
-        """
-        if mode is ChecksumMode.FULL:
-            return cls._sha256(path)
-        if mode is ChecksumMode.QUICK:
-            return cls._quick_signature(path)
-        return None
-
-    @staticmethod
-    def _quick_signature(path: Path, probe: int = _QUICK_PROBE_BYTES) -> str:
-        """Fingerprint a file from its size and its leading and trailing blocks.
-
-        Cost is independent of file size: at most two reads of ``probe`` bytes
-        plus a ``stat``. Detects truncation, extension, and replacement, which
-        together cover the interrupted-write failure mode. Does not detect
-        corruption confined to the middle of a large file.
-
-        Parameters
-        ----------
-        path : Path
-            File to fingerprint.
-        probe : int, optional
-            Number of bytes read from each end. Defaults to
-            :data:`_QUICK_PROBE_BYTES`.
-
-        Returns
-        -------
-        str
-            Hex-encoded SHA-256 digest over the size and sampled blocks.
-        """
-        size = path.stat().st_size
-        digest = hashlib.sha256(f"{size}:".encode())
-        with path.open("rb") as handle:
-            digest.update(handle.read(probe))
-            if size > probe * 2:
-                handle.seek(-probe, os.SEEK_END)
-                digest.update(handle.read(probe))
-        return digest.hexdigest()
-
-    @staticmethod
-    def _sha256(path: Path) -> str:
-        """Compute the SHA-256 digest of a file.
-
-        Parameters
-        ----------
-        path : Path
-            File to digest.
-
-        Returns
-        -------
-        str
-            Hex-encoded digest.
-
-        Notes
-        -----
-        Delegates to :func:`hashlib.file_digest`, which streams the file in C
-        without materialising it in memory. Every byte is hashed; cost is
-        proportional to file size.
-        """
-        with path.open("rb") as handle:
-            return hashlib.file_digest(handle, "sha256").hexdigest()
 
     @staticmethod
     def _utcnow() -> str:
