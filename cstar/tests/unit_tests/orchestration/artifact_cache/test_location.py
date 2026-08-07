@@ -1,9 +1,9 @@
 """Unit tests for :class:`cstar.orchestration.artifact_cache.Location`."""
 
-import dataclasses
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.orchestration.artifact_cache import Location, Tier
 
@@ -62,8 +62,8 @@ def test_exists_false_for_directory(tmp_path: Path) -> None:
 
 def test_is_frozen(location: Location) -> None:
     """Locations are immutable value objects."""
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        location.path = Path("/elsewhere")  # type: ignore[misc]
+    with pytest.raises(ValidationError, match="frozen"):
+        location.path = Path("/elsewhere")
 
 
 def test_equality_is_structural(tmp_path: Path) -> None:

@@ -1,9 +1,9 @@
 """Unit tests for :class:`cstar.orchestration.artifact_cache.Manifest`."""
 
-import dataclasses
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.orchestration.artifact_cache import (
     MANIFEST_VERSION,
@@ -87,7 +87,7 @@ def test_round_trip_preserves_records(manifest: Manifest) -> None:
 
 def test_round_trip_preserves_promotion_stamp(manifest: Manifest) -> None:
     """The promotion timestamp is carried across serialisation."""
-    promoted = dataclasses.replace(manifest, promoted_at="2026-08-07T01:00:00+00:00")
+    promoted = manifest.model_copy(update={"promoted_at": "2026-08-07T01:00:00+00:00"})
     assert Manifest.from_dict(promoted.to_dict()).promoted_at == promoted.promoted_at
 
 
@@ -113,6 +113,14 @@ def test_from_dict_rejects_unknown_tier() -> None:
 
 
 def test_is_frozen(manifest: Manifest) -> None:
-    """Manifests are immutable; updates go through :func:`dataclasses.replace`."""
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        manifest.run_id = "other"  # type: ignore[misc]
+    """Manifests are immutable; updates go through :meth:`~pydantic.BaseModel.model_copy`."""
+    with pytest.raises(ValidationError, match="frozen"):
+        manifest.run_id = "other"
+
+
+def test_model_copy_produces_an_updated_manifest(manifest: Manifest) -> None:
+    """Frozen manifests are updated by copying rather than mutating."""
+    updated = manifest.model_copy(update={"promoted_at": "2026-08-07T01:00:00+00:00"})
+    assert manifest.promoted_at is None
+    assert updated.promoted_at == "2026-08-07T01:00:00+00:00"
+    assert updated.artifacts == manifest.artifacts

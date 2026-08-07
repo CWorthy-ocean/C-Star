@@ -1,9 +1,9 @@
 """Unit tests for :class:`cstar.orchestration.artifact_cache.ArtifactRecord`."""
 
-import dataclasses
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.orchestration.artifact_cache import ArtifactRecord
 
@@ -113,11 +113,19 @@ def test_from_dict_tolerates_null_metadata() -> None:
 
 def test_from_dict_requires_core_fields() -> None:
     """A manifest entry missing required fields fails loudly."""
-    with pytest.raises(KeyError):
+    with pytest.raises(ValidationError, match="size_bytes"):
         ArtifactRecord.from_dict({"name": "a.nc"})
+
+
+def test_from_dict_rejects_uncoercible_size() -> None:
+    """A non-numeric size is a validation error rather than a silent default."""
+    with pytest.raises(ValidationError, match="size_bytes"):
+        ArtifactRecord.from_dict(
+            {"name": "a.nc", "size_bytes": "huge", "created_at": "t", "created_by": "u"}
+        )
 
 
 def test_is_frozen(record: ArtifactRecord) -> None:
     """Records are immutable once created."""
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        record.name = "other.nc"  # type: ignore[misc]
+    with pytest.raises(ValidationError, match="frozen"):
+        record.name = "other.nc"

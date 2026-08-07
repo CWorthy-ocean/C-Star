@@ -34,14 +34,15 @@ import json
 import os
 import shutil
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
 
 __all__ = [
     "ArtifactCache",
@@ -49,6 +50,7 @@ __all__ = [
     "ArtifactExistsError",
     "ArtifactNotFoundError",
     "ArtifactRecord",
+    "CacheModel",
     "Location",
     "Manifest",
     "Tier",
@@ -97,8 +99,29 @@ class Tier(StrEnum):
     SHARED = "shared"
 
 
-@dataclass(frozen=True, slots=True)
-class Location:
+class CacheModel(BaseModel):
+    """Base model configuring shared validation behaviour for cache models.
+
+    Notes
+    -----
+    Models are frozen because locations and manifest entries are value objects
+    describing a committed state; updates are expressed with
+    :meth:`~pydantic.BaseModel.model_copy`.
+
+    Unknown fields are ignored rather than forbidden. Manifests are persisted
+    on disk and may have been written by a newer version of this module, so a
+    sidecar carrying fields this release does not know about must still load.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(
+        frozen=True,
+        extra="ignore",
+        validate_assignment=True,
+    )
+    """Configures the behavior of the pydantic model."""
+
+
+class Location(CacheModel):
     """Resolved filesystem position of an artifact.
 
     Parameters
@@ -140,8 +163,7 @@ class Location:
         return self.path.is_file()
 
 
-@dataclass(frozen=True, slots=True)
-class ArtifactRecord:
+class ArtifactRecord(CacheModel):
     """Manifest entry describing a single artifact.
 
     Parameters
@@ -172,7 +194,24 @@ class ArtifactRecord:
     checksum: str | None = None
     source: str | None = None
     asset_uri: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def _coerce_null_metadata(cls, value: Any) -> Any:
+        """Treat an explicit JSON null as an empty mapping.
+
+        Parameters
+        ----------
+        value : Any
+            Raw value supplied for the ``metadata`` field.
+
+        Returns
+        -------
+        Any
+            An empty dictionary when ``value`` is ``None``, otherwise ``value``.
+        """
+        return {} if value is None else value
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise this record to a JSON-compatible mapping.
@@ -182,16 +221,7 @@ class ArtifactRecord:
         dict of str to Any
             Plain dictionary suitable for :func:`json.dump`.
         """
-        return {
-            "name": self.name,
-            "size_bytes": self.size_bytes,
-            "created_at": self.created_at,
-            "created_by": self.created_by,
-            "checksum": self.checksum,
-            "source": self.source,
-            "asset_uri": self.asset_uri,
-            "metadata": dict(self.metadata),
-        }
+        return self.model_dump(mode="json")
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> ArtifactRecord:
@@ -206,21 +236,16 @@ class ArtifactRecord:
         -------
         ArtifactRecord
             Reconstructed record. Unknown keys are ignored.
+
+        Raises
+        ------
+        pydantic.ValidationError
+            If a required field is missing or a value cannot be coerced.
         """
-        return cls(
-            name=str(payload["name"]),
-            size_bytes=int(payload["size_bytes"]),
-            created_at=str(payload["created_at"]),
-            created_by=str(payload["created_by"]),
-            checksum=payload.get("checksum"),
-            source=payload.get("source"),
-            asset_uri=payload.get("asset_uri"),
-            metadata=dict(payload.get("metadata") or {}),
-        )
+        return cls.model_validate(payload)
 
 
-@dataclass(frozen=True, slots=True)
-class Manifest:
+class Manifest(CacheModel):
     """Sidecar index describing the contents of one run directory.
 
     One manifest is written per ``(tier, run_id)`` directory, making each
@@ -244,9 +269,26 @@ class Manifest:
 
     run_id: str
     tier: Tier
-    artifacts: dict[str, ArtifactRecord] = field(default_factory=dict)
+    artifacts: dict[str, ArtifactRecord] = Field(default_factory=dict)
     version: int = MANIFEST_VERSION
     promoted_at: str | None = None
+
+    @field_validator("artifacts", mode="before")
+    @classmethod
+    def _coerce_null_artifacts(cls, value: Any) -> Any:
+        """Treat an explicit JSON null as an empty artifact mapping.
+
+        Parameters
+        ----------
+        value : Any
+            Raw value supplied for the ``artifacts`` field.
+
+        Returns
+        -------
+        Any
+            An empty dictionary when ``value`` is ``None``, otherwise ``value``.
+        """
+        return {} if value is None else value
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise this manifest to a JSON-compatible mapping.
@@ -256,13 +298,7 @@ class Manifest:
         dict of str to Any
             Plain dictionary suitable for :func:`json.dump`.
         """
-        return {
-            "version": self.version,
-            "run_id": self.run_id,
-            "tier": self.tier.value,
-            "promoted_at": self.promoted_at,
-            "artifacts": {n: r.to_dict() for n, r in self.artifacts.items()},
-        }
+        return self.model_dump(mode="json")
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> Manifest:
@@ -277,17 +313,13 @@ class Manifest:
         -------
         Manifest
             Reconstructed manifest.
+
+        Raises
+        ------
+        pydantic.ValidationError
+            If a required field is missing or a value cannot be coerced.
         """
-        return cls(
-            run_id=str(payload["run_id"]),
-            tier=Tier(payload["tier"]),
-            artifacts={
-                str(n): ArtifactRecord.from_dict(r)
-                for n, r in (payload.get("artifacts") or {}).items()
-            },
-            version=int(payload.get("version", MANIFEST_VERSION)),
-            promoted_at=payload.get("promoted_at"),
-        )
+        return cls.model_validate(payload)
 
 
 class ArtifactCache:
@@ -514,7 +546,7 @@ class ArtifactCache:
         metadata: Mapping[str, Any] | None = None,
         compute_checksum: bool = False,
         overwrite: bool = True,
-    ) -> Iterator[Path]:
+    ) -> Generator[Path]:
         """Stage an artifact for atomic creation.
 
         Yields a temporary path to write to. On clean exit the file is
@@ -1082,7 +1114,7 @@ class ArtifactCache:
             manifest = self.read_manifest(location.run_id, location.tier)
             artifacts = dict(manifest.artifacts)
             artifacts[record.name] = record
-            self.write_manifest(replace(manifest, artifacts=artifacts))
+            self.write_manifest(manifest.model_copy(update={"artifacts": artifacts}))
 
     def _stamp_promoted(self, run_id: str) -> None:
         """Set ``promoted_at`` on the shared manifest for a run.
@@ -1094,10 +1126,12 @@ class ArtifactCache:
         """
         with self._manifest_lock(run_id, Tier.SHARED):
             manifest = self.read_manifest(run_id, Tier.SHARED)
-            self.write_manifest(replace(manifest, promoted_at=self._utcnow()))
+            self.write_manifest(
+                manifest.model_copy(update={"promoted_at": self._utcnow()})
+            )
 
     @contextmanager
-    def _manifest_lock(self, run_id: str, tier: Tier) -> Iterator[None]:
+    def _manifest_lock(self, run_id: str, tier: Tier) -> Generator[None]:
         """Hold an exclusive advisory lock over a run's manifest.
 
         Parameters
