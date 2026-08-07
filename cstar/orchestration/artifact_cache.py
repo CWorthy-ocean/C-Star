@@ -1092,9 +1092,12 @@ class ArtifactCache:
     def _same_content(self, user: Location, shared: Location) -> bool:
         """Report whether two committed artifacts hold identical bytes.
 
-        Compares the shared record's digest against a freshly computed digest
-        of the user copy, using the strategy that produced the recorded value
-        so the two are comparable.
+        Checks identity before content: two paths that resolve to the same
+        inode hold the same bytes by definition, and answering that with two
+        ``stat`` calls avoids re-reading a multi-gigabyte artifact to discover
+        it is itself. Only distinct files fall through to the digest, which is
+        compared using the strategy that produced the recorded value so the two
+        values are comparable.
 
         Parameters
         ----------
@@ -1106,15 +1109,43 @@ class ArtifactCache:
         Returns
         -------
         bool
-            ``True`` only when a recorded digest exists and matches. Absent a
-            digest there is no evidence of sameness, which is reported as
-            ``False`` rather than assumed.
+            ``True`` when the two paths are the same file, or when a recorded
+            digest exists and matches. Absent both there is no evidence of
+            sameness, which is reported as ``False`` rather than assumed.
         """
+        if self._is_same_file(user.path, shared.path):
+            return True
         record = self.record_for(shared)
         if record is None or record.checksum is None or record.checksum_mode is None:
             return False
         strategy = fingerprinter_for(record.checksum_mode)
         return strategy.matches(user.path, record.checksum)
+
+    @staticmethod
+    def _is_same_file(left: Path, right: Path) -> bool:
+        """Report whether two paths refer to one file on disk.
+
+        Compares device and inode, so symlinks, hardlinks, and any two routes
+        to the same file all answer ``True``.
+
+        Parameters
+        ----------
+        left : Path
+            First path.
+        right : Path
+            Second path.
+
+        Returns
+        -------
+        bool
+            ``True`` when both exist and share an inode. A missing path is
+            reported as ``False`` rather than raising, since callers use this
+            as a fast path and fall through to a content comparison.
+        """
+        try:
+            return os.path.samefile(left, right)
+        except OSError:
+            return False
 
     def verify(
         self,

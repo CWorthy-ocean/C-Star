@@ -4,7 +4,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from unittest.mock import patch
+from unittest import mock
 
 import pytest
 
@@ -832,13 +832,13 @@ def test_utcnow_is_iso_utc() -> None:
 
 def test_username_falls_back_when_unavailable() -> None:
     """An unresolvable username degrades rather than failing the write."""
-    with patch("getpass.getuser", side_effect=OSError("no passwd entry")):
+    with mock.patch("getpass.getuser", side_effect=OSError("no passwd entry")):
         assert ArtifactCache._username() == "unknown"
 
 
 def test_username_reports_current_user() -> None:
     """The recorded writer identity comes from the operating system."""
-    with patch("getpass.getuser", return_value="chris"):
+    with mock.patch("getpass.getuser", return_value="chris"):
         assert ArtifactCache._username() == "chris"
 
 
@@ -1660,3 +1660,122 @@ def test_listing_is_not_bypassed(user_root: Path, shared_root: Path) -> None:
     bypassed = ArtifactCache(user_root, shared_root, bypass=True)
     assert [loc.name for loc in bypassed.list_shared_artifacts()] == ["prod.nc"]
     assert set(bypassed.describe(RUN_ID)) == {"prod.nc"}
+
+
+# ---------------------------------------------------------------------------
+# Identity fast path on promotion
+# ---------------------------------------------------------------------------
+
+
+def _link_into_run(
+    cache: ArtifactCache, name: str, run_id: str, hard: bool = False
+) -> Path:
+    """Point a run's user-tier entry at the shared artifact.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    name : str
+        Artifact filename.
+    run_id : str
+        Run to give an entry to.
+    hard : bool, optional
+        Create a hardlink rather than a symlink. Default ``False``.
+
+    Returns
+    -------
+    Path
+        The user-tier path that now refers to the shared artifact.
+    """
+    user = cache.locate(name, Tier.USER, run_id)
+    shared = cache.locate(name, Tier.SHARED)
+    user.path.parent.mkdir(parents=True, exist_ok=True)
+    if hard:
+        os.link(shared.path, user.path)
+    else:
+        user.path.symlink_to(shared.path)
+    return user.path
+
+
+def test_promote_short_circuits_on_symlinked_entry(
+    user_root: Path, shared_root: Path
+) -> None:
+    """A user entry pointing at the shared file needs no re-promotion."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+    _link_into_run(cache, name, "run-B")
+
+    result = cache.promote(name, "run-B")
+
+    assert result.path == cache.locate(name, Tier.SHARED).path
+    record = cache.read_shared_record(name)
+    assert record is not None
+    assert record.promoted_from_run_id == RUN_ID
+
+
+def test_promote_short_circuits_on_hardlinked_entry(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Identity is by inode, so hardlinks are recognised too."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+    _link_into_run(cache, name, "run-B", hard=True)
+
+    assert cache.promote(name, "run-B").path == cache.locate(name, Tier.SHARED).path
+
+
+def test_identity_fast_path_skips_the_digest(
+    user_root: Path, shared_root: Path
+) -> None:
+    """The point of the fast path: no re-read of a file that is itself.
+
+    Without it, recognising a symlinked entry would cost a full pass over the
+    artifact, which for a multi-gigabyte product is the expensive way to
+    discover nothing needs doing.
+    """
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+    _link_into_run(cache, name, "run-B")
+
+    with mock.patch.object(
+        FullFingerprinter, "digest", side_effect=AssertionError("digested!")
+    ) as digested:
+        cache.promote(name, "run-B")
+
+    digested.assert_not_called()
+
+
+def test_identity_fast_path_works_without_a_fingerprinter(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Same-inode is evidence of sameness even with no digest recorded."""
+    cache = ArtifactCache(user_root, shared_root)
+    name = _promoted(cache)
+    _link_into_run(cache, name, "run-B")
+
+    assert cache.promote(name, "run-B").path == cache.locate(name, Tier.SHARED).path
+
+
+def test_distinct_copies_still_fall_through_to_the_digest(
+    user_root: Path, shared_root: Path
+) -> None:
+    """A real copy is a different inode, so content decides."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+    with cache.stage(name, "run-B") as tmp:
+        tmp.write_bytes(b"payload")
+
+    user = cache.locate(name, Tier.USER, "run-B")
+    shared = cache.locate(name, Tier.SHARED)
+    assert not os.path.samefile(user.path, shared.path)
+    assert cache.promote(name, "run-B").path == shared.path
+
+
+def test_is_same_file_tolerates_a_missing_path(tmp_path: Path) -> None:
+    """The fast path reports False rather than raising when a path is gone."""
+    present = tmp_path / "present.nc"
+    present.write_bytes(b"payload")
+
+    assert ArtifactCache._is_same_file(present, tmp_path / "absent.nc") is False
+    assert ArtifactCache._is_same_file(present, present) is True
