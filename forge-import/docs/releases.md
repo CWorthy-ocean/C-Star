@@ -15,6 +15,7 @@
 * Added an option to build with ParallelIO (PIO)
 * Added support for chunked GLORYS staging on large domains
 * Improved parent/child (nested) grid support
+* `ForgeBlueprint.to_yaml`/`to_yaml_str` now stamp `provenance.generated_at`/`forge_version`/`cstar_version`/`roms_tools_version` on first save (preserved on later resaves), so a saved blueprint records which Forge/C-Star/roms-tools produced it — e.g. for checking out a matching Forge commit later. `cstar_version`/`roms_tools_version` are read from the installed package metadata (which already embeds commit info for an editable/dev checkout, via `setuptools_scm`) and reflect the environment doing the *saving*, not necessarily the one that later runs Phase-2 processing if that happens on a different machine.
 
 ### Bug Fixes
 
