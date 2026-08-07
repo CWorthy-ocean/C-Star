@@ -21,8 +21,7 @@ def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
 
     Returns
     -------
-    str
-        The formatted walltime string in the "HH:MM:SS" format.
+    tuple[int, int, int]
     """
     mw_h, mw_m, mw_s = 0, 0, 0
     if walltime_str.count("-") == 1:  # D-HH:MM:SS
