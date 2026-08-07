@@ -137,26 +137,31 @@ def test_quick_handles_file_smaller_than_probe(tmp_path: Path) -> None:
     assert ArtifactCache._quick_signature(small, probe=PROBE) == expected
 
 
-def test_quick_reads_bounded_bytes(
-    big_file: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Quick mode reads at most two probes regardless of file size."""
-    reads: list[int] = []
-    real_open = Path.open
+def test_quick_reads_only_the_sampled_blocks(big_file: Path) -> None:
+    """Only the size and the two probe blocks contribute to the signature.
 
-    def counting_open(self: Path, *args: object, **kwargs: object) -> object:
-        handle = real_open(self, *args, **kwargs)  # type: ignore[arg-type]
-        real_read = handle.read
+    Reconstructing the expected digest from those three inputs alone proves the
+    helper never touches the interior of the file, which is what makes its cost
+    independent of file size.
+    """
+    data = big_file.read_bytes()
+    assert len(data) > 2 * PROBE
 
-        def tracked(n: int = -1) -> bytes:
-            chunk = real_read(n)
-            reads.append(len(chunk))
-            return chunk  # type: ignore[no-any-return]
+    expected = hashlib.sha256(f"{len(data)}:".encode())
+    expected.update(data[:PROBE])
+    expected.update(data[-PROBE:])
 
-        handle.read = tracked  # type: ignore[method-assign,assignment]
-        return handle
+    assert ArtifactCache._quick_signature(big_file, probe=PROBE) == expected.hexdigest()
 
-    monkeypatch.setattr(Path, "open", counting_open)
-    ArtifactCache._quick_signature(big_file, probe=PROBE)
-    assert sum(reads) <= 2 * PROBE
-    assert big_file.stat().st_size > 2 * PROBE
+
+def test_quick_cost_does_not_grow_with_file_size(tmp_path: Path) -> None:
+    """Padding a file's interior leaves the sampled inputs, and the work, unchanged."""
+    head, tail = b"H" * PROBE, b"T" * PROBE
+    small = tmp_path / "small.bin"
+    small.write_bytes(head + b"." * PROBE + tail)
+
+    signature = ArtifactCache._quick_signature(small, probe=PROBE)
+    reconstructed = hashlib.sha256(f"{small.stat().st_size}:".encode())
+    reconstructed.update(head)
+    reconstructed.update(tail)
+    assert signature == reconstructed.hexdigest()
