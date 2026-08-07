@@ -9,7 +9,7 @@ from datetime import datetime
 from cstar_forge.forge.source_data import SourceData
 from cstar_forge.config import resolve_host
 
-host = resolve_host(working_dir="~/cstar-forge-data/my_domain")
+host = resolve_host(working_dir="~/cstar-forge-run/my_domain")
 
 start_time = datetime(2012, 1, 1)
 end_time = datetime(2012, 1, 2)

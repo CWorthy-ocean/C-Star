@@ -340,7 +340,11 @@ DEFAULT_APPLICATION = "forge"
 # spec-default sentinel: ForgeBlueprint expands it to ``<root>/<name>`` on validation,
 # and host providers (Forge's ``config.resolve_host``; eventually C-Star) may rebase
 # default-form paths onto host scratch at run time.
-DEFAULT_WORKING_ROOT = "~/cstar-forge-data/cstar-forge-run"
+DEFAULT_WORKING_ROOT = "~/cstar-forge-run"
+
+# Sibling root segment (alongside DEFAULT_WORKING_ROOT's) for the emitted roms-marbl
+# blueprint's working_dir; see ForgeExecutor.roms_blueprint_working_dir in executor.py.
+ROMS_RUN_SEGMENT = "cstar-roms-run"
 
 _NAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _NAME_RUN_RE = re.compile(r"[_.-]{2,}")

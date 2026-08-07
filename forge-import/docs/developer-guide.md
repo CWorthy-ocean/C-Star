@@ -140,7 +140,7 @@ repo refs) · `composition` (which catalog pieces produced this + overrides laye
 `forge_blueprint_version`) and injects a `$schema` key on serialization (stripped back
 out on load by the same before-validator).
 
-- **`working_dir`** (default `~/cstar-forge-data`) is the single per-run artifact root —
+- **`working_dir`** (default `~/cstar-forge-run`) is the single per-run artifact root —
   everything the executor *produces* lands under it. It's host/location, not
   results-affecting, so it's excluded from `content_hash`. Redeclared as `str` (the
   `Blueprint` base's is `Path`) to preserve the sentinel-expansion behavior below —

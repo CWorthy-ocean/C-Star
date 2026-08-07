@@ -49,7 +49,11 @@ from pydantic import (
 )
 
 from cstar_forge.forge import input_data, source_data
-from cstar_forge.forge.forge_blueprint import DEFAULT_WORKING_ROOT, OpenBoundaries
+from cstar_forge.forge.forge_blueprint import (
+    DEFAULT_WORKING_ROOT,
+    ROMS_RUN_SEGMENT,
+    OpenBoundaries,
+)
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
 from cstar_forge.utils import mem_log
@@ -606,11 +610,11 @@ class ForgeExecutor(BaseModel):
     def roms_blueprint_working_dir(self) -> Path:
         """Working dir for the emitted ROMS blueprint.
 
-        Mirrors ``run_output_dir`` but under a ``cstar-blueprint-run`` root instead of
+        Mirrors ``run_output_dir`` but under a ``cstar-roms-run`` root instead of
         the forge run's ``cstar-forge-run`` root, so the two stages don't share a dir.
         """
         forge_seg = Path(DEFAULT_WORKING_ROOT).name  # "cstar-forge-run"
-        blueprint_seg = forge_seg.replace("cstar-forge-run", "cstar-blueprint-run")
+        blueprint_seg = ROMS_RUN_SEGMENT
         run_dir = self.run_output_dir
         if forge_seg in run_dir.parts:
             return Path(
