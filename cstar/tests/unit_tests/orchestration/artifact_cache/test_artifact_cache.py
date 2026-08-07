@@ -1,6 +1,7 @@
 """Unit tests for :class:`cstar.orchestration.artifact_cache.ArtifactCache`."""
 
 import json
+import logging
 import os
 import threading
 from pathlib import Path
@@ -17,6 +18,7 @@ from cstar.orchestration.artifact_cache import (
     ArtifactCacheError,
     ArtifactExistsError,
     ArtifactNotFoundError,
+    OnConflict,
     Tier,
     UnsafePathError,
 )
@@ -463,7 +465,7 @@ def test_promote_treats_shared_as_immutable(
 ) -> None:
     """Re-promotion is refused by default to protect published data."""
     cache.promote(staged_artifact, RUN_ID)
-    with pytest.raises(ArtifactExistsError, match="overwrite=True"):
+    with pytest.raises(ArtifactExistsError, match="OnConflict"):
         cache.promote(staged_artifact, RUN_ID)
 
 
@@ -474,7 +476,7 @@ def test_promote_can_overwrite_explicitly(
     cache.promote(staged_artifact, RUN_ID)
     with cache.stage(staged_artifact, RUN_ID) as tmp:
         tmp.write_bytes(b"revised")
-    shared = cache.promote(staged_artifact, RUN_ID, overwrite=True)
+    shared = cache.promote(staged_artifact, RUN_ID, on_conflict=OnConflict.OVERWRITE)
     assert shared.path.read_bytes() == b"revised"
 
 
@@ -1179,7 +1181,9 @@ def test_repromotion_without_a_digest_is_treated_as_a_conflict(
         cache.promote("shared.nc", "run-B")
 
 
-def test_overwrite_forces_republication(user_root: Path, shared_root: Path) -> None:
+def test_overwrite_policy_forces_republication(
+    user_root: Path, shared_root: Path
+) -> None:
     """An explicit flag still allows replacing shared content.
 
     Parameters
@@ -1196,7 +1200,7 @@ def test_overwrite_forces_republication(user_root: Path, shared_root: Path) -> N
         tmp.write_bytes(b"divergent")
 
     cache.promote("shared.nc", "run-A")
-    cache.promote("shared.nc", "run-B", overwrite=True)
+    cache.promote("shared.nc", "run-B", on_conflict=OnConflict.OVERWRITE)
 
     assert cache.locate("shared.nc", Tier.SHARED).path.read_bytes() == b"divergent"
     record = cache.read_shared_record("shared.nc")
@@ -1422,7 +1426,7 @@ def test_references_survive_republication(user_root: Path, shared_root: Path) ->
 
     with cache.stage(name, "run-D") as tmp:
         tmp.write_bytes(b"revised")
-    cache.promote(name, "run-D", overwrite=True)
+    cache.promote(name, "run-D", on_conflict=OnConflict.OVERWRITE)
 
     record = cache.read_shared_record(name)
     assert record is not None
@@ -1779,3 +1783,158 @@ def test_is_same_file_tolerates_a_missing_path(tmp_path: Path) -> None:
 
     assert ArtifactCache._is_same_file(present, tmp_path / "absent.nc") is False
     assert ArtifactCache._is_same_file(present, present) is True
+
+
+# ---------------------------------------------------------------------------
+# Conflict policy
+# ---------------------------------------------------------------------------
+
+
+def _diverging(user_root: Path, shared_root: Path) -> ArtifactCache:
+    """Promote one artifact, then stage differing bytes under the same name.
+
+    Parameters
+    ----------
+    user_root : Path
+        User tier root.
+    shared_root : Path
+        Shared tier root.
+
+    Returns
+    -------
+    ArtifactCache
+        Cache whose ``run-B`` copy of ``shared.nc`` differs from the published
+        one.
+    """
+    cache = _shared_cache(user_root, shared_root)
+    with cache.stage("shared.nc", "run-A") as tmp:
+        tmp.write_bytes(b"original")
+    cache.promote("shared.nc", "run-A")
+    with cache.stage("shared.nc", "run-B") as tmp:
+        tmp.write_bytes(b"divergent")
+    return cache
+
+
+def test_on_conflict_defaults_to_error(user_root: Path, shared_root: Path) -> None:
+    """Hand-chosen names make a collision worth refusing."""
+    cache = _diverging(user_root, shared_root)
+    with pytest.raises(ArtifactExistsError):
+        cache.promote("shared.nc", "run-B")
+
+
+def test_on_conflict_skip_keeps_the_published_copy(
+    user_root: Path, shared_root: Path
+) -> None:
+    """First-writer-wins: consumers keep the bytes they already validated."""
+    cache = _diverging(user_root, shared_root)
+
+    result = cache.promote("shared.nc", "run-B", on_conflict=OnConflict.SKIP)
+
+    assert result.path == cache.locate("shared.nc", Tier.SHARED).path
+    assert result.path.read_bytes() == b"original"
+    record = cache.read_shared_record("shared.nc")
+    assert record is not None
+    assert record.promoted_from_run_id == "run-A"
+
+
+def test_skip_records_the_divergence(user_root: Path, shared_root: Path) -> None:
+    """Skipping stays observant, since the cause may be a defective key.
+
+    A byte difference is either benign non-reproducibility or a key that omits
+    a relevant input, and the two are indistinguishable at the time. Counting
+    the occurrence keeps the evidence for later.
+    """
+    cache = _diverging(user_root, shared_root)
+
+    cache.promote("shared.nc", "run-B", on_conflict=OnConflict.SKIP)
+
+    record = cache.read_shared_record("shared.nc")
+    assert record is not None
+    assert record.divergent_promotions == 1
+    assert record.last_divergent_run_id == "run-B"
+
+
+def test_skip_accumulates_divergences(user_root: Path, shared_root: Path) -> None:
+    """Repeated mismatches are counted, so a recurring problem is visible."""
+    cache = _diverging(user_root, shared_root)
+    cache.promote("shared.nc", "run-B", on_conflict=OnConflict.SKIP)
+    with cache.stage("shared.nc", "run-C") as tmp:
+        tmp.write_bytes(b"also divergent")
+    cache.promote("shared.nc", "run-C", on_conflict=OnConflict.SKIP)
+
+    record = cache.read_shared_record("shared.nc")
+    assert record is not None
+    assert record.divergent_promotions == 2
+    assert record.last_divergent_run_id == "run-C"
+
+
+def test_skip_warns(
+    user_root: Path, shared_root: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The operator running the promotion is told it did nothing."""
+    cache = _diverging(user_root, shared_root)
+
+    with caplog.at_level(logging.WARNING):
+        cache.promote("shared.nc", "run-B", on_conflict=OnConflict.SKIP)
+
+    assert "Skipped promoting" in caplog.text
+
+
+def test_skip_is_a_no_op_for_identical_content(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Matching bytes never reach the policy, so nothing is recorded."""
+    cache = _shared_cache(user_root, shared_root)
+    for run in ("run-A", "run-B"):
+        with cache.stage("shared.nc", run) as tmp:
+            tmp.write_bytes(b"identical")
+    cache.promote("shared.nc", "run-A")
+
+    cache.promote("shared.nc", "run-B", on_conflict=OnConflict.SKIP)
+
+    record = cache.read_shared_record("shared.nc")
+    assert record is not None
+    assert record.divergent_promotions == 0
+
+
+def test_overwrite_policy_skips_the_digest(user_root: Path, shared_root: Path) -> None:
+    """Replacing unconditionally should not pay to compare content first."""
+    cache = _diverging(user_root, shared_root)
+
+    with mock.patch.object(
+        ArtifactCache, "_same_content", side_effect=AssertionError("compared!")
+    ) as compared:
+        cache.promote("shared.nc", "run-B", on_conflict=OnConflict.OVERWRITE)
+
+    compared.assert_not_called()
+    assert cache.locate("shared.nc", Tier.SHARED).path.read_bytes() == b"divergent"
+
+
+def test_divergence_counters_survive_republication(
+    user_root: Path, shared_root: Path
+) -> None:
+    """History of the name outlives any particular published copy."""
+    cache = _diverging(user_root, shared_root)
+    cache.promote("shared.nc", "run-B", on_conflict=OnConflict.SKIP)
+
+    cache.promote("shared.nc", "run-B", on_conflict=OnConflict.OVERWRITE)
+
+    record = cache.read_shared_record("shared.nc")
+    assert record is not None
+    assert record.divergent_promotions == 1
+    assert record.promoted_from_run_id == "run-B"
+
+
+@pytest.mark.parametrize("policy", list(OnConflict))
+def test_identity_short_circuits_every_policy(
+    user_root: Path, shared_root: Path, policy: OnConflict
+) -> None:
+    """A symlinked entry is the same file, so no policy applies."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+    _link_into_run(cache, name, "run-B")
+
+    assert (
+        cache.promote(name, "run-B", on_conflict=policy).path
+        == cache.locate(name, Tier.SHARED).path
+    )

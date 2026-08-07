@@ -71,6 +71,7 @@ from pydantic import (
 
 from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_BYPASS
 from cstar.base.feature import is_flag_enabled
+from cstar.base.log import get_logger
 from cstar.orchestration.fingerprinting import (
     ChecksumMode,
     Fingerprinter,
@@ -92,12 +93,16 @@ __all__ = [
     "Fingerprinter",
     "Location",
     "Manifest",
+    "OnConflict",
     "Reference",
     "SharedRecord",
     "Tier",
     "UnsafePathError",
     "UsageReport",
 ]
+
+log = get_logger(__name__)
+"""Module logger."""
 
 MANIFEST_NAME: Final[str] = "manifest.json"
 """Filename of the sidecar manifest written into every user-tier run directory."""
@@ -153,6 +158,34 @@ class Tier(StrEnum):
 
     USER = "user"
     SHARED = "shared"
+
+
+class OnConflict(StrEnum):
+    """Policy for promoting a name the shared tier already holds.
+
+    Applies only when the two artifacts are *not* the same file and their
+    contents differ; identical content is always an idempotent no-op.
+
+    Attributes
+    ----------
+    ERROR : str
+        Refuse the promotion. Correct while names are hand-chosen, where a
+        collision plausibly means two unrelated artifacts claiming one name.
+    SKIP : str
+        Keep the published copy and return its location. First-writer-wins.
+        Correct once keys are input-addressed, because the key already asserts
+        the two results are interchangeable and a byte difference then reflects
+        non-reproducibility rather than conflict. The divergence is still
+        recorded, since it may instead mean the key omits a relevant input.
+    OVERWRITE : str
+        Replace the published copy and stamp new provenance. Last-writer-wins,
+        which silently changes the bytes under consumers that have already
+        recorded a use, so it is never the default.
+    """
+
+    ERROR = "error"
+    SKIP = "skip"
+    OVERWRITE = "overwrite"
 
 
 class CacheModel(BaseModel):
@@ -386,11 +419,20 @@ class SharedRecord(ArtifactRecord):
     reference_total : int, optional
         Count of distinct runs that have ever recorded a use, including any
         dropped from :attr:`references` by the cap.
+    divergent_promotions : int, optional
+        Times a promotion was skipped because another run produced different
+        bytes under this name. Benign non-reproducibility looks identical to a
+        key that omits a relevant input, so the occurrences are counted rather
+        than discarded.
+    last_divergent_run_id : str or None, optional
+        Run whose differing promotion was most recently skipped.
     """
 
     references: list[Reference] = Field(default_factory=list)
     first_referenced_at: str | None = None
     reference_total: int = 0
+    divergent_promotions: int = 0
+    last_divergent_run_id: str | None = None
 
     @field_validator("references", mode="before")
     @classmethod
@@ -1011,7 +1053,7 @@ class ArtifactCache:
         self,
         name: str,
         run_id: str,
-        overwrite: bool = False,
+        on_conflict: OnConflict = OnConflict.ERROR,
         fingerprinter: Fingerprinter | None = None,
     ) -> Location:
         """Copy a user-tier artifact into the shared tier, addressed by name.
@@ -1024,9 +1066,11 @@ class ArtifactCache:
         valid. Provenance that the path no longer carries is recorded on the
         shared sidecar.
 
-        Re-promoting a name that already exists compares fingerprints:
-        byte-identical content is an idempotent no-op, and content that differs
-        raises, because ``name`` is the sole identity of shared artifacts.
+        Re-promoting a name that already exists is resolved in three steps.
+        The same file — a symlink or hardlink into the shared tier — is
+        recognised by inode and returns immediately. Otherwise byte-identical
+        content is an idempotent no-op. Only genuinely differing content
+        consults ``on_conflict``.
 
         Parameters
         ----------
@@ -1034,9 +1078,10 @@ class ArtifactCache:
             Artifact filename.
         run_id : str
             Run whose user-tier copy to promote.
-        overwrite : bool, optional
-            Replace an existing shared artifact even when content differs.
-            Default ``False``, since promoted data is treated as immutable.
+        on_conflict : OnConflict, optional
+            What to do when a *different* artifact already holds this name.
+            Default :attr:`OnConflict.ERROR`, appropriate while names are
+            hand-chosen. See :class:`OnConflict`.
         fingerprinter : Fingerprinter or None, optional
             Strategy used to fingerprint the promoted copy. Defaults to the
             cache's own.
@@ -1052,7 +1097,7 @@ class ArtifactCache:
             If the artifact is absent from the named run's user tier.
         ArtifactExistsError
             If a different artifact already occupies that shared name and
-            ``overwrite`` is ``False``.
+            ``on_conflict`` is :attr:`OnConflict.ERROR`.
         """
         user = self.locate(name, Tier.USER, run_id)
         if not user.exists:
@@ -1061,14 +1106,21 @@ class ArtifactCache:
             )
         shared = self.locate(name, Tier.SHARED)
 
-        if shared.exists and not overwrite:
-            if self._same_content(user, shared):
+        if shared.exists:
+            if self._is_same_file(user.path, shared.path):
                 return shared
-            raise ArtifactExistsError(
-                f"{shared.path} already holds different content for {name!r}; "
-                "shared artifacts are addressed by name alone, so either choose a "
-                "content-identifying name or pass overwrite=True"
-            )
+            if on_conflict is not OnConflict.OVERWRITE:
+                if self._same_content(user, shared):
+                    return shared
+                if on_conflict is OnConflict.ERROR:
+                    raise ArtifactExistsError(
+                        f"{shared.path} already holds different content for "
+                        f"{name!r}; shared artifacts are addressed by name alone, "
+                        "so either choose a content-identifying name or pass "
+                        "on_conflict=OnConflict.SKIP or OnConflict.OVERWRITE"
+                    )
+                self._note_divergence(name, run_id)
+                return shared
 
         existing = self.record_for(user)
         with self.stage(
@@ -1120,6 +1172,42 @@ class ArtifactCache:
             return False
         strategy = fingerprinter_for(record.checksum_mode)
         return strategy.matches(user.path, record.checksum)
+
+    def _note_divergence(self, name: str, run_id: str) -> None:
+        """Record that a differing promotion was skipped.
+
+        A byte difference under one name has two indistinguishable causes: the
+        computation was not bit-reproducible, or the key that produced the name
+        omits an input that actually matters. The second is a defect that stays
+        hidden for months, so the occurrence is counted and logged rather than
+        discarded silently.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        run_id : str
+            Run whose promotion was skipped.
+        """
+        log.warning(
+            "Skipped promoting %r from run %r: the shared copy holds different "
+            "bytes. If names are input-addressed this is usually non-reproducible "
+            "output; if it recurs, check whether the key omits a relevant input.",
+            name,
+            run_id,
+        )
+        with self._lock(self.shared_record_path(name)):
+            record = self.read_shared_record(name)
+            if record is None:
+                return
+            self.write_shared_record(
+                record.model_copy(
+                    update={
+                        "divergent_promotions": record.divergent_promotions + 1,
+                        "last_divergent_run_id": run_id,
+                    }
+                )
+            )
 
     @staticmethod
     def _is_same_file(left: Path, right: Path) -> bool:
@@ -1772,6 +1860,8 @@ class ArtifactCache:
                             "references": list(previous.references),
                             "first_referenced_at": previous.first_referenced_at,
                             "reference_total": previous.reference_total,
+                            "divergent_promotions": previous.divergent_promotions,
+                            "last_divergent_run_id": previous.last_divergent_run_id,
                         }
                     )
                 self.write_shared_record(shared)
