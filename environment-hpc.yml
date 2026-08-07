@@ -4,6 +4,6 @@ channels:
 dependencies:
   - python>=3.12,<3.14
   - pip
-  - roms-tools>=4.0.0,<5
+  - roms-tools>=4.0.1,<5
   # docs builds only
   - pandoc
