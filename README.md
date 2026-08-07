@@ -1,5 +1,6 @@
 [![codecov](https://codecov.io/gh/CWorthy-ocean/C-Star/graph/badge.svg?token=HAPZGL2LWF)](https://codecov.io/gh/CWorthy-ocean/C-Star)
 [![Documentation Status](https://readthedocs.org/projects/c-star/badge/?version=latest)](https://c-star.readthedocs.io/en/latest/?badge=latest)
+[![Conda Version](https://img.shields.io/conda/vn/conda-forge/cstar-ocean.svg)](https://anaconda.org/conda-forge/cstar-ocean)
 
 > [!Warning] 
 > **This project is still in an early phase of development.**
@@ -12,7 +13,25 @@ We expect to reach a more stable version in Q1 2026.
 
 # Installation
 
-## Installation from GitHub
+## Install with conda (recommended)
+
+`C-Star` is published on [conda-forge](https://anaconda.org/conda-forge/cstar-ocean) as `cstar-ocean`.
+
+On a laptop or workstation, install `cstar-ocean-standalone`, which bundles a complete build toolchain (compilers, MPI, netCDF-Fortran, PnetCDF, CMake) so ROMS can be compiled with no system dependencies:
+
+```
+conda create -n cstar-env -c conda-forge cstar-ocean-standalone
+```
+
+On a supported HPC system (toolchain provided by Environment Modules), install just the package:
+
+```
+conda create -n cstar-env -c conda-forge cstar-ocean
+```
+
+Then `conda activate cstar-env` and you're ready to go.
+
+## Installation from source (developers)
 
 To obtain the latest development version, clone [this repository](https://github.com/CWorthy-ocean/C-Star):
 
@@ -21,7 +40,7 @@ git clone https://github.com/CWorthy-ocean/C-Star.git
 cd C-Star
 ``` 
 
-Next, install **one** of the following conda environments, depending on whether you are working on a supported HPC system (environment management by Linux Environment Modules) or a generic machine like a laptop (environment managed by conda):
+Next, install **one** of the following conda environments, depending on whether you are working on a supported HPC system (environment management by Linux Environment Modules) or a generic machine like a laptop (`environment-laptop.yml` bundles the same conda-forge toolchain that `cstar-ocean-standalone` provides, for developers who prefer an editable install):
 
 ```
 conda env create -f environment-hpc.yml  # conda environment for supported HPC system

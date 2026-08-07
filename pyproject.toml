@@ -35,10 +35,8 @@ dependencies = [
     "PyYAML>=6.0,<7",
     "f90nml>=1.4",
     "numpy>2.0,<2.4",
-    # Released roms-tools 4.0.0 still ships dask as the `[dask]` extra; keep it
-    # until a roms-tools release makes dask a core dep (pip treats an unknown
-    # extra as a warning, so this stays safe after that lands).
-    "roms_tools[dask]>=4.0.0,<5",
+    # dask is a core roms-tools dependency as of 4.0.1 (the [dask] extra is gone).
+    "roms_tools>=4.0.1,<5",
     "typer<=0.25",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
@@ -126,7 +124,7 @@ convention = "pep257"
 config = ".pre-commit-config.yaml"
 
 [tool.setuptools.packages.find]
-exclude = ["tests*", "docs*", "examples*", "additional_files*", "externals*"]
+exclude = ["tests*", "docs*", "examples*", "additional_files*", "externals*", "ci*", "build*"]
 
 [tool.setuptools]
 include-package-data = true
