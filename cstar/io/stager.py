@@ -1,3 +1,4 @@
+import os
 import shutil
 from abc import ABC
 from typing import TYPE_CHECKING, ClassVar, cast
@@ -75,7 +76,7 @@ class Stager(ABC):
             source=self.source,
             path=retrieved_path,
             sha256=self.source.file_hash,
-            stat=None,
+            stat=os.stat(retrieved_path) if retrieved_path.exists() else None,
         )
 
 
@@ -106,7 +107,10 @@ class LocalBinaryFileStager(Stager):
         target_path.symlink_to(self.source.location)
 
         return StagedFile(
-            source=self.source, path=target_path, sha256=(self.source.file_hash or None)
+            source=self.source,
+            path=target_path,
+            sha256=(self.source.file_hash or None),
+            stat=os.stat(target_path) if target_path.exists() else None,
         )
 
 

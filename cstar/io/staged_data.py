@@ -124,15 +124,20 @@ class StagedFile(StagedData):
     def changed_from_source(self) -> bool:
         """True if the file has changed since staging.
 
-        Checks cached checksum, filesize, and modification time against current
-        values.
+        Checks cached filesize and modification time first, then the cached
+        checksum. The `stat` comparison is only ever used to report a change
+        early, never to skip the checksum: matching size and modification time
+        do not prove matching content, and on network filesystems such as
+        Lustre a cached or skewed `mtime` can misreport an unchanged file.
+        A mismatch, by contrast, is conclusive, and avoids hashing a file
+        already known to differ.
         """
         resolved_path = self._path.resolve()
         if not resolved_path.exists():
             return True
 
         if stat := self._stat:
-            r_stat = os.stat(resolved_path.resolve())
+            r_stat = os.stat(resolved_path)
 
             if stat.st_mtime != r_stat.st_mtime:
                 return True
@@ -140,7 +145,7 @@ class StagedFile(StagedData):
             if stat.st_size != r_stat.st_size:
                 return True
 
-        if self._sha256 and self._sha256 != _get_sha256_hash(resolved_path.resolve()):
+        if self._sha256 and self._sha256 != _get_sha256_hash(resolved_path):
             return True
 
         return False
