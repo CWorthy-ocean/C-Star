@@ -90,8 +90,11 @@ __all__ = [
     "Fingerprinter",
     "Location",
     "Manifest",
+    "Reference",
+    "SharedRecord",
     "Tier",
     "UnsafePathError",
+    "UsageReport",
 ]
 
 MANIFEST_NAME: Final[str] = "manifest.json"
@@ -102,6 +105,17 @@ SHARED_RECORD_DIR: Final[str] = ".manifests"
 
 MANIFEST_VERSION: Final[int] = 2
 """Schema version stamped into each manifest, for future migrations."""
+
+MAX_REFERENCES: Final[int] = 64
+"""Most recent reference entries retained per shared artifact.
+
+The log is capped so a widely used artifact's sidecar stays small; the entries
+dropped are the least recently used, and their existence survives in
+:attr:`SharedRecord.reference_total`.
+"""
+
+DEFAULT_USE_INTERVAL_SECONDS: Final[float] = 3600.0
+"""Minimum gap between recorded touches of one artifact by one run."""
 
 _LOCK_SUFFIX: Final[str] = ".lock"
 _TMP_SUFFIX: Final[str] = ".tmp"
@@ -323,6 +337,126 @@ class ArtifactRecord(CacheModel):
             If a required field is missing or a value cannot be coerced.
         """
         return cls.model_validate(payload)
+
+
+class Reference(CacheModel):
+    """A run's recorded use of a shared artifact.
+
+    Notes
+    -----
+    This is a *lease*, not a reference count. Acquisition is voluntary — a
+    consumer that opens :attr:`Location.path` directly is invisible to the
+    cache — and release never happens reliably, because runs are killed by
+    schedulers and crash without unwinding. A timestamp degrades safely under
+    both: a vanished run's entry simply ages out, while a live consumer keeps
+    refreshing its own.
+
+    Parameters
+    ----------
+    run_id : str
+        Run that used the artifact.
+    used_by : str
+        Operating-system username of the consumer.
+    last_used_at : str
+        UTC ISO-8601 timestamp of the most recent recorded use.
+    """
+
+    run_id: str
+    used_by: str
+    last_used_at: str
+
+
+class SharedRecord(ArtifactRecord):
+    """Record for a shared-tier artifact, extended with a reference log.
+
+    Subclasses :class:`ArtifactRecord` rather than reusing :class:`Manifest`,
+    because the shared tier has no directory to collect: it keeps one sidecar
+    per artifact. Every inherited field applies, and only the shared-specific
+    lifecycle information is added.
+
+    Parameters
+    ----------
+    references : list of Reference, optional
+        Recent consumers, most-recently-used last. Capped at
+        :data:`MAX_REFERENCES`.
+    first_referenced_at : str or None, optional
+        UTC ISO-8601 timestamp of the earliest recorded use.
+    reference_total : int, optional
+        Count of distinct runs that have ever recorded a use, including any
+        dropped from :attr:`references` by the cap.
+    """
+
+    references: list[Reference] = Field(default_factory=list[Reference])
+    first_referenced_at: str | None = None
+    reference_total: int = 0
+
+    @field_validator("references", mode="before")
+    @classmethod
+    def _coerce_null_references(cls, value: Any) -> Any:
+        """Treat an explicit JSON null as an empty reference log.
+
+        Parameters
+        ----------
+        value : Any
+            Raw value supplied for the ``references`` field.
+
+        Returns
+        -------
+        Any
+            An empty list when ``value`` is ``None``, otherwise ``value``.
+        """
+        return [] if value is None else value
+
+    @property
+    def last_used_at(self) -> str | None:
+        """Most recent recorded use, or the promotion time when never used.
+
+        Falls back to :attr:`ArtifactRecord.promoted_at` so an artifact nobody
+        has read still has a meaningful age, rather than looking infinitely
+        stale.
+
+        Returns
+        -------
+        str or None
+            UTC ISO-8601 timestamp, or ``None`` when neither exists.
+        """
+        if self.references:
+            return max(ref.last_used_at for ref in self.references)
+        return self.promoted_at
+
+
+class UsageReport(CacheModel):
+    """Summary of one shared artifact's size, age, and recent consumers.
+
+    Returned by :meth:`ArtifactCache.gc_candidates`, which reports rather than
+    deletes: liveness here is inferred from voluntary registration, and acting
+    on it automatically would eventually delete data somebody still needs.
+
+    Parameters
+    ----------
+    name : str
+        Artifact filename.
+    size_bytes : int
+        Size recorded at commit time.
+    last_used_at : str or None
+        Most recent recorded use, or promotion time when never used.
+    idle_days : float or None
+        Days since :attr:`last_used_at`, or ``None`` when no timestamp exists.
+    reference_total : int
+        Distinct runs that have ever recorded a use.
+    recent_runs : list of str
+        Run identifiers retained in the reference log, most recent last.
+    promoted_from_run_id : str or None
+        Run whose copy was promoted.
+    """
+
+    name: str
+    size_bytes: int
+    last_used_at: str | None
+    idle_days: float | None
+    reference_total: int
+    recent_runs: list[str]
+    promoted_from_run_id: str | None
 
 
 class Manifest(CacheModel):
@@ -564,6 +698,7 @@ class ArtifactCache:
         name: str,
         run_id: str | None = None,
         prefer_local: bool = False,
+        record_use: bool = False,
     ) -> Location | None:
         """Find an artifact, checking the shared tier first.
 
@@ -579,6 +714,13 @@ class ArtifactCache:
             Reverse the precedence and check the user tier first. Useful when
             iterating locally on a product that also exists in the shared tier.
             Ignored when ``run_id`` is ``None``.
+        record_use : bool, optional
+            Record this run's use when the artifact resolves to the shared
+            tier, via :meth:`record_use`. Putting the touch on the read path is
+            what keeps the reference log honest: a consumer that resolves and
+            then opens the path directly would otherwise be invisible. Writes
+            are debounced, so this costs at most one small write per artifact
+            per run per :data:`DEFAULT_USE_INTERVAL_SECONDS`.
 
         Returns
         -------
@@ -593,7 +735,15 @@ class ArtifactCache:
         ordered = self.candidates(name, run_id)
         if prefer_local and len(ordered) > 1:
             ordered = tuple(reversed(ordered))
-        return next((x for x in ordered if x.exists), None)
+        location = next((x for x in ordered if x.exists), None)
+        if (
+            location is not None
+            and record_use
+            and location.tier is Tier.SHARED
+            and run_id is not None
+        ):
+            self.record_use(name, run_id)
+        return location
 
     def require(
         self,
@@ -719,7 +869,8 @@ class ArtifactCache:
             tmp.unlink(missing_ok=True)
             raise
 
-        record = ArtifactRecord(
+        record_cls = SharedRecord if tier is Tier.SHARED else ArtifactRecord
+        record = record_cls(
             name=name,
             size_bytes=size,
             created_at=self._utcnow(),
@@ -937,6 +1088,159 @@ class ArtifactCache:
         strategy = fingerprinter_for(record.checksum_mode)
         return strategy.matches(location.path, record.checksum)
 
+    def record_use(
+        self,
+        name: str,
+        run_id: str,
+        min_interval_seconds: float = DEFAULT_USE_INTERVAL_SECONDS,
+    ) -> bool:
+        """Record that a run used a shared artifact, debounced.
+
+        Upserts the run's entry in the artifact's reference log. A run that
+        reads the same artifact repeatedly refreshes its own timestamp at most
+        once per ``min_interval_seconds``, so a hot artifact does not generate
+        a write per read.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        run_id : str
+            Run recording the use.
+        min_interval_seconds : float, optional
+            Minimum gap between recorded touches by the same run. Pass ``0`` to
+            force a write.
+
+        Returns
+        -------
+        bool
+            Whether the sidecar was updated. ``False`` means either the touch
+            was debounced, or there is no shared artifact and record to attach
+            it to.
+        """
+        location = self.locate(name, Tier.SHARED)
+        if not location.exists:
+            return False
+
+        with self._lock(self.shared_record_path(name)):
+            record = self.read_shared_record(name)
+            if record is None:
+                return False
+
+            now = self._utcnow()
+            others = [ref for ref in record.references if ref.run_id != run_id]
+            mine = next(
+                (ref for ref in record.references if ref.run_id == run_id), None
+            )
+            if mine is not None and self._age_seconds(mine.last_used_at, now) < (
+                min_interval_seconds
+            ):
+                return False
+
+            entry = Reference(run_id=run_id, used_by=self._username(), last_used_at=now)
+            references = [*others, entry][-MAX_REFERENCES:]
+            self.write_shared_record(
+                record.model_copy(
+                    update={
+                        "references": references,
+                        "first_referenced_at": record.first_referenced_at or now,
+                        "reference_total": record.reference_total
+                        + (1 if mine is None else 0),
+                    }
+                )
+            )
+        return True
+
+    def references_for(self, name: str) -> list[Reference]:
+        """Return the retained reference log for a shared artifact.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+
+        Returns
+        -------
+        list of Reference
+            Recent consumers, most-recently-used last. Empty when the artifact
+            has no record or no recorded uses.
+        """
+        record = self.read_shared_record(name)
+        return list(record.references) if record else []
+
+    def gc_candidates(self, idle_days: float = 180.0) -> list[UsageReport]:
+        """Report shared artifacts that nothing has touched recently.
+
+        Reports only; nothing is deleted. Liveness here is *inferred* from
+        voluntary registration, so a quiet artifact may still have readers that
+        never went through :meth:`record_use`. Deletion stays a human decision
+        via :meth:`delete_shared`.
+
+        Parameters
+        ----------
+        idle_days : float, optional
+            Minimum idle period for an artifact to be reported.
+
+        Returns
+        -------
+        list of UsageReport
+            Candidates, most idle first. Artifacts with no timestamp at all —
+            neither a use nor a promotion — are included, since nothing
+            suggests they are live.
+        """
+        now = self._utcnow()
+        reports: list[UsageReport] = []
+        for location in self.list_shared_artifacts():
+            record = self.read_shared_record(location.name)
+            if record is None:
+                continue
+            last_used = record.last_used_at
+            age = (
+                self._age_seconds(last_used, now) / 86400.0
+                if last_used is not None
+                else None
+            )
+            if age is not None and age < idle_days:
+                continue
+            reports.append(
+                UsageReport(
+                    name=record.name,
+                    size_bytes=record.size_bytes,
+                    last_used_at=last_used,
+                    idle_days=round(age, 2) if age is not None else None,
+                    reference_total=record.reference_total,
+                    recent_runs=[ref.run_id for ref in record.references],
+                    promoted_from_run_id=record.promoted_from_run_id,
+                )
+            )
+        reports.sort(key=lambda r: (r.idle_days is None, -(r.idle_days or 0.0)))
+        return reports
+
+    @staticmethod
+    def _age_seconds(earlier: str, later: str) -> float:
+        """Return the gap in seconds between two ISO-8601 timestamps.
+
+        Parameters
+        ----------
+        earlier : str
+            Earlier timestamp.
+        later : str
+            Later timestamp.
+
+        Returns
+        -------
+        float
+            Seconds between them, or ``0.0`` if either cannot be parsed, which
+            makes an unparseable timestamp look recent rather than infinitely
+            stale.
+        """
+        try:
+            return (
+                datetime.fromisoformat(later) - datetime.fromisoformat(earlier)
+            ).total_seconds()
+        except ValueError:
+            return 0.0
+
     # ------------------------------------------------------------------
     # Records
     # ------------------------------------------------------------------
@@ -1015,7 +1319,7 @@ class ArtifactCache:
         """
         return self._write_json(self.manifest_path(manifest.run_id), manifest.to_dict())
 
-    def read_shared_record(self, name: str) -> ArtifactRecord | None:
+    def read_shared_record(self, name: str) -> SharedRecord | None:
         """Read the sidecar record for a shared-tier artifact.
 
         Parameters
@@ -1025,7 +1329,7 @@ class ArtifactCache:
 
         Returns
         -------
-        ArtifactRecord or None
+        SharedRecord or None
             Parsed record, or ``None`` when the sidecar is missing or
             unreadable.
         """
@@ -1033,16 +1337,16 @@ class ArtifactCache:
         if payload is None:
             return None
         try:
-            return ArtifactRecord.from_dict(payload)
+            return SharedRecord.model_validate(payload)
         except ValidationError:
             return None
 
-    def write_shared_record(self, record: ArtifactRecord) -> Path:
+    def write_shared_record(self, record: SharedRecord) -> Path:
         """Atomically write a shared-tier sidecar record.
 
         Parameters
         ----------
-        record : ArtifactRecord
+        record : SharedRecord
             Record to persist.
 
         Returns
@@ -1357,7 +1661,21 @@ class ArtifactCache:
         """
         if location.tier is Tier.SHARED:
             with self._lock(self.shared_record_path(location.name)):
-                self.write_shared_record(record)
+                shared = (
+                    record
+                    if isinstance(record, SharedRecord)
+                    else SharedRecord.model_validate(record.to_dict())
+                )
+                previous = self.read_shared_record(location.name)
+                if previous is not None:
+                    shared = shared.model_copy(
+                        update={
+                            "references": list(previous.references),
+                            "first_referenced_at": previous.first_referenced_at,
+                            "reference_total": previous.reference_total,
+                        }
+                    )
+                self.write_shared_record(shared)
             return
 
         assert location.run_id is not None

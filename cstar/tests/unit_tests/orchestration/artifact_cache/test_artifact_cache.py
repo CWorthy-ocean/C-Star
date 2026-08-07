@@ -10,6 +10,7 @@ import pytest
 
 from cstar.orchestration.artifact_cache import (
     MANIFEST_NAME,
+    MAX_REFERENCES,
     SHARED_RECORD_DIR,
     ArtifactCache,
     ArtifactCacheError,
@@ -1239,3 +1240,264 @@ def test_verify_works_without_a_run_id(user_root: Path, shared_root: Path) -> No
     assert cache.verify("shared.nc") is True
     cache.locate("shared.nc", Tier.SHARED).path.write_bytes(b"tampered")
     assert cache.verify("shared.nc") is False
+
+
+# ---------------------------------------------------------------------------
+# Reference log
+# ---------------------------------------------------------------------------
+
+
+def _shared_cache(user_root: Path, shared_root: Path) -> ArtifactCache:
+    """Build a cache whose fingerprints allow idempotent re-promotion.
+
+    Parameters
+    ----------
+    user_root : Path
+        User tier root.
+    shared_root : Path
+        Shared tier root.
+
+    Returns
+    -------
+    ArtifactCache
+        Cache with a full-digest strategy.
+    """
+    return ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+
+
+def _promoted(cache: ArtifactCache, name: str = "shared.nc") -> str:
+    """Commit and promote an artifact, returning its name.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache to write into.
+    name : str, optional
+        Artifact filename.
+
+    Returns
+    -------
+    str
+        The promoted artifact's name.
+    """
+    with cache.stage(name, RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    cache.promote(name, RUN_ID)
+    return name
+
+
+def test_shared_record_starts_with_no_references(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """A freshly promoted artifact has been used by nobody."""
+    cache.promote(staged_artifact, RUN_ID)
+    record = cache.read_shared_record(staged_artifact)
+    assert record is not None
+    assert record.references == []
+    assert record.reference_total == 0
+    assert record.first_referenced_at is None
+
+
+def test_record_use_registers_a_consumer(user_root: Path, shared_root: Path) -> None:
+    """A run recording a use appears in the log with a timestamp."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    assert cache.record_use(name, "run-B") is True
+
+    (entry,) = cache.references_for(name)
+    assert entry.run_id == "run-B"
+    assert entry.used_by
+    assert entry.last_used_at
+
+
+def test_resolve_records_use_on_the_read_path(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Registration is automatic for consumers going through the cache.
+
+    This is what keeps the log honest: a consumer that resolves and then opens
+    the path directly would otherwise never be recorded.
+    """
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    cache.resolve(name, "run-B", record_use=True)
+    cache.resolve(name, "run-C", record_use=True)
+
+    assert [ref.run_id for ref in cache.references_for(name)] == ["run-B", "run-C"]
+
+
+def test_resolve_does_not_record_by_default(user_root: Path, shared_root: Path) -> None:
+    """Reads stay read-only unless the caller opts in."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    cache.resolve(name, "run-B")
+
+    assert cache.references_for(name) == []
+
+
+def test_resolve_does_not_record_user_tier_hits(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Only shared artifacts carry a reference log."""
+    cache = _shared_cache(user_root, shared_root)
+    with cache.stage("local.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+
+    resolved = cache.resolve("local.nc", RUN_ID, record_use=True)
+
+    assert resolved is not None
+    assert resolved.tier is Tier.USER
+    assert cache.references_for("local.nc") == []
+
+
+def test_repeated_use_is_debounced(user_root: Path, shared_root: Path) -> None:
+    """A hot artifact does not generate a sidecar write per read."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    assert cache.record_use(name, "run-B") is True
+    assert cache.record_use(name, "run-B") is False
+    assert len(cache.references_for(name)) == 1
+
+
+def test_debounce_can_be_bypassed(user_root: Path, shared_root: Path) -> None:
+    """A zero interval forces the timestamp to refresh."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    cache.record_use(name, "run-B")
+    assert cache.record_use(name, "run-B", min_interval_seconds=0) is True
+    assert len(cache.references_for(name)) == 1
+
+
+def test_reference_total_counts_distinct_runs(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Re-use by a known run refreshes it rather than counting again."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    cache.record_use(name, "run-B")
+    cache.record_use(name, "run-C")
+    cache.record_use(name, "run-B", min_interval_seconds=0)
+
+    record = cache.read_shared_record(name)
+    assert record is not None
+    assert record.reference_total == 2
+
+
+def test_reference_log_is_capped(user_root: Path, shared_root: Path) -> None:
+    """A widely used artifact's sidecar stays small.
+
+    The history that falls off the end survives as a count, so the cap loses
+    detail rather than the fact that use occurred.
+    """
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    for index in range(MAX_REFERENCES + 5):
+        cache.record_use(name, f"run-{index:03d}")
+
+    record = cache.read_shared_record(name)
+    assert record is not None
+    assert len(record.references) == MAX_REFERENCES
+    assert record.reference_total == MAX_REFERENCES + 5
+    assert record.references[-1].run_id == f"run-{MAX_REFERENCES + 4:03d}"
+
+
+def test_record_use_ignores_absent_artifacts(cache: ArtifactCache) -> None:
+    """There is nothing to attach a reference to."""
+    assert cache.record_use("never-promoted.nc", "run-B") is False
+
+
+def test_references_survive_republication(user_root: Path, shared_root: Path) -> None:
+    """References belong to the shared name, which re-promotion does not change."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+    cache.record_use(name, "run-B")
+
+    with cache.stage(name, "run-D") as tmp:
+        tmp.write_bytes(b"revised")
+    cache.promote(name, "run-D", overwrite=True)
+
+    record = cache.read_shared_record(name)
+    assert record is not None
+    assert [ref.run_id for ref in record.references] == ["run-B"]
+    assert record.promoted_from_run_id == "run-D"
+
+
+def test_last_used_at_falls_back_to_promotion(
+    user_root: Path, shared_root: Path
+) -> None:
+    """An artifact nobody has read still has a meaningful age."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    record = cache.read_shared_record(name)
+    assert record is not None
+    assert record.last_used_at == record.promoted_at
+
+
+# ---------------------------------------------------------------------------
+# Garbage-collection reporting
+# ---------------------------------------------------------------------------
+
+
+def test_gc_candidates_excludes_recent_artifacts(
+    user_root: Path, shared_root: Path
+) -> None:
+    """A just-promoted artifact is not a candidate."""
+    cache = _shared_cache(user_root, shared_root)
+    _promoted(cache)
+
+    assert cache.gc_candidates(idle_days=180) == []
+
+
+def test_gc_candidates_reports_idle_artifacts(
+    user_root: Path, shared_root: Path
+) -> None:
+    """A zero threshold reports everything, with its usage summary."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+    cache.record_use(name, "run-B")
+
+    (report,) = cache.gc_candidates(idle_days=0.0)
+    assert report.name == name
+    assert report.reference_total == 1
+    assert report.recent_runs == ["run-B"]
+    assert report.promoted_from_run_id == RUN_ID
+    assert report.idle_days is not None
+
+
+def test_gc_candidates_never_deletes(user_root: Path, shared_root: Path) -> None:
+    """Reporting is not deletion; liveness here is inferred, not known."""
+    cache = _shared_cache(user_root, shared_root)
+    name = _promoted(cache)
+
+    cache.gc_candidates(idle_days=0.0)
+
+    assert cache.locate(name, Tier.SHARED).exists
+    assert cache.shared_record_path(name).exists()
+
+
+def test_gc_candidates_orders_most_idle_first(
+    user_root: Path, shared_root: Path
+) -> None:
+    """The report is ordered so the strongest candidates read first."""
+    cache = _shared_cache(user_root, shared_root)
+    for artifact in ("old.nc", "new.nc"):
+        with cache.stage(artifact, RUN_ID) as tmp:
+            tmp.write_bytes(artifact.encode())
+        cache.promote(artifact, RUN_ID)
+
+    stale = cache.read_shared_record("old.nc")
+    assert stale is not None
+    cache.write_shared_record(
+        stale.model_copy(update={"promoted_at": "2000-01-01T00:00:00+00:00"})
+    )
+
+    names = [report.name for report in cache.gc_candidates(idle_days=0.0)]
+    assert names[0] == "old.nc"
