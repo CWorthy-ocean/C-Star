@@ -322,6 +322,17 @@ ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
 ] = "CSTAR_ORCH_LOCAL_DELAY"
 """Delay (in seconds) between status queries in the local launcher proxy script."""
 
+ENV_CSTAR_ARTIFACT_CACHE_BYPASS: t.Annotated[
+    t.Literal["CSTAR_ARTIFACT_CACHE_BYPASS"],
+    EnvVar(
+        "Ignore existing artifact-cache entries so lookups report a miss and "
+        "artifacts are recreated. Writes still occur, so the cache repopulates.",
+        GROUP_FS,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_ARTIFACT_CACHE_BYPASS"
+"""Ignore existing artifact-cache entries and force fresh artifact creation."""
+
 
 @lru_cache
 def discover_env_vars() -> dict[str, EnvItem]:

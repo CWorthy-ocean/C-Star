@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_BYPASS, FLAG_ON
 from cstar.orchestration.artifact_cache import (
     MANIFEST_NAME,
     MAX_REFERENCES,
@@ -1501,3 +1502,161 @@ def test_gc_candidates_orders_most_idle_first(
 
     names = [report.name for report in cache.gc_candidates(idle_days=0.0)]
     assert names[0] == "old.nc"
+
+
+# ---------------------------------------------------------------------------
+# Cache bypass
+# ---------------------------------------------------------------------------
+
+
+def test_bypass_defaults_off(cache: ArtifactCache) -> None:
+    """Caching is active unless the flag says otherwise."""
+    assert cache.bypass is False
+
+
+def test_bypass_reads_the_environment_flag(
+    user_root: Path, shared_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The env var is the ergonomic front door for enabling bypass."""
+    monkeypatch.setenv(ENV_CSTAR_ARTIFACT_CACHE_BYPASS, FLAG_ON)
+    assert ArtifactCache(user_root, shared_root).bypass is True
+
+
+def test_explicit_argument_overrides_the_environment(
+    user_root: Path, shared_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit value wins, so tests and callers can scope the behaviour."""
+    monkeypatch.setenv(ENV_CSTAR_ARTIFACT_CACHE_BYPASS, FLAG_ON)
+    assert ArtifactCache(user_root, shared_root, bypass=False).bypass is False
+
+
+def test_repr_surfaces_bypass(user_root: Path, shared_root: Path) -> None:
+    """A bypassed cache says so when printed, so surprise is diagnosable."""
+    assert "bypass=True" in repr(ArtifactCache(user_root, shared_root, bypass=True))
+
+
+def test_bypass_makes_resolve_report_a_miss(user_root: Path, shared_root: Path) -> None:
+    """Client code that looks for a cached artifact is told there is none."""
+    cache = ArtifactCache(user_root, shared_root)
+    with cache.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+
+    bypassed = ArtifactCache(user_root, shared_root, bypass=True)
+    assert bypassed.resolve("prod.nc", RUN_ID) is None
+    assert bypassed.locate("prod.nc", Tier.USER, RUN_ID).exists
+
+
+def test_bypass_reports_a_miss_for_shared_artifacts(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Promoted data is ignored too, so the run recreates rather than reuses."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    cache.promote("prod.nc", RUN_ID)
+
+    bypassed = ArtifactCache(user_root, shared_root, bypass=True)
+    assert bypassed.resolve("prod.nc") is None
+    assert bypassed.resolve("prod.nc", RUN_ID) is None
+
+
+def test_bypass_still_writes_to_the_user_cache(
+    user_root: Path, shared_root: Path
+) -> None:
+    """Bypass ignores the cache; it does not disable it."""
+    bypassed = ArtifactCache(user_root, shared_root, bypass=True)
+
+    with bypassed.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"fresh")
+
+    assert bypassed.locate("prod.nc", Tier.USER, RUN_ID).path.read_bytes() == b"fresh"
+    assert RUN_ID in bypassed.list_runs()
+
+
+def test_bypass_forces_overwrite_on_write(user_root: Path, shared_root: Path) -> None:
+    """Having been told the artifact is missing, the caller must be able to write it.
+
+    Without this, a caller that passes ``overwrite=False`` after a reported
+    miss would hit :class:`ArtifactExistsError` on a file it was just told did
+    not exist.
+    """
+    cache = ArtifactCache(user_root, shared_root)
+    with cache.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"original")
+
+    bypassed = ArtifactCache(user_root, shared_root, bypass=True)
+    with bypassed.stage("prod.nc", RUN_ID, overwrite=False) as tmp:
+        tmp.write_bytes(b"recreated")
+
+    assert (
+        bypassed.locate("prod.nc", Tier.USER, RUN_ID).path.read_bytes() == b"recreated"
+    )
+
+
+def test_bypass_ingest_recreates_over_an_existing_artifact(
+    user_root: Path, shared_root: Path, tmp_path: Path
+) -> None:
+    """Ingestion follows the same rule, since it writes through ``stage``."""
+    cache = ArtifactCache(user_root, shared_root)
+    with cache.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"original")
+
+    source = tmp_path / "external.nc"
+    source.write_bytes(b"ingested")
+    bypassed = ArtifactCache(user_root, shared_root, bypass=True)
+    bypassed.ingest(source, "prod.nc", RUN_ID, overwrite=False)
+
+    assert (
+        bypassed.locate("prod.nc", Tier.USER, RUN_ID).path.read_bytes() == b"ingested"
+    )
+
+
+def test_require_names_the_flag_when_bypassed(
+    user_root: Path, shared_root: Path
+) -> None:
+    """A miss caused by bypass is diagnosable rather than mystifying."""
+    cache = ArtifactCache(user_root, shared_root)
+    with cache.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+
+    bypassed = ArtifactCache(user_root, shared_root, bypass=True)
+    with pytest.raises(ArtifactNotFoundError, match=ENV_CSTAR_ARTIFACT_CACHE_BYPASS):
+        bypassed.require("prod.nc", RUN_ID)
+
+
+def test_verify_is_not_bypassed(user_root: Path, shared_root: Path) -> None:
+    """Integrity checking is not a reuse decision, so bypass must not blind it."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+
+    bypassed = ArtifactCache(
+        user_root, shared_root, fingerprinter=FullFingerprinter(), bypass=True
+    )
+    assert bypassed.verify("prod.nc", RUN_ID) is True
+
+
+def test_refresh_view_is_not_bypassed(
+    user_root: Path, shared_root: Path, view_root: Path
+) -> None:
+    """A view must link the files this run just wrote, bypass or not."""
+    bypassed = ArtifactCache(user_root, shared_root, view_root, bypass=True)
+    with bypassed.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"fresh")
+
+    linked = bypassed.refresh_view(RUN_ID)
+
+    assert set(linked) == {"prod.nc"}
+    assert (view_root / RUN_ID / "prod.nc").is_symlink()
+
+
+def test_listing_is_not_bypassed(user_root: Path, shared_root: Path) -> None:
+    """Inspection reports what is on disk; bypass only affects reuse lookups."""
+    cache = ArtifactCache(user_root, shared_root, fingerprinter=FullFingerprinter())
+    with cache.stage("prod.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+    cache.promote("prod.nc", RUN_ID)
+
+    bypassed = ArtifactCache(user_root, shared_root, bypass=True)
+    assert [loc.name for loc in bypassed.list_shared_artifacts()] == ["prod.nc"]
+    assert set(bypassed.describe(RUN_ID)) == {"prod.nc"}

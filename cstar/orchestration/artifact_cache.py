@@ -69,6 +69,8 @@ from pydantic import (
     model_validator,
 )
 
+from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_BYPASS
+from cstar.base.feature import is_flag_enabled
 from cstar.orchestration.fingerprinting import (
     ChecksumMode,
     Fingerprinter,
@@ -386,7 +388,7 @@ class SharedRecord(ArtifactRecord):
         dropped from :attr:`references` by the cap.
     """
 
-    references: list[Reference] = Field(default_factory=list[Reference])
+    references: list[Reference] = Field(default_factory=list)
     first_referenced_at: str | None = None
     reference_total: int = 0
 
@@ -552,6 +554,12 @@ class ArtifactCache:
     fingerprinter : Fingerprinter or None, optional
         Default strategy for fingerprinting committed artifacts. Defaults to
         :class:`~cstar.orchestration.fingerprinting.NullFingerprinter`.
+    bypass : bool or None, optional
+        Ignore existing entries, so lookups report a miss and callers recreate
+        their artifacts. Defaults to the
+        :data:`~cstar.base.env.ENV_CSTAR_ARTIFACT_CACHE_BYPASS` environment
+        flag. Reads only: writes still happen and overwrite, so the cache
+        repopulates rather than being disabled.
 
     Attributes
     ----------
@@ -563,6 +571,8 @@ class ArtifactCache:
         Resolved view root, if configured.
     fingerprinter : Fingerprinter
         Strategy used when a write does not supply its own.
+    bypass : bool
+        Whether lookups report a miss regardless of what is on disk.
 
     Notes
     -----
@@ -588,6 +598,7 @@ class ArtifactCache:
         view_root: Path | str | None = None,
         create_roots: bool = True,
         fingerprinter: Fingerprinter | None = None,
+        bypass: bool | None = None,
     ) -> None:
         self.user_root: Path = Path(user_root).expanduser().resolve()
         self.shared_root: Path = Path(shared_root).expanduser().resolve()
@@ -595,6 +606,11 @@ class ArtifactCache:
             Path(view_root).expanduser().resolve() if view_root is not None else None
         )
         self.fingerprinter: Fingerprinter = fingerprinter or NullFingerprinter()
+        self.bypass: bool = (
+            is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_BYPASS)
+            if bypass is None
+            else bypass
+        )
         if self.user_root == self.shared_root:
             raise ValueError("user_root and shared_root must differ")
         if create_roots:
@@ -732,6 +748,43 @@ class ArtifactCache:
         -----
         Existence is tested live on every call and is never memoized.
         """
+        if self.bypass:
+            return None
+        return self._lookup(
+            name, run_id, prefer_local=prefer_local, record_use=record_use
+        )
+
+    def _lookup(
+        self,
+        name: str,
+        run_id: str | None = None,
+        prefer_local: bool = False,
+        record_use: bool = False,
+    ) -> Location | None:
+        """Find an artifact on disk, ignoring :attr:`bypass`.
+
+        Bypass models "pretend nothing is cached so the caller recreates it".
+        That belongs to reuse decisions only. Operations on artifacts already
+        known to exist — verifying integrity, or linking a view to files this
+        run just wrote — must still see the filesystem, or bypass would make
+        :meth:`verify` unusable and :meth:`refresh_view` silently empty.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        run_id : str or None, optional
+            See :meth:`resolve`.
+        prefer_local : bool, optional
+            See :meth:`resolve`.
+        record_use : bool, optional
+            See :meth:`resolve`.
+
+        Returns
+        -------
+        Location or None
+            Location of the first tier in which the file is present.
+        """
         ordered = self.candidates(name, run_id)
         if prefer_local and len(ordered) > 1:
             ordered = tuple(reversed(ordered))
@@ -774,6 +827,12 @@ class ArtifactCache:
         """
         location = self.resolve(name, run_id, prefer_local=prefer_local)
         if location is None:
+            if self.bypass:
+                raise ArtifactNotFoundError(
+                    f"artifact {name!r} reported missing because the cache is "
+                    f"bypassed ({ENV_CSTAR_ARTIFACT_CACHE_BYPASS}); it may exist "
+                    "on disk"
+                )
             scope = (
                 "shared tier" if run_id is None else f"shared tier or run {run_id!r}"
             )
@@ -823,7 +882,9 @@ class ArtifactCache:
             Strategy applied on commit, overriding
             :attr:`ArtifactCache.fingerprinter` for this write.
         overwrite : bool, optional
-            Whether committing may replace an existing artifact.
+            Whether committing may replace an existing artifact. Forced to
+            ``True`` when :attr:`bypass` is set, since the caller was told the
+            artifact was missing and must be able to write it.
         provenance : Mapping of str to Any or None, optional
             Extra record fields, used by :meth:`promote` to stamp
             ``promoted_from_run_id``, ``promoted_by`` and ``promoted_at``.
@@ -846,6 +907,8 @@ class ArtifactCache:
         ...     dataset.to_netcdf(tmp)
         """
         location = self.locate(name, tier, run_id)
+        if self.bypass:
+            overwrite = True
         if not overwrite and location.exists:
             raise ArtifactExistsError(f"{location.path} already exists")
 
@@ -1081,7 +1144,12 @@ class ArtifactCache:
         ArtifactNotFoundError
             If the artifact is absent from every candidate tier.
         """
-        location = self.require(name, run_id, prefer_local=prefer_local)
+        location = self._lookup(name, run_id, prefer_local=prefer_local)
+        if location is None:
+            scope = (
+                "shared tier" if run_id is None else f"shared tier or run {run_id!r}"
+            )
+            raise ArtifactNotFoundError(f"artifact {name!r} not found in {scope}")
         record = self.record_for(location)
         if record is None or record.checksum is None or record.checksum_mode is None:
             return None
@@ -1538,7 +1606,7 @@ class ArtifactCache:
 
         linked: dict[str, Path] = {}
         for name in sorted(wanted):
-            resolved = self.resolve(name, run_id, prefer_local=prefer_local)
+            resolved = self._lookup(name, run_id, prefer_local=prefer_local)
             if resolved is None:
                 continue
             link = target_dir / name
@@ -1859,5 +1927,5 @@ class ArtifactCache:
         """
         return (
             f"{type(self).__name__}(user_root={str(self.user_root)!r}, "
-            f"shared_root={str(self.shared_root)!r})"
+            f"shared_root={str(self.shared_root)!r}, bypass={self.bypass})"
         )
