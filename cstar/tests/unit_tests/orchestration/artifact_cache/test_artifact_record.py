@@ -64,6 +64,7 @@ def test_to_dict_is_json_compatible(record: ArtifactRecord) -> None:
         "size_bytes",
         "created_at",
         "created_by",
+        "kind",
         "checksum",
         "checksum_mode",
         "source",

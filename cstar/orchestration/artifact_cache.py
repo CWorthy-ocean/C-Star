@@ -51,9 +51,11 @@ advisory locking is expensive and less reliable.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import shutil
+import tarfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -86,6 +88,7 @@ __all__ = [
     "ArtifactCache",
     "ArtifactCacheError",
     "ArtifactExistsError",
+    "ArtifactKind",
     "ArtifactNotFoundError",
     "ArtifactRecord",
     "CacheModel",
@@ -95,6 +98,8 @@ __all__ = [
     "Manifest",
     "OnConflict",
     "Reference",
+    "SetManifest",
+    "SetMember",
     "SharedRecord",
     "Tier",
     "UnsafePathError",
@@ -113,6 +118,17 @@ SHARED_RECORD_DIR: Final[str] = ".manifests"
 MANIFEST_VERSION: Final[int] = 2
 """Schema version stamped into each manifest, for future migrations."""
 
+SET_MANIFEST_NAME: Final[str] = ".cstar-set.json"
+"""Sidecar written inside a set container describing its members.
+
+Dot-prefixed so a caller's ``glob("*.nc")`` never sees it, and because its
+presence is what marks a directory as an artifact rather than an ordinary
+subdirectory.
+"""
+
+SET_MANIFEST_VERSION: Final[int] = 1
+"""Schema version stamped into each set manifest."""
+
 MAX_REFERENCES: Final[int] = 64
 """Most recent reference entries retained per shared artifact.
 
@@ -127,6 +143,7 @@ DEFAULT_USE_INTERVAL_SECONDS: Final[float] = 3600.0
 _LOCK_SUFFIX: Final[str] = ".lock"
 _TMP_SUFFIX: Final[str] = ".tmp"
 _RECORD_SUFFIX: Final[str] = ".json"
+_OLD_SUFFIX: Final[str] = ".old"
 
 
 class ArtifactCacheError(Exception):
@@ -158,6 +175,23 @@ class Tier(StrEnum):
 
     USER = "user"
     SHARED = "shared"
+
+
+class ArtifactKind(StrEnum):
+    """Whether an artifact is one file or a collection treated as one thing.
+
+    Attributes
+    ----------
+    FILE : str
+        A single file.
+    SET : str
+        A collection of files that are only useful together, such as the ranks
+        of a partitioned dataset. Stored as an expanded directory in the user
+        tier and as an archive in the shared tier.
+    """
+
+    FILE = "file"
+    SET = "set"
 
 
 class OnConflict(StrEnum):
@@ -242,14 +276,38 @@ class Location(CacheModel):
         return self.path.as_uri()
 
     @property
+    def is_container(self) -> bool:
+        """bool: Whether an expanded set container is present at :attr:`path`.
+
+        A directory counts as an artifact only when it carries
+        :data:`SET_MANIFEST_NAME`, which keeps ordinary subdirectories from
+        being mistaken for one.
+        """
+        return (self.path / SET_MANIFEST_NAME).is_file()
+
+    @property
+    def kind(self) -> ArtifactKind:
+        """ArtifactKind: What is present at :attr:`path`, judged from disk.
+
+        Notes
+        -----
+        A shared aggregate is stored as an archive and therefore reports
+        :attr:`ArtifactKind.FILE` — that is what it is on disk. The artifact's
+        declared kind lives on :attr:`ArtifactRecord.kind`.
+        """
+        return ArtifactKind.SET if self.is_container else ArtifactKind.FILE
+
+    @property
     def exists(self) -> bool:
-        """bool: Whether a regular file is present at :attr:`path` right now.
+        """bool: Whether an artifact is present at :attr:`path` right now.
+
+        True for a regular file, or for a directory holding a set manifest.
 
         Notes
         -----
         Performs a live ``stat`` on every access and is never memoized.
         """
-        return self.path.is_file()
+        return self.path.is_file() or self.is_container
 
 
 class ArtifactRecord(CacheModel):
@@ -265,6 +323,9 @@ class ArtifactRecord(CacheModel):
         UTC ISO-8601 timestamp of commit.
     created_by : str
         Operating-system username of the writer.
+    kind : ArtifactKind, optional
+        Whether this artifact is one file or a set. For a set,
+        :attr:`checksum` is the container's ``manifest_digest``.
     checksum : str or None, optional
         Hex-encoded digest, or ``None`` when fingerprinting was skipped. Only
         meaningful alongside :attr:`checksum_mode`.
@@ -294,6 +355,7 @@ class ArtifactRecord(CacheModel):
     size_bytes: int
     created_at: str
     created_by: str
+    kind: ArtifactKind = ArtifactKind.FILE
     checksum: str | None = None
     checksum_mode: ChecksumMode | None = None
     source: str | None = None
@@ -503,6 +565,94 @@ class UsageReport(CacheModel):
     promoted_from_run_id: str | None
 
 
+class SetMember(CacheModel):
+    """One file inside a set container.
+
+    Parameters
+    ----------
+    path : str
+        Location relative to the container root, POSIX-style. Relative rather
+        than a bare filename so a container may nest — a restart set grouped by
+        checkpoint, for instance.
+    size_bytes : int
+        Size at the time the container was committed.
+    checksum : str or None, optional
+        Digest of this member, or ``None`` when fingerprinting was skipped.
+    """
+
+    path: str
+    size_bytes: int
+    checksum: str | None = None
+
+
+class SetManifest(CacheModel):
+    """Index of a set container's members.
+
+    Parameters
+    ----------
+    members : list of SetMember
+        Members in sorted path order.
+    member_count : int
+        Declared number of members. A partition job killed partway leaves a
+        directory that looks plausible; this is what makes it detectable.
+    manifest_digest : str
+        Digest over the ordered member paths and digests, letting two
+        containers be compared without reading either in full.
+    checksum_mode : ChecksumMode or None, optional
+        Strategy that produced the member digests.
+    version : int, optional
+        Schema version.
+    """
+
+    members: list[SetMember] = Field(default_factory=list)
+    member_count: int = 0
+    manifest_digest: str = ""
+    checksum_mode: ChecksumMode | None = None
+    version: int = SET_MANIFEST_VERSION
+
+    @classmethod
+    def build(
+        cls, members: list[SetMember], checksum_mode: ChecksumMode | None
+    ) -> SetManifest:
+        """Assemble a manifest and compute its digest.
+
+        Parameters
+        ----------
+        members : list of SetMember
+            Members, in any order; they are sorted by path.
+        checksum_mode : ChecksumMode or None
+            Strategy that produced the member digests.
+
+        Returns
+        -------
+        SetManifest
+            Manifest with :attr:`member_count` and :attr:`manifest_digest` set.
+        """
+        ordered = sorted(members, key=lambda member: member.path)
+        digest = hashlib.sha256()
+        for member in ordered:
+            digest.update(member.path.encode())
+            digest.update(b"\0")
+            digest.update((member.checksum or str(member.size_bytes)).encode())
+            digest.update(b"\0")
+        return cls(
+            members=ordered,
+            member_count=len(ordered),
+            manifest_digest=digest.hexdigest(),
+            checksum_mode=checksum_mode,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise this manifest to a JSON-compatible mapping.
+
+        Returns
+        -------
+        dict of str to Any
+            Plain dictionary suitable for :func:`json.dump`.
+        """
+        return self.model_dump(mode="json")
+
+
 class Manifest(CacheModel):
     """Sidecar index describing the contents of one user-tier run directory.
 
@@ -596,6 +746,13 @@ class ArtifactCache:
     fingerprinter : Fingerprinter or None, optional
         Default strategy for fingerprinting committed artifacts. Defaults to
         :class:`~cstar.orchestration.fingerprinting.NullFingerprinter`.
+    node_cache_root : Path or str or None, optional
+        Node-local directory into which shared sets are expanded, so several
+        runs on one node share a single expanded copy. A cache of a cache:
+        never authoritative, always re-expandable, and expected to vanish
+        between jobs. Containers there are made read-only, since a run writing
+        into a shared copy would corrupt its neighbours. Defaults to expanding
+        into the run's own directory.
     bypass : bool or None, optional
         Ignore existing entries, so lookups report a miss and callers recreate
         their artifacts. Defaults to the
@@ -613,6 +770,8 @@ class ArtifactCache:
         Resolved view root, if configured.
     fingerprinter : Fingerprinter
         Strategy used when a write does not supply its own.
+    node_cache_root : Path or None
+        Resolved node-local expansion root, if configured.
     bypass : bool
         Whether lookups report a miss regardless of what is on disk.
 
@@ -641,11 +800,17 @@ class ArtifactCache:
         create_roots: bool = True,
         fingerprinter: Fingerprinter | None = None,
         bypass: bool | None = None,
+        node_cache_root: Path | str | None = None,
     ) -> None:
         self.user_root: Path = Path(user_root).expanduser().resolve()
         self.shared_root: Path = Path(shared_root).expanduser().resolve()
         self.view_root: Path | None = (
             Path(view_root).expanduser().resolve() if view_root is not None else None
+        )
+        self.node_cache_root: Path | None = (
+            Path(node_cache_root).expanduser().resolve()
+            if node_cache_root is not None
+            else None
         )
         self.fingerprinter: Fingerprinter = fingerprinter or NullFingerprinter()
         self.bypass: bool = (
@@ -656,6 +821,8 @@ class ArtifactCache:
         if self.user_root == self.shared_root:
             raise ValueError("user_root and shared_root must differ")
         if create_roots:
+            if self.node_cache_root is not None:
+                self.node_cache_root.mkdir(parents=True, exist_ok=True)
             self.user_root.mkdir(parents=True, exist_ok=True)
             self.shared_root.mkdir(parents=True, exist_ok=True)
 
@@ -897,6 +1064,9 @@ class ArtifactCache:
         fingerprinter: Fingerprinter | None = None,
         overwrite: bool = True,
         provenance: Mapping[str, Any] | None = None,
+        kind: ArtifactKind = ArtifactKind.FILE,
+        checksum_override: str | None = None,
+        checksum_mode_override: ChecksumMode | None = None,
     ) -> Generator[Path]:
         """Stage an artifact for atomic creation.
 
@@ -930,6 +1100,17 @@ class ArtifactCache:
         provenance : Mapping of str to Any or None, optional
             Extra record fields, used by :meth:`promote` to stamp
             ``promoted_from_run_id``, ``promoted_by`` and ``promoted_at``.
+        kind : ArtifactKind, optional
+            What the committed artifact represents. A shared set is an archive,
+            so it is a file on disk while being a set to the cache.
+        checksum_override : str or None, optional
+            Digest to record instead of fingerprinting the committed file. Used
+            for a set, whose identity is its container's ``manifest_digest``
+            rather than a digest of the archive that carries it.
+        checksum_mode_override : ChecksumMode or None, optional
+            Strategy tag describing ``checksum_override``. Recorded in place of
+            the staging fingerprinter's own mode, so the tag describes how the
+            recorded digest was actually produced.
 
         Yields
         ------
@@ -967,7 +1148,11 @@ class ArtifactCache:
             if tmp.stat().st_size == 0:
                 raise ArtifactCacheError(f"staged artifact is empty: {tmp}")
             strategy = fingerprinter or self.fingerprinter
-            digest = strategy.digest(tmp)
+            digest = (
+                checksum_override
+                if checksum_override is not None
+                else strategy.digest(tmp)
+            )
             size = tmp.stat().st_size
             os.replace(tmp, location.path)
         except BaseException:
@@ -980,8 +1165,15 @@ class ArtifactCache:
             size_bytes=size,
             created_at=self._utcnow(),
             created_by=self._username(),
+            kind=kind,
             checksum=digest,
-            checksum_mode=strategy.mode if digest is not None else None,
+            checksum_mode=(
+                (checksum_mode_override or strategy.mode)
+                if checksum_override is not None
+                else strategy.mode
+            )
+            if digest is not None
+            else None,
             source=source,
             asset_uri=asset_uri or location.uri,
             run_id=run_id,
@@ -1136,8 +1328,24 @@ class ArtifactCache:
                 "promoted_by": self._username(),
                 "promoted_at": self._utcnow(),
             },
+            kind=ArtifactKind.SET if user.is_container else ArtifactKind.FILE,
+            checksum_override=(
+                manifest.manifest_digest
+                if (manifest := self._read_set_manifest(user.path)) is not None
+                else None
+            )
+            if user.is_container
+            else None,
+            checksum_mode_override=(
+                manifest.checksum_mode
+                if user.is_container and manifest is not None
+                else None
+            ),
         ) as tmp:
-            shutil.copy2(user.path, tmp)
+            if user.is_container:
+                self._pack(user.path, tmp)
+            else:
+                shutil.copy2(user.path, tmp)
 
         return shared
 
@@ -1163,13 +1371,25 @@ class ArtifactCache:
         bool
             ``True`` when the two paths are the same file, or when a recorded
             digest exists and matches. Absent both there is no evidence of
-            sameness, which is reported as ``False`` rather than assumed.
+            sameness, which is reported as ``False`` rather than assumed. A set
+            whose members were never fingerprinted falls in that second case:
+            its manifest digest degrades to a digest over paths and sizes,
+            which two genuinely different sets can share.
         """
         if self._is_same_file(user.path, shared.path):
             return True
         record = self.record_for(shared)
         if record is None or record.checksum is None or record.checksum_mode is None:
             return False
+        if user.is_container:
+            if record.checksum_mode is ChecksumMode.NONE:
+                return False
+            manifest = self._read_set_manifest(user.path)
+            return (
+                manifest is not None
+                and manifest.checksum_mode == record.checksum_mode
+                and manifest.manifest_digest == record.checksum
+            )
         strategy = fingerprinter_for(record.checksum_mode)
         return strategy.matches(user.path, record.checksum)
 
@@ -1272,8 +1492,68 @@ class ArtifactCache:
         record = self.record_for(location)
         if record is None or record.checksum is None or record.checksum_mode is None:
             return None
+        if record.kind is ArtifactKind.SET:
+            return self._verify_set(location, record)
         strategy = fingerprinter_for(record.checksum_mode)
         return strategy.matches(location.path, record.checksum)
+
+    def _verify_set(self, location: Location, record: ArtifactRecord) -> bool | None:
+        """Check a set artifact against its recorded manifest digest.
+
+        An expanded container is re-fingerprinted member by member, which also
+        catches a member that has been removed. A shared archive is checked
+        against the manifest it carries; verifying its members individually
+        would mean expanding it, so that is left to the caller who does.
+
+        Parameters
+        ----------
+        location : Location
+            Located artifact.
+        record : ArtifactRecord
+            Its record.
+
+        Returns
+        -------
+        bool or None
+            Whether the set still matches, or ``None`` when it cannot be read.
+        """
+        if location.is_container:
+            manifest = self._read_set_manifest(location.path)
+            if manifest is None or record.checksum_mode is None:
+                return None
+            strategy = fingerprinter_for(record.checksum_mode)
+            present = self._discover_members(location.path)
+            if len(present) != manifest.member_count:
+                return False
+            rebuilt = SetManifest.build(
+                [
+                    SetMember(
+                        path=member.path,
+                        size_bytes=(location.path / member.path).stat().st_size,
+                        checksum=strategy.digest(location.path / member.path),
+                    )
+                    for member in manifest.members
+                    if (location.path / member.path).is_file()
+                ],
+                record.checksum_mode,
+            )
+            return rebuilt.manifest_digest == record.checksum
+
+        if not tarfile.is_tarfile(location.path):
+            return None
+        with tarfile.open(location.path) as handle:
+            try:
+                extracted = handle.extractfile(SET_MANIFEST_NAME)
+            except KeyError:
+                return None
+            if extracted is None:
+                return None
+            payload = json.loads(extracted.read().decode())
+        try:
+            carried = SetManifest.model_validate(payload)
+        except ValidationError:
+            return None
+        return carried.manifest_digest == record.checksum
 
     def record_use(
         self,
@@ -1427,6 +1707,465 @@ class ArtifactCache:
             ).total_seconds()
         except ValueError:
             return 0.0
+
+    # ------------------------------------------------------------------
+    # Sets
+    # ------------------------------------------------------------------
+
+    def ingest_aggregate(
+        self,
+        source_dir: Path | str,
+        name: str,
+        run_id: str,
+        *,
+        members: Sequence[str] | None = None,
+        fingerprinter: Fingerprinter | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        overwrite: bool = True,
+    ) -> Location:
+        """Copy a directory of files into the user tier as one artifact.
+
+        Used for collections that are only meaningful together — the ranks of a
+        partitioned dataset, say — so that one key names the whole set.
+
+        Parameters
+        ----------
+        source_dir : Path or str
+            Directory holding the members.
+        name : str
+            Artifact filename for the container.
+        run_id : str
+            Run identifier.
+        members : Sequence of str or None, optional
+            Container-relative paths to take. Defaults to every regular file
+            beneath ``source_dir``, excluding bookkeeping files.
+        fingerprinter : Fingerprinter or None, optional
+            Strategy applied to each member.
+        metadata : Mapping of str to Any or None, optional
+            Descriptive metadata recorded with the artifact.
+        overwrite : bool, optional
+            Whether committing may replace an existing container.
+
+        Returns
+        -------
+        Location
+            Committed user-tier container.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``source_dir`` is not a directory, or a named member is absent.
+        ArtifactExistsError
+            If the artifact exists and ``overwrite`` is ``False``.
+        ArtifactCacheError
+            If no members were found, so the container would be empty.
+        UnsafePathError
+            If a member path escapes the container.
+        """
+        source = Path(source_dir).expanduser()
+        if not source.is_dir():
+            raise FileNotFoundError(f"source directory not found: {source}")
+
+        location = self.locate(name, Tier.USER, run_id)
+        if self.bypass:
+            overwrite = True
+        if not overwrite and location.exists:
+            raise ArtifactExistsError(f"{location.path} already exists")
+
+        relative = (
+            [self._checked_relative(source, entry) for entry in members]
+            if members is not None
+            else self._discover_members(source)
+        )
+        if not relative:
+            raise ArtifactCacheError(f"no members found beneath {source}")
+
+        strategy = fingerprinter or self.fingerprinter
+        staged = location.path.with_name(
+            f"{location.path.name}.{os.getpid()}{_TMP_SUFFIX}"
+        )
+        shutil.rmtree(staged, ignore_errors=True)
+        try:
+            entries: list[SetMember] = []
+            for member in relative:
+                origin = source / member
+                if not origin.is_file():
+                    raise FileNotFoundError(f"member not found: {origin}")
+                target = staged / member
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(origin, target)
+                entries.append(
+                    SetMember(
+                        path=member,
+                        size_bytes=target.stat().st_size,
+                        checksum=strategy.digest(target),
+                    )
+                )
+            manifest = SetManifest.build(entries, strategy.mode)
+            self._write_json(staged / SET_MANIFEST_NAME, manifest.to_dict())
+            self._assert_container_complete(staged, manifest)
+            self._commit_container(staged, location.path)
+        except BaseException:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
+
+        self._write_record(
+            location,
+            ArtifactRecord(
+                name=name,
+                size_bytes=sum(member.size_bytes for member in manifest.members),
+                created_at=self._utcnow(),
+                created_by=self._username(),
+                kind=ArtifactKind.SET,
+                checksum=manifest.manifest_digest,
+                checksum_mode=strategy.mode,
+                source=str(source),
+                asset_uri=location.uri,
+                run_id=run_id,
+                metadata=dict(metadata or {}),
+            ),
+        )
+        return location
+
+    def materialize(
+        self,
+        name: str,
+        run_id: str,
+        *,
+        prefer_local: bool = False,
+        record_use: bool = False,
+    ) -> Location | None:
+        """Return an expanded container for a set, expanding it if necessary.
+
+        :meth:`resolve` stays pure and cheap — it is called on every lookup,
+        including misses, and must not acquire the right to write. This is the
+        entry point for a caller that wants files: it expands the shared
+        archive when only that is present, and is idempotent when a complete
+        container already exists.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        run_id : str
+            Run identifier, naming where a container is expanded to when no
+            node-local tier is configured.
+        prefer_local : bool, optional
+            See :meth:`resolve`.
+        record_use : bool, optional
+            See :meth:`resolve`.
+
+        Returns
+        -------
+        Location or None
+            An expanded container, or ``None`` when the artifact is absent.
+            A non-set artifact resolves to itself unchanged.
+        """
+        found = self.resolve(
+            name, run_id, prefer_local=prefer_local, record_use=record_use
+        )
+        if found is None:
+            return None
+        if found.is_container:
+            return found
+        if not tarfile.is_tarfile(found.path):
+            return found
+
+        destination = self._expansion_target(name, run_id)
+        if destination.is_container:
+            return destination
+        with self._lock(self.shared_record_path(name)):
+            if not destination.is_container:
+                self._expand(found.path, destination.path)
+        self._record_expansion(destination, found, run_id)
+        return destination
+
+    def _record_expansion(
+        self, destination: Location, archive: Location, run_id: str
+    ) -> None:
+        """Record an expanded container in the run that expanded it.
+
+        An expansion is a user-tier artifact like any other: without a record
+        it is invisible to :meth:`read_manifest`, unverifiable by
+        :meth:`verify`, and left behind by :meth:`delete_user`, which prunes
+        the run manifest. The digest is the container's own ``manifest_digest``
+        rather than a re-derived one, so a round trip through the archive is
+        checkable against the identity the producer published.
+
+        Skipped for a node-local expansion, which belongs to no run and is a
+        cache of a cache — always re-expandable, never authoritative.
+
+        Parameters
+        ----------
+        destination : Location
+            The expanded container.
+        archive : Location
+            The shared archive it came from.
+        run_id : str
+            Run that asked for the expansion.
+        """
+        if destination.run_id != run_id:
+            return
+        if self.record_for(destination) is not None:
+            return
+        manifest = self._read_set_manifest(destination.path)
+        if manifest is None:
+            return
+        shared = self.record_for(archive)
+        self._write_record(
+            destination,
+            ArtifactRecord(
+                name=destination.name,
+                size_bytes=sum(member.size_bytes for member in manifest.members),
+                created_at=self._utcnow(),
+                created_by=self._username(),
+                kind=ArtifactKind.SET,
+                checksum=manifest.manifest_digest,
+                checksum_mode=manifest.checksum_mode,
+                source=str(archive.path),
+                asset_uri=destination.uri,
+                run_id=run_id,
+                metadata=dict(shared.metadata) if shared else {},
+            ),
+        )
+
+    def _expansion_target(self, name: str, run_id: str) -> Location:
+        """Return where a shared set should be expanded to.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        run_id : str
+            Run identifier.
+
+        Returns
+        -------
+        Location
+            The node-local container when a node cache is configured, else the
+            run's own user-tier container.
+        """
+        if self.node_cache_root is None:
+            return self.locate(name, Tier.USER, run_id)
+        self._validate_component(name, "name")
+        path = self.node_cache_root / name
+        self._assert_contained(path, self.node_cache_root)
+        return Location(path=path, tier=Tier.USER, name=name, run_id=None)
+
+    def _expand(self, archive: Path, destination: Path) -> None:
+        """Extract an archive into a container, atomically.
+
+        Parameters
+        ----------
+        archive : Path
+            Archive to read.
+        destination : Path
+            Container path to create.
+
+        Raises
+        ------
+        ArtifactCacheError
+            If the extracted container does not match its own manifest.
+        """
+        staged = destination.with_name(f"{destination.name}.{os.getpid()}{_TMP_SUFFIX}")
+        shutil.rmtree(staged, ignore_errors=True)
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with tarfile.open(archive) as handle:
+                handle.extractall(staged, filter="data")
+            manifest = self._read_set_manifest(staged)
+            if manifest is None:
+                raise ArtifactCacheError(f"archive carries no set manifest: {archive}")
+            self._assert_container_complete(staged, manifest)
+            self._commit_container(staged, destination)
+            if self.node_cache_root is not None and destination.is_relative_to(
+                self.node_cache_root
+            ):
+                self._make_read_only(destination)
+        except BaseException:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
+
+    def _pack(self, container: Path, archive: Path) -> None:
+        """Write a container to an uncompressed, normalised archive.
+
+        Entry metadata is zeroed and members are added in sorted order, so two
+        runs producing byte-identical members produce byte-identical archives.
+        That makes the archive a content identity rather than merely a
+        transport wrapper.
+
+        Parameters
+        ----------
+        container : Path
+            Directory to pack.
+        archive : Path
+            Archive to write.
+        """
+
+        def scrub(entry: tarfile.TarInfo) -> tarfile.TarInfo:
+            entry.mtime = 0
+            entry.uid = entry.gid = 0
+            entry.uname = entry.gname = ""
+            entry.mode = 0o644 if entry.isfile() else 0o755
+            return entry
+
+        members = sorted(item for item in container.rglob("*") if item.is_file())
+        with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT) as handle:
+            for item in members:
+                handle.add(
+                    item, arcname=item.relative_to(container).as_posix(), filter=scrub
+                )
+
+    def _read_set_manifest(self, container: Path) -> SetManifest | None:
+        """Read the manifest inside a container.
+
+        Parameters
+        ----------
+        container : Path
+            Container directory.
+
+        Returns
+        -------
+        SetManifest or None
+            Parsed manifest, or ``None`` when missing or unreadable.
+        """
+        payload = self._read_json(container / SET_MANIFEST_NAME)
+        if payload is None:
+            return None
+        try:
+            return SetManifest.model_validate(payload)
+        except ValidationError:
+            return None
+
+    def _assert_container_complete(
+        self, container: Path, manifest: SetManifest
+    ) -> None:
+        """Check a container holds every member its manifest declares.
+
+        Parameters
+        ----------
+        container : Path
+            Container directory.
+        manifest : SetManifest
+            Manifest to check against.
+
+        Raises
+        ------
+        ArtifactCacheError
+            If a member is missing or the count disagrees, which is how a
+            partition job killed partway is caught.
+        """
+        present = self._discover_members(container)
+        if len(present) != manifest.member_count:
+            raise ArtifactCacheError(
+                f"container {container} holds {len(present)} members but its "
+                f"manifest declares {manifest.member_count}"
+            )
+        missing = [
+            member.path
+            for member in manifest.members
+            if not (container / member.path).is_file()
+        ]
+        if missing:
+            raise ArtifactCacheError(
+                f"container {container} is missing {len(missing)} declared "
+                f"members, starting with {missing[0]!r}"
+            )
+
+    def _commit_container(self, staged: Path, destination: Path) -> None:
+        """Move a fully built container into place.
+
+        ``os.replace`` cannot overwrite a non-empty directory, so an existing
+        container is renamed aside and removed afterwards. The staged container
+        is complete and verified before this runs, so a reader sees either the
+        old container or the new one, never a partial one.
+
+        Parameters
+        ----------
+        staged : Path
+            Verified temporary container.
+        destination : Path
+            Final container path.
+        """
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.exists():
+            superseded = destination.with_name(
+                f"{destination.name}.{os.getpid()}{_OLD_SUFFIX}"
+            )
+            shutil.rmtree(superseded, ignore_errors=True)
+            os.replace(destination, superseded)
+            try:
+                os.replace(staged, destination)
+            finally:
+                shutil.rmtree(superseded, ignore_errors=True)
+            return
+        os.replace(staged, destination)
+
+    @staticmethod
+    def _discover_members(container: Path) -> list[str]:
+        """List container-relative paths of a container's members.
+
+        Parameters
+        ----------
+        container : Path
+            Container directory.
+
+        Returns
+        -------
+        list of str
+            Sorted POSIX-style relative paths, excluding bookkeeping files.
+        """
+        return sorted(
+            item.relative_to(container).as_posix()
+            for item in container.rglob("*")
+            if item.is_file()
+            and not ArtifactCache._is_reserved(item.name)
+            and item.name != SET_MANIFEST_NAME
+        )
+
+    @staticmethod
+    def _checked_relative(root: Path, member: str) -> str:
+        """Validate a caller-supplied member path stays inside the container.
+
+        Parameters
+        ----------
+        root : Path
+            Container root.
+        member : str
+            Caller-supplied relative path.
+
+        Returns
+        -------
+        str
+            The path, POSIX-style.
+
+        Raises
+        ------
+        UnsafePathError
+            If the path escapes ``root``.
+        """
+        candidate = (root / member).resolve()
+        try:
+            relative = candidate.relative_to(root.resolve())
+        except ValueError as exc:
+            raise UnsafePathError(f"member {member!r} escapes {root}") from exc
+        return relative.as_posix()
+
+    @staticmethod
+    def _make_read_only(container: Path) -> None:
+        """Drop write permission across a container.
+
+        Used for the node-local tier, where several runs read one expanded copy
+        and a stray write would corrupt every reader.
+
+        Parameters
+        ----------
+        container : Path
+            Container directory.
+        """
+        for item in container.rglob("*"):
+            item.chmod(0o555 if item.is_dir() else 0o444)
+        container.chmod(0o555)
 
     # ------------------------------------------------------------------
     # Records
@@ -1604,7 +2343,8 @@ class ArtifactCache:
         return [
             self.locate(p.name, Tier.USER, run_id)
             for p in sorted(directory.iterdir())
-            if p.is_file() and not self._is_reserved(p.name)
+            if not self._is_reserved(p.name)
+            and (p.is_file() or (p.is_dir() and (p / SET_MANIFEST_NAME).is_file()))
         ]
 
     def list_shared_artifacts(self) -> list[Location]:
@@ -1776,6 +2516,66 @@ class ArtifactCache:
         if directory.resolve() == self.user_root:
             raise UnsafePathError(f"refusing to delete tier root: {self.user_root}")
         shutil.rmtree(directory)
+        return True
+
+    def delete_user(
+        self,
+        name: str,
+        run_id: str,
+        missing_ok: bool = True,
+    ) -> bool:
+        """Delete one artifact from a run's user tier.
+
+        Set-aware, so it removes a container as readily as a file. Exists
+        because retaining only the most recent of a series — the last restart
+        partition, say — otherwise requires deleting the whole run that
+        produced it.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        run_id : str
+            Run identifier.
+        missing_ok : bool, optional
+            Return ``False`` instead of raising when the artifact is absent.
+
+        Returns
+        -------
+        bool
+            Whether an artifact was removed.
+
+        Raises
+        ------
+        UnsafePathError
+            If the target is a symlink, which a recursive delete could follow
+            out of managed storage.
+        ArtifactNotFoundError
+            If absent and ``missing_ok`` is ``False``.
+        """
+        location = self.locate(name, Tier.USER, run_id)
+        if location.path.is_symlink():
+            raise UnsafePathError(f"refusing to delete symlink: {location.path}")
+        if not location.path.exists():
+            if missing_ok:
+                return False
+            raise ArtifactNotFoundError(f"{name!r} not present in run {run_id!r}")
+        self._assert_contained(location.path, self.user_root)
+        with self._lock(self.manifest_path(run_id)):
+            manifest = self.read_manifest(run_id)
+            if name in manifest.artifacts:
+                artifacts = {
+                    key: value
+                    for key, value in manifest.artifacts.items()
+                    if key != name
+                }
+                self.write_manifest(
+                    manifest.model_copy(update={"artifacts": artifacts})
+                )
+        if location.path.is_dir():
+            shutil.rmtree(location.path)
+        else:
+            location.path.unlink()
         return True
 
     def delete_shared(
@@ -1967,7 +2767,7 @@ class ArtifactCache:
         return (
             filename == MANIFEST_NAME
             or filename.startswith(".")
-            or filename.endswith((_TMP_SUFFIX, _LOCK_SUFFIX))
+            or filename.endswith((_TMP_SUFFIX, _LOCK_SUFFIX, _OLD_SUFFIX))
         )
 
     @staticmethod
