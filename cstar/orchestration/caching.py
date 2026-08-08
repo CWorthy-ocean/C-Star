@@ -101,6 +101,9 @@ def cached(
         different artifacts share a key.
     promote : bool, optional
         Whether a freshly produced artifact is published to the shared tier.
+        Off by default: publishing is a separate decision about what belongs in
+        a space everyone shares, and a producer is the wrong place to make it.
+        Promote out of band once the artifact is known to be worth keeping.
     on_conflict : OnConflict, optional
         How promotion resolves a shared name already holding different bytes.
         Defaults to :attr:`OnConflict.SKIP`, since a re-derivation differing
