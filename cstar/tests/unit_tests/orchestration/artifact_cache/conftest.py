@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from cstar.orchestration.artifact_cache import ArtifactCache
+from cstar.orchestration.fingerprinting import NullFingerprinter
 
 RUN_ID = "run-abc-123"
 """Run identifier reused across the suite."""
@@ -80,6 +81,29 @@ def cache(user_root: Path, shared_root: Path, view_root: Path) -> ArtifactCache:
         Cache instance under test.
     """
     return ArtifactCache(user_root, shared_root, view_root)
+
+
+@pytest.fixture
+def null_cache(user_root: Path, shared_root: Path) -> ArtifactCache:
+    """Return a cache that records no digests.
+
+    Verification is on by default, so the no-digest behaviour has to be asked
+    for explicitly — which is the point of the default and is what these tests
+    exercise.
+
+    Parameters
+    ----------
+    user_root : Path
+        User tier root.
+    shared_root : Path
+        Shared tier root.
+
+    Returns
+    -------
+    ArtifactCache
+        Cache instance whose default strategy takes no digest.
+    """
+    return ArtifactCache(user_root, shared_root, fingerprinter=NullFingerprinter())
 
 
 @pytest.fixture

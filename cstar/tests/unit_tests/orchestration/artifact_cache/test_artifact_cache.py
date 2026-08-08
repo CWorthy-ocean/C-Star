@@ -26,7 +26,6 @@ from cstar.orchestration.fingerprinting import (
     ChecksumMode,
     Fingerprinter,
     FullFingerprinter,
-    NullFingerprinter,
     QuickFingerprinter,
 )
 from cstar.tests.unit_tests.orchestration.artifact_cache.conftest import RUN_ID
@@ -218,7 +217,7 @@ def test_stage_records_manifest_entry(cache: ArtifactCache) -> None:
     assert record.source == "raw.nc"
     assert record.metadata == {"k": "v"}
     assert record.asset_uri == cache.locate("foo.nc", Tier.USER, RUN_ID).uri
-    assert record.checksum is None
+    assert record.checksum_mode is ChecksumMode.FULL
 
 
 def test_stage_can_checksum(cache: ArtifactCache) -> None:
@@ -250,11 +249,17 @@ def test_stage_quick_and_full_digests_differ(cache: ArtifactCache) -> None:
     assert records["q.nc"].checksum != records["f.nc"].checksum
 
 
-def test_stage_records_no_mode_without_checksum(cache: ArtifactCache) -> None:
-    """Skipping the digest leaves both checksum fields unset."""
-    with cache.stage("foo.nc", RUN_ID) as tmp:
+def test_stage_records_no_mode_without_checksum(null_cache: ArtifactCache) -> None:
+    """Skipping the digest leaves both checksum fields unset.
+
+    Parameters
+    ----------
+    null_cache : ArtifactCache
+        Cache whose default strategy takes no digest.
+    """
+    with null_cache.stage("foo.nc", RUN_ID) as tmp:
         tmp.write_bytes(b"payload")
-    record = cache.read_manifest(RUN_ID).artifacts["foo.nc"]
+    record = null_cache.read_manifest(RUN_ID).artifacts["foo.nc"]
     assert record.checksum is None
     assert record.checksum_mode is None
 
@@ -463,8 +468,11 @@ def test_promote_requires_user_copy(cache: ArtifactCache) -> None:
 def test_promote_treats_shared_as_immutable(
     cache: ArtifactCache, staged_artifact: str
 ) -> None:
-    """Re-promotion is refused by default to protect published data."""
+    """Re-promotion over different content is refused to protect published data."""
     cache.promote(staged_artifact, RUN_ID)
+    with cache.stage(staged_artifact, RUN_ID, overwrite=True) as tmp:
+        tmp.write_bytes(b"divergent-payload")
+
     with pytest.raises(ArtifactExistsError, match="OnConflict"):
         cache.promote(staged_artifact, RUN_ID)
 
@@ -859,9 +867,14 @@ def test_manifest_lock_is_reentrant_across_sequential_uses(
 # ---------------------------------------------------------------------------
 
 
-def test_default_fingerprinter_takes_no_digest(cache: ArtifactCache) -> None:
-    """The cache defaults to the strategy that costs a single pass over data."""
-    assert isinstance(cache.fingerprinter, NullFingerprinter)
+def test_default_fingerprinter_digests_in_full(cache: ArtifactCache) -> None:
+    """Verification is on unless it is explicitly switched off.
+
+    An artifact here may represent days of compute, so minutes of hashing is
+    cheap next to reusing a corrupt one; and a default that takes no digest
+    turns :meth:`verify` and promotion conflict detection into silent no-ops.
+    """
+    assert isinstance(cache.fingerprinter, FullFingerprinter)
 
 
 def test_injected_fingerprinter_applies_to_every_write(
@@ -929,11 +942,18 @@ def test_verify_uses_the_recorded_strategy(user_root: Path, shared_root: Path) -
     assert cache.verify("foo.nc", RUN_ID) is True
 
 
-def test_verify_returns_none_without_a_digest(
-    cache: ArtifactCache, staged_artifact: str
-) -> None:
-    """With no digest recorded there is nothing to check against."""
-    assert cache.verify(staged_artifact, RUN_ID) is None
+def test_verify_returns_none_without_a_digest(null_cache: ArtifactCache) -> None:
+    """With no digest recorded there is nothing to check against.
+
+    Parameters
+    ----------
+    null_cache : ArtifactCache
+        Cache whose default strategy takes no digest.
+    """
+    with null_cache.stage("filtered.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"netcdf-payload")
+
+    assert null_cache.verify("filtered.nc", RUN_ID) is None
 
 
 def test_verify_raises_for_missing_artifact(cache: ArtifactCache) -> None:
@@ -1163,22 +1183,25 @@ def test_repromoting_different_content_raises(
 
 
 def test_repromotion_without_a_digest_is_treated_as_a_conflict(
-    cache: ArtifactCache,
+    null_cache: ArtifactCache,
 ) -> None:
     """Absent a fingerprint there is no evidence of sameness, so it raises.
 
+    The bytes are identical here, and the cache still refuses: switching
+    digests off costs the ability to recognise a re-derivation.
+
     Parameters
     ----------
-    cache : ArtifactCache
-        Cache under test, using the default no-digest strategy.
+    null_cache : ArtifactCache
+        Cache whose default strategy takes no digest.
     """
     for run in ("run-A", "run-B"):
-        with cache.stage("shared.nc", run) as tmp:
+        with null_cache.stage("shared.nc", run) as tmp:
             tmp.write_bytes(b"identical")
 
-    cache.promote("shared.nc", "run-A")
+    null_cache.promote("shared.nc", "run-A")
     with pytest.raises(ArtifactExistsError):
-        cache.promote("shared.nc", "run-B")
+        null_cache.promote("shared.nc", "run-B")
 
 
 def test_overwrite_policy_forces_republication(

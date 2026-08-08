@@ -77,7 +77,7 @@ from cstar.base.log import get_logger
 from cstar.orchestration.fingerprinting import (
     ChecksumMode,
     Fingerprinter,
-    NullFingerprinter,
+    FullFingerprinter,
     fingerprinter_for,
 )
 
@@ -745,7 +745,14 @@ class ArtifactCache:
         Whether to create the roots on construction. Default ``True``.
     fingerprinter : Fingerprinter or None, optional
         Default strategy for fingerprinting committed artifacts. Defaults to
-        :class:`~cstar.orchestration.fingerprinting.NullFingerprinter`.
+        :class:`~cstar.orchestration.fingerprinting.FullFingerprinter`, because
+        an artifact here may represent days of compute and minutes of hashing
+        is cheap insurance against reusing a corrupt one. Pass
+        :class:`~cstar.orchestration.fingerprinting.NullFingerprinter`
+        explicitly to opt out: without digests :meth:`verify` reports ``None``
+        rather than a verdict and :meth:`promote` cannot recognise a
+        re-derivation as equivalent, so switching verification off should have
+        to be typed out.
     node_cache_root : Path or str or None, optional
         Node-local directory into which shared sets are expanded, so several
         runs on one node share a single expanded copy. A cache of a cache:
@@ -812,7 +819,7 @@ class ArtifactCache:
             if node_cache_root is not None
             else None
         )
-        self.fingerprinter: Fingerprinter = fingerprinter or NullFingerprinter()
+        self.fingerprinter: Fingerprinter = fingerprinter or FullFingerprinter()
         self.bypass: bool = (
             is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_BYPASS)
             if bypass is None
