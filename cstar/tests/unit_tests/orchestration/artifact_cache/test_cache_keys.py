@@ -9,10 +9,12 @@ import pytest
 
 from cstar.applications.roms_marbl.models import PartitioningParameterSet
 from cstar.orchestration.cache_keys import (
+    AGGREGATE_SUFFIX,
     DIGEST_LENGTH,
     KEY_SCHEME_VERSION,
     CacheKeyError,
     CacheKeyGenerator,
+    ExpandAggregateKeyGenerator,
     HashKeyGenerator,
     LocationKeyGenerator,
     generator_for,
@@ -559,4 +561,242 @@ def test_adding_a_hash_changes_the_key(
 
     assert generator.key_for(split, partitioning=hashed) != generator.key_for(
         split, partitioning=geometry
+    )
+
+
+# ---------------------------------------------------------------------------
+# Derived keys
+# ---------------------------------------------------------------------------
+
+
+def test_expansion_occupies_a_separate_key_space(
+    versioned: VersionedResource, geometry: PartitioningParameterSet
+) -> None:
+    """A partition and the file it came from must never share a shared name.
+
+    They are different shapes on disk — an archive and a file — so a collision
+    is not a wasted cache entry but a corrupted one.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    geometry : PartitioningParameterSet
+        Partition geometry under test.
+    """
+    single = generator_for(versioned).key_for(versioned)
+    aggregate = ExpandAggregateKeyGenerator().key_for(versioned, partitioning=geometry)
+
+    assert single != aggregate
+
+
+def test_expansion_key_is_suffixed_as_a_set(
+    versioned: VersionedResource, geometry: PartitioningParameterSet
+) -> None:
+    """An aggregate is not a NetCDF file and must not claim to be one.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    geometry : PartitioningParameterSet
+        Partition geometry under test.
+    """
+    key = ExpandAggregateKeyGenerator().key_for(versioned, partitioning=geometry)
+
+    assert key.endswith(AGGREGATE_SUFFIX)
+    assert key.startswith("partitioning1-")
+
+
+def test_expansion_key_tracks_the_geometry(
+    versioned: VersionedResource, geometry: PartitioningParameterSet
+) -> None:
+    """Splitting one resource two ways yields two artifacts.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    geometry : PartitioningParameterSet
+        Partition geometry under test.
+    """
+    generator = ExpandAggregateKeyGenerator()
+
+    assert generator.key_for(versioned, partitioning=geometry) != generator.key_for(
+        versioned, partitioning=PartitioningParameterSet(n_procs_x=8, n_procs_y=16)
+    )
+
+
+def test_expansion_requires_a_geometry(versioned: VersionedResource) -> None:
+    """The geometry is what is being produced, so it can never be optional.
+
+    This is the difference from an ordinary key, where a parameter set
+    describes a resource that arrives already split and is ignored for one
+    that does not.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    """
+    with pytest.raises(CacheKeyError, match="requires a PartitioningParameterSet"):
+        ExpandAggregateKeyGenerator().key_for(versioned)
+
+
+def test_expansion_refuses_an_already_partitioned_source(
+    split: VersionedResource, geometry: PartitioningParameterSet
+) -> None:
+    """Repartitioning needs both geometries, and this key carries one.
+
+    Refused rather than keyed on half its inputs, which would give two
+    different repartitions the same name.
+
+    Parameters
+    ----------
+    split : VersionedResource
+        Resource declared pre-partitioned.
+    geometry : PartitioningParameterSet
+        Partition geometry under test.
+    """
+    with pytest.raises(CacheKeyError, match="already partitioned"):
+        ExpandAggregateKeyGenerator().key_for(split, partitioning=geometry)
+
+
+def test_expansion_delegates_source_identity(
+    plain: Resource, geometry: PartitioningParameterSet
+) -> None:
+    """A source with no hash is keyed on its location rather than rejected.
+
+    Parameters
+    ----------
+    plain : Resource
+        Unhashed resource under test.
+    geometry : PartitioningParameterSet
+        Partition geometry under test.
+    """
+    key = ExpandAggregateKeyGenerator().key_for(plain, partitioning=geometry)
+
+    assert key.endswith(AGGREGATE_SUFFIX)
+
+
+def test_expansion_delegate_can_be_pinned(
+    versioned: VersionedResource, geometry: PartitioningParameterSet
+) -> None:
+    """Pinning the delegate overrides the per-resource choice.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    geometry : PartitioningParameterSet
+        Partition geometry under test.
+    """
+    pinned = ExpandAggregateKeyGenerator(LocationKeyGenerator())
+
+    assert pinned.key_for(versioned, partitioning=geometry) != (
+        ExpandAggregateKeyGenerator().key_for(versioned, partitioning=geometry)
+    )
+    assert repr(pinned) == "ExpandAggregateKeyGenerator(LocationKeyGenerator())"
+
+
+def test_expansion_key_is_stable(
+    versioned: VersionedResource, geometry: PartitioningParameterSet
+) -> None:
+    """The same declaration keys the same way on every call.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    geometry : PartitioningParameterSet
+        Partition geometry under test.
+    """
+    generator = ExpandAggregateKeyGenerator()
+
+    assert generator.key_for(versioned, partitioning=geometry) == generator.key_for(
+        versioned, partitioning=geometry
+    )
+
+
+# ---------------------------------------------------------------------------
+# Input closure
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("generator", "expected"),
+    [
+        (HashKeyGenerator(), {"hash"}),
+        (LocationKeyGenerator(), {"location"}),
+    ],
+)
+def test_identity_is_a_closed_set_of_fields(
+    generator: CacheKeyGenerator,
+    expected: set[str],
+    versioned: VersionedResource,
+) -> None:
+    """Only these fields may reach a key, and this fails if that widens.
+
+    Preprocessing an input takes hours to days, so a field that leaks into the
+    key silently invalidates that work whenever it is edited — and the failure
+    is invisible, because a stale key looks exactly like a cold cache. Nobody
+    reports it; they wait again.
+
+    Pinning the field set is what makes that a failing test rather than a slow
+    month. Adding a field to :class:`~cstar.orchestration.models.Resource` will
+    break this, which is the point: whether it belongs in the key is a decision
+    somebody should have to make on purpose.
+
+    Parameters
+    ----------
+    generator : CacheKeyGenerator
+        Strategy under test.
+    expected : set of str
+        Fields permitted to identify a resource under that strategy.
+    versioned : VersionedResource
+        Resource under test.
+    """
+    assert set(generator.identity(versioned)) == expected
+
+
+def test_derived_identity_adds_nothing_of_its_own(
+    versioned: VersionedResource,
+) -> None:
+    """A derivation is keyed by its source plus its scheme, not by new fields.
+
+    The derivation itself lives in ``scheme`` and the geometry, both folded in
+    by ``key_for``, so identity stays exactly the delegate's.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    """
+    delegate = generator_for(versioned)
+
+    assert ExpandAggregateKeyGenerator().identity(versioned) == delegate.identity(
+        versioned
+    )
+
+
+def test_expansion_uses_a_declared_geometry_hash(
+    versioned: VersionedResource,
+) -> None:
+    """A parameter set that declares a hash is identified by it.
+
+    The hash covers the whole set, including parameters added dynamically that
+    the model does not enumerate, so it supersedes the individual fields.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    """
+    generator = ExpandAggregateKeyGenerator()
+    hashed = PartitioningParameterSet.model_validate(
+        {"n_procs_x": 4, "n_procs_y": 2, "hash": "geom-abc"}
+    )
+
+    assert generator.key_for(versioned, partitioning=hashed) != generator.key_for(
+        versioned, partitioning=PartitioningParameterSet(n_procs_x=4, n_procs_y=2)
     )

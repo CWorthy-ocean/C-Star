@@ -171,6 +171,15 @@ class QuickFingerprinter(Fingerprinter):
     Cannot detect corruption confined to the middle of a large file, so this is
     a smoke test rather than an integrity guarantee.
 
+    Warnings
+    --------
+    Intended for tests, where it keeps a suite fast, rather than for production
+    use. An artifact in this cache may represent days of compute, which makes
+    the minutes :class:`FullFingerprinter` costs cheap next to the chance of
+    reusing a corrupt one — and the middle of a derived file is exactly the
+    part the computation produced. Reach for this only where the cost of
+    hashing genuinely dominates and a truncation check is all that is wanted.
+
     Parameters
     ----------
     probe : int, optional

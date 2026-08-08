@@ -49,10 +49,13 @@ if TYPE_CHECKING:
     from cstar.orchestration.models import DataResource
 
 __all__ = [
+    "AGGREGATE_SUFFIX",
     "DIGEST_LENGTH",
     "KEY_SCHEME_VERSION",
     "CacheKeyError",
     "CacheKeyGenerator",
+    "DerivedKeyGenerator",
+    "ExpandAggregateKeyGenerator",
     "HashKeyGenerator",
     "LocationKeyGenerator",
     "generator_for",
@@ -77,6 +80,15 @@ _UNSAFE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
 
 _DEFAULT_PORTS: Final[dict[str, str]] = {"http": "80", "https": "443", "ftp": "21"}
 """Ports dropped during URL normalisation."""
+
+AGGREGATE_SUFFIX: Final[str] = ".set"
+"""Suffix carried by a key naming a set rather than a single file.
+
+An aggregate is not a NetCDF file, so inheriting the source's ``.nc`` would
+mislead every tool that sniffs by extension. The shared archive and the
+expanded directory carry this same suffix, since a key names one artifact
+regardless of which tier is holding it.
+"""
 
 _PARAMETER_METADATA: Final[frozenset[str]] = frozenset({"documentation", "locked"})
 """Parameter-set fields excluded from a key.
@@ -200,8 +212,7 @@ class CacheKeyGenerator(ABC):
         ).hexdigest()[:DIGEST_LENGTH]
         return f"{stem}-{digest}{suffix}"
 
-    @staticmethod
-    def _readable_parts(resource: DataResource) -> tuple[str, str]:
+    def _readable_parts(self, resource: DataResource) -> tuple[str, str]:
         """Return a safe filename stem and suffix taken from the location.
 
         The digest alone would be a correct key; the stem exists so a human
@@ -223,8 +234,8 @@ class CacheKeyGenerator(ABC):
         suffix = _UNSAFE.sub("", path.suffix)[:16]
         return (stem or "artifact", suffix)
 
-    @staticmethod
     def _partition_identity(
+        self,
         resource: DataResource,
         partitioning: PartitioningParameterSet | None,
     ) -> dict[str, Any] | None:
@@ -409,6 +420,159 @@ class LocationKeyGenerator(CacheKeyGenerator):
 
         path = parts.path.rstrip("/") or "/"
         return urlunsplit((parts.scheme.lower(), host, path, parts.query, ""))
+
+
+class DerivedKeyGenerator(CacheKeyGenerator, ABC):
+    """Base for keys naming an artifact derived from another artifact.
+
+    A derivation is keyed by *what it was derived from* plus *how*, so the
+    identity of the source is delegated to whichever ordinary strategy suits
+    the source resource, and this class contributes only the derivation. The
+    consequence that matters is that a derived artifact occupies a separate
+    key space: :attr:`~CacheKeyGenerator.scheme` is folded into every digest,
+    so a partition of a file and the file itself can never collide under one
+    shared name — which they otherwise would, one an archive and one a file.
+
+    Parameters
+    ----------
+    source : CacheKeyGenerator or None, optional
+        Strategy identifying the source resource. Defaults to
+        :func:`generator_for`, chosen per resource at call time, so a resource
+        that declares a hash is keyed on it and one that does not falls back.
+
+    Attributes
+    ----------
+    scheme : str
+        Short tag naming the derivation, folded into the digest.
+    """
+
+    def __init__(self, source: CacheKeyGenerator | None = None) -> None:
+        self._source = source
+
+    def identity(self, resource: DataResource) -> dict[str, Any]:
+        """Return the source resource's identity, unchanged.
+
+        Parameters
+        ----------
+        resource : DataResource
+            Resource the artifact is derived from.
+
+        Returns
+        -------
+        dict of str to Any
+            Whatever the delegate strategy considers identifying.
+
+        Raises
+        ------
+        CacheKeyError
+            If the delegate cannot identify the resource.
+        """
+        delegate = self._source if self._source is not None else generator_for(resource)
+        return delegate.identity(resource)
+
+    def __repr__(self) -> str:
+        """Return a debugging representation naming the strategy and delegate.
+
+        Returns
+        -------
+        str
+            Representation of this generator.
+        """
+        inner = "" if self._source is None else repr(self._source)
+        return f"{type(self).__name__}({inner})"
+
+
+class ExpandAggregateKeyGenerator(DerivedKeyGenerator):
+    """Strategy keying the set of files produced by splitting one resource.
+
+    The ranks of a partition are one artifact rather than many: they are only
+    useful together, so the cache stores them as a single container and this
+    names it. Two properties distinguish it from an ordinary resource key.
+
+    The scheme separates the key space, so the partition and the file it came
+    from cannot land on one shared name. The geometry is *mandatory* and always
+    part of the identity, which is the difference from
+    :meth:`CacheKeyGenerator._partition_identity`: there, a parameter set
+    describes a resource that arrives already split and is ignored for one that
+    does not, because geometry cannot affect data that was never split. Here
+    the geometry is what is being *produced*, so it always determines the
+    content and there is no case in which omitting it is correct.
+
+    Examples
+    --------
+    >>> ExpandAggregateKeyGenerator().key_for(resource, partitioning=geometry)
+    'bgc-boundary-2010-1d0e4a2f7c93b856.set'
+    """
+
+    scheme: ClassVar[str] = "aggregate-expand"
+
+    def _readable_parts(self, resource: DataResource) -> tuple[str, str]:
+        """Return the source stem with the aggregate suffix in place of its own.
+
+        Parameters
+        ----------
+        resource : DataResource
+            Resource the set is derived from.
+
+        Returns
+        -------
+        tuple of (str, str)
+            Sanitised stem from the source location, and
+            :data:`AGGREGATE_SUFFIX`.
+        """
+        stem, _ = super()._readable_parts(resource)
+        return (stem, AGGREGATE_SUFFIX)
+
+    def _partition_identity(
+        self,
+        resource: DataResource,
+        partitioning: PartitioningParameterSet | None,
+    ) -> dict[str, Any] | None:
+        """Return the geometry the set is produced across.
+
+        Parameters
+        ----------
+        resource : DataResource
+            Resource the set is derived from.
+        partitioning : PartitioningParameterSet or None
+            Geometry to split across.
+
+        Returns
+        -------
+        dict of str to Any
+            The parameter set's ``hash`` when it declares one, otherwise its
+            substantive parameters. Never ``None``: a set that is not
+            identified by its geometry is not identified.
+
+        Raises
+        ------
+        CacheKeyError
+            If no parameter set was supplied, or if the source resource is
+            itself declared ``partitioned``. Repartitioning from one grid to
+            another is identified by *both* geometries, and this signature
+            carries only one, so it is refused rather than keyed on half the
+            inputs.
+        """
+        if bool(getattr(resource, "partitioned", False)):
+            raise CacheKeyError(
+                f"{type(resource).__name__} is already partitioned; "
+                "repartitioning is identified by the source and target "
+                "geometries together, which this key cannot express"
+            )
+        if partitioning is None:
+            raise CacheKeyError(
+                "ExpandAggregateKeyGenerator requires a "
+                "PartitioningParameterSet: the geometry determines the "
+                "contents of the set being produced"
+            )
+        declared = getattr(partitioning, "hash", None)
+        if declared:
+            return {"hash": str(declared)}
+        return {
+            field: value
+            for field, value in partitioning.model_dump(mode="json").items()
+            if field not in _PARAMETER_METADATA
+        }
 
 
 def generator_for(resource: DataResource) -> CacheKeyGenerator:
