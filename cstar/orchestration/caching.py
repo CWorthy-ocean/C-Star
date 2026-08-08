@@ -75,7 +75,7 @@ def cached(
     cache_factory: Callable[[], ArtifactCache] | None = None,
     run_id_argument: str = "run_id",
     context: Mapping[str, Any] | None = None,
-    promote: bool = True,
+    promote: bool = False,
     on_conflict: OnConflict = OnConflict.SKIP,
     localize: bool = True,
 ) -> Callable[[F], F]:
