@@ -325,13 +325,12 @@ ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
 ENV_CSTAR_ARTIFACT_CACHE_BYPASS: t.Annotated[
     t.Literal["CSTAR_ARTIFACT_CACHE_BYPASS"],
     EnvVar(
-        "Ignore existing artifact-cache entries so lookups report a miss and "
-        "artifacts are recreated. Writes still occur, so the cache repopulates.",
+        "Enable the artifact cache to be repopulated from scratch and existing entries to be ignored.",
         GROUP_FS,
         default=FLAG_OFF,
     ),
 ] = "CSTAR_ARTIFACT_CACHE_BYPASS"
-"""Ignore existing artifact-cache entries and force fresh artifact creation."""
+"""Enable the artifact cache to be repopulated from scratch and existing entries to be ignored."""
 
 
 @lru_cache
