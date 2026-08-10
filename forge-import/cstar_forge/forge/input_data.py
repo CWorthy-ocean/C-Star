@@ -11,9 +11,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
-import shutil
 import subprocess
-import time
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -333,18 +331,12 @@ class RomsMarblInputData(InputData):
     to produce a CDF-5 (``NETCDF3_64BIT_DATA``) file via an ``nccopy -k cdf5``
     subprocess instead of roms-tools' native (much slower at scale) CDF-5 writer.
     Off by default; mirrors ``ForgeExecutor._use_pio``."""
-    subchunk: bool = False
-    """Interim/experimental (see ``glorys_subchunk.py``): when True, just-in-time
-    build a kerchunk-subchunked reference for multi-file GLORYS sources and hand its
-    path through in place of the raw per-day files. No roms-tools patching involved
+    subchunk: bool = True
+    """When True (the default), just-in-time build a kerchunk-subchunked reference
+    for multi-file GLORYS sources (see ``glorys_subchunk.py``) and hand its path
+    through in place of the raw per-day files. No roms-tools patching involved
     -- kerchunk's own xarray backend auto-detects the reference, so roms-tools reads
-    it via its normal loader. Off by default; enabled via ``--subchunk``."""
-    stage_ic_sources: bool = False
-    """I/O performance experiment: when True, copy the initial-conditions source
-    files (physics + bgc) into ``input_data_dir/staged_sources`` (the per-run
-    working directory, typically on scratch) before constructing
-    ``rt.InitialConditions``, and point it at the copies. Existing same-size
-    copies are reused. Off by default; enabled via ``--stage-ic-sources``."""
+    it via its normal loader. Disable via ``--no-subchunk``."""
     verbose: bool = False
     """Runtime diagnostic flag (forwarded from ``ForgeExecutor.verbose``): forwarded
     as ``verbose=`` to the roms-tools calls that support it (make_nesting_info), and
@@ -957,51 +949,6 @@ class RomsMarblInputData(InputData):
             return False
         return Path(path) in {Path(p) for p in self._subchunk_refs.values()}
 
-    def _stage_source_files(self, input_args: dict[str, Any]) -> dict[str, Any]:
-        """
-        Copy resolved source/bgc_source files into the working dir and repoint at them.
-
-        I/O performance experiment (``stage_ic_sources``): the working directory
-        (scratch) is expected to have better read performance than the project
-        space the staged source data lives on. Copies land in
-        ``input_data_dir/staged_sources``; a copy that already exists with the
-        same size is reused. Blocks without a ``path`` (streamable sources) are
-        left untouched. Mutates and returns ``input_args``.
-        """
-        staging_dir = self.input_data_dir / "staged_sources"
-        copied = reused = 0
-        copied_bytes = 0
-        start = time.perf_counter()
-
-        def _stage(path):
-            nonlocal copied, reused, copied_bytes
-            if isinstance(path, (list, tuple)):
-                return [_stage(p) for p in path]
-            src = Path(path)
-            dest = staging_dir / src.name
-            if dest.exists() and dest.stat().st_size == src.stat().st_size:
-                reused += 1
-                return dest
-            staging_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
-            copied += 1
-            copied_bytes += dest.stat().st_size
-            return dest
-
-        for field_name in ("source", "bgc_source"):
-            block = input_args.get(field_name)
-            if isinstance(block, dict) and block.get("path") is not None:
-                block["path"] = _stage(block["path"])
-        log.info(
-            "Staged IC sources to %s: %d file(s) copied (%.0f MB), %d reused, in %.2fs",
-            staging_dir,
-            copied,
-            copied_bytes / 1024**2,
-            reused,
-            time.perf_counter() - start,
-        )
-        return input_args
-
     # These are registered with @register_input decorator
     def _mrd_extra(self) -> dict[str, Any]:
         """Extra kwargs containing model_reference_date when one is configured."""
@@ -1153,8 +1100,6 @@ class RomsMarblInputData(InputData):
             paths = [str(output_path)]
             ic = None
         else:
-            if self.stage_ic_sources:
-                input_args = self._stage_source_files(input_args)
             log.info("InitialConditions kwargs: %r", input_args)
             with mem_log("InitialConditions()", enabled=self.verbose):
                 ic = rt.InitialConditions(grid=self.grid, **input_args)
