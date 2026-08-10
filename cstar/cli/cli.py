@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from importlib.metadata import entry_points
 
 import typer
@@ -12,18 +13,7 @@ from cstar.cli.template import app as app_template
 from cstar.cli.workplan import app as app_workplan
 
 CLI_PLUGIN_GROUP = "cstar.cli"
-"""Entry-point group third-party packages use to add `cstar <name> ...` subcommands.
-
-A package registers a `typer.Typer` app under this group, e.g. in pyproject.toml:
-
-    [project.entry-points."cstar.cli"]
-    forge = "cstar_forge.cli:app"
-
-and `cstar forge ...` exists exactly when that package is installed. Core
-subcommands are attached first and cannot be shadowed: a plugin whose name
-collides with an existing subcommand is skipped with a warning. A plugin that
-fails to import is likewise skipped rather than breaking the CLI.
-"""
+"""Entry-point group third-party packages use to add `cstar <name> ...` subcommands."""
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +23,7 @@ def attach_subcommands(app: typer.Typer) -> None:
     the command callback to enable shared options.
 
     Core subcommands are attached first, then any third-party plugins
-    discovered via the ``cstar.cli`` entry-point group (see CLI_PLUGIN_GROUP).
+    discovered via the ``cstar.cli`` entry-point group.
     """
     subcommands: list[tuple[typer.Typer, str]] = [
         (app_blueprint, "blueprint"),
@@ -64,35 +54,27 @@ def attach_plugin_subcommands(app: typer.Typer, taken: set[str]) -> None:
     subcommand (or an earlier plugin) is skipped so core commands cannot be
     shadowed through this path.
     """
-    for ep in entry_points(group=CLI_PLUGIN_GROUP):
-        if ep.name in taken:
+    if plugins := set(entry_points(group=CLI_PLUGIN_GROUP)):
+        c = Counter[str](name for name in taken)
+        c.update(ep.name for ep in plugins)
+
+        if conflicts := {k for k in c if c[k] > 1}:
             logger.warning(
-                "Ignoring CLI plugin %r from %s: subcommand name is already taken.",
-                ep.name,
-                ep.value,
+                f"Name conflicts occurred for the plugins: {','.join(conflicts)}"
             )
-            continue
-        try:
-            plugin_app = ep.load()
-        except Exception:
-            logger.warning(
-                "Failed to load CLI plugin %r from %s; skipping.",
-                ep.name,
-                ep.value,
-                exc_info=True,
-            )
-            continue
-        if not isinstance(plugin_app, typer.Typer):
-            logger.warning(
-                "Ignoring CLI plugin %r from %s: expected a typer.Typer, got %s.",
-                ep.name,
-                ep.value,
-                type(plugin_app).__name__,
-            )
-            continue
-        app.add_typer(plugin_app, name=ep.name)
-        taken.add(ep.name)
-        logger.debug("Loaded CLI plugin %r from %s", ep.name, ep.value)
+
+        loadable = {ep for ep in plugins if ep.name not in conflicts}
+
+        for ep in loadable:
+            try:
+                plugin_app = ep.load()
+            except Exception:
+                logger.warning(f"Plugin failed to import: {ep.name}")
+            else:
+                if app.isinstance(typer.Typer):
+                    app.add_typer(plugin_app)
+                else:
+                    logger.warning("Plugins must be typer.Typer...")
 
 
 app = typer.Typer(
