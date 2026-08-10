@@ -14,7 +14,8 @@ Breaking Changes
 New features
 ~~~~~~~~~~~~
 
-- N/A
+
+- External repos can now register CLI plugins (`#620 <https://github.com/CWorthy-ocean/C-Star/pull/620>`_)
 
 Bug Fixes
 ~~~~~~~~~
