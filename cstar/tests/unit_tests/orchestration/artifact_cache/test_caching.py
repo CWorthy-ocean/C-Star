@@ -6,6 +6,7 @@ return where they wrote it — because the point of the decorator is that a
 producer needs to know nothing about the cache to be cached.
 """
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -142,8 +143,9 @@ def _partition(
         The directory of ranks.
     """
     CALLS.append("partition")
-    target = workspace / "ranks"
-    target.mkdir(exist_ok=True)
+    target = workspace / f"ranks-{geometry.n_procs_x}x{geometry.n_procs_y}"
+    shutil.rmtree(target, ignore_errors=True)
+    target.mkdir()
     for rank in range(geometry.n_procs_x * geometry.n_procs_y):
         (target / f"rank{rank:03d}.nc").write_bytes(f"rank {rank}".encode())
     return target
@@ -439,6 +441,40 @@ def test_a_different_geometry_is_a_different_set(
     )
 
     assert CALLS == ["partition", "partition"]
+
+
+def test_a_reused_work_directory_would_contaminate_a_set(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """Only what the producer wrote for *this* call may enter the container.
+
+    ``ingest_aggregate`` captures what it finds and declares a member count
+    matching it, so surplus files left by an earlier call pass every
+    completeness check and are then promoted and shared. Nothing in the cache
+    can detect that: it cannot know which files were meant. Producing into a
+    directory scoped to the call is the client's side of that contract, and
+    this fails loudly if the fixture stops honouring it.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+    partition = cached(cache=cache)(_partition)
+
+    wide = partition(
+        resource, PartitioningParameterSet(n_procs_x=4, n_procs_y=2), RUN_ID, workspace
+    )
+    narrow = partition(
+        resource, PartitioningParameterSet(n_procs_x=2, n_procs_y=1), RUN_ID, workspace
+    )
+
+    assert len(sorted(wide.glob("*.nc"))) == 8
+    assert len(sorted(narrow.glob("*.nc"))) == 2
 
 
 def test_a_set_does_not_collide_with_the_single_file(
