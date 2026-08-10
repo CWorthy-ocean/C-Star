@@ -894,6 +894,7 @@ class ArtifactCache:
                 )
             path = root / name
             self._assert_contained(path, root)
+            log.info(f"Located {name!r} in {tier!r} cache at {str(path)!r}")
             return Location(path=path, tier=tier, name=name, run_id=None)
 
         if run_id is None:
@@ -901,6 +902,8 @@ class ArtifactCache:
         self._validate_component(run_id, "run_id")
         path = root / run_id / name
         self._assert_contained(path, root)
+
+        log.info(f"Located {name!r} in {tier!r} run {run_id!r} cache at {str(path)!r}")
         return Location(path=path, tier=tier, name=name, run_id=run_id)
 
     def candidates(self, name: str, run_id: str | None = None) -> tuple[Location, ...]:
@@ -1162,6 +1165,7 @@ class ArtifactCache:
             )
             size = tmp.stat().st_size
             os.replace(tmp, location.path)
+            log.info(f"Artifact {name!r} added to {tier!r} cache for run {run_id!r}")
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
