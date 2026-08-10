@@ -72,7 +72,9 @@ def test_non_typer_plugin_is_skipped():
     assert registered_names(app) == set()
 
 
-def test_duplicate_plugin_names_first_wins():
+def test_duplicate_plugin_names_both_dropped():
+    # Two plugins claiming the same name are BOTH skipped: discovery iterates a
+    # set (no meaningful "first"), so dropping both is the deterministic policy.
     app = typer.Typer()
     first, second = typer.Typer(), typer.Typer()
     eps = [
@@ -82,6 +84,4 @@ def test_duplicate_plugin_names_first_wins():
     with patch("cstar.cli.cli.entry_points", return_value=eps):
         attach_plugin_subcommands(app, taken=set())
 
-    groups = [g for g in app.registered_groups if g.name == "forge"]
-    assert len(groups) == 1
-    assert groups[0].typer_instance is first
+    assert registered_names(app) == set()

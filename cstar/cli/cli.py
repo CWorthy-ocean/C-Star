@@ -71,10 +71,13 @@ def attach_plugin_subcommands(app: typer.Typer, taken: set[str]) -> None:
             except Exception:
                 logger.warning(f"Plugin failed to import: {ep.name}")
             else:
-                if app.isinstance(typer.Typer):
-                    app.add_typer(plugin_app)
+                if isinstance(plugin_app, typer.Typer):
+                    app.add_typer(plugin_app, name=ep.name)
                 else:
-                    logger.warning("Plugins must be typer.Typer...")
+                    logger.warning(
+                        f"Ignoring plugin {ep.name!r}: expected typer.Typer, "
+                        f"got {type(plugin_app).__name__}"
+                    )
 
 
 app = typer.Typer(
