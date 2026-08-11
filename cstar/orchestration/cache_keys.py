@@ -73,6 +73,7 @@ __all__ = [
     "IdentityFunction",
     "Subject",
     "aggregate_key",
+    "checked_fields",
     "generator_for",
     "hash_identity",
     "location_identity",
@@ -163,6 +164,45 @@ def readable_parts(location: str) -> tuple[str, str]:
     stem = _UNSAFE.sub("-", path.stem).strip("-.")[:_MAX_STEM]
     suffix = _UNSAFE.sub("", path.suffix)[:16]
     return (stem or "artifact", suffix)
+
+
+def checked_fields(fields: Mapping[str, str], role: str) -> dict[str, str]:
+    """Validate that a mapping is safe to fold into a digest.
+
+    Every value reaching a key must already be a string. The digest is taken
+    over ``json.dumps(..., default=str)``, and ``default=str`` renders an
+    arbitrary object by its ``repr`` — which for a set depends on
+    ``PYTHONHASHSEED`` and therefore differs between processes. A key that
+    changes per process never hits, and nothing reports it: an unreachable
+    cache is indistinguishable from a cold one. Requiring strings puts
+    normalisation with whoever understands the values.
+
+    Parameters
+    ----------
+    fields : Mapping of str to str
+        Candidate fields.
+    role : str
+        What produced them, named in the error.
+
+    Returns
+    -------
+    dict of str to str
+        The fields, as a plain dict.
+
+    Raises
+    ------
+    CacheKeyError
+        If any key or value is not a string.
+    """
+    for field, value in fields.items():
+        if not isinstance(field, str) or not isinstance(value, str):
+            raise CacheKeyError(
+                f"{role} must supply str to str; got "
+                f"{type(field).__name__} to {type(value).__name__}. Format the "
+                "value yourself so its spelling is a decision rather than an "
+                "accident of repr()"
+            )
+    return dict(fields)
 
 
 class CacheKeyError(Exception):
@@ -259,21 +299,14 @@ class DynamicCacheKeyGenerator(Generic[TDatum]):
                 "a key with no identity is the filename alone, which two "
                 "unrelated values can share"
             )
-        for field, entry in produced.items():
-            if not isinstance(field, str) or not isinstance(entry, str):
-                raise CacheKeyError(
-                    f"identity function for scheme {self.scheme!r} must return "
-                    f"str to str; got {type(field).__name__} to "
-                    f"{type(entry).__name__}"
-                )
-        return dict(produced)
+        return checked_fields(produced, f"identity function for scheme {self.scheme!r}")
 
     def key_for(
         self,
         value: TDatum,
         path: Path | str,
         *,
-        context: Mapping[str, Any] | None = None,
+        context: Mapping[str, str] | None = None,
         suffix: str | None = None,
     ) -> str:
         """Derive the cache key naming this value's artifact.
@@ -286,11 +319,15 @@ class DynamicCacheKeyGenerator(Generic[TDatum]):
             Location the readable stem and extension are taken from. Only its
             filename participates; the directory it sits in does not, so the
             same artifact keyed from two workspaces agrees.
-        context : Mapping of str to Any or None, optional
+        context : Mapping of str to str or None, optional
             Further inputs that affect the result but are not part of the
-            value — a code revision, a solver version. Anything omitted here
-            that changes the output will make two genuinely different
-            artifacts share a key.
+            value — a code revision, a solver version. This is the escape
+            hatch for inputs that have no natural type to register: the
+            registry declares what a *type* means, once, while context carries
+            what varies at the call site. Anything omitted here that changes
+            the output will make two genuinely different artifacts share a
+            key. Values are strings for the reason given in
+            :func:`checked_fields`.
         suffix : str or None, optional
             Extension to use in place of the one on ``path``. Pass
             :data:`AGGREGATE_SUFFIX` where the artifact is a set, so the key
@@ -315,7 +352,7 @@ class DynamicCacheKeyGenerator(Generic[TDatum]):
             "scheme": self.scheme,
             "version": KEY_SCHEME_VERSION,
             "identity": self.identity(value),
-            "context": dict(context) if context else {},
+            "context": checked_fields(context, "context") if context else {},
             "filename": f"{stem}{extension}",
         }
         digest = hashlib.sha256(
@@ -732,7 +769,7 @@ def resource_key(
     resource: DataResource,
     *,
     partitioning: PartitioningParameterSet | None = None,
-    context: Mapping[str, Any] | None = None,
+    context: Mapping[str, str] | None = None,
     suffix: str | None = None,
 ) -> str:
     """Derive the cache key naming a blueprint resource's artifact.
@@ -743,7 +780,7 @@ def resource_key(
         Resource declaration from a blueprint.
     partitioning : PartitioningParameterSet or None, optional
         See :func:`subject_for`.
-    context : Mapping of str to Any or None, optional
+    context : Mapping of str to str or None, optional
         Further inputs that affect the result but are not fields of the
         resource, such as a solver version or code revision.
     suffix : str or None, optional
@@ -775,7 +812,7 @@ def aggregate_key(
     resource: DataResource,
     partitioning: PartitioningParameterSet,
     *,
-    context: Mapping[str, Any] | None = None,
+    context: Mapping[str, str] | None = None,
 ) -> str:
     """Derive the cache key naming the set produced by splitting a resource.
 
@@ -792,7 +829,7 @@ def aggregate_key(
         Resource the set is derived from.
     partitioning : PartitioningParameterSet
         Geometry to split across.
-    context : Mapping of str to Any or None, optional
+    context : Mapping of str to str or None, optional
         Further inputs that affect the result.
 
     Returns

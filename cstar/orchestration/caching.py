@@ -74,7 +74,7 @@ def cached(
     cache: ArtifactCache | None = None,
     cache_factory: Callable[[], ArtifactCache] | None = None,
     run_id_argument: str = "run_id",
-    context: Mapping[str, Any] | None = None,
+    context: Mapping[str, str] | None = None,
     promote: bool = False,
     on_conflict: OnConflict = OnConflict.SKIP,
     localize: bool = True,
@@ -95,10 +95,11 @@ def cached(
         available at import time.
     run_id_argument : str, optional
         Name of the wrapped function's parameter carrying the run identifier.
-    context : Mapping of str to Any or None, optional
+    context : Mapping of str to str or None, optional
         Extra inputs folded into the key — a code revision, a solver version.
         Anything that changes the output and is omitted here will make two
-        different artifacts share a key.
+        different artifacts share a key. Values are strings so that their
+        spelling is a decision rather than an accident of ``repr``.
     promote : bool, optional
         Whether a freshly produced artifact is published to the shared tier.
         Off by default: publishing is a separate decision about what belongs in
@@ -219,7 +220,7 @@ def _localized(
 def _key_for(
     resource: Resource,
     geometry: PartitioningParameterSet | None,
-    context: Mapping[str, Any] | None,
+    context: Mapping[str, str] | None,
 ) -> str:
     """Derive the key naming what this call will produce.
 
@@ -229,7 +230,7 @@ def _key_for(
         Declared input found among the arguments.
     geometry : PartitioningParameterSet or None
         Partition geometry found among the arguments, if any.
-    context : Mapping of str to Any or None
+    context : Mapping of str to str or None
         Extra inputs folded into the key.
 
     Returns

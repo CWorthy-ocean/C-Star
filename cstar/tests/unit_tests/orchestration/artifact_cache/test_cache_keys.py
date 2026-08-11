@@ -290,8 +290,8 @@ def test_context_changes_the_key(versioned: VersionedResource) -> None:
 
 def test_context_ordering_does_not_matter(versioned: VersionedResource) -> None:
     """Equal context mappings key alike regardless of insertion order."""
-    assert resource_key(versioned, context={"a": 1, "b": 2}) == resource_key(
-        versioned, context={"b": 2, "a": 1}
+    assert resource_key(versioned, context={"a": "1", "b": "2"}) == resource_key(
+        versioned, context={"b": "2", "a": "1"}
     )
 
 
@@ -1071,7 +1071,7 @@ def test_non_string_identity_values_are_refused() -> None:
         lambda grid: {"nx": grid.nx},  # type: ignore[dict-item]
     )
 
-    with pytest.raises(CacheKeyError, match="must return"):
+    with pytest.raises(CacheKeyError, match="must supply str to str"):
         generator.key_for(_Grid(16, 8), "/d/x.nc")
 
 
@@ -1118,3 +1118,38 @@ def test_readable_parts_falls_back_when_nothing_survives() -> None:
     """A location with no usable name still produces a legible key."""
     assert readable_parts("/") == ("artifact", "")
     assert readable_parts("https://example.org/") == ("artifact", "")
+
+
+def test_context_values_must_be_strings(versioned: VersionedResource) -> None:
+    """An unformatted value renders by ``repr``, which is not always stable.
+
+    A set's ``repr`` depends on ``PYTHONHASHSEED``, so a key built from one
+    differs between processes and the cache never hits — silently, because an
+    unreachable cache looks exactly like a cold one.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    """
+    with pytest.raises(CacheKeyError, match="context must supply str to str"):
+        resource_key(versioned, context={"features": {"alpha", "beta"}})  # type: ignore[dict-item]
+
+
+def test_context_is_not_identity(versioned: VersionedResource) -> None:
+    """Context and identity occupy separate payload slots, so neither shadows.
+
+    A caller may use a field name in context that an identity function already
+    uses without the two interfering.
+
+    Parameters
+    ----------
+    versioned : VersionedResource
+        Resource under test.
+    """
+    shadowed = resource_key(versioned, context={"resource.hash": "not-the-hash"})
+
+    assert shadowed != resource_key(versioned)
+    assert shadowed != resource_key(
+        VersionedResource(location=str(versioned.location), hash="not-the-hash")
+    )
