@@ -8,7 +8,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.cli.admin.promote import (
+from cstar.cli.cache.promote import (
     ARG_KEY,
     ARG_RUNID,
     app,

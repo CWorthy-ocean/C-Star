@@ -54,7 +54,7 @@ def str_strip_callback(_context: typer.Context, value: str, desc: str) -> str:
     str
     """
     if value and not value.strip():
-        log.debug(f"A {desc!r} must be specified.")
+        print(f"A {desc!r} must be specified.")
         raise typer.Exit(1)
 
     return value.strip()
