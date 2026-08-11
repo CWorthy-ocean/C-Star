@@ -1,24 +1,34 @@
 import importlib
+import importlib.util
 import typing as t
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from importlib.metadata import entry_points
 from itertools import chain
 from pathlib import Path
 
 from cstar.base.adapter import SchemaAdapter
-from cstar.base.env import get_env_item
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import SerializableModel, deserialize
-from cstar.orchestration.utils import ENV_CSTAR_APP_MODULES
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
+APP_PLUGIN_GROUP: t.Final[str] = "cstar.applications"
+"""Entry-point group third-party packages use to register applications.
+
+A published packaging contract: installed plugins name this group in their own
+``pyproject.toml``, so it must not change when the package layout does. It
+coincides with :data:`BUILTIN_APP_PACKAGE` today only by convention.
+"""
+
+BUILTIN_APP_PACKAGE: t.Final[str] = "cstar.applications"
+"""Package holding the in-tree application modules, one per application name."""
 
 log = get_logger(__name__)
 
@@ -355,6 +365,53 @@ def register_application(
     return klass
 
 
+def _load_builtin_application(name: str) -> None:
+    """Import the in-tree ``{BUILTIN_APP_PACKAGE}.{name}`` module, if it exists.
+
+    Parameters
+    ----------
+    name : str
+        The application name being resolved.
+
+    Notes
+    -----
+    A missing module is not an error -- the name may belong to an installed
+    plugin, which the caller tries next. A module that exists but fails to
+    import *is* an error: the ``ImportError`` propagates rather than being
+    reported as a missing application.
+    """
+    module = f"{BUILTIN_APP_PACKAGE}.{name}"
+
+    if importlib.util.find_spec(module) is None:
+        log.trace(f"No built-in application module {module!r} for {name!r}")
+        return
+
+    importlib.import_module(module)
+
+
+def _load_app_entry_point(name: str) -> None:
+    """Load a third-party application via the ``cstar.applications`` entry-point group.
+
+    Parameters
+    ----------
+    name : str
+        The application name being resolved.
+
+    Notes
+    -----
+    Reached only once the in-tree lookup has come up empty, so an installed
+    plugin can never shadow a built-in application.
+    """
+    for ep in entry_points(group=APP_PLUGIN_GROUP, name=name):
+        try:
+            ep.load()
+        except Exception:
+            log.warning(f"Unable to load application plugin {name!r} from {ep.value!r}")
+
+        if name in _registry:
+            return
+
+
 def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     """Get an application from the application registry.
 
@@ -370,34 +427,21 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
 
     Notes
     -----
-    Applications defined outside the ``cstar.applications`` package can be made
-    discoverable by setting the ``CSTAR_APP_MODULES`` environment variable to a
-    comma-separated list of importable module paths. Each module is imported
-    before lookup so its ``@register_application`` decorators run.
+    Applications are discovered, in order, from:
+
+    1. The in-tree ``{BUILTIN_APP_PACKAGE}.{name}`` module.
+    2. The :data:`APP_PLUGIN_GROUP` entry-point group -- installed third-party
+       plugins.
+
+    Each step is attempted only while *name* is still unregistered. A plugin
+    therefore can never shadow a built-in application: a name that resolves in
+    step 1 never reaches step 2, and the plugin claiming it is never imported.
     """
     if name not in _registry:
-        if modules := get_env_item(ENV_CSTAR_APP_MODULES).value:
-            if matches := {m.strip() for m in modules.split(",") if name in m}:
-                if len(matches) > 1:
-                    msg = f"An application name collision may occur using {name!r} for modules {','.join(matches)}"
-                    log.warning(msg)
+        _load_builtin_application(name)
 
-                module = next(iter(matches))
-
-                try:
-                    importlib.import_module(module)
-                except ModuleNotFoundError:
-                    log.warning(
-                        f"Unable to load external application {name!r} from {module!r}"
-                    )
-                    raise
-
-        module = f"cstar.applications.{name}"
-
-        try:
-            importlib.import_module(module)
-        except ModuleNotFoundError:
-            log.warning(f"Unable to load C-Star application {name!r} from {module!r}")
+    if name not in _registry:
+        _load_app_entry_point(name)
 
     if application := _registry.get(name):
         log.trace(f"Located application context {application.__name__!r} for {name!r}")

@@ -186,3 +186,29 @@ We have finally reached the point where we can execute the application using the
 
    > cstar blueprint run notify-scott.yaml
    Hello, @scott
+
+Making Your Application Discoverable
+------------------------------------
+
+C-Star automatically loads internal applications as-needed and makes use of python's ``entrypoints`` functionality to discover external applications.
+
+Declare a ``cstar.applications`` entry point pointing at the module containing
+your ``@register_application``-decorated class, e.g. in ``pyproject.toml``:
+
+.. code-block:: toml
+   :caption: Registering an application as an installed plugin
+
+   [project.entry-points."cstar.applications"]
+   my_app = "my_package.my_app"
+
+The entry-point name must be the application's ``name`` -- the same value your
+blueprints carry in their ``application`` field. *C-Star* imports that module
+(and only that module -- the entry point's return value is unused) the first
+time an application by that name is requested.
+
+Choose a name no built-in already uses. *C-Star* resolves the in-tree
+``cstar.applications`` module first and only consults entry points when that
+comes up empty, so a plugin can never shadow a built-in application: if
+``cstar.applications`` already defines a module with that name, your plugin is
+silently never imported. Note that this tutorial's own ``hello_world`` is one
+such name, so an installed plugin could not claim it.
