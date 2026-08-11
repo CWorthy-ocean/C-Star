@@ -39,28 +39,7 @@ HELP: t.Final[str] = (
 )
 
 
-def str_strip_callback(_context: typer.Context, value: str, desc: str) -> str:
-    """Clean and validate the format of a string.
-
-    Parameters
-    ----------
-    value : str
-        The value to be checked.
-    desc : str
-        A short name/description that will be logged in the case of errors.
-
-    Returns
-    -------
-    str
-    """
-    if value and not value.strip():
-        print(f"A {desc!r} must be specified.")
-        raise typer.Exit(1)
-
-    return value.strip()
-
-
-def runid_callback(context: typer.Context, run_id: str) -> str:
+def runid_callback(context: typer.Context, value: str) -> str:
     """Clean and validate the run-id format.
 
     Parameters
@@ -72,22 +51,29 @@ def runid_callback(context: typer.Context, run_id: str) -> str:
     -------
     str
     """
-    return str_strip_callback(context, run_id, "run-id")
+    if value and not value.strip():
+        print("A key must be specified.")
+        raise typer.Exit(1)
+    return value.strip()
 
 
-def key_callback(context: typer.Context, key: str) -> str:
+def key_callback(context: typer.Context, value: str) -> str:
     """Clean and validate the key format.
 
     Parameters
     ----------
-    key : str
+    value : str
         The key value received from the user.
 
     Returns
     -------
     str
     """
-    return str_strip_callback(context, key, "key")
+    if value and not value.strip():
+        print("A key must be specified.")
+        raise typer.Exit(1)
+
+    return value.strip()
 
 
 def confirm_overwrite(force_overwrite: bool = False) -> bool:
