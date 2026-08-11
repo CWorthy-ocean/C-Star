@@ -40,8 +40,10 @@ through a decorator that cannot express it.
 from __future__ import annotations
 
 import functools
+import hashlib
 import inspect
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from cstar.orchestration.artifact_cache import (
@@ -51,8 +53,11 @@ from cstar.orchestration.artifact_cache import (
     Tier,
 )
 from cstar.orchestration.cache_keys import (
+    AGGREGATE_SUFFIX,
     CacheKeyError,
     aggregate_key,
+    generator_for,
+    identity_for,
     is_registered,
     resource_key,
 )
@@ -61,7 +66,15 @@ from cstar.orchestration.models import Resource
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-__all__ = ["CachedCallError", "cached"]
+__all__ = [
+    "CachedCallError",
+    "FileSet",
+    "cache_fileset",
+    "cached",
+    "fileset_for",
+    "fileset_identity",
+    "fileset_key",
+]
 
 F = TypeVar("F", bound="Callable[..., Path]")
 """A producer: any callable returning the path it wrote its result to."""
@@ -69,6 +82,219 @@ F = TypeVar("F", bound="Callable[..., Path]")
 
 class CachedCallError(Exception):
     """Raised when a decorated call cannot be cached as declared."""
+
+
+@dataclass(frozen=True)
+class FileSet:
+    """A specific collection of files, identified by what they contain.
+
+    The escape hatch for "just make sure these files are cached". Everything
+    else here is *input-addressed* — keyed on a declaration, before the work
+    runs — because that is what lets a lookup skip the work. A file set has no
+    declaration to key on: the caller has files already and wants them kept.
+    So it is **content-addressed** instead, keyed on the digests of its
+    members.
+
+    That is the honest choice rather than a compromise. Keying on the member
+    names alone would let two unrelated directories that happen to share
+    filenames collide and serve each other's data; keying on the containing
+    directory would make the key machine-specific and useless in the shared
+    tier. Reading the files is the cost of an answer that cannot be wrong, and
+    the files are already on disk by the time anyone asks.
+
+    Build one with :func:`fileset_for` rather than by hand, so the digests and
+    the paths agree.
+
+    Attributes
+    ----------
+    root : Path
+        Directory the members are relative to. Not part of the identity: the
+        same files under two different parents are the same artifact.
+    members : tuple of str
+        Container-relative POSIX paths, sorted.
+    digests : tuple of str
+        SHA-256 of each member, positionally aligned with :attr:`members`.
+    """
+
+    root: Path
+    members: tuple[str, ...]
+    digests: tuple[str, ...]
+
+    @property
+    def content_digest(self) -> str:
+        """str: Digest over the members' paths and contents.
+
+        Notes
+        -----
+        Covers the paths as well as the bytes, so moving a file within the set
+        is a different set — which it is, since a consumer globbing the
+        expanded container would see something different.
+        """
+        rolling = hashlib.sha256()
+        for member, digest in zip(self.members, self.digests, strict=True):
+            rolling.update(member.encode())
+            rolling.update(b"\0")
+            rolling.update(digest.encode())
+            rolling.update(b"\0")
+        return rolling.hexdigest()
+
+
+@identity_for(FileSet, "fileset")
+def fileset_identity(fileset: FileSet) -> dict[str, str]:
+    """Return the fields identifying a file set's contents.
+
+    The wildcard that selected the members is deliberately absent. Two
+    different patterns that select the same files produce the same artifact,
+    and keying on the pattern would split the cache on a difference that
+    cannot change a byte.
+
+    Parameters
+    ----------
+    fileset : FileSet
+        Value being keyed.
+
+    Returns
+    -------
+    dict of str to str
+        Identifying fields.
+    """
+    return {
+        "fileset.digest": fileset.content_digest,
+        "fileset.count": str(len(fileset.members)),
+    }
+
+
+def fileset_for(path: Path | str, wildcard: str | None = None) -> FileSet:
+    """Discover the files under a directory and describe them as a set.
+
+    Parameters
+    ----------
+    path : Path or str
+        Directory to search.
+    wildcard : str or None, optional
+        Pattern passed to :meth:`pathlib.Path.rglob`. Defaults to every file.
+        Only what the pattern selects is described, and therefore only what it
+        selects is ever cached.
+
+    Returns
+    -------
+    FileSet
+        The discovered files, with their digests.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``path`` is not a directory.
+    ValueError
+        If the pattern selects nothing. An empty set would key identically to
+        every other empty set and cache nothing useful, so it is a mistake
+        worth reporting rather than a no-op.
+
+    Examples
+    --------
+    >>> fileset_for(work_dir, "*.nc")
+    FileSet(root=..., members=('rank000.nc', ...), digests=(...))
+    """
+    root = Path(path).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"not a directory: {root}")
+
+    found = sorted(entry for entry in root.rglob(wildcard or "*") if entry.is_file())
+    if not found:
+        pattern = wildcard or "*"
+        raise ValueError(f"no files matched {pattern!r} beneath {root}")
+
+    members = tuple(str(PurePosixPath(entry.relative_to(root))) for entry in found)
+    digests = tuple(_digest(entry) for entry in found)
+    return FileSet(root=root, members=members, digests=digests)
+
+
+def _digest(path: Path) -> str:
+    """Return the SHA-256 of a file.
+
+    Parameters
+    ----------
+    path : Path
+        Existing file to read.
+
+    Returns
+    -------
+    str
+        Hex digest.
+    """
+    with path.open("rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def fileset_key(fileset: FileSet, *, name: str | None = None) -> str:
+    """Derive the cache key naming a file set.
+
+    Parameters
+    ----------
+    fileset : FileSet
+        Set being named.
+    name : str or None, optional
+        Readable stem for the key. Defaults to the root directory's name.
+
+    Returns
+    -------
+    str
+        Key carrying :data:`~cstar.orchestration.cache_keys.AGGREGATE_SUFFIX`,
+        since a file set is a collection rather than a file.
+    """
+    stem = name or fileset.root.name or "fileset"
+    return generator_for(FileSet).key_for(fileset, stem, suffix=AGGREGATE_SUFFIX)
+
+
+def cache_fileset(
+    cache: ArtifactCache,
+    fileset: FileSet,
+    run_id: str,
+    *,
+    name: str | None = None,
+    promote: bool = False,
+    on_conflict: OnConflict = OnConflict.SKIP,
+) -> Location:
+    """Ensure a file set is in the cache, and return where it lives.
+
+    Idempotent: a set already present is returned untouched, since its key is
+    derived from its contents and identical contents are the same artifact.
+
+    Only the set's own members are stored. Anything else under
+    :attr:`FileSet.root` is excluded explicitly rather than by omission — a
+    directory holding ``a.txt`` and ``b.csv``, described with ``*.txt``, yields
+    a container holding ``a.txt`` alone.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache to write into.
+    fileset : FileSet
+        Set to store.
+    run_id : str
+        Run storing it.
+    name : str or None, optional
+        See :func:`fileset_key`.
+    promote : bool, optional
+        Whether to publish to the shared tier. Off by default, as elsewhere:
+        publishing is a separate decision from producing.
+    on_conflict : OnConflict, optional
+        How promotion resolves a shared name already holding different bytes.
+
+    Returns
+    -------
+    Location
+        The expanded container in the user tier.
+    """
+    key = fileset_key(fileset, name=name)
+    found = cache.materialize(key, run_id, record_use=True)
+    if found is None:
+        found = cache.ingest_aggregate(
+            fileset.root, key, run_id, members=fileset.members
+        )
+    if promote:
+        cache.promote(key, run_id, on_conflict=on_conflict)
+    return found
 
 
 def cached(

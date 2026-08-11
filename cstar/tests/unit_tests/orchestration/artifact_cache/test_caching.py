@@ -13,7 +13,14 @@ import pytest
 
 from cstar.applications.roms_marbl.models import PartitioningParameterSet
 from cstar.orchestration.artifact_cache import ArtifactCache, ArtifactKind, Tier
-from cstar.orchestration.caching import CachedCallError, cached
+from cstar.orchestration.caching import (
+    CachedCallError,
+    cache_fileset,
+    cached,
+    fileset_for,
+    fileset_identity,
+    fileset_key,
+)
 from cstar.orchestration.models import Resource, VersionedResource
 
 RUN_ID = "run-abc-123"
@@ -942,3 +949,251 @@ def test_two_geometries_are_ambiguous(
 
     with pytest.raises(CachedCallError, match="ambiguous"):
         cached(cache=cache)(produce)(resource, geometry, geometry, RUN_ID)
+
+
+# ---------------------------------------------------------------------------
+# File sets
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def tree(tmp_path: Path) -> Path:
+    """Return a directory holding a mix of files the wildcard must filter.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+
+    Returns
+    -------
+    Path
+        Directory to discover.
+    """
+    root = tmp_path / "tree"
+    (root / "sub").mkdir(parents=True)
+    (root / "a.txt").write_text("alpha")
+    (root / "b.csv").write_text("beta")
+    (root / "sub" / "c.txt").write_text("gamma")
+    return root
+
+
+def test_wildcard_selects_the_members(tree: Path) -> None:
+    """Only what the pattern matches is described.
+
+    Parameters
+    ----------
+    tree : Path
+        Directory to discover.
+    """
+    assert fileset_for(tree, "*.txt").members == ("a.txt", "sub/c.txt")
+
+
+def test_no_wildcard_takes_everything(tree: Path) -> None:
+    """The default is every file beneath the directory.
+
+    Parameters
+    ----------
+    tree : Path
+        Directory to discover.
+    """
+    assert fileset_for(tree).members == ("a.txt", "b.csv", "sub/c.txt")
+
+
+def test_members_keep_their_nesting(tree: Path) -> None:
+    """Relative paths, not flattened names, so a tree survives the round trip.
+
+    Parameters
+    ----------
+    tree : Path
+        Directory to discover.
+    """
+    assert "sub/c.txt" in fileset_for(tree, "*.txt").members
+
+
+def test_excluded_files_never_reach_the_cache(cache: ArtifactCache, tree: Path) -> None:
+    """A file outside the set must not be swept in by proximity.
+
+    Excluded explicitly through ``members=`` rather than by omission: the
+    container is built from the set's own list, so anything else under the
+    same root is left behind.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    tree : Path
+        Directory to discover.
+    """
+    location = cache_fileset(cache, fileset_for(tree, "*.txt"), RUN_ID)
+
+    stored = sorted(
+        str(item.relative_to(location.path))
+        for item in location.path.rglob("*")
+        if item.is_file() and not item.name.startswith(".")
+    )
+    assert stored == ["a.txt", "sub/c.txt"]
+
+
+def test_a_file_set_is_content_addressed(cache: ArtifactCache, tree: Path) -> None:
+    """Editing a member is a different artifact.
+
+    A file set has no declaration to key on — the caller has files already —
+    so its identity is what they contain. Keying on names alone would let two
+    unrelated directories serve each other's data.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    tree : Path
+        Directory to discover.
+    """
+    before = fileset_key(fileset_for(tree, "*.txt"))
+    (tree / "a.txt").write_text("changed")
+
+    assert fileset_key(fileset_for(tree, "*.txt")) != before
+
+
+def test_the_root_is_not_part_of_the_identity(tmp_path: Path, tree: Path) -> None:
+    """The same files under two parents are one artifact.
+
+    Otherwise the key would be machine-specific and useless in the shared
+    tier.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+    tree : Path
+        Directory to discover.
+    """
+    elsewhere = tmp_path / "elsewhere"
+    shutil.copytree(tree, elsewhere)
+
+    assert fileset_identity(fileset_for(elsewhere, "*.txt")) == fileset_identity(
+        fileset_for(tree, "*.txt")
+    )
+
+
+def test_the_wildcard_is_not_part_of_the_identity(tree: Path) -> None:
+    """Two patterns selecting the same files produce the same artifact.
+
+    Parameters
+    ----------
+    tree : Path
+        Directory to discover.
+    """
+    assert fileset_identity(fileset_for(tree, "*.csv")) == fileset_identity(
+        fileset_for(tree, "b.csv")
+    )
+
+
+def test_moving_a_member_changes_the_set(tmp_path: Path, tree: Path) -> None:
+    """Paths are identifying, since a consumer globbing the container sees them.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+    tree : Path
+        Directory to discover.
+    """
+    before = fileset_for(tree, "*.txt").content_digest
+    (tree / "sub" / "c.txt").rename(tree / "c.txt")
+
+    assert fileset_for(tree, "*.txt").content_digest != before
+
+
+def test_a_file_set_is_stored_as_a_set(cache: ArtifactCache, tree: Path) -> None:
+    """The container is one artifact, not a file per member.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    tree : Path
+        Directory to discover.
+    """
+    location = cache_fileset(cache, fileset_for(tree, "*.txt"), RUN_ID)
+    record = cache.read_manifest(RUN_ID).artifacts[location.name]
+
+    assert record.kind is ArtifactKind.SET
+    assert location.name.endswith(".set")
+    assert cache.verify(location.name, RUN_ID) is True
+
+
+def test_caching_a_file_set_is_idempotent(cache: ArtifactCache, tree: Path) -> None:
+    """Identical contents are the same artifact, so the second call is a hit.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    tree : Path
+        Directory to discover.
+    """
+    first = cache_fileset(cache, fileset_for(tree, "*.txt"), RUN_ID)
+    second = cache_fileset(cache, fileset_for(tree, "*.txt"), RUN_ID)
+
+    assert first.path == second.path
+
+
+def test_a_promoted_file_set_is_reused_across_runs(
+    cache: ArtifactCache, tree: Path
+) -> None:
+    """Another run expands the shared archive rather than re-storing.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    tree : Path
+        Directory to discover.
+    """
+    fileset = fileset_for(tree, "*.txt")
+    cache_fileset(cache, fileset, RUN_ID, promote=True)
+
+    shutil.rmtree(tree)
+    location = cache_fileset(cache, fileset, "run-B")
+
+    assert sorted(item.name for item in location.path.glob("*.txt")) == ["a.txt"]
+
+
+def test_a_custom_name_sets_the_readable_stem(cache: ArtifactCache, tree: Path) -> None:
+    """The stem is for humans reading a cache listing.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    tree : Path
+        Directory to discover.
+    """
+    key = fileset_key(fileset_for(tree, "*.txt"), name="inputs")
+
+    assert key.startswith("inputs-")
+
+
+def test_an_empty_selection_is_refused(tree: Path) -> None:
+    """Every empty set would key alike, so this is a mistake rather than a no-op.
+
+    Parameters
+    ----------
+    tree : Path
+        Directory to discover.
+    """
+    with pytest.raises(ValueError, match="no files matched"):
+        fileset_for(tree, "*.nope")
+
+
+def test_a_missing_directory_is_refused(tmp_path: Path) -> None:
+    """Discovery cannot describe what is not there.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+    """
+    with pytest.raises(FileNotFoundError):
+        fileset_for(tmp_path / "absent")
