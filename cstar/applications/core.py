@@ -392,6 +392,7 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
                     )
                     raise
 
+    if name not in _registry:
         module = f"cstar.applications.{name}"
 
         try:

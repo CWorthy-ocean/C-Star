@@ -82,6 +82,65 @@ def test_get_application_from_external_module(
         _registry.pop(app_name, None)
 
 
+def test_get_application_from_external_module_does_not_warn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify that resolving an application registered via CSTAR_APP_MODULES
+    does not also attempt (and warn about) the in-tree ``cstar.applications``
+    import, now that the name is already present in the registry.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary path fixture for writing per-test outputs. Used to create the
+        external application module.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to set the environment variable and import path.
+    caplog : pytest.LogCaptureFixture
+        Fixture used to assert no spurious "Unable to load" warning is logged.
+    """
+    app_name = "external_test_app_no_warn"
+    module = tmp_path / f"{app_name}_module.py"
+    module.write_text(
+        textwrap.dedent(
+            f"""
+            from cstar.applications.core import (
+                ApplicationDefinition,
+                register_application,
+            )
+            from cstar.applications.hello_world import (
+                HelloWorldBlueprint,
+                HelloWorldRunner,
+            )
+
+
+            @register_application
+            class ExternalApplication(
+                ApplicationDefinition[HelloWorldBlueprint, HelloWorldRunner]
+            ):
+                name: str = "{app_name}"
+                long_name: str = "Externally Defined App"
+                runner = HelloWorldRunner
+                blueprint = HelloWorldBlueprint
+                applicable_transforms = ()
+            """
+        )
+    )
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv(ENV_CSTAR_APP_MODULES, f"{app_name}_module")
+
+    try:
+        with caplog.at_level("WARNING"):
+            app = get_application(app_name)
+        assert app.name == app_name
+        assert "Unable to load C-Star application" not in caplog.text
+    finally:
+        _registry.pop(app_name, None)
+
+
 def test_runnerresult_initial_state(tmp_path: Path) -> None:
     """Verify that the RunnerResult returns the initial status, as expected."""
     fake_bp_path = tmp_path / "fake.yaml"
