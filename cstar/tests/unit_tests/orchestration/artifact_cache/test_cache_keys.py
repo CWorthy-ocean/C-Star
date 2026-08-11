@@ -5,19 +5,25 @@ Exercised against the real :class:`~cstar.orchestration.models.Resource` and
 declarations that appear in the shipped ROMS/MARBL blueprint template.
 """
 
+from dataclasses import dataclass
+from pathlib import Path
+
 import pytest
 
 from cstar.applications.roms_marbl.models import PartitioningParameterSet
+from cstar.orchestration import cache_keys
 from cstar.orchestration.cache_keys import (
     AGGREGATE_SUFFIX,
     DIGEST_LENGTH,
     KEY_SCHEME_VERSION,
     CacheKeyError,
     CacheKeyGenerator,
+    DynamicCacheKeyGenerator,
     ExpandAggregateKeyGenerator,
     HashKeyGenerator,
     LocationKeyGenerator,
     generator_for,
+    readable_parts,
 )
 from cstar.orchestration.models import Resource, VersionedResource
 
@@ -800,3 +806,296 @@ def test_expansion_uses_a_declared_geometry_hash(
     assert generator.key_for(versioned, partitioning=hashed) != generator.key_for(
         versioned, partitioning=PartitioningParameterSet(n_procs_x=4, n_procs_y=2)
     )
+
+
+# ---------------------------------------------------------------------------
+# Type-agnostic keys
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _Grid:
+    """A value with no relationship to the blueprint models.
+
+    Attributes
+    ----------
+    nx : int
+        Cells in x.
+    ny : int
+        Cells in y.
+    crs : str
+        Coordinate reference system.
+    """
+
+    nx: int
+    ny: int
+    crs: str = "EPSG:4326"
+
+
+def _grid_identity(grid: _Grid) -> dict[str, str]:
+    """Return the fields distinguishing one grid from another.
+
+    Parameters
+    ----------
+    grid : _Grid
+        Value being keyed.
+
+    Returns
+    -------
+    dict of str to str
+        Identifying fields.
+    """
+    return {"nx": str(grid.nx), "ny": str(grid.ny), "crs": grid.crs}
+
+
+@pytest.fixture
+def grid_keys() -> DynamicCacheKeyGenerator[_Grid]:
+    """Return a generator keyed on grids.
+
+    Returns
+    -------
+    DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    return DynamicCacheKeyGenerator("grid", _grid_identity)
+
+
+def test_any_type_can_be_keyed(grid_keys: DynamicCacheKeyGenerator[_Grid]) -> None:
+    """A value unrelated to the blueprint models keys without adapting it.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    key = grid_keys.key_for(_Grid(16, 8), Path("/data/domain.nc"))
+
+    assert key.startswith("domain-")
+    assert key.endswith(".nc")
+    assert len(key) == len("domain-") + DIGEST_LENGTH + len(".nc")
+
+
+def test_identity_fields_change_the_key(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """Whatever the identity function reports is what distinguishes artifacts.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    assert grid_keys.key_for(_Grid(16, 8), "/d/x.nc") != grid_keys.key_for(
+        _Grid(8, 16), "/d/x.nc"
+    )
+
+
+def test_the_directory_does_not_participate(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """One artifact keyed from two workspaces must agree.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    assert grid_keys.key_for(_Grid(16, 8), "/scratch/a/x.nc") == grid_keys.key_for(
+        _Grid(16, 8), Path("/home/b/x.nc")
+    )
+
+
+def test_the_filename_does_participate(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """The stem is folded in, so the key stays a pure function of its inputs.
+
+    The cost is duplication: one value under two names caches twice. That is
+    the same trade the resource strategies make, for the same reason — legible
+    cache listings.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    assert grid_keys.key_for(_Grid(16, 8), "/d/x.nc") != grid_keys.key_for(
+        _Grid(16, 8), "/d/y.nc"
+    )
+
+
+def test_schemes_separate_the_key_space() -> None:
+    """Two identity functions over one type must not collide."""
+    first = DynamicCacheKeyGenerator("grid", _grid_identity)
+    second = DynamicCacheKeyGenerator("grid-coarsened", _grid_identity)
+
+    assert first.key_for(_Grid(16, 8), "/d/x.nc") != second.key_for(
+        _Grid(16, 8), "/d/x.nc"
+    )
+
+
+def test_dynamic_scheme_version_participates(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bumping the scheme version invalidates every key at once.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to move the version.
+    """
+    before = grid_keys.key_for(_Grid(16, 8), "/d/x.nc")
+    monkeypatch.setattr(cache_keys, "KEY_SCHEME_VERSION", KEY_SCHEME_VERSION + 1)
+
+    assert grid_keys.key_for(_Grid(16, 8), "/d/x.nc") != before
+
+
+def test_dynamic_context_changes_the_key(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """Inputs outside the value still have to reach the key.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    assert grid_keys.key_for(
+        _Grid(16, 8), "/d/x.nc", context={"solver": "v1"}
+    ) != grid_keys.key_for(_Grid(16, 8), "/d/x.nc", context={"solver": "v2"})
+
+
+def test_dynamic_empty_context_matches_no_context(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """An empty mapping is the absence of context, not a distinct one.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    assert grid_keys.key_for(_Grid(16, 8), "/d/x.nc", context={}) == grid_keys.key_for(
+        _Grid(16, 8), "/d/x.nc"
+    )
+
+
+def test_suffix_can_be_overridden(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """A set is not a file of the source's type and must not claim to be.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    key = grid_keys.key_for(_Grid(16, 8), "/d/x.nc", suffix=AGGREGATE_SUFFIX)
+
+    assert key.endswith(AGGREGATE_SUFFIX)
+    assert key != grid_keys.key_for(_Grid(16, 8), "/d/x.nc")
+
+
+def test_partitioning_is_expressible_through_the_identity_function() -> None:
+    """What the base class hard-codes, a caller supplies.
+
+    This is the point of the design: geometry is not privileged, it is just
+    another field somebody decided identifies their artifact.
+    """
+
+    def identity(pair: tuple[_Grid, PartitioningParameterSet]) -> dict[str, str]:
+        """Fold a process grid into a grid's identity.
+
+        Parameters
+        ----------
+        pair : tuple
+            Grid and the geometry it is split across.
+
+        Returns
+        -------
+        dict of str to str
+            Identifying fields.
+        """
+        grid, geometry = pair
+        return {
+            **_grid_identity(grid),
+            "procs": f"{geometry.n_procs_x}x{geometry.n_procs_y}",
+        }
+
+    generator = DynamicCacheKeyGenerator("partitioned-grid", identity)
+    grid = _Grid(16, 8)
+
+    assert generator.key_for(
+        (grid, PartitioningParameterSet(n_procs_x=4, n_procs_y=2)), "/d/x.nc"
+    ) != generator.key_for(
+        (grid, PartitioningParameterSet(n_procs_x=2, n_procs_y=4)), "/d/x.nc"
+    )
+
+
+def test_an_empty_identity_is_refused() -> None:
+    """A key with no identity is the filename, which anything can share."""
+    generator: DynamicCacheKeyGenerator[_Grid] = DynamicCacheKeyGenerator(
+        "empty", lambda _: {}
+    )
+
+    with pytest.raises(CacheKeyError, match="returned nothing"):
+        generator.key_for(_Grid(16, 8), "/d/x.nc")
+
+
+def test_non_string_identity_values_are_refused() -> None:
+    """Normalisation belongs to whoever understands the type."""
+    generator: DynamicCacheKeyGenerator[_Grid] = DynamicCacheKeyGenerator(
+        "loose",
+        lambda grid: {"nx": grid.nx},  # type: ignore[dict-item]
+    )
+
+    with pytest.raises(CacheKeyError, match="must return"):
+        generator.key_for(_Grid(16, 8), "/d/x.nc")
+
+
+@pytest.mark.parametrize("scheme", ["", "has space", "has/slash"])
+def test_an_unusable_scheme_is_refused(scheme: str) -> None:
+    """The scheme reaches the key space and must be a safe tag.
+
+    Parameters
+    ----------
+    scheme : str
+        Candidate scheme.
+    """
+    with pytest.raises(CacheKeyError, match="filesystem-safe"):
+        DynamicCacheKeyGenerator(scheme, _grid_identity)
+
+
+def test_dynamic_repr_names_the_scheme(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """A generator is identified in debugging output by its key space.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    assert repr(grid_keys) == "DynamicCacheKeyGenerator(scheme='grid')"
+
+
+def test_an_extensionless_path_yields_a_bare_key(
+    grid_keys: DynamicCacheKeyGenerator[_Grid],
+) -> None:
+    """Not every artifact has an extension to carry.
+
+    Parameters
+    ----------
+    grid_keys : DynamicCacheKeyGenerator
+        Generator under test.
+    """
+    assert not Path(grid_keys.key_for(_Grid(16, 8), "/d/domain")).suffix
+
+
+def test_readable_parts_falls_back_when_nothing_survives() -> None:
+    """A location with no usable name still produces a legible key."""
+    assert readable_parts("/") == ("artifact", "")
+    assert readable_parts("https://example.org/") == ("artifact", "")

@@ -39,11 +39,12 @@ import json
 import re
 from abc import ABC, abstractmethod
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, ClassVar, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Generic, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
 
     from cstar.applications.roms_marbl.models import PartitioningParameterSet
     from cstar.orchestration.models import DataResource
@@ -55,11 +56,16 @@ __all__ = [
     "CacheKeyError",
     "CacheKeyGenerator",
     "DerivedKeyGenerator",
+    "DynamicCacheKeyGenerator",
     "ExpandAggregateKeyGenerator",
     "HashKeyGenerator",
     "LocationKeyGenerator",
     "generator_for",
+    "readable_parts",
 ]
+
+TDatum = TypeVar("TDatum")
+"""Any value a caller wants to key an artifact on."""
 
 KEY_SCHEME_VERSION: Final[int] = 3
 """Version of the key derivation, folded into every digest.
@@ -101,6 +107,35 @@ byte of output.
 ``hash`` is excluded from this set because it is not metadata but an identity;
 see :meth:`CacheKeyGenerator._partition_identity`.
 """
+
+
+def readable_parts(location: str) -> tuple[str, str]:
+    """Return a filesystem-safe stem and suffix taken from a location.
+
+    The digest alone would be a correct key; the stem exists so a human
+    listing a cache directory can tell what they are looking at. Accepts a URL
+    or a filesystem path — the path component is taken in either case.
+
+    Parameters
+    ----------
+    location : str
+        URL or path the artifact derives its readable name from.
+
+    Returns
+    -------
+    tuple of (str, str)
+        Sanitised stem, and suffix including its leading dot when present.
+        The stem falls back to ``"artifact"`` when nothing usable remains.
+
+    Examples
+    --------
+    >>> readable_parts("https://example.org/data/boundary-2010.nc")
+    ('boundary-2010', '.nc')
+    """
+    path = PurePosixPath(urlsplit(location).path or location)
+    stem = _UNSAFE.sub("-", path.stem).strip("-.")[:_MAX_STEM]
+    suffix = _UNSAFE.sub("", path.suffix)[:16]
+    return (stem or "artifact", suffix)
 
 
 class CacheKeyError(Exception):
@@ -215,9 +250,6 @@ class CacheKeyGenerator(ABC):
     def _readable_parts(self, resource: DataResource) -> tuple[str, str]:
         """Return a safe filename stem and suffix taken from the location.
 
-        The digest alone would be a correct key; the stem exists so a human
-        listing a cache directory can tell what they are looking at.
-
         Parameters
         ----------
         resource : DataResource
@@ -228,11 +260,7 @@ class CacheKeyGenerator(ABC):
         tuple of (str, str)
             Sanitised stem, and suffix including its leading dot when present.
         """
-        raw = str(getattr(resource, "location", "") or "")
-        path = PurePosixPath(urlsplit(raw).path or raw)
-        stem = _UNSAFE.sub("-", path.stem).strip("-.")[:_MAX_STEM]
-        suffix = _UNSAFE.sub("", path.suffix)[:16]
-        return (stem or "artifact", suffix)
+        return readable_parts(str(getattr(resource, "location", "") or ""))
 
     def _partition_identity(
         self,
@@ -573,6 +601,171 @@ class ExpandAggregateKeyGenerator(DerivedKeyGenerator):
             for field, value in partitioning.model_dump(mode="json").items()
             if field not in _PARAMETER_METADATA
         }
+
+
+class DynamicCacheKeyGenerator(Generic[TDatum]):
+    """Strategy deriving a cache key from any value plus an injected identity.
+
+    :class:`CacheKeyGenerator` is bound to
+    :class:`~cstar.orchestration.models.DataResource`: it reads ``location``,
+    ``hash`` and ``partitioned`` off the value, and its partition handling is
+    specific to one application's geometry. That is right where a blueprint
+    resource is what is being keyed, and useless everywhere else.
+
+    This keeps the *shape* of that design — a scheme naming the derivation, a
+    scheme version, a readable stem, a truncated digest over a sorted payload —
+    and moves the one part that cannot generalise behind a function the caller
+    supplies. Anything that distinguishes one result from another, partition
+    geometry included, goes in whatever ``identity_fn`` returns.
+
+    Parameters
+    ----------
+    scheme : str
+        Short tag naming the derivation, folded into every digest. Required
+        rather than defaulted, because it *is* the key space: two identity
+        functions over one type that shared a scheme would silently collide,
+        and no default can know they differ. Deriving it from the function's
+        name was rejected — renaming a function would invalidate every key it
+        ever produced, with no error to say so.
+    identity_fn : Callable
+        Returns the fields identifying a value's content. Values are strings
+        so that normalisation — rounding, case, ordering — is decided by the
+        caller who understands the type, rather than by :func:`json.dumps`
+        guessing at it.
+
+    Attributes
+    ----------
+    scheme : str
+        Short tag naming the derivation.
+    identity_fn : Callable
+        Injected identity function.
+
+    Examples
+    --------
+    >>> def grid_identity(grid: Grid) -> dict[str, str]:
+    ...     return {"nx": str(grid.nx), "ny": str(grid.ny), "crs": grid.crs}
+    >>> generator = DynamicCacheKeyGenerator("grid", grid_identity)
+    >>> generator.key_for(grid, "/data/domain.nc")
+    'domain-4f8b1c02de75a396.nc'
+
+    See Also
+    --------
+    CacheKeyGenerator : Blueprint-resource strategies, kept for that use.
+    """
+
+    def __init__(
+        self,
+        scheme: str,
+        identity_fn: Callable[[TDatum], Mapping[str, str]],
+    ) -> None:
+        if not scheme or _UNSAFE.search(scheme):
+            raise CacheKeyError(
+                f"scheme must be a non-empty filesystem-safe tag, got {scheme!r}"
+            )
+        self.scheme = scheme
+        self.identity_fn = identity_fn
+
+    def identity(self, value: TDatum) -> dict[str, str]:
+        """Return the fields identifying this value's content.
+
+        Parameters
+        ----------
+        value : TDatum
+            Value being keyed.
+
+        Returns
+        -------
+        dict of str to str
+            Whatever ``identity_fn`` returned, validated.
+
+        Raises
+        ------
+        CacheKeyError
+            If the mapping is empty, or holds a non-string key or value. An
+            empty mapping would leave the key a function of the filename
+            alone, so two unrelated values sharing a name would share an
+            artifact — a silent wrong answer rather than a miss.
+        """
+        produced = self.identity_fn(value)
+        if not produced:
+            raise CacheKeyError(
+                f"identity function for scheme {self.scheme!r} returned nothing; "
+                "a key with no identity is the filename alone, which two "
+                "unrelated values can share"
+            )
+        for field, entry in produced.items():
+            if not isinstance(field, str) or not isinstance(entry, str):
+                raise CacheKeyError(
+                    f"identity function for scheme {self.scheme!r} must return "
+                    f"str to str; got {type(field).__name__} to "
+                    f"{type(entry).__name__}"
+                )
+        return dict(produced)
+
+    def key_for(
+        self,
+        value: TDatum,
+        path: Path | str,
+        *,
+        context: Mapping[str, Any] | None = None,
+        suffix: str | None = None,
+    ) -> str:
+        """Derive the cache key naming this value's artifact.
+
+        Parameters
+        ----------
+        value : TDatum
+            Value being keyed.
+        path : Path or str
+            Location the readable stem and extension are taken from. Only its
+            filename participates; the directory it sits in does not, so the
+            same artifact keyed from two workspaces agrees.
+        context : Mapping of str to Any or None, optional
+            Further inputs that affect the result but are not part of the
+            value — a code revision, a solver version. Anything omitted here
+            that changes the output will make two genuinely different
+            artifacts share a key.
+        suffix : str or None, optional
+            Extension to use in place of the one on ``path``. Pass
+            :data:`AGGREGATE_SUFFIX` where the artifact is a set, so the key
+            does not claim to be a file of the source's type.
+
+        Returns
+        -------
+        str
+            A key of the form ``<stem>-<digest><suffix>``. The filename is
+            folded into the digest as well as prefixed, so the key stays a
+            pure function of its inputs; the consequence is that one value
+            keyed under two filenames caches twice.
+
+        Raises
+        ------
+        CacheKeyError
+            If ``identity_fn`` returns an unusable mapping.
+        """
+        stem, native = readable_parts(str(path))
+        extension = native if suffix is None else suffix
+        payload = {
+            "scheme": self.scheme,
+            "version": KEY_SCHEME_VERSION,
+            "identity": self.identity(value),
+            "context": dict(context) if context else {},
+            "filename": f"{stem}{extension}",
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, default=str).encode()
+        ).hexdigest()[:DIGEST_LENGTH]
+        return f"{stem}-{digest}{extension}"
+
+    def __repr__(self) -> str:
+        """Return a debugging representation naming the scheme.
+
+        Returns
+        -------
+        str
+            Representation of this generator.
+        """
+        return f"{type(self).__name__}(scheme={self.scheme!r})"
 
 
 def generator_for(resource: DataResource) -> CacheKeyGenerator:
