@@ -103,7 +103,7 @@ def store(
         action = "updated in"
 
     try:
-        location = cache.ingest(path, key, run_id, overwrite=overwrite)
+        location = cache.ingest(path, key, run_id, move=move, overwrite=overwrite)
     except ArtifactExistsError:
         print(f"An artifact with key {key!r} already exists for run {run_id!r}")
     else:

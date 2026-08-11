@@ -110,6 +110,40 @@ def confirm_overwrite(
     return answer.lower() == CHOICE_YES
 
 
+def confirm_remove_run(run_id: str, force_remove: bool = False) -> bool:
+    """Ask whether every artifact cached for a run should be removed.
+
+    Separate from :func:`confirm_remove`, which describes one artifact and
+    treats a missing location as "nothing to remove". A whole-run deletion has
+    no single location to name, so passing ``None`` there both prints the wrong
+    message and reports a refusal the caller may then ignore.
+
+    Parameters
+    ----------
+    run_id : str
+        Run whose artifacts would be removed.
+    force_remove : bool, optional
+        Skip the prompt, for unattended use.
+
+    Returns
+    -------
+    bool
+        Whether the removal should proceed.
+    """
+    print(f"Every artifact cached for run {run_id!r} will be removed.")
+
+    if force_remove:
+        return True
+
+    answer = Prompt.ask(
+        f"Press {CHOICE_YES!r} to delete (any other key to skip)",
+        default=CHOICE_NO,
+        choices=choices,
+        case_sensitive=False,
+    )
+    return answer.lower() == CHOICE_YES
+
+
 def confirm_remove(
     force_remove: bool = False,
     location: Location | None = None,
@@ -133,7 +167,10 @@ def confirm_remove(
             case_sensitive=False,
         )
 
-        if location.tier == Tier.SHARED:
+        if location.tier == Tier.SHARED and answer.lower() == CHOICE_YES:
+            # Both answers must be yes. Reassigning here would discard the
+            # first refusal, so answering "n" then "y" would delete a shared
+            # artifact the user had already declined to remove.
             answer = Prompt.ask(
                 prompt2,
                 default=CHOICE_NO,

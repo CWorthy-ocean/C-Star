@@ -8,15 +8,15 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.cli.cache.common import confirm_overwrite
-from cstar.cli.cache.promote import (
+from cstar.cli.cache.common import (
     ARG_KEY,
     ARG_RUNID,
-    app,
-    get_artifact_cache,
+    confirm_overwrite,
     key_callback,
     runid_callback,
 )
+from cstar.cli.cache.promote import app
+from cstar.io.utils import get_artifact_cache
 
 
 @pytest.fixture
@@ -205,3 +205,130 @@ def test_cli_admin_promote_happy_path(tmp_path: Path) -> None:
     assert shared_location.exists
     assert shared_location.path != location.path
     assert run_id not in str(shared_location.path)
+
+
+@pytest.mark.usefixtures("mock_artifact_cache_env")
+def test_cli_admin_promote_conflict_declined_keeps_the_shared_copy(
+    tmp_path: Path,
+) -> None:
+    """A name already published with different content is not taken silently.
+
+    The shared tier is addressed by name alone, so overwriting would replace
+    an artifact other runs are already reading. Declining has to leave it.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+    """
+    key: t.Final[str] = "mock-key"
+    original = tmp_path / "original.txt"
+    original.write_text("published content")
+
+    cache = get_artifact_cache()
+    cache.ingest(original, key, "run-a")
+    cache.promote(key, "run-a")
+
+    divergent = tmp_path / "divergent.txt"
+    divergent.write_text("different content")
+    cache.ingest(divergent, key, "run-b")
+
+    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
+        result = CliRunner().invoke(
+            app, [ARG_RUNID, "run-b", ARG_KEY, key], color=False
+        )
+
+    assert "already exists" in result.stdout
+    assert "promoted to the group cache" not in result.stdout
+
+    shared = cache.resolve(key)
+    assert shared is not None
+    assert shared.path.read_text() == "published content"
+
+
+@pytest.mark.usefixtures("mock_artifact_cache_env")
+def test_cli_admin_promote_conflict_accepted_replaces_it(tmp_path: Path) -> None:
+    """Confirming the prompt republishes over the existing name.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+    """
+    key: t.Final[str] = "mock-key"
+    original = tmp_path / "original.txt"
+    original.write_text("published content")
+
+    cache = get_artifact_cache()
+    cache.ingest(original, key, "run-a")
+    cache.promote(key, "run-a")
+
+    divergent = tmp_path / "divergent.txt"
+    divergent.write_text("different content")
+    cache.ingest(divergent, key, "run-b")
+
+    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")):
+        result = CliRunner().invoke(
+            app, [ARG_RUNID, "run-b", ARG_KEY, key], color=False
+        )
+
+    assert "promoted to the group cache" in result.stdout
+
+    shared = cache.resolve(key)
+    assert shared is not None
+    assert shared.path.read_text() == "different content"
+
+
+@pytest.mark.usefixtures("mock_artifact_cache_env")
+def test_cli_admin_promote_yes_replaces_without_asking(tmp_path: Path) -> None:
+    """``--yes`` is for unattended use, so it must not stop to ask.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+    """
+    key: t.Final[str] = "mock-key"
+    original = tmp_path / "original.txt"
+    original.write_text("published content")
+
+    cache = get_artifact_cache()
+    cache.ingest(original, key, "run-a")
+    cache.promote(key, "run-a")
+
+    divergent = tmp_path / "divergent.txt"
+    divergent.write_text("different content")
+    cache.ingest(divergent, key, "run-b")
+
+    with mock.patch("rich.prompt.Prompt.ask") as prompt:
+        result = CliRunner().invoke(
+            app, [ARG_RUNID, "run-b", ARG_KEY, key, "--yes"], color=False
+        )
+
+    prompt.assert_not_called()
+    assert "promoted to the group cache" in result.stdout
+
+
+@pytest.mark.usefixtures("mock_artifact_cache_env")
+def test_cli_admin_promote_verbose_names_the_location(tmp_path: Path) -> None:
+    """Verbose output identifies where the artifact was published.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Pytest-provided temporary directory.
+    """
+    key: t.Final[str] = "mock-key"
+    item = tmp_path / "something.txt"
+    item.write_text("payload")
+
+    get_artifact_cache().ingest(item, key, "run-a")
+
+    plain = CliRunner().invoke(app, [ARG_RUNID, "run-a", ARG_KEY, key], color=False)
+    assert "Location(" not in plain.stdout
+
+    get_artifact_cache().delete_shared(key, True)
+    verbose = CliRunner().invoke(
+        app, [ARG_RUNID, "run-a", ARG_KEY, key, "--verbose"], color=False
+    )
+    assert "Location(" in verbose.stdout

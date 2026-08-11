@@ -11,13 +11,13 @@ from cstar.cli.cache.common import (
     ARG_RUNID,
     ARG_YES,
     confirm_overwrite,
+    key_callback,
     key_help,
     list_runs_with_cache,
     run_id_help,
     runid_callback,
     yes_help,
 )
-from cstar.cli.cache.show import key_callback
 from cstar.cli.common import (
     cb_pipeline,
     set_env,
