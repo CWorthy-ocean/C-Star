@@ -22,13 +22,14 @@ from cstar.orchestration.cache_keys import (
     aggregate_key,
     generator_for,
     hash_identity,
+    identity_for,
     is_registered,
     location_identity,
     readable_parts,
     register_identity,
     resource_key,
 )
-from cstar.orchestration.models import Resource, VersionedResource
+from cstar.orchestration.models import DataResource, Resource, VersionedResource
 
 
 @pytest.fixture
@@ -1161,3 +1162,132 @@ def test_is_registered_reports_unknown_shapes() -> None:
     assert is_registered((VersionedResource, PartitioningParameterSet))
     assert not is_registered(complex)
     assert not is_registered((VersionedResource, complex))
+
+
+# ---------------------------------------------------------------------------
+# Declarative registration
+# ---------------------------------------------------------------------------
+
+
+def test_decorator_registers_a_plain_identity() -> None:
+    """Registration sits on the function it registers."""
+
+    class Widget:
+        """A type registered by decoration."""
+
+    @identity_for(Widget, "widget")
+    def widget_identity(widget: Widget) -> dict[str, str]:
+        """Identify a widget.
+
+        Parameters
+        ----------
+        widget : Widget
+            Value being keyed.
+
+        Returns
+        -------
+        dict of str to str
+            Identifying fields.
+        """
+        return {"widget.kind": "plain"}
+
+    assert generator_for(Widget).scheme == "widget"
+    assert widget_identity(Widget()) == {"widget.kind": "plain"}
+
+
+def test_decorator_returns_the_function_unchanged() -> None:
+    """A registered function stays directly callable and testable."""
+
+    class Gadget:
+        """A type registered by decoration."""
+
+    def gadget_identity(gadget: Gadget) -> dict[str, str]:
+        """Identify a gadget.
+
+        Parameters
+        ----------
+        gadget : Gadget
+            Value being keyed.
+
+        Returns
+        -------
+        dict of str to str
+            Identifying fields.
+        """
+        return {"gadget.kind": "plain"}
+
+    assert identity_for(Gadget, "gadget")(gadget_identity) is gadget_identity
+
+
+def test_decorator_composes_through_a_base() -> None:
+    """A factory registers once per base it composes with, by stacking.
+
+    Returning the function unchanged is what makes stacking work: each
+    application sees the original factory rather than a wrapper.
+    """
+
+    class Facet:
+        """A companion type registered by decoration."""
+
+    @identity_for((VersionedResource, Facet), "hash", base=hash_identity)
+    @identity_for((Resource, Facet), "location", base=location_identity)
+    def with_facet(base: object) -> object:
+        """Compose a resource identity with a facet.
+
+        Parameters
+        ----------
+        base : object
+            Identity function for the resource alone.
+
+        Returns
+        -------
+        object
+            Identity function over a pair.
+        """
+
+        def identity(subject: tuple[DataResource, Facet]) -> dict[str, str]:
+            """Return the pair's identity.
+
+            Parameters
+            ----------
+            subject : tuple
+                Resource and facet.
+
+            Returns
+            -------
+            dict of str to str
+                Identifying fields.
+            """
+            resource, _ = subject
+            return {**base(resource), "facet.tag": "x"}  # type: ignore[operator]
+
+        return identity
+
+    assert generator_for((VersionedResource, Facet)).scheme == "hash"
+    assert generator_for((Resource, Facet)).scheme == "location"
+    assert callable(with_facet(hash_identity))
+
+
+def test_a_factory_that_returns_a_non_callable_is_refused() -> None:
+    """Passing a base declares the function a factory, so it must behave as one."""
+
+    class Broken:
+        """A type whose registration is malformed."""
+
+    with pytest.raises(CacheKeyError, match="rather than an identity function"):
+
+        @identity_for(Broken, "broken", base=hash_identity)
+        def not_a_factory(base: object) -> str:
+            """Return something that is not an identity function.
+
+            Parameters
+            ----------
+            base : object
+                Ignored.
+
+            Returns
+            -------
+            str
+                Not a callable.
+            """
+            return "oops"

@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING
 from cstar.applications.roms_marbl.models import PartitioningParameterSet
 from cstar.orchestration.cache_keys import (
     hash_identity,
+    identity_for,
     location_identity,
-    register_identity,
 )
 from cstar.orchestration.models import Resource, VersionedResource
 
@@ -44,6 +44,7 @@ see :func:`partition_identity`.
 """
 
 
+@identity_for(PartitioningParameterSet, "partition")
 def partition_identity(partitioning: PartitioningParameterSet) -> dict[str, str]:
     """Identify the geometry a resource is split across.
 
@@ -82,6 +83,8 @@ def partition_identity(partitioning: PartitioningParameterSet) -> dict[str, str]
     }
 
 
+@identity_for((VersionedResource, PartitioningParameterSet), "hash", base=hash_identity)
+@identity_for((Resource, PartitioningParameterSet), "location", base=location_identity)
 def with_partitioning(base: IdentityFunction) -> IdentityFunction:
     """Compose a resource identity with the geometry it is split across.
 
@@ -120,15 +123,3 @@ def with_partitioning(base: IdentityFunction) -> IdentityFunction:
         return {**base(resource), **partition_identity(partitioning)}
 
     return identity
-
-
-register_identity(
-    (VersionedResource, PartitioningParameterSet),
-    "hash",
-    with_partitioning(hash_identity),
-)
-register_identity(
-    (Resource, PartitioningParameterSet),
-    "location",
-    with_partitioning(location_identity),
-)

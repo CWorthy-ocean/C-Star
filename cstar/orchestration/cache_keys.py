@@ -75,6 +75,7 @@ __all__ = [
     "checked_fields",
     "generator_for",
     "hash_identity",
+    "identity_for",
     "is_registered",
     "location_identity",
     "normalise_location",
@@ -514,6 +515,89 @@ def register_identity(
             "through it means"
         )
     _REGISTRY[shape] = (scheme, identity_fn)
+
+
+def identity_for(
+    subject: Subject, scheme: str, *, base: IdentityFunction | None = None
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Register an identity function at its definition.
+
+    The declarative form of :func:`register_identity`. Registration sits on the
+    function it registers, so a reader sees what a type is keyed on without
+    hunting for a call somewhere below.
+
+    The decorated function is returned **unchanged**, which is what makes it
+    still directly callable and testable, and what lets several applications of
+    this decorator stack on one factory.
+
+    Parameters
+    ----------
+    subject : type or tuple of type
+        Shape being registered.
+    scheme : str
+        Short tag naming the derivation, folded into every digest.
+    base : IdentityFunction or None, optional
+        Present when the decorated function is a *factory* rather than an
+        identity function — it is called as ``factory(base)`` and the result is
+        registered. This is how a composed identity, such as a resource taken
+        together with the geometry it is split across, is registered without
+        naming the composition twice.
+
+    Returns
+    -------
+    Callable
+        Decorator returning its argument unchanged.
+
+    Raises
+    ------
+    CacheKeyError
+        If the shape is already registered, or if a factory does not return a
+        callable.
+
+    Examples
+    --------
+    A plain identity function::
+
+        @identity_for(Foo, "foo")
+        def foo_identity(foo: Foo) -> dict[str, str]:
+            return {"foo.name": foo.name}
+
+    A factory, registered once per base it composes with::
+
+        @identity_for(
+            (VersionedResource, Geometry), "hash", base=hash_identity
+        )
+        @identity_for(
+            (Resource, Geometry), "location", base=location_identity
+        )
+        def with_geometry(base: IdentityFunction) -> IdentityFunction:
+            ...
+    """
+
+    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+        """Register the function and hand it back untouched.
+
+        Parameters
+        ----------
+        function : Callable
+            Identity function, or a factory when ``base`` is given.
+
+        Returns
+        -------
+        Callable
+            ``function``, unchanged.
+        """
+        produced = function if base is None else function(base)
+        if not callable(produced):
+            raise CacheKeyError(
+                f"{getattr(function, '__qualname__', function)!r} was given a "
+                "base, so it is treated as a factory, but calling it returned "
+                f"{type(produced).__name__} rather than an identity function"
+            )
+        register_identity(subject, scheme, produced)
+        return function
+
+    return decorate
 
 
 def is_registered(subject: Subject) -> bool:
