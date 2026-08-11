@@ -35,6 +35,63 @@ returning one path, which is the shape most preprocessing steps have. A step
 consuming several resources, or one whose output is not determined by its
 declared inputs alone, should call the cache directly rather than be forced
 through a decorator that cannot express it.
+
+Choosing a key
+--------------
+Because the shared tier is addressed by name alone, the name has to determine
+the content. Everything below is a way of arriving at a name; they differ in
+how much they can promise, and the cost of the weaker ones is paid by whoever
+is confused six months from now, not by the person writing the call.
+
+Take the first one that fits.
+
+**1. A declared resource —** :func:`cached`, or
+:func:`~cstar.orchestration.cache_keys.resource_key` directly.
+
+    Use when the output is determined by a blueprint declaration. The key is
+    *input-addressed*: derived from the declaration before the work runs,
+    which is what lets a lookup skip the work rather than confirm it after the
+    fact. Strongest guarantee available, and the only option that costs
+    nothing to check.
+
+**2. A type of your own —** :func:`~cstar.orchestration.cache_keys.identity_for`
+on an identity function.
+
+    Use when the output is determined by something that is not a blueprint
+    resource — a solver configuration, a derived request object. Same
+    guarantee as above, because it is the same mechanism; you are supplying
+    the part that says which fields matter. The judgement is entirely in that
+    function: a field that changes the output and is omitted puts two
+    different artifacts under one key, while a field that cannot change the
+    output costs a needless recompute every time it is edited. Omitting is
+    the dangerous direction — too much in the key wastes time, too little
+    returns the wrong file.
+
+**3. Files you already have —** :func:`fileset_for` with :func:`cache_fileset`.
+
+    Use when there is no declaration at all: a directory exists and should be
+    kept. Keyed on the members' absolute paths, which is sound on a shared
+    filesystem and costs a stat rather than a pass over the data — but it
+    cannot see an in-place edit, so a changed file under a stable path serves
+    the old contents. Reach for this when the files are produced once and not
+    revised; reach for 2 instead when they are.
+
+**4. A name you chose —** :meth:`~cstar.orchestration.artifact_cache.ArtifactCache.ingest`
+and its set-shaped sibling ``ingest_aggregate``.
+
+    The escape hatch. It is not without protection: names are validated as
+    single path components, writes land in the user tier only, and promotion
+    refuses a shared name already holding different bytes. What no mechanism
+    can supply is the thing a derived key gives you for free — a hand-written
+    name carries no record of what produced it, so nothing catches two
+    configurations that share a name today and diverge after a code change.
+    Worth using when you know the naming discipline holds; worth documenting
+    at the call site when you do.
+
+One rule cuts across all four: a key must be a pure function of what actually
+determines the output, and of nothing else. A stale key looks exactly like a
+cold cache — the work simply runs again, silently, and nobody files a bug — so
+key scope is not a detail that surfaces on its own.
 """
 
 from __future__ import annotations
