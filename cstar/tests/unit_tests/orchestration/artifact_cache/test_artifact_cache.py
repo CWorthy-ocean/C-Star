@@ -306,14 +306,45 @@ def test_stage_rejects_empty_file(cache: ArtifactCache) -> None:
     assert cache.resolve("foo.nc", RUN_ID) is None
 
 
-def test_stage_overwrites_by_default(
+def test_stage_refuses_to_overwrite_by_default(
     cache: ArtifactCache, staged_artifact: str
 ) -> None:
-    """Re-staging replaces the previous content."""
-    with cache.stage(staged_artifact, RUN_ID) as tmp:
+    """Committing over an existing artifact must be asked for.
+
+    Two steps in one run that happen to choose the same name would otherwise
+    replace each other silently — no error, and no log line saying anything
+    was displaced. Making replacement explicit turns that into a failure at
+    the point of the mistake.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    with pytest.raises(ArtifactExistsError), cache.stage(staged_artifact, RUN_ID):
+        pass  # pragma: no cover - the context manager raises on entry
+
+
+def test_stage_overwrites_when_asked(
+    cache: ArtifactCache, staged_artifact: str
+) -> None:
+    """Replacement stays available to callers that mean it.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    """
+    with cache.stage(staged_artifact, RUN_ID, overwrite=True) as tmp:
         tmp.write_bytes(b"replacement")
-    path = cache.locate(staged_artifact, Tier.USER, RUN_ID).path
-    assert path.read_bytes() == b"replacement"
+
+    assert cache.locate(staged_artifact, Tier.USER, RUN_ID).path.read_bytes() == (
+        b"replacement"
+    )
 
 
 def test_stage_can_refuse_to_overwrite(
@@ -482,7 +513,7 @@ def test_promote_can_overwrite_explicitly(
 ) -> None:
     """An explicit flag allows republishing."""
     cache.promote(staged_artifact, RUN_ID)
-    with cache.stage(staged_artifact, RUN_ID) as tmp:
+    with cache.stage(staged_artifact, RUN_ID, overwrite=True) as tmp:
         tmp.write_bytes(b"revised")
     shared = cache.promote(staged_artifact, RUN_ID, on_conflict=OnConflict.OVERWRITE)
     assert shared.path.read_bytes() == b"revised"

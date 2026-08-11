@@ -1074,7 +1074,7 @@ class ArtifactCache:
         asset_uri: str | None = None,
         metadata: Mapping[str, Any] | None = None,
         fingerprinter: Fingerprinter | None = None,
-        overwrite: bool = True,
+        overwrite: bool = False,
         provenance: Mapping[str, Any] | None = None,
         kind: ArtifactKind = ArtifactKind.FILE,
         checksum_override: str | None = None,
@@ -1106,9 +1106,12 @@ class ArtifactCache:
             Strategy applied on commit, overriding
             :attr:`ArtifactCache.fingerprinter` for this write.
         overwrite : bool, optional
-            Whether committing may replace an existing artifact. Forced to
-            ``True`` when :attr:`bypass` is set, since the caller was told the
-            artifact was missing and must be able to write it.
+            Whether committing may replace an existing artifact. Off by
+            default: two steps in one run that happen to choose the same name
+            would otherwise replace each other silently, with no error and no
+            record that anything was displaced. Forced to ``True`` when
+            :attr:`bypass` is set, since the caller was told the artifact was
+            missing and must be able to write it.
         provenance : Mapping of str to Any or None, optional
             Extra record fields, used by :meth:`promote` to stamp
             ``promoted_from_run_id``, ``promoted_by`` and ``promoted_at``.
@@ -1243,7 +1246,7 @@ class ArtifactCache:
         move: bool = False,
         metadata: Mapping[str, Any] | None = None,
         fingerprinter: Fingerprinter | None = None,
-        overwrite: bool = True,
+        overwrite: bool = False,
     ) -> Location:
         """Copy an externally produced file into the user tier.
 
@@ -1774,7 +1777,7 @@ class ArtifactCache:
         members: Sequence[str] | None = None,
         fingerprinter: Fingerprinter | None = None,
         metadata: Mapping[str, Any] | None = None,
-        overwrite: bool = True,
+        overwrite: bool = False,
     ) -> Location:
         """Copy a directory of files into the user tier as one artifact.
 
@@ -1797,7 +1800,8 @@ class ArtifactCache:
         metadata : Mapping of str to Any or None, optional
             Descriptive metadata recorded with the artifact.
         overwrite : bool, optional
-            Whether committing may replace an existing container.
+            Whether committing may replace an existing container. Off by
+            default, for the reason given on :meth:`stage`.
 
         Returns
         -------

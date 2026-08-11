@@ -86,55 +86,58 @@ class CachedCallError(Exception):
 
 @dataclass(frozen=True)
 class FileSet:
-    """A specific collection of files, identified by what they contain.
+    """A specific collection of files, identified by where they live.
 
     The escape hatch for "just make sure these files are cached". Everything
     else here is *input-addressed* — keyed on a declaration, before the work
     runs — because that is what lets a lookup skip the work. A file set has no
     declaration to key on: the caller has files already and wants them kept.
-    So it is **content-addressed** instead, keyed on the digests of its
-    members.
+    It is keyed on its members' **absolute paths** instead.
 
-    That is the honest choice rather than a compromise. Keying on the member
-    names alone would let two unrelated directories that happen to share
-    filenames collide and serve each other's data; keying on the containing
-    directory would make the key machine-specific and useless in the shared
-    tier. Reading the files is the cost of an answer that cannot be wrong, and
-    the files are already on disk by the time anyone asks.
+    That works because these caches live on a shared filesystem, where
+    ``/scratch/project/forcing/a.nc`` names the same bytes for every user on
+    the allocation. Including the containing directory is what keeps two
+    unrelated directories that happen to share filenames from serving each
+    other's data.
 
-    Build one with :func:`fileset_for` rather than by hand, so the digests and
-    the paths agree.
+    Warnings
+    --------
+    A path is not an identity. **Editing a file in place is invisible here**:
+    same paths, same key, and the cache serves what it stored before the edit.
+    Deriving the key from the members' contents instead would catch that, at
+    the cost of reading every byte before any lookup can answer. This type
+    takes the cheap side of that trade deliberately; anything whose contents
+    change under a stable path should be keyed on a declaration through
+    :func:`resource_key` or a registered type of its own, not stored here.
+
+    Build one with :func:`fileset_for` rather than by hand.
 
     Attributes
     ----------
     root : Path
-        Directory the members are relative to. Not part of the identity: the
-        same files under two different parents are the same artifact.
+        Directory the members are relative to. Part of the identity, unlike
+        elsewhere in this module.
     members : tuple of str
         Container-relative POSIX paths, sorted.
-    digests : tuple of str
-        SHA-256 of each member, positionally aligned with :attr:`members`.
     """
 
     root: Path
     members: tuple[str, ...]
-    digests: tuple[str, ...]
 
     @property
-    def content_digest(self) -> str:
-        """str: Digest over the members' paths and contents.
+    def path_digest(self) -> str:
+        """str: Digest over the members' absolute paths.
 
         Notes
         -----
-        Covers the paths as well as the bytes, so moving a file within the set
-        is a different set — which it is, since a consumer globbing the
-        expanded container would see something different.
+        Absolute rather than relative, so the containing directory
+        participates. Folded into one digest rather than listed field by field
+        so that a set of ten thousand members still produces a bounded
+        identity.
         """
         rolling = hashlib.sha256()
-        for member, digest in zip(self.members, self.digests, strict=True):
-            rolling.update(member.encode())
-            rolling.update(b"\0")
-            rolling.update(digest.encode())
+        for member in self.members:
+            rolling.update(str(self.root / member).encode())
             rolling.update(b"\0")
         return rolling.hexdigest()
 
@@ -146,7 +149,7 @@ def fileset_identity(fileset: FileSet) -> dict[str, str]:
     The wildcard that selected the members is deliberately absent. Two
     different patterns that select the same files produce the same artifact,
     and keying on the pattern would split the cache on a difference that
-    cannot change a byte.
+    cannot change which files were chosen.
 
     Parameters
     ----------
@@ -159,7 +162,7 @@ def fileset_identity(fileset: FileSet) -> dict[str, str]:
         Identifying fields.
     """
     return {
-        "fileset.digest": fileset.content_digest,
+        "fileset.paths": fileset.path_digest,
         "fileset.count": str(len(fileset.members)),
     }
 
@@ -179,7 +182,13 @@ def fileset_for(path: Path | str, wildcard: str | None = None) -> FileSet:
     Returns
     -------
     FileSet
-        The discovered files, with their digests.
+        The discovered files.
+
+    Notes
+    -----
+    Discovery stats the tree and reads nothing, so this stays cheap on a set
+    whose members are large. That is the direct consequence of keying on paths
+    rather than contents; see :class:`FileSet`.
 
     Raises
     ------
@@ -193,7 +202,7 @@ def fileset_for(path: Path | str, wildcard: str | None = None) -> FileSet:
     Examples
     --------
     >>> fileset_for(work_dir, "*.nc")
-    FileSet(root=..., members=('rank000.nc', ...), digests=(...))
+    FileSet(root=..., members=('rank000.nc', ...))
     """
     root = Path(path).expanduser().resolve()
     if not root.is_dir():
@@ -205,25 +214,7 @@ def fileset_for(path: Path | str, wildcard: str | None = None) -> FileSet:
         raise ValueError(f"no files matched {pattern!r} beneath {root}")
 
     members = tuple(str(PurePosixPath(entry.relative_to(root))) for entry in found)
-    digests = tuple(_digest(entry) for entry in found)
-    return FileSet(root=root, members=members, digests=digests)
-
-
-def _digest(path: Path) -> str:
-    """Return the SHA-256 of a file.
-
-    Parameters
-    ----------
-    path : Path
-        Existing file to read.
-
-    Returns
-    -------
-    str
-        Hex digest.
-    """
-    with path.open("rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+    return FileSet(root=root, members=members)
 
 
 def fileset_key(fileset: FileSet, *, name: str | None = None) -> str:
@@ -258,7 +249,9 @@ def cache_fileset(
     """Ensure a file set is in the cache, and return where it lives.
 
     Idempotent: a set already present is returned untouched, since its key is
-    derived from its contents and identical contents are the same artifact.
+    derived from its members' paths and the same paths are the same artifact.
+    Note what that means when a member has been edited since — see
+    :class:`FileSet`.
 
     Only the set's own members are stored. Anything else under
     :attr:`FileSet.root` is excluded explicitly rather than by omission — a
@@ -439,6 +432,14 @@ def _localized(
     """
     if not localize or found.tier is not Tier.SHARED or found.is_container:
         return found
+
+    # `resolve` prefers the shared tier, so a run that already localized this
+    # artifact is still handed the shared copy. Re-copying would be a pointless
+    # pass over the bytes and, since a commit does not overwrite by default,
+    # an error on the second call.
+    local = cache.locate(key, Tier.USER, run_id)
+    if local.exists:
+        return local
     return cache.ingest(found.path, key, run_id)
 
 

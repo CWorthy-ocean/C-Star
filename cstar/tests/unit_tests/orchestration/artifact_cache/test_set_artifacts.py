@@ -167,7 +167,7 @@ def test_reingest_replaces_the_container(
     smaller = tmp_path / "smaller"
     smaller.mkdir()
     (smaller / "only.nc").write_bytes(b"one")
-    location = cache.ingest_aggregate(smaller, NAME, RUN_ID)
+    location = cache.ingest_aggregate(smaller, NAME, RUN_ID, overwrite=True)
 
     assert sorted(p.name for p in location.path.glob("*.nc")) == ["only.nc"]
     assert not list(location.path.parent.glob("*.old"))

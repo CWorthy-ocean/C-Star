@@ -1035,12 +1035,16 @@ def test_excluded_files_never_reach_the_cache(cache: ArtifactCache, tree: Path) 
     assert stored == ["a.txt", "sub/c.txt"]
 
 
-def test_a_file_set_is_content_addressed(cache: ArtifactCache, tree: Path) -> None:
-    """Editing a member is a different artifact.
+def test_editing_a_member_does_not_change_the_key(
+    cache: ArtifactCache, tree: Path
+) -> None:
+    """The accepted weakness, pinned so it stays a decision rather than a bug.
 
-    A file set has no declaration to key on — the caller has files already —
-    so its identity is what they contain. Keying on names alone would let two
-    unrelated directories serve each other's data.
+    A file set is keyed on where its members live, not what they contain, so
+    an in-place edit is invisible and the cache keeps serving what it stored.
+    Catching it would mean reading every byte before any lookup could answer.
+    Anything whose contents change under a stable path belongs behind a
+    declaration, not here.
 
     Parameters
     ----------
@@ -1052,14 +1056,29 @@ def test_a_file_set_is_content_addressed(cache: ArtifactCache, tree: Path) -> No
     before = fileset_key(fileset_for(tree, "*.txt"))
     (tree / "a.txt").write_text("changed")
 
+    assert fileset_key(fileset_for(tree, "*.txt")) == before
+
+
+def test_adding_a_member_changes_the_key(tree: Path) -> None:
+    """What *is* caught: the selection itself changing.
+
+    Parameters
+    ----------
+    tree : Path
+        Directory to discover.
+    """
+    before = fileset_key(fileset_for(tree, "*.txt"))
+    (tree / "d.txt").write_text("delta")
+
     assert fileset_key(fileset_for(tree, "*.txt")) != before
 
 
-def test_the_root_is_not_part_of_the_identity(tmp_path: Path, tree: Path) -> None:
-    """The same files under two parents are one artifact.
+def test_the_root_is_part_of_the_identity(tmp_path: Path, tree: Path) -> None:
+    """The same filenames under two directories are two artifacts.
 
-    Otherwise the key would be machine-specific and useless in the shared
-    tier.
+    Absolute paths are what make this sound on a shared filesystem: including
+    the containing directory is what stops two unrelated directories that
+    happen to share filenames from serving each other's data.
 
     Parameters
     ----------
@@ -1071,7 +1090,7 @@ def test_the_root_is_not_part_of_the_identity(tmp_path: Path, tree: Path) -> Non
     elsewhere = tmp_path / "elsewhere"
     shutil.copytree(tree, elsewhere)
 
-    assert fileset_identity(fileset_for(elsewhere, "*.txt")) == fileset_identity(
+    assert fileset_identity(fileset_for(elsewhere, "*.txt")) != fileset_identity(
         fileset_for(tree, "*.txt")
     )
 
@@ -1090,7 +1109,7 @@ def test_the_wildcard_is_not_part_of_the_identity(tree: Path) -> None:
 
 
 def test_moving_a_member_changes_the_set(tmp_path: Path, tree: Path) -> None:
-    """Paths are identifying, since a consumer globbing the container sees them.
+    """Where a member sits is identifying, not just that it exists.
 
     Parameters
     ----------
@@ -1099,10 +1118,10 @@ def test_moving_a_member_changes_the_set(tmp_path: Path, tree: Path) -> None:
     tree : Path
         Directory to discover.
     """
-    before = fileset_for(tree, "*.txt").content_digest
+    before = fileset_for(tree, "*.txt").path_digest
     (tree / "sub" / "c.txt").rename(tree / "c.txt")
 
-    assert fileset_for(tree, "*.txt").content_digest != before
+    assert fileset_for(tree, "*.txt").path_digest != before
 
 
 def test_a_file_set_is_stored_as_a_set(cache: ArtifactCache, tree: Path) -> None:
@@ -1197,3 +1216,75 @@ def test_a_missing_directory_is_refused(tmp_path: Path) -> None:
     """
     with pytest.raises(FileNotFoundError):
         fileset_for(tmp_path / "absent")
+
+
+def test_discovery_never_reads_a_member(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keying on paths means keying costs a stat, not a pass over the data.
+
+    This is the point of the trade. A set whose members are gigabytes is
+    keyed, and therefore looked up, without any of them being opened; on a hit
+    nothing is read at all. Pinned here because the guarantee is easy to lose
+    to an innocuous-looking change, and losing it would be silent.
+
+    Parameters
+    ----------
+    tree : Path
+        Directory to discover.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to make any read fail loudly.
+    """
+
+    def refuse(self: Path, *args: object, **kwargs: object) -> object:
+        """Fail rather than open a member.
+
+        Parameters
+        ----------
+        self : Path
+            Path being opened.
+        *args : object
+            Ignored.
+        **kwargs : object
+            Ignored.
+
+        Returns
+        -------
+        object
+            Never returns.
+        """
+        raise AssertionError(f"read the contents of {self}")
+
+    monkeypatch.setattr(Path, "open", refuse)
+
+    assert fileset_for(tree, "*.txt").members == ("a.txt", "sub/c.txt")
+
+
+def test_repeated_shared_hits_do_not_recopy(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """A run that already localized an artifact must not localize it again.
+
+    ``resolve`` prefers the shared tier, so the second call is handed the
+    shared copy even though a local one exists. Re-ingesting would be a
+    pointless pass over the bytes — and, since a commit no longer overwrites
+    by default, an error.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+    fetch = cached(cache=cache)(_fetch)
+    first = fetch(resource, RUN_ID, workspace)
+    cache.promote(first.name, RUN_ID)
+
+    once = fetch(resource, "run-B", workspace)
+    twice = fetch(resource, "run-B", workspace)
+
+    assert once == twice
+    assert once.parent == cache.user_root / "run-B"
