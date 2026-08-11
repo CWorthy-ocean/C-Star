@@ -792,9 +792,12 @@ class ROMSSimulation(Simulation):
 
         # Relative to the run directory, like output_root_name above, so ROMS
         # writes child extraction files to the output directory rather than its
-        # working directory. Must stay short: ucla-roms builds the extraction
-        # filename in a fixed character(len=99) buffer (create_edata_file in
-        # extract_data.F90), so an absolute path could silently truncate.
+        # working directory. Only PARALLEL_IO builds honor extract_root_name;
+        # non-PIO builds name extraction files from output_root_name (already
+        # pointing at the output directory). Must stay short: ucla-roms builds
+        # the extraction filename in a fixed character(len=99) buffer
+        # (create_edata_file in extract_data.F90), so an absolute path could
+        # silently truncate.
         nml.extract_data_settings.extract_root_name = "../output/child"
 
         return nml
