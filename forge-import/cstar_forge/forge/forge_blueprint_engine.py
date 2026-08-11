@@ -1,15 +1,15 @@
 """
-Phase 2 processing engine: ingest a :class:`ForgeBlueprint` and run the heavy work
+Processing engine: ingest a :class:`ForgeBlueprint` and run the heavy work
 (``generate_inputs`` + ``configure_build``) on *this* machine.
 
-This is the counterpart to the Phase-1 resolver (``forge_blueprint_resolve``). It runs
+This is the counterpart to the resolver (``forge_blueprint_resolve``). It runs
 on the user's machine of choice, where the **host** (machine config + data paths) is
 resolved from :mod:`cstar_forge.config` — nothing host-specific is read from the
 config file. The reviewed, host-independent ``ForgeBlueprint`` provides everything else.
 
 Strategy (see ``docs/dev-notes/forge-blueprint-inventory.md`` §3): the existing
 ``ForgeExecutor`` already performs host resolution, grid building, input
-generation, and namelist/cppdefs writing. So Phase 2:
+generation, and namelist/cppdefs writing. So processing:
 
 1. reconstructs a ``ForgeExecutor`` from the config's atomic inputs (identity,
    run window, grid kwargs, boundaries, partitioning, CDR) — the builder resolves
@@ -88,9 +88,9 @@ PROCESSING_FILLED_SECTIONS = (
     "output_root_name",
 )
 
-# Leaf keys that ``generate_inputs`` (Phase 2a, in ``input_data.py``) derives from the
+# Leaf keys that ``generate_inputs`` (in ``input_data.py``) derives from the
 # *actual* generated forcing/tidal objects — never from ``ForgeBlueprint.model_settings``.
-# The resolver (Phase 1) never computes real values for these: it leaves them at
+# The resolver never computes real values for these: it leaves them at
 # whatever the ModelSpec's disabled placeholder says (``river_frc``/``cdr_frc``/
 # ``cdr_output``) or at a merely *declared*, not actually-generated, value (``tides``'
 # ``ntides`` from a tidal item, if the item set one). Unlike ``PROCESSING_FILLED_SECTIONS``,
@@ -137,7 +137,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
 
     Always returns a dict with ``initial_conditions`` and ``forcing`` keys mirroring
-    the model.yaml inputs block. ``cfg.forcing`` is fully resolved by the Phase-1
+    the model.yaml inputs block. ``cfg.forcing`` is fully resolved by the
     resolver (from the model default or an authored/edited selection), so the executor
     always drives input generation from this dict and never reads ``model_spec.inputs``.
     """
@@ -302,7 +302,7 @@ def process_forge_blueprint(
     only_inputs: Iterable[str] | None = None,
     verbose: bool = False,
 ) -> ForgeBlueprintExecutor:
-    """Run Phase-2 processing for a ``ForgeBlueprint`` (object or path to a YAML file).
+    """Process a ``ForgeBlueprint`` (object or path to a YAML file).
 
     Drives a :class:`ForgeBlueprintExecutor` through ``ensure_source_data`` →
     ``generate_inputs`` → ``configure_build`` (the reviewed ``model_settings`` overlaid

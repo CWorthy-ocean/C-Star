@@ -1,6 +1,6 @@
 # Machine configuration
 
-C-STAR Forge uses a configuration system to manage paths and system-specific settings.
+C-Star Forge uses a configuration system to manage paths and system-specific settings.
 
 ## System Detection
 
@@ -18,10 +18,10 @@ Data paths are automatically configured based on the detected system. The `confi
 - **Source data** (`config.paths.source_data`): External datasets (GLORYS, UNIFIED_BGC, SRTM15, etc.)
 - **Input data** (`config.paths.input_data`): Generated ROMS-MARBL input files
 - **Scratch directory** (`config.paths.scratch`): Model execution directories
-- **Catalog root** (`config.paths.catalog`): Inner directory that directly contains ``blueprints/`` and ``builds/`` (default: ``<cson-forge-data base>/cson_forge_data/catalog`` when ``source-data`` lives under the usual layout; avoids ``cson_forge_data/cson_forge_data`` if ``source_data`` is already under ``cson_forge_data``)
+- **Catalog root** (`config.paths.catalog`): Inner directory that directly contains ``blueprints/`` (default: ``<data base>/catalog``, the sibling of ``input-data`` — e.g. ``~/cstar-forge-data/catalog`` on macOS (`config.default_catalog_inner_dir`))
 - **Blueprints** (`config.paths.blueprints`): Generated blueprint YAML files (default: `config.paths.catalog / "blueprints"`)
-- **Builds**: Rendered compile-time and run-time code directories (under `config.paths.catalog / "builds"`)
-- **YAML files** (`config.paths.models_yaml`, `config.paths.builds_yaml`, `config.paths.machines_yaml`): Configuration files
+- **Builds**: rendered compile-time/run-time code directories under the per-run `HostPaths.working_dir / "builds"/{compile-time,run-time}` — not under the catalog.
+- **YAML files** (`config.paths.models_yaml`, `config.paths.builds_yaml`, `config.paths.machines_yaml`): *(vestigial: these three `DataPaths` fields survive but the files no longer ship and nothing reads them — model/machine data comes from the bundled catalog.)*
 
 ### Relocating the catalog
 
@@ -56,10 +56,10 @@ input_data_path = config.paths.input_data
 
 # Access system information
 system_tag = config.system  # e.g., "MacOS", "RCAC_anvil", "NERSC_perlmutter"
-hostname = config.system_id  # Alias for system
+system_tag_alias = config.system_id  # alias for config.system (a tag like "MacOS", not a hostname)
 
 # Access machine configuration
-machine_config = config.machine  # MachineConfig object with account, pes_per_node, queues
+machine_config = config.machine_config  # MachineConfig object with account, pes_per_node, queues
 cluster_type = config.cluster_type  # "LocalCluster" or "SLURMCluster"
 ```
 
@@ -84,18 +84,18 @@ python -m cstar_forge.config show-paths --json
 
 ## Machine Configuration
 
-Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/machines.yaml`. The `config.machine` object provides access to these settings:
+Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/catalog/Machines/{system_tag}.yaml` via `DomainCatalog.machine_data()`. The `config.machine_config` object provides access to these settings:
 
 ```python
 from cstar_forge import config
 
 # Access machine configuration
-account = config.machine.account  # Account/project name for job submission
-pes_per_node = config.machine.pes_per_node  # Cores per node
-default_queue = config.machine.queues.get("default")  # Default queue name
+account = config.machine_config.account  # Account/project name for job submission
+pes_per_node = config.machine_config.pes_per_node  # Cores per node
+default_queue = config.machine_config.queues.get("default")  # Default queue name
 ```
 
-If a machine is not found in `machines.yaml` or the file doesn't exist, an empty `MachineConfig` is returned.
+If the machine has no catalog entry (or its YAML is unreadable), a warning is logged and an empty `MachineConfig` is returned (`config._load_machine_config_from_catalog`).
 
 ### Cluster Types
 
@@ -127,7 +127,7 @@ def _layout_my_system(home: Path, env: dict) -> Tuple[Path, Path, Path]:
     return source_data, input_data, scratch
 ```
 
-The system detection logic in `_detect_system()` will need to be updated to recognize your system tag based on hostname or environment variables.
+The system detection logic in `_detect_system()` will need to be updated to recognize your system tag based on hostname or environment variables. You must also add the tag to `_default_cluster_type()` in `config.py`, which raises `NotImplementedError` for unknown tags at module-import time.
 
 ### System-Specific Path Layouts
 
@@ -140,12 +140,12 @@ Layout functions should return a tuple of three paths:
 2. `input_data`: Location for generated input files
 3. `scratch`: Location for model execution directories
 
-The `get_data_paths()` function automatically creates these directories if they don't exist.
+The `get_data_paths()` function builds `Path` objects only; pass `create=True`, or call `config.ensure_data_dirs()` from an entry point that writes data (as `run.py`'s `main()` does).
 
 ## Reference
 
 For further reference, see:
-- [Developer Guide](developer-guide.md) - module map, including `config.py` (`DataPaths`/`MachineConfig`/`resolve_host()`)
+- [Architecture Details](architecture-details.md) - module map, including `config.py` (`DataPaths`/`MachineConfig`/`resolve_host()`)
 - [Machines (machines.yaml)](reference-machines.md) - Machine-specific settings
 
 

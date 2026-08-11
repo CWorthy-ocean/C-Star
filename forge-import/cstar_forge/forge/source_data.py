@@ -589,7 +589,7 @@ def _prepare_era5(self: SourceData) -> None:
 
 
 @register_dataset("TPXO")
-def _prepare_tpxo(self: SourceData) -> Path:
+def _prepare_tpxo(self: SourceData) -> dict[str, Path]:
     """
     Verify that the user has provided TPXO tidal data files.
 
@@ -601,8 +601,9 @@ def _prepare_tpxo(self: SourceData) -> Path:
 
     Returns
     -------
-    Path
-        Base directory path to the TPXO dataset.
+    dict[str, Path]
+        The TPXO files keyed ``"grid"`` / ``"h"`` / ``"u"`` (this is what
+        ``prepare_all()`` stores in ``paths["TPXO"]``).
 
     Raises
     ------

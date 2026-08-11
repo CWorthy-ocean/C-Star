@@ -2,7 +2,7 @@
 
 The `ModelSpec` abstraction is designed to formalize and preserve a notion of a trusted model configuration by aggregrating the information required to build and configure a particular model as a named entity. 
 
-Model specifications are defined per-model in `cstar_forge/catalog/ModelSpec/<model>/model.yaml` (see [here](reference-models-yml.md)). Models are discovered by scanning `catalog/ModelSpec/*/model.yaml`. 
+Model specifications are defined per-model in `cstar_forge/catalog/ModelSpec/<model>/model.yaml` (see [here](reference-model-yaml.md)). Models are discovered by scanning `catalog/ModelSpec/*/model.yaml`. 
 
 Each model includes:
 
@@ -12,7 +12,7 @@ Each model includes:
 
 Everything a Domain/Forcing/Output spec already owns (grid/IC/forcing source selection, output write-lists,
 open-boundary and tidal/river presence, grid partitioning, etc.) is deliberately *not* duplicated here — those
-values come from the selected `DomainSpec`/`ForcingSpec`/`OutputSpec` and are merged in by the resolver
+values come from the selected `DomainSpec/`/`ForcingSpec/`/`OutputSpec/` catalog entries (directories read as plain dicts; of the specs, only `ModelSpec` is also a Python class) and are merged in by the resolver
 (`build_forge_blueprint`) when it assembles a `ForgeBlueprint`.
 
 
@@ -84,7 +84,7 @@ model_settings:
 
 - `model_settings`  
   A flat dict of model-specific physics/numerics defaults, mirroring `ForgeBlueprint.model_settings` 1:1
-  (each top-level key is a namelist section, e.g. `cppdefs`, `param`, `tides`, `marbl_bgc`). Every
+  (each top-level key is a namelist section or a scalar namelist value, e.g. `cppdefs`, `param`, `tides`, `marbl_bgc`; `gamma2`, `ubind`). Every
   compile-time `.j2` template file listed under `code.templates_compile_time.files` must have a
   corresponding top-level key here (e.g. `cppdefs.opt.j2` requires a `cppdefs:` section) — this is
   enforced by a `ModelSpec` validator. Many fields within these sections are still overwritten by the

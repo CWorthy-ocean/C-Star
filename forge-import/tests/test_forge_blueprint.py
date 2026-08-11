@@ -1,5 +1,5 @@
 """
-Tests for the ForgeBlueprint schema (``cstar_forge.forge.forge_blueprint``) and the Phase-1
+Tests for the ForgeBlueprint schema (``cstar_forge.forge.forge_blueprint``) and the
 resolver (``cstar_forge.forge_blueprint_resolve.build_forge_blueprint``).
 
 These validate that the resolver reproduces the known ``test-tiny`` demo values,
@@ -75,7 +75,7 @@ def test_naming_is_derived_not_stored():
 def test_resolved_provenance_is_unstamped():
     """generated_at/forge_version/cstar_version/roms_tools_version are left None by
     the resolver -- ``ForgeBlueprint.to_yaml_str`` is what stamps them (see
-    TestProvenanceStamping below), keeping Phase 1 resolution deterministic and
+    TestProvenanceStamping below), keeping resolution deterministic and
     independent of whether ``roms_tools`` happens to be installed.
     """
     cfg = _build()
@@ -2157,7 +2157,7 @@ class TestForgeBlueprintWizardApp:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 engine (orchestration tested with an injected fake builder; the real
+# Processing engine (orchestration tested with an injected fake builder; the real
 # pipeline downloads data + runs roms_tools and is out of scope for unit tests)
 # ---------------------------------------------------------------------------
 class _FakeBuilder:
@@ -2381,7 +2381,7 @@ class TestForgeBlueprintEngine:
 
 
 # ---------------------------------------------------------------------------
-# Step 3 (parity): the Phase-1 resolver and the live ForgeExecutor must agree
+# Step 3 (parity): the resolver and the live ForgeExecutor must agree
 # on the derived values, so a reviewed config matches a from-scratch build.
 #
 # Compared at *construction* (no generate_inputs): the genuinely-computed numerics

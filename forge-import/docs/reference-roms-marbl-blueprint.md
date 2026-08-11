@@ -1,13 +1,33 @@
-# ROMS-MARBL blueprint (`RomsMarblBlueprint`)
+# ROMS-MARBL blueprint (`B_{name}.yaml`)
 
-The forge application emits a ROMS-MARBL blueprint at the end of a
-`python -m cstar_forge.run` processing run; it is the handoff to C-Star, which uses
-it to build and run the simulation.
+Processing a forge blueprint (`cstar forge run`, or `python -m cstar_forge.run`)
+emits a **ROMS-MARBL blueprint** — the YAML handoff that
+[C-Star](https://c-star.readthedocs.io) builds and runs (`cstar blueprint run
+B_{name}.yaml`). It is written to the blueprint's working directory alongside a
+[settings sidecar](reference-roms-marbl-blueprint-settings.md).
 
-Example (a saved legacy-layout blueprint):
+What a current blueprint contains:
 
-`legacy/blueprints/MacOS/cson_roms-marbl_v0.1_test-tiny_1procs/B_cson_roms-marbl_v0.1_test-tiny_1procs.yaml`
+- **`run_time` code payload**: `namelist.nml` (the single generated namelist)
+  plus the model's static run-time files (today just `marbl_in`).
+- **`compile_time` code payload**: `cppdefs.opt` — the only rendered
+  compile-time file; all other former `*.opt` outputs were absorbed into the
+  namelist.
+- **Input datasets**: one `Resource` entry (location + partitioned flag) per
+  generated NetCDF input — grid, initial conditions, surface/boundary forcing,
+  tides, rivers, CDR.
+- **`model_params` / `runtime_params`**: `time_step`, `start_date`/`end_date`,
+  and the blueprint `working_dir` (there is no `output_dir` — it was a
+  pre-2.0.0 field superseded by `working_dir`).
 
-```{include} ../legacy/blueprints/MacOS/cson_roms-marbl_v0.1_test-tiny_1procs/B_cson_roms-marbl_v0.1_test-tiny_1procs.yaml
-:code: yaml
+To see a complete, current example, process the bundled toy domain and inspect
+the result:
+
+```bash
+cstar forge run docs/forge-blueprint-example.wio-toy.yaml
+# emits ~/cstar-forge-run/cson_roms-marbl_v0.1_wio-toy_10procs/B_*.yaml
 ```
+
+(Blueprints under `legacy/blueprints/` predate the namelist refactor — they
+list ~15 `*.opt` compile-time files and a `roms.in`, none of which are emitted
+today.)

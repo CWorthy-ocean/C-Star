@@ -289,7 +289,7 @@ class TestInputData:
         assert data.input_data_dir.exists()
 
     # NB: input_data_dir dirname sanitization moved to the executor's input_data_dir
-    # property (Phase C config-injection); the base class now uses the injected dir
+    # property (config-injection refactor); the base class now uses the injected dir
     # verbatim. That behavior is covered by test_core::test_path_input_data_property.
 
     def test_inputdata_forcing_filename(self, tmp_path):

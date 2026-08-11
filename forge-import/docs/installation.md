@@ -1,163 +1,176 @@
-# Get Started with C-STAR Forge
+# Advanced Installation (HPCs or developers)
+
+For a laptop or workstation, the one-command conda install in
+[Getting Started](getting-started.md) is all you need. This page covers the
+two heavier scenarios — **HPC systems** and **developer setups** — plus
+byte-reproducible installs from the lockfile.
 
 ## Prerequisites
 
-- Python 3.11 or higher (the managed `cstar-forge-env` conda environment pins Python 3.12)
-- Git
-- Conda, Mamba, or Micromamba (the setup script will automatically install Micromamba if needed)
+- Conda, Mamba, or Micromamba (developer setups: `dev-setup.sh` bootstraps
+  micromamba automatically if none is present)
+- Python ≥3.12 is required; the managed environments pin an appropriate version
+- Git (developer setups only)
 
-## Setup
+## Installation on HPC
 
-### 1. Fork the Repository
+### Install the package
 
-Create a fork of the repository at [https://github.com/CWorthy-ocean/cstar-forge](https://github.com/CWorthy-ocean/cstar-forge).
+On a supported HPC system the compiler/MPI/netCDF toolchain comes from the
+site's environment modules, so install **just** `cstar-forge` — deliberately
+*without* `cstar-ocean-standalone`:
 
-### 2. Clone Your Fork
+```bash
+conda create -n cstar-forge-env -c conda-forge cstar-forge
+conda activate cstar-forge-env
+```
 
-In your terminal, clone your forked repository:
+```{warning}
+Do not install `cstar-ocean-standalone` (or the conda `compilers` packages)
+into an environment you will activate on HPC. The conda compiler packages
+export `CC`/`CXX`/`FC` on every activation and put their own `mpif90` ahead of
+the module toolchain on `PATH` — silently hijacking ROMS builds that should
+use the cluster's compilers.
+```
+
+For byte-identical installs across a team or a paper's lifetime, use the
+[lockfile replay](#reproducible-installs-lockfile) below instead of a fresh
+solve.
+
+### Keep the environment isolated from `~/.local`
+
+On clusters, pip's `--user` fallback and Python's user-site directory
+(`~/.local/lib/pythonX.Y`) are a chronic source of silently broken
+environments: a module-provided Python of the same minor version shares that
+directory and shadows the env's packages. The repo ships the hardening we use:
+
+- `scripts/harden-env.sh` — sets `PIP_USER=0`/`PYTHONNOUSERSITE=1` and can
+  persist the latter into the env via an `activate.d` hook, so every future
+  activation stays off user-site.
+
+If you hit `ModuleNotFoundError` for packages you know are installed, or pip
+installs that vanish, this is the first thing to check.
+
+### Jupyter kernel for the cluster's JupyterHub
+
+The wizard served via `cstar forge wizard` needs no kernel registration. But if
+you want to open notebooks in the **cluster's central Jupyter installation**
+(e.g. an HPC OnDemand portal), that external Jupyter must be told about your
+env's kernel — with an activation wrapper, so shell magics and
+`activate.d`-dependent packages work inside notebooks:
+
+```bash
+bash scripts/register-kernel.sh   # from a checkout, with the env active
+```
+
+(Equivalent minimal form, without the activation wrapper:
+`python -m ipykernel install --user --name cstar-forge-env`.)
+
+### Using the wizard from a login node
+
+Login nodes have no browser; bind locally and SSH-forward from your laptop:
+
+```bash
+# on the login node:
+cstar forge wizard --no-browser
+# on your laptop:
+ssh -N -L 8866:localhost:8866 <user>@<login-node>
+# then open http://localhost:8866 locally
+```
+
+If your HPC provides a Jupyter interface, it may be more convenient to clone the repo (see next section) and use the
+[forge-blueprint-wizard.ipynb](../cstar_forge/forge-blueprint-wizard.ipynb) notebook instead of the Voila web app.
+
+Alternatively, C-Star Forge is designed so that you can build your Forge blueprints on one machine and process the data on another; feel free to run the wizard from your laptop, upload your blueprint to your HPC, and process it there from the command line.
+
+## Installation for developers
+
+Developer setups install `cstar_forge` in **editable** mode from a clone, with
+sibling packages (C-Star, roms-tools) swappable to arbitrary git refs.
+
+### 1. Fork and clone
+
+Fork [CWorthy-ocean/cstar-forge](https://github.com/CWorthy-ocean/cstar-forge),
+then:
 
 ```bash
 git clone https://github.com/<YOUR_GITHUB_USERNAME>/cstar-forge.git
 cd cstar-forge
-```
-Consider creating a branch to keep your work organized
-```bash
 git checkout -b <branch-name>
 ```
 
-
 :::{note}
-**HTTPS vs SSH Access**
-
-The command above uses HTTPS. Alternatively, you can use SSH:
-
-```bash
-git clone git@github.com:<YOUR_GITHUB_USERNAME>/cstar-forge.git
-cd cstar-forge
-```
-
-For more information on HTTPS and SSH access, see the [GitHub documentation on cloning repositories](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository).
+The command above uses HTTPS; `git clone git@github.com:<YOUR_GITHUB_USERNAME>/cstar-forge.git`
+uses SSH. To set up SSH keys, see the
+[GitHub SSH documentation](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent).
 :::
 
+### 2. Create the environment
 
-### 3. Install C-STAR Forge
+Pick whichever of the following matches your workflow. All three produce the
+same `cstar-forge-env` conda environment with `cstar_forge` installed in
+editable mode.
 
-Pick whichever of the following matches your workflow. All three produce the same
-`cstar-forge-env` conda environment with `cstar_forge` installed in editable mode.
+#### (a) Easy mode: `dev-setup.sh`
 
-#### (a) I already have conda/mamba/micromamba
-
-The most direct path — no wrapper script involved:
-
-```bash
-conda env create -f environment.yml
-conda activate cstar-forge-env
-./set-repo-versions.sh --roms-tools-ref main --c-star-ref main  # pip --no-deps from GitHub
-pip install -e . --no-deps
-```
-
-(Substitute `mamba`/`micromamba` for `conda` if that's what you use.) `environment.yml`
-doesn't carry `roms-tools`/`cstar-ocean`, so the `set-repo-versions.sh` step is required,
-not optional — swap `main` for a specific branch/tag/commit if you need a pinned ref.
-Optionally register the Jupyter kernel (with the activation wrapper described below) once
-the env is active:
-
-```bash
-bash scripts/register-kernel.sh
-```
-
-#### (b) Easy mode: `dev-setup.sh`
-
-`dev-setup.sh` is a thin orchestrator that finds or bootstraps a package manager
-(micromamba, falling back to mamba/conda, downloading micromamba locally as a last
-resort), creates/reuses the `environment.yml` env, installs `cstar_forge` in editable
-mode, and registers the Jupyter kernel:
+A thin orchestrator that finds or bootstraps a package manager (micromamba →
+mamba → conda → downloads micromamba locally), creates/reuses the
+`environment.yml` env, pip-installs C-Star and roms-tools from GitHub
+(`--no-deps`), installs `cstar_forge` editable, and registers the Jupyter
+kernel:
 
 ```bash
 ./dev-setup.sh
 ```
 
 **Options:**
-- `--clean`: Remove and rebuild the environment if it already exists
-- `--batch`, `-f`, or `--force`: Run without user prompts (useful for CI/automation)
-- `--with-compilers`: Also install compilers/mpich/netcdf-fortran, without the interactive prompt
-- `--roms-tools-ref REF` / `--c-star-ref REF`: pip-install roms-tools/C-Star from a specific
+- `--clean`: remove and rebuild the environment
+- `--batch` / `-f` / `--force`: no interactive prompts (CI/automation)
+- `--with-compilers`: also install compilers/mpich/netcdf-fortran (laptops
+  only — see the HPC warning above)
+- `--roms-tools-ref REF` / `--c-star-ref REF`: pin the sibling installs to a
   git branch, tag, or commit instead of `main`
 
-**Examples:**
-```bash
-# Normal setup (will prompt for confirmation, and for compiler install)
-./dev-setup.sh
+#### (b) Manual conda
 
-# Clean rebuild, no prompts, with compilers
-./dev-setup.sh --clean --batch --with-compilers
+```bash
+conda env create -f environment.yml
+conda activate cstar-forge-env
+./set-repo-versions.sh --roms-tools-ref main --c-star-ref main  # pip --no-deps from GitHub
+pip install -e . --no-deps
+bash scripts/register-kernel.sh   # optional: Jupyter kernel + activation wrapper
 ```
 
-The HPC hardening (keeping pip off `~/.local`, persisting `PYTHONNOUSERSITE` into the env)
-lives in `scripts/harden-env.sh`; Jupyter kernel registration lives in
-`scripts/register-kernel.sh`. Both are sourced by `dev-setup.sh` and can also be run or
-read standalone.
+`environment.yml` is a *generated* file (from `pyproject.toml` via pixi — edit
+the latter, never the former) and doesn't carry `roms-tools`/`cstar-ocean`, so
+the `set-repo-versions.sh` step is required, not optional. Re-run
+`set-repo-versions.sh` any time you need different sibling refs.
 
-#### (c) Pixi users
+#### (c) Pixi
 
-[Pixi](https://pixi.sh) reads dependencies straight from `pyproject.toml` (`[tool.pixi.*]`)
-and manages its own lockfile (`pixi.lock`), so it doesn't need `dev-setup.sh` or
-`environment.yml` at all:
+[Pixi](https://pixi.sh) reads dependencies straight from `pyproject.toml`
+(`[tool.pixi.*]`) and its lockfile (`pixi.lock`), so it needs neither
+`dev-setup.sh` nor `environment.yml`:
 
 ```bash
-pixi install                        # default environment
-pixi run -e dev pytest tests/ -v    # dev environment (adds the `dev`/`app` extras)
+pixi install -e dev                 # dev environment (editable + dev/app extras)
+pixi run -e dev pytest tests/ -v
+pixi install -e dev-laptop          # dev + local build toolchain (compilers, MPI,
+                                    # netCDF) for compiling ROMS on a laptop
 ```
 
-#### (d) Planned: `conda install cstar-forge`
-
-Once the `cstar-forge` conda-forge feedstock is published, `conda install -c conda-forge
-cstar-forge` will be the recommended path for users who don't need an editable/dev
-checkout. Not available yet — use (a), (b), or (c) above until then.
-
-### 4. Verify Installation
-
-To verify that everything is installed correctly:
-
-**a) Activate the environment and test the installation:**
+### 3. Verify
 
 ```bash
-# Activate with whichever tool created the environment above (conda/mamba/micromamba).
-# dev-setup.sh's local-micromamba fallback prints the exact activation command to use,
-# including sourcing ./bin/micromamba-path.sh first if it installed micromamba locally.
-conda activate cstar-forge-env  # or: micromamba activate cstar-forge-env
-
-# Test that cstar_forge can be imported
-cd workflows
+conda activate cstar-forge-env   # or: micromamba activate cstar-forge-env
 python -c "import cstar_forge; print('✓ cstar_forge works')"
+jupyter kernelspec list | grep cstar-forge-env   # if you registered the kernel
+python -m cstar_forge.config show-paths          # detected system + data paths
 ```
 
-**b) Check that the Jupyter kernel is installed:**
+`show-paths` output looks like:
 
-```bash
-jupyter kernelspec list | grep cstar-forge-env
-```
-
-You should see `cstar-forge-env` in the list. If not, the kernel installation may have failed.
-
-**c) Check that the package can be imported in Python:**
-
-```python
-import cstar_forge
-
-print(f"System detected: {cstar_forge.config.system}")
-```
-
-**d) Inspect the configured paths:**
-
-The `show-paths` command displays the detected system and all configured data paths:
-
-```bash
-python -m cstar_forge.config show-paths
-```
-
-This will show output like:
-```
+```text
 System tag : MacOS
 Hostname   : your-hostname
 
@@ -169,34 +182,43 @@ Paths:
   ...
 ```
 
+(reproducible-installs-lockfile)=
 ## Reproducible installs (lockfile)
 
-`pixi.lock` is the single source of truth for the fully-solved dependency closure
-(conda-channel layer + pypi layer, per platform). There are three ways to replay it,
-in order of preference:
+`pixi.lock` is the single source of truth for the fully-solved dependency
+closure (conda-channel layer + pypi layer, per platform). Three ways to replay
+it, in order of preference:
 
 **a) pixi, on any machine — including HPC (recommended)**
 
-pixi ships as a single static binary that installs into `$HOME`, no admin access
-required, so it works on shared/HPC systems as readily as a laptop:
+pixi ships as a single static binary that installs into `$HOME`, no admin
+access required:
 
 ```bash
 pixi install -e dev
 ```
 
-This reproduces the exact locked environment (conda + pypi layers together, in the
-correct order) with full fidelity. See Setup step 3(c) above for day-to-day pixi usage.
+This reproduces the exact locked environment (conda + pypi layers together, in
+the correct order) with full fidelity.
 
 **b) Plain conda, via the exported lockfile artifacts**
 
-For machines/CI that only have plain conda and either can't or don't want to run pixi,
-`scripts/export-lock-artifacts.py` renders the lockfile into two layers per
-environment/platform — a conda explicit-spec file (the conda-channel layer, via `pixi
-workspace export conda-explicit-spec`) and a `requirements-<env>-<platform>.txt` (the
-pinned pypi layer, parsed straight from `pixi.lock`). These are published as GitHub
-release assets (`.github/workflows/lock-artifacts.yaml`) and can also be regenerated
-locally with `python scripts/export-lock-artifacts.py --env dev --outdir <dir>`.
-Replay recipe:
+*Non-developers: use the `user` environment's artifact.* The `user` pixi
+environment sources everything — cstar-forge itself included — from
+conda-forge, so its explicit spec is a complete environment with **no pip step
+at all**:
+
+```bash
+python scripts/export-lock-artifacts.py --env user --outdir lock-artifacts
+conda create -n cstar-forge-env --file lock-artifacts/conda-explicit-user-linux-64.txt
+```
+
+For dev environments (editable checkout + pypi layer), the artifacts come in
+two layers per environment/platform — a conda explicit-spec file and a
+`requirements-<env>-<platform>.txt` for the pinned pypi layer. Both are
+published as GitHub release assets
+(`.github/workflows/lock-artifacts.yaml`) and can be regenerated locally with
+`python scripts/export-lock-artifacts.py --env dev --outdir <dir>`. Replay:
 
 ```bash
 conda create -n cstar-forge-env --file conda-explicit-dev-linux-64.txt
@@ -204,84 +226,17 @@ conda install -n cstar-forge-env pip   # pixi's pypi installer is uv-based, so p
                                        # is NOT in the explicit spec above
 conda activate cstar-forge-env
 python -m pip install --no-deps -r requirements-dev-linux-64.txt
+python -m pip install -e . --no-deps   # the editable checkout itself
 ```
 
-`--no-deps` is required, not optional: the requirements file is already the complete
-resolved closure, and pip must not re-resolve it. `python -m pip` (rather than a bare
-`pip`) ensures the newly-created env's own pip is used. `cstar-forge` itself is
-excluded from the requirements file (it's the editable/local package, not a pinned
-pypi release) — install it separately with `python -m pip install -e . --no-deps`, or
-`python -m pip install cstar-forge==<version>` once a release is published. This path
-works with any conda version.
+`--no-deps` is required, not optional: the requirements file is already the
+complete resolved closure, and pip must not re-resolve it. `python -m pip`
+(rather than bare `pip`) ensures the newly-created env's own pip is used. This
+path works with any conda version.
 
 **c) `conda env create --file pixi.lock` via the conda-lockfiles plugin (future — not yet usable)**
 
-The [conda-lockfiles](https://github.com/conda/conda-lockfiles) plugin aims to let plain
-conda consume `pixi.lock` directly, no export step needed. Not usable yet for this repo:
-its newest release (0.2.1) only reads lock-file schema ≤6, while pixi ≥0.76 (used here)
-writes schema v7, and it requires a fairly recent conda (~26+). Revisit path (b) above
-once the plugin and conda versions catch up.
-
-## Register for data access
-
-C-STAR Forge facilitates access to a collection of open datasets required to force regional oceanographic models. 
-These data are documented in ROMS Tools [here](https://roms-tools.readthedocs.io/en/latest/datasets.html).
-
-Access to most of the data is facilitated automatically. 
-- [Sign up for access](https://help.marine.copernicus.eu/en/articles/4220332-how-to-sign-up-for-copernicus-marine-service) to the Copernicus Marine Service 
-- [Sign up for access](https://www.tpxo.net/global) to TPXO data
-
-
-## Launch the blueprint wizard
-
-Once your environment is set up, launch the wizard to build your first forge blueprint.
-
-**Option A — Voilà web app (code-free form):**
-
-```bash
-./run-wizard-app.sh        # opens http://localhost:8866
-```
-
-On an HPC login node (no browser there), run `./run-wizard-app.sh --no-browser` and
-SSH-forward the port from your laptop:
-`ssh -N -L 8866:localhost:8866 <user>@<login-node>`, then open
-`http://localhost:8866` locally.
-
-**Option B — Jupyter notebook:**
-
-```bash
-jupyter lab cstar_forge/forge-blueprint-wizard.ipynb
-```
-
-Make sure the kernel is set to `cstar-forge-env` (change it in the Kernel menu if
-needed). Run the cells to display the wizard inline; the wizard object stays
-available for inspection and scripting.
-
-In either front-end: pick a model spec, pick (or customize) a domain, review the
-resolved YAML in the Review pane, and **Save** (or **Download**) the resulting
-`forge_blueprint.yaml`.
-
-## Process the blueprint
-
-Take the saved `forge_blueprint.yaml` to the machine where the input files should be
-generated (it can be the same machine) and run the forge application:
-
-```bash
-python -m cstar_forge.run path/to/forge_blueprint.yaml
-```
-
-This downloads and prepares source data, generates all ROMS input files, renders
-model settings, and emits a **ROMS-MARBL blueprint** into the blueprint's working
-directory. That ROMS-MARBL blueprint is the handoff to
-[C-Star](https://c-star.readthedocs.io), which builds and runs the actual ROMS-MARBL
-simulation. See `python -m cstar_forge.run --help` for options.
-
-
-
-:::{tip}
-SSH keys provide a more secure and convenient way to authenticate with GitHub, eliminating the need to enter your credentials for each push or pull operation. To set up SSH keys for GitHub, see:
-- [Generating a new SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent)
-- [Adding a new SSH key to your GitHub account](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account)
-:::
-
-
+The [conda-lockfiles](https://github.com/conda/conda-lockfiles) plugin aims to
+let plain conda consume `pixi.lock` directly. Not usable yet: its newest
+release only reads lock-file schema ≤6 while pixi ≥0.76 writes v7, and it
+requires conda ~26+. Revisit once the plugin catches up.

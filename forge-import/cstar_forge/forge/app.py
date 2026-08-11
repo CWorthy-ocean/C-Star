@@ -23,7 +23,7 @@ Scope (2026-07, first cut): :meth:`ForgeRunner.run` generates ROMS-MARBL inputs 
 emits the downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- it
 does not chain into actually running the ROMS-MARBL simulation. That is the existing
 ``roms_marbl`` application's job, consuming the blueprint forge just produced. See
-``docs/developer-guide.md`` for the producer/consumer boundary between the two
+``docs/architecture-details.md`` for the producer/consumer boundary between the two
 applications.
 """
 
@@ -46,7 +46,7 @@ from cstar_forge.forge.forge_blueprint import DEFAULT_APPLICATION, ForgeBlueprin
 
 APP_NAME: t.Final[str] = DEFAULT_APPLICATION
 
-_APP_NAME_LONG: t.Final[str] = "C-STAR Forge domain generator"
+_APP_NAME_LONG: t.Final[str] = "C-Star Forge domain generator"
 
 
 class ForgeRunner(BlueprintRunner[ForgeBlueprint]):

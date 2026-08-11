@@ -1,12 +1,12 @@
 # Settings
 
-C-STAR Forge curates default settings for each model configuration.
+C-Star Forge curates default settings for each model configuration.
 These defaults are used in the templating engine to generate source code and input files with the correct parameters.
 
 Settings are managed in `forge` using 
 1. Templated code files
 2. A `model_settings` dict specifying defaults, consolidated into each model's
-   [`model.yaml`](reference-models-yml.md)
+   [`model.yaml`](reference-model-yaml.md)
 3. User override settings, merged in by the resolver (`build_forge_blueprint`)
 
 
@@ -39,7 +39,7 @@ Compile-time options still use a Jinja2 template, `cppdefs.opt.j2`, which render
   {% endif %}
   ```
 
-Run-time options are no longer rendered from Jinja2 templates. Instead they are written to a single `namelist.nml` (via `f90nml`, in `write_roms_namelist`) from the run-time settings. The `marbl_in` file is copied as-is.
+Run-time options are no longer rendered from Jinja2 templates. Instead they are written to a single `namelist.nml` by `write_roms_namelist`, which validates the settings into `RunTimeSettings` and serializes via C-Star's `cstar.roms.namelist.RomsNamelist` (itself f90nml-backed). The `marbl_in` file is copied as-is.
 
 When `forge` configures and builds the model for a new domain, `render_roms_settings` (in
 `cstar_forge/forge/settings.py`) uses the `jinja2` templating engine to replace keys in `cppdefs.opt.j2` with

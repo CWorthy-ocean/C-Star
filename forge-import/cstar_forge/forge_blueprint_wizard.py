@@ -2950,7 +2950,7 @@ class ForgeBlueprintWizard:
             # constructs a CDRForcing, so a structurally-valid-but-semantically-broken
             # upload (empty releases, bad time ordering, unknown tracer, an
             # incompatible roms-tools version) would otherwise pass silently through
-            # _rebuild() and only fail much later, during Phase-2 execution.
+            # _rebuild() and only fail much later, during blueprint processing.
             import roms_tools as rt
 
             cdr = rt.CDRForcing(**parsed)

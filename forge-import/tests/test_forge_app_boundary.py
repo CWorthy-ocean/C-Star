@@ -1,5 +1,5 @@
 """
-Phase 0 dependency-direction guard for the forge-application boundary.
+Dependency-direction guard for the forge-application boundary.
 
 The "forge application" (execution code — blueprint = ``ForgeBlueprint``) is being carved
 out of Forge so it can eventually relocate into C-Star as an application (see

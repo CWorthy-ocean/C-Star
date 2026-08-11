@@ -10,7 +10,7 @@ Tests cover:
 
 ModelSpec was consolidated into a single YAML (code + flat model_settings, no more
 inputs/split templates-settings/placeholder code repos) -- see
-docs/developer-guide.md and cstar_forge/models.py's module docstring.
+docs/architecture-details.md and cstar_forge/models.py's module docstring.
 """
 
 from pathlib import Path

@@ -1,0 +1,262 @@
+# Developer Guide
+
+The primary architecture reference for C-Star Forge, describing the current
+state of the code. Historical notes — how the repo arrived here, resolved follow-ups, planning
+documents — live in the repo's git history (the former `docs/dev-notes/`
+directory); the distilled design rationale agents need is in the claude-docs
+repo (`cstar-forge/DESIGN-RATIONALE.md`).
+
+## 1. The big picture
+
+Forge is split into two layers along a hard boundary, in preparation for moving
+the execution half into C-Star as an "application":
+
+- **Authoring** (stays in this repo): the catalog of reusable pieces (Model/Domain/
+  Forcing/Output specs), a **resolver** that assembles them into a single
+  reviewable file, and a **wizard** UI.
+- **Execution** (`cstar_forge/forge/`, target: relocates into C-Star wholesale):
+  an **engine** that turns that file into ROMS-MARBL input NetCDFs, a
+  namelist, and a downstream blueprint, plus the **executor** that does the actual
+  work. Execution never touches the catalog.
+
+The file that crosses the boundary is `ForgeBlueprint` — **the forge application's own
+blueprint**. Terminology trap to avoid: C-Star also has an existing, unrelated
+`roms_marbl` application whose blueprint (`RomsMarblBlueprint`) forge *emits as an
+output artifact*. "Building a blueprint" means producing that downstream artifact,
+not forge's own input.
+
+```
+ catalog pieces ─┐
+ (Model/Domain/  ├─► build_forge_blueprint() ─► ForgeBlueprint ─► process_forge_blueprint(cfg, host)
+  Forcing/Output)│         (resolver)         (.yaml,               (engine → executor)
+                 │                             portable)           │
+ wizard UI ──────┘                                                 ▼
+                                                     input NetCDFs, namelist.nml,
+                                                     cppdefs.opt, roms_marbl blueprint
+```
+
+## 2. Directory map
+
+```
+cstar-forge/
+├── cstar_forge/                 # Main package directory
+│   ├── forge_blueprint_resolve.py  # resolver: build_forge_blueprint(...)
+│   ├── forge_blueprint_wizard.py   # ForgeBlueprintWizard (ipywidgets UI) +
+│   │                               # ForgeBlueprintWizardApp (adds catalog-location bar)
+│   ├── forge-blueprint-wizard.ipynb     # wizard notebook (run in Jupyter)
+│   ├── forge-blueprint-wizard-app.ipynb # wizard app notebook (served by Voilà)
+│   ├── models.py               # Spec classes (ModelSpec, etc.)
+│   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors
+│   ├── config.py               # Path management and system detection
+│   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yaml
+│   ├── cli.py                  # 'cstar forge run'/'cstar forge wizard' typer sub-app (cstar.cli entry point)
+│   ├── forge/                  # The forge application (execution engine —
+│   │   │                       # relocates into C-Star as one unit)
+│   │   ├── app.py                  # ForgeRunner/ForgeApplication (C-Star application)
+│   │   ├── forge_blueprint.py      # ForgeBlueprint — the forge application's blueprint
+│   │   ├── forge_blueprint_engine.py # process_forge_blueprint(); ForgeBlueprintExecutor Protocol
+│   │   ├── executor.py         # ForgeExecutor — the processing engine
+│   │   ├── host.py             # HostPaths — frozen host-boundary contract injected into the executor
+│   │   ├── input_data.py       # Input file generation
+│   │   ├── source_data.py      # Dataset download and preparation
+│   │   ├── source_registry.py  # Dataset alias map / provenance metadata (stdlib-only)
+│   │   ├── glorys_subchunk.py  # Just-in-time kerchunk subchunking for GLORYS
+│   │   ├── settings.py         # Template rendering
+│   │   └── namelist_model.py   # RunTimeSettings + build_namelist
+│   └── catalog/                # Bundled spec catalog (+ BlueprintCatalog API)
+│       ├── ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
+│       ├── DomainSpec/{grid}/Domain.yaml   # Grid definitions
+│       ├── ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
+│       ├── OutputSpec/{name}/Output.yaml   # Output configurations
+│       ├── Machines/{system}.yaml          # Machine descriptions
+│       └── blueprints/                     # Example/saved blueprints
+├── templates/                  # Render templates (cppdefs.opt.j2, marbl_in), decoupled
+│                                # from ModelSpec — fetched by ForgeExecutor via C-Star's
+│                                # AdditionalCode
+├── legacy/                    # Deprecated pre-wizard tooling: notebook workflows,
+│                                # the nb_engine runner, and legacy-layout blueprints
+├── docs/                      # Documentation
+└── README.md
+```
+
+Note `glorys_subchunk.py` is live (called from `input_data.py`) but is **not**
+in the boundary guard's `_FORGE_APP_MODULES` list — a known guard gap (§6).
+
+## 3. `ForgeBlueprint` — the forge blueprint
+
+Defined in `cstar_forge/forge/forge_blueprint.py`, which subclasses
+`cstar.orchestration.models.Blueprint` — this is what makes forge a real C-Star
+application (see §3a), not just a Pydantic model that happens to carry an
+`application` string. It's the ONLY `cstar` import in this module — everything
+else in `forge/` stays free of `cstar_forge`'s authoring/host layer (see §4) —
+so it remains lightweight (no ROMS/MARBL build, no roms-tools); `cstar-ocean` is
+a required pip dependency of this package regardless (see `pyproject.toml`).
+
+Top-level shape: `forge_blueprint_version` (int, bump only on breaking change;
+currently 4) · `application` (=`"forge"`, C-Star app discriminator, required by the
+`Blueprint` base) · `name`/`description` (required top-level fields on the `Blueprint`
+base; `name` is the single user-editable canonical name — `casename`/`working_dir`/
+`B_{name}.yaml`/netCDF stems all derive from it) · `run` (start/end date,
+model_reference_date) · `domain` (`grid_name`, grid_kwargs, topography_source,
+open_boundaries, partitioning, nesting) · `forcing` (flat: initial_conditions,
+surface/boundary/tidal/river lists, cdr_forcing, resolved_datasets) · `datasets`
+(host-independent list of resolved dataset keys) · `model_settings` (flat dict: cppdefs +
+~35 namelist sections) · `code` (roms/marbl repos + `templates_compile_time`/`_run_time`
+repo refs) · `composition` (which catalog pieces produced this + overrides layer) ·
+`provenance` (generated_at, content_hash, notes). The `Blueprint` base also adds
+`state`/`schema_version` (its own versioning metadata, distinct from
+`forge_blueprint_version`) and injects a `$schema` key on serialization (stripped back
+out on load).
+
+Older blueprint files load transparently: a `model_validator(mode="before")`
+(`migrate_forge_blueprint_data`) migrates v2/v3 layouts (removed `identity`
+sub-model, removed `ensemble_id`) to the current shape, reproducing derived
+names bit-for-bit. `model_name`/`grid_name` live in
+`composition.model.name`/`domain.grid_name`; `grid_name` is results-affecting —
+`SourceData` keys cache filenames off it.
+
+- **`working_dir`** (default `~/cstar-forge-run`) is the single per-run artifact root —
+  everything the executor *produces* lands under it. It's host/location, not
+  results-affecting, so it's excluded from `content_hash`. Redeclared as `str` (the
+  `Blueprint` base's is `Path`) to preserve sentinel expansion — see
+  `ForgeBlueprint._resolve_out_dir`, which overrides the base's eager
+  `expanduser()`/`resolve()` for exactly this reason.
+- **`content_hash()`** — sha256 over everything *except* `forge_blueprint_version`,
+  `name`, `description`, `composition`, `provenance`, `working_dir`, `state`,
+  `schema_version`, `$schema` (see `_HASH_EXCLUDE`), plus each code repo's
+  `location` field (the fetch address; only `commit`/`branch`/`directory`/`files`
+  are results-affecting). Stamped on `to_yaml`; `verify_content_hash` warns
+  (doesn't block) on a mismatched hand-edit at load.
+
+### 3a. Forge as a real C-Star application
+
+`cstar_forge/forge/app.py` (NOT part of the `forge/` boundary guarded by §4/
+`test_forge_app_boundary.py` — like `run.py` and `cli.py`, it's disposable
+host-resolution glue) defines the pieces the
+[C-Star custom-applications contract](https://c-star.readthedocs.io/en/latest/custom_applications.html)
+requires:
+
+- `ForgeRunner(BlueprintRunner[ForgeBlueprint])` — `run()` delegates to
+  `cstar_forge.run.process` (host resolution) → `process_forge_blueprint` →
+  `ensure_source_data`/`generate_inputs`/`configure_build`, then reports
+  `ExecutionStatus.COMPLETED`. Scope: generates inputs and emits the downstream
+  `roms_marbl` blueprint (`B_{name}.yaml`), then stops — the existing
+  `roms_marbl` application consumes that blueprint separately.
+- `ForgeApplication` — `@register_application`-decorated `ApplicationDefinition`
+  wiring `ForgeBlueprint` + `ForgeRunner` together under `name = "forge"`.
+
+Discoverable via C-Star's `CSTAR_APP_MODULES` environment variable (comma-separated
+importable module paths, each imported before app lookup):
+
+```
+export CSTAR_APP_MODULES=cstar_forge.forge.app
+```
+
+Three ways to run a forge blueprint:
+
+1. `cstar blueprint run forge_blueprint.yaml` — the app-framework path
+   (defaults only; the no-frills front door).
+2. `cstar forge run forge_blueprint.yaml` — the `cli.py` typer sub-app,
+   registered via the `cstar.cli` entry-point group (requires a C-Star release
+   with the discovery hook); a full-option argv passthrough to `run.main`.
+3. `python -m cstar_forge.run forge_blueprint.yaml` — the module CLI both of
+   the above ultimately reach; always available.
+
+The app lives in this repo (not relocated into the C-Star repo) — deliberate,
+per §1's target: the blueprint/executor design is still iterating, so
+relocation stays a later step.
+
+## 4. The call chain end to end
+
+**Authoring (catalog → resolver/wizard → blueprint):**
+1. `wiz = ForgeBlueprintWizard()` (forge_blueprint_wizard.py) — scans the catalog via
+   `domain_catalog.default_catalog`, populates dropdowns. The notebook entry point is
+   actually `ForgeBlueprintWizardApp()`, a thin wrapper that shows a catalog-location
+   bar above the wizard (auto-loads the bundled catalog; Reload rebuilds a fresh
+   `ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=...))` against a different
+   local path/`"local"`/GitHub URL/http URL, keeping the previous wizard on failure).
+2. User picks a domain → `_on_domain()` prefills grid/boundaries/partitioning/dates from
+   `catalog.domain_data(name)`.
+3. Every edit → `_rebuild()` → `build_forge_blueprint(**self._gather())`
+   (forge_blueprint_resolve.py) — reads the single consolidated `model.yaml` directly as a
+   dict (no Pydantic here; `code` + flat `model_settings`, no embedded forcing/output
+   defaults — a ForcingSpec and OutputSpec must always be supplied explicitly), resolves
+   dataset keys via `source_registry`, computes pure-derived settings (CFL `dt`,
+   `v_sponge`, etc.), returns a `ForgeBlueprint`.
+4. `wiz.config.to_yaml(path)` writes the portable `forge_blueprint.yaml`.
+
+**Execution (blueprint → engine → executor), same machine or a different one:**
+5. `cstar forge run forge_blueprint.yaml` (or `python -m cstar_forge.run …`) —
+   resolves the host via `cstar_forge.config.resolve_host()` (machine tag,
+   `source_data_cache`, `working_dir` override).
+6. `forge.forge_blueprint_engine.process_forge_blueprint(cfg, host, ...)` builds a
+   `ForgeExecutor` via `ForgeExecutor.from_forge_blueprint(cfg, host)` and drives:
+   `ensure_source_data()` → `generate_inputs()` → `configure_build()`.
+7. Outputs land under `host.working_dir`: input NetCDFs, `namelist.nml`, `cppdefs.opt`,
+   and the emitted downstream `roms_marbl` blueprint YAML (`B_{name}.yaml`, persisted
+   once by `configure_build()` — there is no per-stage blueprint file).
+
+`ForgeExecutor` never imports `cstar_forge.config`/`catalog`/`domain_catalog`/
+`forge_blueprint_resolve`/`forge_blueprint_wizard` — verified both by grep and by
+`tests/test_forge_app_boundary.py` (an AST-based guard with an empty, actively-enforced
+violation allowlist). `namelist_model.py` and `util.py` are same-package siblings
+inside `forge/` and are covered by the guard's `_FORGE_APP_MODULES` list.
+
+## 5. `models.py` vs `forge/forge_blueprint.py`
+
+The forcing/IC item models (`BoundaryForcingItem`, `SurfaceForcingItem`,
+`InitialConditions`, `OpenBoundaries`, etc.) are defined once, in
+`forge/forge_blueprint.py`; `models.py` imports and re-exports them — single
+source of truth, no duplication. What `models.py` owns is the `model.yaml`
+*wrapper* shape (`ModelSpec`, `ModelCode`, `ModelTemplates`, `load_models_yaml`)
+used by `domain_catalog.load_model_spec()` for full Pydantic validation at
+catalog-registration time — a heavier, separate path from the resolver's
+plain-dict read of the same file. `cstar_forge.forge` never imports
+`cstar_forge.models`.
+
+What guards drift today: `tests/test_roms_tools_coverage.py` (roms-tools option
+coverage) and a resolver/executor settings-parity assertion in
+`test_forge_blueprint.py`.
+
+## 6. Known gaps / open items
+
+1. **Template staging has no CI coverage for the cross-repo flat-staging contract**
+   (`ForgeExecutor._stage_templates`, executor.py ~L1036). Rendering silently assumes
+   C-Star's `AdditionalCode` stages filtered files *flat*; only manually verified
+   against the real remote. A `@pytest.mark.slow` network test staging from the real
+   repo would close this.
+2. **Templates are re-fetched every `configure_build`** (rmtree + re-clone under
+   `working_dir/templates/<stage>`), not cached like source data / code. A commit-keyed
+   template cache (mirroring `source_data_cache`) would fix this.
+3. **`glorys_subchunk.py` is outside the §4 boundary guard** — live code called
+   from `input_data.py` but absent from `_FORGE_APP_MODULES`, so boundary
+   violations there would go uncaught.
+4. **Forge app relocation into C-Star not yet done** (see §3a) — deliberate;
+   relocation is a follow-on once the blueprint/executor design settles. Also
+   open: `ForgeRunner.run()` calls the synchronous, heavy
+   `process_forge_blueprint` inline on the event loop rather than via
+   `asyncio.to_thread` — fine for a first cut, candidate refinement later.
+5. **No real-generated-data integration test** (actual GLORYS/ERA5/TPXO network
+   fetch with no roms-tools mocking) — the golden tests below mock roms-tools
+   construction classes.
+
+## 7. Golden fixtures
+
+Two committed goldens pin the resolved-settings and namelist contracts (treat
+any diff as a behavior change to justify, not noise):
+
+- **Settings-level**: `test_golden_model_settings_test_tiny`
+  (test_forge_blueprint.py) diffs resolved `model_settings` against
+  `tests/fixtures/golden_model_settings_test-tiny.json`. No regeneration hook —
+  update manually.
+- **Byte-exact namelist**: `tests/test_core.py::TestGoldenNamelist::
+  test_golden_namelist_test_tiny` drives the real `generate_inputs()` →
+  `configure_build()` chain (real `write_roms_namelist`; only roms-tools
+  construction classes are mocked) and diffs the rendered `namelist.nml` against
+  `tests/fixtures/golden_namelist_test-tiny.nml` (host-rooted absolute paths
+  normalized to a `<WORKDIR>` token). Regenerate via
+  `UPDATE_GOLDEN=1 pytest tests/test_core.py -k golden_namelist_test_tiny` (the
+  run intentionally fails after writing; rerun without the env var to confirm).
+
+Both fixtures resolve paths via `cstar_forge.__file__`, so they need the
+editable install.

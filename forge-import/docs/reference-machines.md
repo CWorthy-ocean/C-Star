@@ -1,7 +1,7 @@
 # Machines (`catalog/Machines/*.yaml`)
 
 Machine descriptions live in the bundled catalog at `cstar_forge/catalog/Machines/`,
-one YAML file per system (`MacOS.yaml`, `NERSC_perlmutter.yaml`, `RCAC_anvil.yaml`, …).
+one YAML file per system (currently `MacOS.yaml`, `NERSC_perlmutter.yaml`, `RCAC_anvil.yaml`).
 
 Example — `RCAC_anvil.yaml`:
 

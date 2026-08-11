@@ -96,6 +96,8 @@ class ModelSpec(BaseModel):
     ----------
     name : str
         Logical name of the model (e.g., "cson_roms-marbl_v0.1").
+    description : str, optional
+        Human-readable one-liner for catalogs/wizard display.
     code : ModelCode
         Code repository refs (roms/marbl/pio) + template refs.
     bgc_mode : Literal["marbl", "none"]
@@ -119,6 +121,7 @@ class ModelSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
+    description: str | None = None
     code: ModelCode
     bgc_mode: Literal["marbl", "none"] = "marbl"
     use_pio: bool = False
@@ -249,6 +252,7 @@ def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
 
     return ModelSpec(
         name=model_name,
+        description=block.get("description"),
         code=model_code,
         bgc_mode=block.get("bgc_mode", "marbl"),
         use_pio=block.get("use_pio", False),

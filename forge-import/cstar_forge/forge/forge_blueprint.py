@@ -3,7 +3,7 @@
 forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
 ``cstar_forge.forge.executor.ForgeExecutor.from_forge_blueprint`` and
 ``cstar_forge.forge.forge_blueprint_engine.process_forge_blueprint``), split into two phases
-(see ``docs/developer-guide.md``):
+(see ``docs/architecture-details.md``):
 
 1. **Collection / curation** — assemble every option from its source (constructor
    args, the ModelSpec, and the *pure* derived values), validate it, and write one
@@ -482,7 +482,7 @@ class Partitioning(_Section):
 
 
 class Domain(_Section):
-    """Grid construction inputs (kwargs only — the ``rt.Grid`` is built in Phase 2).
+    """Grid construction inputs (kwargs only — the ``rt.Grid`` is built at processing time).
 
     ``grid_kwargs`` is the single source for grid geometry, including ``theta_s`` /
     ``theta_b`` / ``hc`` when provided; the namelist ``s_coord`` section is filled at
@@ -771,7 +771,7 @@ class Composition(_Section):
 
 class Provenance(_Section):
     """Audit trail. ``generated_at``/``forge_version``/``cstar_version``/
-    ``roms_tools_version`` are never computed inside the resolver (to keep Phase 1
+    ``roms_tools_version`` are never computed inside the resolver (to keep resolution
     deterministic/reproducible, and because ``roms_tools`` isn't guaranteed
     installed there) -- ``ForgeBlueprint.to_yaml_str`` stamps each on first save
     only (a later resave preserves the original value, same as an explicit
@@ -1019,7 +1019,7 @@ class ForgeBlueprint(Blueprint):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> ForgeBlueprint:
-        """Load and validate a ``forge_blueprint.yaml`` (Phase 2 entry point).
+        """Load and validate a ``forge_blueprint.yaml`` (processing entry point).
 
         Version-check + migration happen automatically via the
         ``_migrate_and_clean`` before-validator -- no need to call

@@ -1,5 +1,5 @@
 """
-Phase 1 resolver: ``build_forge_blueprint`` — assemble a validated :class:`ForgeBlueprint`
+Resolver: ``build_forge_blueprint`` — assemble a validated :class:`ForgeBlueprint`
 from the composable pieces (a ModelSpec + a domain selection + a run window).
 
 This is the *collection / curation* half of the planned split (see
@@ -15,8 +15,8 @@ spacing ``ds``) is optional: pass ``dt=`` to stay fully lightweight, or leave it
 ``None`` to have it computed (lazily importing ``roms_tools`` + ``cstar_forge.forge.util``).
 
 What this does NOT do (by design — it is host- and artifact-independent):
-* no machine / path resolution (Phase 2, on the run host),
-* no source downloads or grid/forcing file generation (Phase 2),
+* no machine / path resolution (done at processing time, on the run host),
+* no source downloads or grid/forcing file generation (processing),
 * no ``s_coord`` / file paths / ``title`` / ``output_root_name`` (filled at
   processing or derived from the blueprint's own ``name``).
 
@@ -924,7 +924,7 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any]) -> float:
         raise RuntimeError(
             "v_sponge was not provided and could not be computed: importing "
             "cstar_forge.forge.util failed. Pass v_sponge= explicitly to keep "
-            f"Phase 1 dependency-light. ({exc})"
+            f"resolution dependency-light. ({exc})"
         ) from exc
     return compute_v_sponge_from_grid(grid_kwargs["size_x"], grid_kwargs["nx"])
 
@@ -936,7 +936,7 @@ def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(
             "dt was not provided and could not be computed: importing "
-            "cstar_forge.forge.util failed. Pass dt= explicitly to keep Phase 1 "
+            "cstar_forge.forge.util failed. Pass dt= explicitly to keep resolution "
             f"dependency-light. ({exc})"
         ) from exc
     if grid is None:

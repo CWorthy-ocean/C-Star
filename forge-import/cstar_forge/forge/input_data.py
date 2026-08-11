@@ -375,7 +375,7 @@ class RomsMarblInputData(InputData):
         input_list.append(("grid", {}))
 
         # Initial conditions and forcing come from the fully-resolved forcing_override
-        # (filled by the Phase-1 resolver from the model default or an authored selection).
+        # (filled by the resolver from the model default or an authored selection).
         if self.forcing_override is None:
             raise ValueError(
                 "RomsMarblInputData requires a forcing_override (resolved initial "

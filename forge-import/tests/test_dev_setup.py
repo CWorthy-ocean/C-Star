@@ -185,7 +185,7 @@ class TestDevSetupScript:
     def test_dev_setup_sources_helper_scripts(self, dev_setup_script):
         """Test that dev-setup.sh delegates HPC hardening and kernel
         registration to scripts/harden-env.sh and scripts/register-kernel.sh
-        instead of inlining them (Phase 3c extraction).
+        instead of inlining them.
         """
         with open(dev_setup_script) as f:
             content = f.read()

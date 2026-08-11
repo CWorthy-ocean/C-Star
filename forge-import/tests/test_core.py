@@ -1771,7 +1771,7 @@ class TestGoldenNamelist:
 
     This is the deterministic, mocked-forcing golden referenced in the Follow-ups
     section of ``docs/dev-notes/forge-blueprint-parameter-audit.md`` and in
-    ``docs/developer-guide.md`` Sec 6 — it is NOT the real-generated-data integration
+    ``docs/architecture-details.md`` Sec 6 — it is NOT the real-generated-data integration
     test those docs separately name as still deferred (this one mocks every
     roms-tools construction class; a real run against GLORYS/ERA5/TPXO/DAI data is a
     different, heavier test that doesn't exist yet).

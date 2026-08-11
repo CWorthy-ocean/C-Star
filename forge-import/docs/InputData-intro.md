@@ -1,7 +1,7 @@
 # Input Data Generation Overview
 
-> **This subsystem is driven by the forge application** (`python -m cstar_forge.run <forge_blueprint.yaml>`),
-> which resolves a `ForgeBlueprint` and calls `ForgeExecutor.generate_inputs()`
+> **This subsystem is driven by the forge application** (`cstar forge run <forge_blueprint.yaml>`, or equivalently
+> `python -m cstar_forge.run`), which loads a `ForgeBlueprint` and calls `ForgeExecutor.generate_inputs()`
 > (`cstar_forge/forge/executor.py`). That method constructs a `RomsMarblInputData`
 > instance and calls `generate_all()` on it. Constructing `RomsMarblInputData` directly
 > (as shown later in this doc) is for developers debugging or extending input generation
@@ -17,7 +17,7 @@ The input data generation process transforms prepared source datasets into model
 - **Initial conditions**: Temperature, salinity, and biogeochemical fields
 - **Forcing data**: Surface, boundary, tidal, and river forcing
 - **CDR forcing**: Carbon dioxide removal forcing (optional)
-- **Corrections**: Forcing corrections (not yet implemented)
+- **Corrections**: Forcing corrections (registered but unwired: the resolver never emits a `corrections` category, and the handler raises `NotImplementedError`)
 
 ## Core Components
 
@@ -71,7 +71,7 @@ Steps are executed in order (lowest `order` value first):
 - `forcing.tidal` (order=50)
 - `forcing.river` (order=60)
 - `cdr_forcing` (order=80)
-- `forcing.corrections` (order=90)
+- `forcing.corrections` (order=90; registered but unwired — never emitted by the resolver)
 
 ### ROMS-MARBL Implementation: `RomsMarblInputData`
 
@@ -87,7 +87,7 @@ The `RomsMarblInputData` class provides ROMS-MARBL specific input generation:
 - `cdr_forcing`: optional user-provided CDR forcing dict
 - `roms_marbl_blueprint_elements`: `RomsMarblBlueprintInputData` subset, auto-initialized
 - `_settings_compile_time` / `_settings_run_time`: settings dictionaries, auto-initialized
-- `input_list`: list of `(key, kwargs)` tuples derived from `forcing_override` (see below)
+- `input_list`: list of `(key, kwargs)` tuples derived from `forcing_override` (a plain attribute set in `__post_init__`, not a declared dataclass field; see below)
 
 **Workflow:**
 1. **Initialization**: Builds `input_list` from `forcing_override` (plus the always-present `grid` entry and any
@@ -102,7 +102,7 @@ The `RomsMarblInputData` class provides ROMS-MARBL specific input generation:
 ### Step 1: Build Input List
 
 `__post_init__` derives `input_list` from `forcing_override` (the resolved initial-conditions +
-forcing selection injected by the caller — see `cstar_forge.forge.forge_blueprint` /
+forcing selection injected by the caller — see `cstar_forge.forge.forge_blueprint_engine` /
 `sources_to_forcing_override`), not from a model spec:
 - `grid` is always appended (its handler ignores kwargs; the grid comes from the injected `grid` object)
 - `forcing_override["initial_conditions"]` → `("initial_conditions", kwargs)`
@@ -145,8 +145,8 @@ These settings are used later to render configuration templates.
 - **Handler**: `_generate_grid()`
 - **Output**: Grid NetCDF file and YAML metadata (plus a child grid + nesting-info NetCDF when
   `grid_child` is set)
-- **Settings**: Updates the run-time `param` (grid dimensions), `s_coord`, and (when nesting)
-  `extract_data`; updates the compile-time `cppdefs` (open boundaries)
+- **Settings**: Updates the run-time `grid` (grid file path), `param` (grid dimensions), `s_coord`,
+  and (when nesting) `extract_data`; updates the compile-time `cppdefs` (open boundaries)
 
 ### Initial Conditions (`initial_conditions`)
 - **Handler**: `_generate_initial_conditions()`
@@ -271,8 +271,7 @@ roms_marbl_blueprint_elements, compile_time_settings, run_time_settings = input_
 ## Integration with ForgeExecutor
 
 The `RomsMarblInputData` class is used internally by `ForgeExecutor.generate_inputs()`
-(`cstar_forge/forge/executor.py` — this was `CstarSpecBuilder.generate_inputs()` before the
-decomposition into `ForgeBlueprint` + `ForgeExecutor`; see `docs/developer-guide.md`). That
+(`cstar_forge/forge/executor.py`; see `docs/developer-guide.md` for the architecture). That
 method is in turn called by `process_forge_blueprint()`
 (`cstar_forge/forge/forge_blueprint_engine.py`), which is what `python -m cstar_forge.run`
 invokes:
@@ -284,5 +283,5 @@ invokes:
 4. Merges settings dictionaries with template defaults
 5. Persists blueprint and settings to disk (in `configure_build()`)
 
-This completes the POSTCONFIG stage of the workflow.
+This completes the `generate_inputs` stage; the blueprint and settings are persisted in `configure_build()`.
 

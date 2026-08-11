@@ -1,6 +1,6 @@
 # Installation changes — what existing users need to know
 
-The dependency overhaul (August 2026) changed how C-STAR Forge is installed and
+The dependency overhaul (August 2026) changed how C-Star Forge is installed and
 managed. If you had a working setup before, here's what's different.
 
 ## Action needed

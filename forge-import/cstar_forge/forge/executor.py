@@ -148,7 +148,6 @@ class ForgeExecutor(BaseModel):
        - Jinja2 templates rendered with current settings
        - Blueprint updated with rendered code locations
        - **Blueprint persisted to disk** -- the only time this happens
-       - ROMSSimulation instance created
 
     `run()` then hands the persisted blueprint's path to C-Star for execution.
 
@@ -1696,7 +1695,7 @@ class ForgeExecutor(BaseModel):
         ``ForgeBlueprint`` (the forge application's blueprint) + the injected ``host``.
 
         This is the single derivation path from a ForgeBlueprint to a runnable builder. The
-        domain-catalog path routes through the Phase-1 resolver
+        domain-catalog path routes through the resolver
         (``forge_blueprint_resolve.build_forge_blueprint``) to produce the ``ForgeBlueprint`` and then
         here — so there is one place that maps blueprint → builder inputs
         (``forge_blueprint_engine.forge_blueprint_to_builder_kwargs``).
@@ -1738,7 +1737,6 @@ class ForgeExecutor(BaseModel):
            (only when `generate_inputs()` has run -- the placeholder blueprint
            cannot validate), so an extra="forbid" mismatch fails at emit time
         8. Persists the blueprint to disk -- the only time it is written
-        9. Creates ROMSSimulation instance from blueprint
 
         This is expected to run after `generate_inputs()` has populated the
         in-memory blueprint with real input data file locations.
@@ -1817,7 +1815,7 @@ class ForgeExecutor(BaseModel):
                 if isinstance(ntimes, float):
                     self._settings_run_time["time_stepping"]["ntimes"] = round(ntimes)
 
-        # Derive n_tracers: prefer the value passed by the Phase-2 engine; otherwise
+        # Derive n_tracers: prefer the value passed by the processing engine; otherwise
         # derive it from the resolved settings (T + S + BGC ntrc_bio + passive).
         if "n_tracers" in kwargs:
             n_tracers = int(kwargs["n_tracers"])

@@ -1,5 +1,5 @@
 """
-Phase 3: roms-tools option drift guard.
+roms-tools option drift guard.
 
 Introspects each rt constructor's parameters against Forge's item models (models.py).
 Every rt parameter that is NOT a "data/run input" (provided programmatically by Forge)
@@ -191,7 +191,7 @@ def test_all_rt_params_are_exposed_or_skipped(cls_name, forge_cls_name):
     )
 
 
-# ── single-source item models (Phase D) ──────────────────────────────────────
+# ── single-source item models ──────────────────────────────────────
 # The forcing/IC item models are now defined ONCE in ``cstar_forge.forge.forge_blueprint``
 # and re-exported by ``cstar_forge.models`` (with ``InitialConditions`` aliased to the
 # legacy name ``InitialConditionsInput``). This guard asserts they are literally the same

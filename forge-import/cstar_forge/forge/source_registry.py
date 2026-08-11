@@ -7,7 +7,7 @@ This module holds ONLY pure data + functions (stdlib/typing) so it can be import
 by both:
   * ``cstar_forge.forge.source_data`` (the heavy acquisition layer — copernicusmarine /
     gdown / roms_tools), which re-exports these names for its existing consumers, and
-  * ``cstar_forge.forge_blueprint_resolve`` (the dependency-light Phase-1 resolver),
+  * ``cstar_forge.forge_blueprint_resolve`` (the dependency-light resolver),
     which previously carried a hand-copied duplicate of this table.
 
 Single source of truth: edit dataset identifiers / URLs / aliases here. When the

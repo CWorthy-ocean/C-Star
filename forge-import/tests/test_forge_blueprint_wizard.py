@@ -540,7 +540,7 @@ def test_cdr_upload_semantically_broken_yaml_caught_by_eager_rt_construction():
     this -- only the eager ``rt.CDRForcing(**parsed)`` construction in
     ``_on_cdr_upload`` catches it (roms-tools' own validator raises). This is the
     scenario the eager-validation design exists for: without it, this would embed
-    silently into the blueprint and only fail much later, during Phase-2 execution.
+    silently into the blueprint and only fail much later, during blueprint processing.
     """
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
