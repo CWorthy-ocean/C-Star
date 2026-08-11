@@ -723,8 +723,8 @@ def test_expansion_key_is_stable(
 @pytest.mark.parametrize(
     ("identity_fn", "expected"),
     [
-        (hash_identity, {"hash"}),
-        (location_identity, {"location"}),
+        (hash_identity, {"resource.hash"}),
+        (location_identity, {"resource.location"}),
     ],
 )
 def test_identity_is_a_closed_set_of_fields(
@@ -777,7 +777,7 @@ def test_identity_fields_are_safe_to_merge(versioned: VersionedResource) -> None
     assert set(hash_identity(versioned)) & set(partition_identity(geometry)) == set()
 
     merged = with_partitioning(hash_identity)((versioned, geometry))
-    assert merged["hash"] == hash_identity(versioned)["hash"]
+    assert merged["resource.hash"] == hash_identity(versioned)["resource.hash"]
     assert merged["partition.hash"] == "geom-abc"
 
 
@@ -799,8 +799,8 @@ def test_derived_identity_adds_nothing_of_its_own(
 
     geometry = PartitioningParameterSet(n_procs_x=4, n_procs_y=2)
 
-    assert fields["hash"] == hash_identity(versioned)["hash"]
-    assert {field for field in fields if field != "hash"} == set(
+    assert fields["resource.hash"] == hash_identity(versioned)["resource.hash"]
+    assert {field for field in fields if not field.startswith("resource.")} == set(
         partition_identity(geometry)
     )
 

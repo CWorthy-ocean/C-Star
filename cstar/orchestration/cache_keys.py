@@ -386,7 +386,10 @@ def location_identity(resource: DataResource) -> dict[str, str]:
     Returns
     -------
     dict of str to str
-        Mapping of the normalised ``location``.
+        Mapping of the normalised location, under ``resource.location``. The
+        namespace is the subject rather than the strategy: it says the field
+        describes a resource, while the scheme already records that the
+        resource was identified by location rather than by hash.
 
     Raises
     ------
@@ -404,7 +407,7 @@ def location_identity(resource: DataResource) -> dict[str, str]:
     location = getattr(resource, "location", None)
     if not location:
         raise CacheKeyError(f"{type(resource).__name__} declares no location")
-    return {"location": normalise_location(str(location))}
+    return {"resource.location": normalise_location(str(location))}
 
 
 def hash_identity(resource: DataResource) -> dict[str, str]:
@@ -421,7 +424,10 @@ def hash_identity(resource: DataResource) -> dict[str, str]:
     Returns
     -------
     dict of str to str
-        Mapping of ``hash``.
+        Mapping of the declared digest, under ``resource.hash``. Qualified
+        because a bare ``hash`` is a name several identity functions could
+        plausibly want — :func:`partition_identity` is one — and a flat merge
+        would let one silently overwrite another.
 
     Raises
     ------
@@ -435,7 +441,7 @@ def hash_identity(resource: DataResource) -> dict[str, str]:
             f"{type(resource).__name__} declares no hash; key on the location "
             "instead, or add a hash to the blueprint"
         )
-    return {"hash": str(digest)}
+    return {"resource.hash": str(digest)}
 
 
 def partition_identity(partitioning: PartitioningParameterSet) -> dict[str, str]:
