@@ -357,6 +357,30 @@ def register_application(
     return klass
 
 
+def _load_builtin_application(name: str) -> None:
+    """Import the in-tree ``cstar.applications.{name}`` module, if it exists.
+
+    Parameters
+    ----------
+    name : str
+        The application name being resolved.
+
+    Notes
+    -----
+    A missing module is not an error -- the name may belong to an installed
+    plugin, which the caller tries next. A module that exists but fails to
+    import *is* an error: the ``ImportError`` propagates rather than being
+    reported as a missing application.
+    """
+    module = f"cstar.applications.{name}"
+
+    if importlib.util.find_spec(module) is None:
+        log.trace(f"No built-in application module {module!r} for {name!r}")
+        return
+
+    importlib.import_module(module)
+
+
 def _load_app_entry_point(name: str) -> None:
     """Load a third-party application via the ``cstar.applications`` entry-point group.
 
@@ -367,23 +391,10 @@ def _load_app_entry_point(name: str) -> None:
 
     Notes
     -----
-    Skipped entirely when an in-tree module ``cstar.applications.{name}``
-    exists, so an installed plugin can never shadow a built-in application;
-    the in-tree import handles that case instead.
+    Reached only once the in-tree lookup has come up empty, so an installed
+    plugin can never shadow a built-in application.
     """
-    if importlib.util.find_spec(f"cstar.applications.{name}") is not None:
-        for ep in entry_points(group=APP_PLUGIN_GROUP):
-            if ep.name == name:
-                log.warning(
-                    f"Ignoring application plugin {name!r} ({ep.value!r}): a "
-                    "built-in application with this name already exists"
-                )
-        return
-
-    for ep in entry_points(group=APP_PLUGIN_GROUP):
-        if ep.name != name:
-            continue
-
+    for ep in entry_points(group=APP_PLUGIN_GROUP, name=name):
         try:
             ep.load()
         except Exception:
@@ -410,25 +421,19 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     -----
     Applications are discovered, in order, from:
 
-    1. The ``cstar.applications`` entry-point group -- installed third-party
-       plugins. A plugin can never shadow a built-in application: if an
-       in-tree module ``cstar.applications.{name}`` exists, the entry-point
-       is skipped (with a warning) and step 2 is used instead.
-    2. The in-tree ``cstar.applications.{name}`` module.
+    1. The in-tree ``cstar.applications.{name}`` module.
+    2. The ``cstar.applications`` entry-point group -- installed third-party
+       plugins.
 
-    Each step is attempted only while *name* is still unregistered, so a
-    successful earlier step never triggers the warnings of a later one.
+    Each step is attempted only while *name* is still unregistered. A plugin
+    therefore can never shadow a built-in application: a name that resolves in
+    step 1 never reaches step 2, and the plugin claiming it is never imported.
     """
     if name not in _registry:
-        _load_app_entry_point(name)
+        _load_builtin_application(name)
 
     if name not in _registry:
-        module = f"cstar.applications.{name}"
-
-        try:
-            importlib.import_module(module)
-        except ModuleNotFoundError:
-            log.warning(f"Unable to load C-Star application {name!r} from {module!r}")
+        _load_app_entry_point(name)
 
     if application := _registry.get(name):
         log.trace(f"Located application context {application.__name__!r} for {name!r}")

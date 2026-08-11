@@ -1,6 +1,6 @@
 # ruff: noqa: S101
+import sys
 import textwrap
-from importlib.metadata import EntryPoint
 from pathlib import Path
 
 import pytest
@@ -162,32 +162,51 @@ def test_get_application_via_entry_point_does_not_warn(
 
 
 def test_entry_point_cannot_shadow_builtin_application(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify that an entry point named after a built-in application (e.g.
     ``hello_world``) never replaces the built-in: the resolved application
-    must be the real, in-tree class, not the decoy the entry point points at.
+    must be the real, in-tree class, and the decoy module must never even be
+    imported.
+
+    The decoy is a real, importable module that *would* register itself under
+    the built-in's name, so this fails if built-in precedence ever regresses.
 
     Parameters
     ----------
+    tmp_path : Path
+        Temporary path fixture used to host both the decoy module and a
+        dist-info directory so it is discoverable via ``sys.path``.
     monkeypatch : pytest.MonkeyPatch
-        Fixture used to stub out ``entry_points`` with a decoy claiming the
-        built-in's name.
+        Fixture used to set the import path.
     """
-    decoy = EntryPoint(
-        name="hello_world",
-        value="some.decoy.module:DecoyApplication",
-        group=APP_PLUGIN_GROUP,
-    )
-    monkeypatch.setattr(
-        "cstar.applications.core.entry_points",
-        lambda group=None: [decoy],
-    )
+    app_name = "hello_world"
+    module = "shadow_decoy_module"
+    (tmp_path / f"{module}.py").write_text(_external_app_module_source(app_name))
+    _write_dist_info(tmp_path, "shadow-decoy", "1.0.0", app_name, module)
 
-    app = get_application("hello_world")
+    monkeypatch.syspath_prepend(str(tmp_path))
 
-    assert app.name == "hello_world"
-    assert app.blueprint.__name__ == "HelloWorldBlueprint"
+    # Force resolution through the loaders rather than a registry hit left
+    # behind by an earlier test, and drop the cached module so the in-tree
+    # import actually re-runs its @register_application decorator.
+    registered = _registry.pop(app_name, None)
+    builtin = sys.modules.pop(f"cstar.applications.{app_name}", None)
+
+    try:
+        app = get_application(app_name)
+
+        assert app.long_name != "Externally Defined App"
+        assert app.blueprint.__name__ == "HelloWorldBlueprint"
+        assert module not in sys.modules
+    finally:
+        if builtin is not None:
+            sys.modules[f"cstar.applications.{app_name}"] = builtin
+        if registered is not None:
+            _registry[app_name] = registered
+        else:
+            _registry.pop(app_name, None)
 
 
 def test_get_application_broken_entry_point_does_not_abort_resolution(
@@ -262,6 +281,33 @@ def test_get_application_entry_point_registers_nothing_raises_value_error(
             get_application(app_name)
     finally:
         _registry.pop(app_name, None)
+
+
+def test_broken_builtin_application_propagates_import_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that an in-tree application module which exists but fails to
+    import surfaces the real ``ImportError`` rather than being reported as a
+    missing application.
+
+    ``find_spec`` is stubbed so the module appears to exist; the subsequent
+    ``import_module`` then fails for real, standing in for an in-tree
+    application whose own imports are broken.
+
+    Parameters
+    ----------
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to stub out ``find_spec``.
+    """
+    app_name = "broken_builtin_app"
+
+    monkeypatch.setattr(
+        "cstar.applications.core.importlib.util.find_spec",
+        lambda target: object() if target == f"cstar.applications.{app_name}" else None,
+    )
+
+    with pytest.raises(ModuleNotFoundError, match=app_name):
+        get_application(app_name)
 
 
 def test_runnerresult_initial_state(tmp_path: Path) -> None:

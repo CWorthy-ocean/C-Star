@@ -209,15 +209,9 @@ blueprints carry in their ``application`` field. *C-Star* imports that module
 (and only that module -- the entry point's return value is unused) the first
 time an application by that name is requested.
 
-Choose a name no built-in already uses. A plugin can never shadow a built-in
-application: if ``cstar.applications`` already defines a module with that name,
-the plugin is skipped (with a warning) and the built-in is used instead. Note
-that this tutorial's own ``hello_world`` is one such name, so an installed
-plugin could not claim it.
-
-The entry-point group is the only mechanism *C-Star* uses to discover
-applications defined outside ``cstar.applications``. For local development --
-e.g. iterating on an application in a worktree before it is published -- install
-your package in editable mode (``pip install -e .``) so its entry points are
-visible without a real release; re-running the install after editing
-``pyproject.toml`` is enough to pick up a changed or added entry point.
+Choose a name no built-in already uses. *C-Star* resolves the in-tree
+``cstar.applications`` module first and only consults entry points when that
+comes up empty, so a plugin can never shadow a built-in application: if
+``cstar.applications`` already defines a module with that name, your plugin is
+silently never imported. Note that this tutorial's own ``hello_world`` is one
+such name, so an installed plugin could not claim it.
