@@ -727,7 +727,7 @@ class ROMSSimulation(Simulation):
         :class:`~cstar.roms.namelist.RomsNamelist`, and overrides key parameters
         based on the current simulation configuration: time step, number of time
         steps, grid path, initial conditions, forcing datasets, MARBL/CDR/nesting
-        files, and output root.
+        files, output root, and extract root.
 
         Returns
         -------
@@ -788,7 +788,15 @@ class ROMSSimulation(Simulation):
                 self.nesting_info.working_copy.path  # type: ignore[union-attr]
             )
 
+        # These next values must stay short: ucla-roms builds
+        # the extraction filename in a fixed character(len=99) buffer
+        # so an absolute path could silently truncate.
         nml.simulation_name_settings.output_root_name = "../output/output"
+
+        # Note: only PARALLEL_IO builds honor extract_root_name;
+        # non-PIO builds name extraction files from output_root_name (already
+        # pointing at the output directory).
+        nml.extract_data_settings.extract_root_name = "../output/child"
 
         return nml
 

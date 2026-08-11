@@ -448,6 +448,9 @@ class TestROMSSimulationInitialization:
         assert tested_settings.extract_data_settings.extract_file == str(
             fake_nesting_path
         )
+        assert (
+            tested_settings.extract_data_settings.extract_root_name == "../output/child"
+        )
 
         # Test with no MARBL files — marbl_config_file keeps the namelist's value
         sim.runtime_code = additionalcode_local(
@@ -471,10 +474,15 @@ class TestROMSSimulationInitialization:
         result_no_cdr = sim.roms_runtime_settings
         assert result_no_cdr.cdr_frc_settings.cdr_file == "cdr.nc"
 
-        # Test with no nesting info — extract_file keeps the namelist's value
+        # Test with no nesting info — extract_file keeps the namelist's value,
+        # but extract_root_name is still overridden (it is set unconditionally)
         sim.nesting_info = None
         result_no_nesting = sim.roms_runtime_settings
         assert result_no_nesting.extract_data_settings.extract_file == "sample_edata.nc"
+        assert (
+            result_no_nesting.extract_data_settings.extract_root_name
+            == "../output/child"
+        )
 
     def test_roms_runtime_settings_raises_if_no_runtime_code_working_copy(
         self, stub_romssimulation
