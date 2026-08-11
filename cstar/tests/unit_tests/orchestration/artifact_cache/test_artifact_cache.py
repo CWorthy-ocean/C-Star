@@ -1961,3 +1961,75 @@ def test_identity_short_circuits_every_policy(
         cache.promote(name, "run-B", on_conflict=policy).path
         == cache.locate(name, Tier.SHARED).path
     )
+
+
+def test_shared_commit_names_the_producing_run_not_a_missing_one(
+    cache: ArtifactCache, staged_artifact: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A shared path carries no run identity, so it must not report one absent.
+
+    Logging the missing ``run_id`` reads as a run having gone astray rather
+    than as the flattening it is; the promotion record knows where it came
+    from, and saying so is more use than saying nothing.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    staged_artifact : str
+        Name of a committed user-tier artifact.
+    caplog : pytest.LogCaptureFixture
+        Captured log records.
+    """
+    with caplog.at_level(logging.INFO):
+        cache.promote(staged_artifact, RUN_ID)
+
+    expected = (
+        f"Artifact {staged_artifact!r} published to the shared cache "
+        f"from run {RUN_ID!r}"
+    )
+    published = [m for m in caplog.messages if "published to the shared cache" in m]
+    assert published == [expected]
+    assert not [m for m in caplog.messages if "run None" in m]
+
+
+def test_direct_shared_write_omits_the_run_clause(
+    cache: ArtifactCache, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A shared write with no promotion behind it names no run at all.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    caplog : pytest.LogCaptureFixture
+        Captured log records.
+    """
+    with (
+        caplog.at_level(logging.INFO),
+        cache.stage("direct.nc", tier=Tier.SHARED) as tmp,
+    ):
+        tmp.write_bytes(b"payload")
+
+    assert "Artifact 'direct.nc' published to the shared cache" in caplog.messages
+
+
+def test_user_commit_names_its_run(
+    cache: ArtifactCache, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A user-tier artifact belongs to a run and says which.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    caplog : pytest.LogCaptureFixture
+        Captured log records.
+    """
+    with caplog.at_level(logging.INFO), cache.stage("owned.nc", RUN_ID) as tmp:
+        tmp.write_bytes(b"payload")
+
+    assert (
+        f"Artifact 'owned.nc' added to the user cache for run {RUN_ID!r}"
+        in caplog.messages
+    )

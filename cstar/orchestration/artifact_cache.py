@@ -894,7 +894,7 @@ class ArtifactCache:
                 )
             path = root / name
             self._assert_contained(path, root)
-            log.info(f"Located {name!r} in {tier!r} cache at {str(path)!r}")
+            log.info(f"Located {name!r} in the shared cache at {str(path)!r}")
             return Location(path=path, tier=tier, name=name, run_id=None)
 
         if run_id is None:
@@ -903,7 +903,9 @@ class ArtifactCache:
         path = root / run_id / name
         self._assert_contained(path, root)
 
-        log.info(f"Located {name!r} in {tier!r} run {run_id!r} cache at {str(path)!r}")
+        log.info(
+            f"Located {name!r} in the user cache for run {run_id!r} at {str(path)!r}"
+        )
         return Location(path=path, tier=tier, name=name, run_id=run_id)
 
     def candidates(self, name: str, run_id: str | None = None) -> tuple[Location, ...]:
@@ -1165,7 +1167,7 @@ class ArtifactCache:
             )
             size = tmp.stat().st_size
             os.replace(tmp, location.path)
-            log.info(f"Artifact {name!r} added to {tier!r} cache for run {run_id!r}")
+            log.info(self._commit_message(name, tier, run_id, provenance))
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
@@ -1192,6 +1194,46 @@ class ArtifactCache:
             **dict(provenance or {}),
         )
         self._write_record(location, record)
+
+    @staticmethod
+    def _commit_message(
+        name: str,
+        tier: Tier,
+        run_id: str | None,
+        provenance: Mapping[str, Any] | None,
+    ) -> str:
+        """Describe a commit in terms that make sense for its tier.
+
+        A shared path carries no run identity by design, so reporting the
+        absent ``run_id`` reads as a run having gone missing rather than as the
+        flattening it is. Where the write came from a promotion the producing
+        run is on the record, and naming it is more use than naming nothing.
+
+        Parameters
+        ----------
+        name : str
+            Artifact filename.
+        tier : Tier
+            Tier written to.
+        run_id : str or None
+            Run identifier, absent for the shared tier.
+        provenance : Mapping of str to Any or None
+            Extra record fields, carrying ``promoted_from_run_id`` when the
+            write came from :meth:`promote`.
+
+        Returns
+        -------
+        str
+            Message for the log.
+        """
+        if tier is not Tier.SHARED:
+            return f"Artifact {name!r} added to the user cache for run {run_id!r}"
+        origin = (provenance or {}).get("promoted_from_run_id")
+        if origin:
+            return (
+                f"Artifact {name!r} published to the shared cache from run {origin!r}"
+            )
+        return f"Artifact {name!r} published to the shared cache"
 
     def ingest(
         self,
