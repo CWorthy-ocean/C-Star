@@ -1583,7 +1583,9 @@ class TestRomsMarblInputDataGeneration:
             == "cdr.nc"
         )
         assert (
-            sample_roms_marbl_input_data._settings_run_time["cdr_output"]["do_cdr"]
+            sample_roms_marbl_input_data._settings_run_time["cdr_output"][
+                "do_cdr_output"
+            ]
             is True
         )
 

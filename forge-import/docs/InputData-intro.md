@@ -181,7 +181,7 @@ These settings are used later to render configuration templates.
 - **Handler**: `_generate_cdr_forcing()`
 - **Output**: CDR forcing NetCDF file(s) (optional)
 - **Settings**: Updates compile-time `cppdefs.cdr_forcing`; updates run-time `cdr_frc` and
-  `cdr_output.do_cdr`
+  `cdr_output.do_cdr_output`
 
 ## Blueprint Integration
 

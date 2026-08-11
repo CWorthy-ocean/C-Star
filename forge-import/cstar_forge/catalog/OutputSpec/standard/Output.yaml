@@ -72,7 +72,7 @@ frc_output:
   output_period: 3600.0
   nrpf: 4
 cdr_output:
-  do_cdr: false
+  do_cdr_output: false
   do_avg: true
   monthly_averages: false
   output_period: 3600

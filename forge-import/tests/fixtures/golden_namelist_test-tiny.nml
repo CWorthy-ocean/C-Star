@@ -152,7 +152,9 @@
 &marbl_biogeochemistry_settings
     marbl_config_file = 'marbl_in'
     marbl_diagnostics_to_write = 'PH', 'PH_ALT_CO2', 'pCO2SURF_ALT_CO2',
-                                 'pCO2SURF', 'FG_CO2', 'FG_ALT_CO2'
+                                 'pCO2SURF', 'FG_CO2', 'FG_ALT_CO2', 'zsatarag',
+                                 'zsatcalc', 'CO3', 'CO3_ALT_CO2', 'co3_sat_arag',
+                                 'co3_sat_calc'
     marbl_timestep = 3600.0
     marbl_tracers_to_write = 'PO4', 'NO3', 'SiO3', 'NH4', 'Fe', 'O2', 'DIC',
                              'ALK', 'spChl', 'diatChl'

@@ -197,6 +197,53 @@ def test_from_yaml_rejects_newer_version(tmp_path):
         ForgeBlueprint.from_yaml(p)
 
 
+@pytest.mark.parametrize("legacy_value", [False, True])
+def test_migrate_v4_cdr_output_do_cdr_renamed(tmp_path, legacy_value):
+    """v4 -> v5: a v4-shaped ``model_settings.cdr_output.do_cdr`` is renamed
+    ``do_cdr_output`` on load, for both legacy values.
+    """
+    cfg = _build()
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+    data = yaml.safe_load(p.read_text())
+
+    data["forge_blueprint_version"] = 4
+    cdr_output = data["model_settings"]["cdr_output"]
+    cdr_output["do_cdr"] = legacy_value
+    del cdr_output["do_cdr_output"]
+    p.write_text(yaml.safe_dump(data))
+
+    back = ForgeBlueprint.from_yaml(p)
+    assert back.model_settings["cdr_output"]["do_cdr_output"] is legacy_value
+    assert "do_cdr" not in back.model_settings["cdr_output"]
+    assert back.forge_blueprint_version == 5
+
+
+def test_migrate_v4_cdr_output_migration_is_idempotent(tmp_path):
+    """Already-current (do_cdr_output-shaped) data passes through unchanged --
+    calling the migration on already-migrated data must not error or re-rename.
+    """
+    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+
+    cfg = _build()
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+    data = yaml.safe_load(p.read_text())
+    assert data["model_settings"]["cdr_output"]["do_cdr_output"] is False
+
+    migrated = migrate_forge_blueprint_data(data)
+    assert migrated["model_settings"]["cdr_output"]["do_cdr_output"] is False
+    assert "do_cdr" not in migrated["model_settings"]["cdr_output"]
+
+
+def test_migrate_tolerates_missing_cdr_output_section():
+    """No ``model_settings``/``cdr_output`` section at all -- the v4->v5 step must
+    not KeyError.
+    """
+    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+
+    migrated = migrate_forge_blueprint_data({"forge_blueprint_version": 4})
+    assert migrated["forge_blueprint_version"] == 5
+
+
 def test_schema_round_trip_identity(tmp_path):
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
@@ -970,6 +1017,140 @@ def test_cdr_forcing_content_hash_stable_across_yaml_round_trip(tmp_path):
     p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
     back = ForgeBlueprint.from_yaml(p)
     assert back.content_hash() == h1
+
+
+_CDR_OUTPUT_REQUIRED_DIAGNOSTICS = (
+    "zsatarag",
+    "zsatcalc",
+    "CO3",
+    "CO3_ALT_CO2",
+    "co3_sat_arag",
+    "co3_sat_calc",
+)
+# Output.yaml's own defaults, in file order -- asserted to still come first so the
+# CDR-output consistency block only *appends*, never reorders/replaces.
+_DEFAULT_MARBL_DIAGNOSTICS = (
+    "PH",
+    "PH_ALT_CO2",
+    "pCO2SURF_ALT_CO2",
+    "pCO2SURF",
+    "FG_CO2",
+    "FG_ALT_CO2",
+)
+
+
+def test_cdr_output_user_enabled_without_forcing_sets_cppdef_and_diagnostics():
+    """Pathway 1: a user turns on CDR output with no CDR forcing at all -- output is
+    valid standalone (ROMS opens no CDR file; cdr_frc.cdr_source stays False), but
+    cppdefs.cdr_forcing must still flip True (it gates compiling cdr_output.F90) and
+    the MARBL diagnostics ucla-roms looks up by name must be present.
+    """
+    cfg = _build(run_time_overrides={"cdr_output": {"do_cdr_output": True}})
+    settings = cfg.model_settings
+    assert settings["cdr_output"]["do_cdr_output"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    assert settings["cdr_frc"]["cdr_source"] is False
+    diags = settings["marbl_bgc"]["marbl_diagnostics_to_write"]
+    assert diags[: len(_DEFAULT_MARBL_DIAGNOSTICS)] == list(_DEFAULT_MARBL_DIAGNOSTICS)
+    for name in _CDR_OUTPUT_REQUIRED_DIAGNOSTICS:
+        assert diags.count(name) == 1, name
+
+
+def test_cdr_forcing_implies_cdr_output():
+    """Providing CDR forcing always implies CDR output -- there is no point
+    generating a CDR forcing file ROMS won't report on.
+    """
+    cfg = _build(cdr_forcing_yaml=_CDR_SAMPLE_YAML)
+    settings = cfg.model_settings
+    assert settings["cdr_output"]["do_cdr_output"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    diags = settings["marbl_bgc"]["marbl_diagnostics_to_write"]
+    for name in _CDR_OUTPUT_REQUIRED_DIAGNOSTICS:
+        assert name in diags
+
+
+def test_cdr_output_disabled_by_default():
+    """Neither a user override nor CDR forcing -- output stays disabled and the
+    diagnostics list is untouched (still just Output.yaml's 6 defaults).
+    """
+    cfg = _build()
+    settings = cfg.model_settings
+    assert settings["cdr_output"]["do_cdr_output"] is False
+    assert settings["cppdefs"]["cdr_forcing"] is False
+    assert settings["marbl_bgc"]["marbl_diagnostics_to_write"] == list(
+        _DEFAULT_MARBL_DIAGNOSTICS
+    )
+
+
+def test_cdr_output_requires_marbl():
+    """do_cdr_output=True with bgc_mode="none" must raise -- ucla-roms only compiles
+    cdr_output.F90 under MARBL && CDR_FORCING.
+    """
+    with pytest.raises(ValueError, match="do_cdr_output"):
+        _build(
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides={"cdr_output": {"do_cdr_output": True}},
+        )
+
+
+class TestEnsureCdrOutputMarblDiagnostics:
+    def test_none_input_returns_all_required(self):
+        from cstar_forge.forge.namelist_model import (
+            CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS,
+            ensure_cdr_output_marbl_diagnostics,
+        )
+
+        assert ensure_cdr_output_marbl_diagnostics(None) == list(
+            CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS
+        )
+
+    def test_empty_list_returns_all_required(self):
+        from cstar_forge.forge.namelist_model import (
+            CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS,
+            ensure_cdr_output_marbl_diagnostics,
+        )
+
+        assert ensure_cdr_output_marbl_diagnostics([]) == list(
+            CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS
+        )
+
+    def test_partial_overlap_no_duplicates_order_preserved(self):
+        from cstar_forge.forge.namelist_model import (
+            ensure_cdr_output_marbl_diagnostics,
+        )
+
+        result = ensure_cdr_output_marbl_diagnostics(["PH", "CO3", "FG_CO2"])
+        assert result[:3] == ["PH", "CO3", "FG_CO2"]
+        assert result.count("CO3") == 1
+        for name in _CDR_OUTPUT_REQUIRED_DIAGNOSTICS:
+            assert result.count(name) == 1
+
+
+@pytest.mark.parametrize("do_cdr_output", [True, False])
+def test_cdr_output_toggle_renders_cdr_forcing_cppdef(tmp_path, do_cdr_output):
+    """End-to-end template gate: the stored blueprint's settings alone (no CDR
+    forcing, no generation step) must drive ``#define``/``#undef CDR_FORCING`` in the
+    real ``cppdefs.opt.j2`` -- the cppdef gates compiling ucla-roms' cdr_output.F90.
+    """
+    from cstar_forge.forge.settings import render_roms_settings
+
+    overrides = {"cdr_output": {"do_cdr_output": True}} if do_cdr_output else {}
+    cfg = _build(run_time_overrides=overrides)
+    param = cfg.model_settings["param"]
+    n_tracers = 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
+    render_roms_settings(
+        template_files=["cppdefs.opt.j2"],
+        template_dir=Path(cstar_forge.__file__).parents[1]
+        / "templates"
+        / "compile-time",
+        settings_dict=dict(cfg.model_settings),
+        code_output_dir=tmp_path,
+        n_tracers=n_tracers,
+    )
+    text = (tmp_path / "cppdefs.opt").read_text()
+    expected = "#define CDR_FORCING" if do_cdr_output else "#undef CDR_FORCING"
+    assert expected in text
 
 
 def test_resolver_use_pio_sets_cppdefs_and_code_pio():

@@ -98,6 +98,17 @@ DEFAULT_TEMPLATE_REPO = CodeRepo(
     location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
 )
 
+# Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
+# the executor can share it. Dual import keeps the resolver standalone-importable.
+try:  # pragma: no cover - exercised both ways
+    from cstar_forge.forge.namelist_model import (
+        ensure_cdr_output_marbl_diagnostics,
+    )
+except ImportError:  # pragma: no cover
+    from namelist_model import (  # type: ignore
+        ensure_cdr_output_marbl_diagnostics,
+    )
+
 
 # Source-name resolution is single-sourced in ``source_registry`` (a lightweight,
 # dependency-free module also used by ``source_data``) — no duplicate table here.
@@ -581,6 +592,27 @@ def build_forge_blueprint(
     if grid_kwargs_parent is not None:
         settings.setdefault("tides", {})["bry_tides"] = False
         settings.setdefault("sponge_tune", {})["ub_tune"] = False
+
+    # ----- CDR output consistency --------------------------------------------
+    # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
+    # ROMS opens no CDR file), and CDR forcing implies CDR output. Either way
+    # the CDR_FORCING cppdef must be on (it gates compiling ucla-roms'
+    # cdr_output.F90) and the MARBL diagnostics ucla-roms looks up by name,
+    # unchecked, must be in the write list.
+    cdr_out = settings.setdefault("cdr_output", {})
+    do_cdr_output = bool(cdr_out.get("do_cdr_output")) or cdr_forcing is not None
+    cdr_out["do_cdr_output"] = do_cdr_output
+    if do_cdr_output:
+        if bgc_mode != "marbl":
+            raise ValueError(
+                'do_cdr_output=True (or CDR forcing was supplied) but bgc_mode != "marbl": '
+                "ucla-roms only compiles cdr_output.F90 under MARBL && CDR_FORCING."
+            )
+        settings["cppdefs"]["cdr_forcing"] = True
+        marbl = settings.setdefault("marbl_bgc", {})
+        marbl["marbl_diagnostics_to_write"] = ensure_cdr_output_marbl_diagnostics(
+            marbl.get("marbl_diagnostics_to_write")
+        )
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
     # A child grid (has a parent) receives its boundary values from the parent's

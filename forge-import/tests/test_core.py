@@ -1001,6 +1001,131 @@ class TestForgeExecutorBuildAndRun:
         assert builder._settings_run_time["river_frc"]["nriv"] == 3
         assert builder._settings_run_time["tides"]["ntides"] == 7
 
+    def _cdr_cfg_and_builder(
+        self,
+        sample_grid_kwargs,
+        sample_open_boundaries,
+        sample_partitioning,
+        **build_over,
+    ):
+        """Resolver cfg + executor for the CDR configure_build tests (same shape as
+        the clobber test above).
+        """
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-grid",
+            grid_kwargs=sample_grid_kwargs,
+            open_boundaries=sample_open_boundaries.model_dump(),
+            partitioning=sample_partitioning.model_dump(),
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+            **build_over,
+        )
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-cdr-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        return cfg, host
+
+    def _run_configure_build(self, cfg, host):
+        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        run_ov, compile_ov = split_model_settings(cfg)
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+        return builder
+
+    def test_configure_build_user_cdr_output_without_forcing(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """Pathway 1 (CDR output, no CDR forcing), in the wizard-override shape: the
+        wizard applies accordion overrides *after* the resolver, so a stored blueprint
+        can carry ``cdr_output.do_cdr_output=True`` alongside a stale
+        ``cppdefs.cdr_forcing=False`` and a diagnostics list without the CDR names.
+        ``configure_build``'s consistency net must force the CPP flag and the
+        required MARBL diagnostics, while ``cdr_frc.cdr_source`` stays False (no
+        forcing file exists for ROMS to open).
+        """
+        from cstar_forge.forge.namelist_model import (
+            CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS,
+        )
+
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        # Post-resolve wizard-style toggle: runtime switch on, cppdefs/diagnostics
+        # untouched (the resolver's consistency block never saw it).
+        cfg.model_settings["cdr_output"]["do_cdr_output"] = True
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is False
+        assert not set(CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS) & set(
+            cfg.model_settings["marbl_bgc"]["marbl_diagnostics_to_write"]
+        )
+
+        builder = self._run_configure_build(cfg, host)
+
+        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+        assert builder._settings_run_time["cdr_frc"]["cdr_source"] is False
+        diags = builder._settings_run_time["marbl_bgc"]["marbl_diagnostics_to_write"]
+        for name in CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS:
+            assert diags.count(name) == 1, name
+
+    def test_configure_build_rejects_cdr_output_without_marbl(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The resolver's CDR-requires-MARBL guard re-checked at configure_build: a
+        stored/hand-edited blueprint reaches here without re-resolving, and
+        CDR_FORCING without MARBL must not silently bake into cppdefs.opt.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        cfg.model_settings["cdr_output"]["do_cdr_output"] = True
+        cfg.model_settings["cppdefs"]["marbl"] = False
+
+        with pytest.raises(ValueError, match="requires MARBL"):
+            self._run_configure_build(cfg, host)
+
+    def test_configure_build_generated_cdr_forcing_wins_over_stored_disabled(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """Pathway 2 back-compat: a pre-rename blueprint stores
+        ``do_cdr_output=False`` (migrated from the always-False ``do_cdr``) yet a CDR
+        forcing IS configured/generated. Now that the overlay carries the stored
+        value (``do_cdr_output`` left ``GENERATION_DERIVED_LEAF_KEYS``), the
+        consistency net must re-assert output=True for the run that generated
+        forcing -- the guarantee the old leaf-exclusion used to provide.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            cdr_forcing={"enabled": True},
+        )
+        assert cfg.model_settings["cdr_output"]["do_cdr_output"] is True
+        # Simulate the pre-rename stored shape.
+        cfg.model_settings["cdr_output"]["do_cdr_output"] = False
+
+        builder = self._run_configure_build(cfg, host)
+
+        assert builder.cdr_forcing == {"enabled": True}
+        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+
     @pytest.mark.real_template_staging
     def test_template_repo_args_map_from_code_spec(
         self, minimal_cstar_spec_builder_args
@@ -1946,7 +2071,7 @@ class TestGoldenNamelist:
         assert builder._settings_run_time["river_frc"]["nriv"] == 3
         assert builder._settings_run_time["tides"]["ntides"] == 15
         assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
-        assert builder._settings_run_time["cdr_output"]["do_cdr"] is True
+        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
 
         from cstar_forge.forge.forge_blueprint_engine import split_model_settings
 

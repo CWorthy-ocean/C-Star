@@ -5,7 +5,7 @@ application: forge
 state: notset
 schema_version: 1.0.0
 working_dir: ~/cstar-forge-run/cson_roms-marbl_v0.1_wio-toy_10procs
-forge_blueprint_version: 4
+forge_blueprint_version: 5
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -471,7 +471,7 @@ model_settings:
     output_period: 3600.0
     nrpf: 4
   cdr_output:
-    do_cdr: false
+    do_cdr_output: false
     do_avg: true
     monthly_averages: false
     output_period: 3600
@@ -547,5 +547,5 @@ provenance:
   forge_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 682a9c2bf642e8a268f68e4c12dd5dc8520312cd111da3e8938ca98206ecc210
+  content_hash: 47140b94b4e273bcff352a350bf89f0cd546cd4d998634ce61eb260ab20d9295
   notes: null

@@ -68,6 +68,7 @@ from cstar.roms.namelist import (
     ZsliceSettings,
 )
 from pydantic import (
+    AliasChoices,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -318,8 +319,38 @@ class CdrFrcCfg(_SettingsSection):
     cdr_volume: bool
 
 
+# MARBL diagnostics ucla-roms' cdr_output module looks up by name with no
+# missing-name guard (absence segfaults) — must be in
+# marbl_bgc.marbl_diagnostics_to_write whenever do_cdr_output is enabled.
+# Defined here so both the resolver and the executor can import them.
+CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS = (
+    "zsatarag",
+    "zsatcalc",
+    "CO3",
+    "CO3_ALT_CO2",
+    "co3_sat_arag",
+    "co3_sat_calc",
+)
+
+
+def ensure_cdr_output_marbl_diagnostics(diags: list[str] | None) -> list[str]:
+    """Return ``diags`` with every ``CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS`` name
+    appended (order-preserving, no duplicates). ``None`` is treated as empty.
+    """
+    result = list(diags or [])
+    existing = set(result)
+    for name in CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS:
+        if name not in existing:
+            result.append(name)
+            existing.add(name)
+    return result
+
+
 class CdrOutputCfg(_SettingsSection):
-    do_cdr: bool = Field(serialization_alias="do_cdr_output")
+    # ``do_cdr`` is the pre-v5 spelling, accepted so unmigrated dicts validate.
+    do_cdr_output: bool = Field(
+        validation_alias=AliasChoices("do_cdr_output", "do_cdr")
+    )
     do_avg: bool = Field(serialization_alias="wrt_cdr_avg")
     monthly_averages: bool = Field(serialization_alias="cdr_monthly_averages")
     output_period: float = Field(serialization_alias="output_period_cdr")

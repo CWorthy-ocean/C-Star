@@ -469,7 +469,7 @@ section name
 - **Run-time (`cdr_frc`)**: `cdr_file="cdr.nc"` (the executor/blueprint symlinks to the real
   path), `cdr_source=True`, `ncdr_parm=len(cdr.releases)`, `forcing_parameterized=True`,
   `cdr_volume=(cdr.releases.release_type == "volume")`
-- **Run-time (`cdr_output`)**: `do_cdr = True`
+- **Run-time (`cdr_output`)**: `do_cdr_output = True`
 
 ### Corrections Forcing (`forcing.corrections`, order=90)
 
@@ -612,7 +612,8 @@ def _build_input_args(
 **CDR Forcing:**
 - `cdr_frc.cdr_file`, `cdr_frc.cdr_source`, `cdr_frc.ncdr_parm`, `cdr_frc.forcing_parameterized`,
   `cdr_frc.cdr_volume`
-- `cdr_output.do_cdr`: `True` when CDR forcing is generated
+- `cdr_output.do_cdr_output`: forced `True` when CDR forcing is generated; also
+  independently user-controllable (CDR output does not require CDR forcing)
 
 ## ROMS-MARBL Blueprint Element Updates
 

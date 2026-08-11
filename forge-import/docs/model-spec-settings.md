@@ -62,7 +62,8 @@ model_settings:
 ```
 (`cppdefs.obc_*`/`marbl`/`co2_tvarying`/`sal_restore`/`tides`/`cdr_forcing`/`use_pio` are resolver-derived
 from the Domain/Forcing selection and the model's `bgc_mode`/`use_pio` toggles, so they're intentionally
-absent from `model.yaml`.)
+absent from `model.yaml`. `cdr_forcing` is also raised to true whenever CDR output is enabled —
+`cdr_output.do_cdr_output` is user-controllable and does not require an actual CDR forcing.)
 
 ### User override
 

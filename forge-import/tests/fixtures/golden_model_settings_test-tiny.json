@@ -54,7 +54,7 @@
   },
   "cdr_output": {
     "do_avg": true,
-    "do_cdr": false,
+    "do_cdr_output": false,
     "monthly_averages": false,
     "nrpf": 24,
     "output_period": 3600

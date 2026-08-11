@@ -55,6 +55,7 @@ from cstar_forge.forge.forge_blueprint import (
     OpenBoundaries,
 )
 from cstar_forge.forge.host import HostPaths
+from cstar_forge.forge.namelist_model import ensure_cdr_output_marbl_diagnostics
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
 from cstar_forge.utils import mem_log
 
@@ -1814,6 +1815,41 @@ class ForgeExecutor(BaseModel):
                 # Convert to integer if it's a float
                 if isinstance(ntimes, float):
                     self._settings_run_time["time_stepping"]["ntimes"] = round(ntimes)
+
+        # CDR-output consistency net, mirroring the resolver's consistency block:
+        # stored blueprints reach configure_build without re-resolving, and wizard
+        # accordion overrides apply after the resolver, so this is the enforcement
+        # point of record. A generated CDR forcing implies CDR output regardless of
+        # the stored snapshot.
+        if self.cdr_forcing:
+            self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
+        # do_cdr_output requires MARBL plus the CDR_FORCING cppdef (both gate
+        # compiling ucla-roms' cdr_output.F90), and the MARBL diagnostics ucla-roms
+        # looks up by name, unchecked.
+        if self._settings_run_time.get("cdr_output", {}).get("do_cdr_output"):
+            cppdefs = self._settings_compile_time.setdefault("cppdefs", {})
+            if not cppdefs.get("marbl", False):
+                raise ValueError(
+                    "cdr_output.do_cdr_output is True but cppdefs.marbl is False: "
+                    "CDR output requires MARBL (ucla-roms only compiles "
+                    "cdr_output.F90 under MARBL && CDR_FORCING)."
+                )
+            if not cppdefs.get("cdr_forcing"):
+                cppdefs["cdr_forcing"] = True
+                log.info(
+                    "configure_build: do_cdr_output is True; forcing cppdefs.cdr_forcing=True "
+                    "(CDR_FORCING gates ucla-roms' cdr_output.F90)."
+                )
+            marbl = self._settings_run_time.setdefault("marbl_bgc", {})
+            before = list(marbl.get("marbl_diagnostics_to_write") or [])
+            after = ensure_cdr_output_marbl_diagnostics(before)
+            if after != before:
+                marbl["marbl_diagnostics_to_write"] = after
+                log.info(
+                    "configure_build: do_cdr_output is True; added missing required MARBL "
+                    "diagnostics to marbl_bgc.marbl_diagnostics_to_write (%s).",
+                    sorted(set(after) - set(before)),
+                )
 
         # Derive n_tracers: prefer the value passed by the processing engine; otherwise
         # derive it from the resolved settings (T + S + BGC ntrc_bio + passive).

@@ -168,7 +168,7 @@ def test_key_renames(nml):
     assert nml["bgc_settings"]["wrt_bgc_his"] is False
     # river_frc.analytical -> river_analytical
     assert nml["river_frc_settings"]["river_analytical"] is False
-    # cdr_output do_cdr/do_avg -> do_cdr_output/wrt_cdr_avg
+    # cdr_output.do_cdr_output passes through unrenamed; do_avg -> wrt_cdr_avg
     assert nml["cdr_output_settings"]["do_cdr_output"] is False
     assert nml["cdr_output_settings"]["wrt_cdr_avg"] is True
     # param dims

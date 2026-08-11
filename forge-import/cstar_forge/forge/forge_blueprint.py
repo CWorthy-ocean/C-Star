@@ -328,7 +328,11 @@ _HASH_EXCLUDE = {
 # sub-model is gone, flattened onto the blueprint directly. Migration folded into a
 # ``model_validator(mode="before")`` so it fires on every entry point (C-Star's own
 # ``deserialize``/``model_validate`` included), not just ``from_yaml``.
-FORGE_BLUEPRINT_VERSION = 4
+# v5 (2026-08): ``model_settings.cdr_output.do_cdr`` renamed ``do_cdr_output`` to
+# match the ROMS namelist key directly (CDR output became independently
+# user-controllable, decoupled from CDR forcing -- see ``forge_blueprint_resolve``'s
+# CDR-output consistency block).
+FORGE_BLUEPRINT_VERSION = 5
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
@@ -382,6 +386,11 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     ``ForgeBlueprint``'s ``cstar.orchestration.models.Blueprint`` base, which declares
     ``name``/``description`` as its own top-level fields.
 
+    **v4 -> v5**: ``model_settings.cdr_output.do_cdr`` is renamed ``do_cdr_output``
+    (matches the ROMS namelist key; ``CdrOutputCfg`` also carries a
+    ``validation_alias`` for this spelling, but the migration keeps the on-disk
+    dict itself current).
+
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
     ``model_validator(mode="before")`` so it fires on every entry point
@@ -430,6 +439,15 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
             data.setdefault(
                 "description", identity.get("description", "Generated blueprint")
             )
+
+    if version is None or version < 5:
+        model_settings = data.get("model_settings")
+        if isinstance(model_settings, dict):
+            cdr_output = model_settings.get("cdr_output")
+            if isinstance(cdr_output, dict) and (
+                "do_cdr" in cdr_output and "do_cdr_output" not in cdr_output
+            ):
+                cdr_output["do_cdr_output"] = cdr_output.pop("do_cdr")
 
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data
