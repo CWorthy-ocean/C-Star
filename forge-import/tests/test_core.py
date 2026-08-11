@@ -884,9 +884,9 @@ class TestForgeExecutorBuildAndRun:
             data = yaml.safe_load(f)
         assert data["model_params"]["use_pio"] is True
         assert data["code"]["pio"]["location"] == (
-            "https://github.com/NCAR/ParallelIO.git"
+            "https://github.com/CWorthy-ocean/ParallelIO.git"
         )
-        assert data["code"]["pio"]["commit"] == "pio2_7_0"
+        assert data["code"]["pio"]["commit"] == "2.7.1-fork"
 
     def test_build_without_use_pio_omits_pio(self, minimal_cstar_spec_builder_args):
         """Without use_pio, model_params has no use_pio key and code.pio is unset

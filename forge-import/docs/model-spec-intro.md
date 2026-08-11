@@ -33,8 +33,8 @@ code:
     commit: marbl0.45.0
 
   pio:  # optional; required if use_pio can be set true
-    location: https://github.com/NCAR/ParallelIO.git
-    commit: pio2_7_0
+    location: https://github.com/CWorthy-ocean/ParallelIO.git
+    commit: 2.7.1-fork
 
   # Render templates live at the forge repo root (templates/), decoupled from this
   # ModelSpec. `directory` is relative to the repo root; `templates_commit` pins the

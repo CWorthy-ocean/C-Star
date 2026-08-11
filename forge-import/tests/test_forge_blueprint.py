@@ -313,7 +313,7 @@ def test_code_pio_round_trips_through_yaml(tmp_path):
     back = ForgeBlueprint.from_yaml(p)
     assert back.code.pio is not None
     assert back.code.pio.location == cfg.code.pio.location
-    assert back.code.pio.commit == "pio2_7_0"
+    assert back.code.pio.commit == "2.7.1-fork"
     assert back.model_settings["cppdefs"]["use_pio"] is True
 
 
@@ -976,8 +976,8 @@ def test_resolver_use_pio_sets_cppdefs_and_code_pio():
     cfg = _build(use_pio=True)
     assert cfg.model_settings["cppdefs"]["use_pio"] is True
     assert cfg.code.pio is not None
-    assert cfg.code.pio.location == "https://github.com/NCAR/ParallelIO.git"
-    assert cfg.code.pio.commit == "pio2_7_0"
+    assert cfg.code.pio.location == "https://github.com/CWorthy-ocean/ParallelIO.git"
+    assert cfg.code.pio.commit == "2.7.1-fork"
 
 
 def test_resolver_use_pio_default_off():

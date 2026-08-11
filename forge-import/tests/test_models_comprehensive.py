@@ -359,8 +359,8 @@ class TestLoadModelsYaml:
                     "commit": "x",
                 },
                 "pio": {
-                    "location": "https://github.com/NCAR/ParallelIO.git",
-                    "commit": "pio2_7_0",
+                    "location": "https://github.com/CWorthy-ocean/ParallelIO.git",
+                    "commit": "2.7.1-fork",
                 },
                 "templates_compile_time": {
                     "directory": "templates/compile-time",

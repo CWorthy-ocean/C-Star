@@ -9,8 +9,8 @@ code:
     location: https://github.com/marbl-ecosys/MARBL.git
     commit: marbl0.45.0
   pio:
-    location: https://github.com/NCAR/ParallelIO.git
-    commit: pio2_7_0
+    location: https://github.com/CWorthy-ocean/ParallelIO.git
+    commit: 2.7.1-fork
   templates_commit: 4208f4384431852daccea1ccad01d03c0cb473d9
   templates_compile_time:
     directory: templates/compile-time
