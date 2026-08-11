@@ -448,6 +448,9 @@ class TestROMSSimulationInitialization:
         assert tested_settings.extract_data_settings.extract_file == str(
             fake_nesting_path
         )
+        assert (
+            tested_settings.extract_data_settings.extract_root_name == "../output/child"
+        )
 
         # Test with no MARBL files — marbl_config_file keeps the namelist's value
         sim.runtime_code = additionalcode_local(

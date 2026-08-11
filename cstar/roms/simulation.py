@@ -727,7 +727,7 @@ class ROMSSimulation(Simulation):
         :class:`~cstar.roms.namelist.RomsNamelist`, and overrides key parameters
         based on the current simulation configuration: time step, number of time
         steps, grid path, initial conditions, forcing datasets, MARBL/CDR/nesting
-        files, and output root.
+        files, output root, and extract root.
 
         Returns
         -------
@@ -789,6 +789,13 @@ class ROMSSimulation(Simulation):
             )
 
         nml.simulation_name_settings.output_root_name = "../output/output"
+
+        # Relative to the run directory, like output_root_name above, so ROMS
+        # writes child extraction files to the output directory rather than its
+        # working directory. Must stay short: ucla-roms builds the extraction
+        # filename in a fixed character(len=99) buffer (create_edata_file in
+        # extract_data.F90), so an absolute path could silently truncate.
+        nml.extract_data_settings.extract_root_name = "../output/child"
 
         return nml
 
