@@ -151,9 +151,9 @@ def set_env(
     def _callback(ctx: typer.Context, value: str) -> str:
         """Callback that sets the specified environment variable to the specified value."""
         value = value.strip()
-        os.environ[key] = value
         if extra:
             value = extra(ctx, value)
+        os.environ[key] = value
         return value
 
     return _callback
