@@ -11,25 +11,38 @@ before that input is fetched or processed — rather than content-addressed. Tha
 is what makes them usable as a lookup: a run can ask "has anyone already
 produced this?" without first doing the work.
 
-Two strategies, differing in what identifies the input:
+One mechanism, :class:`DynamicCacheKeyGenerator`, does the assembly: a scheme
+naming the derivation, a scheme version, a readable stem, and a truncated
+digest over a sorted payload. What identifies a particular subject is supplied
+as a function, so nothing about any one type is baked into the key machinery.
 
-:class:`HashKeyGenerator`
+Two identity functions cover blueprint resources:
+
+:func:`hash_identity`
     Keys on the declared ``hash``. The hash identifies content exactly, so the
     key survives the file moving between mirrors and changes when the upstream
     data changes. Preferred whenever a hash is declared.
-:class:`LocationKeyGenerator`
+:func:`location_identity`
     Keys on the declared ``location``, for resources with no hash. Weaker: a
     URL can serve different bytes over time and the key cannot notice, so a
     stale artifact may be reused after the upstream file changes.
 
-Both fold in the partition geometry, taken from the
+Either composes with :func:`partition_identity` via :func:`with_partitioning`
+when a subject is a resource *and* the geometry it is split across. The
+geometry is taken from the
 :class:`~cstar.applications.roms_marbl.models.PartitioningParameterSet` rather
 than from the ``partitioned`` flag — by its declared ``hash`` where it has one,
-otherwise by its parameters. The flag records only *that* a resource is
-split, not *how*, so keying on it would give two runs that split one resource
-across different process grids the same key for different data. A resource
-declared ``partitioned`` therefore cannot be keyed without its parameter set,
-and asking for one raises rather than silently producing a colliding key.
+otherwise by its parameters. The flag records only *that* a resource is split,
+not *how*, so keying on it would give two runs that split one resource across
+different process grids the same key for different data. A resource declared
+``partitioned`` therefore cannot be keyed without its parameter set, and asking
+for one raises rather than silently producing a colliding key.
+
+:func:`generator_for` resolves a subject shape to the generator that keys it,
+so a caller names the types it holds rather than choosing a strategy.
+:func:`register_identity` adds shapes the orchestration layer does not know
+about, which is how a type outside this package gets keyed without this module
+learning it exists.
 """
 
 from __future__ import annotations
@@ -37,16 +50,18 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from abc import ABC, abstractmethod
+import typing as t
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
+from cstar.applications.roms_marbl.models import PartitioningParameterSet
+from cstar.orchestration.models import Resource, VersionedResource
+
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Generator, Mapping
     from pathlib import Path
 
-    from cstar.applications.roms_marbl.models import PartitioningParameterSet
     from cstar.orchestration.models import DataResource
 
 __all__ = [
@@ -54,18 +69,30 @@ __all__ = [
     "DIGEST_LENGTH",
     "KEY_SCHEME_VERSION",
     "CacheKeyError",
-    "CacheKeyGenerator",
-    "DerivedKeyGenerator",
     "DynamicCacheKeyGenerator",
-    "ExpandAggregateKeyGenerator",
-    "HashKeyGenerator",
-    "LocationKeyGenerator",
+    "IdentityFunction",
+    "Subject",
+    "aggregate_key",
     "generator_for",
+    "hash_identity",
+    "location_identity",
+    "normalise_location",
+    "partition_identity",
     "readable_parts",
+    "register_identity",
+    "resource_key",
+    "subject_for",
+    "with_partitioning",
 ]
 
 TDatum = TypeVar("TDatum")
 """Any value a caller wants to key an artifact on."""
+
+Subject: t.TypeAlias = type | tuple[type, ...]
+"""The shape of what is being keyed: one type, or several taken together."""
+
+IdentityFunction: t.TypeAlias = "Callable[[Any], Mapping[str, str]]"
+"""Returns the fields that identify a subject's content."""
 
 KEY_SCHEME_VERSION: Final[int] = 3
 """Version of the key derivation, folded into every digest.
@@ -139,468 +166,7 @@ def readable_parts(location: str) -> tuple[str, str]:
 
 
 class CacheKeyError(Exception):
-    """Raised when a resource does not carry the fields a generator needs."""
-
-
-class CacheKeyGenerator(ABC):
-    """Strategy deriving a cache key from a resource declaration.
-
-    Implementations are stateless and safe to share across threads. Subclass
-    this to key on different fields; the cache depends only on the returned
-    string.
-
-    Attributes
-    ----------
-    scheme : str
-        Short tag naming the derivation, folded into the digest so two schemes
-        can never produce the same key for the same inputs.
-    """
-
-    scheme: ClassVar[str]
-
-    @abstractmethod
-    def identity(self, resource: DataResource) -> dict[str, Any]:
-        """Return the fields that identify this resource's content.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource declaration from a blueprint.
-
-        Returns
-        -------
-        dict of str to Any
-            Mapping folded into the digest. Must contain everything that
-            distinguishes one result from another, and nothing that varies
-            between equivalent runs.
-
-        Raises
-        ------
-        CacheKeyError
-            If the resource lacks a field this strategy requires.
-        """
-
-    def key_for(
-        self,
-        resource: DataResource,
-        *,
-        partitioning: PartitioningParameterSet | None = None,
-        context: Mapping[str, Any] | None = None,
-    ) -> str:
-        """Derive the cache key naming this resource's artifact.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource declaration from a blueprint.
-        partitioning : PartitioningParameterSet or None, optional
-            Geometry the resource is split across. Required when the resource
-            declares ``partitioned``; ignored otherwise, so a caller looping
-            over a blueprint may pass it for every resource. Its declared
-            ``hash`` identifies it when present, falling back to the
-            parameters themselves — see
-            :meth:`CacheKeyGenerator._partition_identity`.
-        context : Mapping of str to Any or None, optional
-            Further inputs that affect the result but are not fields of the
-            resource, such as a solver version or code revision. Anything
-            omitted here that changes the output will cause two genuinely
-            different artifacts to share a key.
-
-        Both optional arguments are keyword-only: a mapping passed positionally
-        would otherwise bind to ``partitioning`` and be silently discarded for
-        an unpartitioned resource, producing a key that quietly omits inputs.
-
-        Returns
-        -------
-        str
-            A filesystem-safe key of the form ``<stem>-<digest><suffix>``,
-            carrying the source filename for readability and its extension so
-            downstream tools still see a recognisable file.
-
-            The filename is folded into the digest as well as prefixed, so the
-            key stays a pure function of its inputs. The consequence is that
-            the same content declared under two different filenames yields two
-            keys, and therefore two cached copies.
-
-        Raises
-        ------
-        CacheKeyError
-            If the resource lacks a field this strategy requires, or declares
-            ``partitioned`` without a partitioning parameter set.
-
-        Examples
-        --------
-        >>> HashKeyGenerator().key_for(resource)
-        'partitioning1-3f7a1c9e2b5d8046.nc'
-        """
-        stem, suffix = self._readable_parts(resource)
-        payload = {
-            "scheme": self.scheme,
-            "version": KEY_SCHEME_VERSION,
-            "identity": self.identity(resource),
-            "partitioning": self._partition_identity(resource, partitioning),
-            "context": dict(context) if context else {},
-            "filename": f"{stem}{suffix}",
-        }
-        digest = hashlib.sha256(
-            json.dumps(payload, sort_keys=True, default=str).encode()
-        ).hexdigest()[:DIGEST_LENGTH]
-        return f"{stem}-{digest}{suffix}"
-
-    def _readable_parts(self, resource: DataResource) -> tuple[str, str]:
-        """Return a safe filename stem and suffix taken from the location.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource declaration from a blueprint.
-
-        Returns
-        -------
-        tuple of (str, str)
-            Sanitised stem, and suffix including its leading dot when present.
-        """
-        return readable_parts(str(getattr(resource, "location", "") or ""))
-
-    def _partition_identity(
-        self,
-        resource: DataResource,
-        partitioning: PartitioningParameterSet | None,
-    ) -> dict[str, Any] | None:
-        """Return the partition geometry contributing to a key.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource declaration from a blueprint.
-        partitioning : PartitioningParameterSet or None
-            Geometry the resource is split across.
-
-        Returns
-        -------
-        dict of str to Any or None
-            The parameter set's ``hash`` when it declares one, since that hash
-            identifies the whole set including any dynamically added
-            parameters. Otherwise the substantive parameters themselves.
-            ``None`` for an unsplit resource; a supplied parameter set is then
-            ignored, since geometry cannot affect data that was never split.
-
-        Raises
-        ------
-        CacheKeyError
-            If the resource declares ``partitioned`` but no parameter set was
-            supplied. Keying on the flag alone would give two different process
-            grids the same key for different data.
-
-        Warnings
-        --------
-        A declared ``hash`` is trusted, not verified. Nothing here recomputes
-        it, so a hash left stale after an edit to the parameters will key two
-        different geometries alike — the one way this function can produce a
-        false cache hit. Blueprints that do not maintain the hash should leave
-        it unset, which falls back to the parameters themselves.
-        """
-        if not bool(getattr(resource, "partitioned", False)):
-            return None
-        if partitioning is None:
-            raise CacheKeyError(
-                f"{type(resource).__name__} is declared partitioned, so its "
-                "PartitioningParameterSet is required: the geometry determines "
-                "the content and cannot be inferred from the flag"
-            )
-        declared = getattr(partitioning, "hash", None)
-        if declared:
-            return {"hash": str(declared)}
-        return {
-            field: value
-            for field, value in partitioning.model_dump(mode="json").items()
-            if field not in _PARAMETER_METADATA
-        }
-
-    def __repr__(self) -> str:
-        """Return a debugging representation naming the strategy.
-
-        Returns
-        -------
-        str
-            Representation of this generator.
-        """
-        return f"{type(self).__name__}()"
-
-
-class HashKeyGenerator(CacheKeyGenerator):
-    """Strategy keying on a resource's declared hash and partition geometry.
-
-    The hash identifies the upstream bytes, so the key changes when the
-    upstream data changes and is unaffected by which host or path serves it.
-    The location is excluded from identity for that reason: the same content
-    behind two mirrors should share one cached artifact.
-
-    The filename is the exception. It is folded into the key so the cache
-    directory stays readable, which means the same content published under two
-    different names caches twice. That is a deliberate trade of a little
-    duplication for legible listings; key on the digest alone if storage
-    matters more.
-    """
-
-    scheme: ClassVar[str] = "hash"
-
-    def identity(self, resource: DataResource) -> dict[str, Any]:
-        """Return the hash and partition flag identifying this resource.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource declaration from a blueprint. Must declare a hash.
-
-        Returns
-        -------
-        dict of str to Any
-            Mapping of ``hash``. Partition geometry is contributed separately
-            by :meth:`CacheKeyGenerator.key_for`.
-
-        Raises
-        ------
-        CacheKeyError
-            If the resource declares no hash, which means this strategy cannot
-            identify its content.
-        """
-        digest = getattr(resource, "hash", None)
-        if not digest:
-            raise CacheKeyError(
-                f"{type(resource).__name__} declares no hash; use "
-                "LocationKeyGenerator or add a hash to the blueprint"
-            )
-        return {"hash": str(digest)}
-
-
-class LocationKeyGenerator(CacheKeyGenerator):
-    """Strategy keying on a resource's declared location and partition geometry.
-
-    For resources with no hash. The location is normalised so trivially
-    different spellings of one URL agree: scheme and host are lowercased,
-    default ports are dropped, and fragments are discarded. Query strings are
-    kept, since they often select which content is served.
-
-    Warning
-    -------
-    A location is not an identity. The same URL can serve different bytes over
-    time, and this key cannot detect that, so a cached artifact may be reused
-    after its upstream source changes. For local filesystem paths the key is
-    also machine-specific, which makes it unsuitable for the shared tier.
-    Declare a hash wherever the data matters.
-    """
-
-    scheme: ClassVar[str] = "location"
-
-    def identity(self, resource: DataResource) -> dict[str, Any]:
-        """Return the normalised location and partition flag.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource declaration from a blueprint.
-
-        Returns
-        -------
-        dict of str to Any
-            Mapping of ``location``. Partition geometry is contributed
-            separately by :meth:`CacheKeyGenerator.key_for`.
-
-        Raises
-        ------
-        CacheKeyError
-            If the resource declares no location.
-        """
-        location = getattr(resource, "location", None)
-        if not location:
-            raise CacheKeyError(f"{type(resource).__name__} declares no location")
-        return {"location": self._normalise(str(location))}
-
-    @staticmethod
-    def _normalise(location: str) -> str:
-        """Canonicalise a location so equivalent spellings agree.
-
-        Parameters
-        ----------
-        location : str
-            Raw location from the blueprint.
-
-        Returns
-        -------
-        str
-            Normalised location. Non-URL values, such as filesystem paths, are
-            returned with surrounding whitespace stripped and no other change.
-        """
-        parts = urlsplit(location.strip())
-        if not parts.scheme or not parts.netloc:
-            return location.strip()
-
-        host = parts.hostname or ""
-        port = parts.port
-        if port is not None and str(port) != _DEFAULT_PORTS.get(parts.scheme.lower()):
-            host = f"{host}:{port}"
-        if parts.username:
-            credentials = parts.username
-            if parts.password:
-                credentials = f"{credentials}:{parts.password}"
-            host = f"{credentials}@{host}"
-
-        path = parts.path.rstrip("/") or "/"
-        return urlunsplit((parts.scheme.lower(), host, path, parts.query, ""))
-
-
-class DerivedKeyGenerator(CacheKeyGenerator, ABC):
-    """Base for keys naming an artifact derived from another artifact.
-
-    A derivation is keyed by *what it was derived from* plus *how*, so the
-    identity of the source is delegated to whichever ordinary strategy suits
-    the source resource, and this class contributes only the derivation. The
-    consequence that matters is that a derived artifact occupies a separate
-    key space: :attr:`~CacheKeyGenerator.scheme` is folded into every digest,
-    so a partition of a file and the file itself can never collide under one
-    shared name — which they otherwise would, one an archive and one a file.
-
-    Parameters
-    ----------
-    source : CacheKeyGenerator or None, optional
-        Strategy identifying the source resource. Defaults to
-        :func:`generator_for`, chosen per resource at call time, so a resource
-        that declares a hash is keyed on it and one that does not falls back.
-
-    Attributes
-    ----------
-    scheme : str
-        Short tag naming the derivation, folded into the digest.
-    """
-
-    def __init__(self, source: CacheKeyGenerator | None = None) -> None:
-        self._source = source
-
-    def identity(self, resource: DataResource) -> dict[str, Any]:
-        """Return the source resource's identity, unchanged.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource the artifact is derived from.
-
-        Returns
-        -------
-        dict of str to Any
-            Whatever the delegate strategy considers identifying.
-
-        Raises
-        ------
-        CacheKeyError
-            If the delegate cannot identify the resource.
-        """
-        delegate = self._source if self._source is not None else generator_for(resource)
-        return delegate.identity(resource)
-
-    def __repr__(self) -> str:
-        """Return a debugging representation naming the strategy and delegate.
-
-        Returns
-        -------
-        str
-            Representation of this generator.
-        """
-        inner = "" if self._source is None else repr(self._source)
-        return f"{type(self).__name__}({inner})"
-
-
-class ExpandAggregateKeyGenerator(DerivedKeyGenerator):
-    """Strategy keying the set of files produced by splitting one resource.
-
-    The ranks of a partition are one artifact rather than many: they are only
-    useful together, so the cache stores them as a single container and this
-    names it. Two properties distinguish it from an ordinary resource key.
-
-    The scheme separates the key space, so the partition and the file it came
-    from cannot land on one shared name. The geometry is *mandatory* and always
-    part of the identity, which is the difference from
-    :meth:`CacheKeyGenerator._partition_identity`: there, a parameter set
-    describes a resource that arrives already split and is ignored for one that
-    does not, because geometry cannot affect data that was never split. Here
-    the geometry is what is being *produced*, so it always determines the
-    content and there is no case in which omitting it is correct.
-
-    Examples
-    --------
-    >>> ExpandAggregateKeyGenerator().key_for(resource, partitioning=geometry)
-    'bgc-boundary-2010-1d0e4a2f7c93b856.set'
-    """
-
-    scheme: ClassVar[str] = "aggregate-expand"
-
-    def _readable_parts(self, resource: DataResource) -> tuple[str, str]:
-        """Return the source stem with the aggregate suffix in place of its own.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource the set is derived from.
-
-        Returns
-        -------
-        tuple of (str, str)
-            Sanitised stem from the source location, and
-            :data:`AGGREGATE_SUFFIX`.
-        """
-        stem, _ = super()._readable_parts(resource)
-        return (stem, AGGREGATE_SUFFIX)
-
-    def _partition_identity(
-        self,
-        resource: DataResource,
-        partitioning: PartitioningParameterSet | None,
-    ) -> dict[str, Any] | None:
-        """Return the geometry the set is produced across.
-
-        Parameters
-        ----------
-        resource : DataResource
-            Resource the set is derived from.
-        partitioning : PartitioningParameterSet or None
-            Geometry to split across.
-
-        Returns
-        -------
-        dict of str to Any
-            The parameter set's ``hash`` when it declares one, otherwise its
-            substantive parameters. Never ``None``: a set that is not
-            identified by its geometry is not identified.
-
-        Raises
-        ------
-        CacheKeyError
-            If no parameter set was supplied, or if the source resource is
-            itself declared ``partitioned``. Repartitioning from one grid to
-            another is identified by *both* geometries, and this signature
-            carries only one, so it is refused rather than keyed on half the
-            inputs.
-        """
-        if bool(getattr(resource, "partitioned", False)):
-            raise CacheKeyError(
-                f"{type(resource).__name__} is already partitioned; "
-                "repartitioning is identified by the source and target "
-                "geometries together, which this key cannot express"
-            )
-        if partitioning is None:
-            raise CacheKeyError(
-                "ExpandAggregateKeyGenerator requires a "
-                "PartitioningParameterSet: the geometry determines the "
-                "contents of the set being produced"
-            )
-        declared = getattr(partitioning, "hash", None)
-        if declared:
-            return {"hash": str(declared)}
-        return {
-            field: value
-            for field, value in partitioning.model_dump(mode="json").items()
-            if field not in _PARAMETER_METADATA
-        }
+    """Raised when a subject cannot be keyed as asked."""
 
 
 class DynamicCacheKeyGenerator(Generic[TDatum]):
@@ -768,8 +334,49 @@ class DynamicCacheKeyGenerator(Generic[TDatum]):
         return f"{type(self).__name__}(scheme={self.scheme!r})"
 
 
-def generator_for(resource: DataResource) -> CacheKeyGenerator:
-    """Return the strongest strategy a resource supports.
+# ---------------------------------------------------------------------------
+# Identity functions for blueprint resources
+# ---------------------------------------------------------------------------
+
+
+def normalise_location(location: str) -> str:
+    """Canonicalise a location so equivalent spellings agree.
+
+    Scheme and host are lowercased, default ports are dropped, and fragments
+    are discarded. Query strings are kept, since they often select which
+    content is served.
+
+    Parameters
+    ----------
+    location : str
+        Raw location from the blueprint.
+
+    Returns
+    -------
+    str
+        Normalised location. Non-URL values, such as filesystem paths, are
+        returned with surrounding whitespace stripped and no other change.
+    """
+    parts = urlsplit(location.strip())
+    if not parts.scheme or not parts.netloc:
+        return location.strip()
+
+    host = parts.hostname or ""
+    port = parts.port
+    if port is not None and str(port) != _DEFAULT_PORTS.get(parts.scheme.lower()):
+        host = f"{host}:{port}"
+    if parts.username:
+        credentials = parts.username
+        if parts.password:
+            credentials = f"{credentials}:{parts.password}"
+        host = f"{credentials}@{host}"
+
+    path = parts.path.rstrip("/") or "/"
+    return urlunsplit((parts.scheme.lower(), host, path, parts.query, ""))
+
+
+def location_identity(resource: DataResource) -> dict[str, str]:
+    """Identify a resource by where it is served from.
 
     Parameters
     ----------
@@ -778,16 +385,464 @@ def generator_for(resource: DataResource) -> CacheKeyGenerator:
 
     Returns
     -------
-    CacheKeyGenerator
-        :class:`HashKeyGenerator` when the resource declares a hash, otherwise
-        :class:`LocationKeyGenerator`.
+    dict of str to str
+        Mapping of the normalised ``location``.
+
+    Raises
+    ------
+    CacheKeyError
+        If the resource declares no location.
+
+    Warnings
+    --------
+    A location is not an identity. The same URL can serve different bytes over
+    time and this cannot detect it, so a cached artifact may be reused after
+    its upstream source changes. For local filesystem paths the key is also
+    machine-specific, which makes it unsuitable for the shared tier. Declare a
+    hash wherever the data matters.
+    """
+    location = getattr(resource, "location", None)
+    if not location:
+        raise CacheKeyError(f"{type(resource).__name__} declares no location")
+    return {"location": normalise_location(str(location))}
+
+
+def hash_identity(resource: DataResource) -> dict[str, str]:
+    """Identify a resource by its declared content hash.
+
+    The location is excluded deliberately: the same content behind two mirrors
+    should share one cached artifact.
+
+    Parameters
+    ----------
+    resource : DataResource
+        Resource declaration from a blueprint. Must declare a hash.
+
+    Returns
+    -------
+    dict of str to str
+        Mapping of ``hash``.
+
+    Raises
+    ------
+    CacheKeyError
+        If the resource declares no hash, which means this cannot identify its
+        content.
+    """
+    digest = getattr(resource, "hash", None)
+    if not digest:
+        raise CacheKeyError(
+            f"{type(resource).__name__} declares no hash; key on the location "
+            "instead, or add a hash to the blueprint"
+        )
+    return {"hash": str(digest)}
+
+
+def partition_identity(partitioning: PartitioningParameterSet) -> dict[str, str]:
+    """Identify the geometry a resource is split across.
+
+    Parameters
+    ----------
+    partitioning : PartitioningParameterSet
+        Geometry the resource is split across.
+
+    Returns
+    -------
+    dict of str to str
+        The parameter set's ``hash`` when it declares one, since that hash
+        identifies the whole set including any dynamically added parameters.
+        Otherwise the substantive parameters themselves. Fields are namespaced
+        under ``partition.``: a parameter set's ``hash`` is not a resource's
+        ``hash``, and merging the two flat would let the geometry silently
+        overwrite the content digest — two different artifacts under one key.
+        Qualifying here rather than at the merge site means every composer is
+        safe, not just the one shipped below.
+
+    Warnings
+    --------
+    A declared ``hash`` is trusted, not verified. Nothing here recomputes it,
+    so a hash left stale after an edit to the parameters will key two different
+    geometries alike — the one way this function can produce a false cache hit.
+    Blueprints that do not maintain the hash should leave it unset, which falls
+    back to the parameters themselves.
+    """
+    declared = getattr(partitioning, "hash", None)
+    if declared:
+        return {"partition.hash": str(declared)}
+    return {
+        f"partition.{field}": str(value)
+        for field, value in partitioning.model_dump(mode="json").items()
+        if field not in _PARAMETER_METADATA
+    }
+
+
+def with_partitioning(base: IdentityFunction) -> IdentityFunction:
+    """Compose a resource identity with the geometry it is split across.
+
+    Parameters
+    ----------
+    base : IdentityFunction
+        Identity function for the resource alone.
+
+    Returns
+    -------
+    IdentityFunction
+        Identity function over a ``(resource, partitioning)`` pair.
 
     Notes
     -----
-    Selection is by declared fields rather than by class, so a
-    :class:`~cstar.orchestration.models.VersionedResource` whose hash is unset
-    falls back rather than raising.
+    A plain merge is safe because each identity function qualifies its own
+    field names; see :func:`partition_identity`.
     """
-    if getattr(resource, "hash", None):
-        return HashKeyGenerator()
-    return LocationKeyGenerator()
+
+    def identity(
+        subject: tuple[DataResource, PartitioningParameterSet],
+    ) -> dict[str, str]:
+        """Return the resource's identity with the geometry folded in.
+
+        Parameters
+        ----------
+        subject : tuple
+            Resource and the geometry it is split across.
+
+        Returns
+        -------
+        dict of str to str
+            Identifying fields.
+        """
+        resource, partitioning = subject
+        return {**base(resource), **partition_identity(partitioning)}
+
+    return identity
+
+
+# ---------------------------------------------------------------------------
+# Subject registry
+# ---------------------------------------------------------------------------
+
+_REGISTRY: Final[dict[tuple[type, ...], tuple[str, IdentityFunction]]] = {}
+"""Subject shape to the scheme and identity function that key it."""
+
+
+def register_identity(
+    subject: Subject, scheme: str, identity_fn: IdentityFunction
+) -> None:
+    """Register how a subject shape is identified.
+
+    This is how a type outside this package becomes keyable without this module
+    learning it exists: the layer that owns the type registers it.
+
+    Parameters
+    ----------
+    subject : type or tuple of type
+        Shape being registered. A tuple registers several values taken
+        together, which is what lets a key be composed from more than one
+        thing — a resource and the geometry it is split across, say.
+    scheme : str
+        Short tag naming the derivation, folded into every digest.
+    identity_fn : IdentityFunction
+        Returns the fields identifying a value of this shape. For a tuple
+        subject it receives the values as a tuple, in the registered order.
+        Field names should be unique to what the function identifies — a
+        namespace prefix where the bare name is one another function could
+        plausibly use — so that composing two identities cannot silently drop
+        a field. :func:`partition_identity` is the worked example.
+
+    Raises
+    ------
+    CacheKeyError
+        If the shape is already registered. Silently replacing it would change
+        the meaning of every key derived through it, with nothing to say so.
+    """
+    shape = _as_shape(subject)
+    if shape in _REGISTRY:
+        existing, _ = _REGISTRY[shape]
+        raise CacheKeyError(
+            f"{_describe(shape)} is already registered under scheme "
+            f"{existing!r}; re-registering would change what every key derived "
+            "through it means"
+        )
+    _REGISTRY[shape] = (scheme, identity_fn)
+
+
+def generator_for(subject: Subject) -> DynamicCacheKeyGenerator[Any]:
+    """Return the generator that keys a subject shape.
+
+    Parameters
+    ----------
+    subject : type or tuple of type
+        Shape being keyed. Pass a tuple where the key is composed from several
+        values, in the order the identity function expects them.
+
+    Returns
+    -------
+    DynamicCacheKeyGenerator
+        Generator bound to the registered scheme and identity function.
+
+    Raises
+    ------
+    CacheKeyError
+        If nothing is registered for the shape, including for any base class of
+        it.
+
+    Notes
+    -----
+    Resolution prefers an exact match and otherwise walks each type's method
+    resolution order, so a subclass is keyed like its base unless it registers
+    something of its own. That is what lets
+    :class:`~cstar.orchestration.models.VersionedResource` be keyed on its hash
+    while every other :class:`~cstar.orchestration.models.Resource` falls back
+    to its location.
+
+    Examples
+    --------
+    >>> generator_for(VersionedResource).key_for(resource, resource.location)
+    'boundary-2010-3f7a1c9e2b5d8046.nc'
+    """
+    scheme, identity_fn = _REGISTRY[_resolve(_as_shape(subject))]
+    return DynamicCacheKeyGenerator(scheme, identity_fn)
+
+
+def _as_shape(subject: Subject) -> tuple[type, ...]:
+    """Normalise a subject to a tuple of types.
+
+    Parameters
+    ----------
+    subject : type or tuple of type
+        Shape being keyed.
+
+    Returns
+    -------
+    tuple of type
+        The shape as a tuple.
+
+    Raises
+    ------
+    CacheKeyError
+        If the subject is not a type or a tuple of types. A value passed where
+        a type belongs would otherwise register under something no lookup can
+        reproduce.
+    """
+    shape = subject if isinstance(subject, tuple) else (subject,)
+    if not shape or not all(isinstance(entry, type) for entry in shape):
+        raise CacheKeyError(
+            f"subject must be a type or a tuple of types, got {subject!r}"
+        )
+    return shape
+
+
+def _resolutions(shape: tuple[type, ...]) -> Generator[tuple[type, ...], None, None]:
+    """Yield candidate shapes, most specific first.
+
+    Parameters
+    ----------
+    shape : tuple of type
+        Shape being resolved.
+
+    Yields
+    ------
+    tuple of type
+        Candidate registry keys, walking each position's method resolution
+        order left to right.
+    """
+    yield shape
+    for index, entry in enumerate(shape):
+        for base in entry.__mro__[1:]:
+            yield shape[:index] + (base,) + shape[index + 1 :]
+
+
+def _describe(shape: tuple[type, ...]) -> str:
+    """Name a subject shape for an error message.
+
+    Parameters
+    ----------
+    shape : tuple of type
+        Shape being described.
+
+    Returns
+    -------
+    str
+        Readable description.
+    """
+    names = ", ".join(entry.__name__ for entry in shape)
+    return names if len(shape) == 1 else f"({names})"
+
+
+register_identity(VersionedResource, "hash", hash_identity)
+register_identity(Resource, "location", location_identity)
+register_identity(
+    (VersionedResource, PartitioningParameterSet),
+    "hash",
+    with_partitioning(hash_identity),
+)
+register_identity(
+    (Resource, PartitioningParameterSet),
+    "location",
+    with_partitioning(location_identity),
+)
+
+
+def subject_for(
+    resource: DataResource, partitioning: PartitioningParameterSet | None = None
+) -> tuple[Subject, Any]:
+    """Return the shape and value that key a resource.
+
+    A convenience for the common case, so callers do not repeat the pairing
+    rule at every site.
+
+    Parameters
+    ----------
+    resource : DataResource
+        Resource declaration from a blueprint.
+    partitioning : PartitioningParameterSet or None, optional
+        Geometry the resource is split across. Required when the resource
+        declares ``partitioned``; ignored otherwise, so a caller looping over a
+        blueprint may pass it for every resource.
+
+    Returns
+    -------
+    tuple of (Subject, Any)
+        Shape to look up, and the value to key.
+
+    Raises
+    ------
+    CacheKeyError
+        If the resource declares ``partitioned`` but no parameter set was
+        supplied. Keying on the flag alone would give two different process
+        grids the same key for different data.
+    """
+    if not bool(getattr(resource, "partitioned", False)):
+        return (type(resource), resource)
+    if partitioning is None:
+        raise CacheKeyError(
+            f"{type(resource).__name__} is declared partitioned, so its "
+            "PartitioningParameterSet is required: the geometry determines "
+            "the content and cannot be inferred from the flag"
+        )
+    return ((type(resource), type(partitioning)), (resource, partitioning))
+
+
+def resource_key(
+    resource: DataResource,
+    *,
+    partitioning: PartitioningParameterSet | None = None,
+    context: Mapping[str, Any] | None = None,
+    suffix: str | None = None,
+) -> str:
+    """Derive the cache key naming a blueprint resource's artifact.
+
+    Parameters
+    ----------
+    resource : DataResource
+        Resource declaration from a blueprint.
+    partitioning : PartitioningParameterSet or None, optional
+        See :func:`subject_for`.
+    context : Mapping of str to Any or None, optional
+        Further inputs that affect the result but are not fields of the
+        resource, such as a solver version or code revision.
+    suffix : str or None, optional
+        Extension to use in place of the resource's own. Pass
+        :data:`AGGREGATE_SUFFIX` where the artifact is a set.
+
+    Returns
+    -------
+    str
+        Cache key.
+
+    Raises
+    ------
+    CacheKeyError
+        If the resource cannot be keyed as declared.
+
+    Examples
+    --------
+    >>> resource_key(resource)
+    'boundary-2010-3f7a1c9e2b5d8046.nc'
+    """
+    shape, value = subject_for(resource, partitioning)
+    return generator_for(shape).key_for(
+        value, str(resource.location), context=context, suffix=suffix
+    )
+
+
+def aggregate_key(
+    resource: DataResource,
+    partitioning: PartitioningParameterSet,
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> str:
+    """Derive the cache key naming the set produced by splitting a resource.
+
+    Two things separate this from :func:`resource_key`. The scheme puts the
+    derived set in its own key space, so a partition and the file it came from
+    cannot land on one shared name — they are different shapes on disk, so a
+    collision corrupts rather than wastes. And the geometry is mandatory and
+    always identifying, because here it is what is being *produced*; there is
+    no case in which omitting it is correct.
+
+    Parameters
+    ----------
+    resource : DataResource
+        Resource the set is derived from.
+    partitioning : PartitioningParameterSet
+        Geometry to split across.
+    context : Mapping of str to Any or None, optional
+        Further inputs that affect the result.
+
+    Returns
+    -------
+    str
+        Cache key carrying :data:`AGGREGATE_SUFFIX`.
+
+    Raises
+    ------
+    CacheKeyError
+        If the resource is itself declared ``partitioned``. Repartitioning from
+        one grid to another is identified by both geometries together, which
+        this cannot express, so it is refused rather than keyed on half its
+        inputs.
+    """
+    if bool(getattr(resource, "partitioned", False)):
+        raise CacheKeyError(
+            f"{type(resource).__name__} is already partitioned; repartitioning "
+            "is identified by the source and target geometries together, which "
+            "this key cannot express"
+        )
+    shape = (type(resource), type(partitioning))
+    scheme, identity_fn = _REGISTRY[_resolve(shape)]
+    generator: DynamicCacheKeyGenerator[Any] = DynamicCacheKeyGenerator(
+        f"aggregate-expand-{scheme}", identity_fn
+    )
+    return generator.key_for(
+        (resource, partitioning),
+        str(resource.location),
+        context=context,
+        suffix=AGGREGATE_SUFFIX,
+    )
+
+
+def _resolve(shape: tuple[type, ...]) -> tuple[type, ...]:
+    """Return the registered shape a subject resolves to.
+
+    Parameters
+    ----------
+    shape : tuple of type
+        Shape being resolved.
+
+    Returns
+    -------
+    tuple of type
+        The registry key that matched.
+
+    Raises
+    ------
+    CacheKeyError
+        If nothing is registered for the shape.
+    """
+    for candidate in _resolutions(shape):
+        if candidate in _REGISTRY:
+            return candidate
+    raise CacheKeyError(
+        f"nothing registered to key {_describe(shape)}; call "
+        "register_identity to say how it is identified"
+    )

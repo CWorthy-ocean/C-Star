@@ -51,8 +51,8 @@ from cstar.orchestration.artifact_cache import (
 )
 from cstar.orchestration.cache_keys import (
     CacheKeyError,
-    ExpandAggregateKeyGenerator,
-    generator_for,
+    aggregate_key,
+    resource_key,
 )
 from cstar.orchestration.models import Resource
 
@@ -134,10 +134,11 @@ def cached(
     among them means the result is a set of files in a directory; without one
     it is a single file. Which key generator derives the name depends on
     whether the resource declares itself already partitioned: if it does, the
-    geometry describes the source and the ordinary strategy handles it; if it
-    does not, the geometry is being *produced* and
-    :class:`~cstar.orchestration.cache_keys.ExpandAggregateKeyGenerator` names
-    the derived set in its own key space.
+    geometry describes the source and
+    :func:`~cstar.orchestration.cache_keys.resource_key` handles it; if it does
+    not, the geometry is being *produced* and
+    :func:`~cstar.orchestration.cache_keys.aggregate_key` names the derived set
+    in its own key space.
     """
     if (cache is None) == (cache_factory is None):
         raise ValueError("pass exactly one of cache or cache_factory")
@@ -242,13 +243,10 @@ def _key_for(
         If the arguments cannot produce a well-defined key.
     """
     already_split = bool(getattr(resource, "partitioned", False))
-    generator = (
-        generator_for(resource)
-        if geometry is None or already_split
-        else ExpandAggregateKeyGenerator()
-    )
     try:
-        return generator.key_for(resource, partitioning=geometry, context=context)
+        if geometry is None or already_split:
+            return resource_key(resource, partitioning=geometry, context=context)
+        return aggregate_key(resource, geometry, context=context)
     except CacheKeyError as error:
         raise CachedCallError(str(error)) from error
 
