@@ -20,7 +20,15 @@ if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
 
 APP_PLUGIN_GROUP: t.Final[str] = "cstar.applications"
-"""Entry-point group third-party packages use to register applications."""
+"""Entry-point group third-party packages use to register applications.
+
+A published packaging contract: installed plugins name this group in their own
+``pyproject.toml``, so it must not change when the package layout does. It
+coincides with :data:`BUILTIN_APP_PACKAGE` today only by convention.
+"""
+
+BUILTIN_APP_PACKAGE: t.Final[str] = "cstar.applications"
+"""Package holding the in-tree application modules, one per application name."""
 
 log = get_logger(__name__)
 
@@ -358,7 +366,7 @@ def register_application(
 
 
 def _load_builtin_application(name: str) -> None:
-    """Import the in-tree ``cstar.applications.{name}`` module, if it exists.
+    """Import the in-tree ``{BUILTIN_APP_PACKAGE}.{name}`` module, if it exists.
 
     Parameters
     ----------
@@ -372,7 +380,7 @@ def _load_builtin_application(name: str) -> None:
     import *is* an error: the ``ImportError`` propagates rather than being
     reported as a missing application.
     """
-    module = f"cstar.applications.{name}"
+    module = f"{BUILTIN_APP_PACKAGE}.{name}"
 
     if importlib.util.find_spec(module) is None:
         log.trace(f"No built-in application module {module!r} for {name!r}")
@@ -421,8 +429,8 @@ def get_application(name: str) -> ApplicationDefinition[t.Any, t.Any]:
     -----
     Applications are discovered, in order, from:
 
-    1. The in-tree ``cstar.applications.{name}`` module.
-    2. The ``cstar.applications`` entry-point group -- installed third-party
+    1. The in-tree ``{BUILTIN_APP_PACKAGE}.{name}`` module.
+    2. The :data:`APP_PLUGIN_GROUP` entry-point group -- installed third-party
        plugins.
 
     Each step is attempted only while *name* is still unregistered. A plugin

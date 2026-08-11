@@ -190,10 +190,7 @@ We have finally reached the point where we can execute the application using the
 Making Your Application Discoverable
 ------------------------------------
 
-The example above assumes ``HelloWorldApplication`` has already been imported (and
-therefore registered) by the time the CLI runs. Applications defined outside the
-``cstar.applications`` package need an explicit discovery mechanism so their
-``@register_application`` decorator actually runs.
+C-Star automatically loads internal applications as-needed and makes use of python's ``entrypoints`` functionality to discover external applications.
 
 Declare a ``cstar.applications`` entry point pointing at the module containing
 your ``@register_application``-decorated class, e.g. in ``pyproject.toml``:

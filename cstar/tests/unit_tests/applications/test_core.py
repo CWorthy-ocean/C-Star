@@ -7,6 +7,7 @@ import pytest
 
 from cstar.applications.core import (
     APP_PLUGIN_GROUP,
+    BUILTIN_APP_PACKAGE,
     RunnerRequest,
     RunnerResult,
     RunnerState,
@@ -192,7 +193,7 @@ def test_entry_point_cannot_shadow_builtin_application(
     # behind by an earlier test, and drop the cached module so the in-tree
     # import actually re-runs its @register_application decorator.
     registered = _registry.pop(app_name, None)
-    builtin = sys.modules.pop(f"cstar.applications.{app_name}", None)
+    builtin = sys.modules.pop(f"{BUILTIN_APP_PACKAGE}.{app_name}", None)
 
     try:
         app = get_application(app_name)
@@ -202,7 +203,7 @@ def test_entry_point_cannot_shadow_builtin_application(
         assert module not in sys.modules
     finally:
         if builtin is not None:
-            sys.modules[f"cstar.applications.{app_name}"] = builtin
+            sys.modules[f"{BUILTIN_APP_PACKAGE}.{app_name}"] = builtin
         if registered is not None:
             _registry[app_name] = registered
         else:
@@ -303,7 +304,9 @@ def test_broken_builtin_application_propagates_import_error(
 
     monkeypatch.setattr(
         "cstar.applications.core.importlib.util.find_spec",
-        lambda target: object() if target == f"cstar.applications.{app_name}" else None,
+        lambda target: (
+            object() if target == f"{BUILTIN_APP_PACKAGE}.{app_name}" else None
+        ),
     )
 
     with pytest.raises(ModuleNotFoundError, match=app_name):
