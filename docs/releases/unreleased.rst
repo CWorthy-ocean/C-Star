@@ -26,7 +26,8 @@ Bug Fixes
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- PIO-enabled builds now output extracted child boundaries in the ``output`` directory instead of the ``work`` directory (`#623 <https://github.com/CWorthy-ocean/C-Star/pull/623>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
