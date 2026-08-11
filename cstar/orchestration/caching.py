@@ -8,10 +8,12 @@ function itself stays a plain producer with no knowledge of the cache.
 What makes that possible without annotations is that the inputs which determine
 a key are already distinguishable by type. A
 :class:`~cstar.orchestration.models.Resource` declares *what* data is wanted and
-a :class:`~cstar.applications.roms_marbl.models.PartitioningParameterSet`
-declares *how it is laid out*; between them they are the key. The decorator
-binds the call, finds them among the arguments, and derives the key before the
-function runs.
+a registered *companion* — the geometry it is split across, say — declares
+*how it is laid out*; between them they are the key. The decorator binds the
+call, finds them among the arguments, and derives the key before the function
+runs. Which types can pair is asked of the key registry rather than named
+here, so an application registers its own without this module learning it
+exists.
 
 Examples
 --------
@@ -42,7 +44,6 @@ import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
-from cstar.applications.roms_marbl.models import PartitioningParameterSet
 from cstar.orchestration.artifact_cache import (
     ArtifactCache,
     Location,
@@ -52,6 +53,7 @@ from cstar.orchestration.artifact_cache import (
 from cstar.orchestration.cache_keys import (
     CacheKeyError,
     aggregate_key,
+    is_registered,
     resource_key,
 )
 from cstar.orchestration.models import Resource
@@ -130,10 +132,9 @@ def cached(
 
     Notes
     -----
-    Artifact shape follows the arguments. A
-    :class:`~cstar.applications.roms_marbl.models.PartitioningParameterSet`
-    among them means the result is a set of files in a directory; without one
-    it is a single file. Which key generator derives the name depends on
+    Artifact shape follows the arguments. A registered companion among them
+    means the result is a set of files in a directory; without one it is a
+    single file. Which key function derives the name depends on
     whether the resource declares itself already partitioned: if it does, the
     geometry describes the source and
     :func:`~cstar.orchestration.cache_keys.resource_key` handles it; if it does
@@ -154,22 +155,20 @@ def cached(
             bound.apply_defaults()
 
             resource = _single_of_type(bound.arguments, Resource, function)
-            geometry = _optional_of_type(
-                bound.arguments, PartitioningParameterSet, function
-            )
+            companion = _companion_for(resource, bound.arguments, function)
             run_id = _run_id(bound.arguments, run_id_argument, function)
-            key = _key_for(resource, geometry, context)
+            key = _key_for(resource, companion, context)
 
             found = (
                 active.materialize(key, run_id, record_use=True)
-                if geometry is not None
+                if companion is not None
                 else active.resolve(key, run_id, record_use=True)
             )
             if found is not None:
                 return _localized(active, found, key, run_id, localize).path
 
             produced = Path(function(*args, **kwargs))
-            location = _write_through(active, produced, key, run_id, geometry)
+            location = _write_through(active, produced, key, run_id, companion)
             if promote:
                 active.promote(key, run_id, on_conflict=on_conflict)
             return location.path
@@ -217,9 +216,56 @@ def _localized(
     return cache.ingest(found.path, key, run_id)
 
 
+def _companion_for(
+    resource: Resource, arguments: Mapping[str, Any], function: Callable[..., Any]
+) -> Any | None:
+    """Return the argument that pairs with the resource to identify the result.
+
+    Found by asking the key registry which of the bound arguments has a
+    registered pairing with this resource, rather than by naming a type. That
+    is what keeps this module free of the application types it caches: an
+    application registers its own pairing, and this discovers it.
+
+    Parameters
+    ----------
+    resource : Resource
+        Declared input found among the arguments.
+    arguments : Mapping of str to Any
+        Bound arguments of the call.
+    function : Callable
+        Wrapped function, named in errors.
+
+    Returns
+    -------
+    Any or None
+        The single companion, or ``None`` when the call has none.
+
+    Raises
+    ------
+    CachedCallError
+        If more than one argument pairs with the resource, since the key would
+        be ambiguous.
+    """
+    found = [
+        value
+        for name, value in arguments.items()
+        if value is not resource
+        and not isinstance(value, (str, bytes, int, float, bool, Path, type(None)))
+        and is_registered((type(resource), type(value)))
+    ]
+    if not found:
+        return None
+    if len(found) > 1:
+        raise CachedCallError(
+            f"{function.__qualname__} takes {len(found)} arguments that pair "
+            "with its resource; the key would be ambiguous"
+        )
+    return found[0]
+
+
 def _key_for(
     resource: Resource,
-    geometry: PartitioningParameterSet | None,
+    companion: Any | None,
     context: Mapping[str, str] | None,
 ) -> str:
     """Derive the key naming what this call will produce.
@@ -228,8 +274,8 @@ def _key_for(
     ----------
     resource : Resource
         Declared input found among the arguments.
-    geometry : PartitioningParameterSet or None
-        Partition geometry found among the arguments, if any.
+    companion : Any or None
+        Second identifying value found among the arguments, if any.
     context : Mapping of str to str or None
         Extra inputs folded into the key.
 
@@ -245,9 +291,9 @@ def _key_for(
     """
     already_split = bool(getattr(resource, "partitioned", False))
     try:
-        if geometry is None or already_split:
-            return resource_key(resource, partitioning=geometry, context=context)
-        return aggregate_key(resource, geometry, context=context)
+        if companion is None or already_split:
+            return resource_key(resource, companion=companion, context=context)
+        return aggregate_key(resource, companion, context=context)
     except CacheKeyError as error:
         raise CachedCallError(str(error)) from error
 
@@ -257,7 +303,7 @@ def _write_through(
     produced: Path,
     key: str,
     run_id: str,
-    geometry: PartitioningParameterSet | None,
+    companion: Any | None,
 ) -> Location:
     """Copy a freshly produced result into the user tier.
 
@@ -271,7 +317,7 @@ def _write_through(
         Cache key naming the artifact.
     run_id : str
         Run identifier.
-    geometry : PartitioningParameterSet or None
+    companion : Any or None
         Present when the result is expected to be a set.
 
     Returns
@@ -289,16 +335,16 @@ def _write_through(
     if not produced.exists():
         raise CachedCallError(f"produced path does not exist: {produced}")
 
-    wants_set = geometry is not None
+    wants_set = companion is not None
     if wants_set and not produced.is_dir():
         raise CachedCallError(
-            f"a PartitioningParameterSet was supplied, so {key!r} names a set, "
-            f"but a single file was produced: {produced}"
+            f"a companion value was supplied, so {key!r} names a set, but a "
+            f"single file was produced: {produced}"
         )
     if not wants_set and produced.is_dir():
         raise CachedCallError(
             f"{key!r} names a single file, but a directory was produced: "
-            f"{produced}. Accept a PartitioningParameterSet to cache a set."
+            f"{produced}. Accept a registered companion value to cache a set."
         )
 
     if wants_set:
@@ -340,41 +386,6 @@ def _single_of_type(
         f"{function.__qualname__} must take exactly one {wanted.__name__} "
         f"argument to be cached; found {detail}"
     )
-
-
-def _optional_of_type(
-    arguments: Mapping[str, Any], wanted: type, function: Callable[..., Any]
-) -> Any | None:
-    """Return the sole bound argument of a given type, or ``None``.
-
-    Parameters
-    ----------
-    arguments : Mapping of str to Any
-        Bound arguments of the call.
-    wanted : type
-        Type to look for.
-    function : Callable
-        Wrapped function, named in errors.
-
-    Returns
-    -------
-    Any or None
-        The single matching argument, or ``None`` when there is none.
-
-    Raises
-    ------
-    CachedCallError
-        If more than one is present.
-    """
-    found = [value for value in arguments.values() if isinstance(value, wanted)]
-    if not found:
-        return None
-    if len(found) > 1:
-        raise CachedCallError(
-            f"{function.__qualname__} takes {len(found)} {wanted.__name__} "
-            "arguments; the key would be ambiguous"
-        )
-    return found[0]
 
 
 def _run_id(

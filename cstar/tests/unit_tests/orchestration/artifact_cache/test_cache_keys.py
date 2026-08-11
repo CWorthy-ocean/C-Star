@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from cstar.applications.roms_marbl.cache import partition_identity, with_partitioning
 from cstar.applications.roms_marbl.models import PartitioningParameterSet
 from cstar.orchestration import cache_keys
 from cstar.orchestration.cache_keys import (
@@ -21,12 +22,11 @@ from cstar.orchestration.cache_keys import (
     aggregate_key,
     generator_for,
     hash_identity,
+    is_registered,
     location_identity,
-    partition_identity,
     readable_parts,
     register_identity,
     resource_key,
-    with_partitioning,
 )
 from cstar.orchestration.models import Resource, VersionedResource
 
@@ -206,7 +206,7 @@ def test_hash_key_separates_partitioned_data(
         {"location": "http://h/x.nc", "hash": "abc", "partitioned": True}
     )
 
-    assert resource_key(whole) != resource_key(split, partitioning=geometry)
+    assert resource_key(whole) != resource_key(split, companion=geometry)
 
 
 def test_hash_key_distinguishes_renamed_content() -> None:
@@ -266,7 +266,7 @@ def test_location_key_separates_partitioned_data(
         {"location": "http://mockdoc.com/grid", "partitioned": True}
     )
 
-    assert resource_key(whole) != resource_key(split, partitioning=geometry)
+    assert resource_key(whole) != resource_key(split, companion=geometry)
 
 
 def test_location_strategy_accepts_a_hashed_resource(
@@ -341,7 +341,7 @@ def test_blueprint_resources_key_distinctly() -> None:
     ]
     geometry = PartitioningParameterSet(n_procs_x=16, n_procs_y=8)
 
-    keys = [resource_key(resource, partitioning=geometry) for resource in declared]
+    keys = [resource_key(resource, companion=geometry) for resource in declared]
     assert len(set(keys)) == len(keys)
 
 
@@ -427,9 +427,9 @@ def test_partitioned_resource_requires_its_parameter_set(
 def test_partition_geometry_changes_the_key(split: VersionedResource) -> None:
     """Different process grids produce physically different data."""
     assert resource_key(
-        split, partitioning=PartitioningParameterSet(n_procs_x=16, n_procs_y=8)
+        split, companion=PartitioningParameterSet(n_procs_x=16, n_procs_y=8)
     ) != resource_key(
-        split, partitioning=PartitioningParameterSet(n_procs_x=8, n_procs_y=4)
+        split, companion=PartitioningParameterSet(n_procs_x=8, n_procs_y=4)
     )
 
 
@@ -437,17 +437,17 @@ def test_matching_geometry_keys_alike(
     split: VersionedResource, geometry: PartitioningParameterSet
 ) -> None:
     """Two runs splitting one resource identically must share a cache entry."""
-    assert resource_key(split, partitioning=geometry) == resource_key(
-        split, partitioning=PartitioningParameterSet(n_procs_x=16, n_procs_y=8)
+    assert resource_key(split, companion=geometry) == resource_key(
+        split, companion=PartitioningParameterSet(n_procs_x=16, n_procs_y=8)
     )
 
 
 def test_axes_are_not_interchangeable(split: VersionedResource) -> None:
     """A 16x8 split is not an 8x16 split."""
     assert resource_key(
-        split, partitioning=PartitioningParameterSet(n_procs_x=16, n_procs_y=8)
+        split, companion=PartitioningParameterSet(n_procs_x=16, n_procs_y=8)
     ) != resource_key(
-        split, partitioning=PartitioningParameterSet(n_procs_x=8, n_procs_y=16)
+        split, companion=PartitioningParameterSet(n_procs_x=8, n_procs_y=16)
     )
 
 
@@ -459,7 +459,7 @@ def test_geometry_is_ignored_for_an_unpartitioned_resource(
     Geometry cannot affect the content of data that was never split, so
     supplying it is harmless rather than an error.
     """
-    assert resource_key(versioned, partitioning=geometry) == resource_key(versioned)
+    assert resource_key(versioned, companion=geometry) == resource_key(versioned)
 
 
 def test_parameter_set_governance_does_not_affect_the_key(
@@ -478,8 +478,8 @@ def test_parameter_set_governance_does_not_affect_the_key(
         }
     )
 
-    assert resource_key(split, partitioning=annotated) == resource_key(
-        split, partitioning=geometry
+    assert resource_key(split, companion=annotated) == resource_key(
+        split, companion=geometry
     )
 
 
@@ -508,9 +508,7 @@ def test_parameter_set_hash_identifies_the_geometry(
         {"n_procs_x": 16, "n_procs_y": 8, "hash": "params-def"}
     )
 
-    assert resource_key(split, partitioning=hashed) != resource_key(
-        split, partitioning=other
-    )
+    assert resource_key(split, companion=hashed) != resource_key(split, companion=other)
 
 
 def test_parameter_set_hash_supersedes_the_parameters(
@@ -529,17 +527,15 @@ def test_parameter_set_hash_supersedes_the_parameters(
         {"n_procs_x": 8, "n_procs_y": 4, "hash": "params-abc"}
     )
 
-    assert resource_key(split, partitioning=stale) == resource_key(
-        split, partitioning=edited
-    )
+    assert resource_key(split, companion=stale) == resource_key(split, companion=edited)
 
 
 def test_absent_hash_falls_back_to_the_parameters(
     split: VersionedResource, geometry: PartitioningParameterSet
 ) -> None:
     """Without a hash the parameters themselves carry the identity."""
-    assert resource_key(split, partitioning=geometry) != resource_key(
-        split, partitioning=PartitioningParameterSet(n_procs_x=8, n_procs_y=4)
+    assert resource_key(split, companion=geometry) != resource_key(
+        split, companion=PartitioningParameterSet(n_procs_x=8, n_procs_y=4)
     )
 
 
@@ -557,8 +553,8 @@ def test_adding_a_hash_changes_the_key(
         {"n_procs_x": 16, "n_procs_y": 8, "hash": "params-abc"}
     )
 
-    assert resource_key(split, partitioning=hashed) != resource_key(
-        split, partitioning=geometry
+    assert resource_key(split, companion=hashed) != resource_key(
+        split, companion=geometry
     )
 
 
@@ -710,8 +706,8 @@ def test_expansion_key_is_stable(
     geometry : PartitioningParameterSet
         Partition geometry under test.
     """
-    assert resource_key(versioned, partitioning=geometry) == resource_key(
-        versioned, partitioning=geometry
+    assert resource_key(versioned, companion=geometry) == resource_key(
+        versioned, companion=geometry
     )
 
 
@@ -1153,3 +1149,15 @@ def test_context_is_not_identity(versioned: VersionedResource) -> None:
     assert shadowed != resource_key(
         VersionedResource(location=str(versioned.location), hash="not-the-hash")
     )
+
+
+def test_is_registered_reports_unknown_shapes() -> None:
+    """Callers discover pairings by asking, rather than by naming a type.
+
+    This is what lets :mod:`cstar.orchestration.caching` find the value that
+    pairs with a resource without importing the application that defines it.
+    """
+    assert is_registered(VersionedResource)
+    assert is_registered((VersionedResource, PartitioningParameterSet))
+    assert not is_registered(complex)
+    assert not is_registered((VersionedResource, complex))

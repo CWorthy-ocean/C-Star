@@ -893,7 +893,7 @@ def test_a_key_error_surfaces_as_a_cached_call_error(
         {"location": "https://example.org/d/x.nc", "partitioned": True}
     )
 
-    with pytest.raises(CachedCallError, match="PartitioningParameterSet is required"):
+    with pytest.raises(CachedCallError, match="describing how it is split"):
         cached(cache=cache)(_fetch)(unkeyable, RUN_ID, workspace)
 
 

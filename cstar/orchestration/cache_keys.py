@@ -27,16 +27,16 @@ Two identity functions cover blueprint resources:
     URL can serve different bytes over time and the key cannot notice, so a
     stale artifact may be reused after the upstream file changes.
 
-Either composes with :func:`partition_identity` via :func:`with_partitioning`
-when a subject is a resource *and* the geometry it is split across. The
-geometry is taken from the
-:class:`~cstar.applications.roms_marbl.models.PartitioningParameterSet` rather
-than from the ``partitioned`` flag — by its declared ``hash`` where it has one,
-otherwise by its parameters. The flag records only *that* a resource is split,
-not *how*, so keying on it would give two runs that split one resource across
-different process grids the same key for different data. A resource declared
-``partitioned`` therefore cannot be keyed without its parameter set, and asking
-for one raises rather than silently producing a colliding key.
+Either composes with a *companion* — a second value that also determines the
+result, such as the geometry a resource is split across. Companion pairings are
+registered by whoever owns the companion type;
+:mod:`cstar.applications.roms_marbl.cache` registers the ROMS/MARBL partition
+geometry, which is why nothing here imports it. A resource declaring
+``partitioned`` cannot be keyed without its companion, and asking for one raises
+rather than silently producing a colliding key: the flag records only *that* a
+resource is split, not *how*, so keying on it alone would give two runs that
+split one resource across different process grids the same key for different
+data.
 
 :func:`generator_for` resolves a subject shape to the generator that keys it,
 so a caller names the types it holds rather than choosing a strategy.
@@ -55,7 +55,6 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
-from cstar.applications.roms_marbl.models import PartitioningParameterSet
 from cstar.orchestration.models import Resource, VersionedResource
 
 if TYPE_CHECKING:
@@ -76,14 +75,13 @@ __all__ = [
     "checked_fields",
     "generator_for",
     "hash_identity",
+    "is_registered",
     "location_identity",
     "normalise_location",
-    "partition_identity",
     "readable_parts",
     "register_identity",
     "resource_key",
     "subject_for",
-    "with_partitioning",
 ]
 
 TDatum = TypeVar("TDatum")
@@ -122,18 +120,6 @@ An aggregate is not a NetCDF file, so inheriting the source's ``.nc`` would
 mislead every tool that sniffs by extension. The shared archive and the
 expanded directory carry this same suffix, since a key names one artifact
 regardless of which tier is holding it.
-"""
-
-_PARAMETER_METADATA: Final[frozenset[str]] = frozenset({"documentation", "locked"})
-"""Parameter-set fields excluded from a key.
-
-These describe governance rather than the data a parameter set produces:
-``documentation`` is a provenance URL and ``locked`` is a mutability flag.
-Folding either in would split the cache on edits that cannot change a single
-byte of output.
-
-``hash`` is excluded from this set because it is not metadata but an identity;
-see :meth:`CacheKeyGenerator._partition_identity`.
 """
 
 
@@ -481,84 +467,6 @@ def hash_identity(resource: DataResource) -> dict[str, str]:
     return {"resource.hash": str(digest)}
 
 
-def partition_identity(partitioning: PartitioningParameterSet) -> dict[str, str]:
-    """Identify the geometry a resource is split across.
-
-    Parameters
-    ----------
-    partitioning : PartitioningParameterSet
-        Geometry the resource is split across.
-
-    Returns
-    -------
-    dict of str to str
-        The parameter set's ``hash`` when it declares one, since that hash
-        identifies the whole set including any dynamically added parameters.
-        Otherwise the substantive parameters themselves. Fields are namespaced
-        under ``partition.``: a parameter set's ``hash`` is not a resource's
-        ``hash``, and merging the two flat would let the geometry silently
-        overwrite the content digest — two different artifacts under one key.
-        Qualifying here rather than at the merge site means every composer is
-        safe, not just the one shipped below.
-
-    Warnings
-    --------
-    A declared ``hash`` is trusted, not verified. Nothing here recomputes it,
-    so a hash left stale after an edit to the parameters will key two different
-    geometries alike — the one way this function can produce a false cache hit.
-    Blueprints that do not maintain the hash should leave it unset, which falls
-    back to the parameters themselves.
-    """
-    declared = getattr(partitioning, "hash", None)
-    if declared:
-        return {"partition.hash": str(declared)}
-    return {
-        f"partition.{field}": str(value)
-        for field, value in partitioning.model_dump(mode="json").items()
-        if field not in _PARAMETER_METADATA
-    }
-
-
-def with_partitioning(base: IdentityFunction) -> IdentityFunction:
-    """Compose a resource identity with the geometry it is split across.
-
-    Parameters
-    ----------
-    base : IdentityFunction
-        Identity function for the resource alone.
-
-    Returns
-    -------
-    IdentityFunction
-        Identity function over a ``(resource, partitioning)`` pair.
-
-    Notes
-    -----
-    A plain merge is safe because each identity function qualifies its own
-    field names; see :func:`partition_identity`.
-    """
-
-    def identity(
-        subject: tuple[DataResource, PartitioningParameterSet],
-    ) -> dict[str, str]:
-        """Return the resource's identity with the geometry folded in.
-
-        Parameters
-        ----------
-        subject : tuple
-            Resource and the geometry it is split across.
-
-        Returns
-        -------
-        dict of str to str
-            Identifying fields.
-        """
-        resource, partitioning = subject
-        return {**base(resource), **partition_identity(partitioning)}
-
-    return identity
-
-
 # ---------------------------------------------------------------------------
 # Subject registry
 # ---------------------------------------------------------------------------
@@ -606,6 +514,31 @@ def register_identity(
             "through it means"
         )
     _REGISTRY[shape] = (scheme, identity_fn)
+
+
+def is_registered(subject: Subject) -> bool:
+    """Report whether a subject shape can be keyed.
+
+    Lets a caller discover which of the values it is holding pair with each
+    other, without naming any particular type. That is what keeps this package
+    free of the application types it keys — the pairing is declared by whoever
+    owns the companion, and found here by asking.
+
+    Parameters
+    ----------
+    subject : type or tuple of type
+        Shape to check.
+
+    Returns
+    -------
+    bool
+        Whether the shape resolves, including through a base class.
+    """
+    try:
+        _resolve(_as_shape(subject))
+    except CacheKeyError:
+        return False
+    return True
 
 
 def generator_for(subject: Subject) -> DynamicCacheKeyGenerator[Any]:
@@ -713,20 +646,10 @@ def _describe(shape: tuple[type, ...]) -> str:
 
 register_identity(VersionedResource, "hash", hash_identity)
 register_identity(Resource, "location", location_identity)
-register_identity(
-    (VersionedResource, PartitioningParameterSet),
-    "hash",
-    with_partitioning(hash_identity),
-)
-register_identity(
-    (Resource, PartitioningParameterSet),
-    "location",
-    with_partitioning(location_identity),
-)
 
 
 def subject_for(
-    resource: DataResource, partitioning: PartitioningParameterSet | None = None
+    resource: DataResource, companion: Any | None = None
 ) -> tuple[Subject, Any]:
     """Return the shape and value that key a resource.
 
@@ -737,10 +660,12 @@ def subject_for(
     ----------
     resource : DataResource
         Resource declaration from a blueprint.
-    partitioning : PartitioningParameterSet or None, optional
-        Geometry the resource is split across. Required when the resource
-        declares ``partitioned``; ignored otherwise, so a caller looping over a
-        blueprint may pass it for every resource.
+    companion : Any or None, optional
+        Second value that also determines the result — the geometry a resource
+        is split across, say. Required when the resource declares
+        ``partitioned``; ignored otherwise, so a caller looping over a
+        blueprint may pass it for every resource. Its type must have a
+        registered pairing; see :func:`register_identity`.
 
     Returns
     -------
@@ -756,19 +681,19 @@ def subject_for(
     """
     if not bool(getattr(resource, "partitioned", False)):
         return (type(resource), resource)
-    if partitioning is None:
+    if companion is None:
         raise CacheKeyError(
-            f"{type(resource).__name__} is declared partitioned, so its "
-            "PartitioningParameterSet is required: the geometry determines "
+            f"{type(resource).__name__} is declared partitioned, so the value "
+            "describing how it is split is required: the geometry determines "
             "the content and cannot be inferred from the flag"
         )
-    return ((type(resource), type(partitioning)), (resource, partitioning))
+    return ((type(resource), type(companion)), (resource, companion))
 
 
 def resource_key(
     resource: DataResource,
     *,
-    partitioning: PartitioningParameterSet | None = None,
+    companion: Any | None = None,
     context: Mapping[str, str] | None = None,
     suffix: str | None = None,
 ) -> str:
@@ -778,7 +703,7 @@ def resource_key(
     ----------
     resource : DataResource
         Resource declaration from a blueprint.
-    partitioning : PartitioningParameterSet or None, optional
+    companion : Any or None, optional
         See :func:`subject_for`.
     context : Mapping of str to str or None, optional
         Further inputs that affect the result but are not fields of the
@@ -802,7 +727,7 @@ def resource_key(
     >>> resource_key(resource)
     'boundary-2010-3f7a1c9e2b5d8046.nc'
     """
-    shape, value = subject_for(resource, partitioning)
+    shape, value = subject_for(resource, companion)
     return generator_for(shape).key_for(
         value, str(resource.location), context=context, suffix=suffix
     )
@@ -810,7 +735,7 @@ def resource_key(
 
 def aggregate_key(
     resource: DataResource,
-    partitioning: PartitioningParameterSet,
+    companion: Any,
     *,
     context: Mapping[str, str] | None = None,
 ) -> str:
@@ -827,8 +752,9 @@ def aggregate_key(
     ----------
     resource : DataResource
         Resource the set is derived from.
-    partitioning : PartitioningParameterSet
-        Geometry to split across.
+    companion : Any
+        Value describing how the set is produced — the geometry to split
+        across. Its pairing with the resource must be registered.
     context : Mapping of str to str or None, optional
         Further inputs that affect the result.
 
@@ -851,13 +777,13 @@ def aggregate_key(
             "is identified by the source and target geometries together, which "
             "this key cannot express"
         )
-    shape = (type(resource), type(partitioning))
+    shape = (type(resource), type(companion))
     scheme, identity_fn = _REGISTRY[_resolve(shape)]
     generator: DynamicCacheKeyGenerator[Any] = DynamicCacheKeyGenerator(
         f"aggregate-expand-{scheme}", identity_fn
     )
     return generator.key_for(
-        (resource, partitioning),
+        (resource, companion),
         str(resource.location),
         context=context,
         suffix=AGGREGATE_SUFFIX,
