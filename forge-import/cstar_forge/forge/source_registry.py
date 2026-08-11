@@ -26,7 +26,18 @@ MBL_CO2_URL = (
 WOA_DOWNLOAD_URL = (
     "https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/"
 )
-UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1wUNwVeJsd6yM7o-5kCx-vM3wGwlnGSiq"
+# The unified BGC climatology. From v2.1 on, the file names its dimensions
+# ``longitude``/``latitude``/``depth`` and stores ``month`` as an integer index 1-12;
+# roms-tools still reads earlier files but logs a "predates v2.1" warning, and the
+# oldest ones lack the ``temp_WOA``/``salt_WOA`` fields that density-space BGC
+# interpolation and SSS restoring need. The version is not derivable from the Drive
+# id, so both constants are literal — bump them together.
+UNIFIED_BGC_VERSION = "v2_1"
+UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgdcef"
+# Versioned filename so bumping the URL actually re-downloads: the handler skips the
+# download when the target path already exists, so an unversioned name would leave
+# every already-staged host silently on the old file.
+UNIFIED_BGC_FILENAME = f"BGCdataset_{UNIFIED_BGC_VERSION}.nc"
 GLOFAS_CDS_URL = "https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical"
 GLOFAS_FILENAME = "glofas_v4_rivers_daily.nc"
 

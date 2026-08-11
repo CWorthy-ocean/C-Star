@@ -16,12 +16,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from cstar_forge.forge import source_data
 from cstar_forge.forge.source_data import (
     DATASET_REGISTRY,
     SOURCE_ALIAS,
     SRTM15_URL,
     SRTM15_VERSION,
     STREAMABLE_SOURCES,
+    UNIFIED_BGC_FILENAME,
+    UNIFIED_BGC_URL,
+    UNIFIED_BGC_VERSION,
     DatasetHandler,
     SourceData,
     map_source_to_dataset_key,
@@ -391,6 +395,149 @@ class TestConstants:
         # Check that UNIFIED maps to UNIFIED_BGC
         assert SOURCE_ALIAS.get("UNIFIED") == "UNIFIED_BGC"
         assert SOURCE_ALIAS.get("UNIFIED_BGC") == "UNIFIED_BGC"
+
+    def test_unified_bgc_filename_carries_version(self):
+        """The staged unified-BGC filename must embed the version.
+
+        The handler skips the download whenever the target path already exists, so an
+        unversioned filename would leave every previously-staged host silently on an
+        older file after a URL bump.
+        """
+        assert UNIFIED_BGC_VERSION in UNIFIED_BGC_FILENAME
+        assert UNIFIED_BGC_FILENAME.endswith(".nc")
+        assert UNIFIED_BGC_URL.startswith("https://")
+
+
+class TestPrepareUnifiedBgc:
+    """Tests for the UNIFIED_BGC (Google Drive) dataset handler."""
+
+    @pytest.fixture(autouse=True)
+    def _capable_roms_tools(self, monkeypatch):
+        """Assume a v2.1-capable roms-tools unless a test says otherwise.
+
+        The installed roms-tools may predate v2.1 support, in which case the handler
+        refuses to stage; that guard has its own tests below.
+        """
+        monkeypatch.setattr(source_data, "_roms_tools_reads_unified_v2_1", lambda: True)
+
+    def test_downloads_to_versioned_filename(self, tmp_path, monkeypatch):
+        """A missing file is downloaded from UNIFIED_BGC_URL to the versioned path."""
+        calls: list[tuple[str, str]] = []
+
+        def fake_download(url, out, quiet=False):
+            calls.append((url, out))
+            Path(out).touch()
+            return out
+
+        monkeypatch.setattr(source_data.gdown, "download", fake_download)
+
+        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        sd.prepare_all()
+
+        expected = tmp_path / "UNIFIED_BGC" / UNIFIED_BGC_FILENAME
+        assert sd.paths["UNIFIED_BGC"] == expected
+        assert calls == [(UNIFIED_BGC_URL, str(expected))]
+
+    def test_existing_file_is_reused(self, tmp_path, monkeypatch):
+        """An already-staged versioned file short-circuits the download."""
+
+        def fail_download(*args, **kwargs):
+            raise AssertionError("gdown.download should not be called")
+
+        monkeypatch.setattr(source_data.gdown, "download", fail_download)
+
+        staged = tmp_path / "UNIFIED_BGC" / UNIFIED_BGC_FILENAME
+        staged.parent.mkdir(parents=True)
+        staged.touch()
+
+        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        sd.prepare_all()
+
+        assert sd.paths["UNIFIED_BGC"] == staged
+
+    def test_stale_unversioned_file_does_not_satisfy(self, tmp_path, monkeypatch):
+        """A pre-v2.1 ``BGCdataset.nc`` left by an earlier Forge must not be reused."""
+        downloaded: list[str] = []
+
+        def fake_download(url, out, quiet=False):
+            downloaded.append(out)
+            Path(out).touch()
+            return out
+
+        monkeypatch.setattr(source_data.gdown, "download", fake_download)
+
+        dataset_dir = tmp_path / "UNIFIED_BGC"
+        dataset_dir.mkdir(parents=True)
+        (dataset_dir / "BGCdataset.nc").touch()
+
+        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        sd.prepare_all()
+
+        assert downloaded == [str(dataset_dir / UNIFIED_BGC_FILENAME)]
+
+    def test_stale_unversioned_file_is_reported(self, tmp_path, monkeypatch, capsys):
+        """The orphaned pre-v2.1 file is called out so it can be reclaimed."""
+        monkeypatch.setattr(
+            source_data.gdown,
+            "download",
+            lambda url, out, quiet=False: Path(out).touch(),
+        )
+
+        dataset_dir = tmp_path / "UNIFIED_BGC"
+        dataset_dir.mkdir(parents=True)
+        (dataset_dir / "BGCdataset.nc").touch()
+
+        SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path).prepare_all()
+
+        assert "no longer" in capsys.readouterr().out
+
+
+class TestUnifiedBgcRomsToolsCapability:
+    """The staging guard against a roms-tools too old to read a v2.1 unified file.
+
+    Compatibility runs one way only: post-#655 roms-tools reads both generations, but
+    pre-#655 roms-tools renames ``lon``/``lat``/``dep`` unconditionally and raises on a
+    v2.1 file. Forge pins the v2.1 download, so it must fail at staging time with an
+    actionable message rather than deep inside roms-tools at generation time.
+    """
+
+    def test_refuses_to_stage_when_roms_tools_too_old(self, tmp_path, monkeypatch):
+        """An incapable roms-tools raises before anything is downloaded."""
+
+        def fail_download(*args, **kwargs):
+            raise AssertionError("must not download for an unusable roms-tools")
+
+        monkeypatch.setattr(source_data.gdown, "download", fail_download)
+        monkeypatch.setattr(
+            source_data, "_roms_tools_reads_unified_v2_1", lambda: False
+        )
+
+        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=tmp_path)
+        with pytest.raises(RuntimeError, match="predates v2.1"):
+            sd.prepare_all()
+
+    def test_capability_probe_reads_dim_names_default(self, monkeypatch):
+        """The probe keys off ``UnifiedBGCDataset.dim_names``, not a version string."""
+        import dataclasses
+
+        import roms_tools.datasets.lat_lon_datasets as lld
+
+        def _probe_with(dim_names):
+            @dataclasses.dataclass
+            class FakeUnifiedBGCDataset:
+                dim_names: dict = dataclasses.field(
+                    default_factory=lambda: dict(dim_names)
+                )
+
+            monkeypatch.setattr(
+                lld, "UnifiedBGCDataset", FakeUnifiedBGCDataset, raising=True
+            )
+            return source_data._roms_tools_reads_unified_v2_1()
+
+        assert _probe_with(
+            {"longitude": "longitude", "latitude": "latitude", "depth": "depth"}
+        )
+        assert not _probe_with({"longitude": "lon", "latitude": "lat", "depth": "dep"})
 
 
 class TestRegistryConsistency:

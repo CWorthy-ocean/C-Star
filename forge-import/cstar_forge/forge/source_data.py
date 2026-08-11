@@ -2,7 +2,8 @@ import logging
 import shutil
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass
+from dataclasses import fields as dc_fields
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import urlopen
@@ -73,7 +74,9 @@ from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
     SRTM15_URL,
     SRTM15_VERSION,
     STREAMABLE_SOURCES,
+    UNIFIED_BGC_FILENAME,
     UNIFIED_BGC_URL,
+    UNIFIED_BGC_VERSION,
     UNSTAGED_DATASETS,
     WOA_DOWNLOAD_URL,
     map_source_to_dataset_key,
@@ -452,14 +455,55 @@ def _prepare_glorys_global(self: SourceData) -> list[Path]:
 # ---------------------------
 
 
+def _roms_tools_reads_unified_v2_1() -> bool:
+    """Whether the installed roms-tools can read a v2.1+ unified BGC file.
+
+    Forward compatibility here is one-way. roms-tools learned to read *both* file
+    generations after the 4.0.1 release (it renames a pre-v2.1 file's dimensions and
+    warns); earlier roms-tools renames ``lon``/``lat``/``dep`` unconditionally, so
+    handing it a v2.1 file — whose dimensions are already ``longitude``/``latitude``/
+    ``depth`` — raises deep inside ``UnifiedDataset.clean_up`` instead of at staging
+    time. Since Forge now pins the v2.1 download, check up front.
+
+    The class default for ``dim_names`` is the behavior that actually breaks, so it is
+    read directly rather than parsing a version string (the capability currently has
+    no released roms-tools version to compare against).
+    """
+    try:
+        from roms_tools.datasets.lat_lon_datasets import UnifiedBGCDataset
+    except ImportError:  # pragma: no cover - roms-tools layout changed; don't block
+        return True
+    for f in dc_fields(UnifiedBGCDataset):
+        if f.name == "dim_names" and f.default_factory is not MISSING:
+            return f.default_factory().get("longitude") == "longitude"
+    return True  # pragma: no cover - field vanished; don't block staging
+
+
 @register_dataset("UNIFIED_BGC")
 def _prepare_unified_bgc_dataset(self: SourceData) -> Path:
     """Ensure the UNIFIED_BGC dataset exists locally."""
+    if not _roms_tools_reads_unified_v2_1():
+        raise RuntimeError(
+            f"Forge stages unified BGC {UNIFIED_BGC_VERSION} "
+            f"({UNIFIED_BGC_FILENAME}), but the installed roms-tools "
+            f"({rt.__version__}) predates v2.1 support and would fail to read it "
+            "(it renames lon/lat/dep unconditionally). Upgrade roms-tools to a build "
+            "that includes unified-BGC v2.1 support, or stage a pre-v2.1 file "
+            "yourself and point the UNIFIED source at it via an explicit path."
+        )
+
     url_bgc_forcing = UNIFIED_BGC_URL
     dataset_dir = self.source_data_dir / "UNIFIED_BGC"
     dataset_dir.mkdir(parents=True, exist_ok=True)
-    path = dataset_dir / "BGCdataset.nc"
+    path = dataset_dir / UNIFIED_BGC_FILENAME
     needs_download = self.clobber or (not path.exists())
+
+    stale = dataset_dir / "BGCdataset.nc"
+    if stale.exists():
+        print(
+            f"ℹ️  A pre-v2.1 BGC file is still cached at {stale} and is no longer "
+            "used; delete it to reclaim the space."
+        )
 
     if needs_download:
         if path.exists():
