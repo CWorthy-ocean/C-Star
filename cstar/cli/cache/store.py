@@ -8,16 +8,19 @@ from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.cli.cache.common import (
     ARG_KEY,
+    ARG_MOVE,
+    ARG_PATH,
     ARG_RUNID,
     ARG_YES,
     confirm_overwrite,
+    key_callback,
     key_help,
-    list_runs_with_cache,
+    move_help,
+    path_help,
     run_id_help,
     runid_callback,
     yes_help,
 )
-from cstar.cli.cache.show import key_callback
 from cstar.cli.common import (
     cb_pipeline,
     set_env,
@@ -25,28 +28,21 @@ from cstar.cli.common import (
 )
 from cstar.entrypoint.utils import ARG_VERBOSE, ARG_VERBOSE_HELP
 from cstar.io.utils import get_artifact_cache
-from cstar.orchestration.artifact_cache import (
-    ArtifactExistsError,
-    ArtifactNotFoundError,
-    Location,
-    OnConflict,
-)
+from cstar.orchestration.artifact_cache import ArtifactExistsError
 
 log = get_logger(__name__)
 app = typer.Typer()
 console = Console()
 
 
-command_help: t.Final[str] = (
-    "Promote an item stored in user-level cache to the shared, group-level cache."
-)
+command_help: t.Final[str] = "Manually insert an artifact into the cache."
 
 
 @app.command(
-    name="promote",
+    name="store",
     help=command_help,
 )
-def promote(
+def store(
     context: typer.Context,
     run_id: t.Annotated[
         str,
@@ -55,7 +51,6 @@ def promote(
             help=run_id_help,
             callback=cb_pipeline(runid_callback, set_env(ENV_CSTAR_RUNID)),
             min=1,
-            autocompletion=list_runs_with_cache,
         ),
     ],
     key: t.Annotated[
@@ -67,11 +62,26 @@ def promote(
             min=1,
         ),
     ],
+    path: t.Annotated[
+        str,
+        typer.Option(
+            ARG_PATH,
+            help=path_help,
+            resolve_path=True,
+        ),
+    ],
     overwrite: t.Annotated[
         bool,
         typer.Option(
             ARG_YES,
             help=yes_help,
+        ),
+    ] = False,
+    move: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_MOVE,
+            help=move_help,
         ),
     ] = False,
     verbose: t.Annotated[
@@ -84,23 +94,22 @@ def promote(
         ),
     ] = False,
 ) -> None:
-    """Promote a user-level cached artifact into the shared, group cache."""
+    """Manually insert an artifact into the cache."""
     cache = get_artifact_cache()
-    location: Location | None = None
+    action = "added to"
+
+    if location := cache.resolve(key, run_id):
+        overwrite = confirm_overwrite(overwrite, location)
+        action = "updated in"
 
     try:
-        on_conflict = OnConflict.ERROR if not overwrite else OnConflict.OVERWRITE
-        location = cache.promote(key, run_id, on_conflict=on_conflict)
-    except ArtifactNotFoundError:
-        print(f"No cache artifact found for run-id {run_id!r} with key {key!r}")
+        location = cache.ingest(path, key, run_id, overwrite=overwrite)
     except ArtifactExistsError:
-        if confirm_overwrite(force_overwrite=overwrite):
-            location = cache.promote(key, run_id, on_conflict=OnConflict.OVERWRITE)
-
-    if location:
-        msg = f"Cached artifact {key!r} promoted to the group cache"
+        print(f"An artifact with key {key!r} already exists for run {run_id!r}")
+    else:
+        msg = f"{path} has been {action} the cache"
         if is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
-            msg = f"{msg} at {location!r}"
+            msg = f"{msg} at {str(location.path)!r}"
         print(msg)
 
 

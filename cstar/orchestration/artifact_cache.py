@@ -894,7 +894,7 @@ class ArtifactCache:
                 )
             path = root / name
             self._assert_contained(path, root)
-            log.info(f"Located {name!r} in the shared cache at {str(path)!r}")
+            log.debug(f"Located {name!r} in the shared cache at {str(path)!r}")
             return Location(path=path, tier=tier, name=name, run_id=None)
 
         if run_id is None:
@@ -903,7 +903,7 @@ class ArtifactCache:
         path = root / run_id / name
         self._assert_contained(path, root)
 
-        log.info(
+        log.debug(
             f"Located {name!r} in the user cache for run {run_id!r} at {str(path)!r}"
         )
         return Location(path=path, tier=tier, name=name, run_id=run_id)

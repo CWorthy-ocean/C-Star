@@ -8,11 +8,11 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
+from cstar.cli.cache.common import confirm_overwrite
 from cstar.cli.cache.promote import (
     ARG_KEY,
     ARG_RUNID,
     app,
-    confirm_overwrite,
     get_artifact_cache,
     key_callback,
     runid_callback,
@@ -157,7 +157,7 @@ def test_cli_admin_promote_entry_not_found(
     ]
     result = runner.invoke(app, args, color=False)
 
-    assert "No cache entry found" in result.stdout
+    assert "No cache artifact found" in result.stdout
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
@@ -196,7 +196,7 @@ def test_cli_admin_promote_happy_path(tmp_path: Path) -> None:
     ]
     result = runner.invoke(app, args, color=False)
 
-    assert "is promoted to the group cache" in result.stdout
+    assert "promoted to the group cache" in result.stdout
 
     # confirm the shared cache is prioritized over user cache (even with run-id)
     shared_location = cache.resolve(key, run_id)
