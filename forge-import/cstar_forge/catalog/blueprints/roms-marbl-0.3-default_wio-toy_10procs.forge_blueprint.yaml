@@ -1,11 +1,11 @@
 $schema: https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/forge/forge_schema.1.0.0.json
-name: cson_roms-marbl_v0.1_wio-toy_10procs
+name: roms-marbl-0.3-default_wio-toy_10procs
 description: Generated blueprint
 application: forge
 state: notset
 schema_version: 1.0.0
-working_dir: ~/cstar-forge-run/cson_roms-marbl_v0.1_wio-toy_10procs
-forge_blueprint_version: 5
+working_dir: ~/cstar-forge-run/roms-marbl-0.3-default_wio-toy_10procs
+forge_blueprint_version: 4
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -471,7 +471,7 @@ model_settings:
     output_period: 3600.0
     nrpf: 4
   cdr_output:
-    do_cdr_output: false
+    do_cdr: false
     do_avg: true
     monthly_averages: false
     output_period: 3600
@@ -503,7 +503,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.2.0
+    commit: 0.3.0
     branch: null
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
@@ -529,9 +529,9 @@ code:
     - marbl_in
 composition:
   model:
-    name: cson_roms-marbl_v0.1
+    name: roms-marbl-0.3-default
     origin: catalog
-    modified: true
+    modified: false
   domain:
     name: wio-toy
     origin: catalog
@@ -546,9 +546,10 @@ composition:
     modified: false
   overrides: {}
 provenance:
-  generated_at: null
-  forge_version: null
-  roms_tools_version: null
+  generated_at: '2026-08-11T16:00:26.743301Z'
+  forge_version: 137cca33-dirty
+  cstar_version: cstar-ocean==0.9.1
+  roms_tools_version: roms-tools==4.0.1
   override_files_applied: []
-  content_hash: 6f4e7cdd818e706d67e96957bddef4ea4885d1876723202d6b69cb305f1f9930
+  content_hash: 22b38e7e6e09781e4e00f8562bcb33e1ea4c2f572f407ccdaa20d6383b9d7307
   notes: null

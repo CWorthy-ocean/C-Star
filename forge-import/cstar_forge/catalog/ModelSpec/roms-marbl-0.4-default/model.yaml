@@ -1,0 +1,104 @@
+description: Generated blueprint
+bgc_mode: marbl
+use_pio: true
+code:
+  roms:
+    location: https://github.com/CWorthy-ocean/ucla-roms.git
+    commit: 0.4.1
+  marbl:
+    location: https://github.com/marbl-ecosys/MARBL.git
+    commit: marbl0.45.0
+  pio:
+    location: https://github.com/CWorthy-ocean/ParallelIO.git
+    commit: 2.7.1-fork
+  templates_commit: 4208f4384431852daccea1ccad01d03c0cb473d9
+  templates_compile_time:
+    directory: templates/compile-time
+    files:
+    - cppdefs.opt.j2
+  templates_run_time:
+    directory: templates/run-time
+    files:
+    - marbl_in
+model_settings:
+  cppdefs:
+    sponge_tune: false
+    nhy_forcing: true
+    nox_forcing: true
+  lateral_visc:
+    visc2: 0.0
+    rho0: 1000.0
+  vertical_mixing:
+    akv: 0.0
+    akt_default: 0.0
+  tracer_diff2:
+    tnu2_default: 0.0
+  bottom_drag:
+    rdrg: 0.0
+    rdrg2: 0.001
+    zob: 0.01
+  gamma2: 1.0
+  ubind: 0.1
+  param:
+    nt_passive: 0
+    ntrc_bio: 32
+  bgc:
+    nbgc_flx: 2
+    interp_frc: 0
+    xco2air_default: 284.7
+  blk_frc:
+    interp_frc: 0
+    check_bulk_frc_units: false
+  tides:
+    bry_tides: true
+    pot_tides: true
+    ana_tides: false
+  sponge_tune:
+    pflx_w_vname: up_west
+    pflx_w_tname: bry_time
+    pflx_e_vname: up_east
+    pflx_e_tname: bry_time
+    pflx_s_vname: vp_south
+    pflx_s_tname: bry_time
+    pflx_n_vname: vp_north
+    pflx_n_tname: bry_time
+    ub_tune: false
+    spn_avg: true
+    sp_timscale: 86400
+    wrt_sponge: false
+    nrpf: 7
+    output_period: 86400
+  flux_frc:
+    interp_flux_frc: true
+  calc_pflx:
+    calc_pflx: true
+    timescale: 86400
+  pipe_frc:
+    pipe_source: false
+    p_analytical: false
+    npip: 1
+  particles:
+    floats: false
+    np: 50
+    extra_space_fac: 1.5
+    exchange_facx: 0.1
+    exchange_facy: 0.1
+    exchange_facc: 0.01
+    output_period: 400
+    nrpf: 100
+    ppm3: 1.0e-06
+    pmin: 200
+  lin_rho_eos:
+    tcoef: 0.2
+    t0: 1.0
+    scoef: 0.822
+    s0: 1.0
+  sss_correction:
+    dsssdt: 7.777
+  sst_correction:
+    dsstdt: 7.777
+  dic_alk_correction:
+    dcdt: 7.777
+  marbl_bgc:
+    marbl_config_file: marbl_in
+    marbl_timestep: 3600.0

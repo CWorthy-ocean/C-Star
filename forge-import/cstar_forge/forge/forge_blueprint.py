@@ -17,8 +17,9 @@ forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
 ``ForgeBlueprint`` subclasses ``cstar.orchestration.models.Blueprint`` (see
 ``cstar/applications/hello_world.py`` for the minimal shape of this contract), which is
 what makes forge a real C-Star application: ``cstar_forge.forge.app.ForgeRunner`` +
-``ForgeApplication`` (registered via ``CSTAR_APP_MODULES=cstar_forge.forge.app``) let
-C-Star's own entrypoint (``cstar blueprint run``) discover and drive it directly.
+``ForgeApplication`` (registered through the ``cstar.applications`` entry point
+cstar-forge declares) let C-Star's own entrypoint (``cstar blueprint run``) discover
+and drive it directly.
 
 Single governing principle
 --------------------------

@@ -78,8 +78,13 @@ Blueprint: ~/cstar-forge-run/.../roms_marbl_blueprint.yaml
 Run it with:  cstar blueprint run <path>
 ```
 
-Power-user options (partial runs, dask tuning, verbosity) are available with a separate `cstar forge run` command and are documented in
-`cstar forge run --help`.
+```{tip}
+Power-user options (stage selection,
+`--clobber`, dask tuning, verbosity) are available via the dedicated
+`cstar forge run path/to/forge_blueprint.yaml` entry point (see
+`cstar forge run --help`).
+```
+
 
 ## Run the simulation
 
@@ -87,9 +92,14 @@ Power-user options (partial runs, dask tuning, verbosity) are available with a s
 cstar blueprint run <path-to-roms_marbl_blueprint.yaml>
 ```
 
-Note that the same C-Star CLI command is used -- the details are in the blueprints themselves. While the previous step used
-a **forge blueprint** (see the `application` field in the original yaml), with all of the settings needed to generate the domain,
-this blueprint runs the `ROMS-MARBL` application, with all of the inputs needed to execute the simulation. 
+Both steps use the same `cstar blueprint run` command; each blueprint's
+`application` field tells C-Star which application processes it. The forge
+blueprint from the previous step (`application: forge`) is handled by the
+`forge` application that the installed `cstar-forge` package registers via
+its entry point. This generated **ROMS-MARBL blueprint**
+(`application: roms_marbl`), with all of the inputs needed to execute the
+simulation, is handled by the `roms_marbl` application built into C-Star
+itself.
 
 C-Star fetches and compiles the model code (using the toolchain installed
 above) and executes the simulation; outputs land under the same working

@@ -1,6 +1,7 @@
 # RomsMarblInputData Class Documentation
 
-> **This subsystem is driven by the forge application** (`python -m cstar_forge.run`), which
+> **This subsystem is driven by the forge application** (`cstar forge run`, or the
+> `python -m cstar_forge.run` module CLI it wraps), which
 > calls `ForgeExecutor.generate_inputs()` (`cstar_forge/forge/executor.py`), which constructs a
 > `RomsMarblInputData` and calls `generate_all()` on it. Direct construction, as shown in this
 > document, is for developers debugging or extending input generation.

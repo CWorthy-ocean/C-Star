@@ -1254,6 +1254,40 @@ def test_cppdefs_tides_tracks_tidal_forcing_presence():
     assert cfg_no_tides.model_settings["cppdefs"]["tides"] is False
 
 
+def test_no_tidal_item_forces_runtime_tide_switches_off():
+    """ROMS enables tides at run time via bry_tides/pot_tides (TIDAL_FRC_SETTINGS);
+    the TIDES cppdef only stamps a netCDF attribute. With no tidal item generated,
+    both must be forced off -- past an explicit override -- or ROMS goes looking
+    for tidal input data that was never generated. ana_tides is the deliberate
+    escape hatch: analytical tides are computed in-model and need no input file.
+    """
+    cfg = _build()  # bundled ForcingSpec has a tidal item -> ModelSpec defaults kept
+    assert cfg.model_settings["tides"]["bry_tides"] is True
+    assert cfg.model_settings["tides"]["pot_tides"] is True
+
+    cfg_no = _build(forcing_inputs=_PHYSICS_ONLY_FORCING)
+    assert cfg_no.model_settings["tides"]["bry_tides"] is False
+    assert cfg_no.model_settings["tides"]["pot_tides"] is False
+    assert cfg_no.model_settings["tides"]["ntides"] == 0
+
+    # an explicit bry_tides/pot_tides=True override can't win (it would crash ROMS)
+    cfg_ov = _build(
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+        run_time_overrides={"tides": {"bry_tides": True, "pot_tides": True}},
+    )
+    assert cfg_ov.model_settings["tides"]["bry_tides"] is False
+    assert cfg_ov.model_settings["tides"]["pot_tides"] is False
+
+    # ...unless ana_tides is set, which legitimately runs tides without input data
+    cfg_ana = _build(
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+        run_time_overrides={"tides": {"ana_tides": True}},
+    )
+    assert cfg_ana.model_settings["tides"]["ana_tides"] is True
+    assert cfg_ana.model_settings["tides"]["bry_tides"] is True
+    assert cfg_ana.model_settings["tides"]["pot_tides"] is True
+
+
 def test_cppdefs_sponge_tune_defaults_false_and_is_overridable():
     """SPONGE_TUNE has no per-run resolver kwarg -- it's a plain ModelSpec default
     (False) only reachable via compile_time_overrides (the wizard's advanced
@@ -2752,6 +2786,9 @@ class TestSaveModifiedPiecesToCatalog:
         # bundled catalog verbatim, so reusing that name here would collide.
         spec_name = "pio-dev-test"
         wiz = self._wizard(isolated_catalog)
+        # Pin a spec where use_pio=True / roms_ref="main" are genuine
+        # deviations (the default pio-dev spec already declares both).
+        wiz.model_dd.value = "cson_roms-marbl_v0.1"
         wiz.use_pio_chk.value = True
         wiz.roms_ref.value = "main"
         assert wiz.config.composition.model.modified is True  # spec deviation
@@ -2802,6 +2839,10 @@ class TestSaveModifiedPiecesToCatalog:
         from cstar_forge.forge_blueprint_wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
+        # Pin a spec whose base pin is NOT "main", so a spec that drops the
+        # live roms_ref actually loses information (pio-dev's base pin is
+        # already "main", which would make the roundtrip spuriously succeed).
+        wiz.model_dd.value = "cson_roms-marbl_v0.1"
         wiz.roms_ref.value = "main"
         # Simulate the pre-fix writer: a spec saved without the live roms_ref.
         isolated_catalog.register_model_from_settings(
@@ -2822,6 +2863,9 @@ class TestSaveModifiedPiecesToCatalog:
         # stay False while resolving with a different code/use_pio than the
         # selected catalog spec declares.
         wiz = self._wizard(isolated_catalog)
+        # Pin a spec whose base pin is NOT "main", so roms_ref="main" below is
+        # a real deviation (pio-dev, the default, already pins "main").
+        wiz.model_dd.value = "cson_roms-marbl_v0.1"
         assert wiz.config.composition.model.modified is False
 
         wiz.use_pio_chk.value = not wiz.use_pio_chk.value

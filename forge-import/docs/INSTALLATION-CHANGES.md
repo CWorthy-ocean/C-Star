@@ -19,7 +19,7 @@ managed. If you had a working setup before, here's what's different.
 - **`dev-setup.sh` is much smaller** but behaves the same (same flags, plus
   `--with-compilers`). The HPC hardening it used to inline now lives in
   `scripts/harden-env.sh` and `scripts/register-kernel.sh`.
-- **Dependencies now come from real releases**: roms-tools ≥ 4.0.1 (conda-forge;
+- **Dependencies now come from real releases**: roms-tools ≥ 4.1.0 (conda-forge;
   dask is a core dependency now — the `[dask]` extra is gone) and
   cstar-ocean ≥ 0.8 (PyPI and conda-forge).
 

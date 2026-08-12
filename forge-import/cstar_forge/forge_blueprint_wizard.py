@@ -1668,6 +1668,10 @@ class _ForcingEditor:
         return acc
 
 
+# Preselected in the Model dropdown when present in the catalog (falls back to
+# the first catalog model otherwise).
+_DEFAULT_MODEL = "pio-dev"
+
 _GRID_INT = ("nx", "ny", "N")
 _GRID_FLOAT = ("size_x", "size_y", "center_lon", "center_lat", "rot")
 _SCOORD = ("theta_s", "theta_b", "hc")
@@ -1741,7 +1745,11 @@ class ForgeBlueprintWizard:
         self.model_dd = W.Dropdown(
             options=models,
             description="Model:",
-            value=(models[0] if models else None),
+            value=(
+                _DEFAULT_MODEL
+                if _DEFAULT_MODEL in models
+                else (models[0] if models else None)
+            ),
             style={"description_width": "110px"},
         )
         self.bgc_dd = W.Dropdown(
@@ -2198,7 +2206,7 @@ class ForgeBlueprintWizard:
             _piece_save_row("(new ForcingSpec name)")
         )
 
-        # --- run (invokes the executor CLI on the just-saved blueprint) ---
+        # --- run (invokes the C-Star CLI on the just-saved blueprint) ---
         from cstar_forge.config import system as _detected_system
 
         self.run_warning = W.HTML(
@@ -2206,21 +2214,21 @@ class ForgeBlueprintWizard:
             "memory and CPU depending on grid size.</b> Run this from a compute node "
             "(or another host) with resources appropriate for your domain — this is "
             f"not checked automatically. Detected host: <code>{_detected_system}</code>."
-            "<br><span style='color:#666'>ℹ This interface is likely to change in the "
-            "near future (e.g. once the executor moves into C-Star, this may become a "
-            "<code>cstar blueprint run</code> command).</span>"
         )
         self.run_later_note = W.HTML(
             "<span style='color:#666'>ℹ To run this later, or on a different "
             "machine, save the blueprint above and then (from the "
             "<code>cstar-forge</code> environment) call: "
-            "<code>python -m cstar_forge.run &lt;path/to/forge_blueprint.yaml&gt;</code></span>"
+            "<code>cstar blueprint run &lt;path/to/forge_blueprint.yaml&gt;</code>. "
+            "</span>"
         )
         self.run_btn = W.Button(description="Run", icon="play")
         self.run_status = W.HTML("")
 
         # --- workplan export (two-step C-Star workplan: forge -> roms_marbl) ---
         self.workplan_note = W.HTML(
+            "<span style='color:#b00'>⚠ Experimental — workplan export does not "
+            "work yet; the saved workplan is not currently runnable.</span><br>"
             "<span style='color:#666'>ℹ Saves the blueprint plus a two-step C-Star "
             "workplan: step <code>forge</code> generates the ROMS-MARBL inputs and "
             "blueprint, step <code>roms_marbl</code> runs the simulation from that "
@@ -2769,8 +2777,11 @@ class ForgeBlueprintWizard:
             for key, picker in (("start_time", self.start), ("end_time", self.end)):
                 if data.get(key):
                     picker.value = datetime.fromisoformat(str(data[key])).date()
-            if data.get("model_name") in self.model_dd.options:
-                self.model_dd.value = data["model_name"]
+            # model_name in Domain.yaml is provenance (the model in use when the
+            # domain was saved), not a preference: picking a domain must not
+            # override the user's Model selection, so it is deliberately NOT
+            # restored here (unlike the load-a-full-blueprint path, where the
+            # blueprint's composition.model is authoritative).
             self.topo_source.value = data.get("topography_source", "ETOPO5")
             self.topo_path.value = data.get("topography_path", "") or ""
             # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
@@ -3870,12 +3881,26 @@ class ForgeBlueprintWizard:
             )
 
     def _build_run_command(self, blueprint_path: str) -> list[str]:
-        """Command the Run button invokes. Isolated here so swapping this for a
-        future ``cstar blueprint run <path>`` (once the executor moves into the
-        C-Star repo) is a one-line change.
+        """Command the Run button invokes: ``cstar blueprint run <path>``.
+
+        The same command the docs give for both pipeline steps, and the same one
+        the emitted ``roms_marbl`` blueprint is run with -- the button exposes no
+        per-run flags, so the full-option ``cstar forge run`` passthrough buys it
+        nothing. Resolving ``application: forge`` this way goes through C-Star's
+        registry, which finds the app through cstar-forge's ``cstar.applications``
+        entry point.
+
+        Uses the ``cstar`` console script installed alongside the running
+        interpreter, so the subprocess stays in this environment rather than
+        taking whatever is first on PATH. Where that script is absent (C-Star's
+        CLI not installed), falls back to ``python -m cstar_forge.run``, which
+        drives the same executor without needing C-Star's CLI at all.
         """
         import sys
 
+        cstar_exe = Path(sys.executable).with_name("cstar")
+        if cstar_exe.exists():
+            return [str(cstar_exe), "blueprint", "run", blueprint_path]
         return [sys.executable, "-m", "cstar_forge.run", blueprint_path]
 
     def _on_run(self, _):
@@ -3895,9 +3920,9 @@ class ForgeBlueprintWizard:
         _schedule_coroutine(self._run_async())
 
     async def _run_async(self):
-        """Save the current blueprint, then launch the executor CLI as a
-        subprocess and stream its combined stdout/stderr into ``run_output`` line
-        by line as it arrives (not all at once at the end).
+        """Save the current blueprint, then launch the C-Star CLI as a subprocess
+        and stream its combined stdout/stderr into ``run_output`` line by line as
+        it arrives (not all at once at the end).
         """
         import asyncio
 
@@ -3920,8 +3945,13 @@ class ForgeBlueprintWizard:
             async for line in proc.stdout:
                 self.run_output.append_stdout(line.decode(errors="replace"))
             code = await proc.wait()
+            # On success the log above names the emitted roms_marbl blueprint (the
+            # runner logs where it published it). Point at it rather than restating
+            # a path this widget would have to derive for itself.
             self.run_status.value = (
-                "<span style='color:#080'>✓ finished</span>"
+                "<span style='color:#080'>✓ finished</span> — run the emitted "
+                "ROMS-MARBL blueprint named in the log with <code>cstar blueprint "
+                "run &lt;path&gt;</code>"
                 if code == 0
                 else f"<span style='color:#b00'>exited with code {code}</span>"
             )
@@ -4030,12 +4060,11 @@ class ForgeBlueprintWizard:
             from cstar.orchestration.serialization import serialize
 
             serialize(wp_path, workplan)
-            # CSTAR_APP_MODULES makes the forge app discoverable to C-Star's
-            # registry at schedule time; it propagates to spawned jobs
-            # automatically (all CSTAR_* vars are captured with the run).
-            cmd = (
-                f"CSTAR_APP_MODULES=cstar_forge.forge.app cstar workplan run {wp_path}"
-            )
+            # No env-var prefix: an installed cstar-forge registers the forge app
+            # through its ``cstar.applications`` entry point, so C-Star's registry
+            # resolves ``application: forge`` in the scheduling process and in the
+            # jobs it spawns, without anything being propagated by hand.
+            cmd = f"cstar workplan run {wp_path}"
             self.workplan_status.value = (
                 f"<span style='color:#080'>Saved {bp_path} and {wp_path}</span><br>"
                 f"Run it with: <code>{cmd}</code>"
@@ -4265,17 +4294,17 @@ class ForgeBlueprintWizard:
                     self.save_status,
                 ),
                 section(
-                    "Workplan",
-                    self.workplan_note,
-                    W.HBox([self.workplan_btn]),
-                    self.workplan_status,
-                ),
-                section(
                     "Run",
                     self.run_warning,
                     self.run_later_note,
                     W.HBox([self.run_btn, self.run_status]),
                     self.run_output,
+                ),
+                section(
+                    "Workplan (experimental)",
+                    self.workplan_note,
+                    W.HBox([self.workplan_btn]),
+                    self.workplan_status,
                 ),
             ]
         )

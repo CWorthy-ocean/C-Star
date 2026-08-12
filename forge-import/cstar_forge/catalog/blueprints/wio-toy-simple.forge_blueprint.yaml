@@ -1,10 +1,10 @@
 $schema: https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/forge/forge_schema.1.0.0.json
-name: cson_roms-marbl_v0.1_wio-toy_10procs
+name: wio-toy-simple
 description: Generated blueprint
 application: forge
 state: notset
 schema_version: 1.0.0
-working_dir: ~/cstar-forge-run/cson_roms-marbl_v0.1_wio-toy_10procs
+working_dir: ~/cstar-forge-run/wio-toy-simple
 forge_blueprint_version: 5
 run:
   start_date: '2012-01-01T00:00:00'
@@ -90,39 +90,6 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
-  - source:
-      name: MBL_co2
-      climatology: false
-      glorys_layout: null
-      path: null
-    type: bgc
-    correct_radiation: false
-    coarse_grid_mode: never
-    restoring_forces: null
-    wind_dropoff: false
-    prefill: null
-    prefill_kwargs: null
-    regrid_method: null
-    extrap_method: null
-    extrap_kwargs: null
-    options: {}
-  - source:
-      name: WOA
-      climatology: true
-      glorys_layout: null
-      path: null
-    type: restoring
-    correct_radiation: false
-    coarse_grid_mode: never
-    restoring_forces:
-    - sss
-    wind_dropoff: false
-    prefill: null
-    prefill_kwargs: null
-    regrid_method: null
-    extrap_method: null
-    extrap_kwargs: null
-    options: {}
   boundary:
   - source:
       name: GLORYS
@@ -150,31 +117,8 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
-  tidal:
-  - source:
-      name: TPXO
-      climatology: false
-      glorys_layout: null
-      path: null
-    ntides: 15
-    prefill: null
-    prefill_kwargs: null
-    regrid_method: null
-    extrap_method: null
-    extrap_kwargs: null
-    options: {}
-  river:
-  - source:
-      name: DAI
-      climatology: false
-      glorys_layout: null
-      path: null
-    include_bgc: true
-    convert_to_climatology: if_any_missing
-    bgc_source: null
-    coast_snap_buffer_km: null
-    domain_edge_buffer: 20
-    options: {}
+  tidal: []
+  river: []
   cdr_forcing: null
   resolved_datasets:
     GLORYS:
@@ -192,40 +136,16 @@ forcing:
       dataset_id: null
       url: null
       streamable: true
-    MBL_co2:
-      dataset_key: MBL_CO2
-      dataset_id: null
-      url: https://gml.noaa.gov/ccgg/mbl/tmp/co2_GHGreference.1785677502_surface.txt
-      streamable: false
-    WOA:
-      dataset_key: WOA
-      dataset_id: null
-      url: https://www.ncei.noaa.gov/data/oceans/woa/WOA18/DATA/salinity/netcdf/decav/0.25/
-      streamable: false
-    TPXO:
-      dataset_key: TPXO
-      dataset_id: null
-      url: null
-      streamable: false
-    DAI:
-      dataset_key: DAI
-      dataset_id: null
-      url: null
-      streamable: true
     ETOPO5:
       dataset_key: ETOPO5
       dataset_id: null
       url: null
       streamable: false
 datasets:
-- DAI
 - ERA5
 - ETOPO5
 - GLORYS_REGIONAL
-- MBL_CO2
-- TPXO
 - UNIFIED_BGC
-- WOA
 model_settings:
   cppdefs:
     sponge_tune: false
@@ -238,9 +158,9 @@ model_settings:
     cdr_forcing: false
     use_pio: true
     marbl: true
-    co2_tvarying: true
-    sal_restore: true
-    tides: true
+    co2_tvarying: false
+    sal_restore: false
+    tides: false
   lateral_visc:
     visc2: 0.0
     rho0: 1000.0
@@ -285,10 +205,10 @@ model_settings:
     interp_frc: 0
     check_bulk_frc_units: false
   tides:
-    bry_tides: true
-    pot_tides: true
+    bry_tides: false
+    pot_tides: false
     ana_tides: false
-    ntides: 15
+    ntides: 0
   sponge_tune:
     pflx_w_vname: up_west
     pflx_w_tname: bry_time
@@ -503,7 +423,7 @@ model_settings:
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.2.0
+    commit: 0.4.1
     branch: null
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
@@ -529,15 +449,15 @@ code:
     - marbl_in
 composition:
   model:
-    name: cson_roms-marbl_v0.1
-    origin: catalog
-    modified: true
-  domain:
-    name: wio-toy
+    name: roms-marbl-0.4-default
     origin: catalog
     modified: false
+  domain:
+    name: wio-toy
+    origin: custom
+    modified: false
   forcing:
-    name: glorys-era5-unified
+    name: simple-bgc-demo
     origin: catalog
     modified: false
   output:
@@ -546,9 +466,10 @@ composition:
     modified: false
   overrides: {}
 provenance:
-  generated_at: null
-  forge_version: null
-  roms_tools_version: null
+  generated_at: '2026-08-11T23:19:43.078600Z'
+  forge_version: bd91c3fd
+  cstar_version: cstar-ocean==0.10.0
+  roms_tools_version: roms-tools==4.0.2.dev5+g8b6cd6c7c
   override_files_applied: []
-  content_hash: 6f4e7cdd818e706d67e96957bddef4ea4885d1876723202d6b69cb305f1f9930
+  content_hash: 86e8ec8eeb49f1ada8f0e3db3177d435151cc478ae5df05d302d511d2b9ecc07
   notes: null

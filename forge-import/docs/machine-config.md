@@ -41,7 +41,7 @@ application's `HostPaths` (`cstar_forge.forge.host.HostPaths`) from this auto-de
 config: `source_data_cache` comes from `config.paths.source_data`, plus the detected
 `system` tag and `machine_config`. `working_dir` (the per-run artifact root that
 `ForgeExecutor` writes everything under) is supplied separately — see
-`docs/developer-guide.md` §2–4 for the full authoring/execution split. This is Forge's
+`docs/architecture-details.md` §2–4 for the full authoring/execution split. This is Forge's
 own *disposable* host provider; when the forge application relocates into C-Star,
 C-Star supplies its own `HostPaths` and this resolver is not carried over.
 

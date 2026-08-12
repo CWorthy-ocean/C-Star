@@ -3,9 +3,12 @@
 ## Unreleased
 
 * New CLI: `cstar forge run` (full executor option set, passthrough) and `cstar forge wizard`, registered with C-Star's CLI via the `cstar.cli` entry-point group (requires a C-Star release with the discovery hook; `python -m cstar_forge.run` continues to work)
+* cstar-ocean dependency floor raised to 0.10.0
+* `cstar-forge` now declares a `cstar.applications` entry point (`forge = "cstar_forge.forge.app"`), so `cstar blueprint run <forge_blueprint.yaml>` resolves `application: forge` from an installed cstar-forge alone — no environment variables, in local runs and in scheduler jobs alike. This replaces the `CSTAR_APP_MODULES` prefix the docs and the wizard's saved-workplan command previously required; the variable was removed in cstar-ocean 0.10.0, which ships the entry-point support
 * cstar-ocean is now sourced from conda-forge in the pixi/conda environments
 * New pixi environments: `user` (pure-conda replay of the full stack from conda-forge) and `dev-laptop` (dev plus a local build toolchain); lockfile consumption artifacts are exported per release via `scripts/export-lock-artifacts.py`
 * Docs restructured: new Getting Started walkthrough, installation page reorganized around HPC/developer paths, architecture pages consolidated and refreshed
+* The GLORYS subchunking libraries (`kerchunk`, `nest-asyncio`, `ujson`, `fastparquet`) are now declared forge dependencies. Subchunking is on by default, so a `conda install -c conda-forge cstar-forge` environment previously failed at input generation with an `ImportError` from `glorys_subchunk.py`
 
 ## 0.3.0
 

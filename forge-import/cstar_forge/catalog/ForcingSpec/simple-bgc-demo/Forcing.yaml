@@ -1,0 +1,31 @@
+description: Generated blueprint
+initial_conditions:
+  source:
+    name: GLORYS
+    glorys_layout: regional
+  bgc_source:
+    name: UNIFIED
+    climatology: true
+forcing:
+  surface:
+  - source:
+      name: ERA5
+    type: physics
+    correct_radiation: true
+    coarse_grid_mode: never
+  - source:
+      name: UNIFIED
+      climatology: true
+    type: bgc
+    coarse_grid_mode: never
+  boundary:
+  - source:
+      name: GLORYS
+      glorys_layout: regional
+    type: physics
+  - source:
+      name: UNIFIED
+      climatology: true
+    type: bgc
+  tidal: []
+  river: []

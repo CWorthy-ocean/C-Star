@@ -23,9 +23,10 @@ reference and hand its path through the existing ``source["path"]`` plumbing
 (``RomsMarblInputData._resolve_source_block``) -- nothing in roms-tools is patched.
 
 This remains an *interim, experimental* module (not something roms-tools documents or
-guarantees) rather than a permanent feature: gated behind ``--subchunk``
-(``python -m cstar_forge.run``, default off) pending review from the roms-tools
-maintainers.
+guarantees) rather than a permanent feature, pending review from the roms-tools
+maintainers. It is nonetheless *on by default* (``python -m cstar_forge.run``;
+disable with ``--no-subchunk``), so its dependencies are ordinary runtime
+dependencies of forge, not optional extras.
 
 Note that reading a reference now requires ``kerchunk`` to be *importable at read
 time* too (for xarray's backend auto-detection to find it), not just at build time.
@@ -64,9 +65,11 @@ def _require_subchunk_deps() -> None:
         import ujson  # noqa: F401
     except ImportError as e:
         raise ImportError(
-            "GLORYS subchunking (--subchunk) requires the 'kerchunk', 'nest_asyncio', "
-            "'ujson', and 'fastparquet' packages. These are listed in environment.yml; "
-            "install them into the cstar-forge-env environment to use this feature."
+            "GLORYS subchunking (on by default) requires the 'kerchunk', "
+            "'nest_asyncio', 'ujson', and 'fastparquet' packages. They are declared "
+            "as forge dependencies, so an environment missing them predates that "
+            "change: install them (e.g. `conda install -c conda-forge kerchunk "
+            "nest-asyncio ujson fastparquet`), or rerun with --no-subchunk."
         ) from e
 
 

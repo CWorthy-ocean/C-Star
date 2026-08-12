@@ -144,9 +144,14 @@ def process(spec, *, working_dir=None, **kwargs):
         return process_forge_blueprint(cfg, host=host, **kwargs)
 
 
-def main(argv: list | None = None) -> int:
+def main(argv: list | None = None, *, prog: str = "python -m cstar_forge.run") -> int:
+    """Process a forge blueprint from the command line.
+
+    ``prog`` names the invoking command in ``--help`` output; ``cstar_forge.cli``
+    passes ``"cstar forge run"`` so the usage line matches what the user typed.
+    """
     parser = argparse.ArgumentParser(
-        prog="python -m cstar_forge.run",
+        prog=prog,
         description="Process a forge_blueprint.yaml on this machine "
         "(generate inputs + configure build).",
     )

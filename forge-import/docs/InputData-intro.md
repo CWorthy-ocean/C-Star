@@ -240,7 +240,7 @@ named `cson_roms-marbl_v0.1_test-tiny` produces:
 ## Usage Pattern
 
 Direct construction is for developers; normal usage goes through the forge application
-(`python -m cstar_forge.run`, see the note at the top of this document).
+(`cstar forge run`, see the note at the top of this document).
 
 ```python
 from cstar_forge.forge.input_data import RomsMarblInputData
@@ -271,9 +271,9 @@ roms_marbl_blueprint_elements, compile_time_settings, run_time_settings = input_
 ## Integration with ForgeExecutor
 
 The `RomsMarblInputData` class is used internally by `ForgeExecutor.generate_inputs()`
-(`cstar_forge/forge/executor.py`; see `docs/developer-guide.md` for the architecture). That
+(`cstar_forge/forge/executor.py`; see `docs/architecture-details.md` for the architecture). That
 method is in turn called by `process_forge_blueprint()`
-(`cstar_forge/forge/forge_blueprint_engine.py`), which is what `python -m cstar_forge.run`
+(`cstar_forge/forge/forge_blueprint_engine.py`), which is what `cstar forge run`
 invokes:
 
 1. Creates `RomsMarblInputData` instance, passing `self.forcing_override` and the other

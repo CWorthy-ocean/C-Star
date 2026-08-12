@@ -38,7 +38,7 @@ def run(ctx: typer.Context) -> None:
     """Process a forge blueprint with the full executor option set."""
     from cstar_forge.run import main
 
-    raise typer.Exit(main(list(ctx.args)))
+    raise typer.Exit(main(list(ctx.args), prog="cstar forge run"))
 
 
 @app.command(

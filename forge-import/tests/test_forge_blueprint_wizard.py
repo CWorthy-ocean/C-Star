@@ -466,9 +466,15 @@ def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (default False for the bundled catalog model).
+    top-level use_pio (True for pio-dev, the wizard's default model; False for
+    cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
+    assert wiz.model_dd.value == "pio-dev"
+    assert wiz.use_pio_chk.value is True
+    assert wiz._model_default_use_pio() is True
+
+    wiz.model_dd.value = "cson_roms-marbl_v0.1"
     assert wiz.use_pio_chk.value is False
     assert wiz._model_default_use_pio() is False
 
@@ -482,7 +488,11 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    assert wiz.use_pio_chk.value is False
+    # pio-dev (the default model) declares use_pio: true -- exactly the
+    # ModelSpec this test guards against: unchecking must emit an explicit
+    # False, not fall back to the ModelSpec default.
+    assert wiz.use_pio_chk.value is True
+    wiz.use_pio_chk.value = False
     wiz._rebuild()
     assert wiz.config is not None
     assert wiz.config.model_settings["cppdefs"]["use_pio"] is False
@@ -874,16 +884,28 @@ def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
     assert captured["axes"][0].lines, "the plotted line did not survive plt.show()"
 
 
-def test_build_run_command_uses_current_interpreter():
-    """The Run button invokes `sys.executable -m cstar_forge.run <path>` -- the
-    interpreter already running the wizard's kernel -- not a bare `python` or
-    `conda run` invocation (avoids conda/micromamba env-discovery issues).
+def test_build_run_command_uses_cstar_blueprint_run_from_this_env():
+    """The Run button invokes `cstar blueprint run <path>` -- the one command the docs
+    give for both pipeline steps -- via the `cstar` script installed next to the
+    interpreter already running the wizard's kernel, not a bare `cstar` from PATH or a
+    `conda run` invocation (avoids conda/micromamba env-discovery issues). Not
+    `cstar forge run`: the button exposes no per-run flags, so that passthrough's only
+    advantage does not apply here.
     """
     import sys
 
     wiz = ForgeBlueprintWizard()
     cmd = wiz._build_run_command("/tmp/some_blueprint.yaml")
-    assert cmd == [sys.executable, "-m", "cstar_forge.run", "/tmp/some_blueprint.yaml"]
+    cstar_exe = Path(sys.executable).with_name("cstar")
+    if cstar_exe.exists():
+        assert cmd == [str(cstar_exe), "blueprint", "run", "/tmp/some_blueprint.yaml"]
+    else:
+        assert cmd == [
+            sys.executable,
+            "-m",
+            "cstar_forge.run",
+            "/tmp/some_blueprint.yaml",
+        ]
 
 
 def test_workplan_path_strips_forge_blueprint_suffix():
@@ -967,7 +989,9 @@ def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
     assert [s.name for s in wp.steps] == ["forge", "roms_marbl"]
     assert wp.steps[1].is_deferred
     assert "cstar workplan run" in wiz.workplan_status.value
-    assert "CSTAR_APP_MODULES=cstar_forge.forge.app" in wiz.workplan_status.value
+    # The printed command carries no env-var prefix: the forge app reaches C-Star's
+    # registry through cstar-forge's `cstar.applications` entry point.
+    assert "CSTAR_APP_MODULES" not in wiz.workplan_status.value
 
 
 @requires_workplan_support
@@ -1061,7 +1085,10 @@ def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_p
     text = "".join(o["text"] for o in wiz.run_output.outputs)
     assert "line one" in text
     assert "line two" in text
-    assert wiz.run_status.value == "<span style='color:#080'>✓ finished</span>"
+    assert "✓ finished" in wiz.run_status.value
+    # ...and the success message hands the user their next command, since the
+    # app-framework path prints no "run it with" trailer of its own
+    assert "cstar blueprint run" in wiz.run_status.value
     assert wiz.run_btn.disabled is False
 
 

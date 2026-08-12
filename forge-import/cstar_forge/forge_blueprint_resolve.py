@@ -593,6 +593,18 @@ def build_forge_blueprint(
         settings.setdefault("tides", {})["bry_tides"] = False
         settings.setdefault("sponge_tune", {})["ub_tune"] = False
 
+    # No tidal forcing item: force the run-time tide switches off too. ROMS enables
+    # tides via bry_tides/pot_tides in TIDAL_FRC_SETTINGS (the TIDES cppdef only
+    # stamps a netCDF attribute), so leaving the ModelSpec's defaults on would send
+    # ROMS looking for tidal input data that was never generated. Applied after the
+    # override merge so an explicit bry_tides=True override can't reintroduce the
+    # crash -- except with ana_tides, which computes tides analytically and needs
+    # no input file.
+    if not tidal_items and not settings.get("tides", {}).get("ana_tides", False):
+        tides_settings = settings.setdefault("tides", {})
+        tides_settings["bry_tides"] = False
+        tides_settings["pot_tides"] = False
+
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
     # ROMS opens no CDR file), and CDR forcing implies CDR output. Either way

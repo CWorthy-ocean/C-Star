@@ -11,13 +11,16 @@ disposable for the same reason ``run.py`` is: when forge relocates into C-Star
 wholesale, C-Star supplies its own host resolution and this module is rewritten, not
 carried over as-is.
 
-Discoverable via the ``CSTAR_APP_MODULES`` environment variable
-(``cstar.applications.core.get_application``)::
+Discovered by ``cstar.applications.core.get_application`` through the
+``cstar.applications`` entry-point group, which ``pyproject.toml`` declares as::
 
-    export CSTAR_APP_MODULES=cstar_forge.forge.app
+    [project.entry-points."cstar.applications"]
+    forge = "cstar_forge.forge.app"
 
-which lets C-Star's own entrypoint discover and run a forge blueprint directly, e.g.
-``cstar blueprint run forge_blueprint.yaml``.
+C-Star imports this module the first time an ``application: forge`` blueprint is
+resolved, so its :func:`register_application` decorator runs and its own entrypoint
+can run a forge blueprint directly: ``cstar blueprint run forge_blueprint.yaml``.
+An installed cstar-forge is all that requires -- no environment variables.
 
 Scope (2026-07, first cut): :meth:`ForgeRunner.run` generates ROMS-MARBL inputs and
 emits the downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- it
@@ -113,8 +116,8 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
 
 @register_application
 class ForgeApplication(ApplicationDefinition[ForgeBlueprint, ForgeRunner]):
-    """Registers ``forge`` with C-Star's application registry (see module docstring
-    for the ``CSTAR_APP_MODULES`` discovery mechanism).
+    """Registers ``forge`` with C-Star's application registry (see the module
+    docstring for how the ``cstar.applications`` entry point reaches this module).
     """
 
     name = APP_NAME
