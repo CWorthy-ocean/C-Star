@@ -55,8 +55,6 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
-from cstar.orchestration.models import Resource, VersionedResource
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
     from pathlib import Path
@@ -726,10 +724,6 @@ def _describe(shape: tuple[type, ...]) -> str:
     """
     names = ", ".join(entry.__name__ for entry in shape)
     return names if len(shape) == 1 else f"({names})"
-
-
-register_identity(VersionedResource, "hash", hash_identity)
-register_identity(Resource, "location", location_identity)
 
 
 def subject_for(

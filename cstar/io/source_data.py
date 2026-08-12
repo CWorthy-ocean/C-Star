@@ -17,6 +17,7 @@ from cstar.io.constants import (
 )
 from cstar.io.staged_data import StagedDataCollection
 from cstar.io.stager import get_stager
+from cstar.orchestration.cache_keys import identity_for
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
@@ -299,6 +300,16 @@ class SourceData:
     def stage(self, target_dir: str | Path) -> "StagedData":
         """Stages the data, making it available to C-Star"""
         return self.stager.stage(target_dir=Path(target_dir))
+
+
+@identity_for(SourceData, "hash")
+def sourcedata_identity(ds: SourceData) -> dict[str, str]:
+    identity_map = {
+        "source.identifier": str(ds.identifier),
+        "source.location": ds.location,
+    }
+
+    return identity_map
 
 
 class SourceDataCollection:
