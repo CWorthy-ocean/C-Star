@@ -894,7 +894,10 @@ class ArtifactCache:
                 )
             path = root / name
             self._assert_contained(path, root)
-            log.debug(f"Located {name!r} in the shared cache at {str(path)!r}")
+            msg = f"Target artifact storage location in shared cache: {str(path)!r}"
+            if path.exists():
+                msg = f"Located {name!r} in the shared cache at {str(path)!r}"
+            log.debug(msg)
             return Location(path=path, tier=tier, name=name, run_id=None)
 
         if run_id is None:
@@ -903,9 +906,10 @@ class ArtifactCache:
         path = root / run_id / name
         self._assert_contained(path, root)
 
-        log.debug(
-            f"Located {name!r} in the user cache for run {run_id!r} at {str(path)!r}"
-        )
+        msg = f"Target artifact storage location in user cache: {str(path)!r}"
+        if path.exists():
+            msg = f"Located {name!r} in the user cache at {str(path)!r}"
+        log.debug(msg)
         return Location(path=path, tier=tier, name=name, run_id=run_id)
 
     def candidates(self, name: str, run_id: str | None = None) -> tuple[Location, ...]:
