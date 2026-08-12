@@ -1,14 +1,38 @@
 # Release notes
 
-## Unreleased
+## 0.4.0
 
-* New CLI: `cstar forge run` (full executor option set, passthrough) and `cstar forge wizard`, registered with C-Star's CLI via the `cstar.cli` entry-point group (requires a C-Star release with the discovery hook; `python -m cstar_forge.run` continues to work)
-* cstar-ocean dependency floor raised to 0.10.0
-* `cstar-forge` now declares a `cstar.applications` entry point (`forge = "cstar_forge.forge.app"`), so `cstar blueprint run <forge_blueprint.yaml>` resolves `application: forge` from an installed cstar-forge alone — no environment variables, in local runs and in scheduler jobs alike. This replaces the `CSTAR_APP_MODULES` prefix the docs and the wizard's saved-workplan command previously required; the variable was removed in cstar-ocean 0.10.0, which ships the entry-point support
-* cstar-ocean is now sourced from conda-forge in the pixi/conda environments
-* New pixi environments: `user` (pure-conda replay of the full stack from conda-forge) and `dev-laptop` (dev plus a local build toolchain); lockfile consumption artifacts are exported per release via `scripts/export-lock-artifacts.py`
-* Docs restructured: new Getting Started walkthrough, installation page reorganized around HPC/developer paths, architecture pages consolidated and refreshed
-* The GLORYS subchunking libraries (`kerchunk`, `nest-asyncio`, `ujson`, `fastparquet`) are now declared forge dependencies. Subchunking is on by default, so a `conda install -c conda-forge cstar-forge` environment previously failed at input generation with an `ImportError` from `glorys_subchunk.py`
+### Breaking Changes
+
+* Dropped experimental `--stage-ic-sources` option. ([#114](https://github.com/CWorthy-ocean/cstar-forge/pull/114))
+
+### New Features
+
+* Installation instructions and documentation have been overhauled ([#113](https://github.com/CWorthy-ocean/cstar-forge/pull/113))
+
+### Bug Fixes
+
+* Fixed `do_cdr` (now `do_cdr_output`) behavior ([#116](https://github.com/CWorthy-ocean/cstar-forge/pull/116))
+* Fix tides still being active even if tidal forcing is turned off ([#118](https://github.com/CWorthy-ocean/cstar-forge/pull/118))
+
+### Improvements
+
+* Subchunking of glorys data is now enabled by default; users can opt out with `--no-subchunk`. ([#114](https://github.com/CWorthy-ocean/cstar-forge/pull/114))
+* Use CWorthy fork of PIO to get needed feature for upcoming ROMS release (0.4.0) ([#115](https://github.com/CWorthy-ocean/cstar-forge/pull/115))
+* `do_cdr` renamed to `do_cdr_output` to better reflect functionality and match namelist; migration added for backwards compatibility ([#116](https://github.com/CWorthy-ocean/cstar-forge/pull/116))
+* automatically add necessary MARBL diagnostics when CDR output is enabled ([#116](https://github.com/CWorthy-ocean/cstar-forge/pull/116))
+* Enable support for Unified BGC dataset v2.1 ([#117](https://github.com/CWorthy-ocean/cstar-forge/pull/117))
+* Add additional model specs for newer roms releases ([#118](https://github.com/CWorthy-ocean/cstar-forge/pull/118))
+* Default to pio-dev model spec for now, which tracks the latest roms `main` ([#118](https://github.com/CWorthy-ocean/cstar-forge/pull/118))
+* Add "simple" BGC forcing spec for demos with minimal complexity (notably, no tides, so no TPXO needed) ([#118](https://github.com/CWorthy-ocean/cstar-forge/pull/118))
+* Register forge applications with cstar using entrypoints (requires C-Star 0.10.0) ([#118](https://github.com/CWorthy-ocean/cstar-forge/pull/118))
+
+### Miscellaneous
+
+* Update release notes finalizer to remove sections with nothing in them ([#112](https://github.com/CWorthy-ocean/cstar-forge/pull/112))
+* Update release notes updater to handle unbulleted content ([#112](https://github.com/CWorthy-ocean/cstar-forge/pull/112))
+* Usage of plain `cstar blueprint run` for the forge application encouraged in examples and wizard Run box ([#118](https://github.com/CWorthy-ocean/cstar-forge/pull/118))
+* Properly include subchunking dependencies in default package ([#118](https://github.com/CWorthy-ocean/cstar-forge/pull/118))
 
 ## 0.3.0
 
