@@ -15,7 +15,6 @@ from cstar.io.constants import (
     SourceClassification,
     SourceType,
 )
-from cstar.io.retriever import get_retriever
 from cstar.io.staged_data import StagedDataCollection
 from cstar.io.stager import get_stager
 
@@ -292,6 +291,8 @@ class SourceData:
     def retriever(self) -> "Retriever":
         """The retriever instance used to fetch data."""
         if not self._retriever:
+            from cstar.io.retriever import get_retriever
+
             self._retriever = get_retriever(self)
         return self._retriever
 
