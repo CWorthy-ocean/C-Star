@@ -368,7 +368,7 @@ class ArtifactRecord(CacheModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _infer_legacy_checksum_mode(cls, payload: Any) -> Any:
+    def _infer_legacy_checksum_mode(cls, payload: dict[str, str] | Any) -> Any:
         """Interpret a mode-less checksum as a full digest.
 
         Parameters
@@ -490,7 +490,7 @@ class SharedRecord(ArtifactRecord):
         Run whose differing promotion was most recently skipped.
     """
 
-    references: list[Reference] = Field(default_factory=list)
+    references: list[Reference] = Field(default_factory=list[Reference])
     first_referenced_at: str | None = None
     reference_total: int = 0
     divergent_promotions: int = 0
@@ -604,7 +604,7 @@ class SetManifest(CacheModel):
         Schema version.
     """
 
-    members: list[SetMember] = Field(default_factory=list)
+    members: list[SetMember] = Field(default_factory=list[SetMember])
     member_count: int = 0
     manifest_digest: str = ""
     checksum_mode: ChecksumMode | None = None
