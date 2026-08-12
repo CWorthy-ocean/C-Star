@@ -26,6 +26,10 @@ DEFAULT_OUTPUT_ROOT_NAME: t.Literal["output"] = "output"
 """A fixed `output_root_name` to be used when generating outputs with ROMS."""
 
 
+WALLTIME_RE = r"^(([1-9]-\d{2}|\d{2}):)?(\d{2}):(\d{2})$"
+"""Regex for validating the basic HH:MM:SS, MM:SS, or D-HH:MM-SS format."""
+
+
 def coerce_datetime(datetime: str | dt.datetime) -> dt.datetime:
     """Coerces datetime-like input to a datetime instance.
 

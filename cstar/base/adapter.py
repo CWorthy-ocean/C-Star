@@ -12,6 +12,13 @@ class ModelAdapter(t.Protocol, t.Generic[_Tin, _Tout_co]):
     model: _Tin
 
     def __init__(self, model: _Tin) -> None:
+        """Initialize the adapter instance.
+
+        Parameters
+        ----------
+        model : _Tin
+            The model to be adapted.
+        """
         self.model = model
 
     def adapt(self) -> _Tout_co | None:
@@ -21,6 +28,44 @@ class ModelAdapter(t.Protocol, t.Generic[_Tin, _Tout_co]):
         -------
         _Tout
             The instance converted from the source model
+        """
+        ...
+
+
+_Tin_contra = t.TypeVar("_Tin_contra", contravariant=True)
+
+
+class ConfiguredModelAdapter(t.Protocol, t.Generic[_Tin_contra, _Tout_co]):
+    """Contract exposing a mechanism to adapt a source model to a target type.
+
+    `ConfiguredModelAdapter` instances do not store the model as local state;
+    Instead, the model is passed to `adapt` instead of the contstructor.
+
+    NOTE: this is a workaround until the `ModelAdapter` contract can be adjusted to
+    instantiate a new adapter instance via a factory method instead of hijacking __init__.
+    """
+
+    def adapt(self, model: _Tin_contra) -> _Tout_co:
+        """Adapt the source model to the target output type.
+
+        Returns
+        -------
+        _Tout
+            The instance converted from the source model
+        """
+        ...
+
+
+class ModelEnricher(t.Protocol, t.Generic[_Tin]):
+    """Contract exposing a mechanism to enrich the content of an entity"""
+
+    def enrich(self, model: _Tin) -> _Tin:
+        """Create an enriched version of the input model.
+
+        Returns
+        -------
+        _Tin
+            The instance enriched from the source model
         """
         ...
 
@@ -83,3 +128,9 @@ class SchemaAdapter(abc.ABC, ModelAdapter[dict[str, t.Any], dict[str, t.Any]]):
             migrated[self.SCHEMA_VERSION_KEY] = self.target()
 
         return migrated
+
+
+class CstarAdaptationError(Exception):
+    """Raise this error when an input cannot be adapted to the target type."""
+
+    ...

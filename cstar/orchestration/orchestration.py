@@ -27,6 +27,7 @@ from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
+from cstar.orchestration.formatting import ModelFormatter
 from cstar.orchestration.models import Blueprint, ConfiguredBaseModel, Step, Workplan
 from cstar.orchestration.serialization import (
     deserialize,
@@ -975,6 +976,29 @@ class Orchestrator(LoggingMixin):
 class RunRequest(ConfiguredBaseModel):
     command: list[str] = Field(default_factory=list[str])
     environment: dict[str, str] = Field(default_factory=dict[str, str])
+
+
+class RunRequestCommandFormatter(ModelFormatter[RunRequest]):
+    """Format a `RunRequest` as a CLI command."""
+
+    def _to_string(self, value: RunRequest) -> str:
+        variables = " ".join(f"{k}='{v}'" for k, v in value.environment.items())
+        cmd = " ".join(value.command)
+
+        return f"{variables} {cmd}".strip()
+
+
+class RunRequestScriptFormatter(ModelFormatter[RunRequest]):
+    """Format a `RunRequest` as script content."""
+
+    def _to_string(self, value: RunRequest) -> str:
+        command = " ".join(value.command)
+        exports = ";".join(f"export {k}='{v}'" for k, v in value.environment.items())
+
+        if exports:
+            return f"{exports}; {command};"
+
+        return f"{command};"
 
 
 def check_environment() -> None:

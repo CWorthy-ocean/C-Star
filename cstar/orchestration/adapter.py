@@ -5,15 +5,17 @@ from pathlib import Path
 
 import yaml
 
-from cstar.base.adapter import ModelAdapter
+from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
-from cstar.orchestration import orchestration
-from cstar.orchestration.formatting import RunRequestCommandFormatter
+from cstar.orchestration.orchestration import RunRequest, RunRequestCommandFormatter
+
+if t.TYPE_CHECKING:
+    from cstar.orchestration.orchestration import LiveStep
 
 
-def prepare_directive_file(step: "orchestration.LiveStep") -> Path:
+def prepare_directive_file(step: "LiveStep") -> Path:
     """Create a directives file in the step work directory.
 
     Parameters
@@ -36,22 +38,26 @@ def prepare_directive_file(step: "orchestration.LiveStep") -> Path:
     return directives_path
 
 
-class StepToRunRequestAdapter(
-    ModelAdapter["orchestration.LiveStep", orchestration.RunRequest]
-):
+class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
     """Convert a `LiveStep` into a `RunRequest`."""
 
-    def __init__(self, model: "orchestration.LiveStep") -> None:
-        """Initialize the adapter.
+    _enricher: ModelEnricher["RunRequest"] | None = None
+    """A model enricher that modifies the run request."""
+
+    def __init__(self, enricher: ModelEnricher["RunRequest"] | None = None) -> None:
+        """Initialize the adapter instance.
 
         Parameters
         ----------
-        model : LiveStep
-            The step to convert.
+        enricher : ModelEnricher[RunRequest | None]
+            An enricher to be applied after the default adaptation is performed.
         """
-        self.model = model
+        self._enricher = enricher
 
-    def adapt(self) -> orchestration.RunRequest:
+    def adapt(
+        self,
+        model: "LiveStep",
+    ) -> "RunRequest":
         """Convert a `Step` into a request for blueprint execution via the C-Star CLI.
 
         Returns
@@ -63,17 +69,20 @@ class StepToRunRequestAdapter(
             "cstar",
             "blueprint",
             "run",
-            str(self.model.blueprint_path),
+            str(model.blueprint_path),
         ]
 
         if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
             cmd_array.append(ARG_CLOBBER)
 
-        if self.model.directives:
-            directives_path = prepare_directive_file(self.model)
+        if model.directives:
+            directives_path = prepare_directive_file(model)
             cmd_array.extend([ARG_DIRECTIVES_URI_LONG, str(directives_path)])
 
-        return orchestration.RunRequest(command=cmd_array)
+        request = RunRequest(command=cmd_array)
+        if self._enricher and (enriched_request := self._enricher.enrich(request)):
+            request = enriched_request
+        return request
 
 
 class StepToPlaceholderAdapter(StepToRunRequestAdapter):
@@ -83,7 +92,7 @@ class StepToPlaceholderAdapter(StepToRunRequestAdapter):
 
     SCRIPTFILE_NAME: t.Final[str] = "placeholder_script.sh"
 
-    def adapt(self) -> orchestration.RunRequest:
+    def adapt(self, model: "LiveStep") -> RunRequest:
         """Convert a `Step` into a placeholder request instead of the
         originally requested blueprint execution.
 
@@ -92,24 +101,24 @@ class StepToPlaceholderAdapter(StepToRunRequestAdapter):
         RunRequest
             The instance converted from the source model.
         """
-        actual = super().adapt()
+        request = super().adapt(model)
 
-        if not self.model.fsm.run_dir.exists():
-            self.model.fsm.run_dir.mkdir(parents=True)
+        if not model.fsm.run_dir.exists():
+            model.fsm.run_dir.mkdir(parents=True)
 
-        original_cmd = RunRequestCommandFormatter().format(actual)
+        original_cmd = RunRequestCommandFormatter().format(request)
         sleep_time = random.random()
 
         script = textwrap.dedent(f"""\
             # this is a mock application script that produces verifiable output
-            echo "{self.model.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
+            echo "{model.name} started at $(date "+%Y-%m-%d %H:%M:%S")";
             echo "replacing: {original_cmd}";
             sleep {sleep_time};
-            echo "{self.model.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
+            echo "{model.name} completed at $(date "+%Y-%m-%d %H:%M:%S")";
             """)
 
         # write it to a script asset
-        script_path = self.model.fsm.run_dir / self.SCRIPTFILE_NAME
+        script_path = model.fsm.run_dir / self.SCRIPTFILE_NAME
         script_path.write_text(script)
 
-        return orchestration.RunRequest(command=["sh", str(script_path)])
+        return RunRequest(command=["sh", str(script_path)])

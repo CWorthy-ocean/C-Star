@@ -10,7 +10,7 @@ from cstar.system.scheduler import (
     SlurmPartition,
     SlurmQOS,
     SlurmScheduler,
-    _parse_walltime,
+    format_walltime,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
 )
@@ -510,7 +510,7 @@ def test_parse_walltime(value: str, expected: str) -> None:
     - N-hh:mm:ss
     - mm:ss
     """
-    actual = _parse_walltime(value)
+    actual = format_walltime(value)
 
     assert actual == expected
 

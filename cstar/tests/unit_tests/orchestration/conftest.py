@@ -641,6 +641,7 @@ async def executed_workplan_with_sideeffects(
 async def read_yaml_intercept(
     tmp_path: Path,
     default_blueprint_path: str,
+    bp_templates_dir: Path,
 ) -> AsyncGenerator[None]:
     """Intercept calls to read yaml files from disk to inspect if the content is
     a Workplan that should be modified to enable the test to run.
@@ -656,6 +657,11 @@ async def read_yaml_intercept(
 
     from cstar.orchestration.serialization import read_yaml_to_raw
 
+    default_rm_bp_path = bp_templates_dir / "blueprint.yaml"
+    rm_bp_content = default_rm_bp_path.read_text()
+    default_hw_bp_path = bp_templates_dir / "hello_world/blueprint.1.0.0.yaml"
+    hw_bp_content = default_hw_bp_path.read_text()
+
     def handle_yaml_read(
         _fn: Callable[[Path], dict[str, t.Any]],
     ) -> Callable[[Path], dict[str, t.Any]]:
@@ -666,20 +672,26 @@ async def read_yaml_intercept(
             """
             original_dict = _fn(path)
 
+            # if the we're loading a workplan, create test-local blueprints.
             if set(original_dict.keys()).intersection({"steps", "runtime_vars"}):
                 steps = original_dict["steps"]
                 for step_dict in steps:
-                    if step_dict["blueprint"] == default_blueprint_path:
-                        bp_path = tmp_path / "blueprint.yaml"
-                        bp_path.touch()
-                        step_dict["blueprint"] = bp_path
-                    elif str(step_dict["blueprint"]).startswith("."):
+                    if str(step_dict["blueprint"]).startswith("."):
                         og_path = Path(step_dict["blueprint"])
-                        rel_path = og_path.parent / og_path
-                        if not rel_path.exists():
-                            rel_path = tmp_path / og_path.name
-                            rel_path.touch()
-                        step_dict["blueprint"] = rel_path.resolve()
+                        bp_path = og_path.parent / og_path
+                        if not bp_path.exists():
+                            bp_path = tmp_path / og_path.name
+                        step_dict["blueprint"] = bp_path.resolve()
+                    else:
+                        bp_path = tmp_path / "blueprint.yaml"
+                        step_dict["blueprint"] = bp_path
+
+                    bp_path = step_dict["blueprint"]
+                    if step_dict["application"] == "hello_world":
+                        bp_path.write_text(hw_bp_content)
+                    else:
+                        # default to roms_marbl blueprint ....
+                        bp_path.write_text(rm_bp_content)
             # else:
             return original_dict
 
