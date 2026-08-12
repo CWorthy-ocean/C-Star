@@ -99,10 +99,14 @@ from __future__ import annotations
 import functools
 import hashlib
 import inspect
+import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
+from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, ENV_CSTAR_RUNID
+from cstar.base.feature import is_flag_enabled
 from cstar.orchestration.artifact_cache import (
     ArtifactCache,
     Location,
@@ -704,3 +708,43 @@ def _run_id(
             "argument to be cached; the user tier is addressed by run"
         )
     return value
+
+
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def cached_save_wrapper(
+    cache_func: Callable[[], ArtifactCache],
+    entity_type: type[T],
+    key_attr: str,
+) -> Callable[[Callable[P, Path]], Callable[P, Path]]:
+    def _deco(func: Callable[P, Path]) -> Callable[P, Path]:
+        if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
+            return func
+
+        @functools.wraps(func)
+        def _inner(*args: P.args, **kwargs: P.kwargs) -> Path:
+            self = args[0]
+            target_path = cast("Path", args[1])
+
+            key_entity = getattr(self, key_attr)
+            # cache = get_artifact_cache()
+            cache = cache_func()
+            run_id = os.getenv(ENV_CSTAR_RUNID, "")
+            key = generator_for(entity_type).key_for(key_entity, target_path)
+            if location := cache.resolve(key, run_id, record_use=True):
+                shutil.copy2(src=location.path.resolve(), dst=target_path)
+                print(
+                    f"Copying from cache location {str(location.path)!r} into {(target_path)!r}"
+                )
+                return target_path
+
+            result = func(*args, **kwargs)
+            if run_id:
+                cache.ingest(target_path, key, run_id)
+            return result
+
+        return _inner
+
+    return _deco
