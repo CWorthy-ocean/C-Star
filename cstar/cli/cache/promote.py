@@ -1,7 +1,6 @@
 import typing as t
 
 import typer
-from rich.console import Console
 
 from cstar.base.env import ENV_CSTAR_CLI_VERBOSE, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
@@ -11,6 +10,7 @@ from cstar.cli.cache.common import (
     ARG_RUNID,
     ARG_YES,
     confirm_overwrite,
+    console,
     key_callback,
     key_help,
     list_runs_with_cache,
@@ -34,7 +34,6 @@ from cstar.orchestration.artifact_cache import (
 
 log = get_logger(__name__)
 app = typer.Typer()
-console = Console()
 
 
 command_help: t.Final[str] = (
@@ -47,7 +46,6 @@ command_help: t.Final[str] = (
     help=command_help,
 )
 def promote(
-    context: typer.Context,
     run_id: t.Annotated[
         str,
         typer.Option(
@@ -92,7 +90,7 @@ def promote(
         on_conflict = OnConflict.ERROR if not overwrite else OnConflict.OVERWRITE
         location = cache.promote(key, run_id, on_conflict=on_conflict)
     except ArtifactNotFoundError:
-        print(f"No cache artifact found for run-id {run_id!r} with key {key!r}")
+        console.print(f"No cache artifact found for run-id {run_id!r} with key {key!r}")
     except ArtifactExistsError:
         if confirm_overwrite(force_overwrite=overwrite):
             location = cache.promote(key, run_id, on_conflict=OnConflict.OVERWRITE)
@@ -101,7 +99,7 @@ def promote(
         msg = f"Cached artifact {key!r} promoted to the group cache"
         if is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
             msg = f"{msg} at {location!r}"
-        print(msg)
+        console.print(msg)
 
 
 if __name__ == "__main__":

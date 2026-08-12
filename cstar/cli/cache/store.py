@@ -1,7 +1,7 @@
 import typing as t
+from pathlib import Path
 
 import typer
-from rich.console import Console
 
 from cstar.base.env import ENV_CSTAR_CLI_VERBOSE, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
@@ -13,6 +13,7 @@ from cstar.cli.cache.common import (
     ARG_RUNID,
     ARG_YES,
     confirm_overwrite,
+    console,
     key_callback,
     key_help,
     move_help,
@@ -32,7 +33,6 @@ from cstar.orchestration.artifact_cache import ArtifactExistsError
 
 log = get_logger(__name__)
 app = typer.Typer()
-console = Console()
 
 
 command_help: t.Final[str] = "Manually insert an artifact into the cache."
@@ -43,7 +43,6 @@ command_help: t.Final[str] = "Manually insert an artifact into the cache."
     help=command_help,
 )
 def store(
-    context: typer.Context,
     run_id: t.Annotated[
         str,
         typer.Option(
@@ -63,7 +62,7 @@ def store(
         ),
     ],
     path: t.Annotated[
-        str,
+        Path,
         typer.Option(
             ARG_PATH,
             help=path_help,
@@ -97,20 +96,21 @@ def store(
     """Manually insert an artifact into the cache."""
     cache = get_artifact_cache()
     action = "added to"
+    path = path.expanduser().resolve()
 
-    if location := cache.resolve(key, run_id):
+    if location := cache.resolve(key, run_id, prefer_local=True):
         overwrite = confirm_overwrite(overwrite, location)
         action = "updated in"
 
     try:
         location = cache.ingest(path, key, run_id, move=move, overwrite=overwrite)
     except ArtifactExistsError:
-        print(f"An artifact with key {key!r} already exists for run {run_id!r}")
+        console.print(f"An artifact with key {key!r} already exists for run {run_id!r}")
     else:
-        msg = f"{path} has been {action} the cache"
+        msg = f"{str(path)!r} has been {action} the cache"
         if is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
             msg = f"{msg} at {str(location.path)!r}"
-        print(msg)
+        console.print(msg)
 
 
 if __name__ == "__main__":

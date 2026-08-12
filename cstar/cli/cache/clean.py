@@ -1,7 +1,6 @@
 import typing as t
 
 import typer
-from rich.console import Console
 
 from cstar.base.env import ENV_CSTAR_CLI_VERBOSE, ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
@@ -11,6 +10,7 @@ from cstar.cli.cache.common import (
     ARG_YES,
     confirm_remove,
     confirm_remove_run,
+    console,
     key_callback,
     key_help,
     print_not_found,
@@ -28,7 +28,6 @@ from cstar.orchestration.artifact_cache import ArtifactNotFoundError, UnsafePath
 
 log = get_logger(__name__)
 app = typer.Typer()
-console = Console()
 
 
 command_help: t.Final[str] = "Manually remove artifacts from the cache."
@@ -40,7 +39,6 @@ yes_help: t.Final[str] = "Perform user-level deletions without confirmation."
     help=command_help,
 )
 def store(
-    context: typer.Context,
     key: t.Annotated[
         str,
         typer.Option(
@@ -87,7 +85,7 @@ def store(
         if location := cache.resolve(key, resolve_runid):
             confirm = confirm_remove(confirm, location)
             if not confirm:
-                print("Artifact was not removed")
+                console.print("Artifact was not removed")
                 raise typer.Exit(0)
         else:
             print_not_found(run_id, key)
@@ -96,10 +94,10 @@ def store(
         # Gate the deletion on the answer. Computing it and then deleting
         # regardless would discard a refusal, and a whole run is a lot to lose.
         if not confirm_remove_run(run_id, confirm):
-            print("No artifacts were removed")
+            console.print("No artifacts were removed")
             raise typer.Exit(0)
     else:
-        print("A key or run-id is required")
+        console.print("A key or run-id is required")
         raise typer.Exit(2)
 
     is_removed = False
@@ -112,9 +110,13 @@ def store(
         else:
             is_removed = cache.delete_user_run(run_id)
     except UnsafePathError:
-        print(f"Confirmation required to remove shared artifact with key {key!r}")
+        console.print(
+            f"Confirmation required to remove shared artifact with key {key!r}"
+        )
     except ArtifactNotFoundError:
-        print(f"Artifact with key {key!r} could not be removed for run {run_id!r}")
+        console.print(
+            f"Artifact with key {key!r} could not be removed for run {run_id!r}"
+        )
 
     if is_removed:
         msg = (
@@ -122,7 +124,7 @@ def store(
             if key
             else f"Artifacts from run {run_id} have been deleted"
         )
-        print(msg)
+        console.print(msg)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import typing as t
 
 import typer
+from rich.console import Console
 from rich.prompt import Prompt
 
 from cstar.io.utils import get_artifact_cache
@@ -30,12 +31,15 @@ CHOICE_NO: t.Final[str] = "n"
 choices: t.Final[list[str]] = [CHOICE_YES, CHOICE_NO]
 
 
+console = Console()
+
+
 def print_not_found(run_id: str, key: str) -> None:
     """Print an informational message to the console for an unknown resource."""
     if run_id and key:
-        print(f"No cached artifact {key!r} found for run {run_id!r}")
+        console.print(f"No cached artifact {key!r} found for run {run_id!r}")
     elif not run_id and key:
-        print(f"No cached artifact {key!r} found in shared cache")
+        console.print(f"No cached artifact {key!r} found in shared cache")
 
 
 def runid_callback(context: typer.Context, value: str) -> str:
@@ -51,7 +55,7 @@ def runid_callback(context: typer.Context, value: str) -> str:
     str
     """
     if value and not value.strip():
-        print("A non-empty run-id must be specified.")
+        console.print("A non-empty run-id must be specified.")
         raise typer.Exit(1)
     return value.strip()
 
@@ -69,7 +73,7 @@ def key_callback(context: typer.Context, value: str) -> str:
     str
     """
     if value and not value.strip():
-        print("A non-empty key must be specified.")
+        console.print("A non-empty key must be specified.")
         raise typer.Exit(1)
 
     return value.strip()
@@ -91,9 +95,9 @@ def confirm_overwrite(
     location: Location | None = None,
 ) -> bool:
     if location is None:
-        print("An artifact with the specified key already exists")
+        console.print("An artifact with the specified key already exists")
     else:
-        print(f"The artifact at {location.path} already exists for that key.")
+        console.print(f"The artifact at {location.path} already exists for that key.")
 
     if force_overwrite:
         answer = CHOICE_YES
@@ -130,7 +134,7 @@ def confirm_remove_run(run_id: str, force_remove: bool = False) -> bool:
     bool
         Whether the removal should proceed.
     """
-    print(f"Every artifact cached for run {run_id!r} will be removed.")
+    console.print(f"Every artifact cached for run {run_id!r} will be removed.")
 
     if force_remove:
         return True
@@ -149,10 +153,10 @@ def confirm_remove(
     location: Location | None = None,
 ) -> bool:
     if location is None:
-        print("An artifact with the specified key does not exist")
+        console.print("An artifact with the specified key does not exist")
         return False
     else:
-        print(f"The artifact at {location.path} will be removed.")
+        console.print(f"The artifact at {location.path} will be removed.")
 
     if force_remove:
         answer = CHOICE_YES
