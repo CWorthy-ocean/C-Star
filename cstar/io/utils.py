@@ -1,25 +1,38 @@
-import getpass
 import os
 import typing as t
 from pathlib import Path
 
+from cstar.base.log import get_logger
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.artifact_cache import ArtifactCache
 
+log = get_logger(__name__)
+"""Module logger."""
+
+_cache: ArtifactCache | None = None
+
 
 def get_artifact_cache() -> ArtifactCache:
-    CSTAR_DIR: t.Final[str] = "cstar"
-    CACHE_DIR: t.Final[str] = "artifacts"
-    username: t.Final[str] = getpass.getuser()
+    global _cache
 
-    # TODO: use cstar.system.manager.XxxEnvSettings?
+    if _cache is not None:
+        return _cache
+
+    CACHE_DIR: t.Final[str] = "artifacts"
+    SHARED_DIR: t.Final[str] = "shared-artifacts"
+
     project_dir: t.Final[str] = os.getenv("PROJECT", "")
     scratch_dir: t.Final[str] = os.getenv("SCRATCH", "")
 
-    default_data_dir = DirectoryManager().data_home() / CSTAR_DIR
-    default_group_dir = default_data_dir / CSTAR_DIR / "share"
+    default_data_dir = DirectoryManager().data_home()
+    log.debug(f"{default_data_dir=}")
+    default_group_dir = default_data_dir.parent / "shared-artifacts"
+    log.debug(f"{default_group_dir=}")
 
-    user_cache_dir = Path(scratch_dir or default_data_dir) / username / CACHE_DIR
-    group_cache_dir = Path(project_dir or default_group_dir) / CSTAR_DIR / CACHE_DIR
+    user_cache_dir = Path(scratch_dir or default_data_dir) / CACHE_DIR
+    log.debug(f"{user_cache_dir=}")
+    group_cache_dir = Path(project_dir or default_group_dir) / SHARED_DIR
+    log.debug(f"{group_cache_dir=}")
 
-    return ArtifactCache(user_cache_dir, group_cache_dir)
+    _cache = ArtifactCache(user_cache_dir, group_cache_dir)
+    return _cache

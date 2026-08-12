@@ -8,14 +8,16 @@ from typer.testing import CliRunner
 
 from cstar.cli.cache.common import ARG_KEY, ARG_RUNID
 from cstar.cli.cache.show import app
-from cstar.io.utils import get_artifact_cache
+from cstar.orchestration.artifact_cache import (
+    ArtifactCache,
+)
 
 KEY: t.Final[str] = "mock-key"
 RUN_ID: t.Final[str] = "mock-runid"
 
 
 @pytest.fixture
-def stored(tmp_path: Path) -> Path:
+def stored(tmp_path: Path, cache: ArtifactCache) -> Path:
     """Commit one user-tier artifact and return the file it came from.
 
     Parameters
@@ -30,7 +32,7 @@ def stored(tmp_path: Path) -> Path:
     """
     item = tmp_path / "something.txt"
     item.write_text("Well isn't this something?")
-    get_artifact_cache().ingest(item, KEY, RUN_ID)
+    cache.ingest(item, KEY, RUN_ID)
     return item
 
 
@@ -50,6 +52,7 @@ def _show(*args: str) -> t.Any:
     return CliRunner().invoke(app, list(args), color=False)
 
 
+@pytest.mark.usefixtures("cache")
 @pytest.mark.usefixtures("mock_artifact_cache_env")
 def test_cli_cache_show_reports_an_empty_cache() -> None:
     """A cold cache says so rather than printing empty headings."""
@@ -60,9 +63,8 @@ def test_cli_cache_show_reports_an_empty_cache() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_show_lists_runs_and_shared_artifacts() -> None:
+def test_cli_cache_show_lists_runs_and_shared_artifacts(cache: ArtifactCache) -> None:
     """With no arguments the command surveys what is cached."""
-    cache = get_artifact_cache()
     cache.promote(KEY, RUN_ID)
 
     result = _show()
@@ -113,9 +115,11 @@ def test_cli_cache_show_reports_a_missing_key_for_a_run() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_show_finds_a_shared_artifact_without_a_run() -> None:
+def test_cli_cache_show_finds_a_shared_artifact_without_a_run(
+    cache: ArtifactCache,
+) -> None:
     """A key alone searches the shared tier, which needs no run identity."""
-    get_artifact_cache().promote(KEY, RUN_ID)
+    cache.promote(KEY, RUN_ID)
 
     result = _show(ARG_KEY, KEY)
 

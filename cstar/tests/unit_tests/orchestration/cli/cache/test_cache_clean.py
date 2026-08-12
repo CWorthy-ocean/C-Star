@@ -9,15 +9,18 @@ from typer.testing import CliRunner
 
 from cstar.cli.cache.clean import app
 from cstar.cli.cache.common import ARG_KEY, ARG_RUNID, ARG_YES
-from cstar.io.utils import get_artifact_cache
-from cstar.orchestration.artifact_cache import ArtifactNotFoundError, UnsafePathError
+from cstar.orchestration.artifact_cache import (
+    ArtifactCache,
+    ArtifactNotFoundError,
+    UnsafePathError,
+)
 
 KEY: t.Final[str] = "mock-key"
 RUN_ID: t.Final[str] = "mock-runid"
 
 
 @pytest.fixture
-def stored(tmp_path: Path) -> Path:
+def stored(tmp_path: Path, cache: ArtifactCache) -> Path:
     """Commit one user-tier artifact and return the file it came from.
 
     Parameters
@@ -32,7 +35,7 @@ def stored(tmp_path: Path) -> Path:
     """
     item = tmp_path / "something.txt"
     item.write_text("Well isn't this something?")
-    get_artifact_cache().ingest(item, KEY, RUN_ID)
+    cache.ingest(item, KEY, RUN_ID)
     return item
 
 
@@ -53,40 +56,40 @@ def _clean(*args: str) -> t.Any:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_removes_a_user_artifact() -> None:
+def test_cli_cache_clean_removes_a_user_artifact(cache: ArtifactCache) -> None:
     """A confirmed deletion removes the artifact from the run."""
     with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")):
         result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY)
 
     assert result.exit_code == 0
     assert "has been deleted" in result.stdout
-    assert get_artifact_cache().resolve(KEY, RUN_ID) is None
+    assert cache.resolve(KEY, RUN_ID) is None
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_declining_keeps_the_artifact() -> None:
+def test_cli_cache_clean_declining_keeps_the_artifact(cache: ArtifactCache) -> None:
     """Deletion is irreversible, so a refusal has to leave it alone."""
     with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
         result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY)
 
     assert result.exit_code == 0
     assert "was not removed" in result.stdout
-    assert get_artifact_cache().resolve(KEY, RUN_ID) is not None
+    assert cache.resolve(KEY, RUN_ID) is not None
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_yes_skips_the_prompt() -> None:
+def test_cli_cache_clean_yes_skips_the_prompt(cache: ArtifactCache) -> None:
     """``--yes`` is for unattended use, so it must not stop to ask."""
     with mock.patch("rich.prompt.Prompt.ask") as prompt:
         result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_YES)
 
     prompt.assert_not_called()
     assert "has been deleted" in result.stdout
-    assert get_artifact_cache().resolve(KEY, RUN_ID) is None
+    assert cache.resolve(KEY, RUN_ID) is None
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_cache_clean_reports_an_unknown_artifact() -> None:
+def test_cli_cache_clean_reports_an_unknown_artifact(cache: ArtifactCache) -> None:
     """Nothing to delete is reported rather than treated as a deletion."""
     result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, "no-such-key")
 
@@ -95,7 +98,7 @@ def test_cli_cache_clean_reports_an_unknown_artifact() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_verbose_names_the_tier() -> None:
+def test_cli_cache_clean_verbose_names_the_tier(cache: ArtifactCache) -> None:
     """Verbose output says which tier the artifact was removed from."""
     result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_YES, "--verbose")
 
@@ -104,9 +107,8 @@ def test_cli_cache_clean_verbose_names_the_tier() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_leaves_the_shared_copy_alone() -> None:
+def test_cli_cache_clean_leaves_the_shared_copy_alone(cache: ArtifactCache) -> None:
     """Cleaning a run must not reach into the tier everyone else reads."""
-    cache = get_artifact_cache()
     cache.promote(KEY, RUN_ID)
 
     _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_YES)
@@ -120,13 +122,12 @@ def test_cli_cache_clean_leaves_the_shared_copy_alone() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_removes_a_shared_artifact() -> None:
+def test_cli_cache_clean_removes_a_shared_artifact(cache: ArtifactCache) -> None:
     """A key with no run identifier targets the shared tier.
 
     That routing is what makes the tier reachable at all: the command decides
     between tiers on whether a run was supplied.
     """
-    cache = get_artifact_cache()
     cache.promote(KEY, RUN_ID)
 
     with mock.patch("rich.prompt.Prompt.ask", mock.Mock(side_effect=["y", "y"])):
@@ -138,14 +139,15 @@ def test_cli_cache_clean_removes_a_shared_artifact() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_shared_removal_needs_both_answers() -> None:
+def test_cli_cache_clean_shared_removal_needs_both_answers(
+    cache: ArtifactCache,
+) -> None:
     """A shared deletion affects every user, so one answer is not enough.
 
     The first refusal has to stick. A second prompt that replaced the answer
     rather than adding to it would delete an artifact the user had already
     declined to remove, making the extra question worse than none at all.
     """
-    cache = get_artifact_cache()
     cache.promote(KEY, RUN_ID)
 
     with mock.patch("rich.prompt.Prompt.ask", mock.Mock(side_effect=["n", "y"])):
@@ -156,7 +158,9 @@ def test_cli_cache_clean_shared_removal_needs_both_answers() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_shared_miss_is_worded_for_the_tier() -> None:
+def test_cli_cache_clean_shared_miss_is_worded_for_the_tier(
+    cache: ArtifactCache,
+) -> None:
     """A shared miss has no run to mention, so it is described differently."""
     result = _clean(ARG_KEY, "no-such-key")
 
@@ -165,9 +169,8 @@ def test_cli_cache_clean_shared_miss_is_worded_for_the_tier() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_leaves_the_user_copy_alone() -> None:
+def test_cli_cache_clean_leaves_the_user_copy_alone(cache: ArtifactCache) -> None:
     """Removing the published copy must not reach into a run's workspace."""
-    cache = get_artifact_cache()
     cache.promote(KEY, RUN_ID)
 
     _clean(ARG_KEY, KEY, ARG_YES)
@@ -181,7 +184,9 @@ def test_cli_cache_clean_leaves_the_user_copy_alone() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_cache_clean_removes_a_whole_run(tmp_path: Path) -> None:
+def test_cli_cache_clean_removes_a_whole_run(
+    tmp_path: Path, cache: ArtifactCache
+) -> None:
     """A run identifier with no key clears everything that run cached.
 
     Parameters
@@ -191,7 +196,6 @@ def test_cli_cache_clean_removes_a_whole_run(tmp_path: Path) -> None:
     """
     item = tmp_path / "something.txt"
     item.write_text("payload")
-    cache = get_artifact_cache()
     cache.ingest(item, "first.nc", RUN_ID)
     cache.ingest(item, "second.nc", RUN_ID)
 
@@ -205,7 +209,9 @@ def test_cli_cache_clean_removes_a_whole_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_cache_clean_declining_keeps_the_whole_run(tmp_path: Path) -> None:
+def test_cli_cache_clean_declining_keeps_the_whole_run(
+    tmp_path: Path, cache: ArtifactCache
+) -> None:
     """A refusal has to stop the deletion, not merely be recorded.
 
     This is the most destructive path the command has — one answer removes
@@ -219,7 +225,6 @@ def test_cli_cache_clean_declining_keeps_the_whole_run(tmp_path: Path) -> None:
     """
     item = tmp_path / "something.txt"
     item.write_text("payload")
-    cache = get_artifact_cache()
     cache.ingest(item, "first.nc", RUN_ID)
     cache.ingest(item, "second.nc", RUN_ID)
 
@@ -233,7 +238,9 @@ def test_cli_cache_clean_declining_keeps_the_whole_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_cache_clean_run_prompt_names_the_run(tmp_path: Path) -> None:
+def test_cli_cache_clean_run_prompt_names_the_run(
+    tmp_path: Path, cache: ArtifactCache
+) -> None:
     """The prompt says what is about to go, since a run has no single path.
 
     Parameters
@@ -243,7 +250,7 @@ def test_cli_cache_clean_run_prompt_names_the_run(tmp_path: Path) -> None:
     """
     item = tmp_path / "something.txt"
     item.write_text("payload")
-    get_artifact_cache().ingest(item, "first.nc", RUN_ID)
+    cache.ingest(item, "first.nc", RUN_ID)
 
     with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
         result = _clean(ARG_RUNID, RUN_ID)
@@ -253,7 +260,9 @@ def test_cli_cache_clean_run_prompt_names_the_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_cache_clean_run_yes_skips_the_prompt(tmp_path: Path) -> None:
+def test_cli_cache_clean_run_yes_skips_the_prompt(
+    tmp_path: Path, cache: ArtifactCache
+) -> None:
     """``--yes`` is for unattended use, so it must not stop to ask.
 
     Parameters
@@ -263,7 +272,6 @@ def test_cli_cache_clean_run_yes_skips_the_prompt(tmp_path: Path) -> None:
     """
     item = tmp_path / "something.txt"
     item.write_text("payload")
-    cache = get_artifact_cache()
     cache.ingest(item, "first.nc", RUN_ID)
 
     with mock.patch("rich.prompt.Prompt.ask") as prompt:
@@ -299,14 +307,15 @@ def test_cli_cache_clean_requires_a_key_or_a_run() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_reports_a_refused_shared_deletion() -> None:
+def test_cli_cache_clean_reports_a_refused_shared_deletion(
+    cache: ArtifactCache,
+) -> None:
     """The cache guards shared deletion itself, and the refusal is surfaced.
 
     Confirming at the prompt is not the same as confirming to the cache; if
     the flag fails to reach it the command must say so rather than report a
     deletion that never happened.
     """
-    cache = get_artifact_cache()
     cache.promote(KEY, RUN_ID)
 
     with (
@@ -322,14 +331,14 @@ def test_cli_cache_clean_reports_a_refused_shared_deletion() -> None:
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_reports_an_artifact_that_vanished() -> None:
+def test_cli_cache_clean_reports_an_artifact_that_vanished(
+    cache: ArtifactCache,
+) -> None:
     """An artifact removed between the lookup and the delete is reported.
 
     Two processes cleaning the same run is the ordinary way this happens, and
     it should read as a failed removal rather than a crash.
     """
-    cache = get_artifact_cache()
-
     with (
         mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")),
         mock.patch.object(

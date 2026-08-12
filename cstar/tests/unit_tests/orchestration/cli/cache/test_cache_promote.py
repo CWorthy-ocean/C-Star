@@ -17,6 +17,9 @@ from cstar.cli.cache.common import (
 )
 from cstar.cli.cache.promote import app
 from cstar.io.utils import get_artifact_cache
+from cstar.orchestration.artifact_cache import (
+    ArtifactCache,
+)
 
 
 @pytest.fixture
@@ -127,7 +130,7 @@ async def test_cli_admin_promote_overwrite(answer: str, exp_value: bool) -> None
 )
 @pytest.mark.usefixtures("mock_artifact_cache_env")
 def test_cli_admin_promote_entry_not_found(
-    tmp_path: Path, key: str, run_id: str
+    tmp_path: Path, key: str, run_id: str, cache: ArtifactCache
 ) -> None:
     """Verify that the the key and run callbacks are wired up.
 
@@ -144,7 +147,6 @@ def test_cli_admin_promote_entry_not_found(
     actual_key: t.Final[str] = "mock-key"
     actual_run_id: t.Final[str] = "mock-runid"
 
-    cache = get_artifact_cache()
     location = cache.ingest(item_path, actual_key, actual_run_id)
     assert location.exists
 
@@ -161,7 +163,7 @@ def test_cli_admin_promote_entry_not_found(
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_admin_promote_happy_path(tmp_path: Path) -> None:
+def test_cli_admin_promote_happy_path(tmp_path: Path, cache: ArtifactCache) -> None:
     """Verify that the CLI command executes ArtifactCache.promote for the
     specified value.
 
@@ -178,7 +180,6 @@ def test_cli_admin_promote_happy_path(tmp_path: Path) -> None:
     key: t.Final[str] = "mock-key"
     run_id: t.Final[str] = "mock-runid"
 
-    cache = get_artifact_cache()
     location = cache.ingest(item_path, key, run_id)
     assert location.exists
     assert run_id in str(location.path)
@@ -209,7 +210,7 @@ def test_cli_admin_promote_happy_path(tmp_path: Path) -> None:
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
 def test_cli_admin_promote_conflict_declined_keeps_the_shared_copy(
-    tmp_path: Path,
+    tmp_path: Path, cache: ArtifactCache
 ) -> None:
     """A name already published with different content is not taken silently.
 
@@ -225,7 +226,6 @@ def test_cli_admin_promote_conflict_declined_keeps_the_shared_copy(
     original = tmp_path / "original.txt"
     original.write_text("published content")
 
-    cache = get_artifact_cache()
     cache.ingest(original, key, "run-a")
     cache.promote(key, "run-a")
 
@@ -247,7 +247,9 @@ def test_cli_admin_promote_conflict_declined_keeps_the_shared_copy(
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_admin_promote_conflict_accepted_replaces_it(tmp_path: Path) -> None:
+def test_cli_admin_promote_conflict_accepted_replaces_it(
+    tmp_path: Path, cache: ArtifactCache
+) -> None:
     """Confirming the prompt republishes over the existing name.
 
     Parameters
@@ -259,7 +261,6 @@ def test_cli_admin_promote_conflict_accepted_replaces_it(tmp_path: Path) -> None
     original = tmp_path / "original.txt"
     original.write_text("published content")
 
-    cache = get_artifact_cache()
     cache.ingest(original, key, "run-a")
     cache.promote(key, "run-a")
 
@@ -280,7 +281,9 @@ def test_cli_admin_promote_conflict_accepted_replaces_it(tmp_path: Path) -> None
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_admin_promote_yes_replaces_without_asking(tmp_path: Path) -> None:
+def test_cli_admin_promote_yes_replaces_without_asking(
+    tmp_path: Path, cache: ArtifactCache
+) -> None:
     """``--yes`` is for unattended use, so it must not stop to ask.
 
     Parameters
@@ -292,7 +295,6 @@ def test_cli_admin_promote_yes_replaces_without_asking(tmp_path: Path) -> None:
     original = tmp_path / "original.txt"
     original.write_text("published content")
 
-    cache = get_artifact_cache()
     cache.ingest(original, key, "run-a")
     cache.promote(key, "run-a")
 
