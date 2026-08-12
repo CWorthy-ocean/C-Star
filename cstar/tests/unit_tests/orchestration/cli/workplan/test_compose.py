@@ -234,7 +234,7 @@ async def test_build_and_run_dag_env(
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        await build_and_run_dag(generated_wp_path, run_id, working_dir)
+        await build_and_run_dag(generated_wp_path, run_id)
 
     assert key in str(ex)
 
@@ -380,7 +380,7 @@ async def test_run_composed_dag(
         )
         serialize(tweak_path, wp)
 
-        summary = await build_and_run_dag(tweak_path, run_id, working_dir)
+        summary = await build_and_run_dag(tweak_path, run_id)
         wp_path = summary.final_workplan
 
     wp = deserialize(wp_path, Workplan)

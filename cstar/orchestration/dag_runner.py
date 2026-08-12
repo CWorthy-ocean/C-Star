@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, computed_field
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
-from cstar.execution.file_system import StateDirectoryManager
+from cstar.execution.file_system import DirectoryManager, StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import Step, UserDefinedVariables, Workplan
@@ -254,7 +254,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     msg = f"Reloading workplan run: {wp.name}"
     log.debug(msg)
 
-    configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
+    configure_environment(None, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
     launcher = get_launcher()
@@ -533,7 +533,6 @@ async def on_status_changed(handle: ProcessHandle) -> None:
 async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
-    output_dir: Path | None = None,
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
 ) -> ExecutiveRunSummary:
@@ -545,8 +544,6 @@ async def build_and_run_dag(
         The path to the blueprint to execute
     run_id : str | None
         The run-id to be used by the orchestrator.
-    output_dir : Path | None
-        The path to the output directory.
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
     dry_run : bool
@@ -559,8 +556,7 @@ async def build_and_run_dag(
         The path to the workplan that was executed after any tranformations
         were applied.
     """
-    default_output_dir = StateDirectoryManager.data_dir()
-    output_dir = (output_dir or default_output_dir).expanduser().resolve()
+    output_dir = DirectoryManager().data_home()
     configure_environment(output_dir, run_id)
 
     launcher = get_launcher()

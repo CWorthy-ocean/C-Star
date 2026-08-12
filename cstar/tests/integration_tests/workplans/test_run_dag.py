@@ -109,7 +109,7 @@ async def test_build_and_run_local(
 
     # create unique run name only once per hour, cache otherwise.
     my_run_name = f"{tmp_path.stem}_{workplan_name}"
-    await build_and_run_dag(wp_path, my_run_name, tmp_path)
+    await build_and_run_dag(wp_path, my_run_name)
 
 
 # @pytest.mark.skipif(not slurm())
@@ -148,4 +148,4 @@ async def test_build_and_run(
 
     # create unique run name only once per hour, cache otherwise.
     my_run_name = f"{tmp_path.stem}_{workplan_name}"
-    await build_and_run_dag(wp_path, my_run_name, tmp_path)
+    await build_and_run_dag(wp_path, my_run_name)

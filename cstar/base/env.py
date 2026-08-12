@@ -249,7 +249,7 @@ ENV_CSTAR_CACHE_HOME: t.Annotated[
     EnvVar(
         "Environment variable used to override the home directory for C-Star file cache.",
         GROUP_FS,
-        "~/.cache",
+        "~/.cache/cstar",
         indirect_var="XDG_CACHE_HOME",
         default_factory=indirect_default_factory,
     ),
@@ -261,7 +261,7 @@ ENV_CSTAR_CONFIG_HOME: t.Annotated[
     EnvVar(
         "Environment variable used to override the home directory for C-Star config storage.",
         GROUP_FS,
-        "~/.config",
+        "~/.config/cstar",
         default_factory=indirect_default_factory,
         indirect_var="XDG_CONFIG_HOME",
     ),
@@ -273,7 +273,7 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
     EnvVar(
         "Environment variable used to override the home directory for C-Star dataset storage.",
         GROUP_FS,
-        "~/.local/share",
+        "~/.local/share/cstar",
         indirect_var="XDG_DATA_HOME",
         default_factory=lambda x: hpc_data_directory() or indirect_default_factory(x),
     ),
@@ -285,7 +285,7 @@ ENV_CSTAR_STATE_HOME: t.Annotated[
     EnvVar(
         "Environment variable used to override the home directory for C-Star state storage.",
         GROUP_FS,
-        "~/.local/state",
+        "~/.local/state/cstar",
         indirect_var="XDG_STATE_HOME",
         default_factory=indirect_default_factory,
     ),
