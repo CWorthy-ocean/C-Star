@@ -528,6 +528,24 @@ class ROMSInputDataset(InputDataset, ABC):
         return problems
 
 
+# @identity_for(ROMSInputDataset, "hash")
+# def romsinputdataset_identity(ds: ROMSInputDataset) -> dict[str, str]:
+#     identity_map = {
+#         "source.identifier": str(ds.source.identifier),
+#         "source.location": ds.source.location,
+#     }
+
+#     if ds.partitioning is not None:
+#         identity_map.update(
+#             {
+#                 "partitioning.np_eta": str(ds.partitioning.np_eta),
+#                 "partitioning.np_xi": str(ds.partitioning.np_xi),
+#             },
+#         )
+
+#     return identity_map
+
+
 class ROMSModelGrid(ROMSInputDataset):
     """An implementation of the ROMSInputDataset class for model grid files."""
 

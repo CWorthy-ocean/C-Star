@@ -577,3 +577,7 @@ def preprocess_kvpfile(
     # set_ctxmap(ctx, KEY_KVPS, captured)
 
     return kvp_file_path
+
+
+def colored(msg: str, color: str = "cyan") -> str:
+    return f"[{color}]{msg}[/{color}]"

@@ -12,14 +12,15 @@ log = get_logger(__name__)
 _cache: ArtifactCache | None = None
 
 
+CACHE_DIR: t.Final[str] = "artifacts"
+SHARED_DIR: t.Final[str] = "shared-artifacts"
+
+
 def get_artifact_cache() -> ArtifactCache:
     global _cache
 
     if _cache is not None:
         return _cache
-
-    CACHE_DIR: t.Final[str] = "artifacts"
-    SHARED_DIR: t.Final[str] = "shared-artifacts"
 
     project_dir: t.Final[str] = os.getenv("PROJECT", "")
     scratch_dir: t.Final[str] = os.getenv("SCRATCH", "")
