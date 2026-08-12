@@ -8,4 +8,5 @@ explicit import at every entry point — fails by producing an unkeyable type
 somewhere far from the omission.
 """
 
-from cstar.applications.roms_marbl import cache as _cache  # noqa: F401
+from cstar.applications.roms_marbl import app as _rm_app  # type: ignore # noqa: F401
+from cstar.applications.roms_marbl import cache  # type: ignore # noqa: F401
