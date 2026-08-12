@@ -2381,6 +2381,7 @@ class ArtifactCache:
             this question applies only to the user tier.
         """
         if not self.user_root.is_dir():
+            log.warning(f"User root directory is not a directory: {self.user_root}")
             return []
         return sorted(
             p.name
@@ -2404,6 +2405,7 @@ class ArtifactCache:
         self._validate_component(run_id, "run_id")
         directory = self.user_root / run_id
         if not directory.is_dir():
+            log.warning(f"User run cache directory is not a directory: {directory}")
             return []
         return [
             self.locate(p.name, Tier.USER, run_id)
@@ -2423,6 +2425,7 @@ class ArtifactCache:
             to any run.
         """
         if not self.shared_root.is_dir():
+            log.warning(f"Shared root directory is not a directory: {self.shared_root}")
             return []
         return [
             self.locate(p.name, Tier.SHARED)
