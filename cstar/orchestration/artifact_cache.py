@@ -56,11 +56,12 @@ import json
 import os
 import shutil
 import tarfile
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Final
+from typing import TYPE_CHECKING, Any, ClassVar, Final, TypeAlias
 
 from pydantic import (
     BaseModel,
@@ -82,7 +83,7 @@ from cstar.orchestration.fingerprinting import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping, Sequence
+    from collections.abc import Generator, Sequence
 
 __all__ = [
     "ArtifactCache",
@@ -144,6 +145,9 @@ _LOCK_SUFFIX: Final[str] = ".lock"
 _TMP_SUFFIX: Final[str] = ".tmp"
 _RECORD_SUFFIX: Final[str] = ".json"
 _OLD_SUFFIX: Final[str] = ".old"
+
+
+TMetadataMap: TypeAlias = Mapping[str, str | list[str] | dict[str, str]]
 
 
 class ArtifactCacheError(Exception):
@@ -1076,7 +1080,7 @@ class ArtifactCache:
         tier: Tier = Tier.USER,
         source: str | None = None,
         asset_uri: str | None = None,
-        metadata: Mapping[str, Any] | None = None,
+        metadata: TMetadataMap | None = None,
         fingerprinter: Fingerprinter | None = None,
         overwrite: bool = False,
         provenance: Mapping[str, Any] | None = None,
@@ -1248,7 +1252,7 @@ class ArtifactCache:
         name: str,
         run_id: str,
         move: bool = False,
-        metadata: Mapping[str, Any] | None = None,
+        metadata: TMetadataMap | None = None,
         fingerprinter: Fingerprinter | None = None,
         overwrite: bool = False,
     ) -> Location:
