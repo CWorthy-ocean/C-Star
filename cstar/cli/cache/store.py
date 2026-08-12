@@ -24,6 +24,7 @@ from cstar.cli.cache.common import (
 )
 from cstar.cli.common import (
     cb_pipeline,
+    preprocess_kvps,
     set_env,
     set_flag,
 )
@@ -43,6 +44,7 @@ command_help: t.Final[str] = "Manually insert an artifact into the cache."
     help=command_help,
 )
 def store(
+    context: typer.Context,
     run_id: t.Annotated[
         str,
         typer.Option(
@@ -67,6 +69,19 @@ def store(
             ARG_PATH,
             help=path_help,
             resolve_path=True,
+        ),
+    ],
+    metadata: t.Annotated[
+        list[str],
+        typer.Option(
+            "--var",
+            "-v",
+            default_factory=list,
+            help=(
+                "Specify 0-to-many metadata entries as key-value pairs in "
+                "the form `key=value`."
+            ),
+            callback=preprocess_kvps,
         ),
     ],
     overwrite: t.Annotated[
@@ -103,7 +118,15 @@ def store(
         action = "updated in"
 
     try:
-        location = cache.ingest(path, key, run_id, move=move, overwrite=overwrite)
+        user_meta = t.cast("dict[str, str] | None", context.obj)
+        location = cache.ingest(
+            path,
+            key,
+            run_id,
+            move=move,
+            overwrite=overwrite,
+            metadata=user_meta,
+        )
     except ArtifactExistsError:
         console.print(f"An artifact with key {key!r} already exists for run {run_id!r}")
     else:
