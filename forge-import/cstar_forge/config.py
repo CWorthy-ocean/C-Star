@@ -579,6 +579,21 @@ def _hpc_scratch_root(system_tag: str, env: dict, home: Path) -> Path | None:
     return None
 
 
+# Home-relative default working roots a stored ``working_dir`` may carry, all
+# rebased onto ``$SCRATCH/cstar-forge-run/<relative part>`` on HPC. The current
+# default (``~/cstar-forge-run``) plus the legacy sentinel from blueprints authored
+# before commit 3826bbee (``~/cstar-forge-data/cstar-forge-run``), which the current
+# prefix would otherwise miss -- leaving those runs writing into home. The roots are
+# disjoint, so match order is irrelevant. Kept intentionally narrow: a bare
+# ``~/cstar-forge-data`` match would also rebase the mac/unknown source_data and
+# input_data caches, which live under that same base.
+_DEFAULT_WORKING_ROOTS: tuple[str, ...] = (
+    "cstar-forge-run",
+    "cstar-forge-data/cstar-forge-run",
+)
+_SCRATCH_WORKING_ROOT = "cstar-forge-run"
+
+
 def relocate_working_dir(
     working_dir,
     *,
@@ -589,10 +604,11 @@ def relocate_working_dir(
     """Rebase a default-form ``working_dir`` onto the host's scratch data root.
 
     The ForgeBlueprint stores ``working_dir`` with a home-rooted default
-    (``~/cstar-forge-run/<name>``). On HPC systems that path belongs on scratch, so
-    any path under ``~/cstar-forge-run`` is rebased to
+    (``~/cstar-forge-run/<name>``, or the legacy ``~/cstar-forge-data/cstar-forge-run``
+    from older blueprints). On HPC systems that path belongs on scratch, so any path
+    under one of those default roots is rebased to
     ``$SCRATCH/cstar-forge-run/<same relative part>``. Paths outside the default
-    root are a deliberate user choice and pass through untouched (expanded only).
+    roots are a deliberate user choice and pass through untouched (expanded only).
 
     This is a stand-in for C-Star's eventual runtime override of the spec's
     ``working_dir``; keyword args exist for tests and default to the live host.
@@ -605,11 +621,26 @@ def relocate_working_dir(
     scratch_root = _hpc_scratch_root(system_tag, env, home)
     if scratch_root is None:
         return wd
-    try:
-        rel = wd.relative_to(home / "cstar-forge-run")
-    except ValueError:
-        return wd
-    return scratch_root / "cstar-forge-run" / rel
+    for root in _DEFAULT_WORKING_ROOTS:
+        try:
+            rel = wd.relative_to(home / root)
+        except ValueError:
+            continue
+        return scratch_root / _SCRATCH_WORKING_ROOT / rel
+    if wd.is_relative_to(home):
+        # HPC, but the path is home-rooted and matched no default root, so it is left
+        # in home instead of being relocated to scratch. Usually a deliberate choice;
+        # occasionally an unrecognized (e.g. very old) default that should have landed
+        # on scratch -- worth a heads-up either way.
+        logger.warning(
+            "working_dir %s is under $HOME on an HPC system and was not relocated to "
+            "scratch (%s); generated data will be written to home. If this was not "
+            "intended, set working_dir under %s.",
+            wd,
+            scratch_root / _SCRATCH_WORKING_ROOT,
+            home / _SCRATCH_WORKING_ROOT,
+        )
+    return wd
 
 
 def resolve_host(working_dir):

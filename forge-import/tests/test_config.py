@@ -374,9 +374,10 @@ class TestRelocateWorkingDir:
         )
         assert wd == custom
 
-    def test_former_default_under_cstar_forge_data_now_passes_through(self, tmp_path):
-        """``cstar-forge-data`` is no longer the default-form root, so a path under
-        it (even one matching the old default) is a deliberate user choice now.
+    def test_legacy_default_root_rebases_to_scratch(self, tmp_path):
+        """The legacy sentinel (``~/cstar-forge-data/cstar-forge-run``, from blueprints
+        authored before the default was renamed) rebases onto the *current* scratch
+        working root, so old blueprints no longer write into home on HPC.
         """
         from cstar_forge.config import relocate_working_dir
 
@@ -387,7 +388,63 @@ class TestRelocateWorkingDir:
             env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
-        assert wd == home / "cstar-forge-data" / "cstar-forge-run" / "my-run"
+        assert wd == tmp_path / "scratch" / "cstar-forge-run" / "my-run"
+
+    def test_bare_cstar_forge_data_path_passes_through(self, tmp_path):
+        """The legacy match is deliberately narrow: only the nested
+        ``cstar-forge-data/cstar-forge-run`` sentinel rebases. A bare path under
+        ``~/cstar-forge-data`` (which is also the mac/unknown source_data and
+        input_data base) is a user choice and passes through untouched.
+        """
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        custom = home / "cstar-forge-data" / "my-hand-picked-run"
+        wd = relocate_working_dir(
+            custom,
+            system_tag="NERSC_perlmutter",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == custom
+
+    def test_home_rooted_nondefault_warns_on_hpc(self, tmp_path, caplog):
+        """A home-rooted path that matches no default root is left in home on HPC;
+        warn so an unrelocated (e.g. very old default) run doesn't go unnoticed.
+        """
+        import logging
+
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        custom = home / "cstar-forge-data" / "my-hand-picked-run"
+        with caplog.at_level(logging.WARNING, logger="cstar_forge.config"):
+            wd = relocate_working_dir(
+                custom,
+                system_tag="NERSC_perlmutter",
+                env={"SCRATCH": str(tmp_path / "scratch")},
+                home=home,
+            )
+        assert wd == custom
+        assert "was not relocated to scratch" in caplog.text
+
+    def test_off_home_custom_path_does_not_warn(self, tmp_path, caplog):
+        """A deliberate path outside home is normal and must not warn."""
+        import logging
+
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        custom = tmp_path / "elsewhere" / "my-run"
+        with caplog.at_level(logging.WARNING, logger="cstar_forge.config"):
+            wd = relocate_working_dir(
+                custom,
+                system_tag="NERSC_perlmutter",
+                env={"SCRATCH": str(tmp_path / "scratch")},
+                home=home,
+            )
+        assert wd == custom
+        assert caplog.text == ""
 
     def test_tilde_default_expands_then_rebases(self, tmp_path, monkeypatch):
         from cstar_forge.config import relocate_working_dir
