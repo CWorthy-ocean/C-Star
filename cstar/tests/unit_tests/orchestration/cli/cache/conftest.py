@@ -15,6 +15,7 @@ def mock_artifact_cache_env(tmp_path: Path) -> Generator[dict[str, str]]:
         "USER": "mockuid",
         "PROJECT": str(tmp_path / "project123"),
         "SCRATCH": str(tmp_path / "scratch"),
+        "CSTAR_ARTIFACT_CACHE_ENABLED": "1",
     }
 
     with mock.patch.dict(os.environ, mock_env):
@@ -22,7 +23,9 @@ def mock_artifact_cache_env(tmp_path: Path) -> Generator[dict[str, str]]:
 
 
 @pytest.fixture
-def cache(tmp_path: Path) -> Generator[ArtifactCache]:
+def cache(
+    tmp_path: Path, mock_artifact_cache_env: dict[str, str]
+) -> Generator[ArtifactCache]:
     CACHE_DIR: t.Final[str] = "test-artifacts"
     SHARED_DIR: t.Final[str] = "test-shared-artifacts"
 

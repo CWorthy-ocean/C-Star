@@ -164,7 +164,7 @@ class TestRemoteBinaryFileRetriever:
         with mock.patch("cstar.io.retriever.requests.get", return_value=fake_response):
             r = retriever.RemoteBinaryFileRetriever(source=source)
             with pytest.raises(ValueError, match="Hash mismatch"):
-                r._save(tmp_path)
+                r.save(tmp_path)
 
 
 class TestLocalFileRetriever:

@@ -3,7 +3,7 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, Any, ClassVar, override
 
 import requests
 
@@ -11,9 +11,12 @@ from cstar.base.exceptions import CstarError
 from cstar.base.gitutils import _checkout, _clone, _pull
 from cstar.base.log import LoggingMixin
 from cstar.io.constants import SourceClassification
+from cstar.io.source_data import SourceData
+from cstar.io.utils import get_artifact_cache
+from cstar.orchestration.caching import cached_save_wrapper
 
 if TYPE_CHECKING:
-    from cstar.io.source_data import SourceData
+    ...
 
 _registry: dict["SourceClassification", type["Retriever"]] = {}
 
@@ -86,11 +89,16 @@ class Retriever(ABC, LoggingMixin):
         msg = f"Saving source `{loc}{f'@{has}' if has else ''}` to `{target_dir}`"
         self.log.debug(msg)
 
-        return self._save(target_dir=target_dir)
+        target_path = self._save(target_dir=target_dir)
+        return self._post_save(target_path)
 
     @abstractmethod
     def _save(self, target_dir: Path) -> Path:
         """Retrieve data to a local path"""
+
+    def _post_save(self, target_path: Path, **kwargs: Any) -> Path:
+        """Perform any processing necessary after a file has been retrieved."""
+        return target_path
 
     def refresh(self, target_dir: Path) -> bool:
         """Refresh local data from the datasource.
@@ -131,6 +139,24 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
 
     _classification = SourceClassification.REMOTE_BINARY_FILE
 
+    @cached_save_wrapper(get_artifact_cache, SourceData, "source")
+    def _save_to(self, target_path: Path) -> Path:
+        """Takes the target path and immediately performs any local writes."""
+        hash_obj = hashlib.sha256()
+        for _ in range(5):
+            self.log.debug("CACHE MISS" * 10)  # make it obvious for now...
+
+        with requests.get(self.source.location, stream=True, allow_redirects=True) as r:
+            r.raise_for_status()
+            with target_path.open(mode="wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):  # Download in 8kB chunks
+                    if chunk:
+                        f.write(chunk)
+                        hash_obj.update(chunk)
+
+        self.hash_obj = hash_obj
+        return target_path
+
     def _save(self, target_dir: Path) -> Path:
         """Saves this remote file's contents to `target_dir`.
 
@@ -154,21 +180,25 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
             if the checksum of the downloaded file does not match what is
             specified in its SourceData.
         """
-        hash_obj = hashlib.sha256()
         target_dir.mkdir(parents=True, exist_ok=True)
         target_path = target_dir / self.source.basename
 
-        with requests.get(self.source.location, stream=True, allow_redirects=True) as r:
-            r.raise_for_status()
-            with open(target_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):  # Download in 8kB chunks
-                    if chunk:
-                        f.write(chunk)
-                        hash_obj.update(chunk)
+        return self._save_to(target_path)
 
+    @override
+    def _post_save(self, target_path: Path, **kwargs: Any) -> Path:
+        """Perform post-retrieval processing."""
         # Hash verification if specified in "SourceData":
+
+        if not hasattr(self, "hash_obj"):
+            hash_obj = hashlib.sha256()
+            with open(target_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    hash_obj.update(chunk)  # type: ignore
+            self.hash_obj = hash_obj
+
         if self.source.identifier:
-            actual_hash = hash_obj.hexdigest()
+            actual_hash = self.hash_obj.hexdigest()
             expected_hash = self.source.identifier.lower()
 
             if actual_hash != expected_hash:
@@ -200,8 +230,13 @@ class RemoteTextFileRetriever(RemoteFileRetriever):
         pathlib.Path:
             The path of the saved file
         """
-        data = self.read()
         target_path = target_dir / self.source.basename
+        return self._save_to(target_path)
+
+    @cached_save_wrapper(get_artifact_cache, SourceData, "source")
+    def _save_to(self, target_path: Path) -> Path:
+        """Takes the target path and immediately performs any local writes."""
+        data = self.read()
         with open(target_path, "wb") as f:
             f.write(data)
         return target_path
@@ -235,6 +270,11 @@ class LocalFileRetriever(Retriever):
             The path of the saved file
         """
         target_path = target_dir / self.source.basename
+        return self._save_to(target_path)
+
+    @cached_save_wrapper(get_artifact_cache, SourceData, "source")
+    def _save_to(self, target_path: Path) -> Path:
+        """Takes the target path and immediately performs any local writes."""
         shutil.copy2(src=Path(self.source.location).resolve(), dst=target_path)
         return target_path
 
