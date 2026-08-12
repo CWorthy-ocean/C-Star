@@ -332,6 +332,16 @@ ENV_CSTAR_ARTIFACT_CACHE_BYPASS: t.Annotated[
 ] = "CSTAR_ARTIFACT_CACHE_BYPASS"
 """Enable the artifact cache to be repopulated from scratch and existing entries to be ignored."""
 
+ENV_CSTAR_ARTIFACT_CACHE_ENABLED: t.Annotated[
+    t.Literal["CSTAR_ARTIFACT_CACHE_ENABLED"],
+    EnvVar(
+        "Enable the artifact cache.",
+        GROUP_FS,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_ARTIFACT_CACHE_ENABLED"
+"""Enable the artifact cache."""
+
 
 @lru_cache
 def discover_env_vars() -> dict[str, EnvItem]:
