@@ -1,4 +1,5 @@
 import logging
+import os
 import pickle
 import re
 import tempfile
@@ -10,6 +11,7 @@ from unittest import mock
 import pytest
 
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, FLAG_OFF
 from cstar.base.external_codebase import ExternalCodeBase
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
@@ -926,6 +928,7 @@ class TestToAndFromDictAndBlueprint:
 
         assert sim_from_dict.to_dict() == sim_to_dict
 
+    @mock.patch.dict(os.environ, {ENV_CSTAR_ARTIFACT_CACHE_ENABLED: FLAG_OFF})
     def test_from_blueprint_valid_file(self, blueprint_path: Path) -> None:
         """Tests that `from_blueprint()` correctly loads a `ROMSSimulation` from a valid
         YAML file.

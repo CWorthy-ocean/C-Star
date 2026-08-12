@@ -676,17 +676,15 @@ async def read_yaml_intercept(
             if set(original_dict.keys()).intersection({"steps", "runtime_vars"}):
                 steps = original_dict["steps"]
                 for step_dict in steps:
-                    if str(step_dict["blueprint"]).startswith("."):
-                        og_path = Path(step_dict["blueprint"])
-                        bp_path = og_path.parent / og_path
-                        if not bp_path.exists():
-                            bp_path = tmp_path / og_path.name
-                        step_dict["blueprint"] = bp_path.resolve()
-                    else:
-                        bp_path = tmp_path / "blueprint.yaml"
-                        step_dict["blueprint"] = bp_path
+                    bp_path = tmp_path / "blueprint.yaml"
 
-                    bp_path = step_dict["blueprint"]
+                    if step_dict["blueprint"] == default_blueprint_path or str(
+                        step_dict["blueprint"]
+                    ).startswith("."):
+                        bp_path = tmp_path / "blueprint.yaml"
+                        step_dict["blueprint"] = bp_path.expanduser().resolve()
+
+                    bp_path = Path(step_dict["blueprint"])
                     if step_dict["application"] == "hello_world":
                         bp_path.write_text(hw_bp_content)
                     else:
