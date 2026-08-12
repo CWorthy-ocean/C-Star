@@ -1,4 +1,5 @@
 import datetime as dt
+import itertools
 import shutil
 import tempfile
 from abc import ABC
@@ -6,6 +7,8 @@ from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar
+
+from slugify import slugify
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
@@ -20,6 +23,8 @@ from cstar.base.utils import (
 from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
+from cstar.io.utils import get_artifact_cache
+from cstar.orchestration.caching import fileset_save_wrapper
 
 roms_tools = lazy_import("roms_tools")
 
@@ -271,18 +276,35 @@ class ROMSInputDataset(InputDataset, ABC):
                 ]
             return id_files_to_partition
 
-        def partition_files(files: list[Path]) -> list[Path]:
+        def key_function(path: Path) -> str:
+            assert self.source
+            return slugify(f"{path.stem}__partitioned")
+
+        @fileset_save_wrapper(get_artifact_cache, key_function)
+        def partition_item(idfile: Path) -> list[Path]:
             """Helper function that wraps the actual roms_tools.partition_netcdf
             call.
             """
-            new_parted_files: list[Path] = []
-
             include_coarse_dims = True
 
-            for idfile in files:
-                msg = f"Partitioning {idfile} into ({np_xi},{np_eta})"
-                self.log.info(msg)
+            msg = f"Partitioning {idfile} into ({np_xi},{np_eta})"
+            self.log.info(msg)
 
+            try:
+                result = roms_tools.partition_netcdf(
+                    idfile,
+                    np_xi=np_xi,
+                    np_eta=np_eta,
+                    include_coarse_dims=include_coarse_dims,
+                )
+
+            except Exception as e:
+                msg = (
+                    f"Encountered error partitioning {idfile} with coarse dims; "
+                    f"retrying without coarse dims. Exception: {e}"
+                )
+                self.log.warning(msg)
+                include_coarse_dims = False
                 try:
                     result = roms_tools.partition_netcdf(
                         idfile,
@@ -290,30 +312,20 @@ class ROMSInputDataset(InputDataset, ABC):
                         np_eta=np_eta,
                         include_coarse_dims=include_coarse_dims,
                     )
-
                 except Exception as e:
-                    msg = (
-                        f"Encountered error partitioning {idfile} with coarse dims; "
-                        f"retrying without coarse dims. Exception: {e}"
+                    self.log.exception(
+                        "Still encountered error during partitioning; aborting."
                     )
-                    self.log.warning(msg)
-                    include_coarse_dims = False
-                    try:
-                        result = roms_tools.partition_netcdf(
-                            idfile,
-                            np_xi=np_xi,
-                            np_eta=np_eta,
-                            include_coarse_dims=include_coarse_dims,
-                        )
-                    except Exception as e:
-                        self.log.exception(
-                            "Still encountered error during partitioning; aborting."
-                        )
-                        raise
+                    raise
 
-                new_parted_files.extend(result)
+            return [f.resolve() for f in result]
 
-            return [f.resolve() for f in new_parted_files]
+        def partition_files(files: list[Path]) -> list[Path]:
+            """Helper function that wraps the actual roms_tools.partition_netcdf
+            call.
+            """
+            filesets = [partition_item(f) for f in files]
+            return list(itertools.chain.from_iterable(filesets))
 
         def backup_existing_partitioned_files(files: list[Path]):
             """Helper function to move existing parted files to a tmp dir while
@@ -398,7 +410,10 @@ class ROMSInputDataset(InputDataset, ABC):
         """Stages partitioned source files, checking pre-existence individually."""
         # If some (or all) files exist, go through and check which ones (if any) to stage:
         if self.working_copy:
-            for i, s in enumerate(self.partitioned_source):
+            ordered_ps = tuple(
+                sorted(self.partitioned_source, key=lambda ps: ps.basename)
+            )
+            for i, s in enumerate(ordered_ps):
                 target_path = local_dir / s.basename
                 if self.working_copy and self.working_copy[i].path == target_path:  # type: ignore[index]
                     msg = f"⏭️ {target_path} already exists, skipping."

@@ -108,9 +108,11 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
 from cstar.orchestration.artifact_cache import (
+    SET_MANIFEST_NAME,
     ArtifactCache,
     Location,
     OnConflict,
+    SetManifest,
     Tier,
 )
 from cstar.orchestration.cache_keys import (
@@ -125,7 +127,7 @@ from cstar.orchestration.cache_keys import (
 from cstar.orchestration.models import Resource
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
 __all__ = [
     "CachedCallError",
@@ -715,7 +717,7 @@ T = TypeVar("T")
 
 
 def cached_save_wrapper(
-    cache_func: Callable[[], ArtifactCache],
+    cache_factory: Callable[[], ArtifactCache],
     entity_type: type[T],
     key_attr: str,
 ) -> Callable[[Callable[P, Path]], Callable[P, Path]]:
@@ -730,7 +732,7 @@ def cached_save_wrapper(
 
             key_entity = getattr(self, key_attr)
             # cache = get_artifact_cache()
-            cache = cache_func()
+            cache = cache_factory()
             run_id = os.getenv(ENV_CSTAR_RUNID, "")
             key = generator_for(entity_type).key_for(key_entity, target_path)
             if location := cache.resolve(key, run_id, record_use=True):
@@ -744,6 +746,53 @@ def cached_save_wrapper(
             if run_id:
                 cache.ingest(target_path, key, run_id)
             return result
+
+        return _inner
+
+    return _deco
+
+
+def fileset_save_wrapper(
+    cache_factory: Callable[[], ArtifactCache],
+    key_func: Callable[[Path], str],
+) -> Callable[
+    [
+        Callable[[Path], Sequence[Path]],
+    ],
+    Callable[[Path], Sequence[Path]],
+]:
+    def _deco(
+        func: Callable[[Path], Sequence[Path]],
+    ) -> Callable[[Path], Sequence[Path]]:
+        if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
+            return func
+
+        @functools.wraps(func)
+        def _inner(source_file: Path) -> Sequence[Path]:
+            cache = cache_factory()
+            run_id = os.getenv(ENV_CSTAR_RUNID, "")
+            key = f"{key_func(source_file)}{AGGREGATE_SUFFIX}"
+
+            if found := cache.materialize(
+                key, run_id, prefer_local=True, record_use=True
+            ):
+                print("Materialized the set...")
+                location = found
+                manifest = SetManifest.model_validate_json(
+                    (location.path / SET_MANIFEST_NAME).read_text()
+                )
+                return [location.path / member.path for member in manifest.members]
+
+            partitions = func(source_file)
+
+            if partitions and run_id:
+                filenames = tuple(p.name for p in partitions)
+                fileset = FileSet(source_file.parent, members=filenames)
+                location = cache.ingest_aggregate(
+                    fileset.root, key, run_id, members=fileset.members, overwrite=True
+                )
+
+            return partitions
 
         return _inner
 
