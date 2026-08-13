@@ -790,8 +790,11 @@ def to_cached_fileset(
             if partitions and run_id:
                 filenames = tuple(p.name for p in partitions)
                 fileset = FileSet(source_file.parent, members=filenames)
-                location = cache.ingest_aggregate(
-                    fileset.root, key, run_id, members=fileset.members, overwrite=True
+                location = cache_fileset(
+                    cache,
+                    fileset,
+                    run_id,
+                    on_conflict=OnConflict.OVERWRITE,
                 )
 
             return partitions
