@@ -298,6 +298,72 @@ class AnvilSystemContext(SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
+class BouchetystemContext(SystemContext):
+    """The contextual dependencies for the Anvil system."""
+
+    name: ClassVar[str] = "bouchet"
+    """The unique name identifying the Anvil system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Anvil."""
+    mpi_prefix: ClassVar[str] = "srun"
+    """The MPI prefix used on Anvil."""
+    docs: ClassVar[str] = "https://docs.ycrc.yale.edu/clusters/bouchet"
+    """URI for documentation of the Anvil system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        day_queue = SlurmPartition(
+            name="day",
+            query_name="day",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        week_queue = SlurmPartition(
+            name="week",
+            query_name="week",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        gpu_queue = SlurmPartition(
+            name="gpu",
+            query_name="gpu",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        bigmem_queue = SlurmPartition(
+            name="bigmem",
+            query_name="bigmem",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+        mpi_queue = SlurmPartition(
+            name="mpi",
+            query_name="mpi",
+            max_walltime_method=query_max_walltime_via_sacctmgr,
+        )
+
+        return SlurmScheduler(
+            queues=[day_queue, week_queue, gpu_queue, bigmem_queue, mpi_queue],
+            primary_queue_name="day",
+            other_scheduler_directives={},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return None
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Bouchet* by matching
+        values contained in environment variables.
+        """
+        return os.getenv("SLURM_CLUSTER_NAME", "") == "bobby"
+
+
+@register_sys_context
+@dataclass(frozen=True)
 class DerechoSystemContext(SystemContext):
     """The contextual dependencies for the Derecho system."""
 
