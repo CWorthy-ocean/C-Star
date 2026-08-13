@@ -982,7 +982,39 @@ class SlurmJob(SchedulerJob):
         scheduler_script += f"\n{self.commands}"
         return scheduler_script
 
-    def submit(self) -> int | None:
+    def _generate_submit_cmd(self) -> str:
+        """Generate the command that will be used to launch the job.
+
+        Returns
+        -------
+        job_id : int
+            The unique job ID assigned by the SLURM scheduler.
+
+        Raises
+        ------
+        RuntimeError
+            If the `sbatch` command fails or if the job ID cannot be extracted from the
+            submission output.
+        """
+        deps = ":".join(str(d) for d in self.depends_on)
+        dep_clause = (
+            f" --dependency=afterok:{deps} --kill-on-invalid-dep=yes" if deps else ""
+        )
+
+        return f"sbatch{dep_clause} {self.script_path}"
+
+    def _generate_test_submit_cmd(self) -> str:
+        """Generate the command that will be used to estimate the queue wait time.
+
+        Returns
+        -------
+        str
+            Estimate by SLURM of the job launch time.
+        """
+        submit_cmd = self._generate_submit_cmd()
+        return submit_cmd.replace("sbatch", "sbatch --test-only")
+
+    def submit(self, mode: t.Literal["test", "run"] = "run") -> int | None:
         """Submit the job to the SLURM scheduler.
 
         This method saves the job script to the specified `script_path` and submits it
@@ -1013,12 +1045,10 @@ class SlurmJob(SchedulerJob):
             k: v for k, v in os.environ.items() if k not in env_vars_to_exclude
         }
 
-        deps = ":".join(str(d) for d in self.depends_on)
-        dep_clause = (
-            f" --dependency=afterok:{deps} --kill-on-invalid-dep=yes" if deps else ""
-        )
-
-        cmd = f"sbatch{dep_clause} {self.script_path}"
+        if mode == "test":
+            cmd = self._generate_test_submit_cmd()
+        else:
+            cmd = self._generate_submit_cmd()
 
         self.log.debug(f"Submitting job: {cmd}")
         stdout = _run_cmd(
