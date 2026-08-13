@@ -129,8 +129,9 @@ class TestExplicitMpiWrapper:
 
     def test_returns_none_when_mpihome_unset(self):
         sysmgr = _fake_sysmgr(environment_variables={}, compiler="gnu")
-        with mock.patch(
-            "cstar.roms.build_verification.get_sysmgr", return_value=sysmgr
+        with (
+            mock.patch("cstar.roms.build_verification.get_sysmgr", return_value=sysmgr),
+            mock.patch.dict(os.environ, {"MPIHOME": ""}),
         ):
             assert explicit_mpi_wrapper() is None
 
