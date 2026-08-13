@@ -22,7 +22,12 @@ from cstar.orchestration.orchestration import (
     Status,
 )
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.transforms import WorkplanTransformer, get_time_slices
+from cstar.orchestration.transforms import (
+    SplitFrequency,
+    WorkplanTransformer,
+    get_time_slices,
+)
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
@@ -318,6 +323,7 @@ def test_workplan_transformation(diamond_workplan: Workplan) -> None:
             {
                 ENV_CSTAR_RUNID: str(uuid.uuid4()),
                 ENV_FF_ORCH_TRX_TIMESPLIT: FLAG_ON,
+                ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
             },
         ),
     ):
