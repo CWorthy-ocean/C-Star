@@ -21,7 +21,8 @@ New features
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+
+- Fix unit tests failing in HPC environment (`#626 <https://github.com/CWorthy-ocean/C-Star/pull/626>`_)
 
 Improvements
 ~~~~~~~~~~~~
