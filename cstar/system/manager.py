@@ -29,51 +29,6 @@ from cstar.system.scheduler import (
 log = get_logger(__name__)
 
 
-class AnvilEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Anvil* system.
-
-    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
-    hostname matching test in `is_match`.
-    """
-
-    HOST_IDENTIFIER: ClassVar[str] = "anvil"
-    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
-    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
-    """The hostname of the machine.
-
-    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
-    """
-
-
-class EljaEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Elja* system.
-
-    NOTE: Elja does not support SLURM account names.
-    """
-
-    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
-    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
-    CLUSTER_IDENTIFIER: ClassVar[str] = "elja"
-    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
-
-    HOSTNAME: str = Field(default="", alias="HOSTNAME")
-    """The hostname of the machine.
-
-    Used to identify the system as Elja by matching value: `elja-irhpc`
-    """
-    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
-    """The SLURM account name.
-
-    Overridden from SlurmSettingsBase to allow empty account.
-    """
-    SLURM_QUEUE: str = Field(default="")
-    """The SLURM queue name."""
-    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
-    """The number of threads to be used by OpenMPI"""
-    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
-    """The number of threads used by MKL"""
-
-
 class HostNameEvaluator:
     """Container of host-specific names used to determine the system name that will be
     used by C-Star.
@@ -240,6 +195,22 @@ def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
     return list(CTX_REGISTRY.values())
 
 
+class AnvilEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Anvil* system.
+
+    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
+    hostname matching test in `is_match`.
+    """
+
+    HOST_IDENTIFIER: ClassVar[str] = "anvil"
+    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
+    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
+    """The hostname of the machine.
+
+    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
+    """
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class AnvilSystemContext(SystemContext):
@@ -294,6 +265,21 @@ class AnvilSystemContext(SystemContext):
         value `anvil` in `RCAC_CLUSTER` env var.
         """
         return os.getenv("RCAC_CLUSTER", "") == AnvilEnvSettings.HOST_IDENTIFIER
+
+
+class BouchetEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Bouchet* system."""
+
+    HOST_IDENTIFIER: ClassVar[str] = "unknown"
+    """Fixed value in HOSTNAME env var on Bouchet that uniquely identifies the system."""
+    CLUSTER_IDENTIFIER: ClassVar[str] = "unknown"
+    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
+
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
+    """The hostname of the machine.
+
+    May be used to identify the system as Bouchet by matching value: `???`
+    """
 
 
 @register_sys_context
@@ -356,7 +342,7 @@ class BouchetystemContext(SystemContext):
     @classmethod
     def settings_klass(cls) -> type[SlurmSettingsBase] | None:
         """Return the type used to load settings required by the target system."""
-        return None
+        return BouchetEnvSettings
 
     @override
     @classmethod
@@ -396,6 +382,35 @@ class DerechoSystemContext(SystemContext):
             requires_task_distribution=True,
             documentation=cls.docs,
         )
+
+
+class EljaEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Elja* system.
+
+    NOTE: Elja does not support SLURM account names.
+    """
+
+    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
+    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
+    CLUSTER_IDENTIFIER: ClassVar[str] = "elja"
+    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
+
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
+    """The hostname of the machine.
+
+    Used to identify the system as Elja by matching value: `elja-irhpc`
+    """
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow empty account.
+    """
+    SLURM_QUEUE: str = Field(default="")
+    """The SLURM queue name."""
+    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
+    """The number of threads to be used by OpenMPI"""
+    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
+    """The number of threads used by MKL"""
 
 
 @register_sys_context
