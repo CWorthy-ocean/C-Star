@@ -242,36 +242,6 @@ def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
 
 @register_sys_context
 @dataclass(frozen=True)
-class PerlmutterSystemContext(SystemContext):
-    """The contextual dependencies for the Perlmutter system."""
-
-    name: ClassVar[str] = "perlmutter"
-    """The unique name identifying the Perlmutter system."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Perlmutter."""
-    mpi_prefix: ClassVar[str] = "srun --kill-on-bad-exit=1"
-    """The MPI prefix used on Perlmutter."""
-    docs: ClassVar[str] = "https://docs.nersc.gov/systems/perlmutter/architecture/"
-    """URI for documentation of the Perlmutter system."""
-
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
-        per_shared_q = SlurmQOS(name="shared")
-        per_debug_q = SlurmQOS(name="debug")
-
-        return SlurmScheduler(
-            queues=[per_regular_q, per_shared_q, per_debug_q],
-            primary_queue_name="regular",
-            other_scheduler_directives={"-C": "cpu"},
-            requires_task_distribution=False,
-            documentation=cls.docs,
-            max_cpus_per_node=128,
-        )
-
-
-@register_sys_context
-@dataclass(frozen=True)
 class AnvilSystemContext(SystemContext):
     """The contextual dependencies for the Anvil system."""
 
@@ -455,6 +425,22 @@ class ExpanseSystemContext(SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
+class LinuxARM64SystemContext(SystemContext):
+    name: ClassVar[str] = "linux_aarch64"
+    """The unique name identifying the Linux system on an ARM64 platform."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on ARM64 Linux."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on Linux."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Return None - a scheduler on the Linux system is not supported."""
+        return None
+
+
+@register_sys_context
+@dataclass(frozen=True)
 class LinuxSystemContext(SystemContext):
     """The contextual dependencies for the Linux system on the x86_64 platform."""
 
@@ -489,18 +475,32 @@ class MacOSSystemContext(SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class LinuxARM64SystemContext(SystemContext):
-    name: ClassVar[str] = "linux_aarch64"
-    """The unique name identifying the Linux system on an ARM64 platform."""
+class PerlmutterSystemContext(SystemContext):
+    """The contextual dependencies for the Perlmutter system."""
+
+    name: ClassVar[str] = "perlmutter"
+    """The unique name identifying the Perlmutter system."""
     compiler: ClassVar[str] = "gnu"
-    """The compiler used on ARM64 Linux."""
-    mpi_prefix: ClassVar[str] = "mpirun"
-    """The MPI prefix used on Linux."""
+    """The compiler used on Perlmutter."""
+    mpi_prefix: ClassVar[str] = "srun --kill-on-bad-exit=1"
+    """The MPI prefix used on Perlmutter."""
+    docs: ClassVar[str] = "https://docs.nersc.gov/systems/perlmutter/architecture/"
+    """URI for documentation of the Perlmutter system."""
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        """Return None - a scheduler on the Linux system is not supported."""
-        return None
+        per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
+        per_shared_q = SlurmQOS(name="shared")
+        per_debug_q = SlurmQOS(name="debug")
+
+        return SlurmScheduler(
+            queues=[per_regular_q, per_shared_q, per_debug_q],
+            primary_queue_name="regular",
+            other_scheduler_directives={"-C": "cpu"},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
 
 
 class CStarSystemManager:
