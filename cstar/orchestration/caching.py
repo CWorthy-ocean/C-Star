@@ -107,6 +107,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
 
 from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
+from cstar.base.log import get_logger
 from cstar.orchestration.artifact_cache import (
     SET_MANIFEST_NAME,
     ArtifactCache,
@@ -141,6 +142,8 @@ __all__ = [
 
 F = TypeVar("F", bound="Callable[..., Path]")
 """A producer: any callable returning the path it wrote its result to."""
+
+log = get_logger(__name__)
 
 
 class CachedCallError(Exception):
@@ -737,8 +740,8 @@ def to_cached_artifact(
             key = generator_for(entity_type).key_for(key_entity, target_path)
             if location := cache.resolve(key, run_id, record_use=True):
                 shutil.copy2(src=location.path.resolve(), dst=target_path)
-                print(
-                    f"Copying from cache location {str(location.path)!r} into {(target_path)!r}"
+                log.debug(
+                    f"Copying {key!r} from cache location {str(location.path)!r} into {(target_path)!r}"
                 )
                 return target_path
 
@@ -776,7 +779,6 @@ def to_cached_fileset(
             if found := cache.materialize(
                 key, run_id, prefer_local=True, record_use=True
             ):
-                print("Materialized the set...")
                 location = found
                 manifest = SetManifest.model_validate_json(
                     (location.path / SET_MANIFEST_NAME).read_text()
