@@ -7,10 +7,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from importlib import import_module
-from pathlib import Path
 
 if t.TYPE_CHECKING:
     from types import ModuleType
+
 
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
@@ -125,21 +125,81 @@ def get_env_item(var_name: str) -> EnvItem:
     raise ValueError(msg)
 
 
-def hpc_data_directory() -> str | None:
+def indirect_variable_search(
+    source: str, purpose: str, separator: str = ","
+) -> str | None:
+    """Use the content of a source variable to perform a secondary environment variable read.
+
+    The first populated variable will be returned. When none of the indirect keys have a
+    value, None is returned.
+
+    Parameters
+    ----------
+    source : str
+        The name of the environment variable containing the list of variable names.
+    separator : str
+        The character(s) used to delimit values in the source.
+
+    Returns
+    -------
+    str | None
+    """
+    from cstar.base.log import get_logger
+
+    log = get_logger(__name__)
+
+    if not source or not source.strip():
+        log.warning("Invalid indirect source variable name was provided")
+        return None
+
+    if source not in os.environ:
+        log.warning(f"Indirect source variable {source!r} does not exist")
+        return None
+
+    source = source.strip()
+    variables = [
+        x.strip() for x in get_env_item(source).value.split(separator) if x.strip()
+    ]
+    evaluations = ((x, os.getenv(x, "").strip()) for x in variables if x.strip())
+    if cfg := next((d for d in evaluations if d[1]), None):
+        log.debug(f"{purpose} configured in: {cfg[0]}={cfg[1]}")
+        return cfg[1]
+
+    msg = f"Unable to locate {purpose!r} variable"
+    if not variables:
+        msg = f"{msg} {source!r} is empty"
+    else:
+        msg = f"{msg} after searching: {', '.join(variables)}"
+    log.debug(msg)
+    return None
+
+
+def hpc_scratch_directory() -> str | None:
     """A path-locator function that looks for standard scratch file-systems.
+
+    Searches for a working path to the user-specific scratch directory by testing
+    each key defined in the `CSTAR_SCRATCH_DIRS` environment variable.
+
+    Returns
+    -------
+    str | None
+        If a scratch directory is specified, return it's path, otherwise return None.
+    """
+    return indirect_variable_search(ENV_CSTAR_SCRATCH_DIRS, "scratch directory")
+
+
+def hpc_project_directory() -> str | None:
+    """A path-locator function that looks for a project-specific file-systems.
+
+    Searches for a working path to the project-specific shared directory by testing
+    each key defined in the `CSTAR_PROJECT_DIRS` environment variable.
 
     Returns
     -------
     Path | None
-        If a scratch file system is identified, return it's paty, otherwise return None.
+        If a project directory is specified, return it's path, otherwise return None.
     """
-    scratch_variables = get_env_item(ENV_CSTAR_SCRATCH_DIRS).value.split(",")
-
-    for env_var in scratch_variables:
-        if scratch_path := os.getenv(env_var, ""):
-            return Path(scratch_path).as_posix()
-
-    return None
+    return indirect_variable_search(ENV_CSTAR_PROJECT_DIRS, "project directory")
 
 
 def nprocs_factory() -> str:
@@ -244,6 +304,16 @@ ENV_CSTAR_SCRATCH_DIRS: t.Annotated[
 ] = "CSTAR_SCRATCH_DIRS"
 """A comma-separated list of environment variable names used to identify scratch paths on HPC systems, in search order."""
 
+ENV_CSTAR_PROJECT_DIRS: t.Annotated[
+    t.Literal["CSTAR_PROJECT_DIRS"],
+    EnvVar(
+        "A comma-separated list of environment variable names used to identify project paths on HPC systems, in search order.",
+        GROUP_FS,
+        "PROJECT",
+    ),
+] = "CSTAR_PROJECT_DIRS"
+"""A comma-separated list of environment variable names used to identify project paths on HPC systems, in search order."""
+
 ENV_CSTAR_CACHE_HOME: t.Annotated[
     t.Literal["CSTAR_CACHE_HOME"],
     EnvVar(
@@ -251,9 +321,25 @@ ENV_CSTAR_CACHE_HOME: t.Annotated[
         GROUP_FS,
         "~/.cache/cstar",
         indirect_var="XDG_CACHE_HOME",
-        default_factory=indirect_default_factory,
+        default_factory=lambda x: (
+            hpc_scratch_directory() or indirect_default_factory(x)
+        ),
     ),
 ] = "CSTAR_CACHE_HOME"
+"""Environment variable used to override the home directory for C-Star file cache."""
+
+ENV_CSTAR_SHARED_CACHE_HOME: t.Annotated[
+    t.Literal["CSTAR_SHARED_CACHE_HOME"],
+    EnvVar(
+        "Environment variable used to override the home directory for C-Star file cache.",
+        GROUP_FS,
+        "",
+        indirect_var="CSTAR_SHARED_CACHE_HOME",
+        default_factory=lambda x: (
+            hpc_project_directory() or indirect_default_factory(x)
+        ),
+    ),
+] = "CSTAR_SHARED_CACHE_HOME"
 """Environment variable used to override the home directory for C-Star file cache."""
 
 ENV_CSTAR_CONFIG_HOME: t.Annotated[
@@ -275,7 +361,9 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
         GROUP_FS,
         "~/.local/share/cstar",
         indirect_var="XDG_DATA_HOME",
-        default_factory=lambda x: hpc_data_directory() or indirect_default_factory(x),
+        default_factory=lambda x: (
+            hpc_scratch_directory() or indirect_default_factory(x)
+        ),
     ),
 ] = "CSTAR_DATA_HOME"
 """Environment variable used to override the home directory for C-Star dataset storage."""
