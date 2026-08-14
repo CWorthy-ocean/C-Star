@@ -46,6 +46,7 @@ _FORGE_APP_MODULES = (
     "executor",
     "namelist_model",
     "util",
+    "user_files",
 )
 
 # Forge modules the application must not depend on (authoring/curation + host/glue).

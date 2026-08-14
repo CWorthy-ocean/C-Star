@@ -57,7 +57,9 @@ try:  # pragma: no cover - exercised both ways
         TemplateRepo,
         TidalForcingItem,
         TopographySource,
+        UserProvidedFile,
         sanitize_name,
+        vert_kwargs_from_grid_kwargs,
     )
 except ImportError:  # pragma: no cover
     from forge_blueprint import (  # type: ignore
@@ -133,7 +135,38 @@ def _parse_source(block: Any) -> SourceSpec:
         name=name,
         climatology=bool(d.get("climatology", False)),
         glorys_layout=layout,
+        path=d.get("path"),
     )
+
+
+def _normalize_user_file(
+    value: str | Path | dict[str, Any] | UserProvidedFile, label: str
+) -> UserProvidedFile:
+    """Normalize a user-supplied netCDF reference into a :class:`UserProvidedFile`.
+
+    Accepts the same three forms every user-provided-file field takes: a bare
+    ``str``/``Path`` (hashed here via ``hash_netcdf_contents`` -- the file must
+    exist at authoring time, else a clear ``FileNotFoundError``); a plain dict
+    already carrying ``location``/``content_hash`` (trusted as-is, e.g. the
+    wizard's rebuild path -- no rehashing); or an existing ``UserProvidedFile``
+    instance (passed through unchanged). ``label`` names the field in the raised
+    error message.
+    """
+    if isinstance(value, UserProvidedFile):
+        return value
+    if isinstance(value, dict):
+        return UserProvidedFile(**value)
+
+    from cstar_forge.forge.user_files import hash_netcdf_contents
+
+    path = Path(value)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{label} {path} does not exist; a user-provided file must be "
+            "readable at authoring time so its contents can be hashed into "
+            "the blueprint."
+        )
+    return UserProvidedFile(location=str(path), content_hash=hash_netcdf_contents(path))
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -352,6 +385,8 @@ def build_forge_blueprint(
     grid_kwargs_parent: dict[str, Any] | None = None,
     metadata_child: dict[str, Any] | None = None,
     nesting_include_pressure_fluxes: bool = False,
+    grid_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
+    cdr_forcing_file: str | Path | dict[str, Any] | UserProvidedFile | None = None,
     topography_path: str | None = None,
     topography_source: str | TopographySource = TopographySource.ETOPO5,
     use_pio: bool | None = None,
@@ -422,13 +457,57 @@ def build_forge_blueprint(
     save (see ``cstar_forge.forge.forge_blueprint._forge_version`` /
     ``_installed_version``), preserving an explicit value passed here instead
     (e.g. carrying one forward through a re-resolve).
+
+    ``grid_file``, if given, is a user-supplied pre-made grid netCDF used in place
+    of one Forge would otherwise generate from ``grid_kwargs``. A ``str``/``Path``
+    is normalized into a :class:`UserProvidedFile` by hashing the file's contents
+    (``cstar_forge.forge.user_files.hash_netcdf_contents``) -- the file must exist
+    at authoring time. A dict or ``UserProvidedFile`` carrying both ``location``
+    and ``content_hash`` is trusted as-is (the wizard passes this to avoid
+    rehashing on every rebuild). Either way, the grid is loaded once here
+    (``rt.Grid(filename=..., **vert)``, where ``vert`` is the theta_s/theta_b/
+    hc/N subset of ``grid_kwargs`` -- see :func:`vert_kwargs_from_grid_kwargs`)
+    to read back ``nx``/``ny``/``N`` for ``model_settings["param"]`` and, when
+    ``dt``/``v_sponge`` are not supplied explicitly, ``size_x``/``size_y`` for
+    their derivation -- which raises a clear ``ValueError`` if the file lacks
+    those attrs (a hand-made file roms-tools never wrote), since there is then
+    no way to derive them and an explicit value must be passed instead.
+    ``grid_kwargs`` itself must then carry only the vertical-coord keys (the
+    schema validator rejects generation-geometry keys and nesting alongside
+    ``grid_file`` -- see ``Domain._grid_file_excludes_generation_geometry``).
+
+    ``cdr_forcing_file``, if given, is a user-supplied pre-made CDR-forcing netCDF
+    used in place of building one via ``rt.CDRForcing`` from ``cdr_forcing``/
+    ``cdr_forcing_yaml``. Normalized into a :class:`UserProvidedFile` the same way
+    as ``grid_file`` (see :func:`_normalize_user_file`) -- a ``str``/``Path`` is
+    hashed here (must exist at authoring time), a dict/``UserProvidedFile`` is
+    trusted as-is. Mutually exclusive with ``cdr_forcing``/``cdr_forcing_yaml``
+    (raised here, before the ``Forcing`` model validator would, so the caller gets
+    a resolver-level message); like a set ``cdr_forcing``, it forces
+    ``do_cdr_output=True``, requires ``bgc_mode == "marbl"``, sets
+    ``cppdefs.cdr_forcing = True``, and ensures the CDR-output MARBL diagnostics.
     """
+    if cdr_forcing_file is not None and (
+        cdr_forcing is not None or cdr_forcing_yaml is not None
+    ):
+        raise ValueError(
+            "cdr_forcing_file and cdr_forcing/cdr_forcing_yaml are mutually "
+            "exclusive; supply either a generated-CDR config or a pre-made "
+            "CDR-forcing file, not both."
+        )
+
     if cdr_forcing_yaml is not None:
         cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
     elif cdr_forcing is not None:
         # defensive strip -- a caller may hand us a dict copied straight from a
         # to_yaml() dump (which still carries the human-readable metadata block).
         cdr_forcing = {k: v for k, v in cdr_forcing.items() if k != "_tracer_metadata"}
+
+    cdr_forcing_file_obj: UserProvidedFile | None = None
+    if cdr_forcing_file is not None:
+        cdr_forcing_file_obj = _normalize_user_file(
+            cdr_forcing_file, label="cdr_forcing_file"
+        )
 
     spec = load_model_spec_data(model_dir)
     model = spec["model"]
@@ -451,21 +530,60 @@ def build_forge_blueprint(
         )
     inputs = forcing_inputs
 
-    nx = grid_kwargs["nx"]
-    ny = grid_kwargs["ny"]
-    nvert = grid_kwargs["N"]
+    # ----- optional user-provided grid file ----------------------------------
+    # Normalize `grid_file` into a UserProvidedFile, then load the grid ONCE
+    # (nx/ny/N/dt/v_sponge derivation below all read from this single object
+    # rather than re-opening the file or re-hashing it).
+    grid_file_obj: UserProvidedFile | None = None
+    loaded_grid: Any = None
+    if grid_file is not None:
+        grid_file_obj = _normalize_user_file(grid_file, label="grid_file")
+
+        if grid is not None:
+            # A caller (the wizard, rebuilding on every widget edit) may pass the
+            # already-loaded grid to avoid re-reading the netCDF each rebuild.
+            loaded_grid = grid
+        else:
+            vert = vert_kwargs_from_grid_kwargs(grid_kwargs)
+            import roms_tools as rt
+
+            loaded_grid = rt.Grid(filename=grid_file_obj.location, **vert)
+
+    if loaded_grid is not None:
+        nx = loaded_grid.nx
+        ny = loaded_grid.ny
+        nvert = loaded_grid.N
+    else:
+        nx = grid_kwargs["nx"]
+        ny = grid_kwargs["ny"]
+        nvert = grid_kwargs["N"]
     npx = partitioning["n_procs_x"]
     npy = partitioning["n_procs_y"]
 
     # ----- derived numerics --------------------------------------------------
     if dt is None:
-        dt = _compute_dt_from_cfl(grid_kwargs, grid)
+        if loaded_grid is not None and loaded_grid.size_x is None:
+            raise ValueError(
+                "dt was not provided and the grid_file grid has no size_x/size_y "
+                "(a hand-made file roms-tools never wrote those attrs to) -- CFL "
+                "derivation is impossible; pass dt= explicitly."
+            )
+        dt = _compute_dt_from_cfl(
+            grid_kwargs, loaded_grid if loaded_grid is not None else grid
+        )
     n_days = (end_date - start_date).days
     ntimes = round(n_days * 24 * 3600 / dt)
     # v_sponge default = grid spacing (m) / 10 -- a caller (e.g. the wizard, restoring
     # a user override saved into a DomainSpec) may pass an explicit value instead.
     if v_sponge is None:
-        v_sponge = _compute_v_sponge_default(grid_kwargs)
+        if loaded_grid is not None and loaded_grid.size_x is None:
+            raise ValueError(
+                "v_sponge was not provided and the grid_file grid has no size_x "
+                "(a hand-made file roms-tools never wrote that attr to) -- "
+                "derivation from grid spacing is impossible; pass v_sponge= "
+                "explicitly."
+            )
+        v_sponge = _compute_v_sponge_default(grid_kwargs, loaded_grid)
 
     # ----- flat model_settings ----------------------------------------------
     settings: dict[str, Any] = copy.deepcopy(model.get("model_settings", {}) or {})
@@ -507,7 +625,7 @@ def build_forge_blueprint(
     cppdefs["obc_east"] = bool(open_boundaries.get("east", False))
     cppdefs["obc_north"] = bool(open_boundaries.get("north", False))
     cppdefs["obc_south"] = bool(open_boundaries.get("south", False))
-    cppdefs["cdr_forcing"] = cdr_forcing is not None
+    cppdefs["cdr_forcing"] = cdr_forcing is not None or cdr_forcing_file_obj is not None
     cppdefs["use_pio"] = bool(use_pio)
     cppdefs["marbl"] = bgc_mode == "marbl"
     # nhy_forcing/nox_forcing default from the ModelSpec (advanced-settings editable)
@@ -607,12 +725,16 @@ def build_forge_blueprint(
 
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
-    # ROMS opens no CDR file), and CDR forcing implies CDR output. Either way
-    # the CDR_FORCING cppdef must be on (it gates compiling ucla-roms'
-    # cdr_output.F90) and the MARBL diagnostics ucla-roms looks up by name,
-    # unchecked, must be in the write list.
+    # ROMS opens no CDR file), and CDR forcing (generated OR a user-supplied
+    # cdr_forcing_file) implies CDR output. Either way the CDR_FORCING cppdef
+    # must be on (it gates compiling ucla-roms' cdr_output.F90) and the MARBL
+    # diagnostics ucla-roms looks up by name, unchecked, must be in the write list.
     cdr_out = settings.setdefault("cdr_output", {})
-    do_cdr_output = bool(cdr_out.get("do_cdr_output")) or cdr_forcing is not None
+    do_cdr_output = (
+        bool(cdr_out.get("do_cdr_output"))
+        or cdr_forcing is not None
+        or cdr_forcing_file_obj is not None
+    )
     cdr_out["do_cdr_output"] = do_cdr_output
     if do_cdr_output:
         if bgc_mode != "marbl":
@@ -637,8 +759,13 @@ def build_forge_blueprint(
     sources = _build_forcing(
         inputs,
         cdr_forcing,
-        topography_source,
+        # A user-provided grid file has its topography baked in -- the executor
+        # skips topography staging entirely, so don't note the configured source
+        # into resolved_datasets/datasets (a user-staged source like EMOD would
+        # otherwise hard-fail ensure_source_data over a file that is never used).
+        None if grid_file_obj is not None else topography_source,
         is_child=grid_kwargs_parent is not None,
+        cdr_forcing_file=cdr_forcing_file_obj,
     )  # kept as `sources` locally for brevity
 
     # ----- bgc_mode consistency check ----------------------------------------
@@ -718,6 +845,7 @@ def build_forge_blueprint(
             # ``run_time_overrides={"time_stepping": {"dt": ...}}`` caller can't
             # desync this field from ``model_settings["time_stepping"]["dt"]``.
             dt=settings["time_stepping"]["dt"],
+            grid_file=grid_file_obj,
         ),
         forcing=sources,
         # Host-independent source-dataset keys to prepare (forcing/IC sources + topography),
@@ -757,6 +885,7 @@ def _build_forcing(
     cdr_forcing: dict[str, Any] | None,
     topography_source: str | TopographySource | None = None,
     is_child: bool = False,
+    cdr_forcing_file: UserProvidedFile | None = None,
 ) -> Forcing:
     """Build the flat ``Forcing`` object from model inputs + CDR config.
 
@@ -767,6 +896,12 @@ def _build_forcing(
     ``is_child`` (this domain has a parent grid) skips boundary items entirely --
     not just clears them afterward -- so a boundary-only source is never noted
     into ``resolved_datasets``/``datasets`` either.
+
+    ``cdr_forcing_file``, if given, is already a normalized :class:`UserProvidedFile`
+    (see ``build_forge_blueprint``'s ``_normalize_user_file`` call) -- passed straight
+    through onto ``Forcing.cdr_forcing_file``; mutual exclusion with ``cdr_forcing``
+    is enforced both by the caller (a clearer, resolver-level message) and by
+    ``Forcing``'s own validator (defense in depth).
     """
     ic_block = inputs.get("initial_conditions", {}) or {}
     forcing_block = inputs.get("forcing", {}) or {}
@@ -778,7 +913,13 @@ def _build_forcing(
             kw = {"source": _parse_source(it.get("source"))}
             for f in extra:
                 if f in it:
-                    kw[f] = it[f]
+                    if f == "custom_file":
+                        # Accept the same three forms as grid_file (str/Path/dict/
+                        # instance) -- see _normalize_user_file. Only river carries
+                        # this today; the label generalizes to any future item.
+                        kw[f] = _normalize_user_file(it[f], label=f"{key} custom_file")
+                    else:
+                        kw[f] = it[f]
             out.append(cls(**kw))
         return out
 
@@ -839,6 +980,7 @@ def _build_forcing(
             "bgc_source",
             "coast_snap_buffer_km",
             "domain_edge_buffer",
+            "custom_file",
         ),
     )
 
@@ -846,10 +988,21 @@ def _build_forcing(
     resolved: dict[str, ResolvedDataset] = {}
 
     def _note(src: SourceSpec):
-        if src and src.name:
-            resolved.setdefault(
-                src.name, _resolved_dataset(src.name, src.glorys_layout)
-            )
+        if not (src and src.name):
+            return
+        # CUSTOM_FILE (river.source) has no registry entry -- the file is
+        # verified/staged directly from RiverForcingItem.custom_file, not from
+        # SourceData, so noting it here would either raise "Unknown dataset"
+        # downstream or cause bogus staging of a source that is never used.
+        if src.name.upper() == "CUSTOM_FILE":
+            return
+        # An explicit path (SourceSpec.path) bypasses staging entirely -- mirrors
+        # topography_path semantics -- so the item is never noted into
+        # resolved_datasets/datasets (see input_data._resolve_source_block, which
+        # returns an explicit path verbatim without ever calling path_for_source).
+        if src.path:
+            return
+        resolved.setdefault(src.name, _resolved_dataset(src.name, src.glorys_layout))
 
     _note(ic.source)
     _note(ic.bgc_source)
@@ -878,6 +1031,7 @@ def _build_forcing(
         tidal=tidal,
         river=river,
         cdr_forcing=cdr_forcing,
+        cdr_forcing_file=cdr_forcing_file,
         resolved_datasets=resolved,
     )
 
@@ -957,10 +1111,15 @@ def _build_code(
     )
 
 
-def _compute_v_sponge_default(grid_kwargs: dict[str, Any]) -> float:
+def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> float:
     """Lazily compute the default sponge viscosity from grid spacing (no grid build
     needed -- pure arithmetic on ``nx``/``size_x``). Mirrors ``_compute_dt_from_cfl``'s
     lazy-import pattern to keep this module dependency-light when unused.
+
+    ``grid``, if given (a user-supplied ``grid_file``'s loaded grid, whose
+    ``grid_kwargs`` carries no ``nx``/``size_x`` -- see
+    ``Domain._grid_file_excludes_generation_geometry``), reads ``size_x``/``nx``
+    from the grid object instead of ``grid_kwargs``.
     """
     try:
         from cstar_forge.forge.util import compute_v_sponge_from_grid
@@ -970,6 +1129,8 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any]) -> float:
             "cstar_forge.forge.util failed. Pass v_sponge= explicitly to keep "
             f"resolution dependency-light. ({exc})"
         ) from exc
+    if grid is not None:
+        return compute_v_sponge_from_grid(grid.size_x, grid.nx)
     return compute_v_sponge_from_grid(grid_kwargs["size_x"], grid_kwargs["nx"])
 
 

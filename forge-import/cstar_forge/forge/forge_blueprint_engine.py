@@ -149,6 +149,8 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         d: dict[str, Any] = {"name": spec.name, "climatology": spec.climatology}
         if spec.glorys_layout:
             d["glorys_layout"] = spec.glorys_layout
+        if spec.path:
+            d["path"] = spec.path
         return d
 
     def _item(item) -> dict[str, Any]:
@@ -210,6 +212,11 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         start_time=cfg.run.start_date,
         end_time=cfg.run.end_date,
         cdr_forcing=cfg.forcing.cdr_forcing,
+        # Mirrors cdr_forcing/grid_file: a top-level builder kwarg (not routed
+        # through sources_to_forcing_override, which only ever carries
+        # initial_conditions/surface/boundary/tidal/river) -- the UserProvidedFile
+        # object is passed straight through, same as domain.grid_file below.
+        cdr_forcing_file=cfg.forcing.cdr_forcing_file,
         forcing_override=sources_to_forcing_override(cfg),
         model_reference_date=cfg.run.model_reference_date,
         source_dataset_keys=list(cfg.datasets),
@@ -218,6 +225,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         },
         resolved_settings=copy.deepcopy(cfg.model_settings),
         code_spec=cfg.code,
+        grid_file=cfg.domain.grid_file,
     )
     # nesting: the builder expects grid_kwargs_child to carry an optional "metadata"
     # block (which the ForgeBlueprint stores separately) — re-embed it.

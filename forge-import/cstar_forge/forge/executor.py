@@ -53,10 +53,13 @@ from cstar_forge.forge.forge_blueprint import (
     DEFAULT_WORKING_ROOT,
     ROMS_RUN_SEGMENT,
     OpenBoundaries,
+    UserProvidedFile,
+    vert_kwargs_from_grid_kwargs,
 )
 from cstar_forge.forge.host import HostPaths
 from cstar_forge.forge.namelist_model import ensure_cdr_output_marbl_diagnostics
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
+from cstar_forge.forge.user_files import verify_user_file
 from cstar_forge.utils import mem_log
 
 log = logging.getLogger(__name__)
@@ -182,6 +185,19 @@ class ForgeExecutor(BaseModel):
     grid_kwargs_child: dict[str, Any] | None = Field(
         default=None, validate_default=False
     )
+    grid_file: UserProvidedFile | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "A user-supplied pre-made grid netCDF (from ForgeBlueprint "
+            "``domain.grid_file``), used in place of building the grid from "
+            "``grid_kwargs``. When set, ``model_post_init`` verifies it "
+            "(``cstar_forge.forge.user_files.verify_user_file``), skips "
+            "topography resolution (already baked into the file), and loads the "
+            "grid via ``rt.Grid(filename=...)``; nesting is unsupported alongside "
+            "it (the ForgeBlueprint schema already forbids the combination)."
+        ),
+    )
     topography_source: str = Field(
         default="ETOPO5",
         description=(
@@ -207,6 +223,18 @@ class ForgeExecutor(BaseModel):
         default=None,
         alias="CDR_forcing",
         validate_default=False,
+    )
+    cdr_forcing_file: UserProvidedFile | None = Field(
+        default=None,
+        validate_default=False,
+        description=(
+            "A user-supplied pre-made CDR-forcing netCDF (from ForgeBlueprint "
+            "``forcing.cdr_forcing_file``), used in place of building one via "
+            "``rt.CDRForcing`` from ``cdr_forcing``. Mutually exclusive with "
+            "``cdr_forcing`` (the ForgeBlueprint schema already forbids the "
+            "combination); verified and staged directly in "
+            "``input_data._generate_cdr_forcing``'s custom-file branch."
+        ),
     )
     forcing_override: dict[str, Any] | None = Field(
         default=None,
@@ -382,97 +410,126 @@ class ForgeExecutor(BaseModel):
         # Fail fast if no host was injected — every artifact path needs it.
         self._require_host()
 
-        # Topography is a prerequisite of grid construction: roms-tools requires a
-        # staged 'path' for any non-ETOPO5 source and silently falls back to ETOPO5
-        # otherwise. Stage the topo file (a plain download, no grid needed) and inject
-        # it into every grid_kwargs BEFORE the rt.Grid calls below. ETOPO5 is left
-        # untouched — roms-tools fetches it itself at grid build.
-        topo = self._resolve_topography_source()
-        if topo is not None:
-            self.grid_kwargs = {**self.grid_kwargs, "topography_source": topo}
-            if self.grid_kwargs_parent is not None:
-                self.grid_kwargs_parent = {
-                    **self.grid_kwargs_parent,
-                    "topography_source": topo,
-                }
-            if self.grid_kwargs_child is not None:
-                self.grid_kwargs_child = {
-                    **self.grid_kwargs_child,
-                    "topography_source": topo,
-                }
-
-        # Create grids, 4 cases:
-        # has child and no parent, has child and parent, has parent and no child, no parent no child
-
-        # I am a parent but not a child
-        if self.grid_kwargs_child is not None and self.grid_kwargs_parent is None:
-            # Make both parent and child, to make the nesting data.
-            grid_kwargs_child = {
-                k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
-            }
-
-            with mem_log("Grid(child)", enabled=self.verbose):
-                self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
-            with mem_log("Grid(self)", enabled=self.verbose):
-                self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
-            with mem_log("align_grids(self, child)", enabled=self.verbose):
-                self.grid_child = rt.align_grids(
-                    self.grid, self.grid_child, verbose=self.verbose
+        if self.grid_file is not None:
+            if (
+                self.grid_kwargs_parent is not None
+                or self.grid_kwargs_child is not None
+            ):
+                raise ValueError(
+                    "grid_file is set (a user-supplied grid) but grid_kwargs_parent/"
+                    "grid_kwargs_child is also set; a custom grid file plus nesting "
+                    "is unsupported (the ForgeBlueprint schema already forbids this "
+                    "combination for a resolver-built blueprint)."
                 )
-
-            if "metadata" in self.grid_kwargs_child:
-                self.metadata_child = self.grid_kwargs_child["metadata"]
-
-        # I am a parent and a child
-        elif self.grid_kwargs_child is not None and self.grid_kwargs_parent is not None:
-            grid_kwargs_child = {
-                k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
-            }
-            grid_kwargs_parent = {
-                k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
-            }
-            grid_kwargs = {k: v for k, v in self.grid_kwargs.items() if k != "metadata"}
-
-            # Adapt this grid to its parent, but create nesting data for its child
-            with mem_log("Grid(parent)", enabled=self.verbose):
-                self.grid_parent = rt.Grid(**grid_kwargs_parent, verbose=self.verbose)
-            with mem_log("Grid(child)", enabled=self.verbose):
-                self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
-            with mem_log("Grid(self)", enabled=self.verbose):
-                self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
-
-            with mem_log("align_grids(parent, self)", enabled=self.verbose):
-                self.grid = rt.align_grids(
-                    self.grid_parent, self.grid, verbose=self.verbose
-                )
-            with mem_log("align_grids(self, child)", enabled=self.verbose):
-                self.grid_child = rt.align_grids(
-                    self.grid, self.grid_child, verbose=self.verbose
-                )
-
-            if "metadata" in self.grid_kwargs_child:
-                self.metadata_child = self.grid_kwargs_child["metadata"]
-
-        # I am a child but not a parent
-        elif self.grid_kwargs_child is None and self.grid_kwargs_parent is not None:
-            grid_kwargs_parent = {
-                k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
-            }
-            grid_kwargs = {k: v for k, v in self.grid_kwargs.items() if k != "metadata"}
-
-            # Adapt this grid to its parent. no nesting data needed
-            with mem_log("Grid(parent)", enabled=self.verbose):
-                self.grid_parent = rt.Grid(**grid_kwargs_parent, verbose=self.verbose)
-            with mem_log("Grid(self)", enabled=self.verbose):
-                self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
-
-            with mem_log("align_grids(parent, self)", enabled=self.verbose):
-                self.grid = rt.align_grids(
-                    self.grid_parent, self.grid, verbose=self.verbose
+            resolved_grid_path = verify_user_file(self.grid_file, label="grid")
+            vert = vert_kwargs_from_grid_kwargs(self.grid_kwargs)
+            with mem_log("Grid(self, from grid_file)", enabled=self.verbose):
+                self.grid = rt.Grid(
+                    filename=str(resolved_grid_path), **vert, verbose=self.verbose
                 )
         else:
-            with mem_log("Grid(self)", enabled=self.verbose):
-                self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
+            # Topography is a prerequisite of grid construction: roms-tools requires a
+            # staged 'path' for any non-ETOPO5 source and silently falls back to ETOPO5
+            # otherwise. Stage the topo file (a plain download, no grid needed) and inject
+            # it into every grid_kwargs BEFORE the rt.Grid calls below. ETOPO5 is left
+            # untouched — roms-tools fetches it itself at grid build.
+            topo = self._resolve_topography_source()
+            if topo is not None:
+                self.grid_kwargs = {**self.grid_kwargs, "topography_source": topo}
+                if self.grid_kwargs_parent is not None:
+                    self.grid_kwargs_parent = {
+                        **self.grid_kwargs_parent,
+                        "topography_source": topo,
+                    }
+                if self.grid_kwargs_child is not None:
+                    self.grid_kwargs_child = {
+                        **self.grid_kwargs_child,
+                        "topography_source": topo,
+                    }
+
+            # Create grids, 4 cases:
+            # has child and no parent, has child and parent, has parent and no child, no parent no child
+
+            # I am a parent but not a child
+            if self.grid_kwargs_child is not None and self.grid_kwargs_parent is None:
+                # Make both parent and child, to make the nesting data.
+                grid_kwargs_child = {
+                    k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
+                }
+
+                with mem_log("Grid(child)", enabled=self.verbose):
+                    self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
+                with mem_log("Grid(self)", enabled=self.verbose):
+                    self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
+                with mem_log("align_grids(self, child)", enabled=self.verbose):
+                    self.grid_child = rt.align_grids(
+                        self.grid, self.grid_child, verbose=self.verbose
+                    )
+
+                if "metadata" in self.grid_kwargs_child:
+                    self.metadata_child = self.grid_kwargs_child["metadata"]
+
+            # I am a parent and a child
+            elif (
+                self.grid_kwargs_child is not None
+                and self.grid_kwargs_parent is not None
+            ):
+                grid_kwargs_child = {
+                    k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
+                }
+                grid_kwargs_parent = {
+                    k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
+                }
+                grid_kwargs = {
+                    k: v for k, v in self.grid_kwargs.items() if k != "metadata"
+                }
+
+                # Adapt this grid to its parent, but create nesting data for its child
+                with mem_log("Grid(parent)", enabled=self.verbose):
+                    self.grid_parent = rt.Grid(
+                        **grid_kwargs_parent, verbose=self.verbose
+                    )
+                with mem_log("Grid(child)", enabled=self.verbose):
+                    self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
+                with mem_log("Grid(self)", enabled=self.verbose):
+                    self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
+
+                with mem_log("align_grids(parent, self)", enabled=self.verbose):
+                    self.grid = rt.align_grids(
+                        self.grid_parent, self.grid, verbose=self.verbose
+                    )
+                with mem_log("align_grids(self, child)", enabled=self.verbose):
+                    self.grid_child = rt.align_grids(
+                        self.grid, self.grid_child, verbose=self.verbose
+                    )
+
+                if "metadata" in self.grid_kwargs_child:
+                    self.metadata_child = self.grid_kwargs_child["metadata"]
+
+            # I am a child but not a parent
+            elif self.grid_kwargs_child is None and self.grid_kwargs_parent is not None:
+                grid_kwargs_parent = {
+                    k: v for k, v in self.grid_kwargs_parent.items() if k != "metadata"
+                }
+                grid_kwargs = {
+                    k: v for k, v in self.grid_kwargs.items() if k != "metadata"
+                }
+
+                # Adapt this grid to its parent. no nesting data needed
+                with mem_log("Grid(parent)", enabled=self.verbose):
+                    self.grid_parent = rt.Grid(
+                        **grid_kwargs_parent, verbose=self.verbose
+                    )
+                with mem_log("Grid(self)", enabled=self.verbose):
+                    self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
+
+                with mem_log("align_grids(parent, self)", enabled=self.verbose):
+                    self.grid = rt.align_grids(
+                        self.grid_parent, self.grid, verbose=self.verbose
+                    )
+            else:
+                with mem_log("Grid(self)", enabled=self.verbose):
+                    self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
 
         # Initialize blueprint with basic structure
         log.debug("model_post_init: initializing blueprint structure for %r", self.name)
@@ -547,7 +604,7 @@ class ForgeExecutor(BaseModel):
 
                 _add_nc(category)
 
-        if self.cdr_forcing:
+        if self.cdr_forcing or self.cdr_forcing_file:
             _add_nc(input_data.CDR_FORCING_NETCDF_STEM)
 
         return planned_paths
@@ -1453,6 +1510,7 @@ class ForgeExecutor(BaseModel):
                 roms_marbl_blueprint_dir=self.roms_marbl_blueprint_dir,
                 partitioning=self.partitioning,
                 cdr_forcing=self.cdr_forcing,
+                cdr_forcing_file=self.cdr_forcing_file,
                 use_dask=use_dask,
                 dask_num_workers=dask_num_workers,
                 subchunk=subchunk,
@@ -1819,9 +1877,9 @@ class ForgeExecutor(BaseModel):
         # CDR-output consistency net, mirroring the resolver's consistency block:
         # stored blueprints reach configure_build without re-resolving, and wizard
         # accordion overrides apply after the resolver, so this is the enforcement
-        # point of record. A generated CDR forcing implies CDR output regardless of
-        # the stored snapshot.
-        if self.cdr_forcing:
+        # point of record. A generated CDR forcing (or a user-supplied
+        # cdr_forcing_file) implies CDR output regardless of the stored snapshot.
+        if self.cdr_forcing or self.cdr_forcing_file:
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
         # do_cdr_output requires MARBL plus the CDR_FORCING cppdef (both gate
         # compiling ucla-roms' cdr_output.F90), and the MARBL diagnostics ucla-roms

@@ -12,6 +12,7 @@ Tests cover:
 - Edge cases and error handling
 """
 
+import shutil
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,7 @@ from cstar_forge import models as forge_models
 from cstar_forge.config import DataPaths
 from cstar_forge.forge import source_data
 from cstar_forge.forge.input_data import (
+    CDR_FORCING_NETCDF_STEM,
     INPUT_REGISTRY,
     InputData,
     InputStep,
@@ -1737,6 +1739,639 @@ class TestRomsMarblInputDataGeneration:
         assert not sample_roms_marbl_input_data._settings_run_time.get(
             "extract_data", {}
         ).get("do_extract", False)
+
+
+def _write_river_netcdf(
+    path,
+    nriver=3,
+    ntime=4,
+    ntracers=2,
+    eta_rho=None,
+    xi_rho=None,
+    include_river_name=True,
+):
+    """A minimal, real river-forcing netCDF matching roms-tools'
+    ``RiverForcing.save()`` output shape: dims ``nriver``/``river_time``/
+    ``ntracers``, vars ``river_volume`` (river_time, nriver) and ``river_tracer``
+    (river_time, ntracers, nriver), optionally a ``river_name`` string coordinate.
+    ``eta_rho``/``xi_rho``, if given, add the 2-D ``river_index``/``river_fraction``
+    grid fields roms-tools also writes.
+
+    ``include_river_name=False`` drops the string coordinate -- CDF-5 (the
+    ``nccopy -k cdf5`` PIO conversion) has no netCDF string-variable support, so
+    tests exercising that conversion path use a string-free file (this is a
+    ``nccopy``/CDF-5 format limitation, unrelated to the custom_file logic itself
+    -- ``test_user_files.py``'s own generic nccopy coverage uses a similarly
+    string-free dataset).
+    """
+    data_vars = {
+        "river_volume": (("river_time", "nriver"), np.ones((ntime, nriver))),
+        "river_tracer": (
+            ("river_time", "ntracers", "nriver"),
+            np.ones((ntime, ntracers, nriver)),
+        ),
+    }
+    if eta_rho is not None and xi_rho is not None:
+        data_vars["river_index"] = (("eta_rho", "xi_rho"), np.zeros((eta_rho, xi_rho)))
+        data_vars["river_fraction"] = (
+            ("eta_rho", "xi_rho"),
+            np.zeros((eta_rho, xi_rho)),
+        )
+    ds = xr.Dataset(data_vars)
+    if include_river_name:
+        ds.coords["river_name"] = ("nriver", [f"river_{i}" for i in range(nriver)])
+    ds.to_netcdf(path)
+    return path
+
+
+def _write_cdr_netcdf(
+    path,
+    ncdr=2,
+    ntime=3,
+    family="volume",
+    include_release_name=True,
+    omit=(),
+):
+    """A minimal, real CDR-forcing netCDF matching the variable/dim conventions
+    ``_CDR_FRC_DEFAULT`` (``forge_blueprint_resolve.py``) hardcodes for ROMS to
+    read: dims ``ncdr``/``cdr_time``, location/scale vars ``cdr_lon``/
+    ``cdr_lat``/``cdr_dep``/``cdr_hsc``/``cdr_vsc`` (read unconditionally), and
+    either the volume family (``cdr_volume`` + ``cdr_tracer``, both on
+    ``(cdr_time, ncdr)``) or the tracer-perturbation family (``cdr_trcflx``).
+
+    ``omit`` drops named variables after construction, for missing-content tests.
+    ``family="none"`` skips both families entirely.
+    """
+    data_vars = {
+        "cdr_lon": ("ncdr", np.zeros(ncdr)),
+        "cdr_lat": ("ncdr", np.zeros(ncdr)),
+        "cdr_dep": ("ncdr", np.zeros(ncdr)),
+        "cdr_hsc": ("ncdr", np.ones(ncdr)),
+        "cdr_vsc": ("ncdr", np.ones(ncdr)),
+        "cdr_time": ("cdr_time", np.arange(ntime, dtype=float)),
+    }
+    if family == "volume":
+        data_vars["cdr_volume"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
+        data_vars["cdr_tracer"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
+    elif family == "trcflx":
+        data_vars["cdr_trcflx"] = (("cdr_time", "ncdr"), np.ones((ntime, ncdr)))
+    for name in omit:
+        data_vars.pop(name, None)
+    ds = xr.Dataset(data_vars)
+    if include_release_name:
+        ds.coords["release_name"] = ("ncdr", [f"release_{i}" for i in range(ncdr)])
+    ds.to_netcdf(path)
+    return path
+
+
+class TestCdrCustomFileForcing:
+    """Executor tests for the CDR-forcing ``custom_file`` pathway: a user-supplied,
+    pre-made CDR-forcing netCDF used in place of building one via
+    ``rt.CDRForcing``.
+
+    Uses a hand-built ``RomsMarblInputData`` with a ``MagicMock`` grid, same
+    rationale as ``TestRiverCustomFileForcing`` (a real ``rt.Grid`` fails in this
+    dev env -- PROJ/geopandas mismatch, see CLAUDE.md).
+    """
+
+    @pytest.fixture
+    def cdr_input_data(self, tmp_path):
+        ic = forge_models.InitialConditionsInput(
+            source=forge_models.SourceSpec(name="GLORYS")
+        )
+        surface_item = forge_models.SurfaceForcingItem(
+            source=forge_models.SourceSpec(name="ERA5"), type="physics"
+        )
+        boundary_item = forge_models.BoundaryForcingItem(
+            source=forge_models.SourceSpec(name="GLORYS"), type="physics"
+        )
+        forcing_override = _build_forcing_override(
+            ic, surface=[surface_item], boundary=[boundary_item]
+        )
+
+        grid = MagicMock()
+        grid.ds.sizes = {"eta_rho": 22, "xi_rho": 24}
+
+        data_dir = tmp_path / "input_data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        bp_dir = tmp_path / "blueprints"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+
+        return RomsMarblInputData(
+            domain_name="test_domain",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            forcing_override=forcing_override,
+            grid=grid,
+            boundaries=forge_models.OpenBoundaries(
+                north=True, south=True, east=True, west=False
+            ),
+            source_data=MagicMock(spec=source_data.SourceData),
+            roms_marbl_blueprint_dir=bp_dir,
+            partitioning=cstar_models.PartitioningParameterSet(
+                n_procs_x=2, n_procs_y=2
+            ),
+            use_dask=False,
+            input_data_dir=data_dir,
+            # Placeholder so __post_init__'s input_list/Dataset bookkeeping creates
+            # a "cdr_forcing" slot -- the tests below call _generate_cdr_forcing
+            # directly with their own custom_file, not this placeholder's content.
+            cdr_forcing_file={"location": "placeholder.nc", "content_hash": "0" * 64},
+        )
+
+    def test_missing_file_raises_file_not_found(self, cdr_input_data, tmp_path):
+        missing = tmp_path / "missing_cdr.nc"
+        custom_file = forge_models.UserProvidedFile(
+            location=str(missing), content_hash="x" * 64
+        )
+
+        with pytest.raises(FileNotFoundError):
+            cdr_input_data._generate_cdr_forcing(
+                key="cdr_forcing", custom_file=custom_file
+            )
+
+    def test_hash_mismatch_warns_but_proceeds(self, cdr_input_data, tmp_path):
+        cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=3, family="volume")
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash="not-the-real-hash"
+        )
+
+        with pytest.warns(UserWarning, match="changed since"):
+            cdr_input_data._generate_cdr_forcing(
+                key="cdr_forcing", custom_file=custom_file
+            )
+
+        assert cdr_input_data._settings_run_time["cdr_frc"]["ncdr_parm"] == 3
+
+    def test_volume_file_sets_ncdr_and_cdr_volume_true(self, cdr_input_data, tmp_path):
+        cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=4, family="volume")
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
+        )
+
+        cdr_input_data._generate_cdr_forcing(key="cdr_forcing", custom_file=custom_file)
+
+        rt_settings = cdr_input_data._settings_run_time["cdr_frc"]
+        assert rt_settings["cdr_source"] is True
+        assert rt_settings["cdr_file"] == "cdr.nc"
+        assert rt_settings["ncdr_parm"] == 4
+        assert rt_settings["forcing_parameterized"] is True
+        assert rt_settings["cdr_volume"] is True
+        assert cdr_input_data._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+        assert cdr_input_data._settings_run_time["cdr_output"]["do_cdr_output"] is True
+
+        output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        assert output_path.exists()
+        resources = cdr_input_data.roms_marbl_blueprint_elements.cdr_forcing.data
+        assert any(Path(r.location) == output_path for r in resources)
+
+    def test_trcflx_file_sets_cdr_volume_false(self, cdr_input_data, tmp_path):
+        cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=2, family="trcflx")
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
+        )
+
+        cdr_input_data._generate_cdr_forcing(key="cdr_forcing", custom_file=custom_file)
+
+        rt_settings = cdr_input_data._settings_run_time["cdr_frc"]
+        assert rt_settings["ncdr_parm"] == 2
+        assert rt_settings["cdr_volume"] is False
+
+    def test_accepts_custom_file_as_plain_dict(self, cdr_input_data, tmp_path):
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=5, family="volume")
+        custom_file_dict = {
+            "location": str(cdr_nc),
+            "content_hash": hash_netcdf_contents(cdr_nc),
+        }
+
+        cdr_input_data._generate_cdr_forcing(
+            key="cdr_forcing", custom_file=custom_file_dict
+        )
+
+        assert cdr_input_data._settings_run_time["cdr_frc"]["ncdr_parm"] == 5
+
+    @pytest.mark.parametrize(
+        "family,omit,match",
+        [
+            ("volume", ("cdr_lon",), "cdr_lon"),
+            ("volume", ("cdr_hsc",), "cdr_hsc"),
+            ("volume", ("cdr_tracer",), "cdr_tracer"),
+            ("none", (), "cdr_volume"),
+        ],
+    )
+    def test_missing_required_variable_raises_value_error(
+        self, cdr_input_data, tmp_path, family, omit, match
+    ):
+        cdr_nc = tmp_path / "bad_cdr.nc"
+        _write_cdr_netcdf(cdr_nc, ncdr=2, family=family, omit=omit)
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
+        )
+
+        with pytest.raises(ValueError, match=match):
+            cdr_input_data._generate_cdr_forcing(
+                key="cdr_forcing", custom_file=custom_file
+            )
+
+    def test_missing_ncdr_dim_raises_value_error(self, cdr_input_data, tmp_path):
+        cdr_nc = tmp_path / "bad_cdr.nc"
+        ds = xr.Dataset(
+            {"cdr_volume": (("cdr_time",), np.ones(3))},
+        )
+        ds.to_netcdf(cdr_nc)
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
+        )
+
+        with pytest.raises(ValueError, match="ncdr"):
+            cdr_input_data._generate_cdr_forcing(
+                key="cdr_forcing", custom_file=custom_file
+            )
+
+    def test_skips_staging_when_output_already_present(self, cdr_input_data, tmp_path):
+        """Mirrors the river reuse test: when the planned dest is already on disk
+        (and clobber=False), staging is skipped -- and ncdr_parm/cdr_volume
+        describe the REUSED file (what ROMS actually reads), not the custom_file,
+        with a warning when the two disagree.
+        """
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        _write_cdr_netcdf(output_path, ncdr=3, family="volume")
+        reused_bytes = output_path.read_bytes()
+        cdr_input_data._existing_planned_outputs = {output_path.resolve()}
+
+        cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=5, family="trcflx")
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
+        )
+
+        with pytest.warns(UserWarning, match="differs from custom_file"):
+            cdr_input_data._generate_cdr_forcing(
+                key="cdr_forcing", custom_file=custom_file
+            )
+
+        assert output_path.read_bytes() == reused_bytes
+        rt_settings = cdr_input_data._settings_run_time["cdr_frc"]
+        assert rt_settings["ncdr_parm"] == 3
+        assert rt_settings["cdr_volume"] is True
+
+    @patch("cstar_forge.forge.input_data.rt.CDRForcing")
+    def test_does_not_construct_rt_cdrforcing(
+        self, mock_cdr_class, cdr_input_data, tmp_path
+    ):
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=2, family="volume")
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
+        )
+
+        cdr_input_data._generate_cdr_forcing(key="cdr_forcing", custom_file=custom_file)
+
+        mock_cdr_class.assert_not_called()
+
+    @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
+    def test_stages_via_nccopy_when_pio(self, cdr_input_data, tmp_path):
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        cdr_input_data.use_pio = True
+        cdr_nc = _write_cdr_netcdf(
+            tmp_path / "user_cdr.nc",
+            ncdr=2,
+            family="volume",
+            include_release_name=False,
+        )
+        custom_file = forge_models.UserProvidedFile(
+            location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
+        )
+
+        cdr_input_data._generate_cdr_forcing(key="cdr_forcing", custom_file=custom_file)
+
+        output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
+        assert output_path.exists()
+
+
+class TestRiverCustomFileForcing:
+    """Executor tests for the river ``custom_file`` pathway: a user-supplied,
+    pre-made river-forcing netCDF used in place of building one via
+    ``rt.RiverForcing``.
+
+    Uses a hand-built ``RomsMarblInputData`` with a ``MagicMock`` grid rather
+    than the module's shared ``sample_grid``/``sample_roms_marbl_input_data``
+    fixtures -- those build a real ``rt.Grid``, which fails in this dev env
+    (PROJ/geopandas ``proj.db`` version mismatch, see CLAUDE.md) and accounts
+    for this module's known ~68 pre-existing errors. Avoiding a real grid keeps
+    these new tests green.
+    """
+
+    @pytest.fixture
+    def river_input_data(self, tmp_path):
+        ic = forge_models.InitialConditionsInput(
+            source=forge_models.SourceSpec(name="GLORYS")
+        )
+        surface_item = forge_models.SurfaceForcingItem(
+            source=forge_models.SourceSpec(name="ERA5"), type="physics"
+        )
+        boundary_item = forge_models.BoundaryForcingItem(
+            source=forge_models.SourceSpec(name="GLORYS"), type="physics"
+        )
+        # Placeholder so __post_init__'s forcing_dict/Dataset bookkeeping creates
+        # a "river" slot -- the tests below call _generate_river_forcing directly
+        # with their own kwargs, not through this placeholder's content.
+        placeholder_river = forge_models.RiverForcingItem(
+            source=forge_models.SourceSpec(name="DAI")
+        )
+        forcing_override = _build_forcing_override(
+            ic,
+            surface=[surface_item],
+            boundary=[boundary_item],
+            river=[placeholder_river],
+        )
+
+        grid = MagicMock()
+        grid.ds.sizes = {"eta_rho": 22, "xi_rho": 24}
+
+        data_dir = tmp_path / "input_data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        bp_dir = tmp_path / "blueprints"
+        bp_dir.mkdir(parents=True, exist_ok=True)
+
+        return RomsMarblInputData(
+            domain_name="test_domain",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            forcing_override=forcing_override,
+            grid=grid,
+            boundaries=forge_models.OpenBoundaries(
+                north=True, south=True, east=True, west=False
+            ),
+            source_data=MagicMock(spec=source_data.SourceData),
+            roms_marbl_blueprint_dir=bp_dir,
+            partitioning=cstar_models.PartitioningParameterSet(
+                n_procs_x=2, n_procs_y=2
+            ),
+            use_dask=False,
+            input_data_dir=data_dir,
+        )
+
+    def test_missing_file_raises_file_not_found(self, river_input_data, tmp_path):
+        missing = tmp_path / "missing_river.nc"
+        custom_file = forge_models.UserProvidedFile(
+            location=str(missing), content_hash="x" * 64
+        )
+
+        with pytest.raises(FileNotFoundError):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+            )
+
+    def test_hash_mismatch_warns_but_proceeds(self, river_input_data, tmp_path):
+        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=3)
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash="not-the-real-hash"
+        )
+
+        with pytest.warns(UserWarning, match="changed since"):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+            )
+
+        assert river_input_data._settings_run_time["river_frc"]["nriv"] == 3
+
+    def test_missing_required_variable_raises_value_error(
+        self, river_input_data, tmp_path
+    ):
+        river_nc = tmp_path / "bad_river.nc"
+        xr.Dataset(
+            {"river_volume": (("river_time", "nriver"), np.ones((4, 2)))}
+        ).to_netcdf(river_nc)
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        with pytest.raises(ValueError, match="river_tracer"):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+            )
+
+    def test_stages_file_and_sets_run_time_settings(self, river_input_data, tmp_path):
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        river_nc = _write_river_netcdf(
+            tmp_path / "user_river.nc", nriver=3, eta_rho=22, xi_rho=24
+        )
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        river_input_data._generate_river_forcing(
+            key="forcing.river",
+            source={"name": "CUSTOM_FILE"},
+            custom_file=custom_file,
+        )
+
+        rt_settings = river_input_data._settings_run_time["river_frc"]
+        assert rt_settings["river_source"] is True
+        assert rt_settings["analytical"] is False
+        assert rt_settings["nriv"] == 3
+        assert rt_settings["rvol_vname"] == "river_volume"
+        assert rt_settings["rvol_tname"] == "river_time"
+        assert rt_settings["rtrc_vname"] == "river_tracer"
+        assert rt_settings["rtrc_tname"] == "river_time"
+
+        output_path = river_input_data._forcing_filename("river")
+        assert output_path.exists()
+        assert river_input_data._settings_run_time["forcing"]["river_path"] == str(
+            output_path
+        )
+
+        resources = river_input_data.roms_marbl_blueprint_elements.forcing.river.data
+        assert any(Path(r.location) == output_path for r in resources)
+
+    def test_accepts_custom_file_as_plain_dict(self, river_input_data, tmp_path):
+        """sources_to_forcing_override dumps custom_file as a plain dict (mode="json"
+        model_dump) -- the executor branch must accept either form.
+        """
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=4)
+        custom_file_dict = {
+            "location": str(river_nc),
+            "content_hash": hash_netcdf_contents(river_nc),
+        }
+
+        river_input_data._generate_river_forcing(
+            key="forcing.river",
+            source={"name": "CUSTOM_FILE"},
+            custom_file=custom_file_dict,
+        )
+
+        assert river_input_data._settings_run_time["river_frc"]["nriv"] == 4
+
+    def test_grid_dim_mismatch_warns(self, river_input_data, tmp_path):
+        # river_input_data.grid.ds.sizes is {"eta_rho": 22, "xi_rho": 24}.
+        river_nc = _write_river_netcdf(
+            tmp_path / "user_river.nc", nriver=2, eta_rho=5, xi_rho=5
+        )
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        with pytest.warns(UserWarning, match="different grid"):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+            )
+
+    def test_include_bgc_true_but_only_two_tracers_warns(
+        self, river_input_data, tmp_path
+    ):
+        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2, ntracers=2)
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        with pytest.warns(UserWarning, match="include_bgc=True"):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+                include_bgc=True,
+            )
+
+    def test_include_bgc_false_but_extra_tracers_warns(
+        self, river_input_data, tmp_path
+    ):
+        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2, ntracers=5)
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        with pytest.warns(UserWarning, match="include_bgc was not requested"):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+                include_bgc=False,
+            )
+
+    def test_skips_staging_when_output_already_present(
+        self, river_input_data, tmp_path
+    ):
+        """Mirrors how the other input steps honor _should_reuse_existing_output:
+        when the planned dest is already on disk (and clobber=False), staging is
+        skipped -- and nriv/settings describe the REUSED file (what ROMS actually
+        reads), not the custom_file, with a warning when the two disagree.
+        """
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        output_path = river_input_data._forcing_filename("river")
+        _write_river_netcdf(output_path, nriver=3)
+        reused_bytes = output_path.read_bytes()
+        river_input_data._existing_planned_outputs = {output_path.resolve()}
+
+        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=5)
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        with pytest.warns(UserWarning, match="differs from custom_file"):
+            river_input_data._generate_river_forcing(
+                key="forcing.river",
+                source={"name": "CUSTOM_FILE"},
+                custom_file=custom_file,
+            )
+
+        assert output_path.read_bytes() == reused_bytes
+        assert river_input_data._settings_run_time["river_frc"]["nriv"] == 3
+
+    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
+    def test_does_not_construct_rt_riverforcing(
+        self, mock_rf_class, river_input_data, tmp_path
+    ):
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2)
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        river_input_data._generate_river_forcing(
+            key="forcing.river",
+            source={"name": "CUSTOM_FILE"},
+            custom_file=custom_file,
+        )
+
+        mock_rf_class.assert_not_called()
+
+    @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
+    def test_stages_via_nccopy_when_pio(self, river_input_data, tmp_path):
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        river_input_data.use_pio = True
+        river_nc = _write_river_netcdf(
+            tmp_path / "user_river.nc", nriver=2, include_river_name=False
+        )
+        custom_file = forge_models.UserProvidedFile(
+            location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
+        )
+
+        river_input_data._generate_river_forcing(
+            key="forcing.river",
+            source={"name": "CUSTOM_FILE"},
+            custom_file=custom_file,
+        )
+
+        output_path = river_input_data._forcing_filename("river")
+        assert output_path.exists()
+
+    def test_resolve_source_block_explicit_path_bypasses_path_for_source(
+        self, river_input_data
+    ):
+        """Regression for the SourceSpec.path fix: an explicit path must win
+        verbatim WITHOUT ever calling path_for_source -- previously this only
+        looked correct because the mocked path_for_source in other tests never
+        raises. On a real host, an explicit-path item is never noted into
+        resolved_datasets/datasets (see forge_blueprint_resolve._note), so it was
+        never staged and path_for_source would raise "dataset was not prepared"
+        for it. Configure the mock to raise if called, to prove the bypass.
+        """
+        river_input_data.source_data.path_for_source.side_effect = KeyError(
+            "should not be called for an explicit path"
+        )
+
+        result = river_input_data._resolve_source_block(
+            {"name": "GLORYS", "path": "/custom/glofas_v4_rivers_daily.nc"}
+        )
+
+        assert result["path"] == "/custom/glofas_v4_rivers_daily.nc"
+        river_input_data.source_data.path_for_source.assert_not_called()
 
 
 class TestRomsMarblInputDataGenerateAll:

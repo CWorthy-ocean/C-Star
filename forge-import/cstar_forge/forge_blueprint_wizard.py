@@ -59,6 +59,7 @@ from cstar_forge.forge.forge_blueprint import (
     TidalSource,
 )
 from cstar_forge.forge.namelist_model import RunTimeSettings, validate_run_time_sections
+from cstar_forge.forge.user_files import hash_netcdf_contents
 from cstar_forge.forge_blueprint_resolve import (
     OUTPUT_SECTIONS,
     PARTIAL_OUTPUT_SECTIONS,
@@ -142,6 +143,19 @@ HELP_TEXT: dict[str, str] = {
     ): "Path to a custom topography file for the grid's topography source. Leave "
     "blank to use the default: staged for non-ETOPO5 sources, fetched by roms-tools "
     "for ETOPO5.",
+    (
+        "grid",
+        "grid_file",
+    ): "Attach a pre-made grid netCDF instead of generating one from the kwargs "
+    "above. Locks the grid/topography/nesting fields (their values are read from "
+    "the file); the file must exist at this exact path on the machine that runs "
+    "the executor.",
+    (
+        "cdr",
+        "cdr_file",
+    ): "Attach a pre-made CDR-forcing netCDF instead of building one from the "
+    "uploaded roms-tools YAML above. Mutually exclusive with it; the file must "
+    "exist at this exact path on the machine that runs the executor.",
     # ---- nesting ---------------------------------------------------------------
     (
         "nesting",
@@ -413,6 +427,12 @@ HELP_TEXT: dict[str, str] = {
         "domain_edge_buffer",
     ): "Number of grid cells beyond the domain edge kept in the bounding-box pre-filter "
     "when selecting rivers. Default: 20.",
+    (
+        "river",
+        "custom_file",
+    ): "Attach a pre-made river-forcing netCDF instead of building one from a "
+    "DAI/GLOFAS source (selected via 'src: CUSTOM_FILE' above). The file must "
+    "exist at this exact path on the machine that runs the executor.",
     # ---- output settings -------------------------------------------------------
     (
         "output",
@@ -1119,6 +1139,48 @@ def _options_editor(W, value: Any, description: str = "options:"):
     )
 
 
+# ===========================================================================
+# User-provided-file attach flows (grid / CDR forcing / river custom_file):
+# shared status-HTML rendering and browser-upload staging, used by the grid
+# section, the CDR section, and each river row's custom-file widgets alike.
+# ===========================================================================
+
+
+def _user_file_status_html(file_dict: dict[str, Any] | None) -> str:
+    """Status HTML for an attached user-provided-file dict (``{"location",
+    "content_hash"}``): the attached filename, a short hash prefix, and the
+    persistent host-path warning (this file is host/transport, not shipped
+    with the blueprint -- see ``UserProvidedFile``). Empty string when nothing
+    is attached.
+    """
+    if not file_dict:
+        return ""
+    name = Path(file_dict["location"]).name
+    short = file_dict["content_hash"][:12]
+    return (
+        f"<span style='color:#080'>✓ attached {name} (sha256 {short}…)</span><br>"
+        "<span style='color:#b58900'>⚠ This file must exist at this exact path "
+        "on the machine where the executor runs.</span>"
+    )
+
+
+def _stage_uploaded_netcdf(filename: str, content: bytes) -> Path:
+    """Write browser-uploaded netCDF bytes to a stable server/kernel-filesystem
+    location, then treat it exactly like a server-side path Attach.
+
+    ``ipywidgets.FileUpload`` only hands over raw bytes (no filesystem path),
+    but every attach flow needs a real path to hash/load/pass through to the
+    resolver as ``UserProvidedFile.location``. Lands under
+    ``Path.cwd()/"forge_user_files"/<original filename>``; an existing file of
+    the same name is overwritten (last upload wins).
+    """
+    dest_dir = Path.cwd() / "forge_user_files"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / filename
+    dest.write_bytes(content)
+    return dest
+
+
 class _ForcingEditor:
     """Editor for the forcing piece: initial conditions + per-category forcing items,
     with add/remove. ``gather()`` returns an ``inputs``-shaped dict the resolver
@@ -1499,6 +1561,41 @@ class _ForcingEditor:
 
             w["include_bgc"].observe(_sync_river_bgc_visibility, names="value")
             _sync_river_bgc_visibility()
+
+            # RiverSource.CUSTOM_FILE replaces this whole standard-source row
+            # (climatology/bgc/coast-snap/edge-buffer/generic path) with a
+            # single attach flow -- see _sync_river_custom_visibility below.
+            def _sync_river_custom_visibility(_change=None, ws=w):
+                is_custom = ws["name"].value == RiverSource.CUSTOM_FILE.value
+                for key in (
+                    "climatology",
+                    "include_bgc",
+                    "convert_to_climatology",
+                    "coast_snap_buffer_km",
+                    "domain_edge_buffer",
+                    "path",
+                ):
+                    ws[key].layout.display = "none" if is_custom else ""
+                for key in (
+                    "custom_file_path",
+                    "custom_file_attach_btn",
+                    "custom_file_upload",
+                    "custom_file_status",
+                ):
+                    ws[key].layout.display = "" if is_custom else "none"
+                if is_custom:
+                    # Keep the bgc widgets hidden regardless of include_bgc --
+                    # a custom-file river item carries no bgc_source (see
+                    # RiverForcingItem._custom_file_excludes_bgc_source).
+                    ws["bgc_source_name"].layout.display = "none"
+                    ws["bgc_source_path"].layout.display = "none"
+                else:
+                    # Restored from custom-file mode (or never in it): let
+                    # include_bgc's own sync decide bgc widget visibility again,
+                    # rather than unconditionally showing them here.
+                    _sync_river_bgc_visibility()
+
+            w["name"].observe(_sync_river_custom_visibility, names="value")
         # Advanced passthrough: raw roms-tools kwargs not (yet) typed above.
         w["options"] = _options_editor(W, item.get("options"))
         remove = W.Button(
@@ -1508,12 +1605,88 @@ class _ForcingEditor:
         for widget in w.values():
             widget.observe(lambda _ch: self.on_change(), names="value")
         w["_remove_btn"] = remove
+        if cat == "river":
+            # Custom-file attach row (RiverSource.CUSTOM_FILE): added after the
+            # generic per-widget on_change wiring above (mirrors _remove_btn) --
+            # the Text/Button/FileUpload here are wired to _attach_custom_file
+            # explicitly, which calls self.on_change() itself on a successful
+            # attach, so they don't need the generic per-keystroke wiring too.
+            # `_custom_file` is plain cached state (not a widget), also excluded
+            # from that loop and from _row_box below.
+            _cf = item.get("custom_file")
+            w["_custom_file"] = dict(_cf) if _cf else None
+            w["custom_file_path"] = W.Text(
+                value=str((_cf or {}).get("location") or ""),
+                description="file:",
+                placeholder="path to a pre-made river-forcing netCDF",
+                style=small,
+                layout=W.Layout(width="320px"),
+                tooltip=_tip("river", "custom_file"),
+            )
+            w["custom_file_attach_btn"] = W.Button(
+                description="Attach", icon="link", layout=W.Layout(width="90px")
+            )
+            w["custom_file_upload"] = W.FileUpload(
+                accept=".nc", multiple=False, description="…or upload"
+            )
+            w["custom_file_status"] = W.HTML(_user_file_status_html(w["_custom_file"]))
+
+            def _attach_river_custom_file(path_str: str, ws=w) -> None:
+                ws["custom_file_status"].value = "<i>attaching…</i>"
+                try:
+                    path = Path(path_str).expanduser().resolve()
+                    if not path.exists():
+                        raise FileNotFoundError(f"river custom file not found: {path}")
+                    content_hash = hash_netcdf_contents(path)
+                except Exception as exc:
+                    ws[
+                        "custom_file_status"
+                    ].value = (
+                        f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+                    )
+                    return
+                ws["_custom_file"] = {
+                    "location": str(path),
+                    "content_hash": content_hash,
+                }
+                ws["custom_file_status"].value = _user_file_status_html(
+                    ws["_custom_file"]
+                )
+                self.on_change()
+
+            def _on_river_custom_file_attach_click(_btn, ws=w) -> None:
+                path_str = ws["custom_file_path"].value.strip()
+                if not path_str:
+                    ws[
+                        "custom_file_status"
+                    ].value = "<span style='color:#b00'>Enter a path first.</span>"
+                    return
+                _attach_river_custom_file(path_str)
+
+            def _on_river_custom_file_upload(change, ws=w) -> None:
+                items = change["new"]
+                if not items:
+                    return
+                up_item = (
+                    items[0]
+                    if isinstance(items, (list, tuple))
+                    else next(iter(items.values()))
+                )
+                dest = _stage_uploaded_netcdf(
+                    up_item["name"], bytes(up_item["content"])
+                )
+                ws["custom_file_path"].value = str(dest)
+                _attach_river_custom_file(str(dest))
+
+            w["custom_file_attach_btn"].on_click(_on_river_custom_file_attach_click)
+            w["custom_file_upload"].observe(_on_river_custom_file_upload, names="value")
+            _sync_river_custom_visibility()
         self._apply_row_visibility(w)
         return w
 
     def _row_box(self, w):
         # `type` (when present) drives the other options in the row, so show it first.
-        keys = [k for k in w if k != "_remove_btn"]
+        keys = [k for k in w if k not in ("_remove_btn", "_custom_file")]
         if "type" in keys:
             keys = ["type", *[k for k in keys if k != "type"]]
         return self.W.HBox([*(w[k] for k in keys), w["_remove_btn"]])
@@ -1549,6 +1722,17 @@ class _ForcingEditor:
 
     # ---- gather --------------------------------------------------------------
     def _gather_item(self, cat: str, w) -> dict[str, Any]:
+        if cat == "river" and w["name"].value == RiverSource.CUSTOM_FILE.value:
+            # A custom-file river item bypasses roms-tools' RiverForcing entirely
+            # (the executor stages the file directly -- see
+            # RiverForcingItem.custom_file) -- none of the standard-source fields
+            # (climatology/include_bgc/convert_to_climatology/coast_snap_buffer_km/
+            # domain_edge_buffer/bgc_source/options) apply, and the schema
+            # forbids most of them from being paired with a source path.
+            item: dict[str, Any] = {"source": {"name": w["name"].value}}
+            if w.get("_custom_file"):
+                item["custom_file"] = dict(w["_custom_file"])
+            return item
         src: dict[str, Any] = {"name": w["name"].value}
         if "climatology" in w and w["climatology"].value:
             src["climatology"] = True
@@ -1710,6 +1894,48 @@ def _schedule_coroutine(coro):
         return asyncio.get_running_loop().create_task(coro)
     except RuntimeError:
         return asyncio.run(coro)
+
+
+_STREAM_READ_SIZE = 2**16  # bytes per subprocess read; also bounds the flush below
+# A run whose child never emits a newline for a long stretch -- classically a
+# ``\r``-redrawn progress bar (git clone, tqdm, download progress) -- would grow an
+# unbounded "line". Flush an unterminated run once it reaches this so memory stays
+# bounded and the log still updates. (This is also what a line-oriented reader could
+# not survive: asyncio's StreamReader.readline() raises ValueError, "Separator is not
+# found, and chunk exceed the limit", at its 64 KiB default -- the bug this avoids.)
+_STREAM_MAX_LINE = 2**16
+
+
+def _drain_stream_buffer(
+    buf: bytes, *, at_eof: bool = False
+) -> tuple[list[str], bytes]:
+    r"""Split accumulated subprocess bytes into display lines, returning
+    ``(lines, remainder)``.
+
+    Segments are cut on ``\r\n``, ``\r`` or ``\n`` and each terminator is normalised
+    to a single trailing ``\n``, so ``\r``-only progress redraws surface as successive
+    log lines instead of one ever-growing line. A lone trailing ``\r`` is held back in
+    the remainder (unless at EOF) so a ``\r\n`` split across two reads is not mistaken
+    for a bare ``\r`` plus a spurious blank line. When not at EOF, an unterminated
+    remainder that reaches ``_STREAM_MAX_LINE`` is emitted as a partial line to keep
+    memory bounded; at EOF any remainder is flushed.
+    """
+    held = b""
+    if not at_eof and buf.endswith(b"\r"):
+        buf, held = buf[:-1], b"\r"
+    tokens = re.split(rb"(\r\n|\r|\n)", buf)
+    remainder = tokens.pop() + held
+    lines = [
+        tokens[i].decode(errors="replace") + "\n" for i in range(0, len(tokens), 2)
+    ]
+    if at_eof:
+        if remainder:
+            lines.append(remainder.decode(errors="replace"))
+        remainder = b""
+    elif len(remainder) >= _STREAM_MAX_LINE:
+        lines.append(remainder.decode(errors="replace"))
+        remainder = b""
+    return lines, remainder
 
 
 class ForgeBlueprintWizard:
@@ -2039,6 +2265,36 @@ class ForgeBlueprintWizard:
             tooltip=_tip("grid", "topography_path"),
         )
 
+        # --- user-provided grid file (attach a pre-made grid netCDF instead of
+        # generating one from the kwargs above) ---
+        # `_grid_file` = the cached {"location","content_hash"} dict emitted via
+        # grid_file=; `_grid_file_grid` = the loaded roms_tools.Grid, cached so
+        # _rebuild()/_gather() never reload or rehash the file (see
+        # _finish_grid_file_attach). Both None when detached.
+        self._grid_file: dict[str, Any] | None = None
+        self._grid_file_grid: Any | None = None
+        # Snapshot of grid_w/scoord_chk taken the moment an attach first
+        # overwrites them with the loaded file's own values (see
+        # _finish_grid_file_attach) -- restored by _on_grid_file_detach so the
+        # Detach button gives back the user's own pre-attach geometry instead
+        # of leaving the (unlocked, but now-wrong) file's values sitting there.
+        # None means "nothing to restore" (never attached, or already restored).
+        self._grid_widgets_snapshot: dict[str, Any] | None = None
+        self.grid_file_path = W.Text(
+            value="",
+            description="Grid file:",
+            placeholder="path to a pre-made grid netCDF",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            tooltip=_tip("grid", "grid_file"),
+        )
+        self.grid_file_attach_btn = W.Button(description="Attach", icon="link")
+        self.grid_file_detach_btn = W.Button(description="Detach", icon="unlink")
+        self.grid_file_upload = W.FileUpload(
+            accept=".nc", multiple=False, description="…or upload"
+        )
+        self.grid_file_status = W.HTML("")
+
         # --- timestep ---
         self.dt = W.FloatText(
             value=7200.0,
@@ -2103,6 +2359,25 @@ class ForgeBlueprintWizard:
         self.cdr_clear_btn = W.Button(description="Clear CDR", icon="times")
         self.cdr_status = W.HTML("")
 
+        # --- CDR forcing: user-provided pre-made netCDF (mutually exclusive with
+        # the uploaded YAML above -- attaching one clears the other, see
+        # _attach_cdr_file_from_path / _on_cdr_upload). ---
+        self._cdr_forcing_file: dict[str, Any] | None = None
+        self.cdr_file_path = W.Text(
+            value="",
+            description="CDR file:",
+            placeholder="path to a pre-made CDR-forcing netCDF",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            tooltip=_tip("cdr", "cdr_file"),
+        )
+        self.cdr_file_attach_btn = W.Button(description="Attach", icon="link")
+        self.cdr_file_clear_btn = W.Button(description="Clear", icon="times")
+        self.cdr_file_upload = W.FileUpload(
+            accept=".nc", multiple=False, description="…or upload"
+        )
+        self.cdr_file_status = W.HTML("")
+
         # --- output settings piece (OutputSpec selection) ---
         # The output sections themselves are edited in the Advanced settings accordion;
         # this dropdown selects a named OutputSpec that seeds those sections. An
@@ -2124,6 +2399,11 @@ class ForgeBlueprintWizard:
         # sparse manual overrides layer: (section, field|None) -> value
         self._overrides: dict[Any, Any] = {}
         self._syncing = False  # True while pushing composed values into editor widgets
+        # Reentrancy depth for _suspend()/_Suspender -- lets a programmatic backfill
+        # (e.g. _populate_grid_widgets_from_grid) nest inside an already-suspended
+        # block (e.g. _populate_from's outer _suspend()) without the inner
+        # context's __exit__ prematurely clearing the outer one's suspension.
+        self._suspend_depth = 0
         # snapshot of the domain-defining widgets at the last catalog Domain pick;
         # compared in _rebuild() to detect a deviation (composition.domain.modified).
         # None means no catalog domain has been picked yet (or domain_dd == "<custom>").
@@ -2273,6 +2553,12 @@ class ForgeBlueprintWizard:
         self.upload.observe(self._on_upload, names="value")
         self.cdr_upload.observe(self._on_cdr_upload, names="value")
         self.cdr_clear_btn.on_click(self._on_cdr_clear)
+        self.grid_file_attach_btn.on_click(self._on_grid_file_attach)
+        self.grid_file_detach_btn.on_click(self._on_grid_file_detach)
+        self.grid_file_upload.observe(self._on_grid_file_upload, names="value")
+        self.cdr_file_attach_btn.on_click(self._on_cdr_file_attach)
+        self.cdr_file_clear_btn.on_click(self._on_cdr_file_clear)
+        self.cdr_file_upload.observe(self._on_cdr_file_upload, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
         self.parent_domain_dd.observe(self._on_parent_domain, names="value")
@@ -2362,6 +2648,186 @@ class ForgeBlueprintWizard:
             self._boundaries_derived = False
             self.derive_status.value = ""
         self._rebuild()
+
+    # ---- user-provided grid file ----------------------------------------------
+    def _set_grid_widgets_locked(self, locked: bool) -> None:
+        """Disable/re-enable every grid-generation widget a user-provided grid
+        file makes meaningless: geometry/vertical kwargs, mask/topography, and
+        nesting (custom grid + nesting is unsupported -- see
+        ``Domain._grid_file_excludes_generation_geometry``). Open boundaries and
+        v_sponge stay editable/derivable -- both work fine off a loaded grid.
+        """
+        for w in (
+            *self.grid_w.values(),
+            self.scoord_chk,
+            self.hmin,
+            self.close_narrow_chk,
+            self.mask_shapefile,
+            self.topo_source,
+            self.topo_path,
+            self.nest_enable,
+            self.parent_enable,
+        ):
+            w.disabled = locked
+
+    def _populate_grid_widgets_from_grid(self, grid: Any) -> None:
+        """Display a loaded grid file's own attributes on the (now-locked) grid
+        widgets, skipping any that are ``None`` (a hand-made file may lack
+        ``size_x``/``size_y`` -- see ``build_forge_blueprint``'s grid_file
+        docstring). Purely cosmetic here -- ``_gather()`` never reads these
+        widget values while a grid file is attached (``grid_kwargs`` is ``{}``).
+        """
+        with self._suspend():
+            for key in _GRID_INT + _GRID_FLOAT + _SCOORD:
+                val = getattr(grid, key, None)
+                if val is not None:
+                    self.grid_w[key].value = val
+            if all(
+                getattr(grid, a, None) is not None for a in ("theta_s", "theta_b", "hc")
+            ):
+                self.scoord_chk.value = True
+
+    def _finish_grid_file_attach(
+        self, file_dict: dict[str, Any], grid: Any, *, snapshot: bool = True
+    ) -> None:
+        """Common tail of a successful (or reused-hash) grid-file attach: cache
+        state, populate + lock widgets, invalidate any prior mask-derived
+        boundaries (a new grid means a new mask -- mirrors
+        ``_on_grid_kwarg_change``), and show the attach status.
+
+        ``snapshot=False`` skips capturing the pre-attach widget snapshot -- used
+        by ``_reattach_grid_file`` (blueprint load-back), where the widgets hold
+        leftover values from whatever was on screen before the load, not a
+        user-authored geometry worth restoring on Detach.
+        """
+        if snapshot and self._grid_widgets_snapshot is None:
+            # Capture the user's own pre-attach geometry exactly once per
+            # detached->attached transition -- a second attach while already
+            # attached (e.g. picking a different file without detaching first)
+            # must not overwrite the ORIGINAL values with the first file's.
+            self._grid_widgets_snapshot = {
+                **{k: w.value for k, w in self.grid_w.items()},
+                "scoord_chk": self.scoord_chk.value,
+            }
+        self._grid_file = file_dict
+        self._grid_file_grid = grid
+        self._populate_grid_widgets_from_grid(grid)
+        self._set_grid_widgets_locked(True)
+        self._boundaries_derived = False
+        self.derive_status.value = ""
+        self.grid_file_status.value = _user_file_status_html(file_dict)
+
+    def _attach_grid_file_from_path(self, path_str: str) -> None:
+        self.grid_file_status.value = "<i>attaching…</i>"
+        try:
+            path = Path(path_str).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"grid file not found: {path}")
+            import roms_tools as rt
+
+            grid = rt.Grid(filename=str(path))
+            content_hash = hash_netcdf_contents(path)
+        except Exception as exc:
+            self.grid_file_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        self._finish_grid_file_attach(
+            {"location": str(path), "content_hash": content_hash}, grid
+        )
+        self._rebuild()
+
+    def _on_grid_file_attach(self, _btn):
+        path_str = self.grid_file_path.value.strip()
+        if not path_str:
+            self.grid_file_status.value = (
+                "<span style='color:#b00'>Enter a path first.</span>"
+            )
+            return
+        self._attach_grid_file_from_path(path_str)
+
+    def _on_grid_file_upload(self, change):
+        items = change["new"]
+        if not items:
+            return
+        item = (
+            items[0] if isinstance(items, (list, tuple)) else next(iter(items.values()))
+        )
+        dest = _stage_uploaded_netcdf(item["name"], bytes(item["content"]))
+        self.grid_file_path.value = str(dest)
+        self._attach_grid_file_from_path(str(dest))
+
+    def _detach_grid_file(self) -> None:
+        """Pure state reset (no _rebuild(), no widget-value restore) -- shared
+        by the Detach button and _on_domain/_populate_from (a catalog Domain
+        pick or a freshly-loaded grid-kwargs blueprint both set grid_w to their
+        OWN authoritative values immediately after calling this, which must
+        win outright -- restoring the pre-attach snapshot here would clobber
+        them with stale values from a since-superseded attach). Only
+        _on_grid_file_detach (the explicit user action, with nothing else
+        about to overwrite grid_w) restores the snapshot -- see there.
+        """
+        self._grid_file = None
+        self._grid_file_grid = None
+        self._grid_widgets_snapshot = None
+        self._set_grid_widgets_locked(False)
+        self._boundaries_derived = False
+        self.derive_status.value = ""
+        self.grid_file_path.value = ""
+        self.grid_file_upload.value = ()
+        self.grid_file_status.value = ""
+
+    def _on_grid_file_detach(self, _btn):
+        snapshot = (
+            self._grid_widgets_snapshot
+        )  # read before _detach_grid_file clears it
+        self._detach_grid_file()
+        if snapshot is not None:
+            with self._suspend():
+                for k, v in snapshot.items():
+                    if k == "scoord_chk":
+                        self.scoord_chk.value = v
+                    elif k in self.grid_w:
+                        self.grid_w[k].value = v
+        self._rebuild()
+
+    def _reattach_grid_file(self, file_obj: Any) -> None:
+        """``_populate_from``'s grid_file restore: reload the grid but REUSE the
+        blueprint's recorded content_hash (never recompute it on load -- mirrors
+        the CDR-file restore). On a reload failure, keep the grid_file dict and
+        widgets locked (rather than silently falling back to the generic/default
+        grid_kwargs, which would gather a completely different blueprint) and
+        surface the error -- the resolver will raise the same "file not found"
+        on the next _gather()/_rebuild(), which is the loud failure this must
+        produce instead of a silent wrong answer.
+        """
+        file_dict = {
+            "location": file_obj.location,
+            "content_hash": file_obj.content_hash,
+        }
+        self._grid_file = file_dict
+        # Whatever sits in the grid widgets right now predates this load and is
+        # not a geometry worth restoring on Detach -- drop any stale snapshot.
+        self._grid_widgets_snapshot = None
+        self.grid_file_path.value = file_dict["location"]
+        self._set_grid_widgets_locked(True)
+        try:
+            path = Path(file_dict["location"]).expanduser()
+            if not path.exists():
+                raise FileNotFoundError(f"grid file not found: {path}")
+            import roms_tools as rt
+
+            grid = rt.Grid(filename=str(path))
+        except Exception as exc:
+            self._grid_file_grid = None
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+            self.grid_file_status.value = (
+                f"<span style='color:#b00'>⚠ could not re-attach grid_file: "
+                f"{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        self._finish_grid_file_attach(file_dict, grid, snapshot=False)
 
     def _on_boundary_edit(self, _change):
         # A programmatic backfill (see _apply_grid_derived_properties, _on_domain,
@@ -2497,6 +2963,16 @@ class ForgeBlueprintWizard:
             # boundary items the freshly-built editor just reseeded from the spec.
             self._clear_boundary_forcing()
         self._cdr_forcing = cdr
+        if cdr and self._cdr_forcing_file is not None:
+            # A ForcingSpec carrying CDR forcing is mutually exclusive with an
+            # attached CDR file (Forcing's own validator forbids both).
+            self._cdr_forcing_file = None
+            self.cdr_file_path.value = ""
+            self.cdr_file_upload.value = ()
+            self.cdr_file_status.value = (
+                "<span style='color:#666'>(cleared -- mutually exclusive with "
+                "the ForcingSpec's CDR forcing)</span>"
+            )
         self.cdr_status.value = (
             f"<span style='color:#080'>✓ CDR loaded from ForcingSpec: "
             f"{len(cdr.get('releases', []))} release(s)</span>"
@@ -2593,6 +3069,10 @@ class ForgeBlueprintWizard:
                     fi.setdefault("forcing", {})["boundary"] = []
                 kw["forcing_inputs"] = fi
                 kw["cdr_forcing"] = cdr
+                # Mutually exclusive with cdr_forcing_file (Forcing's own
+                # validator) -- a live _gather() may carry the file key even
+                # though the freshly-picked ForcingSpec's cdr wins here.
+                kw.pop("cdr_forcing_file", None)
             elif piece == "domain":
                 d = self.catalog.domain_data(new_name)
                 kw["grid_kwargs"] = d.get("grid_kwargs", {})
@@ -2678,6 +3158,19 @@ class ForgeBlueprintWizard:
             out = []
             for it in items:
                 d: dict[str, Any] = {"source": src(it.source)}
+                _custom_file = getattr(it, "custom_file", None)
+                if _custom_file is not None:
+                    # A CUSTOM_FILE river item carries no other fields (see
+                    # RiverForcingItem's mutual-exclusion validators) -- skip the
+                    # rest of the per-item extraction below entirely so a loaded
+                    # CUSTOM_FILE blueprint round-trips into the wizard's row
+                    # instead of raising when re-gathered.
+                    d["custom_file"] = {
+                        "location": _custom_file.location,
+                        "content_hash": _custom_file.content_hash,
+                    }
+                    out.append(d)
+                    continue
                 for f in ("type", "coarse_grid_mode"):
                     v = getattr(it, f, None)
                     if v is not None:
@@ -2733,6 +3226,13 @@ class ForgeBlueprintWizard:
         if name == "<custom>":
             self._domain_seed = None
             return
+        if self._grid_file is not None:
+            # A catalog Domain pick replaces the grid wholesale via grid_kwargs,
+            # which a user-provided grid file forbids carrying alongside it
+            # (Domain._grid_file_excludes_generation_geometry) -- detach first so
+            # the catalog's grid_kwargs land on now-unlocked widgets instead of
+            # being silently discarded.
+            self._detach_grid_file()
         data = self.catalog.domain_data(name)
         gk = data.get("grid_kwargs", {}) or {}
         with self._suspend():
@@ -2888,14 +3388,24 @@ class ForgeBlueprintWizard:
         return data
 
     class _Suspender:
+        """Reentrant: nesting ``with self._suspend():`` blocks (e.g. a grid-file
+        reattach's own suspend running inside ``_populate_from``'s outer suspend)
+        only clears ``_suspended`` once the outermost block exits -- a naive
+        unconditional ``False`` on ``__exit__`` would prematurely un-suspend the
+        outer block and let its remaining programmatic writes flip touched flags.
+        """
+
         def __init__(self, wiz):
             self.wiz = wiz
 
         def __enter__(self):
+            self.wiz._suspend_depth = getattr(self.wiz, "_suspend_depth", 0) + 1
             self.wiz._suspended = True
 
         def __exit__(self, *a):
-            self.wiz._suspended = False
+            self.wiz._suspend_depth = max(0, getattr(self.wiz, "_suspend_depth", 1) - 1)
+            if self.wiz._suspend_depth == 0:
+                self.wiz._suspended = False
 
     def _suspend(self):
         return ForgeBlueprintWizard._Suspender(self)
@@ -2974,8 +3484,19 @@ class ForgeBlueprintWizard:
             self._rebuild()
             return
         self._cdr_forcing = parsed
+        cleared_note = ""
+        if self._cdr_forcing_file is not None:
+            # Mutually exclusive with an attached CDR file (Forcing's own
+            # validator forbids both) -- the upload wins, matching the
+            # attach-clears-upload direction in _attach_cdr_file_from_path.
+            self._cdr_forcing_file = None
+            self.cdr_file_path.value = ""
+            self.cdr_file_upload.value = ()
+            self.cdr_file_status.value = ""
+            cleared_note = "<br><span style='color:#666'>(cleared the attached CDR file -- mutually exclusive)</span>"
         self.cdr_status.value = (
             f"<span style='color:#080'>✓ CDR: {len(cdr.releases)} release(s)</span>"
+            f"{cleared_note}"
         )
         self._rebuild()
 
@@ -2983,6 +3504,77 @@ class ForgeBlueprintWizard:
         self._cdr_forcing = None
         self.cdr_upload.value = ()
         self.cdr_status.value = ""
+        self._rebuild()
+
+    # ---- CDR forcing: user-provided pre-made netCDF ---------------------------
+    def _attach_cdr_file_from_path(self, path_str: str) -> None:
+        self.cdr_file_status.value = "<i>attaching…</i>"
+        try:
+            path = Path(path_str).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"CDR-forcing file not found: {path}")
+            content_hash = hash_netcdf_contents(path)
+        except Exception as exc:
+            self.cdr_file_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        # Light validation only (never blocks the attach -- the executor is the
+        # hard gate): warn if the file doesn't even look like CDR forcing.
+        warning = ""
+        try:
+            import xarray as xr
+
+            with xr.open_dataset(path) as ds:
+                if "ncdr" not in ds.dims:
+                    warning = (
+                        "<br><span style='color:#b58900'>⚠ no 'ncdr' dimension "
+                        "found -- is this really a CDR-forcing file?</span>"
+                    )
+        except Exception:
+            pass
+        self._cdr_forcing_file = {"location": str(path), "content_hash": content_hash}
+        cleared_note = ""
+        if self._cdr_forcing is not None:
+            # Mutually exclusive with an uploaded CDR YAML (Forcing's own
+            # validator forbids both) -- the file attach wins here.
+            self._cdr_forcing = None
+            self.cdr_upload.value = ()
+            self.cdr_status.value = ""
+            cleared_note = (
+                "<br><span style='color:#666'>(cleared the uploaded CDR "
+                "YAML -- mutually exclusive)</span>"
+            )
+        self.cdr_file_status.value = (
+            _user_file_status_html(self._cdr_forcing_file) + warning + cleared_note
+        )
+        self._rebuild()
+
+    def _on_cdr_file_attach(self, _btn):
+        path_str = self.cdr_file_path.value.strip()
+        if not path_str:
+            self.cdr_file_status.value = (
+                "<span style='color:#b00'>Enter a path first.</span>"
+            )
+            return
+        self._attach_cdr_file_from_path(path_str)
+
+    def _on_cdr_file_upload(self, change):
+        items = change["new"]
+        if not items:
+            return
+        item = (
+            items[0] if isinstance(items, (list, tuple)) else next(iter(items.values()))
+        )
+        dest = _stage_uploaded_netcdf(item["name"], bytes(item["content"]))
+        self.cdr_file_path.value = str(dest)
+        self._attach_cdr_file_from_path(str(dest))
+
+    def _on_cdr_file_clear(self, _btn):
+        self._cdr_forcing_file = None
+        self.cdr_file_path.value = ""
+        self.cdr_file_upload.value = ()
+        self.cdr_file_status.value = ""
         self._rebuild()
 
     def _populate_from(self, cfg: ForgeBlueprint):
@@ -3059,6 +3651,14 @@ class ForgeBlueprintWizard:
                 cfg.domain.topography_source, "value", cfg.domain.topography_source
             )
             self.topo_path.value = cfg.domain.topography_path or ""
+            # Grid file: re-attach from its recorded location (reusing the stored
+            # content_hash, never recomputing it) if the file still exists;
+            # missing/failed reload leaves the grid_file state + locked widgets in
+            # place with the error surfaced -- see _reattach_grid_file.
+            if cfg.domain.grid_file is not None:
+                self._reattach_grid_file(cfg.domain.grid_file)
+            else:
+                self._detach_grid_file()
             # CDR: FileUpload can't be repopulated with the original file, but the
             # parsed dict persists on the instance and re-emits via _gather(), so
             # load stays non-lossy.
@@ -3070,6 +3670,27 @@ class ForgeBlueprintWizard:
                 if self._cdr_forcing
                 else ""
             )
+            # CDR file: trust the stored hash (never recompute); a missing file
+            # is a warning, not a blocker -- Save must still round-trip losslessly.
+            cff = cfg.forcing.cdr_forcing_file
+            if cff is not None:
+                self._cdr_forcing_file = {
+                    "location": cff.location,
+                    "content_hash": cff.content_hash,
+                }
+                self.cdr_file_path.value = cff.location
+                missing = not Path(cff.location).expanduser().exists()
+                self.cdr_file_status.value = _user_file_status_html(
+                    self._cdr_forcing_file
+                ) + (
+                    "<br><span style='color:#b00'>⚠ file not found at this path</span>"
+                    if missing
+                    else ""
+                )
+            else:
+                self._cdr_forcing_file = None
+                self.cdr_file_path.value = ""
+                self.cdr_file_status.value = ""
             # dt: prefer the first-class domain.dt field; fall back to the
             # model_settings leaf for a pre-domain.dt file (backward compat --
             # older blueprints only ever wrote it there).
@@ -3127,20 +3748,24 @@ class ForgeBlueprintWizard:
     # ---- gather + resolve ----------------------------------------------------
     def _gather(self) -> dict[str, Any]:
         gk: dict[str, Any] = {}
-        for k in _GRID_INT:
-            gk[k] = int(self.grid_w[k].value)
-        for k in _GRID_FLOAT:
-            gk[k] = float(self.grid_w[k].value)
-        if self.scoord_chk.value:
-            for k in _SCOORD:
+        if self._grid_file is None:
+            for k in _GRID_INT:
+                gk[k] = int(self.grid_w[k].value)
+            for k in _GRID_FLOAT:
                 gk[k] = float(self.grid_w[k].value)
-        # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
-        if self.hmin.value != 5.0:
-            gk["hmin"] = float(self.hmin.value)
-        if self.close_narrow_chk.value:
-            gk["close_narrow_channels"] = True
-        if self.mask_shapefile.value.strip():
-            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+            if self.scoord_chk.value:
+                for k in _SCOORD:
+                    gk[k] = float(self.grid_w[k].value)
+            # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
+            if self.hmin.value != 5.0:
+                gk["hmin"] = float(self.hmin.value)
+            if self.close_narrow_chk.value:
+                gk["close_narrow_channels"] = True
+            if self.mask_shapefile.value.strip():
+                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        # else: a user-provided grid file forbids the generation-geometry keys
+        # above alongside it (Domain._grid_file_excludes_generation_geometry) --
+        # grid_kwargs stays {} and grid_file=/grid= (below) carry the grid instead.
         kw = dict(
             model_dir=self.catalog.model_dir(self.model_dd.value),
             grid_name=self.grid_name.value,
@@ -3174,7 +3799,20 @@ class ForgeBlueprintWizard:
             kw["model_reference_date"] = datetime.combine(
                 self.model_ref_date.value, datetime.min.time()
             )
-        if self.nest_enable.value:
+        if self._grid_file is not None:
+            kw["grid_file"] = self._grid_file
+            # Pass the already-loaded grid through to skip re-reading/re-hashing
+            # the file (the resolver accepts a pre-built `grid=` alongside
+            # `grid_file=` for exactly this -- see build_forge_blueprint). Omitted
+            # (not None) when a reattach failed to reload -- the resolver then
+            # reloads from `grid_file["location"]` itself and raises the same
+            # "file not found", surfacing loudly via _rebuild()'s Invalid status.
+            if self._grid_file_grid is not None:
+                kw["grid"] = self._grid_file_grid
+        # Nesting is unsupported alongside a user-provided grid file (see
+        # Domain._grid_file_excludes_generation_geometry) -- omit both blocks
+        # while attached even if the (now-disabled) checkboxes are still checked.
+        if self.nest_enable.value and self._grid_file is None:
             ck: dict[str, Any] = {}
             for k in _GRID_INT:
                 ck[k] = int(self.child_w[k].value)
@@ -3184,7 +3822,7 @@ class ForgeBlueprintWizard:
             kw["metadata_child"] = {"period": float(self.nest_period.value)}
             if self.nest_pressure_fluxes.value:
                 kw["nesting_include_pressure_fluxes"] = True
-        if self.parent_enable.value:
+        if self.parent_enable.value and self._grid_file is None:
             pk: dict[str, Any] = {}
             for k in _GRID_INT:
                 pk[k] = int(self.parent_w[k].value)
@@ -3193,7 +3831,7 @@ class ForgeBlueprintWizard:
             kw["grid_kwargs_parent"] = pk
         # forcing/output are always required now (no more model-default fallback).
         kw["forcing_inputs"] = self._forcing_editor.gather()
-        if self.parent_enable.value:
+        if self.parent_enable.value and self._grid_file is None:
             # Durable guarantee (authoritative, independent of forcing-editor UI
             # state): a child grid (has a parent) receives its boundary values
             # from the parent's nesting.nc extraction, not reanalysis boundary
@@ -3204,6 +3842,8 @@ class ForgeBlueprintWizard:
         kw["composition"] = self._composition()
         if self._cdr_forcing:
             kw["cdr_forcing"] = self._cdr_forcing
+        if self._cdr_forcing_file:
+            kw["cdr_forcing_file"] = self._cdr_forcing_file
         return kw
 
     def _populate_nesting(self, cfg: ForgeBlueprint):
@@ -3406,13 +4046,29 @@ class ForgeBlueprintWizard:
             )
 
     def _build_grid_from_widgets(self) -> Any:
-        """Build a ``roms_tools.Grid`` from the current (main-domain) grid kwargs.
+        """Build a ``roms_tools.Grid`` from the current (main-domain) grid kwargs
+        -- or return the already-loaded grid file's grid, when one is attached.
 
         Shared by the plot button, "Derive from grid", and the export-time
         safety net -- the only three places that pay the cost of an actual
         grid build (the live preview / ``_rebuild`` never does, so typing in
         the grid fields stays instant).
         """
+        if self._grid_file_grid is not None:
+            return self._grid_file_grid
+        if self._grid_file is not None:
+            # Attached but not currently loaded (a reattach failed -- e.g. the
+            # file went missing since it was recorded -- see _reattach_grid_file).
+            # Must not silently fall through to building a grid from whatever
+            # stale/default values happen to be sitting in the (locked, but
+            # still holding old values) grid_w widgets -- that would plot/derive
+            # boundaries and v_sponge from a completely different, wrong grid
+            # with no indication anything is amiss.
+            raise RuntimeError(
+                "grid_file is attached but failed to (re)load -- see "
+                "grid_file_status; re-attach a valid file first."
+            )
+
         from roms_tools import Grid
 
         gk: dict[str, Any] = {}
@@ -3796,6 +4452,15 @@ class ForgeBlueprintWizard:
                 "<span style='color:#b00'>Config invalid — nothing to save.</span>"
             )
             return
+        if self._grid_file is not None:
+            # DomainSpec (catalog/DomainSpec/*.yaml) has no grid_file field --
+            # saving now would silently produce a geometry-less entry (grid_kwargs
+            # is {} while attached). Detach first.
+            self.save_domain_status.value = (
+                "<span style='color:#b00'>Detach the grid file first — DomainSpec "
+                "has no grid_file field.</span>"
+            )
+            return
         # Unlike _on_save/_on_run (which emit concrete boundaries into the
         # blueprint right now), an untouched open_boundaries is deliberately
         # OMITTED from a saved DomainSpec (see _domain_piece_data) so it can
@@ -3929,6 +4594,7 @@ class ForgeBlueprintWizard:
         self.run_btn.disabled = True
         self.run_output.clear_output(wait=True)
         self.run_status.value = "<i>saving blueprint…</i>"
+        cmd: list[str] | None = None
         try:
             path = self.config.to_yaml(Path(self.save_path.value))
             cmd = self._build_run_command(str(path))
@@ -3938,12 +4604,24 @@ class ForgeBlueprintWizard:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-            # append_stdout (not `with self.run_output: print(...)`) appends
-            # directly to the widget's output list -- it works whether or not a
-            # live Jupyter kernel is routing stdout via iopub messaging, so lines
-            # land in the log both in a real notebook and in tests.
-            async for line in proc.stdout:
-                self.run_output.append_stdout(line.decode(errors="replace"))
+            # Read fixed-size chunks and reassemble lines ourselves rather than
+            # `async for line in proc.stdout` (StreamReader.readline), which raises
+            # ValueError, "Separator is not found, and chunk exceed the limit", when a
+            # child emits 64 KiB without a newline -- e.g. a \r-redrawn progress bar.
+            # append_stdout (not `with self.run_output: print(...)`) appends directly
+            # to the widget's output list, so lines land in the log whether or not a
+            # live Jupyter kernel is routing stdout via iopub messaging.
+            buf = b""
+            while True:
+                chunk = await proc.stdout.read(_STREAM_READ_SIZE)
+                if not chunk:
+                    break
+                lines, buf = _drain_stream_buffer(buf + chunk)
+                for line in lines:
+                    self.run_output.append_stdout(line)
+            lines, buf = _drain_stream_buffer(buf, at_eof=True)
+            for line in lines:
+                self.run_output.append_stdout(line)
             code = await proc.wait()
             # On success the log above names the emitted roms_marbl blueprint (the
             # runner logs where it published it). Point at it rather than restating
@@ -3956,8 +4634,11 @@ class ForgeBlueprintWizard:
                 else f"<span style='color:#b00'>exited with code {code}</span>"
             )
         except Exception as exc:
+            # Name the command in the status so a failure isn't a context-free
+            # error string (cmd is None only if saving the blueprint threw first).
+            where = f" while running: {' '.join(cmd)}" if cmd else ""
             self.run_status.value = (
-                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}{where}</span>"
             )
         finally:
             self.run_btn.disabled = False
@@ -4204,6 +4885,18 @@ class ForgeBlueprintWizard:
                                     self.mask_shapefile,
                                     self.topo_source,
                                     self.topo_path,
+                                    section(
+                                        "Attach a pre-made grid file (optional)",
+                                        W.HBox(
+                                            [
+                                                self.grid_file_path,
+                                                self.grid_file_attach_btn,
+                                                self.grid_file_detach_btn,
+                                            ]
+                                        ),
+                                        self.grid_file_upload,
+                                        self.grid_file_status,
+                                    ),
                                 ]
                             ),
                             W.VBox(
@@ -4228,6 +4921,15 @@ class ForgeBlueprintWizard:
                     "CDR forcing (optional)",
                     W.HBox([self.cdr_upload, self.cdr_clear_btn]),
                     self.cdr_status,
+                    W.HBox(
+                        [
+                            self.cdr_file_path,
+                            self.cdr_file_attach_btn,
+                            self.cdr_file_clear_btn,
+                        ]
+                    ),
+                    self.cdr_file_upload,
+                    self.cdr_file_status,
                 ),
                 section(
                     "Partitioning",

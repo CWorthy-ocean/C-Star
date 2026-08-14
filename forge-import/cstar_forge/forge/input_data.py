@@ -29,7 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from threadpoolctl import threadpool_limits
 
 from cstar_forge.forge import source_data
-from cstar_forge.forge.forge_blueprint import OpenBoundaries
+from cstar_forge.forge.forge_blueprint import OpenBoundaries, UserProvidedFile
+from cstar_forge.forge.user_files import stage_user_netcdf, verify_user_file
 from cstar_forge.utils import mem_log
 
 log = logging.getLogger(__name__)
@@ -303,6 +304,11 @@ class RomsMarblInputData(InputData):
     roms_marbl_blueprint_dir: Path
     partitioning: cstar_models.PartitioningParameterSet
     cdr_forcing: dict | None = None
+    cdr_forcing_file: UserProvidedFile | dict[str, Any] | None = None
+    """A user-supplied pre-made CDR-forcing netCDF (from ``ForgeExecutor.cdr_forcing_file``),
+    used in place of building one via ``rt.CDRForcing`` from ``cdr_forcing``. Mutually
+    exclusive with ``cdr_forcing`` (enforced upstream by the ``ForgeBlueprint`` schema).
+    """
     forcing_override: dict[str, Any] | None = None
     """The fully-resolved initial-conditions + forcing selection driving input generation.
     Keys mirror the inputs block structure: 'initial_conditions', 'forcing' (with sub-keys
@@ -388,10 +394,20 @@ class RomsMarblInputData(InputData):
             for item in items or []:
                 input_list.append((f"forcing.{category}", dict(item)))
 
-        # Optional user-provided CDR forcing via builder kwarg.
+        # Optional user-provided CDR forcing via builder kwarg (either a generated
+        # config -- cdr_kwargs -- or a pre-made custom_file; mutually exclusive,
+        # enforced upstream by the ForgeBlueprint schema).
         # Merge with model-specified cdr_list if that input already exists.
-        if self.cdr_forcing:
-            input_list.append(("cdr_forcing", {"cdr_kwargs": self.cdr_forcing}))
+        if self.cdr_forcing or self.cdr_forcing_file:
+            input_list.append(
+                (
+                    "cdr_forcing",
+                    {
+                        "cdr_kwargs": self.cdr_forcing,
+                        "custom_file": self.cdr_forcing_file,
+                    },
+                )
+            )
 
         self.input_list = input_list
 
@@ -817,14 +833,22 @@ class RomsMarblInputData(InputData):
         if out.get("path") in (None, ""):
             out.pop("path", None)
 
+        # An explicit path (SourceSpec.path, or a dict's own "path" key -- e.g. river
+        # bgc_source) always wins verbatim over the registry-staged path, mirroring
+        # topography_path semantics: bypass path_for_source entirely rather than
+        # merely leaving it unable to override (setdefault below). The resolver
+        # skips noting an explicit-path item into resolved_datasets/datasets (see
+        # forge_blueprint_resolve._note), so it was never staged and
+        # path_for_source would raise "dataset was not prepared" for it.
+        if "path" in out:
+            return out
+
         glorys_layout = out.get("glorys_layout") if name.upper() == "GLORYS" else None
 
-        # If streamable and no path was explicitly provided in YAML, don't add path field.
+        # Streamable sources are not staged locally -- nothing to inject.
         # streamable_for_source prefers the pinned ForgeBlueprint resolved_datasets
         # snapshot over a live source_registry check (see SourceData.streamable_for_source).
         if self.source_data.streamable_for_source(name, glorys_layout=glorys_layout):
-            if "path" not in out:
-                return out
             return out
 
         path = self.source_data.path_for_source(name, glorys_layout=glorys_layout)
@@ -1509,6 +1533,147 @@ class RomsMarblInputData(InputData):
             paths[0] if isinstance(paths, (list, tuple)) else paths
         )
 
+    def _generate_river_forcing_from_custom_file(
+        self,
+        subkey: str,
+        output_path: Path,
+        custom_file: UserProvidedFile | dict[str, Any],
+        include_bgc: bool,
+    ) -> None:
+        """Verify, sanity-check, and stage a user-supplied river-forcing netCDF in
+        place of building one via ``rt.RiverForcing``.
+
+        No roms-tools constructor is invoked and no YAML sidecar is written (there
+        is no roms-tools object to dump). Sets the same run-time settings and
+        ``Resource`` bookkeeping the generated path does (mirroring the
+        existing-output reuse branch of :meth:`_generate_river_forcing`), except
+        the source netCDF is verified/staged from ``custom_file.location`` instead
+        of merely found already sitting at ``output_path``.
+        """
+        if not isinstance(custom_file, UserProvidedFile):
+            custom_file = UserProvidedFile(**custom_file)
+        resolved = verify_user_file(custom_file, label="river forcing")
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning, module="xarray")
+            with xr.open_dataset(resolved, decode_timedelta=False) as ds:
+                missing = [
+                    v for v in ("river_volume", "river_tracer") if v not in ds.variables
+                ]
+                if missing or "nriver" not in ds.sizes:
+                    problems = list(missing)
+                    if "nriver" not in ds.sizes:
+                        problems.append("'nriver' dimension")
+                    raise ValueError(
+                        f"river forcing custom_file {resolved} is missing required "
+                        f"content: {', '.join(problems)}"
+                    )
+                nriv = int(ds.sizes["nriver"])
+
+                # Sanity checks (warnings, not errors) -- best-effort peeks at the
+                # user's own file that must never turn into a crash or spurious
+                # noise; mirrors _interp_frc_surface_reuse's defensive try/except.
+                try:
+                    grid_sizes = self.grid.ds.sizes
+                    for dim in ("eta_rho", "xi_rho"):
+                        if (
+                            dim in ds.sizes
+                            and dim in grid_sizes
+                            and int(ds.sizes[dim]) != int(grid_sizes[dim])
+                        ):
+                            warnings.warn(
+                                f"river forcing custom_file {resolved} has "
+                                f"{dim}={ds.sizes[dim]}, but the domain grid has "
+                                f"{dim}={grid_sizes[dim]} -- was this file built "
+                                "for a different grid?",
+                                UserWarning,
+                                stacklevel=2,
+                            )
+                except Exception as e:
+                    log.debug(
+                        "river custom_file %s: could not compare grid dims (%s)",
+                        resolved,
+                        e,
+                    )
+
+                try:
+                    if "ntracers" in ds.sizes:
+                        ntracers = int(ds.sizes["ntracers"])
+                        # roms-tools' RiverForcing writes exactly 2 tracers (temp,
+                        # salt) when include_bgc=False, and more (MARBL_TRACER_NAMES)
+                        # when True -- see get_tracer_metadata_dict in
+                        # roms_tools.setup.utils. Flag a file/item mismatch.
+                        if include_bgc and ntracers <= 2:
+                            warnings.warn(
+                                f"river forcing custom_file {resolved} has only "
+                                f"{ntracers} tracer(s) (temp/salt) but "
+                                "include_bgc=True was requested for this item -- "
+                                "no BGC river tracers appear to be present.",
+                                UserWarning,
+                                stacklevel=2,
+                            )
+                        elif not include_bgc and ntracers > 2:
+                            warnings.warn(
+                                f"river forcing custom_file {resolved} carries "
+                                f"{ntracers} tracers (more than temp/salt) but "
+                                "include_bgc was not requested for this item -- "
+                                "any BGC river tracers in the file will go unused.",
+                                UserWarning,
+                                stacklevel=2,
+                            )
+                except Exception as e:
+                    log.debug(
+                        "river custom_file %s: could not check tracer count (%s)",
+                        resolved,
+                        e,
+                    )
+
+        if self._should_reuse_existing_output(output_path):
+            # Reuse means ROMS reads what already sits at output_path, not the
+            # custom file -- derive nriv from the reused file (mirroring the
+            # generated path's reuse branch) so the namelist can't desync from
+            # the data actually read (e.g. a swapped custom file without clobber).
+            print(f"   ↪ Reusing existing file: {output_path}")
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", category=FutureWarning, module="xarray"
+                )
+                with xr.open_dataset(output_path, decode_timedelta=False) as reused:
+                    nriv_reused = int(reused.sizes["nriver"])
+            if nriv_reused != nriv:
+                warnings.warn(
+                    f"reusing existing river forcing at {output_path} "
+                    f"(nriver={nriv_reused}), which differs from custom_file "
+                    f"{resolved} (nriver={nriv}); the namelist will describe the "
+                    "reused file -- pass clobber to re-stage the custom file.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            nriv = nriv_reused
+        elif resolved.resolve() == output_path.resolve():
+            pass  # already in place (e.g. authored directly into input_data_dir)
+        else:
+            stage_user_netcdf(resolved, output_path, use_pio=self.use_pio)
+
+        if "river_frc" not in self._settings_run_time:
+            self._settings_run_time["river_frc"] = {}
+        self._settings_run_time["river_frc"]["river_source"] = True
+        self._settings_run_time["river_frc"]["analytical"] = False
+        self._settings_run_time["river_frc"]["nriv"] = nriv
+        self._settings_run_time["river_frc"]["rvol_vname"] = "river_volume"
+        self._settings_run_time["river_frc"]["rvol_tname"] = "river_time"
+        self._settings_run_time["river_frc"]["rtrc_vname"] = "river_tracer"
+        self._settings_run_time["river_frc"]["rtrc_tname"] = "river_time"
+
+        if "forcing" not in self._settings_run_time:
+            self._settings_run_time["forcing"] = {}
+        self._settings_run_time["forcing"]["river_path"] = str(output_path)
+
+        resource = Resource(location=str(output_path), partitioned=False)
+        getattr(self.roms_marbl_blueprint_elements.forcing, subkey).data.append(
+            resource
+        )
+
     @register_input(name="forcing.river", order=60, label="Generating river forcing")
     def _generate_river_forcing(self, key: str = "forcing.river", **kwargs):
         """Generate river forcing input files."""
@@ -1516,6 +1681,17 @@ class RomsMarblInputData(InputData):
         subkey = key.split(".", 1)[1] if "." in key else key
         yaml_path = self._yaml_filename(key)
         output_path = self._forcing_filename(subkey)
+
+        custom_file = kwargs.get("custom_file")
+        if custom_file is not None:
+            self._generate_river_forcing_from_custom_file(
+                subkey,
+                output_path,
+                custom_file,
+                include_bgc=bool(kwargs.get("include_bgc", False)),
+            )
+            return
+
         extra = dict(
             start_time=self.start_date,
             end_time=self.end_date,
@@ -1649,11 +1825,133 @@ class RomsMarblInputData(InputData):
             paths[0] if isinstance(paths, (list, tuple)) else paths
         )
 
+    def _generate_cdr_forcing_from_custom_file(
+        self,
+        output_path: Path,
+        custom_file: UserProvidedFile | dict[str, Any],
+    ) -> None:
+        """Verify, sanity-check, and stage a user-supplied CDR-forcing netCDF in
+        place of building one via ``rt.CDRForcing``.
+
+        No roms-tools constructor is invoked and no YAML sidecar is written (there
+        is no roms-tools object to dump). Sets the same run-time settings and
+        ``Resource`` bookkeeping the generated path does (mirroring the
+        existing-output reuse branch of :meth:`_generate_cdr_forcing`), except the
+        source netCDF is verified/staged from ``custom_file.location`` instead of
+        merely found already sitting at ``output_path``.
+
+        Validation distinguishes two variable groups by how the ROMS namelist
+        (``_CDR_FRC_DEFAULT`` in ``forge_blueprint_resolve.py``) actually reads the
+        file: ``cdr_lon``/``cdr_lat``/``cdr_dep``/``cdr_hsc``/``cdr_vsc``/``cdr_time``
+        are read unconditionally regardless of release family, so a missing one is
+        a hard error. The release-family variables are read *conditionally* on the
+        ``cdr_volume`` namelist logical instead -- a volume-type file legitimately
+        lacks ``cdr_trcflx`` and a tracer-perturbation file legitimately lacks
+        ``cdr_volume``/``cdr_tracer`` -- so only the complete absence of *both*
+        families (or a volume file missing its paired ``cdr_tracer``) is an error.
+        """
+        if not isinstance(custom_file, UserProvidedFile):
+            custom_file = UserProvidedFile(**custom_file)
+        resolved = verify_user_file(custom_file, label="CDR forcing")
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning, module="xarray")
+            with xr.open_dataset(resolved, decode_timedelta=False) as ds:
+                problems: list[str] = []
+                if "ncdr" not in ds.sizes:
+                    problems.append("'ncdr' dimension")
+                required_common = (
+                    "cdr_lon",
+                    "cdr_lat",
+                    "cdr_dep",
+                    "cdr_hsc",
+                    "cdr_vsc",
+                    "cdr_time",
+                )
+                problems.extend(v for v in required_common if v not in ds.variables)
+                has_volume = "cdr_volume" in ds.variables
+                has_trcflx = "cdr_trcflx" in ds.variables
+                if has_volume and "cdr_tracer" not in ds.variables:
+                    problems.append(
+                        "cdr_tracer (required alongside cdr_volume for a "
+                        "volume-type release)"
+                    )
+                elif not has_volume and not has_trcflx:
+                    problems.append(
+                        "cdr_volume (+ cdr_tracer) or cdr_trcflx (neither the "
+                        "volume nor the tracer-perturbation release family is "
+                        "present)"
+                    )
+                if problems:
+                    raise ValueError(
+                        f"CDR forcing custom_file {resolved} is missing required "
+                        f"content: {', '.join(problems)}"
+                    )
+                ncdr_parm = int(ds.sizes["ncdr"])
+                cdr_volume = has_volume
+
+        if self._should_reuse_existing_output(output_path):
+            # Reuse means ROMS reads what already sits at output_path, not the
+            # custom file -- derive ncdr_parm/cdr_volume from the reused file
+            # (mirroring the river branch's reuse semantics) so the namelist
+            # can't desync from the data actually read (e.g. a swapped custom
+            # file without clobber).
+            print(f"   ↪ Reusing existing file: {output_path}")
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore", category=FutureWarning, module="xarray"
+                )
+                with xr.open_dataset(output_path, decode_timedelta=False) as reused:
+                    ncdr_reused = int(reused.sizes["ncdr"])
+                    cdr_volume_reused = "cdr_volume" in reused.variables
+            if ncdr_reused != ncdr_parm or cdr_volume_reused != cdr_volume:
+                warnings.warn(
+                    f"reusing existing CDR forcing at {output_path} "
+                    f"(ncdr={ncdr_reused}, cdr_volume={cdr_volume_reused}), which "
+                    f"differs from custom_file {resolved} (ncdr={ncdr_parm}, "
+                    f"cdr_volume={cdr_volume}); the namelist will describe the "
+                    "reused file -- pass clobber to re-stage the custom file.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            ncdr_parm = ncdr_reused
+            cdr_volume = cdr_volume_reused
+        elif resolved.resolve() == output_path.resolve():
+            pass  # already in place (e.g. authored directly into input_data_dir)
+        else:
+            stage_user_netcdf(resolved, output_path, use_pio=self.use_pio)
+
+        if "cppdefs" not in self._settings_compile_time:
+            self._settings_compile_time["cppdefs"] = {}
+        self._settings_compile_time["cppdefs"]["cdr_forcing"] = True
+        # always set this to cdr.nc per conventions; c-star will symlink to the
+        # real path in the blueprint
+        if "cdr_frc" not in self._settings_run_time:
+            self._settings_run_time["cdr_frc"] = {}
+        self._settings_run_time["cdr_frc"]["cdr_file"] = "cdr.nc"
+        self._settings_run_time["cdr_frc"]["cdr_source"] = True
+        self._settings_run_time["cdr_frc"]["ncdr_parm"] = ncdr_parm
+        self._settings_run_time["cdr_frc"]["forcing_parameterized"] = True
+        self._settings_run_time["cdr_frc"]["cdr_volume"] = cdr_volume
+
+        if "cdr_output" not in self._settings_run_time:
+            self._settings_run_time["cdr_output"] = {}
+        self._settings_run_time["cdr_output"]["do_cdr_output"] = True
+
+        resource = Resource(location=str(output_path), partitioned=False)
+        self.roms_marbl_blueprint_elements.cdr_forcing.data.append(resource)
+
     @register_input(name="cdr_forcing", order=80, label="Generating CDR forcing")
     def _generate_cdr_forcing(
-        self, key: str = "cdr_forcing", cdr_kwargs=None, **kwargs
+        self, key: str = "cdr_forcing", cdr_kwargs=None, custom_file=None, **kwargs
     ):
         """Generate CDR forcing input files."""
+        output_path = self._forcing_filename(CDR_FORCING_NETCDF_STEM)
+
+        if custom_file is not None:
+            self._generate_cdr_forcing_from_custom_file(output_path, custom_file)
+            return
+
         cdr_kwargs = cdr_kwargs or {}
         if not cdr_kwargs:
             return
@@ -1664,7 +1962,6 @@ class RomsMarblInputData(InputData):
 
         with mem_log("CDRForcing()", enabled=self.verbose):
             cdr = rt.CDRForcing(**input_args)
-        output_path = self._forcing_filename(CDR_FORCING_NETCDF_STEM)
 
         cdr.to_yaml(yaml_path)
 

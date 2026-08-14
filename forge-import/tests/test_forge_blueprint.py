@@ -215,7 +215,7 @@ def test_migrate_v4_cdr_output_do_cdr_renamed(tmp_path, legacy_value):
     back = ForgeBlueprint.from_yaml(p)
     assert back.model_settings["cdr_output"]["do_cdr_output"] is legacy_value
     assert "do_cdr" not in back.model_settings["cdr_output"]
-    assert back.forge_blueprint_version == 5
+    assert back.forge_blueprint_version == 6
 
 
 def test_migrate_v4_cdr_output_migration_is_idempotent(tmp_path):
@@ -241,7 +241,632 @@ def test_migrate_tolerates_missing_cdr_output_section():
     from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
 
     migrated = migrate_forge_blueprint_data({"forge_blueprint_version": 4})
-    assert migrated["forge_blueprint_version"] == 5
+    assert migrated["forge_blueprint_version"] == 6
+
+
+def test_migrate_v5_shaped_dict_loads_with_null_user_file_fields(tmp_path):
+    """A v5 file (predating user-provided files) loads, migrates its version to 6,
+    and the new fields default to ``None`` -- purely additive, no data rewrite.
+    """
+    cfg = _build()
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+    data = yaml.safe_load(p.read_text())
+    data["forge_blueprint_version"] = 5
+
+    back = ForgeBlueprint.from_yaml_data(data)
+    assert back.forge_blueprint_version == 6
+    assert back.domain.grid_file is None
+    assert back.forcing.cdr_forcing_file is None
+    assert all(river.custom_file is None for river in back.forcing.river)
+
+
+_USER_FILE_KWARGS = dict(location="/data/staged/grid.nc", content_hash="a" * 64)
+
+
+def test_domain_grid_file_round_trips_through_yaml(tmp_path):
+    from cstar_forge.forge.forge_blueprint import UserProvidedFile
+
+    cfg = _build()
+    vertical_only = {
+        k: v
+        for k, v in cfg.domain.grid_kwargs.items()
+        if k in {"theta_s", "theta_b", "hc", "N"}
+    }
+    cfg = cfg.model_copy(
+        update={
+            "domain": cfg.domain.model_copy(
+                update={
+                    "grid_kwargs": vertical_only,
+                    "grid_file": UserProvidedFile(**_USER_FILE_KWARGS),
+                }
+            )
+        }
+    )
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+    back = ForgeBlueprint.from_yaml(p)
+    assert back.domain.grid_file == cfg.domain.grid_file
+
+
+def test_domain_grid_file_rejects_generation_geometry_keys():
+    # ``model_copy`` (used elsewhere in this file for hash-only comparisons) does
+    # NOT re-run validators, so this constructs ``Domain`` directly through its
+    # constructor to actually exercise ``_grid_file_excludes_generation_geometry``.
+    from cstar_forge.forge.forge_blueprint import (
+        Domain,
+        OpenBoundaries,
+        Partitioning,
+        UserProvidedFile,
+    )
+
+    with pytest.raises(ValueError, match="generation-only keys"):
+        Domain(
+            grid_name="custom",
+            grid_kwargs={"nx": 6, "ny": 2, "theta_s": 5.0},
+            open_boundaries=OpenBoundaries(),
+            partitioning=Partitioning(n_procs_x=1, n_procs_y=1),
+            grid_file=UserProvidedFile(**_USER_FILE_KWARGS),
+        )
+
+
+def test_domain_grid_file_allows_vertical_coord_kwargs():
+    """theta_s/theta_b/hc/N remain allowed alongside a supplied grid file --
+    roms-tools accepts them alongside ``filename``.
+    """
+    from cstar_forge.forge.forge_blueprint import (
+        Domain,
+        OpenBoundaries,
+        Partitioning,
+        UserProvidedFile,
+    )
+
+    domain = Domain(
+        grid_name="custom",
+        grid_kwargs={"theta_s": 5.0, "theta_b": 2.0, "hc": 250.0, "N": 3},
+        open_boundaries=OpenBoundaries(),
+        partitioning=Partitioning(n_procs_x=1, n_procs_y=1),
+        grid_file=UserProvidedFile(**_USER_FILE_KWARGS),
+    )
+    assert domain.grid_file is not None
+
+
+def test_domain_grid_file_rejects_nesting():
+    from cstar_forge.forge.forge_blueprint import (
+        Domain,
+        OpenBoundaries,
+        Partitioning,
+        UserProvidedFile,
+    )
+
+    with pytest.raises(ValueError, match="nesting"):
+        Domain(
+            grid_name="custom",
+            grid_kwargs={},
+            open_boundaries=OpenBoundaries(),
+            partitioning=Partitioning(n_procs_x=1, n_procs_y=1),
+            grid_file=UserProvidedFile(**_USER_FILE_KWARGS),
+            grid_kwargs_parent={"nx": 10, "ny": 10},
+        )
+
+
+def test_river_custom_file_required_when_source_is_custom_file():
+    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+
+    with pytest.raises(ValueError, match="custom_file is not set"):
+        RiverForcingItem(source=SourceSpec(name="CUSTOM_FILE"))
+
+
+def test_river_custom_file_forbidden_when_source_is_not_custom_file():
+    from cstar_forge.forge.forge_blueprint import (
+        RiverForcingItem,
+        SourceSpec,
+        UserProvidedFile,
+    )
+
+    with pytest.raises(ValueError, match="only valid with a CUSTOM_FILE source"):
+        RiverForcingItem(
+            source=SourceSpec(name="DAI"),
+            custom_file=UserProvidedFile(**_USER_FILE_KWARGS),
+        )
+
+
+def test_river_custom_file_round_trips_and_is_valid():
+    from cstar_forge.forge.forge_blueprint import (
+        RiverForcingItem,
+        SourceSpec,
+        UserProvidedFile,
+    )
+
+    river = RiverForcingItem(
+        source=SourceSpec(name="CUSTOM_FILE"),
+        custom_file=UserProvidedFile(**_USER_FILE_KWARGS),
+    )
+    assert river.custom_file is not None
+
+
+def test_river_custom_file_excludes_bgc_source():
+    from cstar_forge.forge.forge_blueprint import (
+        RiverForcingItem,
+        SourceSpec,
+        UserProvidedFile,
+    )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        RiverForcingItem(
+            source=SourceSpec(name="CUSTOM_FILE"),
+            custom_file=UserProvidedFile(**_USER_FILE_KWARGS),
+            include_bgc=True,
+            bgc_source={"name": "RIVR2O"},
+        )
+
+
+def test_forcing_cdr_forcing_file_mutually_exclusive_with_cdr_forcing():
+    # Constructs ``Forcing`` directly (see the comment on the sibling grid_file
+    # test above for why ``model_copy`` won't do here).
+    from cstar_forge.forge.forge_blueprint import (
+        Forcing,
+        InitialConditions,
+        SourceSpec,
+        UserProvidedFile,
+    )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        Forcing(
+            initial_conditions=InitialConditions(source=SourceSpec(name="GLORYS")),
+            cdr_forcing={"some": "config"},
+            cdr_forcing_file=UserProvidedFile(**_USER_FILE_KWARGS),
+        )
+
+
+def test_content_hash_ignores_user_file_location_but_not_content_hash():
+    """Same rationale as ``code.<repo>.location``: a user file's ``location`` is
+    host/transport and must not perturb the content hash, but its ``content_hash``
+    leaf (the pin on the file's actual data) is results-affecting.
+    """
+    from cstar_forge.forge.forge_blueprint import UserProvidedFile
+
+    cfg = _build()
+    vertical_only = {
+        k: v
+        for k, v in cfg.domain.grid_kwargs.items()
+        if k in {"theta_s", "theta_b", "hc", "N"}
+    }
+    base = cfg.model_copy(
+        update={
+            "domain": cfg.domain.model_copy(
+                update={
+                    "grid_kwargs": vertical_only,
+                    "grid_file": UserProvidedFile(
+                        location="/data/staged/a.nc", content_hash="a" * 64
+                    ),
+                }
+            )
+        }
+    )
+    same_content_other_location = base.model_copy(
+        update={
+            "domain": base.domain.model_copy(
+                update={
+                    "grid_file": UserProvidedFile(
+                        location="/somewhere/else/b.nc", content_hash="a" * 64
+                    )
+                }
+            )
+        }
+    )
+    assert same_content_other_location.content_hash() == base.content_hash()
+
+    different_content = base.model_copy(
+        update={
+            "domain": base.domain.model_copy(
+                update={
+                    "grid_file": UserProvidedFile(
+                        location="/data/staged/a.nc", content_hash="b" * 64
+                    )
+                }
+            )
+        }
+    )
+    assert different_content.content_hash() != base.content_hash()
+
+
+# ---------------------------------------------------------------------------
+# Resolver: grid pathway (build_forge_blueprint(grid_file=...))
+#
+# roms_tools.Grid is stubbed here (not called for real): a real ``rt.Grid(...)``
+# build is broken in this dev env (PROJ/geopandas ``proj.db`` version mismatch --
+# see CLAUDE.md), and stubbing also keeps these tests fast/offline. The stub
+# stands in for the ONE grid load the resolver performs
+# (``rt.Grid(filename=..., **vert)``) when ``grid_file`` is set.
+# ---------------------------------------------------------------------------
+class _FakeLoadedGrid:
+    """Stand-in for a roms_tools.Grid loaded from a user-supplied filename."""
+
+    def __init__(
+        self,
+        *,
+        nx,
+        ny,
+        N,
+        theta_s=5.0,
+        theta_b=2.0,
+        hc=250.0,
+        size_x=None,
+        size_y=None,
+    ):
+        self.nx = nx
+        self.ny = ny
+        self.N = N
+        self.theta_s = theta_s
+        self.theta_b = theta_b
+        self.hc = hc
+        self.size_x = size_x
+        self.size_y = size_y
+        self.ds = None  # unused: CFL derivation defaults to baroclinic mode
+
+
+def _write_tiny_netcdf(tmp_path, name="grid.nc"):
+    """A minimal real netCDF file for ``hash_netcdf_contents`` to hash -- content
+    is irrelevant (the loaded *grid* comes from the stubbed ``roms_tools.Grid``,
+    not from parsing this file), only that it exists and is a valid netCDF.
+    """
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.Dataset(
+        {"mask_rho": (("eta_rho", "xi_rho"), np.ones((4, 5)))},
+        attrs={"title": "tiny user-supplied grid"},
+    )
+    path = tmp_path / name
+    ds.to_netcdf(path)
+    return path
+
+
+def test_build_forge_blueprint_grid_file_derives_dims_dt_v_sponge(
+    monkeypatch, tmp_path
+):
+    from cstar_forge.forge.user_files import hash_netcdf_contents
+
+    grid_path = _write_tiny_netcdf(tmp_path)
+    captured = {}
+    fake_grid = _FakeLoadedGrid(nx=7, ny=9, N=4, size_x=300.0, size_y=400.0)
+
+    def _stub(**kwargs):
+        captured.update(kwargs)
+        return fake_grid
+
+    monkeypatch.setattr("roms_tools.Grid", _stub)
+
+    cfg = _build(grid_file=str(grid_path), grid_kwargs={}, dt=None, v_sponge=None)
+
+    assert captured == {"filename": str(grid_path)}
+    assert cfg.domain.grid_file is not None
+    assert cfg.domain.grid_file.location == str(grid_path)
+    assert cfg.domain.grid_file.content_hash == hash_netcdf_contents(grid_path)
+    assert cfg.model_settings["param"]["llm"] == 7
+    assert cfg.model_settings["param"]["mmm"] == 9
+    assert cfg.model_settings["param"]["n"] == 4
+    assert cfg.domain.dt is not None
+    assert cfg.domain.v_sponge is not None
+
+
+def test_build_forge_blueprint_grid_file_skips_topography_dataset(
+    monkeypatch, tmp_path
+):
+    # Topography is baked into a user-supplied grid file: the configured source
+    # must not be noted into resolved_datasets/datasets (a user-staged source
+    # like EMOD would otherwise hard-fail ensure_source_data over an unused file).
+    grid_path = _write_tiny_netcdf(tmp_path)
+    monkeypatch.setattr(
+        "roms_tools.Grid",
+        lambda **kw: _FakeLoadedGrid(nx=7, ny=9, N=4, size_x=300.0, size_y=400.0),
+    )
+
+    cfg = _build(
+        grid_file=str(grid_path),
+        grid_kwargs={},
+        topography_source="EMOD",
+        dt=7200,
+        v_sponge=1.0,
+    )
+    assert "EMOD" not in cfg.forcing.resolved_datasets
+    assert "EMOD" not in cfg.datasets
+
+    control = _build(topography_source="EMOD")
+    assert "EMOD" in control.forcing.resolved_datasets
+
+
+def test_build_forge_blueprint_grid_file_passes_vert_kwargs(monkeypatch, tmp_path):
+    grid_path = _write_tiny_netcdf(tmp_path)
+    captured = {}
+    fake_grid = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=100.0, size_y=100.0)
+
+    def _stub(**kwargs):
+        captured.update(kwargs)
+        return fake_grid
+
+    monkeypatch.setattr("roms_tools.Grid", _stub)
+
+    _build(
+        grid_file=str(grid_path),
+        grid_kwargs={"theta_s": 5.0, "theta_b": 2.0, "hc": 250.0, "N": 3},
+        dt=7200,
+        v_sponge=1.0,
+    )
+    assert captured == {
+        "filename": str(grid_path),
+        "theta_s": 5.0,
+        "theta_b": 2.0,
+        "hc": 250.0,
+        "N": 3,
+    }
+
+
+def test_build_forge_blueprint_grid_file_partial_vert_kwargs_raises(tmp_path):
+    grid_path = _write_tiny_netcdf(tmp_path)
+    with pytest.raises(ValueError, match="theta_s"):
+        _build(
+            grid_file=str(grid_path),
+            grid_kwargs={"theta_s": 5.0},
+            dt=7200,
+            v_sponge=1.0,
+        )
+
+
+def test_build_forge_blueprint_grid_file_missing_raises(tmp_path):
+    missing = tmp_path / "does-not-exist.nc"
+    with pytest.raises(FileNotFoundError):
+        _build(grid_file=str(missing), grid_kwargs={}, dt=7200, v_sponge=1.0)
+
+
+def test_build_forge_blueprint_grid_file_no_size_x_requires_explicit_dt(
+    monkeypatch, tmp_path
+):
+    grid_path = _write_tiny_netcdf(tmp_path)
+    fake_grid = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=None, size_y=None)
+    monkeypatch.setattr("roms_tools.Grid", lambda **kw: fake_grid)
+
+    with pytest.raises(ValueError, match="dt"):
+        _build(grid_file=str(grid_path), grid_kwargs={}, dt=None, v_sponge=1.0)
+
+
+def test_build_forge_blueprint_grid_file_no_size_x_requires_explicit_v_sponge(
+    monkeypatch, tmp_path
+):
+    grid_path = _write_tiny_netcdf(tmp_path)
+    fake_grid = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=None, size_y=None)
+    monkeypatch.setattr("roms_tools.Grid", lambda **kw: fake_grid)
+
+    with pytest.raises(ValueError, match="v_sponge"):
+        _build(grid_file=str(grid_path), grid_kwargs={}, dt=7200, v_sponge=None)
+
+
+def test_build_forge_blueprint_grid_file_trusted_dict_skips_rehash(
+    monkeypatch, tmp_path
+):
+    """A dict carrying both ``location``/``content_hash`` (the wizard's rebuild
+    path) is trusted as-is -- the resolver still loads the grid (for nx/ny/N),
+    but does not recompute the hash.
+    """
+    grid_path = _write_tiny_netcdf(tmp_path)
+    fake_grid = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=100.0, size_y=100.0)
+    monkeypatch.setattr("roms_tools.Grid", lambda **kw: fake_grid)
+
+    trusted = {"location": str(grid_path), "content_hash": "not-the-real-hash"}
+    cfg = _build(grid_file=trusted, grid_kwargs={}, dt=7200, v_sponge=1.0)
+    assert cfg.domain.grid_file.content_hash == "not-the-real-hash"
+
+
+def test_build_forge_blueprint_grid_file_accepts_user_provided_file_instance(
+    monkeypatch, tmp_path
+):
+    from cstar_forge.forge.forge_blueprint import UserProvidedFile
+
+    grid_path = _write_tiny_netcdf(tmp_path)
+    fake_grid = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=100.0, size_y=100.0)
+    monkeypatch.setattr("roms_tools.Grid", lambda **kw: fake_grid)
+
+    gf = UserProvidedFile(location=str(grid_path), content_hash="pinned-hash")
+    cfg = _build(grid_file=gf, grid_kwargs={}, dt=7200, v_sponge=1.0)
+    assert cfg.domain.grid_file == gf
+
+
+def test_cpus_needed_falls_back_to_param_dims_for_grid_file(monkeypatch, tmp_path):
+    from cstar_forge.forge.forge_blueprint import estimate_forge_cpus
+
+    grid_path = _write_tiny_netcdf(tmp_path)
+    fake_grid = _FakeLoadedGrid(nx=50, ny=60, N=10, size_x=500.0, size_y=600.0)
+    monkeypatch.setattr("roms_tools.Grid", lambda **kw: fake_grid)
+
+    cfg = _build(grid_file=str(grid_path), grid_kwargs={}, dt=7200, v_sponge=1.0)
+    assert "nx" not in cfg.domain.grid_kwargs
+    assert cfg.cpus_needed == estimate_forge_cpus(50, 60, 10)
+
+
+# ---------------------------------------------------------------------------
+# Resolver: river custom_file pathway (build_forge_blueprint(forcing_inputs=...))
+# ---------------------------------------------------------------------------
+def test_build_forge_blueprint_river_custom_file_carries_hash(tmp_path):
+    import copy
+
+    from cstar_forge.forge.user_files import hash_netcdf_contents
+
+    river_path = _write_tiny_netcdf(tmp_path, name="river.nc")
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"] = [
+        {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": str(river_path),
+        }
+    ]
+
+    cfg = _build(forcing_inputs=fdata)
+
+    river = cfg.forcing.river[0]
+    assert river.source.name == "CUSTOM_FILE"
+    assert river.custom_file is not None
+    assert river.custom_file.location == str(river_path)
+    assert river.custom_file.content_hash == hash_netcdf_contents(river_path)
+    # No registry entry for CUSTOM_FILE -- staging it would either raise "Unknown
+    # dataset" downstream or bogus-stage a source that is never used.
+    assert "CUSTOM_FILE" not in cfg.forcing.resolved_datasets
+    assert "CUSTOM_FILE" not in cfg.datasets
+
+
+def test_build_forge_blueprint_river_custom_file_trusted_dict_skips_rehash(tmp_path):
+    import copy
+
+    river_path = _write_tiny_netcdf(tmp_path, name="river.nc")
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"] = [
+        {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": {
+                "location": str(river_path),
+                "content_hash": "not-the-real-hash",
+            },
+        }
+    ]
+
+    cfg = _build(forcing_inputs=fdata)
+    assert cfg.forcing.river[0].custom_file.content_hash == "not-the-real-hash"
+
+
+def test_build_forge_blueprint_river_custom_file_missing_raises(tmp_path):
+    import copy
+
+    missing = tmp_path / "does-not-exist.nc"
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"] = [
+        {"source": {"name": "CUSTOM_FILE"}, "custom_file": str(missing)}
+    ]
+
+    with pytest.raises(FileNotFoundError):
+        _build(forcing_inputs=fdata)
+
+
+# ---------------------------------------------------------------------------
+# Resolver: CDR-forcing custom-file pathway (build_forge_blueprint(cdr_forcing_file=...))
+# ---------------------------------------------------------------------------
+def test_build_forge_blueprint_cdr_forcing_file_carries_hash_and_forces_output(
+    tmp_path,
+):
+    from cstar_forge.forge.user_files import hash_netcdf_contents
+
+    cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
+
+    cfg = _build(cdr_forcing_file=str(cdr_path))
+
+    assert cfg.forcing.cdr_forcing_file is not None
+    assert cfg.forcing.cdr_forcing_file.location == str(cdr_path)
+    assert cfg.forcing.cdr_forcing_file.content_hash == hash_netcdf_contents(cdr_path)
+    assert cfg.forcing.cdr_forcing is None
+
+    settings = cfg.model_settings
+    assert settings["cdr_output"]["do_cdr_output"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    diags = settings["marbl_bgc"]["marbl_diagnostics_to_write"]
+    for name in _CDR_OUTPUT_REQUIRED_DIAGNOSTICS:
+        assert name in diags
+
+
+def test_build_forge_blueprint_cdr_forcing_file_trusted_dict_skips_rehash(tmp_path):
+    cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
+
+    cfg = _build(
+        cdr_forcing_file={
+            "location": str(cdr_path),
+            "content_hash": "not-the-real-hash",
+        }
+    )
+    assert cfg.forcing.cdr_forcing_file.content_hash == "not-the-real-hash"
+
+
+def test_build_forge_blueprint_cdr_forcing_file_missing_raises(tmp_path):
+    missing = tmp_path / "does-not-exist.nc"
+    with pytest.raises(FileNotFoundError):
+        _build(cdr_forcing_file=str(missing))
+
+
+def test_build_forge_blueprint_cdr_forcing_file_requires_marbl(tmp_path):
+    """Mirrors test_cdr_output_requires_marbl: a user-supplied cdr_forcing_file
+    implies do_cdr_output just like a generated cdr_forcing, so it must raise
+    the same way when bgc_mode="none".
+    """
+    cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
+    with pytest.raises(ValueError, match="do_cdr_output"):
+        _build(
+            cdr_forcing_file=str(cdr_path),
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+        )
+
+
+def test_build_forge_blueprint_cdr_forcing_file_conflicts_with_cdr_forcing(tmp_path):
+    """A resolver-level error (not the bare pydantic ValidationError from
+    Forcing's own validator) when both are passed to the resolver.
+    """
+    cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _build(cdr_forcing_file=str(cdr_path), cdr_forcing={"releases": []})
+
+
+def test_build_forge_blueprint_cdr_forcing_file_conflicts_with_cdr_forcing_yaml(
+    tmp_path,
+):
+    cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _build(cdr_forcing_file=str(cdr_path), cdr_forcing_yaml=_CDR_SAMPLE_YAML)
+
+
+# ---------------------------------------------------------------------------
+# SourceSpec.path: the legacy "explicit dataset path override" -- previously
+# collected by the wizard but silently dropped by the resolver (never threaded
+# into SourceSpec, so it never survived to the executor). Deliberately no
+# hashing for this override (out of scope; unlike grid_file/custom_file this is
+# a legacy escape hatch, not a new user-provided-file contract).
+# ---------------------------------------------------------------------------
+def test_build_forge_blueprint_source_path_round_trips_to_blueprint():
+    import copy
+
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["surface"][0]["source"]["path"] = "/custom/era5.nc"
+
+    cfg = _build(forcing_inputs=fdata)
+    assert cfg.forcing.surface[0].source.path == "/custom/era5.nc"
+
+
+def test_build_forge_blueprint_source_path_skips_dataset_noting():
+    """An item whose source carries an explicit path bypasses staging entirely
+    (mirrors topography_path semantics) -- it must not be noted into
+    resolved_datasets/datasets, since input_data._resolve_source_block returns
+    the explicit path verbatim without ever staging/verifying via SourceData.
+    """
+    import copy
+
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["surface"][0]["source"]["path"] = "/custom/era5.nc"
+
+    cfg = _build(forcing_inputs=fdata)
+    assert "ERA5" not in cfg.forcing.resolved_datasets
+    assert "ERA5" not in cfg.datasets
+
+    # Control: without the explicit path, ERA5 is noted as usual.
+    control = _build(forcing_inputs=_CATALOG.forcing_data("glorys-era5-unified"))
+    assert "ERA5" in control.forcing.resolved_datasets
+    assert "ERA5" in control.datasets
+
+
+def test_sources_to_forcing_override_carries_source_path():
+    import copy
+
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["surface"][0]["source"]["path"] = "/custom/era5.nc"
+
+    cfg = _build(forcing_inputs=fdata)
+    ov = sources_to_forcing_override(cfg)
+    assert ov["forcing"]["surface"][0]["source"]["path"] == "/custom/era5.nc"
 
 
 def test_schema_round_trip_identity(tmp_path):
@@ -640,6 +1265,62 @@ def test_sources_to_forcing_override_carries_river_bgc_source():
     assert kwargs["topography_source"] == "EMOD"
     assert "RIVR2O" in kwargs["source_dataset_keys"]
     assert "EMOD" in kwargs["source_dataset_keys"]
+
+
+def test_sources_to_forcing_override_carries_river_custom_file():
+    """The third propagation path (resolver / sources_to_forcing_override / wizard
+    load-back -- this WP covers the first two): custom_file must survive the
+    round trip through sources_to_forcing_override the same as bgc_source does
+    above. Guards against a future ``exclude=`` edit to ``_item()``'s
+    ``model_dump`` silently dropping it (today it propagates "for free" because
+    nothing excludes it).
+    """
+    import copy
+
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+
+    fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"] = [
+        {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": {
+                "location": "/data/staged/river.nc",
+                "content_hash": "a" * 64,
+            },
+        }
+    ]
+
+    cfg = _build(forcing_inputs=fdata)
+    ov = sources_to_forcing_override(cfg)
+    river_ov = ov["forcing"]["river"][0]
+    assert river_ov["source"]["name"] == "CUSTOM_FILE"
+    assert river_ov["custom_file"] == {
+        "location": "/data/staged/river.nc",
+        "content_hash": "a" * 64,
+    }
+
+
+def test_forge_blueprint_to_builder_kwargs_carries_cdr_forcing_file(tmp_path):
+    """cdr_forcing_file reaches the executor the same way as cdr_forcing/grid_file:
+    a top-level ``forge_blueprint_to_builder_kwargs`` kwarg, NOT routed through
+    ``sources_to_forcing_override`` (which only ever carries initial_conditions/
+    surface/boundary/tidal/river -- cdr_forcing itself is never in there either).
+    """
+    from cstar_forge.forge.forge_blueprint_engine import (
+        forge_blueprint_to_builder_kwargs,
+        sources_to_forcing_override,
+    )
+
+    cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
+    cfg = _build(cdr_forcing_file=str(cdr_path))
+
+    kwargs = forge_blueprint_to_builder_kwargs(cfg)
+    assert kwargs["cdr_forcing_file"] == cfg.forcing.cdr_forcing_file
+    assert kwargs["cdr_forcing"] is None
+
+    ov = sources_to_forcing_override(cfg)
+    assert "cdr_forcing_file" not in ov
+    assert "cdr_forcing" not in ov
 
 
 def test_catalog_scans_forcingspec():

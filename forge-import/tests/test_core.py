@@ -540,6 +540,139 @@ class TestForgeExecutorModelPostInit:
         )
 
 
+class TestForgeExecutorModelPostInitGridFile:
+    """Tests for the ``domain.grid_file`` pathway in ``model_post_init``: a
+    user-supplied pre-made grid netCDF loaded via ``rt.Grid(filename=...)``
+    instead of one built from ``grid_kwargs``.
+
+    ``cfg`` is built normally (``_make_builder``, no ``grid_file``) and then
+    ``model_copy``'d to inject ``domain.grid_file`` -- mirrors
+    ``test_model_post_init_srtm15_injects_topography_source``'s pattern of
+    exercising an exotic domain value without re-running validators. The
+    resolver-level ``grid_file=...`` normalization/derivation itself is covered
+    in ``tests/test_forge_blueprint.py``.
+    """
+
+    @staticmethod
+    def _write_tiny_netcdf(tmp_path, name="grid.nc"):
+        import numpy as np
+        import xarray as xr
+
+        ds = xr.Dataset(
+            {"mask_rho": (("eta_rho", "xi_rho"), np.ones((4, 5)))},
+            attrs={"title": "tiny user-supplied grid"},
+        )
+        path = tmp_path / name
+        ds.to_netcdf(path)
+        return path
+
+    def _cfg_with_grid_file(self, minimal_cstar_spec_builder_args, tmp_path, gf):
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        return cfg.model_copy(
+            update={
+                "domain": cfg.domain.model_copy(
+                    update={"grid_kwargs": {}, "grid_file": gf}
+                )
+            }
+        )
+
+    def test_grid_file_builds_via_filename(
+        self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
+    ):
+        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+        from cstar_forge.forge.user_files import hash_netcdf_contents
+
+        grid_path = self._write_tiny_netcdf(tmp_path)
+        gf = UserProvidedFile(
+            location=str(grid_path), content_hash=hash_netcdf_contents(grid_path)
+        )
+        cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
+
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+        mock_grid.assert_called_once_with(
+            filename=str(grid_path.resolve()), verbose=builder.verbose
+        )
+        assert builder.grid == mock_grid.return_value
+
+    def test_grid_file_missing_raises_file_not_found(
+        self, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+
+        missing = tmp_path / "does-not-exist.nc"
+        gf = UserProvidedFile(location=str(missing), content_hash="x" * 64)
+        cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
+
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-missing-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        with pytest.raises(FileNotFoundError, match="grid"):
+            ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+    def test_grid_file_hash_mismatch_warns(
+        self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
+    ):
+        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+
+        grid_path = self._write_tiny_netcdf(tmp_path)
+        gf = UserProvidedFile(location=str(grid_path), content_hash="not-the-real-hash")
+        cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
+
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-mismatch-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        with pytest.warns(UserWarning, match="grid"):
+            ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+    def test_grid_file_rejects_nesting_kwargs(
+        self, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        """Defensive check on the executor itself: even though the ForgeBlueprint
+        schema already forbids ``grid_file`` + nesting (``Domain``), the executor
+        (a separate Pydantic model, fed by ``forge_blueprint_to_builder_kwargs``)
+        raises too rather than silently building a nested grid from a
+        user-supplied file.
+        """
+        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+
+        grid_path = self._write_tiny_netcdf(tmp_path)
+        gf = UserProvidedFile(location=str(grid_path), content_hash="x" * 64)
+        cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
+        cfg = cfg.model_copy(
+            update={
+                "domain": cfg.domain.model_copy(
+                    update={"grid_kwargs_parent": {"nx": 10, "ny": 10}}
+                )
+            }
+        )
+
+        tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-nesting-"))
+        host = HostPaths(
+            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
+        )
+        with pytest.raises(ValueError, match="nesting"):
+            ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+
 class TestForgeExecutorGetDs:
     """Tests for the get_ds method."""
 
@@ -1447,6 +1580,19 @@ class TestCaptureOutput:
 
         assert "late write" in capsys.readouterr().out
         assert "late write" not in log_path.read_text()
+
+    def test_escaping_exception_traceback_is_written_to_log(self, tmp_path):
+        """An exception that escapes the block is pretty-printed by typer/rich only
+        after the capture context has restored stderr and closed the file, so
+        _capture_output itself must record the traceback before re-raising.
+        """
+        with pytest.raises(ValueError, match="boom"):
+            with forge_run._capture_output(tmp_path) as log_path:
+                raise ValueError("boom")
+
+        content = log_path.read_text()
+        assert "Traceback (most recent call last)" in content
+        assert "ValueError: boom" in content
 
     def test_logging_handler_created_during_capture_survives_exit(
         self, tmp_path, capsys

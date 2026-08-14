@@ -14,6 +14,7 @@ import pytest
 
 from cstar_forge.forge_blueprint_wizard import (
     ForgeBlueprintWizard,
+    _drain_stream_buffer,
     _ForcingEditor,
 )
 
@@ -1029,24 +1030,35 @@ def test_on_run_guards_on_invalid_config(monkeypatch):
 
 
 class _FakeStdout:
-    """Minimal async-iterable mimicking asyncio.StreamReader's line iteration."""
+    """Minimal async stand-in for asyncio.StreamReader's ``read(n)``.
 
-    def __init__(self, lines):
-        self._lines = iter(lines)
+    Serves a flat byte buffer in small, deliberately line-*un*aligned chunks (7
+    bytes by default), so a test exercises the wizard's chunk-to-line reassembly
+    rather than getting one whole line per read (which would prove nothing). Returns
+    ``b""`` at EOF, like the real reader.
 
-    def __aiter__(self):
-        return self
+    Deliberately implements only ``read(n)`` and no ``__aiter__``: the wizard must
+    not go back to ``async for line in proc.stdout`` (StreamReader.readline), whose
+    64 KiB line limit is the bug this change removed -- doing so would fail here.
+    """
 
-    async def __anext__(self):
-        try:
-            return next(self._lines)
-        except StopIteration:
-            raise StopAsyncIteration
+    def __init__(self, data, chunk_size=7):
+        self._data = data if isinstance(data, bytes) else b"".join(data)
+        self._pos = 0
+        self._chunk_size = chunk_size
+
+    async def read(self, n=-1):
+        if self._pos >= len(self._data):
+            return b""
+        take = len(self._data) - self._pos if n < 0 else min(n, self._chunk_size)
+        chunk = self._data[self._pos : self._pos + take]
+        self._pos += len(chunk)
+        return chunk
 
 
 class _FakeProcess:
-    def __init__(self, lines, returncode=0):
-        self.stdout = _FakeStdout(lines)
+    def __init__(self, data, returncode=0, chunk_size=7):
+        self.stdout = _FakeStdout(data, chunk_size=chunk_size)
         self._returncode = returncode
 
     async def wait(self):
@@ -1112,3 +1124,708 @@ def test_on_run_reports_nonzero_exit_code(monkeypatch, tmp_path):
 
     assert "exited with code 1" in wiz.run_status.value
     assert wiz.run_btn.disabled is False
+
+
+def _run_wiz_with_output(monkeypatch, tmp_path, data, *, returncode=0, chunk_size=7):
+    """Drive _on_run with a fake process emitting ``data`` (bytes); return the wizard."""
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+
+    async def _fake(*args, **kwargs):
+        return _FakeProcess(data, returncode=returncode, chunk_size=chunk_size)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake)
+    wiz._on_run(None)
+    return wiz
+
+
+def test_on_run_survives_line_longer_than_stream_limit(monkeypatch, tmp_path):
+    r"""A child that emits far more than 64 KiB with no newline (the classic
+    \r-less/progress-less long line) must NOT raise the asyncio StreamReader
+    "Separator is not found, and chunk exceed the limit" ValueError that the old
+    ``async for line in proc.stdout`` loop did -- the content still lands, split
+    across multiple appends by the memory-bounding flush.
+    """
+    from cstar_forge.forge_blueprint_wizard import _STREAM_MAX_LINE
+
+    giant = b"x" * (_STREAM_MAX_LINE * 3 + 17) + b"\ndone\n"
+    # Read in chunks well below the flush threshold and unaligned to it, so the
+    # buffer must *accumulate across many reads* before each flush -- the real
+    # production path (asyncio read() returns whatever is buffered, usually far less
+    # than the threshold), not one oversized read that drains immediately.
+    wiz = _run_wiz_with_output(monkeypatch, tmp_path, giant, chunk_size=3000)
+
+    assert "✓ finished" in wiz.run_status.value  # no exception surfaced
+    text = "".join(o["text"] for o in wiz.run_output.outputs)
+    assert text.count("x") == _STREAM_MAX_LINE * 3 + 17  # every byte preserved
+    assert "done\n" in text
+    # bounded memory => the giant run was flushed as several appends, not held whole
+    assert len(wiz.run_output.outputs) > 3
+
+
+def test_on_run_splits_carriage_return_progress_into_lines(monkeypatch, tmp_path):
+    r"""\r-redrawn progress (git clone / tqdm) surfaces as successive log lines
+    instead of one accumulating line.
+    """
+    wiz = _run_wiz_with_output(monkeypatch, tmp_path, b"10%\r20%\r30%\n")
+
+    texts = [o["text"] for o in wiz.run_output.outputs]
+    assert texts == ["10%\n", "20%\n", "30%\n"]
+
+
+def test_on_run_error_status_names_the_command(monkeypatch, tmp_path):
+    """An exception during the run is reported WITH the command that was running,
+    not as a context-free error string.
+    """
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True
+
+    async def _boom(*args, **kwargs):
+        raise OSError("no such executable")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
+    wiz._on_run(None)
+
+    assert "OSError: no such executable" in wiz.run_status.value
+    assert "while running:" in wiz.run_status.value
+    assert "bp.yaml" in wiz.run_status.value  # the built command is named
+    assert wiz.run_btn.disabled is False
+
+
+def test_drain_stream_buffer_crlf_split_across_reads():
+    r"""A \r\n straddling a read boundary is one line break, not \r + blank line:
+    the trailing \r is held back for the next chunk.
+    """
+    lines, rem = _drain_stream_buffer(b"abc\ndef\r")
+    assert lines == ["abc\n"]
+    assert rem == b"def\r"  # \r held, not emitted as a terminator yet
+    lines2, rem2 = _drain_stream_buffer(rem + b"\nghi")
+    assert lines2 == ["def\n"]  # the held \r + \n = a single CRLF break
+    assert rem2 == b"ghi"
+
+
+def test_drain_stream_buffer_mixed_terminators_and_eof():
+    r"""\r, \n and \r\n all cut lines (normalised to \n); EOF flushes the
+    unterminated remainder.
+    """
+    lines, rem = _drain_stream_buffer(b"a\rb\nc\r\nd")
+    assert lines == ["a\n", "b\n", "c\n"]
+    assert rem == b"d"
+    flushed, rem2 = _drain_stream_buffer(rem, at_eof=True)
+    assert flushed == ["d"]  # no trailing newline added at EOF
+    assert rem2 == b""
+
+
+# ===========================================================================
+# User-provided-netCDF attach flows (grid / CDR forcing / river custom_file)
+# ===========================================================================
+#
+# Real (tiny) netCDFs are used wherever ``hash_netcdf_contents`` runs for real
+# (it opens the file with xarray) -- only ``roms_tools.Grid`` itself is stubbed
+# (real Grid *generation* is broken in this env; ``Grid(filename=...)`` loading
+# is also stubbed here for speed/determinism, mirroring
+# test_parent_plot_is_always_grid_plot_only's monkeypatch pattern).
+
+
+def _write_tiny_netcdf(path: Path) -> Path:
+    """A minimal real netCDF, just for ``hash_netcdf_contents`` to hash."""
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.Dataset(
+        {"temp": (["y", "x"], np.zeros((2, 2), dtype=np.float64))},
+        attrs={"title": "tiny test file"},
+    )
+    ds.to_netcdf(path)
+    return path
+
+
+def _write_tiny_cdr_netcdf(path: Path, with_ncdr_dim: bool = True) -> Path:
+    """A minimal real netCDF with (or without) the ``ncdr`` dimension the CDR
+    attach flow's light validation checks for.
+    """
+    import numpy as np
+    import xarray as xr
+
+    dim = "ncdr" if with_ncdr_dim else "n_other"
+    ds = xr.Dataset({"cdr_volume": ([dim], np.zeros(3, dtype=np.float64))})
+    ds.to_netcdf(path)
+    return path
+
+
+class _FakeLoadedGrid:
+    """Stands in for ``rt.Grid(filename=...)``'s return value: only the
+    attributes the wizard/resolver actually read off a loaded grid file
+    (nx/ny/N/center_lon/center_lat/rot/size_x/size_y/theta_s/theta_b/hc).
+
+    Mirrors real roms-tools I/O behavior for a missing ``filename`` (raises)
+    rather than silently succeeding -- needed so a test simulating a
+    since-deleted grid_file also sees the resolver's own independent reload
+    attempt (``build_forge_blueprint``'s ``rt.Grid(filename=grid_file_obj.location)``
+    when no ``grid=`` is passed) fail the same way a real missing file would.
+    """
+
+    def __init__(self, **kwargs):
+        filename = kwargs.get("filename")
+        if filename is not None and not Path(filename).exists():
+            raise FileNotFoundError(f"no such file: {filename}")
+        self.kwargs = kwargs
+        self.nx = 10
+        self.ny = 8
+        self.N = 5
+        self.center_lon = 12.0
+        self.center_lat = 34.0
+        self.rot = 0.0
+        self.size_x = 300.0
+        self.size_y = 250.0
+        self.theta_s = 6.0
+        self.theta_b = 3.0
+        self.hc = 200.0
+
+
+@pytest.fixture
+def fake_grid(monkeypatch):
+    """Stub ``roms_tools.Grid`` for the duration of a test."""
+    import roms_tools
+
+    monkeypatch.setattr(roms_tools, "Grid", _FakeLoadedGrid)
+    return _FakeLoadedGrid
+
+
+def _new_wizard():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    return wiz
+
+
+class TestGridFileAttach:
+    def test_attach_locks_and_populates_widgets(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+
+        assert wiz._grid_file == {
+            "location": str(p),
+            "content_hash": wiz._grid_file["content_hash"],
+        }
+        assert isinstance(wiz._grid_file_grid, _FakeLoadedGrid)
+        assert wiz._grid_file_grid.kwargs == {
+            "filename": str(p)
+        }  # loaded from this path
+        assert wiz.grid_w["nx"].value == 10
+        assert wiz.grid_w["center_lon"].value == 12.0
+        assert wiz.scoord_chk.value is True  # theta_s/theta_b/hc all present
+
+        for w in (
+            *wiz.grid_w.values(),
+            wiz.scoord_chk,
+            wiz.hmin,
+            wiz.close_narrow_chk,
+            wiz.mask_shapefile,
+            wiz.topo_source,
+            wiz.topo_path,
+            wiz.nest_enable,
+            wiz.parent_enable,
+        ):
+            assert w.disabled is True
+        assert "attached" in wiz.grid_file_status.value
+        assert "exact path" in wiz.grid_file_status.value  # persistent warning
+
+    def test_upload_fallback_stages_and_attaches(
+        self, fake_grid, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
+        wiz = _new_wizard()
+        src = _write_tiny_netcdf(tmp_path / "uploaded.nc")
+        change = {"new": ({"name": "uploaded.nc", "content": src.read_bytes()},)}
+
+        wiz._on_grid_file_upload(change)
+
+        staged = tmp_path / "forge_user_files" / "uploaded.nc"
+        assert staged.exists()
+        assert wiz._grid_file == {
+            "location": str(staged),
+            "content_hash": wiz._grid_file["content_hash"],
+        }
+        assert wiz.grid_w["nx"].disabled is True
+
+    def test_attach_error_shown_in_status_not_raised(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        wiz.grid_file_path.value = str(tmp_path / "does-not-exist.nc")
+
+        wiz._on_grid_file_attach(None)  # must not raise
+
+        assert wiz._grid_file is None
+        assert "FileNotFoundError" in wiz.grid_file_status.value
+
+    def test_detach_restores_widgets(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        pre_attach_nx = wiz.grid_w["nx"].value
+        pre_attach_center_lon = wiz.grid_w["center_lon"].value
+        assert pre_attach_nx != 10  # sanity: differs from _FakeLoadedGrid's nx
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        assert wiz.grid_w["nx"].disabled is True
+        assert wiz.grid_w["nx"].value == 10  # overwritten by the attached file
+
+        wiz._on_grid_file_detach(None)
+
+        assert wiz._grid_file is None
+        assert wiz._grid_file_grid is None
+        assert wiz.grid_file_status.value == ""
+        assert wiz.grid_file_path.value == ""
+        for w in (*wiz.grid_w.values(), wiz.scoord_chk, wiz.nest_enable):
+            assert w.disabled is False
+        # The user's own pre-attach geometry is restored, not left at the
+        # detached file's (now meaningless) values.
+        assert wiz.grid_w["nx"].value == pre_attach_nx
+        assert wiz.grid_w["center_lon"].value == pre_attach_center_lon
+
+    def test_reattach_and_detach_restores_original_pre_attach_geometry(
+        self, fake_grid, tmp_path
+    ):
+        """Re-attaching a second file without detaching first must not clobber
+        the snapshot with the first file's values -- Detach must still give
+        back the ORIGINAL pre-any-attach geometry.
+        """
+        wiz = _new_wizard()
+        pre_attach_nx = wiz.grid_w["nx"].value
+        p1 = _write_tiny_netcdf(tmp_path / "grid1.nc")
+        wiz.grid_file_path.value = str(p1)
+        wiz._on_grid_file_attach(None)
+        assert wiz.grid_w["nx"].value == 10
+
+        p2 = _write_tiny_netcdf(tmp_path / "grid2.nc")
+        wiz.grid_file_path.value = str(p2)
+        wiz._on_grid_file_attach(None)  # re-attach without detaching
+        assert wiz.grid_w["nx"].value == 10  # still the (only) fake grid's nx
+
+        wiz._on_grid_file_detach(None)
+
+        assert wiz.grid_w["nx"].value == pre_attach_nx
+
+    def test_gather_emits_grid_file_and_empty_grid_kwargs(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+
+        kw = wiz._gather()
+
+        assert kw["grid_file"] == wiz._grid_file
+        assert kw["grid"] is wiz._grid_file_grid
+        assert kw["grid_kwargs"] == {}
+        assert "grid_kwargs_child" not in kw
+        assert "grid_kwargs_parent" not in kw
+
+    def test_rebuild_does_not_rehash_after_attach(
+        self, fake_grid, tmp_path, monkeypatch
+    ):
+        """The one hash computation happens at Attach time; every subsequent
+        _rebuild() (triggered here by an unrelated widget edit) must reuse the
+        cached dict, never recomputing the digest.
+        """
+        import cstar_forge.forge.user_files as user_files_mod
+        import cstar_forge.forge_blueprint_wizard as wizard_mod
+
+        calls = {"n": 0}
+        real_hash = user_files_mod.hash_netcdf_contents
+
+        def _counting_hash(path):
+            calls["n"] += 1
+            return real_hash(path)
+
+        monkeypatch.setattr(wizard_mod, "hash_netcdf_contents", _counting_hash)
+        monkeypatch.setattr(user_files_mod, "hash_netcdf_contents", _counting_hash)
+
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        assert calls["n"] == 1
+
+        wiz.description.value = "edited after attach"  # triggers _rebuild()
+        wiz._rebuild()
+
+        assert calls["n"] == 1  # never rehashed
+        assert wiz.config is not None
+
+    def test_config_round_trips_attached_and_locked_through_populate_from(
+        self, fake_grid, tmp_path
+    ):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        assert wiz.config is not None
+        cfg = wiz.config
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2._grid_file is not None
+        assert wiz2._grid_file["content_hash"] == wiz._grid_file["content_hash"]
+        assert wiz2.grid_w["nx"].disabled is True
+        assert wiz2.config is not None
+        assert "attached" in wiz2.grid_file_status.value
+
+    def test_reattach_failure_keeps_locked_and_surfaces_error(
+        self, fake_grid, tmp_path
+    ):
+        """A missing file at reload time must not silently fall back to the
+        default/generic grid_kwargs (which would gather a different blueprint) --
+        the grid_file dict + locked widgets stay in place, and _gather()/
+        _rebuild() surface the failure loudly (config goes Invalid).
+        """
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        cfg = wiz.config
+
+        p.unlink()  # the file is now missing at "reload" time
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2._grid_file is not None  # kept, not cleared
+        assert wiz2._grid_file_grid is None
+        assert wiz2.grid_w["nx"].disabled is True  # still locked
+        assert "could not re-attach" in wiz2.grid_file_status.value
+        assert wiz2.config is None  # surfaced loudly, not silently substituted
+
+        # Plot/Derive/the Save-Run safety net must likewise refuse to silently
+        # build a grid from the (locked, stale) grid_w values instead of the
+        # missing file -- not just build_forge_blueprint().
+        with pytest.raises(RuntimeError, match="failed to"):
+            wiz2._build_grid_from_widgets()
+        # _populate_from freezes a loaded file's boundaries as touched (a
+        # deliberate, already-resolved choice -- see _populate_from), which
+        # would short-circuit _ensure_boundaries_derived() before it ever
+        # reaches _build_grid_from_widgets(); force the untouched path here to
+        # actually exercise the safety net's own grid-build attempt.
+        wiz2._boundaries_touched = False
+        assert wiz2._ensure_boundaries_derived() is False
+        assert "failed to" in wiz2.derive_status.value
+
+    def test_domain_pick_detaches_attached_grid_file(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        assert wiz._grid_file is not None
+
+        wiz.domain_dd.value = wiz.domain_dd.options[1]  # first real catalog domain
+
+        assert wiz._grid_file is None
+        assert wiz.grid_w["nx"].disabled is False
+
+    def test_save_domain_guards_while_grid_file_attached(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        wiz.save_domain_name.value = "some-new-domain"
+
+        wiz._on_save_domain(None)
+
+        assert "Detach the grid file first" in wiz.save_domain_status.value
+
+
+class TestCdrFileAttach:
+    def test_attach_populates_and_clears_yaml_upload(self, tmp_path):
+        wiz = _new_wizard()
+        wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+        assert wiz._cdr_forcing is not None
+
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        assert wiz._cdr_forcing_file == {
+            "location": str(p),
+            "content_hash": wiz._cdr_forcing_file["content_hash"],
+        }
+        assert wiz._cdr_forcing is None
+        assert "cleared" in wiz.cdr_file_status.value.lower()
+        assert "attached" in wiz.cdr_file_status.value.lower()
+
+    def test_upload_fallback_stages_and_attaches(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
+        wiz = _new_wizard()
+        src = _write_tiny_cdr_netcdf(tmp_path / "uploaded_cdr.nc")
+        change = {"new": ({"name": "uploaded_cdr.nc", "content": src.read_bytes()},)}
+
+        wiz._on_cdr_file_upload(change)
+
+        staged = tmp_path / "forge_user_files" / "uploaded_cdr.nc"
+        assert staged.exists()
+        assert wiz._cdr_forcing_file == {
+            "location": str(staged),
+            "content_hash": wiz._cdr_forcing_file["content_hash"],
+        }
+
+    def test_yaml_upload_clears_attached_cdr_file(self, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+        assert wiz._cdr_forcing_file is not None
+
+        wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+
+        assert wiz._cdr_forcing is not None
+        assert wiz._cdr_forcing_file is None
+        assert "cleared" in wiz.cdr_status.value.lower()
+
+    def test_attach_warns_but_does_not_block_when_ncdr_dim_missing(self, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc", with_ncdr_dim=False)
+        wiz.cdr_file_path.value = str(p)
+
+        wiz._on_cdr_file_attach(None)
+
+        assert wiz._cdr_forcing_file is not None  # not blocked
+        assert "ncdr" in wiz.cdr_file_status.value.lower()
+
+    def test_gather_emits_cdr_forcing_file(self, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        kw = wiz._gather()
+
+        assert kw["cdr_forcing_file"] == wiz._cdr_forcing_file
+        assert "cdr_forcing" not in kw
+
+    def test_clear_resets_state(self, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        wiz._on_cdr_file_clear(None)
+
+        assert wiz._cdr_forcing_file is None
+        assert wiz.cdr_file_status.value == ""
+        assert "cdr_forcing_file" not in wiz._gather()
+
+    def test_round_trips_through_populate_from(self, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+        assert wiz.config is not None
+        cfg = wiz.config
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2._cdr_forcing_file == wiz._cdr_forcing_file
+        assert "attached" in wiz2.cdr_file_status.value.lower()
+        assert wiz2.config is not None
+
+    def test_forcing_spec_carrying_cdr_clears_attached_cdr_file(
+        self, tmp_path, monkeypatch
+    ):
+        """Picking a ForcingSpec whose own CDR forcing is non-empty must clear an
+        attached CDR file (Forcing's own validator forbids both at once). Stubs
+        catalog.forcing_data with an embedded cdr_forcing block, independent of
+        whether the bundled default ForcingSpec happens to carry one.
+        """
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+        assert wiz._cdr_forcing_file is not None
+
+        fake_spec = dict(wiz.catalog.forcing_data(wiz.forcing_dd.value))
+        fake_spec["cdr_forcing"] = {"releases": []}
+        monkeypatch.setattr(wiz.catalog, "forcing_data", lambda _name: fake_spec)
+
+        wiz._on_forcing_spec(None)
+
+        assert wiz._cdr_forcing == {"releases": []}
+        assert wiz._cdr_forcing_file is None
+
+
+class TestRiverCustomFileAttach:
+    def test_selecting_custom_file_toggles_visibility(self, editor):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        assert _display(w["custom_file_path"]) == "none"
+        assert _display(w["climatology"]) == ""
+        assert _display(w["path"]) == ""
+
+        w["name"].value = "CUSTOM_FILE"
+
+        assert _display(w["custom_file_path"]) == ""
+        assert _display(w["custom_file_attach_btn"]) == ""
+        assert _display(w["custom_file_upload"]) == ""
+        assert _display(w["custom_file_status"]) == ""
+        assert _display(w["climatology"]) == "none"
+        assert _display(w["include_bgc"]) == "none"
+        assert _display(w["convert_to_climatology"]) == "none"
+        assert _display(w["coast_snap_buffer_km"]) == "none"
+        assert _display(w["domain_edge_buffer"]) == "none"
+        assert _display(w["bgc_source_name"]) == "none"
+        assert _display(w["bgc_source_path"]) == "none"
+        assert _display(w["path"]) == "none"
+
+        w["name"].value = "DAI"
+        assert _display(w["custom_file_path"]) == "none"
+        assert _display(w["climatology"]) == ""
+        assert _display(w["path"]) == ""
+
+    def test_include_bgc_visibility_still_works_after_leaving_custom_file(self, editor):
+        """Switching CUSTOM_FILE -> DAI must hand bgc-widget visibility back to
+        include_bgc's own sync, not leave it stuck from the custom-file branch.
+        """
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["name"].value = "DAI"
+        assert _display(w["bgc_source_name"]) == "none"  # include_bgc still False
+
+        w["include_bgc"].value = True
+        assert _display(w["bgc_source_name"]) == ""
+
+    def test_attach_and_gather_emits_custom_file_omits_standard_fields(
+        self, editor, tmp_path
+    ):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["include_bgc"].value = True  # would-be leftover state; must be ignored
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+
+        w["custom_file_attach_btn"].click()
+
+        assert w["_custom_file"] == {
+            "location": str(p),
+            "content_hash": w["_custom_file"]["content_hash"],
+        }
+        assert "attached" in w["custom_file_status"].value.lower()
+
+        item = editor._gather_item("river", w)
+
+        assert item == {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": w["_custom_file"],
+        }
+
+    def test_upload_fallback_stages_and_attaches(self, editor, tmp_path, monkeypatch):
+        """Unlike the grid/CDR upload-fallback tests (which call the wizard's
+        ``_on_*_upload`` handler directly, bypassing the widget), the river
+        row's upload handler is a closure with no externally-reachable name --
+        this must go through the real ``FileUpload.value`` trait, so the
+        change item needs every key ipywidgets' own (de)serializer requires
+        (name/type/size/content/last_modified), not just the two the handler
+        itself reads.
+        """
+        import datetime as dt
+
+        monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        src = _write_tiny_netcdf(tmp_path / "uploaded_river.nc")
+        content = src.read_bytes()
+
+        w["custom_file_upload"].value = (
+            {
+                "name": "uploaded_river.nc",
+                "type": "application/x-netcdf",
+                "size": len(content),
+                "content": content,
+                "last_modified": dt.datetime.now(dt.UTC),
+            },
+        )
+
+        staged = tmp_path / "forge_user_files" / "uploaded_river.nc"
+        assert staged.exists()
+        assert w["_custom_file"] == {
+            "location": str(staged),
+            "content_hash": w["_custom_file"]["content_hash"],
+        }
+
+    def test_attach_error_shown_in_status(self, editor, tmp_path):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["custom_file_path"].value = str(tmp_path / "missing.nc")
+
+        w["custom_file_attach_btn"].click()  # must not raise
+
+        assert w["_custom_file"] is None
+        assert "FileNotFoundError" in w["custom_file_status"].value
+
+    def test_gather_item_hints_when_nothing_attached_yet(self, editor):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+
+        item = editor._gather_item("river", w)
+
+        assert item == {"source": {"name": "CUSTOM_FILE"}}  # no custom_file key
+
+    def test_custom_file_round_trips_through_populate_from(self, tmp_path):
+        wiz = _new_wizard()
+        fe = wiz._forcing_editor
+        assert fe._rows["river"], "expected a default river row from ForcingSpec"
+        w = fe._rows["river"][0]
+        w["name"].value = "CUSTOM_FILE"
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+        w["custom_file_attach_btn"].click()
+        wiz._rebuild()
+        assert wiz.config is not None, wiz.derived.value
+        assert any(it.source.name == "CUSTOM_FILE" for it in wiz.config.forcing.river)
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)  # must not raise ValueError
+
+        assert wiz2.config is not None
+        fe2 = wiz2._forcing_editor
+        custom_rows = [
+            ws for ws in fe2._rows["river"] if ws["name"].value == "CUSTOM_FILE"
+        ]
+        assert len(custom_rows) == 1
+        assert custom_rows[0]["_custom_file"]["location"] == str(p)
+        assert _display(custom_rows[0]["custom_file_path"]) == ""
+        assert _display(custom_rows[0]["climatology"]) == "none"
+
+    def test_generic_source_path_round_trips_through_populate_from(self):
+        """Non-custom river categories already carry SourceSpec.path (a WP3 fix);
+        this pins the wizard's load-back side: w["path"] must repopulate too.
+        """
+        wiz = _new_wizard()
+        fe = wiz._forcing_editor
+        w = fe._rows["river"][0]
+        w["name"].value = "DAI"
+        w["path"].value = "/custom/river/source.nc"
+        wiz._rebuild()
+        assert wiz.config is not None
+        dai_item = next(
+            it for it in wiz.config.forcing.river if it.source.name == "DAI"
+        )
+        assert dai_item.source.path == "/custom/river/source.nc"
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        fe2 = wiz2._forcing_editor
+        w2 = next(ws for ws in fe2._rows["river"] if ws["name"].value == "DAI")
+        assert w2["path"].value == "/custom/river/source.nc"

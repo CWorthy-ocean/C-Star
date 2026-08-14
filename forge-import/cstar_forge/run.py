@@ -16,6 +16,7 @@ import contextlib
 import logging
 import os
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -115,6 +116,12 @@ def _capture_output(working_dir, *, verbose=False):
         try:
             print(f"Forge log: {log_path}")
             yield log_path
+        except BaseException:
+            # The pretty traceback (typer/rich) is rendered by our caller only after
+            # this context has restored stderr and closed the file, so record the
+            # failure here or the log ends silently mid-run.
+            fh.write(traceback.format_exc())
+            raise
         finally:
             root.removeHandler(handler)
             for name, prev_level in prev_levels.items():
