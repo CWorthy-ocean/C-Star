@@ -1943,6 +1943,11 @@ class ArtifactCache:
             if not destination.is_container:
                 self._expand(found.path, destination.path)
         self._record_expansion(destination, found, run_id)
+
+        workspace_path = str(destination.path)
+        msg = f"Materialized {name!r} from tier {found.tier} to {workspace_path!r}"
+        log.debug(msg)
+
         return destination
 
     def _record_expansion(
