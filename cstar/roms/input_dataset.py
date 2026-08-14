@@ -24,7 +24,7 @@ from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.io.utils import get_artifact_cache
-from cstar.orchestration.caching import fileset_save_wrapper
+from cstar.orchestration.caching import to_cached_fileset
 
 roms_tools = lazy_import("roms_tools")
 
@@ -280,7 +280,7 @@ class ROMSInputDataset(InputDataset, ABC):
             assert self.source
             return slugify(f"{path.stem}__partitioned")
 
-        @fileset_save_wrapper(get_artifact_cache, key_function)
+        @to_cached_fileset(get_artifact_cache, key_function)
         def partition_item(idfile: Path) -> list[Path]:
             """Helper function that wraps the actual roms_tools.partition_netcdf
             call.

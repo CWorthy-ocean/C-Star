@@ -819,7 +819,7 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-def cached_save_wrapper(
+def to_cached_artifact(
     cache_factory: Callable[[], ArtifactCache],
     entity_type: type[T],
     key_attr: str,
@@ -855,7 +855,7 @@ def cached_save_wrapper(
     return _deco
 
 
-def fileset_save_wrapper(
+def to_cached_fileset(
     cache_factory: Callable[[], ArtifactCache],
     key_func: Callable[[Path], str],
 ) -> Callable[
