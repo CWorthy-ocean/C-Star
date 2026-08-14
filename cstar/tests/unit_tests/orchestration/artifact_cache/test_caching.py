@@ -13,6 +13,7 @@ import pytest
 
 from cstar.applications.roms_marbl.models import PartitioningParameterSet
 from cstar.orchestration.artifact_cache import ArtifactCache, ArtifactKind, Tier
+from cstar.orchestration.cache_keys import aggregate_key, resource_key
 from cstar.orchestration.caching import (
     CachedCallError,
     cache_fileset,
@@ -102,8 +103,8 @@ def geometry() -> PartitioningParameterSet:
 # ---------------------------------------------------------------------------
 
 
-def _fetch(resource: Resource, run_id: str, workspace: Path) -> Path:
-    """Write a file derived from ``resource`` and return where it went.
+def _fetch(resource: Resource, run_id: str, destination: Path) -> None:
+    """Write a file derived from ``resource`` at the path it was given.
 
     Parameters
     ----------
@@ -111,27 +112,21 @@ def _fetch(resource: Resource, run_id: str, workspace: Path) -> Path:
         Declared input.
     run_id : str
         Run identifier.
-    workspace : Path
-        Directory to write into.
-
-    Returns
-    -------
-    Path
-        The file written.
+    destination : Path
+        Path to write to.
     """
     CALLS.append("fetch")
-    target = workspace / "boundary.nc"
-    target.write_bytes(f"derived from {resource.location}".encode())
-    return target
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(f"derived from {resource.location}".encode())
 
 
 def _partition(
     resource: Resource,
     geometry: PartitioningParameterSet,
     run_id: str,
-    workspace: Path,
-) -> Path:
-    """Write a directory of ranks and return it.
+    destination: Path,
+) -> None:
+    """Write a directory of ranks.
 
     Parameters
     ----------
@@ -141,21 +136,14 @@ def _partition(
         Process grid to split across.
     run_id : str
         Run identifier.
-    workspace : Path
+    destination : Path
         Directory to write into.
-
-    Returns
-    -------
-    Path
-        The directory of ranks.
     """
     CALLS.append("partition")
-    target = workspace / f"ranks-{geometry.n_procs_x}x{geometry.n_procs_y}"
-    shutil.rmtree(target, ignore_errors=True)
-    target.mkdir()
+    shutil.rmtree(destination, ignore_errors=True)
+    destination.mkdir(parents=True)
     for rank in range(geometry.n_procs_x * geometry.n_procs_y):
-        (target / f"rank{rank:03d}.nc").write_bytes(f"rank {rank}".encode())
-    return target
+        (destination / f"rank{rank:03d}.nc").write_bytes(f"rank {rank}".encode())
 
 
 # ---------------------------------------------------------------------------
@@ -179,11 +167,12 @@ def test_first_call_runs_and_caches(
     """
     fetch = cached(cache=cache)(_fetch)
 
-    result = fetch(resource, RUN_ID, workspace)
+    result = fetch(resource, RUN_ID, workspace / "boundary.nc")
 
     assert CALLS == ["fetch"]
+    assert result == workspace / "boundary.nc"
     assert result.is_file()
-    assert cache.user_root in result.parents
+    assert cache.resolve(resource_key(resource), RUN_ID) is not None
 
 
 def test_second_call_skips_the_work(
@@ -202,12 +191,11 @@ def test_second_call_skips_the_work(
     """
     fetch = cached(cache=cache)(_fetch)
 
-    first = fetch(resource, RUN_ID, workspace)
-    second = fetch(resource, RUN_ID, workspace)
+    first = fetch(resource, RUN_ID, workspace / "boundary.nc")
+    second = fetch(resource, RUN_ID, workspace / "boundary.nc")
 
     assert CALLS == ["fetch"]
-    assert first == second
-    assert first.parent == cache.user_root / RUN_ID
+    assert first == second == workspace / "boundary.nc"
 
 
 def test_another_run_hits_the_shared_tier(
@@ -215,9 +203,10 @@ def test_another_run_hits_the_shared_tier(
 ) -> None:
     """A second run reuses the first run's published artifact.
 
-    The path handed back lands in run-B's own workspace rather than the shared
-    tier: a caller is given a path and nothing stops it writing there, so a
-    shared hit is copied down before it is exposed.
+    The path handed back is the one run-B asked for, never a path into the
+    cache: a caller given a cache path has nothing stopping it writing there,
+    and one client editing a shared artifact in place corrupts it for every
+    other run on the allocation.
 
     Parameters
     ----------
@@ -229,36 +218,17 @@ def test_another_run_hits_the_shared_tier(
         Directory the client writes into.
     """
     fetch = cached(cache=cache)(_fetch)
-    first = fetch(resource, RUN_ID, workspace)
-    cache.promote(first.name, RUN_ID)
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
+    key = resource_key(resource)
+    cache.promote(key, RUN_ID)
 
-    result = fetch(resource, "run-B", workspace)
+    result = fetch(resource, "run-B", workspace / "b" / "boundary.nc")
 
     assert CALLS == ["fetch"]
-    assert result.parent == cache.user_root / "run-B"
-    assert cache.locate(result.name, Tier.SHARED).exists
-
-
-def test_localization_can_be_declined(
-    cache: ArtifactCache, resource: VersionedResource, workspace: Path
-) -> None:
-    """A read-only consumer may take the shared path and skip the copy.
-
-    Parameters
-    ----------
-    cache : ArtifactCache
-        Cache under test.
-    resource : VersionedResource
-        Declared input.
-    workspace : Path
-        Directory the client writes into.
-    """
-    first = cached(cache=cache)(_fetch)(resource, RUN_ID, workspace)
-    cache.promote(first.name, RUN_ID)
-
-    result = cached(cache=cache, localize=False)(_fetch)(resource, "run-B", workspace)
-
-    assert cache.shared_root in result.parents
+    assert result == workspace / "b" / "boundary.nc"
+    assert result.read_bytes() == (workspace / "boundary.nc").read_bytes()
+    assert cache.user_root not in result.parents
+    assert cache.shared_root not in result.parents
 
 
 def test_promotion_is_opt_in(
@@ -279,10 +249,12 @@ def test_promotion_is_opt_in(
     workspace : Path
         Directory the client writes into.
     """
-    cached(cache=cache)(_fetch)(resource, RUN_ID, workspace)
+    cached(cache=cache)(_fetch)(resource, RUN_ID, workspace / "boundary.nc")
     assert not cache.list_shared_artifacts()
 
-    cached(cache=cache, promote=True)(_fetch)(resource, "run-B", workspace)
+    cached(cache=cache, promote=True)(_fetch)(
+        resource, "run-B", workspace / "b" / "boundary.nc"
+    )
     assert [loc.name for loc in cache.list_shared_artifacts()]
 
 
@@ -301,10 +273,10 @@ def test_a_changed_input_is_a_different_artifact(
         Directory the client writes into.
     """
     fetch = cached(cache=cache)(_fetch)
-    fetch(resource, RUN_ID, workspace)
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
 
     other = VersionedResource(location=str(resource.location), hash="different")
-    fetch(other, RUN_ID, workspace)
+    fetch(other, RUN_ID, workspace / "other.nc")
 
     assert CALLS == ["fetch", "fetch"]
 
@@ -326,8 +298,8 @@ def test_context_participates_in_the_key(
     old = cached(cache=cache, context={"transform": "v3"})(_fetch)
     new = cached(cache=cache, context={"transform": "v4"})(_fetch)
 
-    old(resource, RUN_ID, workspace)
-    new(resource, RUN_ID, workspace)
+    old(resource, RUN_ID, workspace / "old.nc")
+    new(resource, RUN_ID, workspace / "new.nc")
 
     assert CALLS == ["fetch", "fetch"]
 
@@ -353,8 +325,8 @@ def test_cache_factory_is_consulted_per_call(
         return cache
 
     fetch = cached(cache_factory=factory)(_fetch)
-    fetch(resource, RUN_ID, workspace)
-    fetch(resource, RUN_ID, workspace)
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
 
     assert len(calls) == 2
 
@@ -385,11 +357,13 @@ def test_a_geometry_makes_the_result_a_set(
     """
     partition = cached(cache=cache)(_partition)
 
-    result = partition(resource, geometry, RUN_ID, workspace)
+    result = partition(resource, geometry, RUN_ID, workspace / "ranks")
 
     assert result.is_dir()
     assert len(sorted(result.glob("*.nc"))) == 4
-    assert cache.read_manifest(RUN_ID).artifacts[result.name].kind is ArtifactKind.SET
+    key = aggregate_key(resource, geometry)
+    assert result == workspace / "ranks"
+    assert cache.read_manifest(RUN_ID).artifacts[key].kind is ArtifactKind.SET
 
 
 def test_a_set_is_reused_across_runs(
@@ -412,12 +386,13 @@ def test_a_set_is_reused_across_runs(
         Directory the client writes into.
     """
     partition = cached(cache=cache)(_partition)
-    first = partition(resource, geometry, RUN_ID, workspace)
-    cache.promote(first.name, RUN_ID)
+    partition(resource, geometry, RUN_ID, workspace / "ranks")
+    cache.promote(aggregate_key(resource, geometry), RUN_ID)
 
-    result = partition(resource, geometry, "run-B", workspace)
+    result = partition(resource, geometry, "run-B", workspace / "b-ranks")
 
     assert CALLS == ["partition"]
+    assert result == workspace / "b-ranks"
     assert len(sorted(result.glob("*.nc"))) == 4
 
 
@@ -441,26 +416,27 @@ def test_a_different_geometry_is_a_different_set(
         Directory the client writes into.
     """
     partition = cached(cache=cache)(_partition)
-    partition(resource, geometry, RUN_ID, workspace)
+    partition(resource, geometry, RUN_ID, workspace / "ranks")
 
     partition(
-        resource, PartitioningParameterSet(n_procs_x=4, n_procs_y=1), RUN_ID, workspace
+        resource,
+        PartitioningParameterSet(n_procs_x=4, n_procs_y=1),
+        RUN_ID,
+        workspace / "alt-ranks",
     )
 
     assert CALLS == ["partition", "partition"]
 
 
-def test_a_reused_work_directory_would_contaminate_a_set(
+def test_reusing_one_destination_for_two_sets_leaves_no_remnants(
     cache: ArtifactCache, resource: VersionedResource, workspace: Path
 ) -> None:
-    """Only what the producer wrote for *this* call may enter the container.
+    """A destination holding a larger set is replaced, not merged into.
 
-    ``ingest_aggregate`` captures what it finds and declares a member count
-    matching it, so surplus files left by an earlier call pass every
-    completeness check and are then promoted and shared. Nothing in the cache
-    can detect that: it cannot know which files were meant. Producing into a
-    directory scoped to the call is the client's side of that contract, and
-    this fails loudly if the fixture stops honouring it.
+    Copying a set over a directory that already holds one would otherwise
+    leave the surplus members of the first behind, and a consumer globbing the
+    directory would read them as part of the second — a set that passes every
+    completeness check while containing files that were never in it.
 
     Parameters
     ----------
@@ -472,16 +448,22 @@ def test_a_reused_work_directory_would_contaminate_a_set(
         Directory the client writes into.
     """
     partition = cached(cache=cache)(_partition)
+    target = workspace / "ranks"
 
     wide = partition(
-        resource, PartitioningParameterSet(n_procs_x=4, n_procs_y=2), RUN_ID, workspace
+        resource, PartitioningParameterSet(n_procs_x=4, n_procs_y=2), RUN_ID, target
     )
+    assert len(sorted(wide.glob("*.nc"))) == 8
+
     narrow = partition(
-        resource, PartitioningParameterSet(n_procs_x=2, n_procs_y=1), RUN_ID, workspace
+        resource, PartitioningParameterSet(n_procs_x=2, n_procs_y=1), RUN_ID, target
     )
 
-    assert len(sorted(wide.glob("*.nc"))) == 8
-    assert len(sorted(narrow.glob("*.nc"))) == 2
+    assert narrow == target
+    assert sorted(item.name for item in narrow.glob("*.nc")) == [
+        "rank000.nc",
+        "rank001.nc",
+    ]
 
 
 def test_a_set_does_not_collide_with_the_single_file(
@@ -506,8 +488,10 @@ def test_a_set_does_not_collide_with_the_single_file(
     workspace : Path
         Directory the client writes into.
     """
-    single = cached(cache=cache)(_fetch)(resource, RUN_ID, workspace)
-    plural = cached(cache=cache)(_partition)(resource, geometry, RUN_ID, workspace)
+    single = cached(cache=cache)(_fetch)(resource, RUN_ID, workspace / "boundary.nc")
+    plural = cached(cache=cache)(_partition)(
+        resource, geometry, RUN_ID, workspace / "ranks"
+    )
 
     assert single.name != plural.name
     assert single.is_file()
@@ -538,7 +522,9 @@ def test_a_pre_partitioned_source_keeps_the_ordinary_strategy(
         }
     )
 
-    result = cached(cache=cache)(_partition)(already, geometry, RUN_ID, workspace)
+    result = cached(cache=cache)(_partition)(
+        already, geometry, RUN_ID, workspace / "ranks"
+    )
 
     assert result.is_dir()
     assert not result.name.endswith(".set")
@@ -665,8 +651,8 @@ def test_producing_a_directory_without_a_geometry_is_refused(
         Directory the client writes into.
     """
 
-    def produce(resource: Resource, run_id: str) -> Path:
-        """Return a directory despite declaring no geometry.
+    def produce(resource: Resource, run_id: str, destination: Path) -> None:
+        """Write a directory despite declaring no geometry.
 
         Parameters
         ----------
@@ -674,19 +660,14 @@ def test_producing_a_directory_without_a_geometry_is_refused(
             Declared input.
         run_id : str
             Run identifier.
-
-        Returns
-        -------
-        Path
-            A directory.
+        destination : Path
+            Path to write to.
         """
-        target = workspace / "unexpected"
-        target.mkdir(exist_ok=True)
-        (target / "a.nc").write_bytes(b"a")
-        return target
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / "a.nc").write_bytes(b"a")
 
     with pytest.raises(CachedCallError, match="names a single file"):
-        cached(cache=cache)(produce)(resource, RUN_ID)
+        cached(cache=cache)(produce)(resource, RUN_ID, workspace / "unexpected")
 
 
 def test_producing_a_file_for_a_set_is_refused(
@@ -710,9 +691,12 @@ def test_producing_a_file_for_a_set_is_refused(
     """
 
     def produce(
-        resource: Resource, geometry: PartitioningParameterSet, run_id: str
-    ) -> Path:
-        """Return one file despite declaring a geometry.
+        resource: Resource,
+        geometry: PartitioningParameterSet,
+        run_id: str,
+        destination: Path,
+    ) -> None:
+        """Write one file despite declaring a geometry.
 
         Parameters
         ----------
@@ -722,18 +706,16 @@ def test_producing_a_file_for_a_set_is_refused(
             Process grid.
         run_id : str
             Run identifier.
-
-        Returns
-        -------
-        Path
-            A single file.
+        destination : Path
+            Path to write to.
         """
-        target = workspace / "lonely.nc"
-        target.write_bytes(b"alone")
-        return target
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(b"alone")
 
     with pytest.raises(CachedCallError, match="names a set"):
-        cached(cache=cache)(produce)(resource, geometry, RUN_ID)
+        cached(cache=cache)(produce)(
+            resource, geometry, RUN_ID, workspace / "lonely.nc"
+        )
 
 
 def test_a_vanished_result_is_refused(
@@ -749,8 +731,8 @@ def test_a_vanished_result_is_refused(
         Declared input.
     """
 
-    def produce(resource: Resource, run_id: str) -> Path:
-        """Return a path that was never written.
+    def produce(resource: Resource, run_id: str, destination: Path) -> None:
+        """Write nothing, leaving the destination empty.
 
         Parameters
         ----------
@@ -758,16 +740,13 @@ def test_a_vanished_result_is_refused(
             Declared input.
         run_id : str
             Run identifier.
-
-        Returns
-        -------
-        Path
-            A path to nowhere.
+        destination : Path
+            Path it was told to write to, and does not.
         """
-        return Path("/nonexistent/nowhere.nc")
+        return
 
     with pytest.raises(CachedCallError, match="does not exist"):
-        cached(cache=cache)(produce)(resource, RUN_ID)
+        cached(cache=cache)(produce)(resource, RUN_ID, Path("/nonexistent/nowhere.nc"))
 
 
 def test_exactly_one_cache_source_is_required() -> None:
@@ -809,19 +788,19 @@ def test_the_undecorated_function_is_unaffected(
     workspace : Path
         Directory the client writes into.
     """
-    result = _fetch(resource, RUN_ID, workspace)
+    _fetch(resource, RUN_ID, workspace / "boundary.nc")
 
-    assert result == workspace / "boundary.nc"
-    assert result.is_file()
+    assert (workspace / "boundary.nc").is_file()
 
 
-def test_a_hit_returns_the_cached_path_not_the_workspace_path(
+def test_the_caller_never_receives_a_cache_path(
     cache: ArtifactCache, resource: VersionedResource, workspace: Path
 ) -> None:
-    """The caller receives the cache's copy, which is what skipping work means.
+    """The returned path is always the one the caller asked for.
 
-    Worth stating explicitly: a caller that assumed the returned path was the
-    one it passed in would be surprised.
+    Handing back a path into the cache invites a client to write through it,
+    and one client editing an artifact in place corrupts it for everyone else
+    reading that key.
 
     Parameters
     ----------
@@ -832,10 +811,11 @@ def test_a_hit_returns_the_cached_path_not_the_workspace_path(
     workspace : Path
         Directory the client writes into.
     """
-    result = cached(cache=cache)(_fetch)(resource, RUN_ID, workspace)
+    result = cached(cache=cache)(_fetch)(resource, RUN_ID, workspace / "boundary.nc")
 
-    assert result != workspace / "boundary.nc"
-    assert result.read_bytes() == (workspace / "boundary.nc").read_bytes()
+    assert result == workspace / "boundary.nc"
+    assert cache.user_root not in result.parents
+    assert cache.shared_root not in result.parents
 
 
 def test_keyword_arguments_bind_the_same_way(
@@ -854,8 +834,10 @@ def test_keyword_arguments_bind_the_same_way(
     """
     fetch = cached(cache=cache)(_fetch)
 
-    positional = fetch(resource, RUN_ID, workspace)
-    keyword = fetch(resource=resource, run_id=RUN_ID, workspace=workspace)
+    positional = fetch(resource, RUN_ID, workspace / "boundary.nc")
+    keyword = fetch(
+        resource=resource, run_id=RUN_ID, destination=workspace / "boundary.nc"
+    )
 
     assert CALLS == ["fetch"]
     assert positional == keyword
@@ -875,11 +857,12 @@ def test_the_shared_copy_is_verifiable(
     workspace : Path
         Directory the client writes into.
     """
-    result = cached(cache=cache)(_fetch)(resource, RUN_ID, workspace)
-    cache.promote(result.name, RUN_ID)
+    cached(cache=cache)(_fetch)(resource, RUN_ID, workspace / "boundary.nc")
+    key = resource_key(resource)
+    cache.promote(key, RUN_ID)
 
-    assert cache.verify(result.name) is True
-    assert cache.locate(result.name, Tier.SHARED).exists
+    assert cache.verify(key) is True
+    assert cache.locate(key, Tier.SHARED).exists
 
 
 def test_a_key_error_surfaces_as_a_cached_call_error(
@@ -1260,15 +1243,13 @@ def test_discovery_never_reads_a_member(
     assert fileset_for(tree, "*.txt").members == ("a.txt", "sub/c.txt")
 
 
-def test_repeated_shared_hits_do_not_recopy(
+def test_repeating_a_hit_replaces_the_destination(
     cache: ArtifactCache, resource: VersionedResource, workspace: Path
 ) -> None:
-    """A run that already localized an artifact must not localize it again.
+    """Asking twice is a no-op, not an error, even with the file already there.
 
-    ``resolve`` prefers the shared tier, so the second call is handed the
-    shared copy even though a local one exists. Re-ingesting would be a
-    pointless pass over the bytes — and, since a commit no longer overwrites
-    by default, an error.
+    Re-running a step in one workspace is ordinary, so a destination that
+    already holds the artifact is overwritten rather than refused.
 
     Parameters
     ----------
@@ -1280,11 +1261,308 @@ def test_repeated_shared_hits_do_not_recopy(
         Directory the client writes into.
     """
     fetch = cached(cache=cache)(_fetch)
-    first = fetch(resource, RUN_ID, workspace)
-    cache.promote(first.name, RUN_ID)
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
+    cache.promote(resource_key(resource), RUN_ID)
 
-    once = fetch(resource, "run-B", workspace)
-    twice = fetch(resource, "run-B", workspace)
+    target = workspace / "b" / "boundary.nc"
+    once = fetch(resource, "run-B", target)
+    target.write_bytes(b"clobbered by something else")
+    twice = fetch(resource, "run-B", target)
 
-    assert once == twice
-    assert once.parent == cache.user_root / "run-B"
+    assert once == twice == target
+    assert target.read_bytes() == (workspace / "boundary.nc").read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# Destination contract
+# ---------------------------------------------------------------------------
+
+
+def test_a_producer_without_a_destination_cannot_be_cached(
+    cache: ArtifactCache, resource: VersionedResource
+) -> None:
+    """On a hit the function is not called, so it cannot choose the path.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    """
+
+    def produce(resource: Resource, run_id: str) -> None:
+        """Take no destination.
+
+        Parameters
+        ----------
+        resource : Resource
+            Declared input.
+        run_id : str
+            Run identifier.
+        """
+        return
+
+    with pytest.raises(CachedCallError, match="argument naming the path"):
+        cached(cache=cache)(produce)(resource, RUN_ID)
+
+
+def test_the_destination_argument_can_be_renamed(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """Producers that already name the parameter something else still work.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+
+    def produce(resource: Resource, run_id: str, out: Path) -> None:
+        """Write to a differently named destination parameter.
+
+        Parameters
+        ----------
+        resource : Resource
+            Declared input.
+        run_id : str
+            Run identifier.
+        out : Path
+            Path to write to.
+        """
+        out.write_bytes(b"payload")
+
+    target = workspace / "renamed.nc"
+    result = cached(cache=cache, destination_argument="out")(produce)(
+        resource, RUN_ID, target
+    )
+
+    assert result == target
+
+
+def test_a_producer_writing_elsewhere_is_refused(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """Writing somewhere other than the destination breaks hit/miss symmetry.
+
+    Detected by reading the destination rather than by trusting anything the
+    producer says, which is the point of the producer returning nothing: the
+    check does not depend on the producer being honest about what it did.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+
+    def produce(resource: Resource, run_id: str, destination: Path) -> None:
+        """Write somewhere other than where it was told.
+
+        Parameters
+        ----------
+        resource : Resource
+            Declared input.
+        run_id : str
+            Run identifier.
+        destination : Path
+            Path it was told to write to, and ignores.
+        """
+        (workspace / "elsewhere.nc").write_bytes(b"payload")
+
+    with pytest.raises(CachedCallError, match="does not exist"):
+        cached(cache=cache)(produce)(resource, RUN_ID, workspace / "asked-for.nc")
+
+
+def test_a_hit_creates_missing_parent_directories(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """The destination's directory may not exist yet on the consuming run.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+    fetch = cached(cache=cache)(_fetch)
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
+    cache.promote(resource_key(resource), RUN_ID)
+
+    deep = workspace / "a" / "b" / "c" / "boundary.nc"
+    result = fetch(resource, "run-B", deep)
+
+    assert result == deep
+    assert deep.is_file()
+
+
+def test_a_set_delivered_over_a_file_is_refused(
+    cache: ArtifactCache,
+    resource: VersionedResource,
+    geometry: PartitioningParameterSet,
+    workspace: Path,
+) -> None:
+    """A shape mismatch at the destination is reported, not forced.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    geometry : PartitioningParameterSet
+        Process grid.
+    workspace : Path
+        Directory the client writes into.
+    """
+    partition = cached(cache=cache)(_partition)
+    partition(resource, geometry, RUN_ID, workspace / "ranks")
+    cache.promote(aggregate_key(resource, geometry), RUN_ID)
+
+    occupied = workspace / "occupied"
+    occupied.write_bytes(b"a file is in the way")
+
+    with pytest.raises(CachedCallError, match="needs a directory"):
+        partition(resource, geometry, "run-B", occupied)
+
+
+def test_a_file_delivered_over_a_directory_is_refused(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """The inverse mismatch is reported too.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+    fetch = cached(cache=cache)(_fetch)
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
+    cache.promote(resource_key(resource), RUN_ID)
+
+    occupied = workspace / "occupied"
+    occupied.mkdir()
+
+    with pytest.raises(CachedCallError, match="single file"):
+        fetch(resource, "run-B", occupied)
+
+
+def test_the_cached_copy_survives_editing_the_delivered_file(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """The point of the whole change: the caller cannot reach the cache.
+
+    A client that edits what it was handed must not damage the artifact every
+    other run reads under that key.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+    fetch = cached(cache=cache)(_fetch)
+    delivered = fetch(resource, RUN_ID, workspace / "boundary.nc")
+    key = resource_key(resource)
+    cache.promote(key, RUN_ID)
+
+    delivered.write_bytes(b"a client scribbled here")
+
+    assert cache.verify(key) is True
+    assert cache.verify(key, RUN_ID, prefer_local=True) is True
+
+
+def test_a_destination_that_is_the_cache_path_is_a_no_op(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """A caller that hands back the cache's own path must not corrupt it.
+
+    ``shutil.copy2`` raises on a self-copy, and any implementation that opened
+    the destination for writing first would truncate the artifact before
+    discovering it was the source.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+    fetch = cached(cache=cache)(_fetch)
+    fetch(resource, RUN_ID, workspace / "boundary.nc")
+    key = resource_key(resource)
+
+    cached_path = cache.locate(key, Tier.USER, RUN_ID).path
+    result = fetch(resource, RUN_ID, cached_path)
+
+    assert result == cached_path
+    assert cache.verify(key, RUN_ID, prefer_local=True) is True
+
+
+def test_a_producer_may_return_anything_and_it_is_ignored(
+    cache: ArtifactCache, resource: VersionedResource, workspace: Path
+) -> None:
+    """A producer with other callers keeps its own return type.
+
+    The decorator promises not to look at it. That promise is what makes it
+    safe to decorate a function that already exists and already returns
+    something useful to somebody else, without writing a wrapper.
+
+    On a hit the producer is not called at all, so any such value is
+    unobtainable rather than merely discarded — which is why the caller is
+    given the destination and never a producer's result.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    resource : VersionedResource
+        Declared input.
+    workspace : Path
+        Directory the client writes into.
+    """
+
+    def produce(resource: Resource, run_id: str, destination: Path) -> dict[str, int]:
+        """Write the artifact and return a summary its other callers want.
+
+        Parameters
+        ----------
+        resource : Resource
+            Declared input.
+        run_id : str
+            Run identifier.
+        destination : Path
+            Path to write to.
+
+        Returns
+        -------
+        dict of str to int
+            Ignored by the decorator.
+        """
+        destination.write_bytes(b"payload")
+        return {"bytes_written": 7}
+
+    target = workspace / "summarised.nc"
+    result = cached(cache=cache)(produce)(resource, RUN_ID, target)
+
+    assert result == target
+    assert produce(resource, RUN_ID, target) == {"bytes_written": 7}

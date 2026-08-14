@@ -18,15 +18,18 @@ exists.
 Examples
 --------
 >>> @cached(cache_factory=get_cache)
-... def fetch_boundary(resource: VersionedResource, run_id: str) -> Path:
-...     path = workspace / "boundary.nc"
-...     download(resource.location, path)
-...     return path
+... def fetch_boundary(
+...     resource: VersionedResource, run_id: str, destination: Path
+... ) -> Path:
+...     download(resource.location, destination)
+...     return destination
 
 The function is unchanged by the decoration and still callable directly in a
-test. What it returns changes, though: on a hit the caller receives the *cached*
-path rather than the path the function would have written to, which is the
-point — the work is skipped.
+test, and the caller always receives the path it asked for — never a path into
+the cache. On a miss the producer writes there; on a hit the cached artifact is
+copied there. A cache path handed to a caller is a cache path something will
+eventually write through, and one client editing an artifact in place corrupts
+it for every other run reading that key.
 
 Notes
 -----
@@ -103,7 +106,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
 
 from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
@@ -113,7 +116,6 @@ from cstar.orchestration.artifact_cache import (
     Location,
     OnConflict,
     SetManifest,
-    Tier,
 )
 from cstar.orchestration.cache_keys import (
     AGGREGATE_SUFFIX,
@@ -130,6 +132,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
 __all__ = [
+    "ArtifactProducer",
     "CachedCallError",
     "FileSet",
     "cache_fileset",
@@ -139,8 +142,64 @@ __all__ = [
     "fileset_key",
 ]
 
-F = TypeVar("F", bound="Callable[..., Path]")
-"""A producer: any callable returning the path it wrote its result to."""
+Params = ParamSpec("Params")
+"""The wrapped producer's own parameters, preserved through decoration."""
+
+
+class ArtifactProducer(Protocol[Params]):
+    """A function that writes one artifact to the path it is given.
+
+    The contract :func:`cached` wraps. Two halves of it are enforced in
+    different places, because Python's type system can express one and not the
+    other.
+
+    **Its return value is ignored.** A producer may return whatever suits its
+    other callers; the decorated function returns the destination regardless.
+    The type is ``object`` rather than ``Any`` so that the ignored value stays
+    inert: every type is assignable *to* ``object``, so any producer is
+    accepted, but nothing flows back *out* of it without an explicit narrowing
+    check. ``Any`` would accept the same producers while silently satisfying
+    any annotation the value reached and disabling checks on everything
+    derived from it.
+
+    Note what is being ignored. On a hit the producer is never called, so a
+    return value is not merely discarded but unobtainable — a producer whose
+    result carries information beyond the artifact on disk cannot be cached
+    correctly, because that information has nowhere to come from.
+
+    Whether the write succeeded is reported the way Python reports it — by
+    raising — which also carries *why*, as a status value cannot.
+
+    **Writes to its destination argument.** No type system can require a
+    parameter of a particular name, so this half is checked at call time:
+    :func:`cached` refuses a producer with no destination argument, and the
+    commit refuses one that left the destination empty. A producer that writes
+    somewhere else is therefore caught, just not statically.
+
+    Examples
+    --------
+    >>> def fetch_boundary(
+    ...     resource: VersionedResource, run_id: str, destination: Path
+    ... ) -> None:
+    ...     download(resource.location, destination)
+    """
+
+    def __call__(self, *args: Params.args, **kwargs: Params.kwargs) -> object:
+        """Write the artifact to the destination among the arguments.
+
+        Parameters
+        ----------
+        *args : Params.args
+            The producer's own positional arguments.
+        **kwargs : Params.kwargs
+            The producer's own keyword arguments.
+
+        Returns
+        -------
+        object
+            Ignored. Producers commonly return ``None``.
+        """
+        ...  # pragma: no cover - a structural protocol has no implementation
 
 
 class CachedCallError(Exception):
@@ -358,11 +417,11 @@ def cached(
     cache: ArtifactCache | None = None,
     cache_factory: Callable[[], ArtifactCache] | None = None,
     run_id_argument: str = "run_id",
+    destination_argument: str = "destination",
     context: Mapping[str, str] | None = None,
     promote: bool = False,
     on_conflict: OnConflict = OnConflict.SKIP,
-    localize: bool = True,
-) -> Callable[[F], F]:
+) -> Callable[[ArtifactProducer[Params]], Callable[Params, Path]]:
     """Wrap a file-producing function in the check / retrieve / cache flow.
 
     The wrapped function is called only on a miss. Its return value is taken to
@@ -379,6 +438,12 @@ def cached(
         available at import time.
     run_id_argument : str, optional
         Name of the wrapped function's parameter carrying the run identifier.
+    destination_argument : str, optional
+        Name of the wrapped function's parameter carrying the path it writes
+        to. The producer must accept one: on a miss it writes there and the
+        result is taken from it, and on a hit the cached artifact is copied
+        there. That symmetry is what lets the caller always receive the path
+        it asked for rather than a path into the cache.
     context : Mapping of str to str or None, optional
         Extra inputs folded into the key — a code revision, a solver version.
         Anything that changes the output and is omitted here will make two
@@ -393,19 +458,13 @@ def cached(
         How promotion resolves a shared name already holding different bytes.
         Defaults to :attr:`OnConflict.SKIP`, since a re-derivation differing
         only in a header timestamp should not fail a long run.
-    localize : bool, optional
-        Whether a shared hit is copied into the run's own workspace before its
-        path is returned. On by default: the caller is handed a path and
-        nothing stops it writing there, and a client that edits an artifact in
-        place would corrupt it for every other run on the allocation. Turn it
-        off only where the consumer is known to be read-only and the copy is
-        worth avoiding. Set artifacts are copied regardless, since expansion
-        already targets the user tier.
 
     Returns
     -------
     Callable
-        Decorator preserving the wrapped function's signature.
+        Decorator preserving the wrapped function's parameters while
+        correcting its return type: the producer returns nothing, the
+        decorated function returns the destination.
 
     Raises
     ------
@@ -427,11 +486,13 @@ def cached(
     if (cache is None) == (cache_factory is None):
         raise ValueError("pass exactly one of cache or cache_factory")
 
-    def decorate(function: F) -> F:
+    def decorate(
+        function: ArtifactProducer[Params],
+    ) -> Callable[Params, Path]:
         signature = inspect.signature(function)
 
         @functools.wraps(function)
-        def wrapper(*args: Any, **kwargs: Any) -> Path:
+        def wrapper(*args: Params.args, **kwargs: Params.kwargs) -> Path:
             active = cache if cache is not None else cache_factory()  # type: ignore[misc]
             bound = signature.bind(*args, **kwargs)
             bound.apply_defaults()
@@ -439,6 +500,7 @@ def cached(
             resource = _single_of_type(bound.arguments, Resource, function)
             companion = _companion_for(resource, bound.arguments, function)
             run_id = _run_id(bound.arguments, run_id_argument, function)
+            destination = _destination(bound.arguments, destination_argument, function)
             key = _key_for(resource, companion, context)
 
             found = (
@@ -447,63 +509,101 @@ def cached(
                 else active.resolve(key, run_id, record_use=True)
             )
             if found is not None:
-                return _localized(active, found, key, run_id, localize).path
+                _deliver(found, destination)
+                return destination
 
-            produced = Path(function(*args, **kwargs))
-            location = _write_through(active, produced, key, run_id, companion)
+            function(*args, **kwargs)
+            _write_through(active, destination, key, run_id, companion)
             if promote:
                 active.promote(key, run_id, on_conflict=on_conflict)
-            return location.path
+            return destination
 
-        return wrapper  # type: ignore[return-value]
+        return wrapper
 
     return decorate
 
 
-def _localized(
-    cache: ArtifactCache,
-    found: Location,
-    key: str,
-    run_id: str,
-    localize: bool,
-) -> Location:
-    """Return a hit, copied into the run's workspace when asked.
+def _deliver(found: Location, destination: Path) -> None:
+    """Copy a cached artifact to where the caller asked for it.
 
-    A shared artifact is shared: the caller receives a path, and nothing in
-    the type system stops it opening that path for writing. One client that
-    edits in place corrupts the artifact for every other run on the
-    allocation, and the damage is silent until a digest is checked. Copying is
-    minutes against the days the artifact cost to produce.
+    The cache's own path is never handed out. A caller given one has nothing
+    stopping it opening that path for writing, and a client that edits a
+    shared artifact in place corrupts it for every other run on the
+    allocation — silently, until someone checks a digest.
+
+    An existing destination is replaced. The caller named this path for this
+    artifact, and a partial file left by a killed run is exactly what should be
+    overwritten; refusing would turn re-running a step into an error rather
+    than the no-op it ought to be.
 
     Parameters
     ----------
-    cache : ArtifactCache
-        Cache holding the artifact.
     found : Location
-        The hit, in either tier.
-    key : str
-        Cache key naming the artifact.
-    run_id : str
-        Run identifier.
-    localize : bool
-        Whether to copy a shared file into the user tier.
+        The cached artifact, in either tier.
+    destination : Path
+        Where the caller asked for it.
+
+    Raises
+    ------
+    CachedCallError
+        If the destination cannot be replaced by an artifact of that shape.
+    """
+    if found.path == destination:
+        return
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if found.is_container:
+        if destination.exists() and not destination.is_dir():
+            raise CachedCallError(
+                f"{str(destination)!r} is a file, but {found.name!r} is a set "
+                "and needs a directory"
+            )
+        shutil.rmtree(destination, ignore_errors=True)
+        shutil.copytree(found.path, destination)
+        return
+
+    if destination.is_dir():
+        raise CachedCallError(
+            f"{str(destination)!r} is a directory, but {found.name!r} is a single file"
+        )
+    shutil.copy2(found.path, destination)
+
+
+def _destination(
+    arguments: Mapping[str, Any], name: str, function: Callable[..., Any]
+) -> Path:
+    """Return the path the wrapped function was told to write to.
+
+    Parameters
+    ----------
+    arguments : Mapping of str to Any
+        Bound arguments of the call.
+    name : str
+        Parameter name carrying the destination.
+    function : Callable
+        Wrapped function, named in errors.
 
     Returns
     -------
-    Location
-        Where the caller should read from.
-    """
-    if not localize or found.tier is not Tier.SHARED or found.is_container:
-        return found
+    Path
+        Where the artifact should end up.
 
-    # `resolve` prefers the shared tier, so a run that already localized this
-    # artifact is still handed the shared copy. Re-copying would be a pointless
-    # pass over the bytes and, since a commit does not overwrite by default,
-    # an error on the second call.
-    local = cache.locate(key, Tier.USER, run_id)
-    if local.exists:
-        return local
-    return cache.ingest(found.path, key, run_id)
+    Raises
+    ------
+    CachedCallError
+        If the parameter is absent or is not a path. Without it a hit has
+        nowhere to put the artifact, since the function that would have chosen
+        a path is precisely the one being skipped.
+    """
+    value = arguments.get(name)
+    if not isinstance(value, (str, Path)) or not str(value):
+        raise CachedCallError(
+            f"{function.__qualname__} must take a {name!r} argument naming the "
+            "path to write to; on a hit the function is not called, so there "
+            "is nothing else to say where the artifact belongs"
+        )
+    return Path(value)
 
 
 def _companion_for(
