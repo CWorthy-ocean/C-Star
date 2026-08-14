@@ -91,17 +91,20 @@ class DirectoryManager:
         Path
         """
         override_fn = env_item.default_factory
-        path = Path(env_item.default) / DirectoryManager._PKG_SUBDIR
+        path = Path(env_item.default)
 
         if os.getenv(env_item.name, ""):
             # check user-provided environment variables
             path = Path(env_item.value)
         elif override_fn and override_fn(env_item):
             # check functions that return alternative locations
-            path = Path(env_item.value) / DirectoryManager._PKG_SUBDIR
+            path = Path(env_item.value)
         elif os.getenv(env_item.indirect_var, ""):
             # check user provided XDG-.*-HOME environment variables
-            path = Path(env_item.value) / DirectoryManager._PKG_SUBDIR
+            path = Path(env_item.value)
+
+        if "cstar" not in str(path):
+            path = path / "cstar"
 
         return path.expanduser().resolve()
 

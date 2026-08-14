@@ -157,9 +157,7 @@ def indirect_variable_search(
         return None
 
     source = source.strip()
-    variables = [
-        x.strip() for x in get_env_item(source).value.split(separator) if x.strip()
-    ]
+    variables = [x.strip() for x in os.getenv(source, "").split(separator) if x.strip()]
     evaluations = ((x, os.getenv(x, "").strip()) for x in variables if x.strip())
     if cfg := next((d for d in evaluations if d[1]), None):
         log.debug(f"{purpose} configured in: {cfg[0]}={cfg[1]}")

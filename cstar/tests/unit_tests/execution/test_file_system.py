@@ -132,7 +132,7 @@ def test_live_step(tmp_path: Path) -> None:
     bp = tmp_path / "bp.yml"
     bp.touch()
 
-    data_home = tmp_path / "data"
+    data_home = tmp_path / "data/cstar"
     run_id = "fake-run-id"
 
     step_1 = Step(name="A", application="roms_marbl", blueprint=bp)

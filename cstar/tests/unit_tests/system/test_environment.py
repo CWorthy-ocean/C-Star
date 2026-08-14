@@ -1091,7 +1091,39 @@ def test_lmodenvsettings_variable_resolution(
         pytest.param(" a , b ", {"a": "lhs", "b": ""}, "lhs", id="interleaved ws"),
     ],
 )
-def test_indirect_variable_search(
+def test_indirect_variable_search_scratch(
+    source: str | None,
+    values: dict[str, str],
+    exp_value: str | None,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Verify the default factory is invoked."""
+    mock_source_var = "CSTAR_DATA_HOME"
+    monkeypatch.setenv(mock_source_var, source or "")
+    monkeypatch.setenv("CSTAR_SCRATCH_DIRS", "")
+
+    for k, v in values.items():
+        monkeypatch.setenv(k, v)
+
+    actual = indirect_variable_search(mock_source_var, "unit-testing")
+    assert actual == exp_value
+
+
+@pytest.mark.parametrize(
+    ("source", "values", "exp_value"),
+    [
+        pytest.param("", {}, None, id="handle empty value"),
+        pytest.param(",,,", {}, None, id="reject empty keys"),
+        pytest.param("  ,  ,  ,  ", {}, None, id="reject whitespace-only keys"),
+        pytest.param("  ,  ,a,  ", {"a": "lhs"}, "lhs", id="wheat amongst the chaff"),
+        pytest.param("a,b", {"a": "", "b": "rhs"}, "rhs", id="skip empty"),
+        pytest.param("a,b", {"a": "lhs", "b": "rhs"}, "lhs", id="FIFO"),
+        pytest.param("a,b", {"a": "lhs", "b": ""}, "lhs", id="decoupling"),
+        pytest.param(" a,b ", {"a": "lhs", "b": ""}, "lhs", id="ws wrapping"),
+        pytest.param(" a , b ", {"a": "lhs", "b": ""}, "lhs", id="interleaved ws"),
+    ],
+)
+def test_indirect_variable_search_projects(
     source: str | None,
     values: dict[str, str],
     exp_value: str | None,
@@ -1100,11 +1132,10 @@ def test_indirect_variable_search(
     """Verify the default factory is invoked."""
     mock_source_var = "CSTAR_SHARED_CACHE_HOME"
     monkeypatch.setenv(mock_source_var, source or "")
-    monkeypatch.setenv("CSTAR_SCRATCH_DIRS", "")
+    monkeypatch.setenv("CSTAR_PROJECT_DIRS", "")
 
     for k, v in values.items():
         monkeypatch.setenv(k, v)
 
-    with mock.patch("cstar.base.env.hpc_data_directory", mock.Mock()):
-        actual = indirect_variable_search(mock_source_var, "unit-testing")
-        assert actual == exp_value
+    actual = indirect_variable_search(mock_source_var, "unit-testing")
+    assert actual == exp_value
