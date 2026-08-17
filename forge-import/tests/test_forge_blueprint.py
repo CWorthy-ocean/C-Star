@@ -880,7 +880,7 @@ def test_schema_round_trip_identity(tmp_path):
 
 
 def test_content_hash_ignores_excluded_sections():
-    from cstar_forge.forge.forge_blueprint import _HASH_EXCLUDE, PieceRef
+    from cstar_forge.forge.forge_blueprint import _HASH_EXCLUDE, SpecRef
 
     cfg = _build()
     h = cfg.content_hash()
@@ -890,7 +890,7 @@ def test_content_hash_ignores_excluded_sections():
             "name": "totally-different-name",
             "description": "totally different",
             "composition": cfg.composition.model_copy(
-                update={"forcing": PieceRef(name="x", origin="custom")}
+                update={"forcing": SpecRef(name="x", origin="custom")}
             ),
             "provenance": cfg.provenance.model_copy(update={"notes": "edited"}),
         }
@@ -2117,7 +2117,7 @@ def test_overrides_take_precedence():
     assert cfg.model_settings["time_stepping"]["ndtfast"] == 30
 
 
-def test_composition_records_piece_provenance():
+def test_composition_records_spec_provenance():
     cfg = _build()
     assert cfg.composition.model.origin == "catalog"
     assert cfg.composition.model.name == "cson_roms-marbl_v0.1"
@@ -2793,7 +2793,7 @@ class TestForgeBlueprintWizard:
         # edit an output section in Advanced -> override recorded; selection unchanged
         w.editor._widgets[("ts_output", "wrt_temp")][0].value = True
         assert w.config.composition.overrides["ts_output"]["wrt_temp"] is True
-        # re-selecting the output piece clears output-section overrides (the handler
+        # re-selecting the output spec clears output-section overrides (the handler
         # doesn't key off which value it changed to, only that a selection happened)
         w._on_output_spec(None)
         assert "ts_output" not in w.config.composition.overrides
@@ -3435,12 +3435,12 @@ class TestResolverBuilderParity:
 
 
 # ---------------------------------------------------------------------------
-# "Save modified pieces to catalog" (wizard panel + DomainCatalog register_*)
+# "Save modified specs to catalog" (wizard panel + DomainCatalog register_*)
 # ---------------------------------------------------------------------------
-class TestSaveModifiedPiecesToCatalog:
-    """Each save handler: extract the piece from current state, write it to an
+class TestSaveModifiedSpecsToCatalog:
+    """Each save handler: extract the spec from current state, write it to an
     isolated catalog, side-effect-free round-trip verify via content_hash, and
-    only on a match repoint the dropdown / clear that piece's overrides-or-seed.
+    only on a match repoint the dropdown / clear that spec's overrides-or-seed.
     A mismatch must still write the file but leave everything else untouched.
     """
 
@@ -3462,7 +3462,7 @@ class TestSaveModifiedPiecesToCatalog:
 
         return ForgeBlueprintWizard(catalog=catalog)
 
-    def test_save_output_piece_marks_unmodified_and_clears_overrides(
+    def test_save_output_spec_marks_unmodified_and_clears_overrides(
         self, isolated_catalog
     ):
         wiz = self._wizard(isolated_catalog)
@@ -3479,7 +3479,7 @@ class TestSaveModifiedPiecesToCatalog:
         assert wiz._overrides == {}
         assert "✓" in wiz.save_output_status.value
 
-    def test_save_model_piece_marks_unmodified(self, isolated_catalog):
+    def test_save_model_spec_marks_unmodified(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
         wiz._overrides[("lateral_visc", "visc2")] = 999.0
         wiz._rebuild()
@@ -3492,7 +3492,7 @@ class TestSaveModifiedPiecesToCatalog:
         assert wiz.model_dd.value == "my-model"
         assert wiz.config.composition.model.modified is False
 
-    def test_save_model_piece_marks_unmodified_with_blank_roms_ref(
+    def test_save_model_spec_marks_unmodified_with_blank_roms_ref(
         self, isolated_catalog
     ):
         # A blank roms_ref means "clone the base pin" -- must not itself count
@@ -3505,7 +3505,7 @@ class TestSaveModifiedPiecesToCatalog:
 
         assert wiz.config.composition.model.modified is False
 
-    def test_save_model_piece_persists_use_pio_and_roms_ref(self, isolated_catalog):
+    def test_save_model_spec_persists_use_pio_and_roms_ref(self, isolated_catalog):
         # Name deliberately distinct from the bundled "pio-dev" ModelSpec
         # (cstar_forge/catalog/ModelSpec/pio-dev) -- register_model_from_settings
         # refuses to overwrite an existing entry, and isolated_catalog copies the
@@ -3557,7 +3557,7 @@ class TestSaveModifiedPiecesToCatalog:
             use_pio=False,
             roms_ref=wiz.roms_ref.value.strip() or None,
         )
-        assert wiz._verify_piece_roundtrip("model", "no-pio") is False
+        assert wiz._verify_spec_roundtrip("model", "no-pio") is False
 
     def test_verify_model_roundtrip_false_when_spec_loses_roms_ref(
         self, isolated_catalog
@@ -3578,12 +3578,12 @@ class TestSaveModifiedPiecesToCatalog:
             use_pio=wiz.use_pio_chk.value,
             roms_ref=None,
         )
-        assert wiz._verify_piece_roundtrip("model", "stale-ref") is False
+        assert wiz._verify_spec_roundtrip("model", "stale-ref") is False
 
     def test_model_modified_reflects_use_pio_and_roms_ref_toggles(
         self, isolated_catalog
     ):
-        # Toggling PIO/roms_ref must flag the Model piece as modified even
+        # Toggling PIO/roms_ref must flag the Model spec as modified even
         # without ever touching "Save as new spec" -- these live outside
         # model_settings, so composition.model.modified must not silently
         # stay False while resolving with a different code/use_pio than the
@@ -3606,7 +3606,7 @@ class TestSaveModifiedPiecesToCatalog:
         wiz.roms_ref.value = ""  # blank => clone the base pin, not a deviation
         assert wiz.config.composition.model.modified is False
 
-    def test_save_forcing_piece_marks_unmodified(self, isolated_catalog):
+    def test_save_forcing_spec_marks_unmodified(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
         wiz._forcing_editor.ic_bgc_clim.value = (
             not wiz._forcing_editor.ic_bgc_clim.value
@@ -3621,7 +3621,7 @@ class TestSaveModifiedPiecesToCatalog:
         assert wiz.forcing_dd.value == "my-forcing"
         assert wiz.config.composition.forcing.modified is False
 
-    def test_save_forcing_piece_embeds_and_reloads_cdr(self, isolated_catalog):
+    def test_save_forcing_spec_embeds_and_reloads_cdr(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
         fake_cdr = {"releases": [{"lon": 1.0, "lat": 2.0}]}
         wiz._cdr_forcing = fake_cdr
@@ -3640,7 +3640,7 @@ class TestSaveModifiedPiecesToCatalog:
         wiz2.forcing_dd.value = "my-cdr-forcing"
         assert wiz2._cdr_forcing == fake_cdr
 
-    def test_save_domain_piece_marks_unmodified_and_preserves_other_pieces(
+    def test_save_domain_spec_marks_unmodified_and_preserves_other_specs(
         self, isolated_catalog
     ):
         wiz = self._wizard(isolated_catalog)
@@ -3660,13 +3660,13 @@ class TestSaveModifiedPiecesToCatalog:
         assert "my-domain" in isolated_catalog.domain_names
         assert wiz.domain_dd.value == "my-domain"
         assert wiz.config.composition.domain.modified is False
-        # no-clobber: every OTHER piece's state is untouched by the domain save.
+        # no-clobber: every OTHER spec's state is untouched by the domain save.
         assert wiz._overrides == before_overrides
         assert wiz._forcing_seed == before_forcing_seed
         assert wiz.model_dd.value == before_model_dd
         assert wiz.output_dd.value == before_output_dd
 
-    def test_save_domain_piece_persists_v_sponge_when_touched(self, isolated_catalog):
+    def test_save_domain_spec_persists_v_sponge_when_touched(self, isolated_catalog):
         """v_sponge is a first-class domain property (Domain-derived
         properties): touching it and saving the domain must persist it into
         Domain.yaml, and a fresh wizard selecting that saved domain must
@@ -3690,7 +3690,7 @@ class TestSaveModifiedPiecesToCatalog:
         assert wiz2._v_sponge_touched is True
         assert wiz2.config.domain.v_sponge == 4242.0
 
-    def test_save_domain_piece_omits_v_sponge_when_untouched(self, isolated_catalog):
+    def test_save_domain_spec_omits_v_sponge_when_untouched(self, isolated_catalog):
         """An untouched v_sponge is deliberately omitted from a saved
         DomainSpec so it re-derives fresh from the grid on next load, instead
         of freezing a resolver default that was never a real user choice.
@@ -3711,7 +3711,7 @@ class TestSaveModifiedPiecesToCatalog:
         # at by fresh derivation, not a frozen saved number.
         assert wiz2.v_sponge.value == wiz.v_sponge.value
 
-    def test_save_domain_piece_persists_dt(self, isolated_catalog):
+    def test_save_domain_spec_persists_dt(self, isolated_catalog):
         """``dt`` is a first-class domain property (Domain-derived properties),
         alongside v_sponge -- but unlike v_sponge/open_boundaries it has no
         touched flag: the widget is always authoritative (default, CFL-computed,
@@ -3773,7 +3773,7 @@ class TestSaveModifiedPiecesToCatalog:
         wiz._on_save_output(None)
         assert "nothing to save" in wiz.save_output_status.value
 
-    def test_mismatch_keeps_piece_modified_and_state_untouched(
+    def test_mismatch_keeps_spec_modified_and_state_untouched(
         self, isolated_catalog, monkeypatch
     ):
         """A writer bug (or any post-write drift) must not silently claim

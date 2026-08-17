@@ -1,4 +1,4 @@
-# OutputSpec 'standard' — a selectable output-settings piece (current defaults).
+# OutputSpec 'standard' — a selectable output-settings spec (current defaults).
 # Deep-merged over the model's run-time defaults when selected; manual edits in
 # the wizard's Advanced settings still win on top. Covers the output-control
 # sections + the MARBL output write-lists.

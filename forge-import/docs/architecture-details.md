@@ -11,7 +11,7 @@ repo (`cstar-forge/DESIGN-RATIONALE.md`).
 Forge is split into two layers along a hard boundary, in preparation for moving
 the execution half into C-Star as an "application":
 
-- **Authoring** (stays in this repo): the catalog of reusable pieces (Model/Domain/
+- **Authoring** (stays in this repo): the catalog of reusable specs (Model/Domain/
   Forcing/Output specs), a **resolver** that assembles them into a single
   reviewable file, and a **wizard** UI.
 - **Execution** (`cstar_forge/forge/`, target: relocates into C-Star wholesale):
@@ -26,7 +26,7 @@ output artifact*. "Building a blueprint" means producing that downstream artifac
 not forge's own input.
 
 ```
- catalog pieces ─┐
+ catalog specs  ─┐
  (Model/Domain/  ├─► build_forge_blueprint() ─► ForgeBlueprint ─► process_forge_blueprint(cfg, host)
   Forcing/Output)│         (resolver)         (.yaml,               (engine → executor)
                  │                             portable)           │
@@ -107,7 +107,7 @@ open_boundaries, partitioning, nesting) · `forcing` (flat: initial_conditions,
 surface/boundary/tidal/river lists, cdr_forcing, resolved_datasets) · `datasets`
 (host-independent list of resolved dataset keys) · `model_settings` (flat dict: cppdefs +
 ~35 namelist sections) · `code` (roms/marbl repos + `templates_compile_time`/`_run_time`
-repo refs) · `composition` (which catalog pieces produced this + overrides layer) ·
+repo refs) · `composition` (which catalog specs produced this + overrides layer) ·
 `provenance` (generated_at, content_hash, notes). The `Blueprint` base also adds
 `state`/`schema_version` (its own versioning metadata, distinct from
 `forge_blueprint_version`) and injects a `$schema` key on serialization (stripped back

@@ -63,7 +63,7 @@ the wizard entirely and process either directly.
 
 ```{note}
 **Where your work is saved.** Blueprints and workplans you save from the
-wizard, and any pieces you register to the catalog, land in your own
+wizard, and any specs you register to the catalog, land in your own
 writable catalog layer at `~/cstar-forge-data/catalog` (`blueprints/`,
 `workplans/`, and spec directories) — never inside the installed package.
 The bundled examples (like `wio-toy` above) stay visible alongside your own

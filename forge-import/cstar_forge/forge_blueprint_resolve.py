@@ -1,6 +1,6 @@
 """
 Resolver: ``build_forge_blueprint`` — assemble a validated :class:`ForgeBlueprint`
-from the composable pieces (a ModelSpec + a domain selection + a run window).
+from the composable specs (a ModelSpec + a domain selection + a run window).
 
 This is the *collection / curation* half of the planned split (see
 ``docs/dev-notes/forge-blueprint-inventory.md``). It is intentionally **dependency-light**: it
@@ -47,12 +47,12 @@ try:  # pragma: no cover - exercised both ways
         InitialConditions,
         OpenBoundaries,
         Partitioning,
-        PieceRef,
         Provenance,
         ResolvedDataset,
         RiverForcingItem,
         RunWindow,
         SourceSpec,
+        SpecRef,
         SurfaceForcingItem,
         TemplateRepo,
         TidalForcingItem,
@@ -73,12 +73,12 @@ except ImportError:  # pragma: no cover
         InitialConditions,
         OpenBoundaries,
         Partitioning,
-        PieceRef,
         Provenance,
         ResolvedDataset,
         RiverForcingItem,
         RunWindow,
         SourceSpec,
+        SpecRef,
         SurfaceForcingItem,
         TemplateRepo,
         TidalForcingItem,
@@ -214,7 +214,7 @@ _PROCESSING_FILLED_SECTIONS = (
     "output_root_name",
 )
 
-# The "output settings" piece (OutputSpec): whole model_settings sections that are
+# The "output settings" spec (OutputSpec): whole model_settings sections that are
 # output controls, plus the MARBL output write-lists (a partial of marbl_bgc).
 OUTPUT_SECTIONS = (
     "ocean_vars",
@@ -255,7 +255,7 @@ PARTIAL_OUTPUT_SECTIONS: dict[str, tuple[str, ...]] = {
 
 def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
     """Pull the output-settings subset out of a full model_settings dict (used to
-    seed an OutputSpec catalog entry and to gather the piece for save).
+    seed an OutputSpec catalog entry and to gather the spec for save).
     """
     out: dict[str, Any] = {}
     for sec in OUTPUT_SECTIONS:
@@ -404,7 +404,7 @@ def build_forge_blueprint(
     roms_tools_version: str | None = None,
     notes: str | None = None,
 ) -> ForgeBlueprint:
-    """Resolve the composable pieces into a validated, host-independent ``ForgeBlueprint``.
+    """Resolve the composable specs into a validated, host-independent ``ForgeBlueprint``.
 
     Parameters mirror the logical inputs a UI would collect. ``dt`` may be supplied
     directly (fully lightweight); if ``None`` it is computed from the CFL criterion,
@@ -691,7 +691,7 @@ def build_forge_blueprint(
         extract["extract_period"] = float(period) if period is not None else 3600.0
         settings["extract_data"] = extract
 
-    # OutputSpec piece: deep-merge the output-settings selection over the model
+    # OutputSpec spec: deep-merge the output-settings selection over the model
     # defaults (before manual overrides, so a hand override still wins).
     _deep_merge(settings, output_settings)
 
@@ -861,14 +861,14 @@ def build_forge_blueprint(
         code=code,
         composition=composition
         or Composition(
-            model=PieceRef(name=model_name, origin="catalog"),
-            domain=PieceRef(name=grid_name, origin="custom"),
+            model=SpecRef(name=model_name, origin="catalog"),
+            domain=SpecRef(name=grid_name, origin="custom"),
             # forcing_inputs/output_settings are always supplied now (no more
             # "model_default" fallback); a caller not tracking finer-grained
             # catalog/custom provenance (e.g. direct/test callers -- the wizard
             # builds its own Composition via _composition()) gets "custom".
-            forcing=PieceRef(name=None, origin="custom"),
-            output=PieceRef(name=None, origin="custom"),
+            forcing=SpecRef(name=None, origin="custom"),
+            output=SpecRef(name=None, origin="custom"),
         ),
         provenance=Provenance(
             generated_at=generated_at,

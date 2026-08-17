@@ -893,36 +893,36 @@ class Code(_Section):
 
 
 # ===========================================================================
-# Composition (which catalog pieces produced this config) & provenance
+# Composition (which catalog specs produced this config) & provenance
 # ===========================================================================
-class PieceRef(_Section):
-    """Records where one composable piece (model / domain / forcing) came from.
+class SpecRef(_Section):
+    """Records where one composable spec (model / domain / forcing) came from.
 
     Supports the "pick from a catalog or build your own" workflow: a UI can show,
-    for each piece, whether it was a catalog selection (and which one), whether the
+    for each spec, whether it was a catalog selection (and which one), whether the
     user edited it, or whether it was authored from scratch.
     """
 
     name: str | None = None  # catalog entry name, or None if authored from scratch
     origin: str = "custom"  # "catalog" | "custom" | "model_default"
-    modified: bool = False  # True if a catalog piece was edited after selection
+    modified: bool = False  # True if a catalog spec was edited after selection
 
 
 class Composition(_Section):
-    """The composable pieces selected to build this config. The resolved data lives
+    """The composable specs selected to build this config. The resolved data lives
     in the sections above; this records provenance for review/UI.
 
     ``forcing`` corresponds to the ``sources`` section (initial conditions + surface/
     boundary/tidal/river + CDR).
     """
 
-    model: PieceRef = Field(default_factory=PieceRef)
-    domain: PieceRef = Field(default_factory=PieceRef)
-    forcing: PieceRef = Field(default_factory=PieceRef)
-    output: PieceRef = Field(
-        default_factory=PieceRef
-    )  # output-settings piece (OutputSpec)
-    # Manual edits applied on top of the composed pieces: a sparse
+    model: SpecRef = Field(default_factory=SpecRef)
+    domain: SpecRef = Field(default_factory=SpecRef)
+    forcing: SpecRef = Field(default_factory=SpecRef)
+    output: SpecRef = Field(
+        default_factory=SpecRef
+    )  # output-settings spec (OutputSpec)
+    # Manual edits applied on top of the composed specs: a sparse
     # {section: {field: value}} (or {section: scalar}) layer. ``model_settings`` already
     # reflects these; this records *which* values were overridden vs. composed/derived.
     overrides: dict[str, Any] = Field(default_factory=dict)

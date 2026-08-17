@@ -18,18 +18,18 @@ was constructed **at import time**. Users could point elsewhere only via the Pyt
 **The site-packages write problem was threefold:**
 1. Wizard default blueprint save path targeted `<packaged catalog>/blueprints/`.
 2. Workplans targeted `<packaged catalog>/workplans/`.
-3. "Save modified pieces to catalog" (`register_output`, `register_model_from_settings`,
+3. "Save modified specs to catalog" (`register_output`, `register_model_from_settings`,
    `register_domain_from_dict`, `register_forcing`) wrote directly into the packaged spec dirs —
    with no guard for non-local catalogs (GitHub-backed catalogs silently wrote under CWD).
 
-**Half-built pieces that informed the design:** a vestigial `config.paths.catalog` already
+**Half-built specs that informed the design:** a vestigial `config.paths.catalog` already
 defaulted to `~/cstar-forge-data/catalog` (PR #100) but had no consumers;
 `DomainCatalog(initialize_catalog_from=...)` already implemented catalog seeding; read-only
 **remote catalogs over fsspec** (GitHub/http, `GITHUB_TOKEN`) already worked.
 
 **Identity & relationships (still true today):** catalog entries have **no id, version, or hash**
 — the directory name is the entire identity. Cross-references are bare name strings and the
-blueprint's `composition` block (`PieceRef {name, origin, modified}` + sparse `overrides`),
+blueprint's `composition` block (`SpecRef {name, origin, modified}` + sparse `overrides`),
 provenance-only and excluded from `content_hash`. Blueprint→(model, grid) attribution in
 `roms_marbl_blueprint_df` is recovered by **filename regex convention**. No index file.
 
@@ -113,7 +113,7 @@ there is no re-sync/merge problem on upgrade.
    creation-time UUID (or `name@<short-hash>`) plus the human name. IDs are minted once and never
    recomputed (immune to the content-hash churn in §2). Content hashes remain integrity/dedup
    fingerprints once canonicalized; the join key is the ID.
-2. **Typed references.** Extend `PieceRef` to carry the source entry's `id` (and the content hash
+2. **Typed references.** Extend `SpecRef` to carry the source entry's `id` (and the content hash
    of what was snapshotted) alongside `name/origin/modified`. Snapshot-don't-reference is
    untouched — the ref is provenance metadata the indexer turns into graph edges. Same for
    `Domain.yaml: model_name` → `model_id`.
@@ -158,8 +158,8 @@ What shipped, relative to the plan above:
 3. **Lazy everything**: `default_catalog`, `catalog.blueprint`, and `config.machine_config` are
    PEP 562 lazy — `import cstar_forge` no longer scans any catalog. Machine config now reads
    through the stack, so a user `Machines/<tag>.yaml` overrides the bundled one (top-first).
-4. **Wizard**: piece dropdowns badge lower-layer entries (`wio-toy (bundled)`) via homogeneous
-   `(label, value)` option tuples (`_dd_options`/`_dd_values`); blueprint/workplan saves and piece
+4. **Wizard**: spec dropdowns badge lower-layer entries (`wio-toy (bundled)`) via homogeneous
+   `(label, value)` option tuples (`_dd_options`/`_dd_values`); blueprint/workplan saves and spec
    registrations land in the user layer (dirs created on demand); collision errors surface as
    plain one-line messages naming the owning layer; the catalog bar accepts a pathsep-separated
    stack and reports per-layer counts; blank = the default stack.

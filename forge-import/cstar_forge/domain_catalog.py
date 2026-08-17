@@ -902,7 +902,7 @@ class DomainCatalog:
             domain_data["grid_kwargs_child"] = builder.grid_kwargs_child
         # v_sponge: best-effort -- this executor-driven path predates the
         # wizard's touched/derived distinction (see forge_blueprint_wizard's
-        # _domain_piece_data, the authoritative save path), so it always
+        # _domain_spec_data, the authoritative save path), so it always
         # records whatever the resolver computed rather than tracking whether
         # it was a user override.
         _v_sponge = (

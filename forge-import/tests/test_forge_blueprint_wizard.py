@@ -285,27 +285,27 @@ def test_wizard_smoke_assembles_widget():
     assert grid_i < obc_i < nest_i
 
 
-def test_pieces_section_has_forcing_and_output_dropdowns():
-    """Item 5: Forcing/Output selectors live in the first 'Pieces' box."""
+def test_specs_section_has_forcing_and_output_dropdowns():
+    """Item 5: Forcing/Output selectors live in the first 'Specs' box."""
     wiz = ForgeBlueprintWizard()
-    pieces_box = _find_section(wiz.widget, "<b>Pieces</b>")
-    assert pieces_box is not None
-    assert wiz.forcing_dd in pieces_box.children
-    assert wiz.output_dd in pieces_box.children
+    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
+    assert specs_box is not None
+    assert wiz.forcing_dd in specs_box.children
+    assert wiz.output_dd in specs_box.children
 
 
 def test_roms_ref_prefilled_and_placed_next_to_model_dropdown():
     """ucla-roms ref is prefilled from the selected model's pinned default (stays
-    editable) and lives right next to the Model dropdown in the Pieces section.
+    editable) and lives right next to the Model dropdown in the Specs section.
     """
     wiz = ForgeBlueprintWizard()
     assert wiz.roms_ref.value == wiz._model_default_roms_ref()
     assert wiz.roms_ref.value  # this model.yaml pins a concrete commit
 
-    pieces_box = _find_section(wiz.widget, "<b>Pieces</b>")
-    assert pieces_box is not None
+    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
+    assert specs_box is not None
     model_row = next(
-        c for c in pieces_box.children if wiz.model_dd in getattr(c, "children", [])
+        c for c in specs_box.children if wiz.model_dd in getattr(c, "children", [])
     )
     assert wiz.roms_ref in model_row.children  # same row as the Model dropdown
 
@@ -423,15 +423,15 @@ def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
 
 
 def test_bgc_dd_default_and_placement():
-    """BGC mode defaults to 'marbl' and lives in the same Pieces row as Model."""
+    """BGC mode defaults to 'marbl' and lives in the same Specs row as Model."""
     wiz = ForgeBlueprintWizard()
     assert wiz.bgc_dd.value == "marbl"
     assert set(wiz.bgc_dd.options) == {"marbl", "none"}
 
-    pieces_box = _find_section(wiz.widget, "<b>Pieces</b>")
-    assert pieces_box is not None
+    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
+    assert specs_box is not None
     model_row = next(
-        c for c in pieces_box.children if wiz.model_dd in getattr(c, "children", [])
+        c for c in specs_box.children if wiz.model_dd in getattr(c, "children", [])
     )
     assert wiz.bgc_dd in model_row.children
 
@@ -697,8 +697,8 @@ def test_forcing_modified_reflects_deviation_from_catalog_pick():
 
 def test_model_and_output_modified_from_accordion_overrides():
     """Model/output share the accordion overrides layer; modified is derived per-
-    piece by whether a deviating override key belongs to OUTPUT_SECTIONS/
-    PARTIAL_OUTPUT_SECTIONS (audit follow-up: these two pieces never set `modified`
+    spec by whether a deviating override key belongs to OUTPUT_SECTIONS/
+    PARTIAL_OUTPUT_SECTIONS (audit follow-up: these two specs never set `modified`
     at all before this fix).
     """
     wiz = ForgeBlueprintWizard()
@@ -725,7 +725,7 @@ def test_model_and_output_modified_from_accordion_overrides():
 def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
     """A saved deviation on model/output/domain/forcing must reload with the same
     `modified` flags (composition is meant to reliably answer "did the user touch
-    this catalog piece" even after a save/load cycle).
+    this catalog spec" even after a save/load cycle).
     """
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
@@ -754,7 +754,7 @@ def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
 def test_composition_modified_all_false_on_pristine_save_and_load_round_trip(
     tmp_path,
 ):
-    """A file saved with no edits must reload with every piece unmodified -- the
+    """A file saved with no edits must reload with every spec unmodified -- the
     forcing comparison in particular round-trips through `_sources_to_inputs` /
     `build_forge_blueprint` before being re-gathered, so a lossy resolve/reconstruct
     cycle (e.g. an omitted-vs-null field) could otherwise report a false positive

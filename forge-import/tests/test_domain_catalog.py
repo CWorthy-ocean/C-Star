@@ -83,7 +83,7 @@ def test_parse_github_catalog_url_invalid():
 
 # ---------------------------------------------------------------------------
 # register_output / register_forcing / register_domain_from_dict /
-# register_model_from_settings -- the "save modified pieces to catalog" writers
+# register_model_from_settings -- the "save modified specs to catalog" writers
 # ---------------------------------------------------------------------------
 @pytest.fixture
 def isolated_catalog(tmp_path):

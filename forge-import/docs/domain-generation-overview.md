@@ -1,6 +1,6 @@
 # Domain generation overview
 
-C-Star Forge turns a set of reusable catalog pieces (plus optional wizard input) into
+C-Star Forge turns a set of reusable catalog specs (plus optional wizard input) into
 a `ForgeBlueprint`, then processes that blueprint into ROMS-MARBL input files, rendered
 ROMS code (`cppdefs.opt`, `namelist.nml`), and a downstream `roms_marbl` blueprint that
 C-Star builds and runs. See `docs/architecture-details.md`
@@ -56,7 +56,7 @@ compilation and execution happen separately, when C-Star runs the emitted
 blueprint.
 
 0. **Resolve** (`build_forge_blueprint()`, `cstar_forge/forge_blueprint_resolve.py`)
-   - Assemble a `ForgeBlueprint` from the catalog pieces (`ModelSpec`, `DomainSpec`,
+   - Assemble a `ForgeBlueprint` from the catalog specs (`ModelSpec`, `DomainSpec`,
      `ForcingSpec`, `OutputSpec`) plus any wizard-supplied domain/forcing/run overrides
    - This step, and everything before it, is dependency-light: no ROMS/MARBL build and
      no roms-tools needed (`cstar-ocean` is a hard dependency — `ForgeBlueprint`

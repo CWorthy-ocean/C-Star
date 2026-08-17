@@ -37,7 +37,7 @@
 # below only where the remaining fields in that same section (cppdefs' sponge_tune/
 # nhy_forcing/nox_forcing; param's nt_passive/ntrc_bio; tides' bry_tides/pot_tides/
 # ana_tides) are real, still-relevant model defaults. `pipe_frc` stays here in full:
-# there is no pipe forcing item or generation path, so it has no other piece to
+# there is no pipe forcing item or generation path, so it has no other spec to
 # live in.
 
 bgc_mode: marbl  # marbl|none -- prepopulates the wizard; resolver derives cppdefs.marbl from it
