@@ -52,7 +52,7 @@ def wizard(
 
     Extra arguments are passed through to voila.
     """
-    notebook = files("cstar_forge") / "forge-blueprint-wizard-app.ipynb"
+    notebook = files("cstar_forge.ui") / "_voila_app.ipynb"
     argv = [
         "voila",
         str(notebook),

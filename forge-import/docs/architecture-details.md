@@ -43,8 +43,7 @@ cstar-forge/
 │   ├── forge_blueprint_resolve.py  # resolver: build_forge_blueprint(...)
 │   ├── forge_blueprint_wizard.py   # ForgeBlueprintWizard (ipywidgets UI) +
 │   │                               # ForgeBlueprintWizardApp (adds catalog-location bar)
-│   ├── forge-blueprint-wizard.ipynb     # wizard notebook (run in Jupyter)
-│   ├── forge-blueprint-wizard-app.ipynb # wizard app notebook (served by Voilà)
+│   ├── forge-blueprint-wizard.ipynb     # user-facing wizard notebook (run in Jupyter)
 │   ├── models.py               # Spec classes (ModelSpec, etc.)
 │   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors;
 │   │                           # LayeredCatalog stacks a writable user layer
@@ -54,6 +53,11 @@ cstar-forge/
 │   ├── config.py               # Path management and system detection
 │   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yaml
 │   ├── cli.py                  # 'cstar forge run'/'cstar forge wizard' typer sub-app (cstar.cli entry point)
+│   ├── ui/                     # Wizard presentation layer (Voilà app front-end)
+│   │   ├── _voila_app.ipynb    # Voilà app notebook — internal; served via
+│   │   │                       # run-wizard-app.sh / 'cstar forge wizard'
+│   │   ├── branding.py         # [C]Worthy header bar, favicon, page title
+│   │   └── assets/cworthy-logo.png  # bundled logo (embedded as a data URI)
 │   ├── forge/                  # The forge application (execution engine —
 │   │   │                       # relocates into C-Star as one unit)
 │   │   ├── app.py                  # ForgeRunner/ForgeApplication (C-Star application)

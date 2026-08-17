@@ -40,7 +40,7 @@ class TestWizard:
         assert result.exit_code == 0
         argv = mock_exec.call_args.args[0]
         assert argv[0] == "voila"
-        assert argv[1].endswith("forge-blueprint-wizard-app.ipynb")
+        assert argv[1].endswith("ui/_voila_app.ipynb")
         assert "--port=8866" in argv
 
     def test_port_option_and_extra_args_forwarded(self):
