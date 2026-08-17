@@ -11,9 +11,6 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
-
-import yaml
 
 from cstar_forge.domain_catalog import user_catalog_root
 
@@ -63,27 +60,6 @@ class DataPaths:
     blueprints: Path
     models_yaml: Path
     builds_yaml: Path
-    machines_yaml: Path
-
-
-@dataclass(frozen=True)
-class MachineConfig:
-    """
-    Machine-specific configuration loaded from machines.yaml.
-
-    Attributes
-    ----------
-    account : str, optional
-        Account/project name for job submission.
-    pes_per_node : int, optional
-        Processing elements (cores) per node.
-    queues : dict, optional
-        Dictionary of queue names, with 'default' and optionally 'premium' keys.
-    """
-
-    account: str | None = None
-    pes_per_node: int | None = None
-    queues: dict[str, str] | None = None
 
 
 # --------------------------------------------------------
@@ -230,7 +206,6 @@ def get_data_paths(create: bool = False) -> DataPaths:
     blueprints_dir = catalog / "blueprints"
     models_yaml = here / "models.yaml"
     builds_yaml = here / "builds.yaml"
-    machines_yaml = here / "machines.yaml"
 
     if create:
         for p in (source_data, input_data, scratch, catalog, blueprints_dir):
@@ -245,7 +220,6 @@ def get_data_paths(create: bool = False) -> DataPaths:
         blueprints=blueprints_dir,
         models_yaml=models_yaml,
         builds_yaml=builds_yaml,
-        machines_yaml=machines_yaml,
     )
 
 
@@ -278,54 +252,6 @@ def with_catalog(paths: DataPaths, catalog: Path) -> DataPaths:
         catalog=catalog,
         blueprints=catalog / "blueprints",
     )
-
-
-# --------------------------------------------------------
-# Machine configuration loader
-# --------------------------------------------------------
-
-
-def load_machine_config(system_tag: str, machines_yaml_path: Path) -> MachineConfig:
-    """
-    Load machine-specific configuration from machines.yaml.
-
-    Parameters
-    ----------
-    system_tag : str
-        System tag (e.g., "NERSC_perlmutter", "RCAC_anvil").
-    machines_yaml_path : Path
-        Path to the machines.yaml file.
-
-    Returns
-    -------
-    MachineConfig
-        Machine configuration object. Returns empty config if machine not found
-        or file doesn't exist.
-    """
-    if not machines_yaml_path.exists():
-        return MachineConfig()
-
-    try:
-        with machines_yaml_path.open("r") as f:
-            machines_data = yaml.safe_load(f) or {}
-
-        machine_data = machines_data.get(system_tag, {})
-        if not isinstance(machine_data, dict):
-            machine_data = {}
-
-        return MachineConfig(
-            account=machine_data.get("account"),
-            pes_per_node=machine_data.get("pes_per_node"),
-            queues=machine_data.get("queues"),
-        )
-    except (OSError, yaml.YAMLError) as exc:
-        logger.warning(
-            "Failed to load machine config for %r from %s: %s",
-            system_tag,
-            machines_yaml_path,
-            exc,
-        )
-        return MachineConfig()
 
 
 # =========================================================
@@ -531,63 +457,11 @@ def main(argv: list[str] | None = None) -> int:
     return 1
 
 
-def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
-    """Load machine config through the layered default catalog.
-
-    A user ``Machines/<system_tag>.yaml`` (the writable top layer) overrides the
-    bundled catalog's entry for the same tag.
-    """
-    from cstar_forge.domain_catalog import default_catalog
-
-    try:
-        data = default_catalog.machine_data(system_tag)
-    except (KeyError, OSError, yaml.YAMLError) as exc:
-        # Machine not in the catalog, or its YAML is missing/unreadable -- fall
-        # back to an empty config rather than failing import-time module setup.
-        logger.warning(
-            "Failed to load machine config for %r from catalog: %s", system_tag, exc
-        )
-        return MachineConfig()
-
-    return MachineConfig(
-        account=data.get("account"),
-        pes_per_node=data.get("pes_per_node"),
-        queues=data.get("queues"),
-    )
-
-
 # Initialize canonical instance
 paths = get_data_paths()
 system = _detect_system()
 system_id = system  # Alias for compatibility
 cluster_type = _default_cluster_type(system)
-
-# machine_config is lazy (module __getattr__ below): computing it scans the
-# default catalog, which importing cstar_forge.config must not do eagerly.
-_machine_config_cache: MachineConfig | None = None
-
-
-def _get_machine_config() -> MachineConfig:
-    """Return the cached machine config, computing it on first access.
-
-    Internal callers in this module must use this function rather than the
-    bare ``machine_config`` name: module ``__getattr__`` (PEP 562) only
-    intercepts attribute access from *outside* the module (``config.machine_config``,
-    ``from cstar_forge.config import machine_config``); a same-module global
-    reference resolves via ``LOAD_GLOBAL`` against this module's ``__dict__``
-    and would bypass it, raising ``NameError`` instead.
-    """
-    global _machine_config_cache
-    if _machine_config_cache is None:
-        _machine_config_cache = _load_machine_config_from_catalog(system)
-    return _machine_config_cache
-
-
-def __getattr__(name: str) -> Any:
-    """Lazily compute and cache ``machine_config`` on first external access (PEP 562)."""
-    if name == "machine_config":
-        return _get_machine_config()
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _hpc_scratch_root(system_tag: str, env: dict, home: Path) -> Path | None:
@@ -688,7 +562,6 @@ def resolve_host(working_dir):
         working_dir=relocate_working_dir(working_dir),
         source_data_cache=paths.source_data,
         system=system,
-        machine_config=_get_machine_config(),
     )
 
 

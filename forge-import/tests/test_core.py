@@ -91,9 +91,7 @@ def _make_builder(args, **overrides):
         output_settings=merged.get("output_settings", _OUTPUT_SETTINGS),
     )
     tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-"))
-    host = HostPaths(
-        working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-    )
+    host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
     return ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
 
@@ -446,9 +444,7 @@ class TestForgeExecutorModelPostInit:
             }
         )
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-srtm15-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         staged = tmp / "SRTM15" / "SRTM15_V2.7.nc"
         # Mock the staging download: prepare_all() is a no-op, path_for_source returns the path.
         with patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd:
@@ -490,9 +486,7 @@ class TestForgeExecutorModelPostInit:
         )
         assert cfg.domain.topography_path == "/custom/my_topo.nc"
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-topopath-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         # Staging must NOT be invoked when an explicit path is given.
         with patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd:
             builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
@@ -601,9 +595,7 @@ class TestForgeExecutorModelPostInitGridFile:
         cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
 
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
         mock_grid.assert_called_once_with(
@@ -621,9 +613,7 @@ class TestForgeExecutorModelPostInitGridFile:
         cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
 
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-missing-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         with pytest.raises(FileNotFoundError, match="grid"):
             ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
@@ -637,9 +627,7 @@ class TestForgeExecutorModelPostInitGridFile:
         cfg = self._cfg_with_grid_file(minimal_cstar_spec_builder_args, tmp_path, gf)
 
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-mismatch-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         with pytest.warns(UserWarning, match="grid"):
             ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
@@ -666,9 +654,7 @@ class TestForgeExecutorModelPostInitGridFile:
         )
 
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-gridfile-nesting-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         with pytest.raises(ValueError, match="nesting"):
             ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
@@ -1084,9 +1070,7 @@ class TestForgeExecutorBuildAndRun:
         assert cfg.model_settings["tides"]["ntides"] == 15
 
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-clobber-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
         # Before the fix, this pre-generation snapshot is exactly what configure_build's
@@ -1158,9 +1142,7 @@ class TestForgeExecutorBuildAndRun:
             **build_over,
         )
         tmp = Path(tempfile.mkdtemp(prefix="forge-test-core-cdr-"))
-        host = HostPaths(
-            working_dir=tmp, source_data_cache=tmp, system="test", machine_config=None
-        )
+        host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         return cfg, host
 
     def _run_configure_build(self, cfg, host):
@@ -1440,7 +1422,6 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
             working_dir=run_dir,
             source_data_cache=builder.host.source_data_cache,
             system="test",
-            machine_config=None,
         )
 
         assert builder.roms_blueprint_working_dir == Path(
@@ -1459,7 +1440,6 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
             working_dir=run_dir,
             source_data_cache=builder.host.source_data_cache,
             system="test",
-            machine_config=None,
         )
 
         assert builder.roms_blueprint_working_dir == Path("/custom/spot/cstar-roms-run")
@@ -2154,7 +2134,6 @@ class TestGoldenNamelist:
             working_dir=run_dir,
             source_data_cache=run_dir,
             system="test",
-            machine_config=None,
         )
         builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         builder.src_data = self._mock_source_data(tmp_path)
@@ -2326,7 +2305,6 @@ class TestForgeRunnerEndToEnd:
             working_dir=run_dir,
             source_data_cache=run_dir,
             system="test",
-            machine_config=None,
         )
 
         def fake_process(spec, **_kwargs):
@@ -2680,7 +2658,6 @@ class TestOnlyInputsReuseIsIdempotent:
             working_dir=run_dir,
             source_data_cache=run_dir,
             system="test",
-            machine_config=None,
         )
 
         namelist_1, blueprint_1 = self._run_one_pass(cfg, host, mock_grid, tmp_path)

@@ -3,10 +3,8 @@ Tests for the config.py module.
 
 Tests cover:
 - DataPaths dataclass
-- MachineConfig dataclass
 - System detection functions
 - Path resolution and layout functions
-- Machine configuration loading
 - CLI functionality
 """
 
@@ -17,18 +15,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import yaml
 
 import cstar_forge.config as config_module
 from cstar_forge.config import (
     SYSTEM_LAYOUT_REGISTRY,
     DataPaths,
-    MachineConfig,
     _default_cluster_type,
     _detect_system,
     _get_hostname,
     get_data_paths,
-    load_machine_config,
     main,
     register_system,
     with_catalog,
@@ -51,7 +46,6 @@ class TestDataPaths:
             blueprints=cat / "blueprints",
             models_yaml=tmp_path / "models.yaml",
             builds_yaml=tmp_path / "builds.yaml",
-            machines_yaml=tmp_path / "machines.yaml",
         )
 
         assert paths.here == tmp_path
@@ -62,7 +56,6 @@ class TestDataPaths:
         assert paths.blueprints == cat / "blueprints"
         assert paths.models_yaml == tmp_path / "models.yaml"
         assert paths.builds_yaml == tmp_path / "builds.yaml"
-        assert paths.machines_yaml == tmp_path / "machines.yaml"
 
     def test_datapaths_frozen(self, tmp_path):
         """Test that DataPaths is frozen (immutable)."""
@@ -76,7 +69,6 @@ class TestDataPaths:
             blueprints=cat / "blueprints",
             models_yaml=tmp_path / "models.yaml",
             builds_yaml=tmp_path / "builds.yaml",
-            machines_yaml=tmp_path / "machines.yaml",
         )
 
         with pytest.raises(FrozenInstanceError):
@@ -94,7 +86,6 @@ class TestDataPaths:
             blueprints=cat / "blueprints",
             models_yaml=tmp_path / "models.yaml",
             builds_yaml=tmp_path / "builds.yaml",
-            machines_yaml=tmp_path / "machines.yaml",
         )
         other = tmp_path / "other_catalog"
         moved = with_catalog(paths, other)
@@ -137,28 +128,6 @@ class TestUserCatalogRoot:
         monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
         result = user_catalog_root()
         assert not result.exists()
-
-
-class TestMachineConfig:
-    """Tests for MachineConfig dataclass."""
-
-    def test_machineconfig_creation_minimal(self):
-        """Test creating MachineConfig with no fields."""
-        config = MachineConfig()
-        assert config.account is None
-        assert config.pes_per_node is None
-        assert config.queues is None
-
-    def test_machineconfig_creation_with_fields(self):
-        """Test creating MachineConfig with all fields."""
-        config = MachineConfig(
-            account="test_account",
-            pes_per_node=64,
-            queues={"default": "normal", "premium": "high"},
-        )
-        assert config.account == "test_account"
-        assert config.pes_per_node == 64
-        assert config.queues == {"default": "normal", "premium": "high"}
 
 
 class TestSystemDetection:
@@ -532,64 +501,6 @@ class TestGetDataPaths:
         assert paths.blueprints.exists()
 
 
-class TestLoadMachineConfig:
-    """Tests for load_machine_config function."""
-
-    def test_load_machine_config_nonexistent_file(self, tmp_path):
-        """Test loading machine config when file doesn't exist."""
-        machines_yaml = tmp_path / "machines.yaml"
-        config = load_machine_config("test_system", machines_yaml)
-
-        assert isinstance(config, MachineConfig)
-        assert config.account is None
-        assert config.pes_per_node is None
-        assert config.queues is None
-
-    def test_load_machine_config_existing_machine(self, tmp_path):
-        """Test loading machine config for existing machine."""
-        machines_yaml = tmp_path / "machines.yaml"
-        machines_data = {
-            "NERSC_perlmutter": {
-                "account": "test_account",
-                "pes_per_node": 128,
-                "queues": {"default": "normal", "premium": "premium"},
-            }
-        }
-
-        with machines_yaml.open("w") as f:
-            yaml.safe_dump(machines_data, f)
-
-        config = load_machine_config("NERSC_perlmutter", machines_yaml)
-
-        assert config.account == "test_account"
-        assert config.pes_per_node == 128
-        assert config.queues == {"default": "normal", "premium": "premium"}
-
-    def test_load_machine_config_nonexistent_machine(self, tmp_path):
-        """Test loading machine config for machine not in file."""
-        machines_yaml = tmp_path / "machines.yaml"
-        machines_data = {"NERSC_perlmutter": {"account": "test_account"}}
-
-        with machines_yaml.open("w") as f:
-            yaml.safe_dump(machines_data, f)
-
-        config = load_machine_config("unknown_machine", machines_yaml)
-
-        assert isinstance(config, MachineConfig)
-        assert config.account is None
-
-    def test_load_machine_config_invalid_yaml(self, tmp_path):
-        """Test loading machine config with invalid YAML."""
-        machines_yaml = tmp_path / "machines.yaml"
-        machines_yaml.write_text("invalid: yaml: content: [")
-
-        config = load_machine_config("test_system", machines_yaml)
-
-        # Should return empty config on error
-        assert isinstance(config, MachineConfig)
-        assert config.account is None
-
-
 class TestCLI:
     """Tests for CLI functionality."""
 
@@ -605,7 +516,6 @@ class TestCLI:
             blueprints=Path("/test/catalog/blueprints"),
             models_yaml=Path("/test/models.yaml"),
             builds_yaml=Path("/test/builds.yaml"),
-            machines_yaml=Path("/test/machines.yaml"),
         )
 
         # Patch everything in one context manager
@@ -634,7 +544,6 @@ class TestCLI:
             blueprints=Path("/test/catalog/blueprints"),
             models_yaml=Path("/test/models.yaml"),
             builds_yaml=Path("/test/builds.yaml"),
-            machines_yaml=Path("/test/machines.yaml"),
         )
 
         # Patch everything in one context manager
@@ -665,7 +574,6 @@ class TestCLI:
             blueprints=Path("/test/catalog/blueprints"),
             models_yaml=Path("/test/models.yaml"),
             builds_yaml=Path("/test/builds.yaml"),
-            machines_yaml=Path("/test/machines.yaml"),
         )
 
         with (

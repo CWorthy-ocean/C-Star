@@ -3164,7 +3164,6 @@ class TestForgeBlueprintEngine:
             working_dir=tmp_path / "wd",
             source_data_cache=tmp_path / "cache",
             system="test",
-            machine_config=None,
         )
         ex = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         assert ex.resolved_datasets["GLORYS"]["dataset_key"] == "GLORYS_REGIONAL"
@@ -3414,7 +3413,6 @@ class TestResolverBuilderParity:
             working_dir=tmp_path / "wd",
             source_data_cache=tmp_path / "cache",
             system="test",
-            machine_config=None,
         )
         ex = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         b_rt = ex._settings_run_time

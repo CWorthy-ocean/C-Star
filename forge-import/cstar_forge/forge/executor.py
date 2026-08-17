@@ -9,9 +9,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
-import os
 import shutil
-import sys
 import warnings
 from contextlib import contextmanager
 from datetime import datetime
@@ -22,23 +20,9 @@ import cstar.applications.roms_marbl.models as cstar_models
 import roms_tools as rt
 import xarray as xr
 import yaml
-from cstar.applications.core import RunnerRequest
-from cstar.applications.roms_marbl.app import RomsMarblRunner
-from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
-from cstar.base.env import (
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_IN_ACTIVE_ALLOCATION,
-    ENV_CSTAR_NPROCS_POST,
-)
-from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.orchestration.models import Resource
 from cstar.orchestration.serialization import deserialize
-from cstar.orchestration.utils import (
-    ENV_CSTAR_SLURM_ACCOUNT,
-    ENV_CSTAR_SLURM_MAX_WALLTIME,
-    ENV_CSTAR_SLURM_QUEUE,
-)
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -1027,10 +1011,6 @@ class ForgeExecutor(BaseModel):
 
         # Return as DatasetsDict to support both dict access and method call
         return DatasetsDict(self._datasets)
-
-    def _get_machine_config(self):
-        """Return the injected host's machine config (account / queues / pes_per_node)."""
-        return self._require_host().machine_config
 
     def _cstar_code_repository(self) -> cstar_models.ROMSCompositeCodeRepository:
         """Build the blueprint's cstar ``ROMSCompositeCodeRepository`` from the resolved
@@ -2025,95 +2005,3 @@ class ForgeExecutor(BaseModel):
             if self._inputs_generated:
                 self.roms_marbl_blueprint = self._validated_roms_marbl_blueprint()
             self.persist()
-
-    def prep_cstar_environment(
-        self,
-        account_key: str | None = None,
-        queue_name: str | None = None,
-        walltime: str | None = None,
-        clobber: bool = True,
-        on_compute_node: bool = False,
-        n_procs_available: int | None = None,
-    ):
-        """
-        Configure the appropriate settings for the C-Star executable.
-
-        Parameters
-        ----------
-        account_key: Account name for slurm jobs. Defaults to machine config if None.
-        queue_name: Queue name for slurm jobs. Defaults to machine config if None.
-        walltime: Max wall time for slurm jobs. Defaults to 6 hours.
-        clobber: Whether to clear the working directory for this simulation before running. Defaults to True. If False,
-            C-star will fail if files exist already.
-        on_compute_node: Whether to run ROMS on the current node. Defaults to False (will submit slurm jobs if on HPC).
-        n_procs_available: How many processors to utilize for joining operations. If 0, auto-detect. If you leave it 0
-            and you're on a shared or login node, you're probably going to use too many and get booted. If None, don't
-            change it (e.g. you have set it externally)
-        """
-        mc = self._get_machine_config()
-        queues = mc.queues or {}
-
-        # precedence: passed variable > pre-existing env-var setting > internal machine config > some default
-        account_key = (
-            account_key or os.getenv(ENV_CSTAR_SLURM_ACCOUNT) or mc.account or ""
-        )
-        queue_name = (
-            queue_name
-            or os.getenv(ENV_CSTAR_SLURM_QUEUE)
-            or queues.get("default")
-            or ""
-        )
-        walltime = walltime or os.getenv(ENV_CSTAR_SLURM_MAX_WALLTIME) or "6:00:00"
-        clobber = "1" if clobber else os.getenv(ENV_CSTAR_CLOBBER_WORKING_DIR, "0")
-        in_active_alloc = (
-            "1" if on_compute_node else os.getenv(ENV_CSTAR_IN_ACTIVE_ALLOCATION, "0")
-        )
-
-        # set everything
-        os.environ[ENV_CSTAR_CLOBBER_WORKING_DIR] = clobber
-        os.environ[ENV_CSTAR_IN_ACTIVE_ALLOCATION] = in_active_alloc
-        os.environ[ENV_CSTAR_SLURM_ACCOUNT] = account_key
-        os.environ[ENV_CSTAR_SLURM_QUEUE] = queue_name
-        os.environ[ENV_CSTAR_SLURM_MAX_WALLTIME] = walltime
-
-        if n_procs_available:
-            os.environ[ENV_CSTAR_NPROCS_POST] = str(n_procs_available)
-        elif n_procs_available == 0:
-            if os.getenv(ENV_CSTAR_NPROCS_POST):
-                del os.environ[ENV_CSTAR_NPROCS_POST]
-        # implicit: elif n_procs_available is None, do nothing
-
-        # A stale `cstar` on PATH (e.g. a pip fallback under ~/.local/bin on some
-        # HPC systems) can shadow this environment's `cstar` executable. Force the
-        # running env's bin dir to the front of PATH so its `cstar` always wins,
-        # on every host, without relying on a machine-specific check.
-        bin_dir = Path(sys.executable).parent
-        cstar_exe = bin_dir / "cstar"
-        if not cstar_exe.is_file():
-            log.warning(
-                "Expected cstar executable not found at %s; prepending to PATH anyway",
-                cstar_exe,
-            )
-        current_path = os.environ.get("PATH", "")
-        current_path_entries = current_path.split(os.pathsep) if current_path else []
-        if not current_path_entries or current_path_entries[0] != str(bin_dir):
-            os.environ["PATH"] = os.pathsep.join([str(bin_dir), *current_path_entries])
-
-    async def run(
-        self,
-    ):
-        """Run C-Star for this Builder's blueprint"""
-        log.debug("run: entering for %r", self.name)
-        self.prep_cstar_environment()
-
-        request = RunnerRequest(
-            uri=str(self.path_roms_marbl_blueprint()),
-            bp_type=RomsMarblBlueprint,
-            name=self.casename,
-        )
-        service_cfg = get_service_config(log_level="INFO")
-        job_cfg = get_job_config()
-        runner = RomsMarblRunner(
-            request=request, service_cfg=service_cfg, job_cfg=job_cfg
-        )
-        await runner.execute()

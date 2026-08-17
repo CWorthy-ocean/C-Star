@@ -130,10 +130,6 @@ class DomainCatalog:
     Catalog structure::
 
         catalog/
-        ├── Machines/
-        │   ├── MacOS.yaml
-        │   ├── NERSC_perlmutter.yaml
-        │   └── RCAC_anvil.yaml
         ├── ModelSpec/
         │   └── cson_roms-marbl_v0.1/
         │       └── model.yaml   (single consolidated file: code + model_settings)
@@ -153,7 +149,7 @@ class DomainCatalog:
     Parameters
     ----------
     catalog_root : str or Path or None
-        Root of the catalog (inner directory containing Machines/, ModelSpec/, etc.).
+        Root of the catalog (inner directory containing ModelSpec/, etc.).
         Defaults to the package-bundled catalog at ``<cstar_forge>/catalog``.
         Pass a github URL string for remote catalogs.
     read_only : bool
@@ -241,7 +237,6 @@ class DomainCatalog:
 
         # Internal registries
         self._models: dict[str, Path] = {}
-        self._machines: dict[str, Path] = {}
         self._domains: dict[str, Path] = {}  # domain_name -> DomainSpec/<name>/ dir
         self._forcing: dict[str, Path] = {}  # forcing_name -> ForcingSpec/<name>/ dir
         self._output: dict[str, Path] = {}  # output_name -> OutputSpec/<name>/ dir
@@ -252,7 +247,6 @@ class DomainCatalog:
             str, Path
         ] = {}  # forge_blueprint_name -> blueprints/<name>.forge_blueprint.yaml
 
-        self._scan_machines()
         self._scan_models()
         self._scan_roms_marbl_blueprints()
         self._scan_forge_blueprints()
@@ -348,16 +342,6 @@ class DomainCatalog:
     # ------------------------------------------------------------------
     # Scanning
     # ------------------------------------------------------------------
-
-    def _scan_machines(self) -> None:
-        """Scan Machines/ for per-machine YAML files."""
-        self._machines = {}
-        machine_dir = self.catalog_root / "Machines"
-        try:
-            for f in sorted(self._fs_glob_dual(machine_dir, "*")):
-                self._machines[f.stem] = f
-        except Exception as exc:
-            logger.warning("Failed to scan machines: %s", exc)
 
     def _scan_models(self) -> None:
         """Scan ModelSpec/ for per-model directories containing model.yaml (or
@@ -472,7 +456,7 @@ class DomainCatalog:
     # ------------------------------------------------------------------
 
     def _initialize_from(self, source: str | Path, clobber: bool = False) -> None:
-        """Merge Machines/, ModelSpec/, and DomainSpec/ from a source catalog into self.catalog_root.
+        """Merge ModelSpec/ and DomainSpec/ from a source catalog into self.catalog_root.
 
         Files that do not already exist at the destination are always copied.
         Files that exist at both source and destination are "conflicts":
@@ -498,7 +482,6 @@ class DomainCatalog:
         # Collect all source files and map each to its destination path.
         pairs: list[tuple[Path, Path]] = []
         for subdir in (
-            "Machines",
             "ModelSpec",
             "DomainSpec",
             "ForcingSpec",
@@ -531,20 +514,15 @@ class DomainCatalog:
             shutil.copy2(src_file, dst_file)
 
     def _validate_catalog(self) -> None:
-        """Raise ValueError if Machines/ or ModelSpec/ are missing or empty.
+        """Raise ValueError if ModelSpec/ is missing or empty.
 
         Only called for non-default catalog roots that were not just initialized.
-        Uses the already-populated _machines/_models dicts so remote filesystems work.
+        Uses the already-populated _models dict so remote filesystems work.
         """
-        if not self._machines or not self._models:
-            missing = []
-            if not self._machines:
-                missing.append("Machines/ (with at least one .yaml)")
-            if not self._models:
-                missing.append("ModelSpec/ (with at least one <name>/model.yaml)")
+        if not self._models:
             raise ValueError(
                 f"No valid catalog found at '{self.catalog_root}'. "
-                f"Missing: {', '.join(missing)}.\n"
+                f"Missing: ModelSpec/ (with at least one <name>/model.yaml).\n"
                 f"To initialize from the built-in package catalog run:\n"
                 f"    DomainCatalog(catalog_root=..., initialize_catalog_from='local')\n"
                 f"Or pass initialize_catalog_from=<inner-catalog-path> to copy from "
@@ -559,11 +537,6 @@ class DomainCatalog:
     def model_names(self) -> list[str]:
         """Return a sorted list of available model names."""
         return sorted(self._models.keys())
-
-    @property
-    def machine_names(self) -> list[str]:
-        """Return a sorted list of available machine names."""
-        return sorted(self._machines.keys())
 
     @property
     def domain_names(self) -> list[str]:
@@ -655,15 +628,6 @@ class DomainCatalog:
             )
         return self._models[model_name]
 
-    def machine_path(self, machine_name: str) -> Path:
-        """Return the path to the YAML file for a named machine."""
-        if machine_name not in self._machines:
-            raise KeyError(
-                f"Machine '{machine_name}' not found in catalog at {self.catalog_root}. "
-                f"Available machines: {self.machine_names}"
-            )
-        return self._machines[machine_name]
-
     def domain_path(self, domain_name: str) -> Path:
         """Return the directory path for a named domain (contains Domain.yaml and Assets/)."""
         if domain_name not in self._domains:
@@ -695,12 +659,6 @@ class DomainCatalog:
     # ------------------------------------------------------------------
     # Data accessors (return raw dicts)
     # ------------------------------------------------------------------
-
-    def machine_data(self, machine_name: str) -> dict:
-        """Return the raw YAML data dict for a named machine."""
-        path = self.machine_path(machine_name)
-        with self._fs_open(path) as f:
-            return yaml.safe_load(f) or {}
 
     def model_data(self, model_name: str) -> dict:
         """Return the raw YAML data dict for a named model."""
@@ -1260,8 +1218,7 @@ class DomainCatalog:
     def __repr__(self) -> str:
         return (
             f"DomainCatalog(catalog_root={self.catalog_root}, "
-            f"models={self.model_names}, machines={self.machine_names}, "
-            f"domains={self.domain_names})"
+            f"models={self.model_names}, domains={self.domain_names})"
         )
 
 
@@ -1290,7 +1247,6 @@ class LayeredCatalog:
 
     _KIND_ATTR: ClassVar[dict[str, str]] = {
         "model": "_models",
-        "machine": "_machines",
         "domain": "_domains",
         "forcing": "_forcing",
         "output": "_output",
@@ -1299,7 +1255,6 @@ class LayeredCatalog:
     }
     _KIND_DISPLAY: ClassVar[dict[str, str]] = {
         "model": "ModelSpec",
-        "machine": "Machine",
         "domain": "DomainSpec",
         "forcing": "ForcingSpec",
         "output": "OutputSpec",
@@ -1363,10 +1318,6 @@ class LayeredCatalog:
     @property
     def model_names(self) -> list[str]:
         return sorted({n for store in self.stores for n in store.model_names})
-
-    @property
-    def machine_names(self) -> list[str]:
-        return sorted({n for store in self.stores for n in store.machine_names})
 
     @property
     def domain_names(self) -> list[str]:
@@ -1438,9 +1389,6 @@ class LayeredCatalog:
     def model_dir(self, model_name: str) -> Path:
         return self._store_for("model", model_name).model_dir(model_name)
 
-    def machine_path(self, machine_name: str) -> Path:
-        return self._store_for("machine", machine_name).machine_path(machine_name)
-
     def domain_path(self, domain_name: str) -> Path:
         return self._store_for("domain", domain_name).domain_path(domain_name)
 
@@ -1453,9 +1401,6 @@ class LayeredCatalog:
         return self._store_for(
             "forge_blueprint", forge_blueprint_name
         ).forge_blueprint_path(forge_blueprint_name)
-
-    def machine_data(self, machine_name: str) -> dict:
-        return self._store_for("machine", machine_name).machine_data(machine_name)
 
     def model_data(self, model_name: str) -> dict:
         return self._store_for("model", model_name).model_data(model_name)

@@ -155,9 +155,8 @@ What shipped, relative to the plan above:
    **home-anchored** — the `config.py` HPC layouts rebase data caches onto `$SCRATCH`/`$WORK`,
    which get purged; durable user-registered content must not live there. `config.paths.catalog`
    is now wired to it (the PR #100 vestige has a consumer; `default_catalog_inner_dir` deleted).
-3. **Lazy everything**: `default_catalog`, `catalog.blueprint`, and `config.machine_config` are
-   PEP 562 lazy — `import cstar_forge` no longer scans any catalog. Machine config now reads
-   through the stack, so a user `Machines/<tag>.yaml` overrides the bundled one (top-first).
+3. **Lazy everything**: `default_catalog` and `catalog.blueprint` are
+   PEP 562 lazy — `import cstar_forge` no longer scans any catalog.
 4. **Wizard**: spec dropdowns badge lower-layer entries (`wio-toy (bundled)`) via homogeneous
    `(label, value)` option tuples (`_dd_options`/`_dd_values`); blueprint/workplan saves and spec
    registrations land in the user layer (dirs created on demand); collision errors surface as

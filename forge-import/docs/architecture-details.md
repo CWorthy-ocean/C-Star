@@ -76,7 +76,6 @@ cstar-forge/
 │       ├── DomainSpec/{grid}/Domain.yaml   # Grid definitions
 │       ├── ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
 │       ├── OutputSpec/{name}/Output.yaml   # Output configurations
-│       ├── Machines/{system}.yaml          # Machine descriptions
 │       └── blueprints/                     # Example blueprints (bundled, read-only layer;
 │                                            # user saves go to the user catalog layer instead)
 ├── templates/                  # Render templates (cppdefs.opt.j2, marbl_in), decoupled

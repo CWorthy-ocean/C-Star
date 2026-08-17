@@ -1,6 +1,0 @@
-account: m4632
-pes_per_node: 128
-queues:
-  default: regular
-  premium: premium
-  shared: shared
