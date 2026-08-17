@@ -434,10 +434,20 @@ class RomsMarblInputData(InputData):
         # Check that required forcing categories are present
         if forcing_dict:
             if "boundary" not in forcing_dict:
-                raise ValueError(
-                    "Missing required 'boundary' forcing category. "
-                    "Boundary forcing must be specified in forcing_override."
-                )
+                if self.grid_parent is not None:
+                    # A child/nested domain receives its boundary values from the
+                    # parent's nesting.nc extraction, so the resolver deliberately
+                    # emits no boundary items (see _build_forcing in
+                    # forge_blueprint_resolve). C-Star's ForcingConfiguration still
+                    # requires the boundary field, so satisfy it with an empty
+                    # dataset — mirroring the all-open-boundaries-False case, where
+                    # generation is skipped and the dataset stays empty.
+                    forcing_dict["boundary"] = cstar_models.Dataset(data=[])
+                else:
+                    raise ValueError(
+                        "Missing required 'boundary' forcing category. "
+                        "Boundary forcing must be specified in forcing_override."
+                    )
             if "surface" not in forcing_dict:
                 raise ValueError(
                     "Missing required 'surface' forcing category. "

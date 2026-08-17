@@ -600,6 +600,76 @@ class TestRomsMarblInputDataInitialization:
         # Should have input_list with registered handlers
         assert len(data.input_list) > 0
 
+    def _forcing_override_without_boundary(self):
+        """forcing_override shaped like the resolver's child-domain output: the
+        resolver skips boundary items entirely for a child (is_child in
+        _build_forcing), so the 'boundary' forcing category is absent.
+        """
+        ic = forge_models.InitialConditionsInput(
+            source=forge_models.SourceSpec(name="GLORYS")
+        )
+        surface_item = forge_models.SurfaceForcingItem(
+            source=forge_models.SourceSpec(name="ERA5"), type="physics"
+        )
+        return _build_forcing_override(ic, surface=[surface_item])
+
+    def test_child_domain_without_boundary_forcing_initializes(
+        self, tmp_path, sample_grid, sample_partitioning
+    ):
+        """Regression: a child/nested domain (grid_parent set) has no boundary
+        forcing items — its boundaries come from the parent's nesting.nc
+        extraction — and must not fail the required-boundary check.
+        """
+        roms_marbl_blueprint_dir = tmp_path / "blueprints"
+        roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
+
+        data = RomsMarblInputData(
+            domain_name="test_child_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            forcing_override=self._forcing_override_without_boundary(),
+            grid=sample_grid,
+            grid_parent=sample_grid,
+            boundaries=forge_models.OpenBoundaries(),
+            source_data=MagicMock(),
+            roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
+            partitioning=sample_partitioning,
+            input_data_dir=tmp_path,
+            use_dask=False,
+        )
+
+        # ForcingConfiguration requires boundary; a child gets an empty dataset.
+        forcing = data.roms_marbl_blueprint_elements.forcing
+        assert forcing is not None
+        assert forcing.boundary is not None
+        assert len(forcing.boundary.data) == 0
+        # No boundary-generation step should have been planned.
+        assert all(key != "forcing.boundary" for key, _ in data.input_list)
+
+    def test_missing_boundary_forcing_raises_without_parent(
+        self, tmp_path, sample_grid, sample_partitioning
+    ):
+        """A regular (non-nested) domain must still fail loudly when boundary
+        forcing is missing from forcing_override.
+        """
+        roms_marbl_blueprint_dir = tmp_path / "blueprints"
+        roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
+
+        with pytest.raises(ValueError, match="Missing required 'boundary'"):
+            RomsMarblInputData(
+                domain_name="test_grid",
+                start_date=datetime(2012, 1, 1),
+                end_date=datetime(2012, 1, 2),
+                forcing_override=self._forcing_override_without_boundary(),
+                grid=sample_grid,
+                boundaries=forge_models.OpenBoundaries(),
+                source_data=MagicMock(),
+                roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
+                partitioning=sample_partitioning,
+                input_data_dir=tmp_path,
+                use_dask=False,
+            )
+
 
 class TestRomsMarblInputDataHelperMethods:
     """Tests for RomsMarblInputData helper methods."""
