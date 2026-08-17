@@ -26,6 +26,7 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
@@ -244,10 +245,26 @@ class RestartFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        if matches := sorted(search_path.rglob(f"*{cls.SUFFIX}.*.*.{cls.EXT}")):
-            # prefer use of pre-partitioned data when available
-            return RestartFile(path=matches[0])
+        # filter to names that actually parse before constructing (a stray file matching
+        # the glob shape but not `PATTERN_RST` should be skipped, not fatal).
+        matches = [
+            match
+            for match in search_path.rglob(f"*{cls.SUFFIX}.*.*.{cls.EXT}")
+            if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
+        ]
+        if matches:
+            # Prefer pre-partitioned data when available. `matches` may span
+            # several restart timestamps, each with a full set of partition
+            # files, so continue from partition 0 of the most recent timestamp.
+            rst_files = [RestartFile(path=match) for match in matches]
+            latest_ts = max(rst.timestamp for rst in rst_files)
+            return min(
+                (rst for rst in rst_files if rst.timestamp == latest_ts),
+                key=lambda rst: rst.partition or 0,
+            )
 
+        # Joined (unpartitioned) restart files carry no partition segment;
+        # continue from the most recent timestamp.
         matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"), reverse=True)
         if matches:
             return RestartFile(path=matches.pop(0))
@@ -686,7 +703,19 @@ class ContinuanceDirective(OverrideDirective):
         if name := self._config.get(self.KEY_STEP, None):
             if name in self.workplan:
                 step = self.workplan[name]
-                search_path = step.fsm.output_dir
+                fsm = RomsFileSystemManager(step.fsm.root_dir)
+                # With ParallelIO there are no partitioned restart files to
+                # reuse; the joined restart files live in `joined_output`.
+                blueprint = step.blueprint
+                if (
+                    isinstance(blueprint, RomsMarblBlueprint)
+                    and blueprint.model_params.use_pio
+                ):
+                    search_path = fsm.joined_output_dir
+                else:
+                    # fall back to regular output_dir for non-roms blueprints.
+                    # seems unlikely this is a relevant use case, but easy to guard
+                    search_path = fsm.output_dir
             else:
                 msg = f"Unable to locate step {name!r} in workplan"
                 raise KeyError(msg)
