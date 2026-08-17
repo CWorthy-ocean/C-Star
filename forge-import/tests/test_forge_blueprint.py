@@ -2346,7 +2346,7 @@ class TestForgeBlueprintWizard:
 
     def test_selecting_catalog_domain_prefills_and_resolves(self):
         wiz = self._wizard()
-        if "gulf-guinea-toy" not in wiz.domain_dd.options:
+        if "gulf-guinea-toy" not in wiz._dd_values(wiz.domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         wiz.domain_dd.value = "gulf-guinea-toy"  # triggers prefill + rebuild
         cfg = wiz.config
@@ -2506,7 +2506,7 @@ class TestForgeBlueprintWizard:
         resolved config round-trip (the #7 load affordance).
         """
         w1 = self._wizard()
-        if "gulf-guinea-toy" in w1.domain_dd.options:
+        if "gulf-guinea-toy" in w1._dd_values(w1.domain_dd):
             w1.domain_dd.value = "gulf-guinea-toy"
         w1.name.value = "my-custom-run"
         p = tmp_path / "forge_blueprint.yaml"
@@ -2755,7 +2755,7 @@ class TestForgeBlueprintWizard:
         # ForcingSpec must always be an explicit catalog selection now -- no more
         # "<model default>" fallback -- so the default-selected entry is already
         # origin="catalog" from construction.
-        if "glorys-era5-unified" not in w.forcing_dd.options:
+        if "glorys-era5-unified" not in w._dd_values(w.forcing_dd):
             pytest.skip("example ForcingSpec not in catalog")
         assert w.forcing_dd.value == "glorys-era5-unified"
         assert w.config.composition.forcing.origin == "catalog"
@@ -2783,7 +2783,7 @@ class TestForgeBlueprintWizard:
         w = self._wizard()
         # OutputSpec must always be an explicit catalog selection now -- no more
         # "<model default>" fallback.
-        if "standard" not in w.output_dd.options:
+        if "standard" not in w._dd_values(w.output_dd):
             pytest.skip("example OutputSpec not in catalog")
         assert w.output_dd.value == "standard"
         assert w.config.composition.output.origin == "catalog"
@@ -2800,7 +2800,7 @@ class TestForgeBlueprintWizard:
 
     def test_output_spec_round_trips_through_load(self, tmp_path):
         w1 = self._wizard()
-        if "standard" not in w1.output_dd.options:
+        if "standard" not in w1._dd_values(w1.output_dd):
             pytest.skip("example OutputSpec not in catalog")
         w1.output_dd.value = "standard"
         p = tmp_path / "forge_blueprint.yaml"
@@ -2844,7 +2844,7 @@ class TestForgeBlueprintWizard:
 
     def test_nest_from_domain_dropdown_prefills_child(self):
         w = self._wizard()
-        if "gulf-guinea-toy" not in w.nest_domain_dd.options:
+        if "gulf-guinea-toy" not in w._dd_values(w.nest_domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         w.nest_domain_dd.value = "gulf-guinea-toy"  # prefills child + enables nesting
         assert w.nest_enable.value is True
@@ -2898,7 +2898,7 @@ class TestForgeBlueprintWizard:
 
     def test_parent_from_domain_dropdown_prefills_parent(self):
         w = self._wizard()
-        if "gulf-guinea-toy" not in w.parent_domain_dd.options:
+        if "gulf-guinea-toy" not in w._dd_values(w.parent_domain_dd):
             pytest.skip("gulf-guinea-toy domain not in catalog")
         w.parent_domain_dd.value = "gulf-guinea-toy"  # prefills parent + enables it
         assert w.parent_enable.value is True
@@ -3034,22 +3034,65 @@ class TestForgeBlueprintWizardApp:
 
         return ForgeBlueprintWizardApp(**kwargs)
 
-    def test_default_auto_loads_bundled_catalog(self):
-        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT
+    def test_default_auto_loads_layered_catalog(self):
+        from cstar_forge.domain_catalog import (
+            _DEFAULT_CATALOG_ROOT,
+            LayeredCatalog,
+            user_catalog_root,
+        )
         from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
 
         app = self._app()
         assert isinstance(app.inner, ForgeBlueprintWizard)
-        assert app.inner.catalog.catalog_root == _DEFAULT_CATALOG_ROOT
+        cat = app.inner.catalog
+        # Blank App load yields a LayeredCatalog: writable user layer (top,
+        # .catalog_root) over the read-only bundled packaged layer (bottom).
+        assert isinstance(cat, LayeredCatalog)
+        assert cat.catalog_root == user_catalog_root()
+        assert cat.stores[-1].catalog_root == _DEFAULT_CATALOG_ROOT
         assert "color:#2a2" in app._cat_status.value
 
-    def test_reload_with_bad_path_keeps_previous_wizard(self):
+    def test_reload_with_bad_value_keeps_previous_wizard(self):
+        # A nonexistent local path is no longer an error (it becomes an empty
+        # writable layer over bundled, matching CSTAR_FORGE_CATALOG semantics),
+        # so a malformed GitHub URL is the failure case now.
         app = self._app()
         original_inner = app.inner
-        app._cat_input.value = "/nonexistent/catalog/path"
+        app._cat_input.value = "https://github.com/org-but-no-repo"
         app._reload(None)
         assert app.inner is original_inner
         assert "color:#b00" in app._cat_status.value
+
+    def test_single_local_path_builds_stack_with_bundled(self, tmp_path):
+        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, LayeredCatalog
+
+        app = self._app()
+        app._cat_input.value = str(tmp_path / "my-catalog")
+        app._reload(None)
+        cat = app.inner.catalog
+        # One local path routes through build_catalog_stack: writable top over
+        # the read-only bundled layer, same as the env var would produce.
+        assert isinstance(cat, LayeredCatalog)
+        assert cat.catalog_root == (tmp_path / "my-catalog").resolve()
+        assert cat.stores[-1].catalog_root == _DEFAULT_CATALOG_ROOT
+        assert cat.model_names  # bundled models visible through the stack
+        assert "color:#2a2" in app._cat_status.value
+
+    def test_single_local_literal_loads_readonly_store_with_warning(self):
+        from cstar_forge.domain_catalog import DomainCatalog, LayeredCatalog
+
+        app = self._app()
+        app._cat_input.value = "local"
+        app._reload(None)
+        cat = app.inner.catalog
+        # "local" (the bundled catalog) can never be a writable top layer:
+        # exactly one read-only store, and the status line warns that saves
+        # fall back to CWD-relative filenames.
+        assert isinstance(cat, DomainCatalog)
+        assert not isinstance(cat, LayeredCatalog)
+        assert cat.read_only is True
+        assert "read-only catalog" in app._cat_status.value
+        assert app.inner._default_blueprint_path("x") == "x.forge_blueprint.yaml"
 
 
 # ---------------------------------------------------------------------------
@@ -3405,10 +3448,12 @@ class TestSaveModifiedPiecesToCatalog:
     def isolated_catalog(self, tmp_path):
         import shutil
 
-        from cstar_forge.domain_catalog import DomainCatalog
+        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
         root = tmp_path / "catalog"
-        shutil.copytree(_CATALOG.catalog_root, root)
+        # Copy the BUNDLED catalog (not _CATALOG.catalog_root, which is now the
+        # writable *user* layer -- empty/nonexistent in tests, see conftest.py).
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
         return DomainCatalog(catalog_root=root)
 
     def _wizard(self, catalog):
@@ -3599,7 +3644,7 @@ class TestSaveModifiedPiecesToCatalog:
         self, isolated_catalog
     ):
         wiz = self._wizard(isolated_catalog)
-        if "gulf-guinea-toy" in wiz.domain_dd.options:
+        if "gulf-guinea-toy" in wiz._dd_values(wiz.domain_dd):
             wiz.domain_dd.value = "gulf-guinea-toy"
         wiz.npx.value = wiz.npx.value + 1
         assert wiz.config.composition.domain.modified is True

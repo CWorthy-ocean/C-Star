@@ -646,7 +646,9 @@ def test_domain_modified_reflects_deviation_from_catalog_pick():
     track modification at all).
     """
     wiz = ForgeBlueprintWizard()
-    wiz.domain_dd.value = wiz.domain_dd.options[1]  # first real catalog domain
+    wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[
+        1
+    ]  # first real catalog domain
     assert wiz.config.composition.domain.origin == "catalog"
     assert wiz.config.composition.domain.modified is False
 
@@ -728,7 +730,7 @@ def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    wiz.domain_dd.value = wiz.domain_dd.options[1]
+    wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[1]
     wiz.npx.value = wiz.npx.value + 1  # deviate domain
     wiz._overrides[("lateral_visc", "visc2")] = 99.0  # deviate model
     wiz._rebuild()
@@ -969,10 +971,12 @@ def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
     from cstar.orchestration.models import Workplan
     from cstar.orchestration.serialization import deserialize
 
-    from cstar_forge.domain_catalog import DomainCatalog, default_catalog
+    from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
     root = tmp_path / "catalog"
-    shutil.copytree(default_catalog.catalog_root, root)
+    # Copy the BUNDLED catalog (not default_catalog.catalog_root, which is now
+    # the writable *user* layer -- empty/nonexistent in tests, see conftest.py).
+    shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
     wiz = ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=root))
     wiz._boundaries_touched = True  # not exercising boundary derivation here
     assert wiz.config is not None
@@ -1531,7 +1535,9 @@ class TestGridFileAttach:
         wiz._on_grid_file_attach(None)
         assert wiz._grid_file is not None
 
-        wiz.domain_dd.value = wiz.domain_dd.options[1]  # first real catalog domain
+        wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[
+            1
+        ]  # first real catalog domain
 
         assert wiz._grid_file is None
         assert wiz.grid_w["nx"].disabled is False

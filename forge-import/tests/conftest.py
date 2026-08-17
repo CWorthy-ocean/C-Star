@@ -1,11 +1,26 @@
 """Pytest configuration and shared fixtures for cstar-forge tests."""
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 # Add project root to path so we can import cstar_forge package
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# Force the default catalog's user (writable) layer to a throwaway temp
+# directory, unconditionally overriding whatever CSTAR_FORGE_CATALOG the
+# developer's real shell/env may already have set. Without this, a developer
+# with CSTAR_FORGE_CATALOG unset would get the module's real default --
+# ~/cstar-forge-data/catalog -- as the user layer, and the test suite must
+# never read from or write into that real directory. This has to happen at
+# conftest *import* time (module level, before any test module runs): the
+# default catalog is a lazy singleton (see cstar_forge.domain_catalog's
+# module __getattr__), and `from cstar_forge.domain_catalog import
+# default_catalog` in any test module constructs it immediately at
+# collection, using whatever CSTAR_FORGE_CATALOG is set at that moment.
+os.environ["CSTAR_FORGE_CATALOG"] = tempfile.mkdtemp(prefix="cstar-forge-test-catalog-")
 
 import pytest  # noqa: E402  (must follow the sys.path bootstrap above)
 

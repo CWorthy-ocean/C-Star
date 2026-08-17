@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import fsspec
 import yaml
@@ -17,6 +18,64 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CATALOG_ROOT = Path(__file__).parent / "catalog"
+
+
+def user_catalog_root() -> Path:
+    """Return the root of the user-writable catalog layer.
+
+    Deliberately home-anchored (``~/cstar-forge-data/catalog``), NOT the
+    ``$SCRATCH``-rebased layouts used elsewhere (see ``config.py``): catalog
+    entries are durable, user-registered content, not job-scoped working
+    data, and must survive HPC scratch purges.
+
+    If ``CSTAR_FORGE_CATALOG`` is set and non-empty, the first
+    ``os.pathsep``-separated entry is used instead (expanded and resolved).
+    Does not create the directory.
+    """
+    entries = _env_catalog_entries()
+    if entries:
+        first = entries[0]
+        if first.strip().lower() == "local":
+            raise ValueError(
+                "CSTAR_FORGE_CATALOG: the bundled catalog ('local') is read-only "
+                "and cannot be the writable top layer; list it after your own "
+                "catalog root instead (e.g. '/path/to/mine:local')."
+            )
+        return Path(first).expanduser().resolve()
+    return Path.home() / "cstar-forge-data" / "catalog"
+
+
+def _env_catalog_entries() -> list[str]:
+    """Non-empty ``os.pathsep``-separated entries of ``CSTAR_FORGE_CATALOG``, in order.
+
+    The single parser for the env var: ``user_catalog_root``,
+    ``default_catalog_stack``, and the wizard's catalog bar must all agree on
+    which entry is the writable top, including when the value carries leading
+    or doubled separators (e.g. ``"$UNSET:/opt/shared"`` expanding to
+    ``":/opt/shared"``).
+    """
+    return [e for e in os.environ.get("CSTAR_FORGE_CATALOG", "").split(os.pathsep) if e]
+
+
+def _extract_model_and_grid(
+    roms_marbl_blueprint_name: str, model_names: list[str]
+) -> tuple[str | None, str | None]:
+    """Extract (model_name, grid_name) from a blueprint name.
+
+    Strips a trailing _NNprocs suffix, then tries to match against *model_names*
+    (longest first). Falls back to splitting on the last underscore. Shared by
+    ``DomainCatalog`` (its own models) and ``LayeredCatalog`` (union of layers).
+    """
+    if not roms_marbl_blueprint_name:
+        return None, None
+    name = re.sub(r"_\d+procs$", "", roms_marbl_blueprint_name)
+    for model_name in sorted(model_names, key=len, reverse=True):
+        if name.startswith(model_name + "_"):
+            return model_name, name[len(model_name) + 1 :]
+    parts = name.rsplit("_", 1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return None, None
 
 
 def _is_github_catalog_url(catalog_root: str) -> bool:
@@ -97,6 +156,13 @@ class DomainCatalog:
         Root of the catalog (inner directory containing Machines/, ModelSpec/, etc.).
         Defaults to the package-bundled catalog at ``<cstar_forge>/catalog``.
         Pass a github URL string for remote catalogs.
+    read_only : bool
+        Mark this store non-writable. Non-local stores (remote/github/http)
+        are always treated as read-only regardless of this flag.
+    label : str or None
+        Human-readable name for this store, used in error messages and by
+        ``LayeredCatalog``. Defaults to ``"bundled"`` for the packaged catalog
+        root, else ``str(catalog_root)``.
     """
 
     def __init__(
@@ -106,6 +172,9 @@ class DomainCatalog:
         initialize_catalog_clobber: bool = False,
         suppress_validation: bool = False,
         github_token: str | None = None,
+        *,
+        read_only: bool = False,
+        label: str | None = None,
     ) -> None:
         _using_default = catalog_root is None
 
@@ -149,6 +218,21 @@ class DomainCatalog:
                 f"catalog_root must be a Path, str, or None; got {type(catalog_root)}"
             )
 
+        # Non-local stores (remote/github/http) are never writable, no matter
+        # what the caller asked for.
+        _root_is_bundled = self._is_local and (
+            self.catalog_root.resolve() == _DEFAULT_CATALOG_ROOT.resolve()
+        )
+        # The packaged catalog lives inside the installed package (site-packages
+        # on a real install): never writable through the API, no matter what the
+        # caller asked for -- user work must not land somewhere an upgrade wipes.
+        self.read_only = bool(read_only) or not self._is_local or _root_is_bundled
+        self.label = (
+            label
+            if label is not None
+            else ("bundled" if _root_is_bundled else str(self.catalog_root))
+        )
+
         # Merge catalog skeleton from a source catalog before scanning.
         if initialize_catalog_from is not None:
             self._initialize_from(
@@ -164,10 +248,14 @@ class DomainCatalog:
         self._roms_marbl_blueprints: dict[
             str, Path
         ] = {}  # roms_marbl_blueprint_name -> blueprints/<machine>/<name>/ dir
+        self._forge_blueprints: dict[
+            str, Path
+        ] = {}  # forge_blueprint_name -> blueprints/<name>.forge_blueprint.yaml
 
         self._scan_machines()
         self._scan_models()
         self._scan_roms_marbl_blueprints()
+        self._scan_forge_blueprints()
         self._scan_domains()
         self._scan_forcing()
         self._scan_output()
@@ -305,6 +393,34 @@ class DomainCatalog:
                     "Failed to scan roms_marbl_blueprints under %s: %s",
                     subdir_name,
                     exc,
+                )
+
+    def _scan_forge_blueprints(self) -> None:
+        """Scan blueprints/ (and Blueprints/) for flat ``*.forge_blueprint.yaml``
+        files -- a separate, newer layout from the nested
+        ``blueprints/<machine>/<name>/`` one scanned by
+        ``_scan_roms_marbl_blueprints``.
+
+        ``Path.stem`` only strips one suffix, so ``X.forge_blueprint.yaml``
+        would map to key ``X.forge_blueprint``; the full compound suffix is
+        stripped explicitly instead so the catalog key is just ``X``.
+        """
+        self._forge_blueprints = {}
+        for subdir_name in ("blueprints", "Blueprints"):
+            bp_root = self.catalog_root / subdir_name
+            if not self._fs_exists(bp_root):
+                continue
+            try:
+                for f in self._fs_glob_dual(bp_root, "*.forge_blueprint"):
+                    name = f.name
+                    for suffix in (".forge_blueprint.yaml", ".forge_blueprint.yml"):
+                        if name.endswith(suffix):
+                            name = name[: -len(suffix)]
+                            break
+                    self._forge_blueprints[name] = f
+            except Exception as exc:
+                logger.warning(
+                    "Failed to scan forge_blueprints under %s: %s", subdir_name, exc
                 )
 
     def _scan_domains(self) -> None:
@@ -470,6 +586,11 @@ class DomainCatalog:
         return sorted(self._roms_marbl_blueprints.keys())
 
     @property
+    def forge_blueprint_names(self) -> list[str]:
+        """Return a sorted list of available flat forge-blueprint names."""
+        return sorted(self._forge_blueprints.keys())
+
+    @property
     def roms_marbl_blueprints_dir(self) -> Path:
         """Path to the blueprints directory (catalog_root/blueprints)."""
         return self.catalog_root / "blueprints"
@@ -560,6 +681,16 @@ class DomainCatalog:
                 f"Available blueprints: {self.roms_marbl_blueprint_names}"
             )
         return self._roms_marbl_blueprints[roms_marbl_blueprint_name]
+
+    def forge_blueprint_path(self, forge_blueprint_name: str) -> Path:
+        """Return the path to a named flat ``*.forge_blueprint.yaml`` file."""
+        if forge_blueprint_name not in self._forge_blueprints:
+            raise KeyError(
+                f"Forge blueprint '{forge_blueprint_name}' not found in catalog at "
+                f"{self.catalog_root}. Available forge blueprints: "
+                f"{self.forge_blueprint_names}"
+            )
+        return self._forge_blueprints[forge_blueprint_name]
 
     # ------------------------------------------------------------------
     # Data accessors (return raw dicts)
@@ -701,6 +832,17 @@ class DomainCatalog:
     # Registration / mutation methods
     # ------------------------------------------------------------------
 
+    def _check_writable(self) -> None:
+        """Guard called first by every mutator. Also closes a latent bug: a
+        GitHub-backed (or other non-local) catalog used to fall through to a
+        bare ``Path.mkdir``/``open`` and silently write under the CWD instead
+        of failing.
+        """
+        if self.read_only:
+            raise PermissionError(
+                f"Catalog store '{self.label}' at {self.catalog_root} is read-only"
+            )
+
     def register_model(self, model_dir: Path | str) -> None:
         """Register a new model by copying its directory (containing model.yaml) into ModelSpec/ and rescanning.
 
@@ -710,6 +852,7 @@ class DomainCatalog:
             Path to the model directory (which must contain model.yaml, or
             legacy model.yml). The directory name is used as the model name.
         """
+        self._check_writable()
         src = Path(model_dir).expanduser().resolve()
         if not (src / "model.yaml").exists() and not (src / "model.yml").exists():
             raise ValueError(f"model_dir must contain a model.yaml file: {src}")
@@ -735,6 +878,7 @@ class DomainCatalog:
             ``register_domain_from_dict`` accepts an explicit ``model_name`` when
             the caller has one (e.g. the wizard's composition).
         """
+        self._check_writable()
         domain_name = builder.grid_name
         domain_dir = self.catalog_root / "DomainSpec" / domain_name
         domain_dir.mkdir(parents=True, exist_ok=True)
@@ -790,6 +934,7 @@ class DomainCatalog:
         Refuses to overwrite an existing entry -- catalog entries are named,
         shared resources; pick a different name or delete the old one first.
         """
+        self._check_writable()
         domain_dir = self.catalog_root / "DomainSpec" / name
         if domain_dir.exists():
             raise FileExistsError(f"DomainSpec '{name}' already exists at {domain_dir}")
@@ -814,6 +959,7 @@ class DomainCatalog:
         ``forge_blueprint_resolve.extract_output_settings``). Refuses to overwrite
         an existing entry.
         """
+        self._check_writable()
         output_dir = self.catalog_root / "OutputSpec" / name
         if output_dir.exists():
             raise FileExistsError(f"OutputSpec '{name}' already exists at {output_dir}")
@@ -840,6 +986,7 @@ class DomainCatalog:
         original ForcingSpec schema, added so a domain using CDR forcing can still
         save/reload its ForcingSpec). Refuses to overwrite an existing entry.
         """
+        self._check_writable()
         forcing_dir = self.catalog_root / "ForcingSpec" / name
         if forcing_dir.exists():
             raise FileExistsError(
@@ -878,6 +1025,7 @@ class DomainCatalog:
         ``_model_owned_settings``, and ``code.roms.commit`` isn't part of
         ``model_settings`` at all). Refuses to overwrite an existing entry.
         """
+        self._check_writable()
         model_dir = self.catalog_root / "ModelSpec" / name
         if model_dir.exists():
             raise FileExistsError(f"ModelSpec '{name}' already exists at {model_dir}")
@@ -932,6 +1080,7 @@ class DomainCatalog:
         asset_metadata : dict
             Arbitrary key/value metadata recorded alongside the asset in Domain.yaml.
         """
+        self._check_writable()
         domain_dir = self.domain_path(domain_name)
         assets_dir = domain_dir / "Assets"
         assets_dir.mkdir(exist_ok=True)
@@ -968,6 +1117,7 @@ class DomainCatalog:
         catalog : DomainCatalog
             Target catalog to copy the domain into.
         """
+        catalog._check_writable()
         src = self.domain_path(domain_name)
         dest = catalog.catalog_root / "DomainSpec" / domain_name
         if dest.exists():
@@ -985,6 +1135,7 @@ class DomainCatalog:
         catalog : DomainCatalog
             Target catalog to copy the model into.
         """
+        catalog._check_writable()
         src = self.model_dir(model_name)
         dest = catalog.catalog_root / "ModelSpec" / model_name
         if dest.exists():
@@ -1043,16 +1194,7 @@ class DomainCatalog:
         Strips a trailing _NNprocs suffix, then tries to match against known
         model names (longest first). Falls back to splitting on the last underscore.
         """
-        if not roms_marbl_blueprint_name:
-            return None, None
-        name = re.sub(r"_\d+procs$", "", roms_marbl_blueprint_name)
-        for model_name in sorted(self.model_names, key=len, reverse=True):
-            if name.startswith(model_name + "_"):
-                return model_name, name[len(model_name) + 1 :]
-        parts = name.rsplit("_", 1)
-        if len(parts) == 2:
-            return parts[0], parts[1]
-        return None, None
+        return _extract_model_and_grid(roms_marbl_blueprint_name, self.model_names)
 
     def roms_marbl_blueprint_df(self) -> pd.DataFrame:
         """Load all blueprints and return a pandas DataFrame.
@@ -1123,5 +1265,518 @@ class DomainCatalog:
         )
 
 
-# Package-default catalog instance (points to cstar_forge/catalog/)
-default_catalog = DomainCatalog()
+class LayeredCatalog:
+    """Facade over an ordered stack of :class:`DomainCatalog` stores.
+
+    The stack is searched top-first: the first (index 0) store is the single
+    writable layer new entries are registered into; every store beneath it
+    is read-only and typically holds either the packaged catalog or a
+    shared/site catalog. Duck-types ``DomainCatalog``'s public read surface
+    plus its ``register_*``/``add_asset_to_domain`` mutators.
+
+    Collision policy is deliberately hybrid: writers enforce stack-wide name
+    uniqueness (a ``register_*`` call fails loudly if the name exists
+    *anywhere* in the stack, not just the top), but collisions that arrive
+    out-of-band -- a package upgrade or a shared-layer pull that happens to
+    reuse a name -- are tolerated on read with deterministic top-first
+    precedence, logged once at construction via ``logger.warning``.
+
+    Parameters
+    ----------
+    stores : list of DomainCatalog
+        Ordered top-to-bottom. ``stores[0]`` (``self.top``) must be a
+        writable local store.
+    """
+
+    _KIND_ATTR: ClassVar[dict[str, str]] = {
+        "model": "_models",
+        "machine": "_machines",
+        "domain": "_domains",
+        "forcing": "_forcing",
+        "output": "_output",
+        "roms_marbl_blueprint": "_roms_marbl_blueprints",
+        "forge_blueprint": "_forge_blueprints",
+    }
+    _KIND_DISPLAY: ClassVar[dict[str, str]] = {
+        "model": "ModelSpec",
+        "machine": "Machine",
+        "domain": "DomainSpec",
+        "forcing": "ForcingSpec",
+        "output": "OutputSpec",
+        "roms_marbl_blueprint": "Blueprint",
+        "forge_blueprint": "ForgeBlueprint",
+    }
+
+    def __init__(self, stores: list[DomainCatalog]) -> None:
+        if not stores:
+            raise ValueError("LayeredCatalog requires at least one store")
+        top = stores[0]
+        if not (top._is_local and not top.read_only):
+            raise ValueError(
+                "LayeredCatalog's top store must be a writable local catalog "
+                f"(got catalog_root={top.catalog_root}, read_only={top.read_only})"
+            )
+        self.stores = stores
+        self.top = top
+        self._collisions = self._compute_collisions()
+        for key, labels in self._collisions.items():
+            logger.warning(
+                "Catalog collision: %s present in multiple layers (%s); "
+                "the topmost wins",
+                key,
+                ", ".join(labels),
+            )
+
+    # ------------------------------------------------------------------
+    # Properties delegating to the top store
+    # ------------------------------------------------------------------
+
+    @property
+    def catalog_root(self) -> Path:
+        return self.top.catalog_root
+
+    @property
+    def _is_local(self) -> bool:
+        return self.top._is_local
+
+    @property
+    def roms_marbl_blueprints_dir(self) -> Path:
+        return self.top.roms_marbl_blueprints_dir
+
+    @property
+    def workplans_dir(self) -> Path:
+        return self.top.workplans_dir
+
+    @property
+    def read_only(self) -> bool:
+        """Always False: a LayeredCatalog is only constructible with a writable top."""
+        return False
+
+    @property
+    def label(self) -> str:
+        return self.top.label
+
+    # ------------------------------------------------------------------
+    # Union name properties
+    # ------------------------------------------------------------------
+
+    @property
+    def model_names(self) -> list[str]:
+        return sorted({n for store in self.stores for n in store.model_names})
+
+    @property
+    def machine_names(self) -> list[str]:
+        return sorted({n for store in self.stores for n in store.machine_names})
+
+    @property
+    def domain_names(self) -> list[str]:
+        return sorted({n for store in self.stores for n in store.domain_names})
+
+    @property
+    def forcing_names(self) -> list[str]:
+        return sorted({n for store in self.stores for n in store.forcing_names})
+
+    @property
+    def output_names(self) -> list[str]:
+        return sorted({n for store in self.stores for n in store.output_names})
+
+    @property
+    def roms_marbl_blueprint_names(self) -> list[str]:
+        return sorted(
+            {n for store in self.stores for n in store.roms_marbl_blueprint_names}
+        )
+
+    @property
+    def forge_blueprint_names(self) -> list[str]:
+        return sorted({n for store in self.stores for n in store.forge_blueprint_names})
+
+    # ------------------------------------------------------------------
+    # Top-first resolution
+    # ------------------------------------------------------------------
+
+    def _store_for(self, kind: str, name: str) -> DomainCatalog:
+        """Return the topmost store whose *kind* registry contains *name*."""
+        attr = self._KIND_ATTR[kind]
+        for store in self.stores:
+            if name in getattr(store, attr):
+                return store
+        available = sorted({n for store in self.stores for n in getattr(store, attr)})
+        raise KeyError(
+            f"{self._KIND_DISPLAY[kind]} '{name}' not found in any catalog layer. "
+            f"Available: {available}"
+        )
+
+    def entry_source(self, kind: str, name: str) -> str:
+        """Return the label of the winning (topmost) store containing *name*."""
+        return self._store_for(kind, name).label
+
+    def _compute_collisions(self) -> dict[str, list[str]]:
+        collisions: dict[str, list[str]] = {}
+        for kind, attr in self._KIND_ATTR.items():
+            labels_by_name: dict[str, list[str]] = {}
+            for store in self.stores:
+                for name in getattr(store, attr):
+                    labels_by_name.setdefault(name, []).append(store.label)
+            for name, labels in labels_by_name.items():
+                if len(labels) > 1:
+                    collisions[f"{kind}:{name}"] = labels
+        return collisions
+
+    def collisions(self) -> dict[str, list[str]]:
+        """Return ``"kind:name"`` -> ordered (top-first) store labels for every
+        name present in 2+ stores. For status display.
+        """
+        return dict(self._collisions)
+
+    # ------------------------------------------------------------------
+    # Keyed reads (top-first)
+    # ------------------------------------------------------------------
+
+    def model_path(self, model_name: str) -> Path:
+        return self._store_for("model", model_name).model_path(model_name)
+
+    def model_dir(self, model_name: str) -> Path:
+        return self._store_for("model", model_name).model_dir(model_name)
+
+    def machine_path(self, machine_name: str) -> Path:
+        return self._store_for("machine", machine_name).machine_path(machine_name)
+
+    def domain_path(self, domain_name: str) -> Path:
+        return self._store_for("domain", domain_name).domain_path(domain_name)
+
+    def roms_marbl_blueprint_path(self, roms_marbl_blueprint_name: str) -> Path:
+        return self._store_for(
+            "roms_marbl_blueprint", roms_marbl_blueprint_name
+        ).roms_marbl_blueprint_path(roms_marbl_blueprint_name)
+
+    def forge_blueprint_path(self, forge_blueprint_name: str) -> Path:
+        return self._store_for(
+            "forge_blueprint", forge_blueprint_name
+        ).forge_blueprint_path(forge_blueprint_name)
+
+    def machine_data(self, machine_name: str) -> dict:
+        return self._store_for("machine", machine_name).machine_data(machine_name)
+
+    def model_data(self, model_name: str) -> dict:
+        return self._store_for("model", model_name).model_data(model_name)
+
+    def domain_data(self, domain_name: str) -> dict:
+        return self._store_for("domain", domain_name).domain_data(domain_name)
+
+    def forcing_data(self, forcing_name: str) -> dict:
+        return self._store_for("forcing", forcing_name).forcing_data(forcing_name)
+
+    def output_data(self, output_name: str) -> dict:
+        return self._store_for("output", output_name).output_data(output_name)
+
+    def load_model_spec(self, model_name: str) -> Any:
+        return self._store_for("model", model_name).load_model_spec(model_name)
+
+    def domain(self, domain_id: str | int) -> dict:
+        name = self.domain_names[domain_id] if isinstance(domain_id, int) else domain_id
+        return self._store_for("domain", name).domain(name)
+
+    def model(self, model_id: str | int) -> dict:
+        name = self.model_names[model_id] if isinstance(model_id, int) else model_id
+        return self._store_for("model", name).model(name)
+
+    def roms_marbl_blueprint(self, roms_marbl_blueprint_id: str | int) -> Path:
+        name = (
+            self.roms_marbl_blueprint_names[roms_marbl_blueprint_id]
+            if isinstance(roms_marbl_blueprint_id, int)
+            else roms_marbl_blueprint_id
+        )
+        return self._store_for("roms_marbl_blueprint", name).roms_marbl_blueprint(name)
+
+    # ------------------------------------------------------------------
+    # Writers: stack-wide uniqueness, then delegate to the top store
+    # ------------------------------------------------------------------
+
+    def _check_unique(self, kind: str, name: str) -> None:
+        attr = self._KIND_ATTR[kind]
+        for store in self.stores:
+            if name in getattr(store, attr):
+                raise FileExistsError(
+                    f"{self._KIND_DISPLAY[kind]} '{name}' already exists in the "
+                    f"'{store.label}' catalog layer — pick a new name"
+                )
+
+    def register_domain_from_dict(self, name: str, domain_data: dict[str, Any]) -> None:
+        self._check_unique("domain", name)
+        self.top.register_domain_from_dict(name, domain_data)
+
+    def register_output(
+        self, name: str, output_settings: dict[str, Any], description: str = ""
+    ) -> None:
+        self._check_unique("output", name)
+        self.top.register_output(name, output_settings, description)
+
+    def register_forcing(
+        self,
+        name: str,
+        forcing_inputs: dict[str, Any],
+        cdr_forcing: dict[str, Any] | None = None,
+        description: str = "",
+    ) -> None:
+        self._check_unique("forcing", name)
+        self.top.register_forcing(
+            name, forcing_inputs, cdr_forcing=cdr_forcing, description=description
+        )
+
+    def register_model_from_settings(
+        self,
+        name: str,
+        model_settings: dict[str, Any],
+        base_model_dir: Path | str,
+        description: str = "",
+        *,
+        bgc_mode: str | None = None,
+        use_pio: bool | None = None,
+        roms_ref: str | None = None,
+    ) -> None:
+        self._check_unique("model", name)
+        self.top.register_model_from_settings(
+            name,
+            model_settings,
+            base_model_dir,
+            description,
+            bgc_mode=bgc_mode,
+            use_pio=use_pio,
+            roms_ref=roms_ref,
+        )
+
+    def register_model(self, model_dir: Path | str) -> None:
+        """Register a model directory into the top store.
+
+        The model name (derived from ``model_dir``'s directory name, mirroring
+        ``DomainCatalog.register_model``) is checked for stack-wide uniqueness
+        before delegating.
+        """
+        name = Path(model_dir).expanduser().resolve().name
+        self._check_unique("model", name)
+        self.top.register_model(model_dir)
+
+    def register_domain(self, builder: Any) -> None:
+        """Register a domain built by a ``ForgeExecutor``-like builder into the top store.
+
+        The domain name (``builder.grid_name``, mirroring
+        ``DomainCatalog.register_domain``) is checked for stack-wide
+        uniqueness before delegating.
+        """
+        self._check_unique("domain", builder.grid_name)
+        self.top.register_domain(builder)
+
+    def add_asset_to_domain(
+        self,
+        domain_name: str,
+        asset_name: str,
+        asset_file: Any,
+        asset_metadata: dict,
+    ) -> None:
+        """Add an asset to a domain that must already live in the top store.
+
+        Assets mutate an existing entry in place, so (unlike the ``register_*``
+        writers) there is no stack-wide uniqueness check here -- instead, a
+        domain resolved from a read-only lower layer is rejected outright.
+        """
+        if domain_name not in self.top._domains:
+            if domain_name in self.domain_names:
+                raise PermissionError(
+                    f"Domain '{domain_name}' lives in a read-only catalog layer "
+                    f"('{self.entry_source('domain', domain_name)}') -- register "
+                    "a copy under a new name first, e.g. "
+                    f"catalog.register_domain_from_dict(new_name, "
+                    f"catalog.domain_data('{domain_name}'))."
+                )
+            raise KeyError(
+                f"Domain '{domain_name}' not found in any catalog layer. "
+                f"Available: {self.domain_names}"
+            )
+        self.top.add_asset_to_domain(
+            domain_name, asset_name, asset_file, asset_metadata
+        )
+
+    def _check_writable(self) -> None:
+        """Delegate the write guard to the top store (always writable by
+        construction; present so a LayeredCatalog can be the *target* of
+        ``DomainCatalog.copy_domain``/``copy_model``).
+        """
+        self.top._check_writable()
+
+    # ------------------------------------------------------------------
+    # Copy / path helpers (top store)
+    # ------------------------------------------------------------------
+
+    def roms_marbl_blueprint_dir_for(
+        self, machine_id: str, roms_marbl_blueprint_name: str
+    ) -> Path:
+        return self.top.roms_marbl_blueprint_dir_for(
+            machine_id, roms_marbl_blueprint_name
+        )
+
+    def build_dir_for(self, machine_id: str, roms_marbl_blueprint_name: str) -> Path:
+        return self.top.build_dir_for(machine_id, roms_marbl_blueprint_name)
+
+    def copy_domain(
+        self, domain_name: str, catalog: DomainCatalog | LayeredCatalog
+    ) -> None:
+        """Copy a domain from whichever layer owns it into *catalog*.
+
+        A ``LayeredCatalog`` target receives the copy in its writable top
+        store, subject to that stack's stack-wide name uniqueness (same-name
+        copies would deliberately shadow a lower layer, which writers reject).
+        """
+        src = self._store_for("domain", domain_name)
+        if isinstance(catalog, LayeredCatalog):
+            catalog._check_unique("domain", domain_name)
+            src.copy_domain(domain_name, catalog.top)
+        else:
+            src.copy_domain(domain_name, catalog)
+
+    def copy_model(
+        self, model_name: str, catalog: DomainCatalog | LayeredCatalog
+    ) -> None:
+        """Copy a model from whichever layer owns it into *catalog* (see
+        ``copy_domain`` for LayeredCatalog-target semantics).
+        """
+        src = self._store_for("model", model_name)
+        if isinstance(catalog, LayeredCatalog):
+            catalog._check_unique("model", model_name)
+            src.copy_model(model_name, catalog.top)
+        else:
+            src.copy_model(model_name, catalog)
+
+    # ------------------------------------------------------------------
+    # Blueprint DataFrame / misc
+    # ------------------------------------------------------------------
+    # The private _find/_load/_extract methods below back the deprecated
+    # catalog.BlueprintCatalog shim, whose no-args construction now holds a
+    # LayeredCatalog -- they must exist here with union semantics.
+
+    def _find_roms_marbl_blueprint_files(self) -> list[Path]:
+        files: list[Path] = []
+        for store in self.stores:
+            files.extend(store._find_roms_marbl_blueprint_files())
+        return sorted(set(files))
+
+    def _load_roms_marbl_blueprint_yaml(
+        self, roms_marbl_blueprint_path: Path
+    ) -> dict[str, Any]:
+        for store in self.stores:
+            if store._fs_exists(roms_marbl_blueprint_path):
+                return store._load_roms_marbl_blueprint_yaml(roms_marbl_blueprint_path)
+        # Not in any store: the top store's loader raises the usual
+        # FileNotFoundError with its message.
+        return self.top._load_roms_marbl_blueprint_yaml(roms_marbl_blueprint_path)
+
+    def _load_grid_kwargs(self, grid_yaml_path: Path) -> dict[str, Any]:
+        for store in self.stores:
+            if store._fs_exists(grid_yaml_path):
+                return store._load_grid_kwargs(grid_yaml_path)
+        return self.top._load_grid_kwargs(grid_yaml_path)
+
+    def _extract_model_and_grid_name(
+        self, roms_marbl_blueprint_name: str
+    ) -> tuple[str | None, str | None]:
+        return _extract_model_and_grid(roms_marbl_blueprint_name, self.model_names)
+
+    def roms_marbl_blueprint_df(self) -> pd.DataFrame:
+        import pandas as pd
+
+        frames = [store.roms_marbl_blueprint_df() for store in self.stores]
+        frames = [f for f in frames if not f.empty]
+        if not frames:
+            return pd.DataFrame()
+        return pd.concat(frames, ignore_index=True)
+
+    def tree(self) -> None:
+        for store in self.stores:
+            print(f"== {store.label} ({store.catalog_root}) ==")
+            store.tree()
+
+    def __repr__(self) -> str:
+        stores_repr = ", ".join(f"{s.label}@{s.catalog_root}" for s in self.stores)
+        return f"LayeredCatalog([{stores_repr}])"
+
+
+def default_catalog_stack() -> LayeredCatalog:
+    """Build the default layered catalog: the user layer over the packaged catalog.
+
+    If ``CSTAR_FORGE_CATALOG`` is set, it is split on ``os.pathsep`` into an
+    ordered list of catalog roots; the first is the writable top (label
+    ``"user"``), every subsequent entry is a read-only store (a literal
+    ``"local"`` entry resolves to the packaged catalog via
+    ``DomainCatalog``'s own constructor logic, and is only valid after the
+    first position -- the bundled catalog is never writable). Otherwise the
+    top store is
+    ``user_catalog_root()`` (``~/cstar-forge-data/catalog`` by default, may
+    not exist yet -- constructing it here creates nothing).
+
+    The packaged catalog is always appended at the bottom (label
+    ``"bundled"``), unless a store with the same resolved root is already in
+    the stack.
+    """
+    entries = _env_catalog_entries() or [str(user_catalog_root())]
+    return build_catalog_stack(entries)
+
+
+def build_catalog_stack(entries: list[str]) -> LayeredCatalog:
+    """Build a :class:`LayeredCatalog` from ordered catalog-root entries (top first).
+
+    The first entry becomes the writable top store (label ``"user"``); every
+    subsequent entry is read-only. The packaged catalog is appended at the
+    bottom (label ``"bundled"``) unless a store with the same resolved root is
+    already present. The single builder behind ``default_catalog_stack`` (env
+    var) and the wizard's catalog bar, so the two cannot drift.
+
+    Raises ``ValueError`` if the first entry resolves to the bundled catalog
+    (which is never writable) or is otherwise not a writable local store.
+    """
+    if not entries:
+        raise ValueError("build_catalog_stack requires at least one catalog root")
+    bundled_root = _DEFAULT_CATALOG_ROOT.resolve()
+
+    stores: list[DomainCatalog] = []
+    for i, entry in enumerate(entries):
+        is_top = i == 0
+        kwargs: dict[str, Any] = dict(
+            catalog_root=entry, suppress_validation=True, read_only=not is_top
+        )
+        if is_top:
+            kwargs["label"] = "user"
+        stores.append(DomainCatalog(**kwargs))
+
+    top = stores[0]
+    if top._is_local and top.catalog_root.resolve() == bundled_root:
+        raise ValueError(
+            "The bundled catalog ('local') is read-only and cannot be the writable "
+            "top layer of a catalog stack; list it after your own catalog root "
+            "instead (e.g. '/path/to/mine:local')."
+        )
+
+    already_bundled = any(
+        store._is_local and store.catalog_root.resolve() == bundled_root
+        for store in stores
+    )
+    if not already_bundled:
+        stores.append(DomainCatalog(read_only=True))
+
+    return LayeredCatalog(stores)
+
+
+_default_catalog: LayeredCatalog | None = None
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily construct the module-level ``default_catalog`` singleton (PEP 562).
+
+    ``from cstar_forge.domain_catalog import default_catalog`` still triggers
+    construction at import of the *importing* module -- this only protects
+    ``import cstar_forge`` itself from an eager filesystem scan.
+    """
+    global _default_catalog
+    if name == "default_catalog":
+        if _default_catalog is None:
+            _default_catalog = default_catalog_stack()
+        return _default_catalog
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

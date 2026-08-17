@@ -18,14 +18,25 @@ Data paths are automatically configured based on the detected system. The `confi
 - **Source data** (`config.paths.source_data`): External datasets (GLORYS, UNIFIED_BGC, SRTM15, etc.)
 - **Input data** (`config.paths.input_data`): Generated ROMS-MARBL input files
 - **Scratch directory** (`config.paths.scratch`): Model execution directories
-- **Catalog root** (`config.paths.catalog`): Inner directory that directly contains ``blueprints/`` (default: ``<data base>/catalog``, the sibling of ``input-data`` — e.g. ``~/cstar-forge-data/catalog`` on macOS (`config.default_catalog_inner_dir`))
+- **Catalog root** (`config.paths.catalog`): Inner directory that directly contains ``blueprints/`` — equal to `user_catalog_root()` (default: `~/cstar-forge-data/catalog`), deliberately home-anchored rather than rebased onto `$SCRATCH`/`$WORK` like `source_data`/`input_data`/`scratch` above: catalog entries are durable, user-registered content that must survive HPC scratch purges. Override with the `CSTAR_FORGE_CATALOG` environment variable (an `os.pathsep`-separated list of catalog roots; the first entry is this writable layer).
 - **Blueprints** (`config.paths.blueprints`): Generated blueprint YAML files (default: `config.paths.catalog / "blueprints"`)
 - **Builds**: rendered compile-time/run-time code directories under the per-run `HostPaths.working_dir / "builds"/{compile-time,run-time}` — not under the catalog.
-- **YAML files** (`config.paths.models_yaml`, `config.paths.builds_yaml`, `config.paths.machines_yaml`): *(vestigial: these three `DataPaths` fields survive but the files no longer ship and nothing reads them — model/machine data comes from the bundled catalog.)*
+- **YAML files** (`config.paths.models_yaml`, `config.paths.builds_yaml`, `config.paths.machines_yaml`): *(vestigial: these three `DataPaths` fields survive but the files no longer ship and nothing reads them — model/machine data comes from the layered default catalog instead.)*
 
 ### Relocating the catalog
 
-To point blueprints and builds at another directory (for example scratch or a shared drive), build a new `DataPaths` with `config.with_catalog` and assign it to `config.paths`:
+The catalog the wizard and `domain_catalog.default_catalog` actually read from and
+save into is controlled independently of `config.paths`, via the
+`CSTAR_FORGE_CATALOG` environment variable (see the **Catalog root** bullet
+above) — set it in your environment before launching the wizard (or before
+importing `cstar_forge` at all) to relocate the writable layer, for example
+onto a shared drive.
+
+`config.with_catalog` is a narrower, in-process utility: it returns a new
+`DataPaths` with `.catalog`/`.blueprints` overridden, for code that reads
+`config.paths.catalog` directly. It does **not** reroute
+`domain_catalog.default_catalog`, so it will not change where the wizard
+saves:
 
 ```python
 from pathlib import Path
@@ -34,7 +45,7 @@ from cstar_forge import config
 config.paths = config.with_catalog(config.paths, Path("/scratch/me/cstar-catalog"))
 ```
 
-Create the new `blueprints` and `builds` directories if needed before running workflows.
+Create the new `blueprints` directory if needed before running workflows that read `config.paths.blueprints` directly.
 
 At processing time, `cstar_forge.config.resolve_host(working_dir)` builds the forge
 application's `HostPaths` (`cstar_forge.forge.host.HostPaths`) from this auto-detected
@@ -84,7 +95,7 @@ python -m cstar_forge.config show-paths --json
 
 ## Machine Configuration
 
-Machine-specific settings (account, processing elements per node, queue names) are loaded from `cstar_forge/catalog/Machines/{system_tag}.yaml` via `DomainCatalog.machine_data()`. The `config.machine_config` object provides access to these settings:
+Machine-specific settings (account, processing elements per node, queue names) are loaded lazily through the layered default catalog (`domain_catalog.default_catalog`, a `LayeredCatalog` stacking your writable user layer over the read-only bundled catalog) via `machine_data(system_tag)`. Placing a `Machines/{system_tag}.yaml` in your user layer (`~/cstar-forge-data/catalog/Machines/`, or the writable top of `CSTAR_FORGE_CATALOG`) overrides the bundled catalog's entry for that same tag — the layered lookup is top-first, with a warning logged if the same tag exists in more than one layer. The `config.machine_config` object provides access to these settings:
 
 ```python
 from cstar_forge import config

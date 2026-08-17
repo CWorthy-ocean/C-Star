@@ -9,7 +9,7 @@ convenience instance for code that already imports from here.
 from pathlib import Path
 from typing import Any
 
-from cstar_forge.domain_catalog import DomainCatalog, default_catalog
+from cstar_forge.domain_catalog import DomainCatalog
 
 
 class BlueprintCatalog:
@@ -20,7 +20,13 @@ class BlueprintCatalog:
 
     def __init__(self, blueprints_dir: Path | None = None) -> None:
         if blueprints_dir is None:
-            self._catalog: DomainCatalog = default_catalog
+            # Local import: keeps this module import scan-free (default_catalog
+            # is itself lazily constructed -- see domain_catalog.__getattr__).
+            from cstar_forge.domain_catalog import default_catalog
+
+            # default_catalog is a LayeredCatalog (duck-types DomainCatalog's
+            # read/write surface -- see domain_catalog.LayeredCatalog).
+            self._catalog = default_catalog
         else:
             # Infer catalog root as the parent of the supplied blueprints dir.
             self._catalog = DomainCatalog(catalog_root=Path(blueprints_dir).parent)
@@ -49,5 +55,18 @@ class BlueprintCatalog:
         return self._catalog.roms_marbl_blueprint_df()
 
 
-# Convenience instance
-blueprint = BlueprintCatalog()
+_blueprint: BlueprintCatalog | None = None
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily construct the deprecated ``blueprint`` convenience instance (PEP 562).
+
+    Keeps ``import cstar_forge.catalog`` scan-free; construction (which pulls
+    in ``default_catalog``) only happens once ``blueprint`` is actually used.
+    """
+    global _blueprint
+    if name == "blueprint":
+        if _blueprint is None:
+            _blueprint = BlueprintCatalog()
+        return _blueprint
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

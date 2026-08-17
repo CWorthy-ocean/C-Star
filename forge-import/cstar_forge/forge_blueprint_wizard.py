@@ -1875,7 +1875,13 @@ _DEFAULT_GRID = dict(
 
 
 def _get_catalog():
-    """Return the bundled DomainCatalog (read-only discovery of pieces)."""
+    """Return the default catalog stack for piece discovery.
+
+    A layered stack: the user's writable catalog layer (``~/cstar-forge-data/
+    catalog`` by default, or ``CSTAR_FORGE_CATALOG``) over the read-only
+    bundled in-repo catalog. Reads resolve top-first; writes (``register_*``)
+    land in the user layer.
+    """
     from cstar_forge.domain_catalog import default_catalog
 
     return default_catalog
@@ -1969,7 +1975,7 @@ class ForgeBlueprintWizard:
 
         # --- piece selectors ---
         self.model_dd = W.Dropdown(
-            options=models,
+            options=self._dd_options(models, "model"),
             description="Model:",
             value=(
                 _DEFAULT_MODEL
@@ -1989,7 +1995,7 @@ class ForgeBlueprintWizard:
             ),
         )
         self.domain_dd = W.Dropdown(
-            options=["<custom>", *domains],
+            options=self._dd_options(domains, "domain", prefix=["<custom>"]),
             description="Domain:",
             value="<custom>",
             style={"description_width": "110px"},
@@ -2329,7 +2335,7 @@ class ForgeBlueprintWizard:
         # embeds a default forcing.
         _forcing_names = list(self.catalog.forcing_names)
         self.forcing_dd = W.Dropdown(
-            options=_forcing_names,
+            options=self._dd_options(_forcing_names, "forcing"),
             value=(_forcing_names[0] if _forcing_names else None),
             description="Forcing:",
             style={"description_width": "110px"},
@@ -2385,7 +2391,7 @@ class ForgeBlueprintWizard:
         # default output settings.
         _output_names = list(self.catalog.output_names)
         self.output_dd = W.Dropdown(
-            options=_output_names,
+            options=self._dd_options(_output_names, "output"),
             value=(_output_names[0] if _output_names else None),
             description="Output:",
             style={"description_width": "110px"},
@@ -2620,6 +2626,60 @@ class ForgeBlueprintWizard:
             return
         self._save_path_touched = True
 
+    def _dd_options(
+        self, names: list[str], kind: str, *, prefix: list[str] | None = None
+    ) -> list:
+        """Badge dropdown ``options`` with their source layer when it isn't the
+        top (writable) one -- ipywidgets-homogeneous.
+
+        ipywidgets' ``Dropdown`` requires ``options`` to be either ALL bare
+        values or ALL ``(label, value)`` 2-tuples: ``_make_options`` only takes
+        the "pairs" branch when *every* entry is a 2-tuple, so a mix silently
+        falls through to treating each element (tuples included) as a literal
+        value, and ``dd.value`` ends up holding a raw ``(label, value)`` tuple
+        instead of the bare name. So: if no *names* entry needs a badge, this
+        returns plain names unchanged (matching pre-layering behavior, safe to
+        mix with a plain sentinel like domain_dd's ``"<custom>"``); otherwise
+        *every* entry -- including any *prefix* sentinels -- is emitted as an
+        explicit ``(label, value)`` tuple so the whole list stays homogeneous.
+        ``dd.value`` is always the bare name/sentinel either way.
+
+        A ``KeyError`` from ``entry_source`` (name absent, shouldn't happen for
+        names drawn from the same catalog) is treated as "no badge".
+        """
+        prefix = prefix or []
+        entry_source = getattr(self.catalog, "entry_source", None)
+        top = getattr(self.catalog, "top", None)
+        top_label = top.label if top is not None else None
+
+        badges: dict[str, str] = {}
+        if entry_source is not None:
+            for name in names:
+                try:
+                    source = entry_source(kind, name)
+                except KeyError:
+                    continue
+                if source != top_label:
+                    badges[name] = source
+
+        if not badges:
+            return [*prefix, *names]
+
+        options: list[Any] = [(p, p) for p in prefix]
+        for name in names:
+            label = f"{name} ({badges[name]})" if name in badges else name
+            options.append((label, name))
+        return options
+
+    @staticmethod
+    def _dd_values(dd) -> list:
+        """Bare values of a dropdown's ``options``, whether badged
+        ``(label, value)`` tuples (see ``_dd_options``) or plain strings
+        (ipywidgets' label == value shorthand). Use this instead of reading
+        ``dd.options`` directly for membership tests / indexing.
+        """
+        return [o[1] if isinstance(o, tuple) else o for o in dd.options]
+
     def _default_blueprint_path(self, name: str) -> str:
         """Default "Save to:" path for a blueprint named *name*.
 
@@ -2631,7 +2691,13 @@ class ForgeBlueprintWizard:
         fname = f"{name}.forge_blueprint.yaml"
         cat = getattr(self, "catalog", None)
         try:
-            if cat is not None and getattr(cat, "_is_local", False):
+            # A read-only catalog (e.g. the bundled one loaded as a single
+            # store) must not be offered as a save destination.
+            if (
+                cat is not None
+                and getattr(cat, "_is_local", False)
+                and not getattr(cat, "read_only", False)
+            ):
                 return str(cat.roms_marbl_blueprints_dir / fname)
         except Exception:
             pass
@@ -3591,7 +3657,7 @@ class ForgeBlueprintWizard:
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
-            if cfg.composition.model.name in self.model_dd.options:
+            if cfg.composition.model.name in self._dd_values(self.model_dd):
                 self.model_dd.value = cfg.composition.model.name
             self.grid_name.value = cfg.domain.grid_name
             self.description.value = cfg.description
@@ -3705,10 +3771,11 @@ class ForgeBlueprintWizard:
             # fallback value); fall back to the first available option for an older
             # file recorded with origin="model_default" or an unknown/missing name.
             fname = cfg.composition.forcing.name
-            if fname in self.forcing_dd.options:
+            _forcing_values = self._dd_values(self.forcing_dd)
+            if fname in _forcing_values:
                 self.forcing_dd.value = fname
-            elif self.forcing_dd.options:
-                self.forcing_dd.value = self.forcing_dd.options[0]
+            elif _forcing_values:
+                self.forcing_dd.value = _forcing_values[0]
             self._build_forcing_editor(self._sources_to_inputs(cfg))
             if self.parent_enable.value:
                 # A loaded file may (inconsistently) carry boundary forcing for a
@@ -3730,10 +3797,11 @@ class ForgeBlueprintWizard:
                 self._forcing_seed = None
             # output piece selection
             oname = cfg.composition.output.name
-            if oname in self.output_dd.options:
+            _output_values = self._dd_values(self.output_dd)
+            if oname in _output_values:
                 self.output_dd.value = oname
-            elif self.output_dd.options:
-                self.output_dd.value = self.output_dd.options[0]
+            elif _output_values:
+                self.output_dd.value = _output_values[0]
         # Reconstruct the overrides layer = diff(loaded model_settings, composed). This
         # captures every manual deviation regardless of the file's recorded provenance,
         # making load fully non-lossy.
@@ -4319,7 +4387,9 @@ class ForgeBlueprintWizard:
             )
             return
         try:
-            p = self.config.to_yaml(Path(self.save_path.value))
+            save_path = Path(self.save_path.value)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            p = self.config.to_yaml(save_path)
             self.save_status.value = f"<span style='color:#080'>Saved {p}</span>"
         except Exception as exc:
             self.save_status.value = (
@@ -4351,10 +4421,11 @@ class ForgeBlueprintWizard:
                 extract_output_settings(self.config.model_settings),
                 description=self.description.value,
             )
-        except FileExistsError:
-            self.save_output_status.value = (
-                f"<span style='color:#b00'>'{name}' already exists.</span>"
-            )
+        except FileExistsError as exc:
+            # str(exc) names the owning layer (e.g. "...already exists in the
+            # 'bundled' catalog layer") -- a plain single-line message, no
+            # traceback, so it's rendered verbatim rather than genericized.
+            self.save_output_status.value = f"<span style='color:#b00'>{exc}</span>"
             return
         except Exception as exc:
             self.save_output_status.value = (
@@ -4367,7 +4438,9 @@ class ForgeBlueprintWizard:
             # reassignment even when the old value is still present -- restore it
             # explicitly so a mismatch genuinely leaves the selection untouched.
             old_value = self.output_dd.value
-            self.output_dd.options = list(self.catalog.output_names)
+            self.output_dd.options = self._dd_options(
+                list(self.catalog.output_names), "output"
+            )
             self.output_dd.value = name if ok else old_value
             if ok:
                 self._overrides = {
@@ -4410,10 +4483,8 @@ class ForgeBlueprintWizard:
                 use_pio=self.use_pio_chk.value,
                 roms_ref=self.roms_ref.value.strip() or None,
             )
-        except FileExistsError:
-            self.save_model_status.value = (
-                f"<span style='color:#b00'>'{name}' already exists.</span>"
-            )
+        except FileExistsError as exc:
+            self.save_model_status.value = f"<span style='color:#b00'>{exc}</span>"
             return
         except Exception as exc:
             self.save_model_status.value = (
@@ -4423,7 +4494,9 @@ class ForgeBlueprintWizard:
         ok = self._verify_piece_roundtrip("model", name)
         with self._suspend():
             old_value = self.model_dd.value
-            self.model_dd.options = list(self.catalog.model_names)
+            self.model_dd.options = self._dd_options(
+                list(self.catalog.model_names), "model"
+            )
             self.model_dd.value = name if ok else old_value
             if ok:
                 self._overrides = {
@@ -4470,10 +4543,8 @@ class ForgeBlueprintWizard:
         # topography not sorted out). No _ensure_boundaries_derived() call.
         try:
             self.catalog.register_domain_from_dict(name, self._domain_piece_data())
-        except FileExistsError:
-            self.save_domain_status.value = (
-                f"<span style='color:#b00'>'{name}' already exists.</span>"
-            )
+        except FileExistsError as exc:
+            self.save_domain_status.value = f"<span style='color:#b00'>{exc}</span>"
             return
         except Exception as exc:
             self.save_domain_status.value = (
@@ -4483,7 +4554,9 @@ class ForgeBlueprintWizard:
         ok = self._verify_piece_roundtrip("domain", name)
         with self._suspend():
             old_value = self.domain_dd.value
-            self.domain_dd.options = ["<custom>", *self.catalog.domain_names]
+            self.domain_dd.options = self._dd_options(
+                list(self.catalog.domain_names), "domain", prefix=["<custom>"]
+            )
             self.domain_dd.value = name if ok else old_value
             if ok:
                 self._domain_seed = self._domain_snapshot()
@@ -4517,10 +4590,8 @@ class ForgeBlueprintWizard:
                 cdr_forcing=self._cdr_forcing,
                 description=self.description.value,
             )
-        except FileExistsError:
-            self.save_forcing_status.value = (
-                f"<span style='color:#b00'>'{name}' already exists.</span>"
-            )
+        except FileExistsError as exc:
+            self.save_forcing_status.value = f"<span style='color:#b00'>{exc}</span>"
             return
         except Exception as exc:
             self.save_forcing_status.value = (
@@ -4530,7 +4601,9 @@ class ForgeBlueprintWizard:
         ok = self._verify_piece_roundtrip("forcing", name)
         with self._suspend():
             old_value = self.forcing_dd.value
-            self.forcing_dd.options = list(self.catalog.forcing_names)
+            self.forcing_dd.options = self._dd_options(
+                list(self.catalog.forcing_names), "forcing"
+            )
             self.forcing_dd.value = name if ok else old_value
             if ok:
                 self._forcing_seed = self._forcing_editor.gather()
@@ -4596,7 +4669,9 @@ class ForgeBlueprintWizard:
         self.run_status.value = "<i>saving blueprint…</i>"
         cmd: list[str] | None = None
         try:
-            path = self.config.to_yaml(Path(self.save_path.value))
+            save_path = Path(self.save_path.value)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            path = self.config.to_yaml(save_path)
             cmd = self._build_run_command(str(path))
             self.run_status.value = f"<i>running: {' '.join(cmd)}</i>"
             proc = await asyncio.create_subprocess_exec(
@@ -4663,7 +4738,12 @@ class ForgeBlueprintWizard:
         fname = self._workplan_path(blueprint_path).name
         cat = getattr(self, "catalog", None)
         try:
-            if cat is not None and getattr(cat, "_is_local", False):
+            # Mirror _default_blueprint_path: never offer a read-only catalog.
+            if (
+                cat is not None
+                and getattr(cat, "_is_local", False)
+                and not getattr(cat, "read_only", False)
+            ):
                 return cat.workplans_dir / fname
         except Exception:
             pass
@@ -4734,9 +4814,12 @@ class ForgeBlueprintWizard:
             )
             return
         try:
-            bp_path = self.config.to_yaml(Path(self.save_path.value))
+            save_path = Path(self.save_path.value)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            bp_path = self.config.to_yaml(save_path)
             workplan = self._build_workplan(Path(bp_path))
             wp_path = self._workplan_dest(Path(bp_path))
+            wp_path.parent.mkdir(parents=True, exist_ok=True)
 
             from cstar.orchestration.serialization import serialize
 
@@ -5019,10 +5102,17 @@ class ForgeBlueprintWizard:
 
 class ForgeBlueprintWizardApp:
     """Thin wrapper around :class:`ForgeBlueprintWizard` that adds a catalog-location
-    bar above it. Defaults to and auto-loads the bundled in-repo catalog; entering a
-    different location (a local path, ``"local"``, a GitHub URL, or an http URL --
-    anything :class:`~cstar_forge.domain_catalog.DomainCatalog` accepts as
-    ``catalog_root``) and clicking Reload rebuilds the wizard against it.
+    bar above it. Blank input loads the default layered stack (your writable
+    ``~/cstar-forge-data/catalog`` -- or ``CSTAR_FORGE_CATALOG`` -- layer over the
+    read-only bundled in-repo catalog, see
+    :func:`~cstar_forge.domain_catalog.default_catalog_stack`). Entering one or more
+    ``os.pathsep``-separated local paths builds a
+    :class:`~cstar_forge.domain_catalog.LayeredCatalog` exactly like the same value
+    in ``CSTAR_FORGE_CATALOG`` would (first = writable top, rest read-only, bundled
+    catalog appended at the bottom). Entering a single GitHub/http URL or the
+    literal ``"local"`` loads exactly that one store, read-only, for browsing
+    (saves then default to CWD-relative filenames, and the status line says so).
+    Clicking Reload rebuilds the wizard against the new catalog.
 
     Usage (in a Jupyter notebook)::
 
@@ -5041,7 +5131,8 @@ class ForgeBlueprintWizardApp:
 
         self._cat_input = W.Text(
             value="",
-            placeholder="catalog path or GitHub URL (blank = bundled in-repo catalog)",
+            placeholder="catalog path(s), ':'-separated top-first, or GitHub URL "
+            "(blank = your catalog over the bundled one)",
             description="Catalog:",
             style={"description_width": "110px"},
             layout=W.Layout(width="520px"),
@@ -5054,25 +5145,76 @@ class ForgeBlueprintWizardApp:
         self._load(catalog_root)
 
     def _load(self, catalog_root_value: str | None) -> None:
-        from cstar_forge.domain_catalog import DomainCatalog
+        import os
 
-        val = (catalog_root_value or "").strip() or None
+        from cstar_forge.domain_catalog import (
+            DomainCatalog,
+            LayeredCatalog,
+            _is_github_catalog_url,
+            build_catalog_stack,
+            default_catalog_stack,
+        )
+
+        val = (catalog_root_value or "").strip()
         try:
-            cat = DomainCatalog(catalog_root=val)
+            if not val:
+                # Blank -> the default layered stack (writable user layer over
+                # the read-only bundled catalog), not the bundled catalog alone.
+                cat = default_catalog_stack()
+            else:
+                entries = [e for e in val.split(os.pathsep) if e]
+                if len(entries) == 1 and (
+                    _is_github_catalog_url(entries[0])
+                    or entries[0].startswith("http")
+                    or entries[0].strip().lower() == "local"
+                ):
+                    # A remote URL or the literal "local" (bundled catalog)
+                    # can never be a writable top layer, so load it as exactly
+                    # one read-only store for browsing.
+                    cat = DomainCatalog(catalog_root=entries[0])
+                else:
+                    # Same builder as the CSTAR_FORGE_CATALOG env handling
+                    # (first entry writable top, rest read-only, bundled
+                    # appended at the bottom) so the two paths cannot drift --
+                    # a single local path gets the bundled layer underneath,
+                    # exactly like the same value in the env var.
+                    cat = build_catalog_stack(entries)
             inner = ForgeBlueprintWizard(catalog=cat)
         except Exception as exc:
             self._cat_status.value = (
                 f"<span style='color:#b00'>Failed to load catalog "
-                f"{val or '(bundled)'!r}: {exc}</span>"
+                f"{val or '(default)'!r}: {exc}</span>"
             )
             return
 
         self.inner = inner
-        self._cat_status.value = (
-            f"<span style='color:#2a2'>Loaded {cat.catalog_root} -- "
-            f"{len(cat.model_names)} models, "
-            f"{len(cat.roms_marbl_blueprint_names)} blueprints</span>"
-        )
+        if isinstance(cat, LayeredCatalog):
+            layers = " over ".join(
+                f"{store.label} {store.catalog_root} ({len(store.domain_names)} domains)"
+                if store is cat.top
+                else f"{store.label} ({len(store.domain_names)} domains)"
+                for store in cat.stores
+            )
+            self._cat_status.value = (
+                f"<span style='color:#2a2'>Loaded {layers} -- "
+                f"{len(cat.model_names)} models, "
+                f"{len(cat.roms_marbl_blueprint_names)} blueprints</span>"
+            )
+        else:
+            # Single stores can be read-only (a remote URL or "local"): the
+            # save-path defaults then silently fall back to CWD-relative
+            # filenames, so say so instead of leaving the fallback invisible.
+            ro_note = (
+                " <span style='color:#b60'>(read-only catalog -- saves default "
+                "to the current directory)</span>"
+                if getattr(cat, "read_only", False)
+                else ""
+            )
+            self._cat_status.value = (
+                f"<span style='color:#2a2'>Loaded {cat.catalog_root} -- "
+                f"{len(cat.model_names)} models, "
+                f"{len(cat.roms_marbl_blueprint_names)} blueprints</span>{ro_note}"
+            )
         self._outer.children = [
             self.W.VBox(
                 [

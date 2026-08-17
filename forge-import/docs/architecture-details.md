@@ -46,7 +46,11 @@ cstar-forge/
 │   ├── forge-blueprint-wizard.ipynb     # wizard notebook (run in Jupyter)
 │   ├── forge-blueprint-wizard-app.ipynb # wizard app notebook (served by Voilà)
 │   ├── models.py               # Spec classes (ModelSpec, etc.)
-│   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors
+│   ├── domain_catalog.py       # DomainCatalog: scans the catalog, exposes accessors;
+│   │                           # LayeredCatalog stacks a writable user layer
+│   │                           # (default_catalog_stack(): ~/cstar-forge-data/catalog,
+│   │                           # or CSTAR_FORGE_CATALOG) over the read-only bundled
+│   │                           # catalog — this stack is the module's default_catalog
 │   ├── config.py               # Path management and system detection
 │   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yaml
 │   ├── cli.py                  # 'cstar forge run'/'cstar forge wizard' typer sub-app (cstar.cli entry point)
@@ -69,7 +73,8 @@ cstar-forge/
 │       ├── ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
 │       ├── OutputSpec/{name}/Output.yaml   # Output configurations
 │       ├── Machines/{system}.yaml          # Machine descriptions
-│       └── blueprints/                     # Example/saved blueprints
+│       └── blueprints/                     # Example blueprints (bundled, read-only layer;
+│                                            # user saves go to the user catalog layer instead)
 ├── templates/                  # Render templates (cppdefs.opt.j2, marbl_in), decoupled
 │                                # from ModelSpec — fetched by ForgeExecutor via C-Star's
 │                                # AdditionalCode
@@ -184,11 +189,16 @@ relocation stays a later step.
 
 **Authoring (catalog → resolver/wizard → blueprint):**
 1. `wiz = ForgeBlueprintWizard()` (forge_blueprint_wizard.py) — scans the catalog via
-   `domain_catalog.default_catalog`, populates dropdowns. The notebook entry point is
-   actually `ForgeBlueprintWizardApp()`, a thin wrapper that shows a catalog-location
-   bar above the wizard (auto-loads the bundled catalog; Reload rebuilds a fresh
-   `ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=...))` against a different
-   local path/`"local"`/GitHub URL/http URL, keeping the previous wizard on failure).
+   `domain_catalog.default_catalog`, populates dropdowns; entries from lower layers
+   (e.g. the bundled catalog) are shown with a `(bundled)` badge. The notebook entry
+   point is actually `ForgeBlueprintWizardApp()`, a thin wrapper that shows a
+   catalog-location bar above the wizard (auto-loads the default layered stack —
+   your writable `~/cstar-forge-data/catalog`/`CSTAR_FORGE_CATALOG` layer over the
+   read-only bundled catalog; Reload rebuilds a fresh wizard against a different
+   single local path/`"local"`/GitHub URL/http URL, or several `os.pathsep`-separated
+   locations to build a new `LayeredCatalog`, keeping the previous wizard on failure).
+   Saves (blueprints, workplans) and catalog registrations land in the stack's
+   writable top layer — never inside the installed package.
 2. User picks a domain → `_on_domain()` prefills grid/boundaries/partitioning/dates from
    `catalog.domain_data(name)`.
 3. Every edit → `_rebuild()` → `build_forge_blueprint(**self._gather())`

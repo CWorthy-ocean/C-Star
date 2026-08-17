@@ -27,13 +27,13 @@ from cstar_forge.config import (
     _default_cluster_type,
     _detect_system,
     _get_hostname,
-    default_catalog_inner_dir,
     get_data_paths,
     load_machine_config,
     main,
     register_system,
     with_catalog,
 )
+from cstar_forge.domain_catalog import user_catalog_root
 
 
 class TestDataPaths:
@@ -107,22 +107,36 @@ class TestDataPaths:
 # config/catalog decoupling — the forge app writes under the injected host.working_dir.
 
 
-class TestDefaultCatalogInnerDir:
-    def test_under_cstar_forge_data_base(self, tmp_path):
-        # Standard layout: source-data is a direct child of the base directory.
-        # Catalog is a sibling of source-data inside that same base.
-        sd = tmp_path / "cstar-forge-data" / "source-data"
-        sd.mkdir(parents=True)
-        assert (
-            default_catalog_inner_dir(sd) == tmp_path / "cstar-forge-data" / "catalog"
-        )
+class TestUserCatalogRoot:
+    """Tests for domain_catalog.user_catalog_root (the writable catalog layer's
+    root), imported here because config.paths.catalog is now just
+    ``user_catalog_root()``.
+    """
 
-    def test_when_source_data_already_under_cstar_forge_data(self, tmp_path):
-        sd = tmp_path / "cstar_forge_data" / "source-data"
-        sd.mkdir(parents=True)
-        assert (
-            default_catalog_inner_dir(sd) == tmp_path / "cstar_forge_data" / "catalog"
+    def test_env_override_uses_first_pathsep_entry(self, monkeypatch, tmp_path):
+        first = tmp_path / "first-catalog"
+        second = tmp_path / "second-catalog"
+        monkeypatch.setenv(
+            "CSTAR_FORGE_CATALOG", os.pathsep.join([str(first), str(second)])
         )
+        assert user_catalog_root() == first.expanduser().resolve()
+
+    def test_env_override_single_entry(self, monkeypatch, tmp_path):
+        entry = tmp_path / "only-catalog"
+        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(entry))
+        assert user_catalog_root() == entry.expanduser().resolve()
+
+    def test_default_is_home_anchored_when_env_unset(self, monkeypatch, tmp_path):
+        # conftest.py forces CSTAR_FORGE_CATALOG globally for test isolation, so
+        # this test must monkeypatch (auto-undone), never delete it globally.
+        monkeypatch.delenv("CSTAR_FORGE_CATALOG", raising=False)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        assert user_catalog_root() == tmp_path / "cstar-forge-data" / "catalog"
+
+    def test_does_not_create_the_directory(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
+        result = user_catalog_root()
+        assert not result.exists()
 
 
 class TestMachineConfig:
@@ -464,7 +478,7 @@ class TestGetDataPaths:
     """Tests for get_data_paths function."""
 
     @patch("cstar_forge.config._detect_system")
-    def test_get_data_paths(self, mock_detect, tmp_path):
+    def test_get_data_paths(self, mock_detect, tmp_path, monkeypatch):
         """Test get_data_paths returns DataPaths object without creating directories.
 
         Importing cstar_forge.config must not have filesystem side effects, so the
@@ -472,6 +486,12 @@ class TestGetDataPaths:
         """
         mock_detect.return_value = "MacOS"
 
+        # conftest.py forces CSTAR_FORGE_CATALOG to an already-created temp dir
+        # (for global test isolation), which would make the "not exists()"
+        # assertions below meaningless -- point it at a not-yet-created path
+        # instead so this test still checks that get_data_paths() itself
+        # creates nothing.
+        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
         # Use a real home directory that exists for the test
         with patch.dict(os.environ, {"HOME": str(tmp_path)}):
             paths = get_data_paths()
@@ -487,14 +507,19 @@ class TestGetDataPaths:
         assert not paths.scratch.exists()
         assert not paths.catalog.exists()
         assert not paths.blueprints.exists()
-        assert paths.catalog == default_catalog_inner_dir(paths.source_data)
+        assert paths.catalog == user_catalog_root()
         assert paths.blueprints == paths.catalog / "blueprints"
 
     @patch("cstar_forge.config._detect_system")
-    def test_get_data_paths_creates_directories(self, mock_detect, tmp_path):
+    def test_get_data_paths_creates_directories(
+        self, mock_detect, tmp_path, monkeypatch
+    ):
         """Test that get_data_paths(create=True) creates necessary directories."""
         mock_detect.return_value = "MacOS"
 
+        # See test_get_data_paths above: repoint the catalog at a not-yet-created
+        # path so this test actually exercises directory creation for it too.
+        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
         # Use a temporary directory as HOME for the test
         with patch.dict(os.environ, {"HOME": str(tmp_path)}):
             paths = get_data_paths(create=True)

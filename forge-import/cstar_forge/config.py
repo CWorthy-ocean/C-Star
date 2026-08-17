@@ -11,8 +11,11 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import yaml
+
+from cstar_forge.domain_catalog import user_catalog_root
 
 logger = logging.getLogger(__name__)
 
@@ -201,16 +204,6 @@ def _layout_unknown(home: Path, env: dict) -> tuple[Path, Path, Path]:
 # --------------------------------------------------------
 
 
-def default_catalog_inner_dir(input_data: Path) -> Path:
-    """
-    Default inner *catalog* directory: the folder that directly contains ``blueprints/``.
-
-    The catalog lives alongside ``input-data`` inside the base data directory, e.g.
-    ``~/cstar-forge-data/catalog/blueprints/``.
-    """
-    return input_data.parent.resolve() / "catalog"
-
-
 def get_data_paths(create: bool = False) -> DataPaths:
     """Return canonical data and project paths adapted to the system we're running on.
 
@@ -229,8 +222,11 @@ def get_data_paths(create: bool = False) -> DataPaths:
     source_data, input_data, scratch = layout_fn(home, env)
 
     here = Path(__file__).resolve().parent
-    # Inner catalog dir: .../cstar_forge_data/catalog/blueprints/
-    catalog = default_catalog_inner_dir(input_data)
+    # The catalog is deliberately home-anchored (unlike source_data/input_data/
+    # scratch above, which get rebased onto HPC $SCRATCH/$WORK): catalog entries
+    # are durable, user-registered content that must survive scratch purges, not
+    # job-scoped working data. See user_catalog_root's docstring.
+    catalog = user_catalog_root()
     blueprints_dir = catalog / "blueprints"
     models_yaml = here / "models.yaml"
     builds_yaml = here / "builds.yaml"
@@ -536,7 +532,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
-    """Load machine config from the default DomainCatalog (internal cstar-forge catalog)."""
+    """Load machine config through the layered default catalog.
+
+    A user ``Machines/<system_tag>.yaml`` (the writable top layer) overrides the
+    bundled catalog's entry for the same tag.
+    """
     from cstar_forge.domain_catalog import default_catalog
 
     try:
@@ -560,8 +560,34 @@ def _load_machine_config_from_catalog(system_tag: str) -> MachineConfig:
 paths = get_data_paths()
 system = _detect_system()
 system_id = system  # Alias for compatibility
-machine_config = _load_machine_config_from_catalog(system)
 cluster_type = _default_cluster_type(system)
+
+# machine_config is lazy (module __getattr__ below): computing it scans the
+# default catalog, which importing cstar_forge.config must not do eagerly.
+_machine_config_cache: MachineConfig | None = None
+
+
+def _get_machine_config() -> MachineConfig:
+    """Return the cached machine config, computing it on first access.
+
+    Internal callers in this module must use this function rather than the
+    bare ``machine_config`` name: module ``__getattr__`` (PEP 562) only
+    intercepts attribute access from *outside* the module (``config.machine_config``,
+    ``from cstar_forge.config import machine_config``); a same-module global
+    reference resolves via ``LOAD_GLOBAL`` against this module's ``__dict__``
+    and would bypass it, raising ``NameError`` instead.
+    """
+    global _machine_config_cache
+    if _machine_config_cache is None:
+        _machine_config_cache = _load_machine_config_from_catalog(system)
+    return _machine_config_cache
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily compute and cache ``machine_config`` on first external access (PEP 562)."""
+    if name == "machine_config":
+        return _get_machine_config()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def _hpc_scratch_root(system_tag: str, env: dict, home: Path) -> Path | None:
@@ -662,7 +688,7 @@ def resolve_host(working_dir):
         working_dir=relocate_working_dir(working_dir),
         source_data_cache=paths.source_data,
         system=system,
-        machine_config=machine_config,
+        machine_config=_get_machine_config(),
     )
 
 

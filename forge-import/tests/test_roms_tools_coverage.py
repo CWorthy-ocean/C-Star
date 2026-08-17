@@ -127,6 +127,10 @@ _SKIP = {
         "chunks",
         "initial_slice_bounds",
         "bypass_validation",
+        # new in roms-tools: forcing time-window padding; will be exposed
+        # deliberately (typed fields + resolver/wizard wiring) in an upcoming PR
+        "start_time_pad",
+        "end_time_pad",
     },
     "BoundaryForcing": {
         "chunks",
@@ -134,6 +138,10 @@ _SKIP = {
         "bypass_validation",
         "physics_forcing",  # internal object for density interp wiring (set by Forge, not user)
         "apply_2d_horizontal_fill",  # deprecated in rt>=4 in favor of `prefill`; Forge exposes prefill instead
+        # new in roms-tools: forcing time-window padding; will be exposed
+        # deliberately (typed fields + resolver/wizard wiring) in an upcoming PR
+        "start_time_pad",
+        "end_time_pad",
     },
     "TidalForcing": {
         "bypass_validation",

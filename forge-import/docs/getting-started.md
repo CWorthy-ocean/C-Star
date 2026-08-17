@@ -54,10 +54,24 @@ the resolved YAML in the Review pane, then **Save** (or **Download**)
 `forge_blueprint.yaml`.
 
 ```{tip}
-In a hurry? A ready-made wio-toy blueprint ships with the package
-(`cstar_forge/catalog/blueprints/cson_roms-marbl_v0.1_wio-toy_10procs.forge_blueprint.yaml`)
-and in the repo as `docs/forge-blueprint-example.wio-toy.yaml` — you can skip
-the wizard entirely and process it directly.
+In a hurry? A ready-made wio-toy blueprint ships with the package — locate it
+with `python -c "from cstar_forge import default_catalog;
+print(default_catalog.forge_blueprint_path('wio-toy-simple'))"` — and a copy
+lives in the repo as `docs/forge-blueprint-example.wio-toy.yaml`. You can skip
+the wizard entirely and process either directly.
+```
+
+```{note}
+**Where your work is saved.** Blueprints and workplans you save from the
+wizard, and any pieces you register to the catalog, land in your own
+writable catalog layer at `~/cstar-forge-data/catalog` (`blueprints/`,
+`workplans/`, and spec directories) — never inside the installed package.
+The bundled examples (like `wio-toy` above) stay visible alongside your own
+in the wizard's dropdowns, read-only, marked with a `(bundled)` badge. Set
+`CSTAR_FORGE_CATALOG` to point the writable layer elsewhere. Upgrading from
+a pre-0.5 install and have blueprints stranded under an old
+`site-packages/cstar_forge/catalog/blueprints/`? Just copy those YAML files
+into `~/cstar-forge-data/catalog/blueprints/` — they're self-contained.
 ```
 
 ## Process the blueprint
@@ -84,7 +98,6 @@ Power-user options (stage selection,
 `cstar forge run path/to/forge_blueprint.yaml` entry point (see
 `cstar forge run --help`).
 ```
-
 
 ## Run the simulation
 
