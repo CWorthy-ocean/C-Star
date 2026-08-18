@@ -23,6 +23,8 @@ Bug Fixes
 
 
 - Fix unit tests failing in HPC environment (`#626 <https://github.com/CWorthy-ocean/C-Star/pull/626>`_)
+- Fixes a bug where the ``continue-from`` directive would look in the wrong directory if PIO is enabled (`#629 <https://github.com/CWorthy-ocean/C-Star/pull/629>`_)
+- Fixes a bug where the ``continue-from`` directive would obtain the wrong file if partitioning was enabled and multiple restart file timestamps were present (`#629 <https://github.com/CWorthy-ocean/C-Star/pull/629>`_)
 
 Improvements
 ~~~~~~~~~~~~
