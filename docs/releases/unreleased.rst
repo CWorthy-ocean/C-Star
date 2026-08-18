@@ -36,4 +36,4 @@ Improvements
 Miscellaneous
 ~~~~~~~~~~~~~
 
-- N/A
+- Pin ``compilers<2`` for laptop installs; see [here](https://github.com/conda-forge/mpich-feedstock/issues/142) for details (`#630 <https://github.com/CWorthy-ocean/C-Star/pull/630>`_)
