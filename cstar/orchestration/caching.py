@@ -842,7 +842,7 @@ def locate_entity_by_name(
         entity = candidate
     else:
         msg = f"The specified key source is invalid. {key_source!r} not found."
-        raise KeyError(msg)
+        raise CachedCallError(msg)
 
     return entity
 
@@ -858,8 +858,8 @@ def locate_entity_by_type(
         # look for an instance member matching the target type.
         if candidate := next(
             (
-                x[1]
-                for x in inspect.getmembers(
+                v
+                for _, v in inspect.getmembers(
                     self, predicate=lambda x: isinstance(x, entity_type)
                 )
             ),
@@ -876,7 +876,7 @@ def locate_entity_by_type(
         msg = (
             f"Unable to locate entity type {entity_type.__name__!r} for key generation"
         )
-        raise ValueError(msg)
+        raise CachedCallError(msg)
 
     return entity
 
@@ -884,6 +884,7 @@ def locate_entity_by_type(
 def to_cached_artifact(
     cache_factory: Callable[[], ArtifactCache],
     entity_type: type[T],
+    *,
     key_source: str = "",
     value_source: str = "",
     cache_key_function: Callable[[T, Mapping[str, str] | None], str] | None = None,
@@ -964,7 +965,7 @@ def to_cached_artifact(
 
             if not target_path:
                 msg = f"Unable to locate target_path for {func.__name__!r} for value caching"
-                raise ValueError(msg)
+                raise CachedCallError(msg)
 
             cache = cache_factory()
 
@@ -975,7 +976,7 @@ def to_cached_artifact(
 
             if not entity:
                 msg = f"Unable to locate entity of type {entity_type.__name__!r} for cache key generation"
-                raise ValueError(msg)
+                raise CachedCallError(msg)
 
             if cache_key_function:
                 key = cache_key_function(entity, context)
