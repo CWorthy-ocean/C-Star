@@ -202,6 +202,8 @@ class RestartFile(BaseModel):
     """The expected file extension for a restart file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
     """The expected timestamp format in the restart file name"""
+    TS_GLOB: t.ClassVar[str] = "[0-9]" * 14
+    """Glob fragment matching the fixed-width (14-digit) timestamp (see `FMT_TS`)."""
     PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
         r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
     )
@@ -245,29 +247,30 @@ class RestartFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        # filter to names that actually parse before constructing (a stray file matching
-        # the glob shape but not `PATTERN_RST` should be skipped, not fatal).
-        matches = [
-            match
-            for match in search_path.rglob(f"*{cls.SUFFIX}.*.*.{cls.EXT}")
-            if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
-        ]
-        if matches:
-            # Prefer pre-partitioned data when available. `matches` may span
-            # several restart timestamps, each with a full set of partition
-            # files, so continue from partition 0 of the most recent timestamp.
-            rst_files = [RestartFile(path=match) for match in matches]
-            latest_ts = max(rst.timestamp for rst in rst_files)
-            return min(
-                (rst for rst in rst_files if rst.timestamp == latest_ts),
-                key=lambda rst: rst.partition or 0,
-            )
+        # Prefer pre-partitioned files (avoids re-partitioning), falling back to
+        # joined (unpartitioned) files. Both globs pin the fixed-width timestamp
+        # but not the variable-width partition segment, so `PATTERN_RST` still
+        # validates each candidate -- skipping stray files that match the glob
+        # shape but not the naming convention rather than treating them as fatal.
+        partitioned_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.*.{cls.EXT}"
+        joined_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.{cls.EXT}"
 
-        # Joined (unpartitioned) restart files carry no partition segment;
-        # continue from the most recent timestamp.
-        matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"), reverse=True)
-        if matches:
-            return RestartFile(path=matches.pop(0))
+        for glob_pattern in (partitioned_glob, joined_glob):
+            rst_files = [
+                RestartFile(path=match)
+                for match in search_path.rglob(glob_pattern)
+                if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
+            ]
+            if rst_files:
+                # A directory may hold several restart timestamps (each a full
+                # partition set); continue from partition 0 of the most recent.
+                # Partition 0 is required: downstream reconstructs the remaining
+                # partitions by substituting its suffix in the file name.
+                latest_ts = max(rst.timestamp for rst in rst_files)
+                return min(
+                    (rst for rst in rst_files if rst.timestamp == latest_ts),
+                    key=lambda rst: rst.partition or 0,
+                )
 
         if not notfound_ok:
             msg = f"No restart files located. Unable to continue from {search_path!r}"
@@ -704,6 +707,9 @@ class ContinuanceDirective(OverrideDirective):
             if name in self.workplan:
                 step = self.workplan[name]
                 fsm = RomsFileSystemManager(step.fsm.root_dir)
+
+                search_path = fsm.output_dir
+
                 # With ParallelIO there are no partitioned restart files to
                 # reuse; the joined restart files live in `joined_output`.
                 blueprint = step.blueprint
@@ -712,10 +718,7 @@ class ContinuanceDirective(OverrideDirective):
                     and blueprint.model_params.use_pio
                 ):
                     search_path = fsm.joined_output_dir
-                else:
-                    # fall back to regular output_dir for non-roms blueprints.
-                    # seems unlikely this is a relevant use case, but easy to guard
-                    search_path = fsm.output_dir
+
             else:
                 msg = f"Unable to locate step {name!r} in workplan"
                 raise KeyError(msg)

@@ -260,9 +260,21 @@ def test_override_transform_system_precedence(
 
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
-@pytest.mark.parametrize("use_pio", [False, True])
+@pytest.mark.parametrize(
+    ("use_pio", "expected_dir_attr", "expected_name"),
+    [
+        pytest.param(
+            False, "output_dir", "output_rst.20120201000000.000.nc", id="no_pio"
+        ),
+        pytest.param(
+            True, "joined_output_dir", "output_rst.20120201000000.nc", id="pio"
+        ),
+    ],
+)
 async def test_continuance_directive_step_resolution(
     use_pio: bool,
+    expected_dir_attr: str,
+    expected_name: str,
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
@@ -350,15 +362,10 @@ async def test_continuance_directive_step_resolution(
             assert ContinuanceDirective.KEY_PATH not in config
 
             # confirm the initial conditions were overridden to continue from the
-            # latest restart of the named step: under PIO the joined restart file
-            # in `joined_output`, otherwise partition 0 in `output`.
+            # latest restart of the named step (see parametrization for the
+            # expected directory and file per PIO mode).
             prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
-            if use_pio:
-                expected_dir = prior_fsm.joined_output_dir
-                expected_name = "output_rst.20120201000000.nc"
-            else:
-                expected_dir = prior_fsm.output_dir
-                expected_name = "output_rst.20120201000000.000.nc"
+            expected_dir = getattr(prior_fsm, expected_dir_attr)
 
             bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
             location = Path(bp.initial_conditions.data[0].location)
@@ -1058,8 +1065,9 @@ def test_restart_file_find_skips_malformed(tmp_path: Path) -> None:
     search_path.mkdir(parents=True)
 
     (search_path / "foo_rst.20120101000000.000.nc").touch()
-    # matches the loose glob `*_rst.*.*.nc` but not `PATTERN_RST` (bad timestamp)
-    (search_path / "foo_rst.notadate.xyz.nc").touch()
+    # matches the glob (valid timestamp) but not `PATTERN_RST` (non-numeric
+    # partition segment), so it must be filtered out rather than constructed
+    (search_path / "foo_rst.20120101000000.xyz.nc").touch()
 
     reset_file = RestartFile.find(search_path, notfound_ok=False)
     assert reset_file
