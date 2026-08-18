@@ -42,11 +42,14 @@ solve.
 On clusters, pip's `--user` fallback and Python's user-site directory
 (`~/.local/lib/pythonX.Y`) are a chronic source of silently broken
 environments: a module-provided Python of the same minor version shares that
-directory and shadows the env's packages. The repo ships the hardening we use:
+directory and shadows the env's packages.
 
-- `scripts/harden-env.sh` — sets `PIP_USER=0`/`PYTHONNOUSERSITE=1` and can
-  persist the latter into the env via an `activate.d` hook, so every future
-  activation stays off user-site.
+- **Conda installs**: the conda-forge `cstar-forge` package ships
+  `activate.d`/`deactivate.d` hooks that set `PYTHONNOUSERSITE=1` on every
+  activation, so the env stays off user-site with no action needed.
+- **Checkout installs**: `scripts/harden-env.sh` (sourced by `dev-setup.sh`)
+  sets `PIP_USER=0`/`PYTHONNOUSERSITE=1` and persists the latter into the env
+  via the same kind of `activate.d` hook.
 
 If you hit `ModuleNotFoundError` for packages you know are installed, or pip
 installs that vanish, this is the first thing to check.
@@ -60,10 +63,10 @@ env's kernel — with an activation wrapper, so shell magics and
 `activate.d`-dependent packages work inside notebooks:
 
 ```bash
-bash scripts/register-kernel.sh   # from a checkout, with the env active
+cstar forge register-kernel   # with the env active; --help for options
 ```
 
-(Equivalent minimal form, without the activation wrapper:
+(Minimal form, without the activation wrapper:
 `python -m ipykernel install --user --name cstar-forge-env`.)
 
 ### Using the wizard from a login node
@@ -138,7 +141,7 @@ conda env create -f environment.yml
 conda activate cstar-forge-env
 ./set-repo-versions.sh --roms-tools-ref main --c-star-ref main  # pip --no-deps from GitHub
 pip install -e . --no-deps
-bash scripts/register-kernel.sh   # optional: Jupyter kernel + activation wrapper
+cstar forge register-kernel       # optional: Jupyter kernel + activation wrapper
 ```
 
 `environment.yml` is a *generated* file (from `pyproject.toml` via pixi — edit

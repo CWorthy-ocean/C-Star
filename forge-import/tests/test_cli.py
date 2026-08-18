@@ -60,6 +60,51 @@ class TestWizard:
         assert "voila is not installed" in result.output
 
 
+class TestRegisterKernel:
+    def test_options_map_to_register_kernel_kwargs(self):
+        with patch("cstar_forge.register_kernel.register_kernel") as mock_register:
+            result = runner.invoke(
+                cli.app,
+                [
+                    "register-kernel",
+                    "--name",
+                    "my-kernel",
+                    "--clean",
+                    "--package-manager",
+                    "micromamba",
+                    "--micromamba-bin",
+                    "/repo/bin/micromamba",
+                ],
+            )
+        assert result.exit_code == 0
+        kwargs = mock_register.call_args.kwargs
+        assert kwargs["name"] == "my-kernel"
+        assert kwargs["display_name"] is None
+        assert kwargs["clean"] is True
+        assert kwargs["package_manager"] == "micromamba"
+        assert kwargs["micromamba_bin"] == "/repo/bin/micromamba"
+
+    def test_defaults(self):
+        with patch("cstar_forge.register_kernel.register_kernel") as mock_register:
+            result = runner.invoke(cli.app, ["register-kernel"])
+        assert result.exit_code == 0
+        kwargs = mock_register.call_args.kwargs
+        assert kwargs["name"] is None
+        assert kwargs["clean"] is False
+        assert kwargs["package_manager"] == "auto"
+
+    def test_register_kernel_error_exits_nonzero_with_message(self):
+        from cstar_forge.register_kernel import RegisterKernelError
+
+        with patch(
+            "cstar_forge.register_kernel.register_kernel",
+            side_effect=RegisterKernelError("not inside a conda env"),
+        ):
+            result = runner.invoke(cli.app, ["register-kernel"])
+        assert result.exit_code == 1
+        assert "not inside a conda env" in result.output
+
+
 class TestEntryPointRegistration:
     def test_pyproject_registers_cstar_cli_entry_point(self):
         # The metadata contract with C-Star's discovery hook: group cstar.cli,

@@ -52,7 +52,8 @@ cstar-forge/
 │   │                           # catalog — this stack is the module's default_catalog
 │   ├── config.py               # Path management and system detection
 │   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yaml
-│   ├── cli.py                  # 'cstar forge run'/'cstar forge wizard' typer sub-app (cstar.cli entry point)
+│   ├── cli.py                  # 'cstar forge run'/'wizard'/'register-kernel' typer sub-app (cstar.cli entry point)
+│   ├── register_kernel.py      # Jupyter kernelspec + activation wrapper (backs 'cstar forge register-kernel')
 │   ├── ui/                     # Wizard presentation layer (Voilà app front-end)
 │   │   ├── _voila_app.ipynb    # Voilà app notebook — internal; served via
 │   │   │                       # run-wizard-app.sh / 'cstar forge wizard'

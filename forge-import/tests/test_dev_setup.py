@@ -44,14 +44,6 @@ def harden_env_script():
 
 
 @pytest.fixture
-def register_kernel_script():
-    """Path to scripts/register-kernel.sh (Jupyter kernel registration +
-    activation wrapper), extracted out of dev-setup.sh.
-    """
-    return Path(__file__).parent.parent / "scripts" / "register-kernel.sh"
-
-
-@pytest.fixture
 def test_environment(test_dir, fixtures_dir):
     """Set up a test environment with minimal files."""
     # Copy environment.yml
@@ -73,8 +65,8 @@ def test_environment(test_dir, fixtures_dir):
     shutil.copy(dev_setup, Path(test_dir) / "dev-setup.sh")
     os.chmod(Path(test_dir) / "dev-setup.sh", 0o755)
 
-    # Copy scripts/ (harden-env.sh, register-kernel.sh) since dev-setup.sh
-    # sources them relative to its own directory.
+    # Copy scripts/ (harden-env.sh) since dev-setup.sh sources it relative
+    # to its own directory.
     scripts_src = Path(__file__).parent.parent / "scripts"
     scripts_dst = Path(test_dir) / "scripts"
     shutil.copytree(scripts_src, scripts_dst)
@@ -182,10 +174,9 @@ class TestDevSetupScript:
         assert "Darwin" in content, "Script missing macOS detection"
         assert "compilers" in content, "Script missing compiler installation"
 
-    def test_dev_setup_sources_helper_scripts(self, dev_setup_script):
-        """Test that dev-setup.sh delegates HPC hardening and kernel
-        registration to scripts/harden-env.sh and scripts/register-kernel.sh
-        instead of inlining them.
+    def test_dev_setup_sources_harden_env(self, dev_setup_script):
+        """Test that dev-setup.sh delegates HPC hardening to
+        scripts/harden-env.sh instead of inlining it.
         """
         with open(dev_setup_script) as f:
             content = f.read()
@@ -193,42 +184,35 @@ class TestDevSetupScript:
         assert "scripts/harden-env.sh" in content, (
             "dev-setup.sh should source scripts/harden-env.sh"
         )
-        assert "scripts/register-kernel.sh" in content, (
-            "dev-setup.sh should source scripts/register-kernel.sh"
-        )
 
-    def test_script_sets_up_jupyter_kernel(self, register_kernel_script):
-        """Test that register-kernel.sh sets up the Jupyter kernel."""
-        with open(register_kernel_script) as f:
-            content = f.read()
+    def test_dev_setup_registers_kernel_via_cli(self, dev_setup_script):
+        """Test that dev-setup.sh registers the kernel through the CLI.
 
-        assert "ipykernel" in content, "Script missing Jupyter kernel setup"
-        assert "KernelSpecManager" in content, "Script missing kernel detection"
-
-    def test_script_registers_kernel_via_activation_wrapper(
-        self, register_kernel_script
-    ):
-        """Test that the kernel is launched through an activating wrapper script.
-
-        Without this, kernel.json launches the env's python by absolute path
-        without activating it, so subprocesses started from a Jupyter server
-        hosted outside the env (e.g. HPC hosted Jupyter) don't see the env's
-        PATH or activate.d hook vars.
+        The kernel-registration logic (ipykernel install, activation wrapper,
+        kernel.json rewrite) lives in cstar_forge/register_kernel.py — covered
+        by tests/test_register_kernel.py — so dev-setup.sh must only translate
+        its variables into CLI flags and invoke `... cstar_forge.cli
+        register-kernel`.
         """
-        with open(register_kernel_script) as f:
+        with open(dev_setup_script) as f:
             content = f.read()
 
-        assert "start-kernel.sh" in content, "Script missing kernel activation wrapper"
-        assert "ipykernel_launcher" in content, (
-            "Wrapper missing ipykernel_launcher exec"
+        assert "cstar_forge.cli" in content, (
+            "dev-setup.sh missing delegation to the cstar_forge CLI"
         )
-        assert "micromamba activate" in content or "conda activate" in content, (
-            "Wrapper missing real env activation"
+        assert "register-kernel" in content, (
+            "dev-setup.sh missing the register-kernel CLI subcommand"
         )
-        assert '"argv"' in content, "Script missing kernel.json argv rewrite"
-        assert "resource_dir" in content, (
-            "Script missing kernel dir resolution via KernelSpecManager"
-        )
+        # Every variable of the registration interface must be forwarded.
+        for var, flag in [
+            ("KERNEL_NAME", "--name"),
+            ("CLEAN_MODE", "--clean"),
+            ("PACKAGE_MANAGER", "--package-manager"),
+            ("MICROMAMBA_CMD", "--micromamba-bin"),
+        ]:
+            assert var in content and flag in content, (
+                f"dev-setup.sh does not forward {var} via {flag}"
+            )
 
     def test_harden_env_script_hardens_pip_and_env_checks(self, harden_env_script):
         """Test that harden-env.sh carries the PIP_USER/PYTHONNOUSERSITE
@@ -264,7 +248,7 @@ class TestDevSetupScript:
     @pytest.mark.skipif(not shutil.which("bash"), reason="bash not available")
     @pytest.mark.parametrize(
         "script_fixture",
-        ["dev_setup_script", "harden_env_script", "register_kernel_script"],
+        ["dev_setup_script", "harden_env_script"],
     )
     def test_script_syntax_valid(self, script_fixture, request):
         """Test that dev-setup.sh and its extracted helper scripts have valid

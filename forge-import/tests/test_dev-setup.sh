@@ -17,7 +17,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEV_SETUP_SCRIPT="$PROJECT_ROOT/dev-setup.sh"
 HARDEN_ENV_SCRIPT="$PROJECT_ROOT/scripts/harden-env.sh"
-REGISTER_KERNEL_SCRIPT="$PROJECT_ROOT/scripts/register-kernel.sh"
 
 # Test counter
 TESTS_PASSED=0
@@ -89,8 +88,8 @@ EOF
   cp "$DEV_SETUP_SCRIPT" ./dev-setup.sh
   chmod +x ./dev-setup.sh
 
-  # Copy scripts/ (harden-env.sh, register-kernel.sh): dev-setup.sh sources
-  # them relative to its own directory, so a subprocess run needs them present.
+  # Copy scripts/ (harden-env.sh): dev-setup.sh sources it relative to its
+  # own directory, so a subprocess run needs it present.
   cp -r "$PROJECT_ROOT/scripts" ./scripts
 }
 
@@ -210,34 +209,29 @@ test_env_file_valid() {
   fi
 }
 
-# Test 8: Extracted helper scripts (Phase 3c) exist, are executable, and have
-# valid bash syntax.
+# Test 8: Extracted helper script (Phase 3c) exists and has valid bash syntax.
 test_helper_scripts_valid() {
-  test_start "scripts/harden-env.sh and scripts/register-kernel.sh are valid"
+  test_start "scripts/harden-env.sh is valid"
 
   if [[ -f "$HARDEN_ENV_SCRIPT" ]] && bash -n "$HARDEN_ENV_SCRIPT" 2>/dev/null; then
     test_pass "scripts/harden-env.sh exists and has valid bash syntax"
   else
     test_fail "scripts/harden-env.sh missing or has syntax errors"
   fi
-
-  if [[ -f "$REGISTER_KERNEL_SCRIPT" ]] && bash -n "$REGISTER_KERNEL_SCRIPT" 2>/dev/null; then
-    test_pass "scripts/register-kernel.sh exists and has valid bash syntax"
-  else
-    test_fail "scripts/register-kernel.sh missing or has syntax errors"
-  fi
 }
 
-# Test 9: dev-setup.sh delegates to the extracted helper scripts rather than
-# inlining HPC hardening / kernel registration itself.
+# Test 9: dev-setup.sh delegates rather than inlining — HPC hardening to the
+# sourced scripts/harden-env.sh, kernel registration to the installed
+# package's own CLI (`cstar forge register-kernel`).
 test_dev_setup_sources_helpers() {
-  test_start "dev-setup.sh sources the extracted helper scripts"
+  test_start "dev-setup.sh delegates hardening and kernel registration"
 
   if grep -q "scripts/harden-env.sh" "$DEV_SETUP_SCRIPT" \
-    && grep -q "scripts/register-kernel.sh" "$DEV_SETUP_SCRIPT"; then
-    test_pass "dev-setup.sh sources scripts/harden-env.sh and scripts/register-kernel.sh"
+    && grep -q "cstar_forge.cli" "$DEV_SETUP_SCRIPT" \
+    && grep -q "register-kernel" "$DEV_SETUP_SCRIPT"; then
+    test_pass "dev-setup.sh sources harden-env.sh and calls the register-kernel CLI"
   else
-    test_fail "dev-setup.sh does not source the extracted helper scripts"
+    test_fail "dev-setup.sh does not delegate hardening/kernel registration"
   fi
 }
 

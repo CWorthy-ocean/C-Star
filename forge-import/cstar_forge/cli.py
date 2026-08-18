@@ -6,6 +6,7 @@ packages are installed the commands appear as::
 
     cstar forge run <forge_blueprint.yaml> [executor options...]
     cstar forge wizard [--port 8866] [voila options...]
+    cstar forge register-kernel [--clean] [--name ...]
 
 ``forge run`` is a deliberate passthrough to the executor's own argparse CLI
 (`cstar_forge.run.main`) — the full option set (stage selection, dask tuning,
@@ -61,6 +62,48 @@ def wizard(
         *ctx.args,
     ]
     _exec_voila(argv)
+
+
+@app.command()
+def register_kernel(
+    name: str | None = typer.Option(
+        None, help="kernel name (default: the active env's name)"
+    ),
+    display_name: str | None = typer.Option(
+        None, help="display name shown in Jupyter (default: the kernel name)"
+    ),
+    clean: bool = typer.Option(
+        False, "--clean", help="remove an existing kernelspec of this name first"
+    ),
+    package_manager: str = typer.Option(
+        "auto", help="tool the wrapper activates with: micromamba, conda, or auto"
+    ),
+    micromamba_bin: str = typer.Option(
+        "micromamba", help="micromamba binary the wrapper should invoke"
+    ),
+) -> None:
+    """Register this env's Jupyter kernel, launched via an activation wrapper.
+
+    Makes the env usable from a Jupyter server hosted outside it (e.g. an HPC
+    OnDemand portal): the kernelspec launches through a wrapper that activates
+    the env first, so shell magics and activate.d-dependent packages work
+    inside notebooks.
+    """
+    from cstar_forge.register_kernel import RegisterKernelError
+    from cstar_forge.register_kernel import register_kernel as _register_kernel
+
+    try:
+        _register_kernel(
+            name=name,
+            display_name=display_name,
+            clean=clean,
+            package_manager=package_manager,
+            micromamba_bin=micromamba_bin,
+            log=typer.echo,
+        )
+    except RegisterKernelError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 def _exec_voila(argv: list[str]) -> None:
