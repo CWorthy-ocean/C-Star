@@ -139,7 +139,12 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
 
     _classification = SourceClassification.REMOTE_BINARY_FILE
 
-    @to_cached_artifact(get_artifact_cache, SourceData, "source")
+    @to_cached_artifact(
+        get_artifact_cache,
+        SourceData,
+        key_source="source",
+        value_source="target_path",
+    )
     def _save_to(self, target_path: Path) -> Path:
         """Takes the target path and immediately performs any local writes."""
         hash_obj = hashlib.sha256()
@@ -233,7 +238,12 @@ class RemoteTextFileRetriever(RemoteFileRetriever):
         target_path = target_dir / self.source.basename
         return self._save_to(target_path)
 
-    @to_cached_artifact(get_artifact_cache, SourceData, "source")
+    @to_cached_artifact(
+        get_artifact_cache,
+        SourceData,
+        key_source="source",
+        value_source="target_path",
+    )
     def _save_to(self, target_path: Path) -> Path:
         """Takes the target path and immediately performs any local writes."""
         data = self.read()
@@ -272,7 +282,9 @@ class LocalFileRetriever(Retriever):
         target_path = target_dir / self.source.basename
         return self._save_to(target_path)
 
-    @to_cached_artifact(get_artifact_cache, SourceData, "source")
+    @to_cached_artifact(
+        get_artifact_cache, SourceData, key_source="source", value_source="target_path"
+    )
     def _save_to(self, target_path: Path) -> Path:
         """Takes the target path and immediately performs any local writes."""
         shutil.copy2(src=Path(self.source.location).resolve(), dst=target_path)
