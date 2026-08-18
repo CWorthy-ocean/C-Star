@@ -106,7 +106,7 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, ParamSpec, Protocol, TypeVar, cast
 
 from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
@@ -141,6 +141,8 @@ __all__ = [
     "fileset_for",
     "fileset_identity",
     "fileset_key",
+    "to_cached_artifact",
+    "to_cached_fileset",
 ]
 
 Params = ParamSpec("Params")
@@ -819,35 +821,209 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
+def locate_entity_by_name(
+    entity_type: type[T], key_source: str, bound_args: inspect.BoundArguments
+) -> T | None:
+    # use key source to find the entity in arguments to func or instance members
+    arguments = bound_args.arguments
+    self = cast("T | None", arguments.get("self", None))
+    entity: T | None = None
+
+    if self and hasattr(self, key_source):
+        # func is a method on a class and that class contains the key source
+        entity = getattr(self, key_source)
+    elif key_source in arguments:
+        # use bound_args to search both args and kwargs
+        candidate = arguments[key_source]
+
+        if not isinstance(candidate, entity_type):
+            msg = f"The specified source key is invalid. {entity_type.__name__!r} expected, {type(candidate).__name__!r} received"
+            raise TypeError(msg)
+        entity = candidate
+    else:
+        msg = f"The specified key source is invalid. {key_source!r} not found."
+        raise KeyError(msg)
+
+    return entity
+
+
+def locate_entity_by_type(
+    entity_type: type[T], bound_args: inspect.BoundArguments
+) -> T | None:
+    arguments = bound_args.arguments
+    self = cast("T | None", arguments.get("self", None))
+    entity: T | None = None
+
+    if self:
+        # look for an instance member matching the target type.
+        if candidate := next(
+            (
+                x[1]
+                for x in inspect.getmembers(
+                    self, predicate=lambda x: isinstance(x, entity_type)
+                )
+            ),
+            None,
+        ):
+            entity = cast("T", candidate)
+    elif candidate := next(
+        (x for x in arguments.values() if isinstance(x, entity_type)),
+        None,
+    ):
+        # found entity of correct type in function arguments
+        entity = candidate
+    else:
+        msg = (
+            f"Unable to locate entity type {entity_type.__name__!r} for key generation"
+        )
+        raise ValueError(msg)
+
+    return entity
+
+
+def locate_target_path(bound_args: inspect.BoundArguments) -> Path:
+    self = cast("object | None", bound_args.arguments.get("self", None))
+    path: Path | None = None
+
+    if candidate := next(
+        (x for x in bound_args.arguments.values() if isinstance(x, Path)),
+        None,
+    ):
+        # found path in function arguments
+        path = candidate
+    elif self:
+        # look for an instance member with Path type
+        if candidate := next(
+            (
+                x[1]
+                for x in inspect.getmembers(
+                    self, predicate=lambda x: isinstance(x, Path)
+                )
+            ),
+            None,
+        ):
+            path = candidate
+
+    if not path:
+        msg = "Unable to locate path to serialized entity for caching."
+        raise ValueError(msg)
+
+    return path
+
+
 def to_cached_artifact(
     cache_factory: Callable[[], ArtifactCache],
     entity_type: type[T],
-    key_attr: str,
+    key_source: str = "",
+    cache_key_function: Callable[[T], str] | None = None,
+    on_hit: Literal["copy", "link"] = "copy",
+    on_miss: Literal["copy", "write_through"] = "copy",
 ) -> Callable[[Callable[P, Path]], Callable[P, Path]]:
+    """Decorator factory applied to functions that take in the entity to be saved
+    and returns the path to the persisted output.
+
+    Parameters
+    ----------
+    cache_factory : Callable[[], ArtifactCache]
+        Factory function that returns the cache
+
+    entity_type : type[T]
+        The object type; used by the system to locate the key-generation function
+        or serialization payload when `key_source` is not provided.
+
+    key_source : str
+        The name of a method parameter or instance member that identifies the
+        serialization payload.
+
+    cache_key_function : Callable[[T], str]
+        Function to be used by the caching system to generate keys. Must be passed when an
+        identity function is not pre-registered with `@identify_for(T)`
+
+    on_hit: Literal["copy", "link"] (default: copy)
+        Used by the system to determine how the cached item should be included in the
+        working directory.
+        - Use "copy" if the data may be modified.
+        - Use "link" when the client use of the data is read-only to avoid writing
+          an extra copy of the data.
+
+    on_miss: Literal["copy", "write_through"] (default: copy)
+        Used by the system to determine how the cached item should be included placed
+        into the cache and what value will be returned.
+        - "copy" creates a copy of the original data and returns the original target path.
+        - "write_through" moves the serialized entity into the cache and replaces the original
+          output path with the location in the cache. It can be used to pre-populate the cache
+          and to avoid creating an extra copy of the data.
+
+    Returns
+    -------
+    Callable[[Callable[P, Path]], Callable[P, Path]]
+    """
+
     def _deco(func: Callable[P, Path]) -> Callable[P, Path]:
+        """Decorator for handling the automatic storage or retrieval from a cache for a
+        serialized entity with a key function registered for the entity type.
+        """
         if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
             return func
 
+        sig = inspect.signature(func)
+
         @functools.wraps(func)
         def _inner(*args: P.args, **kwargs: P.kwargs) -> Path:
-            self = args[0]
-            target_path = cast("Path", args[1])
 
-            key_entity = getattr(self, key_attr)
-            # cache = get_artifact_cache()
-            cache = cache_factory()
             run_id = os.getenv(ENV_CSTAR_RUNID, "")
-            key = generator_for(entity_type).key_for(key_entity, target_path)
+            entity: T | None = None
+
+            if not run_id:
+                msg = "Caching requires an active run-id. Cache disabled."
+                log.warning(msg)
+
+                return func(*args, **kwargs)
+
+            bound_args = sig.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            target_path = locate_target_path(bound_args)
+            cache = cache_factory()
+
+            if key_source:
+                entity = locate_entity_by_name(entity_type, key_source, bound_args)
+            else:
+                entity = locate_entity_by_type(entity_type, bound_args)
+
+            if not entity:
+                msg = f"Unable to locate entity of type {entity_type.__name__!r} for key generation"
+                raise ValueError(msg)
+
+            if cache_key_function:
+                key = cache_key_function(entity)
+            else:
+                key = generator_for(entity_type).key_for(entity, target_path)
+
             if location := cache.resolve(key, run_id, record_use=True):
-                shutil.copy2(src=location.path.resolve(), dst=target_path)
-                log.debug(
-                    f"Copying {key!r} from cache location {str(location.path)!r} into {(target_path)!r}"
-                )
+                cache_path = location.path.resolve()
+                if on_hit == "copy":
+                    shutil.copy2(src=cache_path, dst=target_path)
+                    log.debug(
+                        f"{key!r} copied from cache location {str(location.path)!r} into {(target_path)!r}"
+                    )
+                elif on_hit == "link":
+                    target_path.symlink_to(cache_path)
+                    log.debug(
+                        f"{key!r} symlinked from cache location {str(location.path)!r} into {(target_path)!r}"
+                    )
                 return target_path
+            else:
+                log.debug(f"Cache miss on {key!r}")
 
             result = func(*args, **kwargs)
-            if run_id:
-                cache.ingest(target_path, key, run_id)
+
+            location = cache.ingest(target_path, key, run_id)
+            if on_miss == "write_through":
+                result.unlink()
+                result = location.path
+                log.debug("Cache source removed; returning substituted cache path")
+
             return result
 
         return _inner
@@ -864,9 +1040,18 @@ def to_cached_fileset(
     ],
     Callable[[Path], Sequence[Path]],
 ]:
+    """Decorator factory applied to functions that take in a list of files that must
+    be saved as an atomic unit and returns the same collection.
+
+    Applicable to any callable that has the following parameters:
+    - p: Path - the target path (where to persist)
+    - s: Sequence[Path] - the collection of file paths
+    """
+
     def _deco(
         func: Callable[[Path], Sequence[Path]],
     ) -> Callable[[Path], Sequence[Path]]:
+        """Decorator handling automatic storage and retrieval of a FileSet from the cache."""
         if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
             return func
 
