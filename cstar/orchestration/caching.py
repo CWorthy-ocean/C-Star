@@ -881,43 +881,15 @@ def locate_entity_by_type(
     return entity
 
 
-def locate_target_path(bound_args: inspect.BoundArguments) -> Path:
-    self = cast("object | None", bound_args.arguments.get("self", None))
-    path: Path | None = None
-
-    if candidate := next(
-        (x for x in bound_args.arguments.values() if isinstance(x, Path)),
-        None,
-    ):
-        # found path in function arguments
-        path = candidate
-    elif self:
-        # look for an instance member with Path type
-        if candidate := next(
-            (
-                x[1]
-                for x in inspect.getmembers(
-                    self, predicate=lambda x: isinstance(x, Path)
-                )
-            ),
-            None,
-        ):
-            path = candidate
-
-    if not path:
-        msg = "Unable to locate path to serialized entity for caching."
-        raise ValueError(msg)
-
-    return path
-
-
 def to_cached_artifact(
     cache_factory: Callable[[], ArtifactCache],
     entity_type: type[T],
     key_source: str = "",
-    cache_key_function: Callable[[T], str] | None = None,
+    value_source: str = "",
+    cache_key_function: Callable[[T, Mapping[str, str] | None], str] | None = None,
     on_hit: Literal["copy", "link"] = "copy",
     on_miss: Literal["copy", "write_through"] = "copy",
+    context: Mapping[str, str] | None = None,
 ) -> Callable[[Callable[P, Path]], Callable[P, Path]]:
     """Decorator factory applied to functions that take in the entity to be saved
     and returns the path to the persisted output.
@@ -970,7 +942,9 @@ def to_cached_artifact(
 
         @functools.wraps(func)
         def _inner(*args: P.args, **kwargs: P.kwargs) -> Path:
-
+            """Perform the cache lookup and return the result when found. Otherwise,
+            execute the wrapped function and place the result into the cache.
+            """
             run_id = os.getenv(ENV_CSTAR_RUNID, "")
             entity: T | None = None
 
@@ -983,7 +957,15 @@ def to_cached_artifact(
             bound_args = sig.bind(*args, **kwargs)
             bound_args.apply_defaults()
 
-            target_path = locate_target_path(bound_args)
+            if value_source:
+                target_path = locate_entity_by_name(Path, value_source, bound_args)
+            else:
+                target_path = locate_entity_by_type(Path, bound_args)
+
+            if not target_path:
+                msg = f"Unable to locate target_path for {func.__name__!r} for value caching"
+                raise ValueError(msg)
+
             cache = cache_factory()
 
             if key_source:
@@ -992,13 +974,17 @@ def to_cached_artifact(
                 entity = locate_entity_by_type(entity_type, bound_args)
 
             if not entity:
-                msg = f"Unable to locate entity of type {entity_type.__name__!r} for key generation"
+                msg = f"Unable to locate entity of type {entity_type.__name__!r} for cache key generation"
                 raise ValueError(msg)
 
             if cache_key_function:
-                key = cache_key_function(entity)
+                key = cache_key_function(entity, context)
             else:
-                key = generator_for(entity_type).key_for(entity, target_path)
+                key = generator_for(entity_type).key_for(
+                    entity,
+                    target_path,
+                    context=context,
+                )
 
             if location := cache.resolve(key, run_id, record_use=True):
                 cache_path = location.path.resolve()
