@@ -1192,12 +1192,14 @@ class ArtifactCache:
             kind=kind,
             checksum=digest,
             checksum_mode=(
-                (checksum_mode_override or strategy.mode)
-                if checksum_override is not None
-                else strategy.mode
-            )
-            if digest is not None
-            else None,
+                (
+                    (checksum_mode_override or strategy.mode)
+                    if checksum_override is not None
+                    else strategy.mode
+                )
+                if digest is not None
+                else None
+            ),
             source=source,
             asset_uri=asset_uri or location.uri,
             run_id=run_id,
@@ -1394,12 +1396,14 @@ class ArtifactCache:
             },
             kind=ArtifactKind.SET if user.is_container else ArtifactKind.FILE,
             checksum_override=(
-                manifest.manifest_digest
-                if (manifest := self._read_set_manifest(user.path)) is not None
+                (
+                    manifest.manifest_digest
+                    if (manifest := self._read_set_manifest(user.path)) is not None
+                    else None
+                )
+                if user.is_container
                 else None
-            )
-            if user.is_container
-            else None,
+            ),
             checksum_mode_override=(
                 manifest.checksum_mode
                 if user.is_container and manifest is not None
@@ -1746,6 +1750,64 @@ class ArtifactCache:
             )
         reports.sort(key=lambda r: (r.idle_days is None, -(r.idle_days or 0.0)))
         return reports
+
+    def gc(self, reports: list[UsageReport]) -> None:
+        """Delete the shared artifacts named by a set of usage reports.
+
+        The acting half of :meth:`gc_candidates`, which only reports. They are
+        separate because liveness here is *inferred* from voluntary
+        registration through :meth:`record_use`: a quiet artifact may still
+        have readers that never registered, so nothing is removed until a
+        caller has looked at the list and decided. Passing reports straight
+        from :meth:`gc_candidates` without that step reinstates exactly the
+        automatic deletion the split exists to prevent.
+
+        Each artifact goes with its sidecar record, which carries the
+        reference log and the divergence counters — there is nothing left to
+        describe once the bytes are gone.
+
+        One failure does not abandon the sweep. A shared tier is written by
+        several users, so an artifact may vanish or become unreadable between
+        being reported and being removed; that is logged and the rest
+        proceed, since the alternative is a sweep that stops partway through
+        for a reason the operator cannot see.
+
+        Parameters
+        ----------
+        reports : list of UsageReport
+            Artifacts to remove, as returned by :meth:`gc_candidates`.
+
+        Warnings
+        --------
+        Deletion is not guarded here the way :meth:`delete_shared` is. That
+        guard exists so a single removal cannot happen by accident, and a
+        caller assembling a list of reports has already been deliberate. The
+        confirmation belongs with whoever built the list.
+
+        Examples
+        --------
+        >>> stale = cache.gc_candidates(idle_days=180)
+        >>> cache.gc([report for report in stale if operator_approved(report)])
+        """
+        removed = 0
+        reclaimed = 0
+        for report in reports:
+            try:
+                if self.delete_shared(report.name, confirm=True):
+                    removed += 1
+                    reclaimed += report.size_bytes
+                else:
+                    log.info(
+                        f"Artifact {report.name!r} was already gone before "
+                        "collection reached it"
+                    )
+            except (OSError, ArtifactCacheError) as error:
+                log.warning(f"Could not collect {report.name!r}: {error}")
+
+        log.info(
+            f"Collected {removed} of {len(reports)} artifacts, reclaiming "
+            f"{reclaimed} bytes"
+        )
 
     @staticmethod
     def _age_seconds(earlier: str, later: str) -> float:
@@ -2698,7 +2760,14 @@ class ArtifactCache:
                 return False
             raise ArtifactNotFoundError(f"{name!r} not present in shared tier")
         location.path.unlink()
-        self.shared_record_path(name).unlink(missing_ok=True)
+        record_path = self.shared_record_path(name)
+        record_path.unlink(missing_ok=True)
+        # The sidecar's lock file is named after it and would otherwise
+        # outlive the artifact. One orphan is harmless; a garbage-collection
+        # sweep leaves one per artifact removed, which is not.
+        record_path.with_name(f"{record_path.name}{_LOCK_SUFFIX}").unlink(
+            missing_ok=True
+        )
         return True
 
     # ------------------------------------------------------------------

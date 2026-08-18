@@ -24,10 +24,12 @@ ARG_MOVE: t.Final[str] = "--move"
 ARG_PATH: t.Final[str] = "--path"
 ARG_RUNID: t.Final[str] = "--run-id"
 ARG_YES: t.Final[str] = "--yes"
+ARG_GC: t.Final[str] = "--garbage"
 
 
 CHOICE_YES: t.Final[str] = "y"
 CHOICE_NO: t.Final[str] = "n"
+CHOICE_ALL: t.Final[str] = "all"
 choices: t.Final[list[str]] = [CHOICE_YES, CHOICE_NO]
 
 

@@ -2064,3 +2064,229 @@ def test_user_commit_names_its_run(
         f"Artifact 'owned.nc' added to the user cache for run {RUN_ID!r}"
         in caplog.messages
     )
+
+
+# ---------------------------------------------------------------------------
+# Garbage collection
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def published(cache: ArtifactCache, tmp_path: Path) -> list[str]:
+    """Publish three shared artifacts and return their names.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache to write into.
+    tmp_path : Path
+        Pytest-provided temporary directory.
+
+    Returns
+    -------
+    list of str
+        Names of the published artifacts.
+    """
+    source = tmp_path / "payload.nc"
+    source.write_bytes(b"payload")
+    names = ["first.nc", "second.nc", "third.nc"]
+    for name in names:
+        cache.ingest(source, name, RUN_ID)
+        cache.promote(name, RUN_ID)
+    return names
+
+
+def test_gc_removes_the_reported_artifacts(
+    cache: ArtifactCache, published: list[str]
+) -> None:
+    """The acting half of ``gc_candidates`` removes what it is handed.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    """
+    cache.gc(cache.gc_candidates(idle_days=0.0))
+
+    assert cache.list_shared_artifacts() == []
+    for name in published:
+        assert cache.resolve(name) is None
+
+
+def test_gc_removes_only_what_it_is_given(
+    cache: ArtifactCache, published: list[str]
+) -> None:
+    """Reporting and acting are separate so a caller can filter in between.
+
+    That separation is the whole point: liveness is inferred from voluntary
+    registration, so an operator has to be able to keep something the sweep
+    listed.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    """
+    reports = cache.gc_candidates(idle_days=0.0)
+    keep = published[0]
+
+    cache.gc([report for report in reports if report.name != keep])
+
+    assert cache.resolve(keep) is not None
+    assert [location.name for location in cache.list_shared_artifacts()] == [keep]
+
+
+def test_gc_takes_the_sidecar_with_the_artifact(
+    cache: ArtifactCache, published: list[str]
+) -> None:
+    """A record describing bytes that are gone is nothing but confusion.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    """
+    name = published[0]
+    assert cache.read_shared_record(name) is not None
+
+    cache.gc([report for report in cache.gc_candidates(0.0) if report.name == name])
+
+    assert cache.read_shared_record(name) is None
+    assert not cache.shared_record_path(name).exists()
+
+
+def test_gc_leaves_no_lock_files_behind(
+    cache: ArtifactCache, published: list[str], shared_root: Path
+) -> None:
+    """A sweep must not trade artifacts for an equal number of orphans.
+
+    Each sidecar has a lock file named after it. One left behind is harmless;
+    one per artifact collected turns a tidying operation into a slower leak.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    shared_root : Path
+        Shared tier root.
+    """
+    cache.gc(cache.gc_candidates(idle_days=0.0))
+
+    assert list(shared_root.rglob("*.lock")) == []
+    assert [item for item in shared_root.rglob("*") if item.is_file()] == []
+
+
+def test_gc_accepts_an_empty_list(cache: ArtifactCache, published: list[str]) -> None:
+    """Nothing to collect is not an error.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    """
+    cache.gc([])
+
+    assert len(cache.list_shared_artifacts()) == len(published)
+
+
+def test_gc_continues_past_an_artifact_that_vanished(
+    cache: ArtifactCache, published: list[str]
+) -> None:
+    """A shared tier has several writers, so a report can go stale mid-sweep.
+
+    Stopping at the first casualty would abandon the rest for a reason the
+    operator cannot see from the outside.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    """
+    reports = cache.gc_candidates(idle_days=0.0)
+    cache.delete_shared(published[1], confirm=True)
+
+    cache.gc(reports)
+
+    assert cache.list_shared_artifacts() == []
+
+
+def test_gc_continues_past_an_unremovable_artifact(
+    cache: ArtifactCache, published: list[str], shared_root: Path
+) -> None:
+    """One artifact that refuses to go must not shield the others.
+
+    A symlink in the shared tier is refused by ``delete_shared`` as unsafe;
+    the sweep should report it and carry on.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    shared_root : Path
+        Shared tier root.
+    """
+    guarded = published[1]
+    path = shared_root / guarded
+    path.unlink()
+    path.symlink_to(shared_root / published[0])
+
+    cache.gc(cache.gc_candidates(idle_days=0.0))
+
+    assert path.is_symlink()
+    assert cache.resolve(published[2]) is None
+
+
+def test_gc_reports_what_it_collected(
+    cache: ArtifactCache,
+    published: list[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A sweep says how much it removed, since nothing else will.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    caplog : pytest.LogCaptureFixture
+        Captured log records.
+    """
+    with caplog.at_level(logging.INFO):
+        cache.gc(cache.gc_candidates(idle_days=0.0))
+
+    assert f"Collected {len(published)} of {len(published)} artifacts" in "\n".join(
+        caplog.messages
+    )
+
+
+def test_gc_does_not_touch_the_user_tier(
+    cache: ArtifactCache, published: list[str]
+) -> None:
+    """Collection is a shared-tier operation; a run's own copies are its own.
+
+    Parameters
+    ----------
+    cache : ArtifactCache
+        Cache under test.
+    published : list of str
+        Names of the published artifacts.
+    """
+    cache.gc(cache.gc_candidates(idle_days=0.0))
+
+    for name in published:
+        assert cache.locate(name, Tier.USER, RUN_ID).exists
