@@ -10,6 +10,7 @@ Tests cover:
 - Constants and registry consistency
 """
 
+import stat
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -352,6 +353,129 @@ class TestSourceDataMethods:
 
         with pytest.raises(ValueError, match="requires attributes"):
             sd.prepare_all()
+
+
+class TestShareWithGroup:
+    """Tests for the group-readability sweep (share_with_group / _add_group_read)."""
+
+    @staticmethod
+    def _mode(path: Path) -> int:
+        return stat.S_IMODE(path.stat().st_mode)
+
+    def test_files_gain_group_read_and_dirs_group_rx(self, tmp_path):
+        """0600 files become group-readable; intermediate dirs become group-traversable."""
+        root = tmp_path / "source-data"
+        dataset_dir = root / "SRTM15"
+        dataset_dir.mkdir(parents=True)
+        dataset_dir.chmod(0o700)
+        f = dataset_dir / "SRTM15_V2.7.nc"
+        f.write_text("data")
+        f.chmod(0o600)  # what NamedTemporaryFile leaves behind
+        root.chmod(0o700)
+
+        sd = SourceData(datasets=["SRTM15"], source_data_dir=root)
+        sd.paths["SRTM15"] = f
+        sd.share_with_group()
+
+        assert self._mode(f) & stat.S_IRGRP
+        assert not self._mode(f) & stat.S_IWGRP  # never adds group-write
+        assert self._mode(dataset_dir) & stat.S_IRGRP
+        assert self._mode(dataset_dir) & stat.S_IXGRP
+        assert self._mode(root) & stat.S_IXGRP
+
+    def test_expands_lists_dicts_and_glob_patterns(self, tmp_path):
+        """GLORYS lists, TPXO dicts, and WOA/RIVR2O wildcard patterns are all swept."""
+        root = tmp_path / "source-data"
+        glorys = root / "GLORYS_REGIONAL"
+        tpxo = root / "TPXO"
+        woa = root / "WOA"
+        for d in (glorys, tpxo, woa):
+            d.mkdir(parents=True)
+        files = [
+            glorys / "day1.nc",
+            glorys / "day2.nc",
+            tpxo / "grid.nc",
+            woa / "woa18_decav_s01_04.nc",
+        ]
+        for f in files:
+            f.write_text("x")
+            f.chmod(0o600)
+
+        sd = SourceData(datasets=["GLORYS_REGIONAL"], source_data_dir=root)
+        sd.paths = {
+            "GLORYS_REGIONAL": [glorys / "day1.nc", glorys / "day2.nc"],
+            "TPXO": {"grid": tpxo / "grid.nc"},
+            "WOA": woa / "woa*_decav_s*.nc",
+        }
+        sd.share_with_group()
+
+        for f in files:
+            assert self._mode(f) & stat.S_IRGRP, f
+
+    def test_tolerates_chmod_failure_and_missing_paths(self, tmp_path, monkeypatch):
+        """Chmod on another user's file (PermissionError) or a vanished path never raises."""
+        root = tmp_path / "source-data"
+        root.mkdir()
+        f = root / "UNIFIED_BGC" / "bgc.nc"
+        f.parent.mkdir()
+        f.write_text("x")
+
+        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=root)
+        sd.paths = {
+            "UNIFIED_BGC": f,
+            "GONE": root / "GONE" / "missing.nc",  # stat() raises OSError
+            "NONE": None,  # streamable entry
+        }
+        monkeypatch.setattr(Path, "chmod", MagicMock(side_effect=PermissionError))
+        sd.share_with_group()  # must not raise
+
+    def test_prepare_all_sweeps_downloads(self, tmp_path):
+        """prepare_all makes a handler's 0600 download group-readable."""
+        root = tmp_path / "source-data"
+        dataset_dir = root / "UNIFIED_BGC"
+        dataset_dir.mkdir(parents=True)
+
+        def fake_handler(sd):
+            p = dataset_dir / "bgc.nc"
+            p.write_text("x")
+            p.chmod(0o600)
+            return p
+
+        handler = MagicMock()
+        handler.requires = []
+        handler.func = fake_handler
+
+        sd = SourceData(datasets=["UNIFIED_BGC"], source_data_dir=root)
+        with patch.dict(DATASET_REGISTRY, {"UNIFIED_BGC": handler}):
+            sd.prepare_all()
+
+        assert self._mode(dataset_dir / "bgc.nc") & stat.S_IRGRP
+
+    def test_prepare_all_sweeps_even_when_a_handler_fails(self, tmp_path):
+        """Datasets staged before a mid-run failure are still shared with the group."""
+        root = tmp_path / "source-data"
+        dataset_dir = root / "UNIFIED_BGC"
+        dataset_dir.mkdir(parents=True)
+        staged = dataset_dir / "bgc.nc"
+
+        def ok_handler(sd):
+            staged.write_text("x")
+            staged.chmod(0o600)
+            return staged
+
+        unified = MagicMock()
+        unified.requires = []
+        unified.func = ok_handler
+        tpxo = MagicMock()
+        tpxo.requires = []
+        tpxo.func = MagicMock(side_effect=FileNotFoundError("no TPXO"))
+
+        sd = SourceData(datasets=["UNIFIED_BGC", "TPXO"], source_data_dir=root)
+        with patch.dict(DATASET_REGISTRY, {"UNIFIED_BGC": unified, "TPXO": tpxo}):
+            with pytest.raises(FileNotFoundError):
+                sd.prepare_all()
+
+        assert self._mode(staged) & stat.S_IRGRP
 
 
 class TestConstants:

@@ -1,7 +1,8 @@
 import logging
 import shutil
+import stat
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import MISSING, dataclass
 from dataclasses import fields as dc_fields
 from datetime import datetime, timedelta
@@ -28,6 +29,40 @@ class DatasetHandler:
 
 
 DATASET_REGISTRY: dict[str, DatasetHandler] = {}
+
+
+def _add_group_read(path: Path) -> None:
+    """Best-effort ``chmod g+rX``: add group-read (plus group-execute for directories).
+
+    Only ever *adds* group bits (never write, never other), and silently tolerates
+    failure: in a group-shared cache, files staged by a different user cannot be
+    chmodded by this one (chmod is owner-only) — and don't need to be.
+    """
+    try:
+        mode = path.stat().st_mode
+        extra = stat.S_IRGRP | (stat.S_IXGRP if stat.S_ISDIR(mode) else 0)
+        if (mode & extra) != extra:
+            path.chmod(mode | extra)
+    except OSError:
+        pass
+
+
+def _iter_concrete_paths(obj) -> Iterator[Path]:
+    """Yield concrete Paths from a handler result (Path, glob-pattern Path, list, dict, None)."""
+    if obj is None:
+        return
+    if isinstance(obj, (list, tuple, set)):
+        for item in obj:
+            yield from _iter_concrete_paths(item)
+    elif isinstance(obj, dict):
+        for item in obj.values():
+            yield from _iter_concrete_paths(item)
+    elif isinstance(obj, Path):
+        # WOA/RIVR2O handlers return wildcard patterns for roms-tools; expand them.
+        if "*" in obj.name:
+            yield from obj.parent.glob(obj.name)
+        else:
+            yield obj
 
 
 def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
@@ -178,38 +213,67 @@ class SourceData:
             If True, also prepare streamable datasets. If False (default),
             streamable datasets are skipped.
         """
-        for name in self.datasets:
-            # Datasets Forge doesn't stage: provided by roms-tools (ETOPO5) or streamed
-            # at run time with no handler (DAI). Always skipped here, never staged.
-            if name in UNSTAGED_DATASETS:
-                continue
-            if name in STREAMABLE_SOURCES and not include_streamable:
-                continue
-            # raise error if not in registry (shouldn't happen after validation, but be safe)
-            if name not in DATASET_REGISTRY:
-                raise ValueError(f"Unknown dataset: {name}")
+        try:
+            for name in self.datasets:
+                # Datasets Forge doesn't stage: provided by roms-tools (ETOPO5) or streamed
+                # at run time with no handler (DAI). Always skipped here, never staged.
+                if name in UNSTAGED_DATASETS:
+                    continue
+                if name in STREAMABLE_SOURCES and not include_streamable:
+                    continue
+                # raise error if not in registry (shouldn't happen after validation, but be safe)
+                if name not in DATASET_REGISTRY:
+                    raise ValueError(f"Unknown dataset: {name}")
 
-            handler = DATASET_REGISTRY[name]
-            # Make sure required attributes are provided
-            missing_attrs = [
-                attr for attr in handler.requires if getattr(self, attr) is None
-            ]
-            if missing_attrs:
-                raise ValueError(
-                    f"Dataset '{name}' requires attributes {missing_attrs}, "
-                    "but they were not provided to SourceData()."
-                )
-            if self.source_data_dir is None:
-                raise ValueError(
-                    f"SourceData.source_data_dir must be set to prepare '{name}' — the "
-                    "caller must inject the dataset cache root (source_data no longer "
-                    "reads cstar_forge.config)."
-                )
+                handler = DATASET_REGISTRY[name]
+                # Make sure required attributes are provided
+                missing_attrs = [
+                    attr for attr in handler.requires if getattr(self, attr) is None
+                ]
+                if missing_attrs:
+                    raise ValueError(
+                        f"Dataset '{name}' requires attributes {missing_attrs}, "
+                        "but they were not provided to SourceData()."
+                    )
+                if self.source_data_dir is None:
+                    raise ValueError(
+                        f"SourceData.source_data_dir must be set to prepare '{name}' — the "
+                        "caller must inject the dataset cache root (source_data no longer "
+                        "reads cstar_forge.config)."
+                    )
 
-            path = handler.func(self)  # call handler with this instance
-            self.paths[name] = path  # store generically
+                path = handler.func(self)  # call handler with this instance
+                self.paths[name] = path  # store generically
+        finally:
+            # Even on a mid-run failure, share whatever was already staged.
+            self.share_with_group()
 
         return self
+
+    def share_with_group(self) -> None:
+        """Make staged datasets group-readable (``g+r`` files, ``g+rx`` directories).
+
+        On HPC the source-data cache typically lives in a group-shared allocation,
+        but downloads land user-private: ``tempfile.NamedTemporaryFile`` creates
+        0600 files regardless of umask (SRTM15, MBL_CO2), and a restrictive umask
+        makes the copernicusmarine/gdown downloads private too. This sweep walks
+        every prepared path (plus its parent directories up to and including
+        ``source_data_dir``) and adds group-read bits. Best-effort: paths owned by
+        another user are skipped silently (see ``_add_group_read``).
+        """
+        if self.source_data_dir is None:
+            return
+        root = self.source_data_dir
+        _add_group_read(root)
+        for result in self.paths.values():
+            for p in _iter_concrete_paths(result):
+                _add_group_read(p)
+                # Group-read on a file is useless if an ancestor dir blocks traversal;
+                # fix dirs between the file and the cache root (root handled above).
+                for parent in p.parents:
+                    if parent == root or not parent.is_relative_to(root):
+                        break
+                    _add_group_read(parent)
 
     # -----------------------------------------
     # Helpers for model.py (logical source → path)
