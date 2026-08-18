@@ -331,9 +331,7 @@ async def test_continuance_directive_step_resolution(
 
     await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
 
-    # `read_yaml_intercept` rewrites `local_bp` with the default template on every
-    # workplan read (the last of which is inside `create_mocked_simulation_outputs`),
-    # so inject `use_pio` here to ensure it survives into the directive's blueprint read.
+    # inject `use_pio` here to ensure it survives into the directive's blueprint read.
     bp = deserialize(local_bp, RomsMarblBlueprint)
     bp.model_params.use_pio = use_pio
     assert serialize(local_bp, bp)

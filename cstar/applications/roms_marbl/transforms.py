@@ -215,10 +215,11 @@ class RestartFile(BaseModel):
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
-        If `search_path` identifies a directory, the first item matching the `RestartFile`
-        naming convention is returned.
+        If `search_path` identifies a directory, the item matching the _latest_
+        timestamp and the 0th partition piece (if partitioned) is returned.
 
         If `search_path` identifies a file, that `RestartFile` will be returned.
+
 
         Parameters
         ----------
@@ -247,11 +248,6 @@ class RestartFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        # Prefer pre-partitioned files (avoids re-partitioning), falling back to
-        # joined (unpartitioned) files. Both globs pin the fixed-width timestamp
-        # but not the variable-width partition segment, so `PATTERN_RST` still
-        # validates each candidate -- skipping stray files that match the glob
-        # shape but not the naming convention rather than treating them as fatal.
         partitioned_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.*.{cls.EXT}"
         joined_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.{cls.EXT}"
 
@@ -262,10 +258,6 @@ class RestartFile(BaseModel):
                 if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
             ]
             if rst_files:
-                # A directory may hold several restart timestamps (each a full
-                # partition set); continue from partition 0 of the most recent.
-                # Partition 0 is required: downstream reconstructs the remaining
-                # partitions by substituting its suffix in the file name.
                 latest_ts = max(rst.timestamp for rst in rst_files)
                 return min(
                     (rst for rst in rst_files if rst.timestamp == latest_ts),
