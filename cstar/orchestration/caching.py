@@ -944,9 +944,6 @@ def to_cached_artifact(
         """Decorator for handling the automatic storage or retrieval from a cache for a
         serialized entity with a key function registered for the entity type.
         """
-        if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
-            return func
-
         sig = inspect.signature(func)
 
         @functools.wraps(func)
@@ -957,11 +954,14 @@ def to_cached_artifact(
             run_id = os.getenv(ENV_CSTAR_RUNID, "")
             entity: T | None = None
 
+            if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
+                msg = f"Caching flag {ENV_CSTAR_ARTIFACT_CACHE_ENABLED!r} is disabled."
+                log.debug(msg)
+                return func(*args, **kwargs)
+
             if not run_id:
                 msg = "Caching requires an active run-id. Cache disabled."
                 log.warning(msg)
-
-                return func(*args, **kwargs)
 
             bound_args = sig.bind(*args, **kwargs)
             bound_args.apply_defaults()
@@ -1051,9 +1051,6 @@ def to_cached_fileset(
         func: Callable[P, Sequence[Path]],
     ) -> Callable[P, Sequence[Path]]:
         """Decorator handling automatic storage and retrieval of a FileSet from the cache."""
-        if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
-            return func
-
         sig = inspect.signature(func)
 
         @functools.wraps(func)
@@ -1061,6 +1058,11 @@ def to_cached_fileset(
             cache = cache_factory()
             run_id = os.getenv(ENV_CSTAR_RUNID, "")
             # key = f"{key_func(source_file)}{AGGREGATE_SUFFIX}"
+
+            if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
+                msg = f"Caching flag {ENV_CSTAR_ARTIFACT_CACHE_ENABLED!r} is disabled."
+                log.debug(msg)
+                return func(*args, **kwargs)
 
             if not run_id:
                 msg = "Caching requires an active run-id. Cache disabled."
