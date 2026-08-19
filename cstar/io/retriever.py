@@ -148,8 +148,6 @@ class RemoteBinaryFileRetriever(RemoteFileRetriever):
     def _save_to(self, target_path: Path) -> Path:
         """Takes the target path and immediately performs any local writes."""
         hash_obj = hashlib.sha256()
-        for _ in range(5):
-            self.log.debug("CACHE MISS" * 10)  # make it obvious for now...
 
         with requests.get(self.source.location, stream=True, allow_redirects=True) as r:
             r.raise_for_status()
