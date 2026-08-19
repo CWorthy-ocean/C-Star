@@ -104,8 +104,8 @@ class DirectoryManager:
             # check user provided XDG-.*-HOME environment variables
             path = Path(env_item.value)
 
-        if "cstar" not in str(path):
-            path = path / "cstar"
+        if DirectoryManager._PKG_SUBDIR not in str(path):
+            path = path / DirectoryManager._PKG_SUBDIR
 
         return path.expanduser().resolve()
 
