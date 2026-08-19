@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.cli.workplan.run import app
+from cstar.cli.workplan.run import app, preprocess_runid
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.models import UserDefinedVariables
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -666,3 +666,32 @@ async def test_workplan_run_reload_prior_run(
 
     # confirm the attempt to load the old record was made
     mock_get_wp.assert_called()
+
+
+@pytest.mark.parametrize(
+    ("raw_run_id", "expected"),
+    [
+        ("MyRun", "myrun"),
+        ("  MyRun_01  ", "myrun_01"),
+        ("My Run!", "my-run"),
+        ("already-lowercase", "already-lowercase"),
+    ],
+)
+def test_preprocess_runid_normalizes_case(raw_run_id: str, expected: str) -> None:
+    """Verify a user-supplied run-id is slugified (lowercased) at intake.
+
+    Mixed-case run-ids previously produced two run directories (one raw, one
+    slugified) and mismatched tracking/cache entries because the environment
+    variable was slugified while directories and tracking records used the
+    raw value.
+
+    Parameters
+    ----------
+    raw_run_id : str
+        The run-id as typed by the user.
+    expected : str
+        The normalized run-id expected after preprocessing.
+    """
+    ctx = mock.MagicMock(spec=typer.Context)
+
+    assert preprocess_runid(ctx, raw_run_id) == expected

@@ -15,6 +15,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.utils import slugify
 from cstar.cli.common import (
     cb_pipeline,
     set_env,
@@ -266,6 +267,8 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     """Perform validation and formatting of the run-id argument.
 
     - verify blueprint path or run-id is supplied
+    - normalize a user-supplied run-id (slugify) so the same identifier is
+      used everywhere (directories, tracking records, environment)
     - generate a default run id from a blueprint if run-id is not supplied
 
     Parameters
@@ -280,7 +283,11 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     str
     """
     if run_id := run_id.strip():
-        return run_id
+        normalized = slugify(run_id)
+        if normalized != run_id:
+            msg = f"Normalized run-id `{run_id}` to `{normalized}`"
+            log.info(msg)
+        return normalized
 
     path: str | None = ctx.params.get("path", None)
     if isinstance(path, str):

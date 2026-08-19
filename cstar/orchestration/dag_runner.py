@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, computed_field
 from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
+from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -559,7 +560,10 @@ async def build_and_run_dag(
         The path to the workplan that was executed after any tranformations
         were applied.
     """
-    default_output_dir = StateDirectoryManager.data_dir()
+    if run_id:
+        run_id = slugify(run_id)
+
+    default_output_dir = StateDirectoryManager.data_dir(run_id or None)
     output_dir = (output_dir or default_output_dir).expanduser().resolve()
     configure_environment(output_dir, run_id)
 
