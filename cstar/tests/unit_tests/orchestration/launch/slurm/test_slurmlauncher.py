@@ -46,8 +46,8 @@ def test_slurmlauncher_adapt_step_no_overrides(
     mock_mgr = mock.Mock()
     mock_mgr.environment.package_root = tmp_path
     mock_mgr.scheduler = SlurmScheduler(
-        queues=[fake_get_queue("a"), fake_get_queue("b")],
-        primary_queue_name="a",
+        queues=[fake_get_queue("default-q"), fake_get_queue("alt-q")],
+        primary_queue_name="default-q",
         other_scheduler_directives={},
         requires_task_distribution=False,
         documentation="fake slurm scheduduler",
@@ -192,7 +192,7 @@ def test_slurmlauncher_adapt_step_with_overrides(
     mock_mgr.environment.package_root = tmp_path
     mock_mgr.scheduler = SlurmScheduler(
         queues=[fake_get_queue("default-q"), fake_get_queue("alt-q")],
-        primary_queue_name="a",
+        primary_queue_name="default-q",
         other_scheduler_directives={},
         requires_task_distribution=False,
         documentation="fake slurm scheduduler",
