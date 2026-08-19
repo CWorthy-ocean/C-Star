@@ -46,8 +46,8 @@ def test_slurmlauncher_adapt_step_no_overrides(
     mock_mgr = mock.Mock()
     mock_mgr.environment.package_root = tmp_path
     mock_mgr.scheduler = SlurmScheduler(
-        queues=[fake_get_queue("a"), fake_get_queue("b")],
-        primary_queue_name="a",
+        queues=[fake_get_queue("default-q"), fake_get_queue("alt-q")],
+        primary_queue_name="default-q",
         other_scheduler_directives={},
         requires_task_distribution=False,
         documentation="fake slurm scheduduler",
@@ -74,23 +74,112 @@ def test_slurmlauncher_adapt_step_no_overrides(
 
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
-    ("overrides",),
+    (
+        "overrides",
+        "exp_account",
+        "exp_queue",
+        "exp_walltime",
+        "exp_ncpus",
+        "exp_nnodes",
+        "exp_cpus_per_node",
+    ),
     [
-        pytest.param({"slurm": {"queue_name": "b"}}, id="queue-name"),
-        pytest.param({"slurm": {"num_cpus": "42"}}, id="num-cpus"),
-        pytest.param({"slurm": {"num_nodes": "99"}}, id="num-nodes"),
-        pytest.param({"slurm": {"max_walltime": "01:00:00"}}, id="walltime"),
-        pytest.param({"slurm": {"cpus_per_node": "32"}}, id="cpus-per-node"),
-        pytest.param({"slurm": {"account_name": "alt-acct"}}, id="account-name"),
+        pytest.param(
+            {"slurm": {"queue_name": "alt-q"}},
+            "default-account",
+            "alt-q",
+            "42:00:00",
+            128,
+            None,
+            None,
+            id="queue-name",
+        ),
+        pytest.param(
+            {"slurm": {"num_cpus": "42"}},
+            "default-account",
+            "default-q",
+            "42:00:00",
+            42,
+            None,
+            None,
+            id="num-cpus",
+        ),
+        pytest.param(
+            {"slurm": {"num_nodes": "99"}},
+            "default-account",
+            "default-q",
+            "42:00:00",
+            128,
+            99,
+            None,
+            id="num-nodes",
+        ),
+        pytest.param(
+            {"slurm": {"max_walltime": "01:00:00"}},
+            "default-account",
+            "default-q",
+            "01:00:00",
+            128,
+            None,
+            None,
+            id="walltime",
+        ),
+        pytest.param(
+            {"slurm": {"cpus_per_node": "32"}},
+            "default-account",
+            "default-q",
+            "42:00:00",
+            128,
+            None,
+            32,
+            id="cpus-per-node",
+        ),
+        pytest.param(
+            {"slurm": {"account_name": "alt-account"}},
+            "alt-account",
+            "default-q",
+            "42:00:00",
+            128,
+            None,
+            None,
+            id="account-name",
+        ),
+        pytest.param(
+            {
+                "slurm": {
+                    "account_name": "alt-account",
+                    "queue_name": "alt-q",
+                    "num_cpus": 10,
+                    "num_nodes": 20,
+                    "max_walltime": "02:00:00",
+                    "cpus_per_node": 30,
+                }
+            },
+            "alt-account",
+            "alt-q",
+            "02:00:00",
+            10,
+            20,
+            30,
+            id="all",
+        ),
     ],
 )
 def test_slurmlauncher_adapt_step_with_overrides(
     tmp_path: Path,
     wp_templates_dir: Path,
     overrides: dict[str, dict[str, str]],
+    exp_account: str,
+    exp_queue: str,
+    exp_walltime: str,
+    exp_ncpus: int,
+    exp_nnodes: int | None,
+    exp_cpus_per_node: int | None,
 ) -> None:
     """Verify that the `SlurmLauncher` correctly converts a step into a `SchedulerJob`
     that includes any provided per-step compute overrides.
+
+    NOTE: num_cpus is populated from the template bp, resulting in 128: `return xi * eta`
     """
     wp_path = wp_templates_dir / "single_step.yaml"
     workplan = deserialize(wp_path, Workplan)
@@ -102,8 +191,8 @@ def test_slurmlauncher_adapt_step_with_overrides(
     mock_mgr = mock.Mock()
     mock_mgr.environment.package_root = tmp_path
     mock_mgr.scheduler = SlurmScheduler(
-        queues=[fake_get_queue("a"), fake_get_queue("b")],
-        primary_queue_name="a",
+        queues=[fake_get_queue("default-q"), fake_get_queue("alt-q")],
+        primary_queue_name="default-q",
         other_scheduler_directives={},
         requires_task_distribution=False,
         documentation="fake slurm scheduduler",
@@ -115,9 +204,9 @@ def test_slurmlauncher_adapt_step_with_overrides(
         mock.patch.dict(
             os.environ,
             {
-                ENV_CSTAR_SLURM_ACCOUNT: "og-account",
-                ENV_CSTAR_SLURM_MAX_WALLTIME: "00:42:00",
-                ENV_CSTAR_SLURM_QUEUE: "a",
+                ENV_CSTAR_SLURM_ACCOUNT: "default-account",
+                ENV_CSTAR_SLURM_MAX_WALLTIME: "42:00:00",
+                ENV_CSTAR_SLURM_QUEUE: "default-q",
             },
         ),
         mock.patch("cstar.execution.scheduler_job.get_sysmgr", mock_getsysmgr),
@@ -126,23 +215,28 @@ def test_slurmlauncher_adapt_step_with_overrides(
         minimum_spec = SlurmLauncher._get_default_compute_spec(live_step)  # type: ignore
         job = SlurmLauncher.adapt_step(live_step, [])
 
-    # confirm that no job attributes have been overridden from the minimal spec
-    if value := overrides["slurm"].get("account_name", ""):
-        assert job.account_key == value
-    else:
-        assert job.account_key == minimum_spec.account_name
+    # confirm defaults as baseline
+    assert minimum_spec.account_name == "default-account"
+    assert minimum_spec.cpus_per_node is None
+    assert minimum_spec.max_walltime == "42:00:00"
+    assert minimum_spec.num_cpus == 128
+    assert minimum_spec.num_nodes is None
+    assert minimum_spec.queue_name == "default-q"
 
-    if value := overrides["slurm"].get("num_cpus", ""):
-        assert job.cpus == int(value)
-    else:
-        assert job.cpus == minimum_spec.num_cpus
+    # confirm the job varies from defaults as expected
+    assert job.account_key == exp_account
+    assert job.cpus == exp_ncpus
+    assert job.walltime == exp_walltime
+    assert job.cpus_per_node == exp_cpus_per_node
+    assert job.nodes == exp_nnodes
+    assert job.queue.name == exp_queue
 
-    if value := overrides["slurm"].get("queue_name", ""):
-        assert job.queue_name == value
-    else:
-        assert job.queue_name == minimum_spec.queue_name
+    # confirm slurm-specific env vars are captured in the command
+    if exp_queue != minimum_spec.queue_name:
+        assert f"{ENV_CSTAR_SLURM_QUEUE}={exp_queue!r}" in job.commands
 
-    if value := overrides["slurm"].get("max_walltime", ""):
-        assert job.walltime == value
-    else:
-        assert job.walltime == minimum_spec.max_walltime
+    if exp_account != minimum_spec.account_name:
+        assert f"{ENV_CSTAR_SLURM_ACCOUNT}={exp_account!r}" in job.commands
+
+    if exp_walltime != minimum_spec.max_walltime:
+        assert f"{ENV_CSTAR_SLURM_MAX_WALLTIME}={exp_walltime!r}" in job.commands

@@ -103,6 +103,24 @@ class SlurmComputeSpec(BaseModel):
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure model to ignore empty strings."""
 
+    @property
+    def environment(self) -> dict[str, str]:
+        environment: dict[str, str] = {}
+        if self.account_name and self.account_name != os.getenv(
+            ENV_CSTAR_SLURM_ACCOUNT
+        ):
+            environment[ENV_CSTAR_SLURM_ACCOUNT] = self.account_name
+
+        if self.queue_name and self.queue_name != os.getenv(ENV_CSTAR_SLURM_QUEUE):
+            environment[ENV_CSTAR_SLURM_QUEUE] = self.queue_name
+
+        if self.max_walltime and self.max_walltime != os.getenv(
+            ENV_CSTAR_SLURM_MAX_WALLTIME
+        ):
+            environment[ENV_CSTAR_SLURM_MAX_WALLTIME] = self.max_walltime
+
+        return environment
+
 
 class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec]):
     """Adapts a `KeyValueStore` containing optional overrides into a `SlurmComputeSpec`."""
@@ -220,22 +238,19 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         )
 
     @staticmethod
-    def adapt_step(
-        step: "LiveStep",
-        dependencies: list[SlurmHandle],
-    ) -> SchedulerJob:
-        """Create a `SchedulerJob` that will execute the desired command for a
-        `Step` while also waiting for any dependencies to complete.
+    def _get_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
+        """Return a compute spec that has been customized with any
+        overrides specified in the step.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step to use for configuring overrides
 
         Returns
         -------
-        str
+        SlurmComputeSpec
         """
-        job_dep_ids = [d.pid for d in dependencies]
-
-        request_adapter = StepToRunRequestAdapter()
-        command = RunRequestCommandFormatter().format(request_adapter.adapt(step))
-
         default_compute = SlurmLauncher._get_default_compute_spec(step)
         compute = default_compute
 
@@ -248,6 +263,29 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             except CstarAdaptationError:
                 msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
                 log.warning(msg, exc_info=True)
+        return compute
+
+    @staticmethod
+    def adapt_step(
+        step: "LiveStep",
+        dependencies: list[SlurmHandle],
+    ) -> SchedulerJob:
+        """Create a `SchedulerJob` that will execute the desired command for a
+        `Step` while also waiting for any dependencies to complete.
+
+        Returns
+        -------
+        str
+        """
+        compute = SlurmLauncher._get_compute_spec(step)
+
+        job_dep_ids = [d.pid for d in dependencies]
+        request_adapter = StepToRunRequestAdapter()
+        run_request = request_adapter.adapt(step)
+        if compute.environment:
+            run_request.environment.update(compute.environment)
+
+        command = RunRequestCommandFormatter().format(run_request)
 
         return create_scheduler_job(
             commands=command,
