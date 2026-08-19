@@ -6,14 +6,12 @@ dependencies:
   - pip
   - roms-tools>=4.0.1,<5
   # toolchain: provided by modules on HPC
-  # <2 pin: compiler metapackages 2.0.0 (conda-forge "raw compilers" migration,
-  # 2026-08-13) drop clang_osx-arm64, whose triplet-named clang wrapper
-  # conda-forge mpich's mpicc hardcodes — fresh osx-arm64 solves get a broken
-  # mpicc ("arm64-apple-darwin20.0.0-clang: command not found"). Unpin once
-  # conda-forge mpich is rebuilt against the new compilers.
-  - compilers<2
+  - compilers
   - cmake
   - mpich
+  # mpicc / mpifort flavors needed to ensure we get the matching compilers on macos
+  - mpich-mpicc
+  - mpich-mpifort
   - netcdf-fortran
   - libpnetcdf
   # ucla-roms Makefiles need GNU-flavored rsync; macOS's system rsync lacks
