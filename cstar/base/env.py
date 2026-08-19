@@ -2,7 +2,7 @@ import os
 import sys
 import typing as t
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -152,6 +152,28 @@ def generate_run_id() -> str:
     return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
 
+def get_clobber_steps() -> frozenset[str]:
+    """Return the set of step safe_names selected for per-step clobber.
+
+    Returns
+    -------
+    frozenset[str]
+    """
+    raw = os.environ.get(ENV_CSTAR_CLOBBER_STEPS, "")
+    return frozenset(x for entry in raw.split(",") if (x := entry.strip()))
+
+
+def set_clobber_steps(values: Iterable[str]) -> None:
+    """Set `CSTAR_CLOBBER_STEPS` to the comma-encoding of `values`.
+
+    Parameters
+    ----------
+    values : Iterable[str]
+        The step names or safe_names to encode.
+    """
+    os.environ[ENV_CSTAR_CLOBBER_STEPS] = ",".join(values)
+
+
 ENV_CSTAR_LOG_LEVEL: t.Annotated[
     t.Literal["CSTAR_LOG_LEVEL"],
     EnvVar(
@@ -181,6 +203,16 @@ ENV_CSTAR_CLI_VERBOSE: t.Annotated[
     ),
 ] = "CSTAR_CLI_VERBOSE"
 """Set to `1` to produce verbose CLI outputs."""
+
+ENV_CSTAR_CLOBBER_STEPS: t.Annotated[
+    t.Literal["CSTAR_CLOBBER_STEPS"],
+    EnvVar(
+        "Comma-separated list of step safe_names whose prior state is cleared and re-executed on rerun.",
+        GROUP_SIM,
+        default="",
+    ),
+] = "CSTAR_CLOBBER_STEPS"
+"""Comma-separated list of step safe_names whose prior state is cleared and re-executed on rerun."""
 
 ENV_CSTAR_CLOBBER_WORKING_DIR: t.Annotated[
     t.Literal["CSTAR_CLOBBER_WORKING_DIR"],

@@ -8,15 +8,25 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_CLOBBER_STEPS, ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
-from cstar.orchestration.dag_runner import get_status_detail_map, load_run_state
+from cstar.orchestration.dag_runner import (
+    _resolve_clobber_steps,
+    get_status_detail_map,
+    load_run_state,
+)
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
-from cstar.orchestration.models import BlueprintState, Step, Workplan, WorkplanState
-from cstar.orchestration.orchestration import Planner, Status
+from cstar.orchestration.models import (
+    Application,
+    BlueprintState,
+    Step,
+    Workplan,
+    WorkplanState,
+)
+from cstar.orchestration.orchestration import LiveStep, Planner, Status
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -301,3 +311,106 @@ async def test_dag_runner_get_status_detail_map(
             elif step.name in open_names:
                 # it has no dependencies in the open set
                 assert detail.ready
+
+
+def _make_live_step(
+    tmp_path: Path,
+    name: str,
+    depends_on: list[str] | None = None,
+) -> LiveStep:
+    """Build a minimal `LiveStep` for use in `_resolve_clobber_steps` tests."""
+    bp_path = tmp_path / f"{name}.yaml"
+    bp_path.touch()
+    return LiveStep(
+        name=name,
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / f"wd-{name}",
+        depends_on=depends_on or [],
+    )
+
+
+def test_resolve_clobber_steps_noop_when_unset(tmp_path: Path) -> None:
+    """Verify no resolution occurs when no `--clobber-step` tokens are supplied."""
+    steps = [_make_live_step(tmp_path, "Step A")]
+
+    with mock.patch.dict(os.environ, {}, clear=True):
+        result = _resolve_clobber_steps(steps)
+
+    assert result == frozenset()
+
+
+def test_resolve_clobber_steps_matches_name_and_safe_name(tmp_path: Path) -> None:
+    """Verify a token matching either `name` or `safe_name` resolves to the
+    step's `safe_name`, and the env var is re-set to the canonical form.
+    """
+    step_a = _make_live_step(tmp_path, "Step A")
+    step_b = _make_live_step(tmp_path, "Step B")
+
+    with mock.patch.dict(
+        os.environ,
+        {ENV_CSTAR_CLOBBER_STEPS: f"{step_a.name},{step_b.safe_name}"},
+        clear=True,
+    ):
+        result = _resolve_clobber_steps([step_a, step_b])
+        assert os.environ[ENV_CSTAR_CLOBBER_STEPS] == ",".join(
+            sorted({step_a.safe_name, step_b.safe_name})
+        )
+
+    assert result == frozenset({step_a.safe_name, step_b.safe_name})
+
+
+def test_resolve_clobber_steps_unknown_raises(tmp_path: Path) -> None:
+    """Verify an unresolvable token raises `ValueError` listing valid step names."""
+    step_a = _make_live_step(tmp_path, "Step A")
+
+    with (
+        mock.patch.dict(
+            os.environ, {ENV_CSTAR_CLOBBER_STEPS: "does-not-exist"}, clear=True
+        ),
+        pytest.raises(ValueError, match=r"Unknown --clobber-step value\(s\)"),
+    ):
+        _resolve_clobber_steps([step_a])
+
+
+def test_resolve_clobber_steps_unknown_lists_all_bad_tokens(tmp_path: Path) -> None:
+    """Verify all unresolvable tokens are reported in a single `ValueError`."""
+    step_a = _make_live_step(tmp_path, "Step A")
+
+    with (
+        mock.patch.dict(
+            os.environ,
+            {ENV_CSTAR_CLOBBER_STEPS: "bad-one,bad-two"},
+            clear=True,
+        ),
+        pytest.raises(ValueError, match=r"'bad-one'.*'bad-two'|'bad-two'.*'bad-one'"),
+    ):
+        _resolve_clobber_steps([step_a])
+
+
+def test_resolve_clobber_steps_warns_untargeted_dependents(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify an untargeted step logs one warning listing all of its stale
+    (clobbered) dependencies.
+    """
+    step_a = _make_live_step(tmp_path, "Step A")
+    step_b = _make_live_step(tmp_path, "Step B")
+    step_c = _make_live_step(tmp_path, "Step C", depends_on=[step_a.name, step_b.name])
+
+    with (
+        mock.patch.dict(
+            os.environ,
+            {ENV_CSTAR_CLOBBER_STEPS: f"{step_a.safe_name},{step_b.safe_name}"},
+            clear=True,
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        _resolve_clobber_steps([step_a, step_b, step_c])
+
+    assert len(caplog.records) == 1
+    assert "Step C" in caplog.text
+    assert "Step A" in caplog.text
+    assert "Step B" in caplog.text
+    assert "stale" in caplog.text

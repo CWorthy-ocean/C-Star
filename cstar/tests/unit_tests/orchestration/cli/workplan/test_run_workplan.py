@@ -6,7 +6,11 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_STEPS,
+    ENV_CSTAR_RUNID,
+    ENV_CSTAR_STATE_HOME,
+)
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app
@@ -104,6 +108,105 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
 
     assert result.exit_code == 0
     mock_exec.assert_called_once()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_step_sets_env() -> None:
+    """Verify repeated `--clobber-step` options are comma-joined into the env var."""
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+    captured: dict[str, str] = {}
+
+    async def _capture_env(*args: object, **kwargs: object) -> mock.MagicMock:
+        captured["value"] = os.environ.get(ENV_CSTAR_CLOBBER_STEPS, "")
+        return mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+
+    mock_build_and_run_dag = mock.AsyncMock(side_effect=_capture_env)
+
+    with (
+        mock.patch.dict(os.environ, {}, clear=False),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            mock_build_and_run_dag,
+        ),
+    ):
+        os.environ.pop(ENV_CSTAR_CLOBBER_STEPS, None)
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "--run-id",
+                "12345",
+                "--clobber-step",
+                "step_2",
+                "--clobber-step",
+                "step_5",
+                wp_uri,
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    assert captured["value"] == "step_2,step_5"
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_step_absent_clears_preset_env() -> None:
+    """Verify a shell-preset `CSTAR_CLOBBER_STEPS` is cleared when
+    `--clobber-step` is not supplied, so it cannot leak into an unrelated run.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+    captured: dict[str, str] = {}
+
+    async def _capture_env(*args: object, **kwargs: object) -> mock.MagicMock:
+        captured["value"] = os.environ.get(ENV_CSTAR_CLOBBER_STEPS, "")
+        return mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+
+    mock_build_and_run_dag = mock.AsyncMock(side_effect=_capture_env)
+
+    with (
+        mock.patch.dict(
+            os.environ, {ENV_CSTAR_CLOBBER_STEPS: "preset-step"}, clear=False
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            mock_build_and_run_dag,
+        ),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", wp_uri],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    assert captured["value"] == ""
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_step_rejects_comma() -> None:
+    """Verify a `--clobber-step` value containing a comma is rejected."""
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["--run-id", "12345", "--clobber-step", "a,b", wp_uri],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    assert "comma" in result.stderr.lower()
 
 
 @pytest.mark.usefixtures("prefect_server_url", "read_yaml_intercept")

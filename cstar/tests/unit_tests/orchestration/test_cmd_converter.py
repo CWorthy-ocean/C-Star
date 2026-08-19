@@ -1,11 +1,14 @@
+import os
 import shutil
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
-from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
+from cstar.base.env import ENV_CSTAR_CLOBBER_STEPS, ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.adapter import (
     StepToPlaceholderAdapter,
@@ -208,3 +211,77 @@ def test_continuance_transform(
 
     # confirm the path has been expanded and resolved
     assert transformed_ic.expanduser().resolve() == transformed_ic
+
+
+def test_adapt_appends_clobber_for_targeted_step(tmp_path: Path) -> None:
+    """Verify `--clobber` is appended when the step's `safe_name` is present
+    in `CSTAR_CLOBBER_STEPS`, even though the global clobber flag is unset.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step = LiveStep(
+        name="test step",
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+    )
+
+    with mock.patch.dict(
+        os.environ,
+        {ENV_CSTAR_CLOBBER_STEPS: step.safe_name},
+        clear=True,
+    ):
+        request = StepToRunRequestAdapter().adapt(step)
+
+    assert ARG_CLOBBER in request.command
+
+
+def test_adapt_omits_clobber_for_untargeted_step(tmp_path: Path) -> None:
+    """Verify `--clobber` is not appended when the step's `safe_name` is
+    absent from `CSTAR_CLOBBER_STEPS` and the global flag is unset.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step = LiveStep(
+        name="test step",
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+    )
+
+    with mock.patch.dict(
+        os.environ,
+        {ENV_CSTAR_CLOBBER_STEPS: "some-other-step"},
+        clear=True,
+    ):
+        request = StepToRunRequestAdapter().adapt(step)
+
+    assert ARG_CLOBBER not in request.command
+
+
+def test_adapt_appends_clobber_for_all_steps_when_global_flag_set(
+    tmp_path: Path,
+) -> None:
+    """Verify the global `CSTAR_CLOBBER_WORKING_DIR` flag appends `--clobber`
+    regardless of per-step targeting.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step = LiveStep(
+        name="test step",
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+    )
+
+    with mock.patch.dict(
+        os.environ,
+        {ENV_CSTAR_CLOBBER_WORKING_DIR: "1"},
+        clear=True,
+    ):
+        request = StepToRunRequestAdapter().adapt(step)
+
+    assert ARG_CLOBBER in request.command

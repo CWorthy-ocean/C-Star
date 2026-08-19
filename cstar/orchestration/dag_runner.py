@@ -10,10 +10,16 @@ from pathlib import Path
 from prefect import flow
 from pydantic import BaseModel, Field, computed_field
 
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
+from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
+    capture_environment,
+    get_clobber_steps,
+    set_clobber_steps,
+)
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
+from cstar.entrypoint.utils import ARG_CLOBBER_STEP
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -519,6 +525,60 @@ class ExecutiveRunSummary(BaseModel):
         )
 
 
+def _resolve_clobber_steps(steps: "list[LiveStep]") -> frozenset[str]:
+    """Validate, canonicalize, and warn about the raw ``--clobber-step`` selection.
+
+    Resolves each raw token against `steps` (matching on either `name` or
+    `safe_name`), then re-sets the env var to the matched steps' `safe_name`s.
+    Also warns about any untargeted step that depends on a targeted one, since
+    it will not be re-run and may hold stale outputs.
+
+    Parameters
+    ----------
+    steps : list[LiveStep]
+        The flattened steps of the workplan being executed.
+
+    Returns
+    -------
+    frozenset[str]
+        The `safe_name`s of the steps selected for per-step clobber.
+
+    Raises
+    ------
+    ValueError
+        If any token does not match a step's `name` or `safe_name`.
+    """
+    tokens = get_clobber_steps()
+    if not tokens:
+        return frozenset()
+
+    by_token = {key: step for step in steps for key in (step.name, step.safe_name)}
+
+    if unknown := tokens.difference(by_token):
+        valid_names = sorted(step.name for step in steps)
+        msg = f"Unknown {ARG_CLOBBER_STEP} value(s) {sorted(unknown)}. Valid steps: {valid_names}"
+        raise ValueError(msg)
+
+    matched = [by_token[token] for token in tokens]
+    targeted_names = {step.name for step in matched}
+    targeted_safe_names = frozenset(step.safe_name for step in matched)
+
+    set_clobber_steps(sorted(targeted_safe_names))
+
+    for step in steps:
+        if step.safe_name in targeted_safe_names:
+            continue
+        if stale := sorted(targeted_names.intersection(step.depends_on)):
+            msg = (
+                f"Step {step.name!r} depends on clobbered step(s) {stale} but "
+                "was not itself targeted by --clobber-step; it will not be "
+                "re-run and may hold stale outputs derived from the clobbered step(s)."
+            )
+            log.warning(msg)
+
+    return targeted_safe_names
+
+
 async def on_status_changed(handle: ProcessHandle) -> None:
     """Persist updates to process handles."""
     state_repo = StateRepository()
@@ -576,6 +636,8 @@ async def build_and_run_dag(
 
     planner = Planner(workplan=wp)
     steps = t.cast("list[LiveStep]", planner.flatten())
+
+    _resolve_clobber_steps(steps)
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,

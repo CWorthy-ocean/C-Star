@@ -9,9 +9,11 @@ from pydantic import BaseModel
 
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_CLOBBER_STEPS,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
+    set_clobber_steps,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
@@ -32,6 +34,8 @@ from cstar.cli.workplan.shared import (
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
     ARG_CLOBBER_HELP,
+    ARG_CLOBBER_STEP,
+    ARG_CLOBBER_STEP_HELP,
     ARG_DRY_RUN,
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
@@ -302,6 +306,46 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     return run_id
 
 
+def preprocess_clobber_steps(
+    ctx: typer.Context,
+    values: list[str] | None,
+) -> list[str] | None:
+    """Perform validation and formatting of the `--clobber-step` option.
+
+    - clears `CSTAR_CLOBBER_STEPS` when no entries are supplied, so a value
+      preset in the shell cannot leak into an unrelated run
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        A context object containing state for the typer app.
+    values : list[str] | None
+        The user-supplied step names or safe_names, one per `--clobber-step` use.
+
+    Returns
+    -------
+    list[str] | None
+        The original input.
+
+    Raises
+    ------
+    typer.BadParameter
+        - If an entry contains a comma, the delimiter used to encode values.
+    """
+    entries = [x for value in values or [] if (x := value.strip())]
+    if not entries:
+        os.environ.pop(ENV_CSTAR_CLOBBER_STEPS, None)
+        return values
+
+    if bad_entries := [x for x in entries if "," in x]:
+        msg = f"{ARG_CLOBBER_STEP} values must not contain commas: {bad_entries!r}"
+        raise typer.BadParameter(msg, param_hint="clobber_step")
+
+    set_clobber_steps(entries)
+
+    return values
+
+
 def preprocess_path(workplan_path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
@@ -438,6 +482,14 @@ def run(
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
         ),
     ] = False,
+    clobber_step: t.Annotated[
+        list[str] | None,
+        typer.Option(
+            ARG_CLOBBER_STEP,
+            help=ARG_CLOBBER_STEP_HELP,
+            callback=preprocess_clobber_steps,
+        ),
+    ] = None,
 ) -> None:
     """Execute a workplan.
 
