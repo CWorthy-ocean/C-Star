@@ -17,6 +17,7 @@ from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    normalize_runid,
     set_env,
     set_flag,
 )
@@ -474,7 +475,9 @@ def clean(
         typer.Option(
             "--run-id",
             help=run_help,
-            callback=cb_pipeline(runid_callback, set_env(ENV_CSTAR_RUNID)),
+            callback=cb_pipeline(
+                runid_callback, normalize_runid, set_env(ENV_CSTAR_RUNID)
+            ),
             min=1,
             autocompletion=list_runs,
         ),

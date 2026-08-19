@@ -5,7 +5,7 @@ import typer
 
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, get_from_ctxmap, set_env
+from cstar.cli.common import cb_pipeline, get_from_ctxmap, normalize_runid, set_env
 from cstar.cli.workplan.shared import (
     autocomplete_step_list,
     list_runs,
@@ -83,7 +83,9 @@ def workplan_log(
         typer.Argument(
             help="The unique identifier of a specific workplan execution.",
             autocompletion=list_runs,
-            callback=cb_pipeline(set_env(ENV_CSTAR_RUNID), preload_run),
+            callback=cb_pipeline(
+                normalize_runid, set_env(ENV_CSTAR_RUNID), preload_run
+            ),
         ),
     ],
     step_name: t.Annotated[

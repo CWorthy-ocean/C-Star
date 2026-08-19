@@ -17,6 +17,7 @@ from cstar.base.env import (
 )
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
+from cstar.base.utils import slugify
 from cstar.execution.file_system import DirectoryManager, is_remote_resource
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
@@ -128,6 +129,35 @@ def set_flag(
         return value
 
     return _callback
+
+
+def normalize_runid(_context: typer.Context, run_id: str) -> str:
+    """Normalize a user-supplied run-id (slugify) so the same identifier is
+    used everywhere (directories, tracking records, environment).
+
+    Empty values are returned unchanged so callers can apply their own
+    presence/default handling.
+
+    Parameters
+    ----------
+    _context : typer.Context
+        The typer context (unused).
+    run_id : str
+        The run-id value received from the user.
+
+    Returns
+    -------
+    str
+    """
+    if not (run_id := run_id.strip()):
+        return run_id
+
+    normalized = slugify(run_id)
+    if normalized != run_id:
+        msg = f"Normalized run-id `{run_id}` to `{normalized}`"
+        log.debug(msg)
+
+    return normalized
 
 
 def set_env(

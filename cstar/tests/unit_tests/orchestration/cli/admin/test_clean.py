@@ -9,7 +9,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, FLAG_ON
+from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, ENV_CSTAR_RUNID, FLAG_ON
 from cstar.cli.admin.clean import (
     ARG_YES,
     FileSystemCleanupAction,
@@ -220,6 +220,35 @@ async def test_cli_admin_clean_runid_callback(
 
     # confirm the run-id is returned with any callback cleaning appleid
     assert actual_run_id == run_id.strip()
+
+
+def test_cli_admin_clean_normalizes_mixed_case_runid(
+    executed_workplan: tuple[Path, Workplan, str],
+) -> None:
+    """Verify a mixed-case run-id is normalized before it reaches the
+    environment, so cleanup targets the directories the run actually used.
+
+    Regression test: the clean command previously placed the raw user-typed
+    run-id in the environment, so a mixed-case run-id resolved cleanup paths
+    in a nonexistent (wrong-case) run directory.
+
+    Parameters
+    ----------
+    executed_workplan : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    *_, run_id = executed_workplan
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["--run-id", run_id.upper(), ARG_YES, ARG_DRY_RUN],
+        color=False,
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert os.environ[ENV_CSTAR_RUNID] == run_id
 
 
 @pytest.mark.parametrize(

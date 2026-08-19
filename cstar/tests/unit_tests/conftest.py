@@ -2057,10 +2057,13 @@ def mocked_simulation_outputs(
 
     joined_dir = fsm.joined_output_dir
 
+    # Restart timestamps must fall within the continue-from blueprint's
+    # simulation window; `find` continues from the most recent one
+    # (00:20:00 here).
     reset_files = [
         joined_dir / "output_rst.20120101000000.000.nc",
-        joined_dir / "output_rst.20120110000000.001.nc",
-        joined_dir / "output_rst.20120120000000.002.nc",
+        joined_dir / "output_rst.20120101001000.001.nc",
+        joined_dir / "output_rst.20120101002000.002.nc",
     ]
     for file in reset_files:
         file.write_text(info_msg)
@@ -2127,21 +2130,22 @@ def create_mocked_simulation_outputs(
 
             output_dir = step.fsm.output_dir
 
-            # create some mocked "partitioned" restart files
-            reset_files = [
-                output_dir / "output_rst.20120101000000.000.nc",
-                output_dir / "output_rst.20120110000000.001.nc",
-                output_dir / "output_rst.20120120000000.002.nc",
-            ]
-            for file in reset_files:
-                file.write_text(info_msg)
+            # A real run leaves partitioned restart files for every restart
+            # timestamp it wrote, each as a full set of partition files. Mock
+            # two timestamps so the "continue from the latest restart" logic is
+            # actually exercised (20120201... is the most recent).
+            for timestamp in ("20120101000000", "20120201000000"):
+                for segment in ("000", "001", "002"):
+                    (output_dir / f"output_rst.{timestamp}.{segment}.nc").write_text(
+                        info_msg
+                    )
 
-            # create a joined restart file.
-            reset_files = [
-                roms_fsm.joined_output_dir / "output_rst.20120101000000.nc",
-            ]
-            for file in reset_files:
-                file.write_text(info_msg)
+            # With ParallelIO the restart files are joined (no partition segment)
+            # and live in `joined_output`; mock the same two timestamps.
+            for timestamp in ("20120101000000", "20120201000000"):
+                (roms_fsm.joined_output_dir / f"output_rst.{timestamp}.nc").write_text(
+                    info_msg
+                )
 
     return _inner
 
