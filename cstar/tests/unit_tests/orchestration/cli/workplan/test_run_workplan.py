@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app, preprocess_runid
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.models import UserDefinedVariables
@@ -695,3 +696,31 @@ def test_preprocess_runid_normalizes_case(raw_run_id: str, expected: str) -> Non
     ctx = mock.MagicMock(spec=typer.Context)
 
     assert preprocess_runid(ctx, raw_run_id) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw_run_id", "expected"),
+    [
+        ("MyRun", "myrun"),
+        ("  MyRun_01  ", "myrun_01"),
+        ("My Run!", "my-run"),
+        ("already-lowercase", "already-lowercase"),
+        ("", ""),
+        ("   ", ""),
+    ],
+)
+def test_normalize_runid(raw_run_id: str, expected: str) -> None:
+    """Verify the shared run-id normalization callback slugifies non-empty
+    values and passes empty values through unchanged (so callers keep their
+    own presence/default handling).
+
+    Parameters
+    ----------
+    raw_run_id : str
+        The run-id as typed by the user.
+    expected : str
+        The normalized run-id expected from the callback.
+    """
+    ctx = mock.MagicMock(spec=typer.Context)
+
+    assert normalize_runid(ctx, raw_run_id) == expected

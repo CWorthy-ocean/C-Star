@@ -81,6 +81,36 @@ def test_cli_workplan_log_step_with_logs(
         assert f"{step.name} message" in result.stdout
 
 
+def test_cli_workplan_log_step_with_logs_mixed_case_runid(
+    executed_workplan_with_sideeffects: tuple[Path, Workplan, str],
+) -> None:
+    """Verify that logs are loaded successfully when a user passes the run-id
+    with different casing than it was created with.
+
+    Regression test: the log command previously placed the raw user-typed
+    run-id in the environment, so a mixed-case run-id resolved log paths in a
+    nonexistent run directory.
+
+    Parameters
+    ----------
+    executed_workplan_with_sideeffects : tuple[Path, Workplan, str]
+        The path to a workplan YAML file, the workplan instance, and a run-id.
+    """
+    _, wp, fake_run_id = executed_workplan_with_sideeffects
+
+    runner = CliRunner()
+    step = wp.steps[0]
+
+    result = runner.invoke(
+        app,
+        [fake_run_id.upper(), step.name],
+        color=False,
+        catch_exceptions=False,
+    )
+
+    assert f"{step.name} message" in result.stdout
+
+
 def test_cli_workplan_log_step_with_logs_via_slug(
     executed_workplan_with_sideeffects: tuple[Path, Workplan, str],
 ) -> None:
