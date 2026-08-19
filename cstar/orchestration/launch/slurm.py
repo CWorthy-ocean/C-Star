@@ -253,7 +253,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         """
         default_compute = SlurmLauncher._get_default_compute_spec(step)
         compute = default_compute
-        compute.num_cpus = step.blueprint.cpus_needed
 
         if step.compute_overrides:
             try:
