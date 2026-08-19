@@ -106,7 +106,15 @@ import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any, Literal, ParamSpec, Protocol, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    ParamSpec,
+    Protocol,
+    TypeVar,
+    cast,
+)
 
 from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
@@ -1020,12 +1028,16 @@ def to_cached_artifact(
 
 def to_cached_fileset(
     cache_factory: Callable[[], ArtifactCache],
-    key_func: Callable[[Path], str],
+    entity_type: type[T],
+    *,
+    key_source: str = "",
+    member_source: str = "",
+    root_source: str = "",
 ) -> Callable[
     [
-        Callable[[Path], Sequence[Path]],
+        Callable[P, Sequence[Path]],
     ],
-    Callable[[Path], Sequence[Path]],
+    Callable[P, Sequence[Path]],
 ]:
     """Decorator factory applied to functions that take in a list of files that must
     be saved as an atomic unit and returns the same collection.
@@ -1036,17 +1048,83 @@ def to_cached_fileset(
     """
 
     def _deco(
-        func: Callable[[Path], Sequence[Path]],
-    ) -> Callable[[Path], Sequence[Path]]:
+        func: Callable[P, Sequence[Path]],
+    ) -> Callable[P, Sequence[Path]]:
         """Decorator handling automatic storage and retrieval of a FileSet from the cache."""
         if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
             return func
 
+        sig = inspect.signature(func)
+
         @functools.wraps(func)
-        def _inner(source_file: Path) -> Sequence[Path]:
+        def _inner(*args: P.args, **kwargs: P.kwargs) -> Sequence[Path]:
             cache = cache_factory()
             run_id = os.getenv(ENV_CSTAR_RUNID, "")
-            key = f"{key_func(source_file)}{AGGREGATE_SUFFIX}"
+            # key = f"{key_func(source_file)}{AGGREGATE_SUFFIX}"
+
+            if not run_id:
+                msg = "Caching requires an active run-id. Cache disabled."
+                log.warning(msg)
+
+                return func(*args, **kwargs)
+
+            bound_args = sig.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+
+            if key_source:
+                entity = locate_entity_by_name(entity_type, key_source, bound_args)
+                log.info(f"entity by name: {key_source=}, {entity=}")
+            else:
+                entity = locate_entity_by_type(entity_type, bound_args)
+                log.info(f"entity by type: {entity=}")
+
+            if not entity:
+                msg = "Unable to determine entity for FileSet caching"
+                raise CachedCallError(msg)
+
+            if member_source:
+                member_paths = locate_entity_by_name(
+                    list[Path], member_source, bound_args
+                )
+                # attr_ = getattr(entity, member_source)
+                # log.info(f"member source attr: {attr_}")
+                # member_paths = cast("list[Path]", )
+                log.info(f"member paths by name: {member_source=}, {member_paths=}")
+            else:
+                member_paths = cast(
+                    "list[Path]", locate_entity_by_type(list, bound_args)
+                )
+                log.info(f"member paths by type: {member_paths=}")
+
+            if not member_paths:
+                msg = "Unable to identify members for FileSet caching"
+                raise CachedCallError(msg)
+
+            root_path: Path | None = None
+            if root_source:
+                root_path = locate_entity_by_name(Path, root_source, bound_args)
+                log.info(f"root path by name: {root_source=}, {root_path=}")
+            else:
+                root_path = cast("Path", locate_entity_by_type(Path, bound_args))
+                log.info(f"root path by type: {member_paths=}")
+
+            if not root_path:
+                msg = "Unable to determine root path for FileSet caching"
+                raise CachedCallError(msg)
+
+            members = tuple(str(p) for p in member_paths)
+
+            if root_path.is_file():
+                log.debug(
+                    f"Using parent directory of {str(root_path)!r} as FileSet.root"
+                )
+                stem = root_path.stem
+                members = tuple(f"{stem}{member}" for member in members)
+                root_path = root_path.parent
+
+            fileset = FileSet(root=root_path, members=members)
+            datasource_key = generator_for(type(entity)).key_for(entity, root_path)
+            key = fileset_key(fileset, name=datasource_key)
 
             if found := cache.materialize(
                 key, run_id, prefer_local=True, record_use=True
@@ -1057,19 +1135,24 @@ def to_cached_fileset(
                 )
                 return [location.path / member.path for member in manifest.members]
 
-            partitions = func(source_file)
+            file_paths = func(*args, **kwargs)
+            filenames = tuple(p.name for p in file_paths)
 
-            if partitions and run_id:
-                filenames = tuple(p.name for p in partitions)
-                fileset = FileSet(source_file.parent, members=filenames)
-                location = cache_fileset(
-                    cache,
-                    fileset,
-                    run_id,
-                    on_conflict=OnConflict.OVERWRITE,
+            if set(filenames).union(members) != set(filenames):
+                msg = (
+                    f"Unable to cache FileSet. Members of {datasource_key} did not match the "
+                    f"results of {func.__name__}. Expected: {filenames}, Actual: {members}"
                 )
+                log.warning(msg)
+                return file_paths
 
-            return partitions
+            location = cache_fileset(
+                cache,
+                fileset,
+                run_id,
+            )
+
+            return file_paths
 
         return _inner
 

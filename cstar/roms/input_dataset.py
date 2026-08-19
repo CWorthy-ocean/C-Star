@@ -6,13 +6,11 @@ from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar
-
-from slugify import slugify
+from typing import Any, ClassVar, cast
 
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.input_dataset import InputDataset
-from cstar.base.log import LoggingMixin
+from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import (
     _list_to_concise_str,
     coerce_datetime,
@@ -24,9 +22,12 @@ from cstar.io.constants import FileEncoding
 from cstar.io.source_data import SourceData, SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
 from cstar.io.utils import get_artifact_cache
+from cstar.orchestration.cache_keys import identity_for
 from cstar.orchestration.caching import to_cached_fileset
+from cstar.roms.discretization import ROMSDiscretization
 
 roms_tools = lazy_import("roms_tools")
+log = get_logger(__name__)
 
 
 class ROMSPartitioning:
@@ -144,6 +145,7 @@ class ROMSInputDataset(InputDataset, ABC):
         source_np_xi: int | None = None,
         source_np_eta: int | None = None,
         linker: DatasetLinker | None = None,
+        discretization: ROMSDiscretization | None = None,
     ) -> None:
         self.start_date = coerce_datetime(start_date) if start_date else None
         self.end_date = coerce_datetime(end_date) if end_date else None
@@ -153,6 +155,7 @@ class ROMSInputDataset(InputDataset, ABC):
         self.partitioning: ROMSPartitioning | None = None
         self.source = SourceData(location=location, identifier=file_hash)
         self.linker = linker
+        self.discretization = discretization
 
         if self.source_partitioning:
             if file_hash:
@@ -195,6 +198,67 @@ class ROMSInputDataset(InputDataset, ABC):
             input_dataset_dict["source_np_eta"] = self.source_np_eta
         return input_dataset_dict
 
+    # def members(self, xi: int = 0, eta: int = 0) -> list[Path]:
+    @property
+    def members(self) -> list[Path]:
+        if d := cast(
+            "ROMSDiscretization | None", getattr(self, "discretization", None)
+        ):
+            xi = d.n_procs_x
+            eta = d.n_procs_y
+            file_suffixes = ROMSPartitioning.suffixes(xi * eta)
+
+            return [Path(s) for s in file_suffixes]
+        return []
+
+    @to_cached_fileset(
+        get_artifact_cache,
+        InputDataset,
+        key_source="self",
+        member_source="members",
+        root_source="idfile",
+    )
+    def partition_item(self, idfile: Path) -> list[Path]:
+        """Helper function that wraps the actual roms_tools.partition_netcdf
+        call.
+        """
+        include_coarse_dims = True
+        np_xi = self.discretization.n_procs_x  # type: ignore
+        np_eta = self.discretization.n_procs_y  # type: ignore
+
+        msg = f"Partitioning {str(idfile)!r} into ({np_xi},{np_eta})"
+        self.log.info(msg)
+
+        try:
+            result = roms_tools.partition_netcdf(
+                idfile,
+                np_xi=np_xi,
+                np_eta=np_eta,
+                include_coarse_dims=include_coarse_dims,
+            )
+
+        except Exception as e:
+            msg = (
+                f"Encountered error partitioning {idfile} with coarse dims; "
+                f"retrying without coarse dims. Exception: {e}"
+            )
+            self.log.warning(msg)
+            include_coarse_dims = False
+            try:
+                result = roms_tools.partition_netcdf(
+                    idfile,
+                    np_xi=np_xi,
+                    np_eta=np_eta,
+                    include_coarse_dims=include_coarse_dims,
+                )
+            except Exception as e:
+                self.log.exception(
+                    "Still encountered error during partitioning; aborting."
+                )
+                raise
+
+        return [f.resolve() for f in result]
+
     def partition(
         self, np_xi: int, np_eta: int, overwrite_existing_files: bool = False
     ) -> None:
@@ -225,6 +289,9 @@ class ROMSInputDataset(InputDataset, ABC):
                 f"⏭️  {self.__class__.__name__} does not need to be partitioned, skipping"
             )
             return
+
+        if self.discretization is None:
+            self.discretization = ROMSDiscretization(0, np_xi, np_eta)
 
         # Helper functions
         def validate_partitioning_request() -> bool:
@@ -276,55 +343,11 @@ class ROMSInputDataset(InputDataset, ABC):
                 ]
             return id_files_to_partition
 
-        def key_function(path: Path) -> str:
-            assert self.source
-            return slugify(f"{path.stem}__partitioned")
-
-        @to_cached_fileset(get_artifact_cache, key_function)
-        def partition_item(idfile: Path) -> list[Path]:
-            """Helper function that wraps the actual roms_tools.partition_netcdf
-            call.
-            """
-            include_coarse_dims = True
-
-            msg = f"Partitioning {idfile} into ({np_xi},{np_eta})"
-            self.log.info(msg)
-
-            try:
-                result = roms_tools.partition_netcdf(
-                    idfile,
-                    np_xi=np_xi,
-                    np_eta=np_eta,
-                    include_coarse_dims=include_coarse_dims,
-                )
-
-            except Exception as e:
-                msg = (
-                    f"Encountered error partitioning {idfile} with coarse dims; "
-                    f"retrying without coarse dims. Exception: {e}"
-                )
-                self.log.warning(msg)
-                include_coarse_dims = False
-                try:
-                    result = roms_tools.partition_netcdf(
-                        idfile,
-                        np_xi=np_xi,
-                        np_eta=np_eta,
-                        include_coarse_dims=include_coarse_dims,
-                    )
-                except Exception as e:
-                    self.log.exception(
-                        "Still encountered error during partitioning; aborting."
-                    )
-                    raise
-
-            return [f.resolve() for f in result]
-
         def partition_files(files: list[Path]) -> list[Path]:
             """Helper function that wraps the actual roms_tools.partition_netcdf
             call.
             """
-            filesets = [partition_item(f) for f in files]
+            filesets = [self.partition_item(f) for f in files]
             return list(itertools.chain.from_iterable(filesets))
 
         def backup_existing_partitioned_files(files: list[Path]):
@@ -503,7 +526,7 @@ class ROMSInputDataset(InputDataset, ABC):
         # Lazy import: only needed on the use_pio path
         import xarray as xr
 
-        problems = []
+        problems: list[str] = []
 
         for path in self.path_for_roms_unpartitioned:
             with open(path, "rb") as f:
@@ -528,22 +551,22 @@ class ROMSInputDataset(InputDataset, ABC):
         return problems
 
 
-# @identity_for(ROMSInputDataset, "hash")
-# def romsinputdataset_identity(ds: ROMSInputDataset) -> dict[str, str]:
-#     identity_map = {
-#         "source.identifier": str(ds.source.identifier),
-#         "source.location": ds.source.location,
-#     }
+@identity_for(ROMSInputDataset, "hash")
+def romsinputdataset_identity(ds: ROMSInputDataset) -> dict[str, str]:
+    identity_map = {
+        "source.identifier": str(ds.source.identifier),
+        "source.location": ds.source.location,
+    }
 
-#     if ds.partitioning is not None:
-#         identity_map.update(
-#             {
-#                 "partitioning.np_eta": str(ds.partitioning.np_eta),
-#                 "partitioning.np_xi": str(ds.partitioning.np_xi),
-#             },
-#         )
+    if ds.partitionable and ds.discretization is not None:
+        identity_map.update(
+            {
+                "discretization.np_eta": str(ds.discretization.n_procs_y),
+                "discretization.np_xi": str(ds.discretization.n_procs_x),
+            },
+        )
 
-#     return identity_map
+    return identity_map
 
 
 class ROMSModelGrid(ROMSInputDataset):

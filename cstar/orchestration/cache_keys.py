@@ -103,7 +103,7 @@ rules.
 DIGEST_LENGTH: Final[int] = 16
 """Hex characters of SHA-256 retained in a key (64 bits)."""
 
-_MAX_STEM: Final[int] = 40
+_MAX_STEM: Final[int] = 50
 """Characters of the human-readable prefix retained in a key."""
 
 _UNSAFE: Final[re.Pattern[str]] = re.compile(r"[^A-Za-z0-9._-]+")
