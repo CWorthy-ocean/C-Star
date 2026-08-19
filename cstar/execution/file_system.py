@@ -19,6 +19,7 @@ from cstar.base.env import (
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
+    ENV_CSTAR_SHARED_CACHE_HOME,
     ENV_CSTAR_STATE_HOME,
     get_env_item,
 )
@@ -115,6 +116,14 @@ class DirectoryManager:
         Used to cache temporary files to disk (e.g. git repositories).
         """
         return cls.xdg_dir(load_xdg_metadata().cache)
+
+    @classmethod
+    def shared_cache_home(cls) -> Path:
+        """Get the shared cache directory.
+
+        Used to share data among users.
+        """
+        return cls.xdg_dir(get_env_item(ENV_CSTAR_SHARED_CACHE_HOME))
 
     @classmethod
     def config_home(cls) -> Path:
