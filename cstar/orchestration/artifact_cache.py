@@ -72,7 +72,11 @@ from pydantic import (
     model_validator,
 )
 
-from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_BYPASS
+from cstar.base.env import (
+    ENV_CSTAR_ARTIFACT_CACHE_BYPASS,
+    ENV_CSTAR_ARTIFACT_CACHE_ENABLED,
+    FLAG_OFF,
+)
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.orchestration.fingerprinting import (
@@ -815,6 +819,7 @@ class ArtifactCache:
     ) -> None:
         self.user_root: Path = Path(user_root).expanduser().resolve()
         self.shared_root: Path = Path(shared_root).expanduser().resolve()
+
         self.view_root: Path | None = (
             Path(view_root).expanduser().resolve() if view_root is not None else None
         )
@@ -829,13 +834,37 @@ class ArtifactCache:
             if bypass is None
             else bypass
         )
+
         if self.user_root == self.shared_root:
             raise ValueError("user_root and shared_root must differ")
+
+        self._ensure_directories(create_roots=create_roots)
+
+    def _ensure_directories(self, create_roots: bool) -> None:
+        """Create the user and shared root directories.
+
+        If unable to create the shared root, the system will work in user-only mode.
+        """
         if create_roots:
-            if self.node_cache_root is not None:
-                self.node_cache_root.mkdir(parents=True, exist_ok=True)
-            self.user_root.mkdir(parents=True, exist_ok=True)
-            self.shared_root.mkdir(parents=True, exist_ok=True)
+            actions: list[Path] = []
+            if not self.user_root.exists():
+                actions.append(self.user_root)
+            if not self.shared_root.exists():
+                actions.append(self.shared_root)
+            if self.node_cache_root and not self.node_cache_root.exists():
+                actions.append(self.node_cache_root)
+
+            for action in actions:
+                try:
+                    action.mkdir(parents=True)
+                except Exception:
+                    log.error(f"Unable to create directory: {action}")
+
+        if not self.user_root.exists() or not self.shared_root.exists():
+            os.environ[ENV_CSTAR_ARTIFACT_CACHE_ENABLED] = FLAG_OFF
+            log.warning(
+                f"Unable to use cache directories ({str(self.user_root)!r}, {str(self.shared_root)!r}). Caching is disabled."
+            )
 
     # ------------------------------------------------------------------
     # Location
