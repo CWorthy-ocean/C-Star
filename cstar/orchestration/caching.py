@@ -962,6 +962,7 @@ def to_cached_artifact(
             if not run_id:
                 msg = "Caching requires an active run-id. Cache disabled."
                 log.warning(msg)
+                return func(*args, **kwargs)
 
             bound_args = sig.bind(*args, **kwargs)
             bound_args.apply_defaults()
@@ -1057,7 +1058,6 @@ def to_cached_fileset(
         def _inner(*args: P.args, **kwargs: P.kwargs) -> Sequence[Path]:
             cache = cache_factory()
             run_id = os.getenv(ENV_CSTAR_RUNID, "")
-            # key = f"{key_func(source_file)}{AGGREGATE_SUFFIX}"
 
             if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
                 msg = f"Caching flag {ENV_CSTAR_ARTIFACT_CACHE_ENABLED!r} is disabled."
@@ -1067,7 +1067,6 @@ def to_cached_fileset(
             if not run_id:
                 msg = "Caching requires an active run-id. Cache disabled."
                 log.warning(msg)
-
                 return func(*args, **kwargs)
 
             bound_args = sig.bind(*args, **kwargs)
@@ -1088,9 +1087,6 @@ def to_cached_fileset(
                 member_paths = locate_entity_by_name(
                     list[Path], member_source, bound_args
                 )
-                # attr_ = getattr(entity, member_source)
-                # log.info(f"member source attr: {attr_}")
-                # member_paths = cast("list[Path]", )
                 log.info(f"member paths by name: {member_source=}, {member_paths=}")
             else:
                 member_paths = cast(
