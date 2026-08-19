@@ -260,7 +260,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 compute = default_compute.model_copy(
                     update=overrides.model_dump(exclude_defaults=True)
                 )
-
             except CstarAdaptationError:
                 msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
                 log.warning(msg, exc_info=True)
