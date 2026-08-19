@@ -154,7 +154,7 @@ def normalize_runid(_context: typer.Context, run_id: str) -> str:
     normalized = slugify(run_id)
     if normalized != run_id:
         msg = f"Normalized run-id `{run_id}` to `{normalized}`"
-        log.info(msg)
+        log.debug(msg)
 
     return normalized
 

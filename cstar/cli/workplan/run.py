@@ -267,23 +267,24 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     """Perform validation and formatting of the run-id argument.
 
     - verify blueprint path or run-id is supplied
-    - normalize a user-supplied run-id (slugify) so the same identifier is
-      used everywhere (directories, tracking records, environment)
     - generate a default run id from a blueprint if run-id is not supplied
+
+    Expects a run-id already normalized by the `normalize_runid` stage that
+    precedes this one in the callback pipeline.
 
     Parameters
     ----------
     ctx : typer.Context
         A context object containing state for the typer app.
     run_id : str
-        The user-supplied run-id.
+        The normalized user-supplied run-id, or an empty string.
 
     Returns
     -------
     str
     """
-    if normalized := normalize_runid(ctx, run_id):
-        return normalized
+    if run_id:
+        return run_id
 
     path: str | None = ctx.params.get("path", None)
     if isinstance(path, str):
@@ -368,7 +369,9 @@ def run(
         typer.Option(
             help="The unique identifier for an execution of the workplan.",
             autocompletion=list_runs,
-            callback=cb_pipeline(preprocess_runid, set_env(ENV_CSTAR_RUNID)),
+            callback=cb_pipeline(
+                normalize_runid, preprocess_runid, set_env(ENV_CSTAR_RUNID)
+            ),
         ),
     ] = "",
     user_variables: t.Annotated[
