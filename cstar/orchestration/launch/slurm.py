@@ -1,7 +1,6 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Mapping
 
 from prefect import State, task
 from prefect import Task as PrefectTask
@@ -33,10 +32,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.state import (
-    StateRepository,
-    load_sentinels,
-)
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -372,17 +368,44 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return batch.status
 
     @staticmethod
-    async def _locate_priors() -> Mapping[str, SlurmHandle]:
-        """Retrieve all task sentinels discovered in the output path.
+    async def _prune_completed_dependencies(
+        dependencies: list[SlurmHandle],
+    ) -> list[SlurmHandle]:
+        """Remove dependencies whose SLURM jobs have already completed successfully.
 
+        SLURM cannot use dependencies on previously completed jobs: submitting
+        with `--dependency=afterok:<jobid>` referencing a job that already
+        finished (e.g. a step satisfied by a prior run and not resubmitted)
+        causes the submission to fail or the job to be killed for an invalid
+        dependency. Such dependencies are already satisfied and can be dropped.
+
+        Parameters
+        ----------
+        dependencies : list[SlurmHandle]
+            The dependency handles for a step about to be submitted.
 
         Returns
         -------
-        Mapping[str, Task[SlurmHandle]]
-            Mapping of all previously run PIDs to their sentinel content.
+        list[SlurmHandle]
+            The dependencies whose jobs have not yet completed.
         """
-        sentinels = await load_sentinels(SlurmHandle)
-        return {h.pid: h for h in sentinels}
+        if not dependencies:
+            return dependencies
+
+        batch_map = await get_slurm_batches([d.pid for d in dependencies])
+        successes = {
+            k for k, v in batch_map.items() if v.status == ExecutionStatus.COMPLETED
+        }
+
+        if not successes:
+            return dependencies
+
+        satisfied = {d.pid for d in dependencies}.intersection(successes)
+        msg = f"Dependencies previously satisfied: {', '.join(sorted(satisfied))}"
+        log.info(msg)
+
+        # only keep dependencies that are not already satisfied
+        return [d for d in dependencies if d.pid not in successes]
 
     @classmethod
     async def launch(
@@ -418,22 +441,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 step.fsm.clear_prior()
                 submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
-                # SLURM cannot use dependencies on previously completed jobs
-                pid_to_task = await cls._locate_priors()
-                batch_map = await get_slurm_batches(pid_to_task.keys())
-                successes = {
-                    k
-                    for k, v in batch_map.items()
-                    if v.status == ExecutionStatus.COMPLETED
-                }
-                if dependencies and successes:
-                    reusable = set(x.pid for x in dependencies).intersection(successes)
-                    msg = f"Dependencies previously satisfied: {', '.join(reusable)}"
-                    log.info(msg)
-
-                    # only keep dependencies that are not re-usable
-                    active = set(x.pid for x in dependencies).difference(successes)
-                    dependencies = list(filter(lambda x: x.pid in active, dependencies))
+        # always drop dependencies on jobs that already completed successfully
+        # (e.g. steps satisfied by a prior run) so SLURM does not reject the
+        # submission over an already-finished job id
+        dependencies = await cls._prune_completed_dependencies(dependencies)
 
         handle = await submit_fn(step, dependencies)
         await SlurmLauncher.update_status(handle)
