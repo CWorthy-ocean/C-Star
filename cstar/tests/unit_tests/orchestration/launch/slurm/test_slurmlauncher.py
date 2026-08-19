@@ -63,7 +63,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
 
     # confirm that no job attributes have been overridden from the minimal spec
     assert minimum_spec.account_name == job.account_key
-    assert minimum_spec.num_cpus == 128
+    assert minimum_spec.num_cpus == job.cpus
     assert minimum_spec.queue_name == job.queue_name
     assert minimum_spec.max_walltime == job.walltime
 
