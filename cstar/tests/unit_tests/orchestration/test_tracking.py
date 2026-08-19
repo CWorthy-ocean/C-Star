@@ -434,3 +434,35 @@ async def test_tracking_get_run_paths(
     assert len(actual_paths) == exp_num_paths
     mismatched = set(actual_paths).difference(expected_paths)
     assert not mismatched  # set(actual_paths).issuperset(expected_paths)
+
+
+@pytest.mark.asyncio
+async def test_tracking_retrieve_mixed_case_runid(tmp_path: Path) -> None:
+    """Verify a mixed-case run-id query resolves to the slugified run record.
+
+    Run records are persisted with slugified (lowercase) run-ids; the lookup
+    must normalize the same way so `cstar workplan status MYRUN` finds the
+    record created for `myrun`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    """
+    wp_run = WorkplanRun(
+        workplan_path=tmp_path / "fake_workplan.yaml",
+        trx_workplan_path=tmp_path / "mock_transformed_workplan.yaml",
+        output_path=tmp_path / "output",
+        run_id="mixed-case-run-id",
+    )
+
+    repo = TrackingRepository()
+    _ = await repo.put_workplan_run(wp_run)
+
+    found = await repo.get_workplan_run(run_id="MIXED-Case-Run-ID")
+    assert found
+    assert found.run_id == "mixed-case-run-id"
+
+    found_sync = repo.get_workplan_run_sync(run_id="MIXED-Case-Run-ID")
+    assert found_sync
+    assert found_sync.run_id == "mixed-case-run-id"
