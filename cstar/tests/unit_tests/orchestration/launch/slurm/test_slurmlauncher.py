@@ -5,9 +5,11 @@ from unittest import mock
 
 import pytest
 
-from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.execution.handler import ExecutionStatus
+from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
 from cstar.orchestration.orchestration import LiveStep, Workplan
 from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -240,3 +242,105 @@ def test_slurmlauncher_adapt_step_with_overrides(
 
     if exp_walltime != minimum_spec.max_walltime:
         assert f"{ENV_CSTAR_SLURM_MAX_WALLTIME}={exp_walltime!r}" in job.commands
+
+
+async def test_prune_completed_dependencies_drops_completed_jobs() -> None:
+    """Verify dependencies on already-completed SLURM jobs are removed."""
+    completed_dep = SlurmHandle(pid="111", name="step_1", run_id="test-run")
+    running_dep = SlurmHandle(pid="222", name="step_0", run_id="test-run")
+
+    batch_map = {
+        "111": mock.Mock(status=ExecutionStatus.COMPLETED),
+        "222": mock.Mock(status=ExecutionStatus.RUNNING),
+    }
+    get_batches_mock = mock.AsyncMock(return_value=batch_map)
+
+    with mock.patch(
+        "cstar.orchestration.launch.slurm.get_slurm_batches", get_batches_mock
+    ):
+        pruned = await SlurmLauncher._prune_completed_dependencies(
+            [completed_dep, running_dep]
+        )
+
+    get_batches_mock.assert_awaited_once_with(["111", "222"])
+    assert [d.pid for d in pruned] == ["222"]
+
+
+async def test_prune_completed_dependencies_keeps_unfinished_jobs() -> None:
+    """Verify dependencies are unchanged when no dependency job has completed."""
+    pending_dep = SlurmHandle(pid="111", name="step_1", run_id="test-run")
+
+    batch_map = {"111": mock.Mock(status=ExecutionStatus.PENDING)}
+
+    with mock.patch(
+        "cstar.orchestration.launch.slurm.get_slurm_batches",
+        mock.AsyncMock(return_value=batch_map),
+    ):
+        pruned = await SlurmLauncher._prune_completed_dependencies([pending_dep])
+
+    assert pruned == [pending_dep]
+
+
+async def test_prune_completed_dependencies_no_deps_skips_query() -> None:
+    """Verify an empty dependency list does not trigger a SLURM query."""
+    get_batches_mock = mock.AsyncMock()
+
+    with mock.patch(
+        "cstar.orchestration.launch.slurm.get_slurm_batches", get_batches_mock
+    ):
+        pruned = await SlurmLauncher._prune_completed_dependencies([])
+
+    get_batches_mock.assert_not_awaited()
+    assert pruned == []
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_launch_prunes_stale_deps_without_prior_sentinel(
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a never-before-submitted step does not submit with a SLURM
+    dependency on a job that already completed (e.g. a step satisfied by a
+    prior run and skipped on re-run).
+
+    Regression test: previously the pruning only ran when the step itself had
+    a failed prior sentinel, so re-running a workplan where step_1 was already
+    Done caused step_2 to be submitted with `--dependency=afterok:<old job>`,
+    which SLURM rejects or kills once the old job is gone.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    completed_dep = SlurmHandle(pid="111", name="step_1", run_id="test-run")
+    running_dep = SlurmHandle(pid="222", name="step_0", run_id="test-run")
+
+    new_handle = SlurmHandle(pid="333", name=live_step.name, run_id="test-run")
+    submit_mock = mock.AsyncMock(return_value=new_handle)
+
+    batch_map = {
+        "111": mock.Mock(status=ExecutionStatus.COMPLETED),
+        "222": mock.Mock(status=ExecutionStatus.RUNNING),
+    }
+
+    with (
+        mock.patch.object(
+            StateRepository, "get_sentinel", mock.AsyncMock(return_value=None)
+        ),
+        mock.patch.object(SlurmLauncher, "_submit", submit_mock),
+        mock.patch.object(
+            SlurmLauncher,
+            "update_status",
+            mock.AsyncMock(return_value=(False, new_handle)),
+        ),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.get_slurm_batches",
+            mock.AsyncMock(return_value=batch_map),
+        ),
+    ):
+        task = await SlurmLauncher.launch(live_step, [completed_dep, running_dep])
+
+    submit_mock.assert_awaited_once()
+    assert submit_mock.await_args is not None
+    _, submitted_deps = submit_mock.await_args.args
+    assert [d.pid for d in submitted_deps] == ["222"]
+    assert task.handle.pid == "333"
