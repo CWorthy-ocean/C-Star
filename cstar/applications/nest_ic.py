@@ -1,3 +1,4 @@
+import subprocess
 import typing as t
 from pathlib import Path
 
@@ -38,6 +39,13 @@ class NestIcBlueprint(Blueprint):
     """Path to a netCDF file defining the parent grid attributes."""
     child_grid: Path
     """Path to a netCDF file defining the child grid attributes."""
+    pio: bool = True
+    """Whether the target ROMS build reads its inputs via ParallelIO, which requires
+    CDF-5 (``NETCDF3_64BIT_DATA``) files. When True (the default), the initial
+    conditions are written in roms-tools' default NETCDF4 format (fast) under an
+    ``_nc4``-suffixed name, then converted to CDF-5 at the intended filename via an
+    ``nccopy -k cdf5`` subprocess instead of roms-tools' native (much slower at
+    scale) CDF-5 writer. When False, roms-tools' default save is used unchanged."""
 
 
 class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
@@ -134,10 +142,27 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
         ic = roms_tools.InitialConditions(**ic_kwargs)
 
         # Write out initial conditions file for child
-        ic.save(path)
+        if self.blueprint.pio:
+            nc4_path = path.with_name(path.stem + "_nc4" + path.suffix)
+            ic.save(nc4_path)
+            self._convert_to_cdf5(nc4_path, path)
+        else:
+            ic.save(path)
         self.log.debug(f"Initial conditions created and persisted to: {path}")
 
         return path
+
+    @staticmethod
+    def _convert_to_cdf5(nc4_path: Path, final_path: Path) -> None:
+        """Convert a NETCDF4 file to CDF-5 via ``nccopy -k cdf5``, then delete the
+        source. Raises on a non-zero ``nccopy`` exit; the source file is left in
+        place (and the final name unclaimed) so a re-run regenerates cleanly.
+        """
+        subprocess.run(
+            ["nccopy", "-k", "cdf5", str(nc4_path), str(final_path)],
+            check=True,
+        )
+        nc4_path.unlink()
 
 
 @register_application
