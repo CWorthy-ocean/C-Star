@@ -9,11 +9,9 @@ from pydantic import BaseModel
 
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLOBBER_STEPS,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
-    set_clobber_steps,
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
@@ -308,42 +306,24 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
 
 def preprocess_clobber_steps(
     ctx: typer.Context,
-    values: list[str] | None,
-) -> list[str] | None:
+    values: list[str],
+) -> list[str]:
     """Perform validation and formatting of the `--clobber-step` option.
-
-    - clears `CSTAR_CLOBBER_STEPS` when no entries are supplied, so a value
-      preset in the shell cannot leak into an unrelated run
 
     Parameters
     ----------
     ctx : typer.Context
         A context object containing state for the typer app.
-    values : list[str] | None
+    values : list[str]
         The user-supplied step names or safe_names, one per `--clobber-step` use.
 
     Returns
     -------
-    list[str] | None
-        The original input.
-
-    Raises
-    ------
-    typer.BadParameter
-        - If an entry contains a comma, the delimiter used to encode values.
+    list[str]
+        The cleaned step names or safe_names, stripped of whitespace with any
+        empty entries dropped.
     """
-    entries = [x for value in values or [] if (x := value.strip())]
-    if not entries:
-        os.environ.pop(ENV_CSTAR_CLOBBER_STEPS, None)
-        return values
-
-    if bad_entries := [x for x in entries if "," in x]:
-        msg = f"{ARG_CLOBBER_STEP} values must not contain commas: {bad_entries!r}"
-        raise typer.BadParameter(msg, param_hint="clobber_step")
-
-    set_clobber_steps(entries)
-
-    return values
+    return [x for value in values if (x := value.strip())]
 
 
 def preprocess_path(workplan_path: str | None) -> str | None:
@@ -483,13 +463,13 @@ def run(
         ),
     ] = False,
     clobber_step: t.Annotated[
-        list[str] | None,
+        list[str],
         typer.Option(
             ARG_CLOBBER_STEP,
             help=ARG_CLOBBER_STEP_HELP,
             callback=preprocess_clobber_steps,
         ),
-    ] = None,
+    ] = [],
 ) -> None:
     """Execute a workplan.
 
@@ -510,6 +490,7 @@ def run(
                     run_id,
                     user_variables=t.cast("Mapping[str, str]", ctx.obj),
                     dry_run=dry_run,
+                    clobber_steps=clobber_step,
                 ),
             )
             console.print(get_run_summary_display(summary))

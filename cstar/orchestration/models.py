@@ -35,7 +35,8 @@ RequiredString: t.TypeAlias = t.Annotated[
 
 KeyValueStore: t.TypeAlias = dict[
     str,
-    str
+    bool
+    | str
     | float
     | list[str]
     | list[float]
@@ -45,6 +46,10 @@ KeyValueStore: t.TypeAlias = dict[
     ],
 ]
 """A collection of user-defined key-value pairs."""
+
+KEY_CLOBBER: t.Final[str] = "clobber"
+"""The `workflow_overrides` key indicating a step's prior state should be
+cleared and re-executed."""
 
 TargetDirectoryPath = t.Annotated[
     Path,
@@ -304,6 +309,17 @@ class Step(ConfiguredBaseModel):
         str
         """
         return slugify(self.name)
+
+    @property
+    def clobber(self) -> bool:
+        """Return `True` if this step's prior state should be cleared and
+        re-executed.
+
+        Returns
+        -------
+        bool
+        """
+        return bool(self.workflow_overrides.get(KEY_CLOBBER, False))
 
 
 class Workplan(ConfiguredBaseModel):

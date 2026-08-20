@@ -2,7 +2,7 @@ import asyncio
 import os
 import typing as t
 from collections import OrderedDict
-from collections.abc import Awaitable, Generator, Iterable, Mapping
+from collections.abc import Awaitable, Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
@@ -13,8 +13,6 @@ from pydantic import BaseModel, Field, computed_field
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
     capture_environment,
-    get_clobber_steps,
-    set_clobber_steps,
 )
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
@@ -23,7 +21,7 @@ from cstar.entrypoint.utils import ARG_CLOBBER_STEP
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
-from cstar.orchestration.models import Step, UserDefinedVariables, Workplan
+from cstar.orchestration.models import KEY_CLOBBER, Step, UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -317,6 +315,7 @@ async def prepare_workplan(
     output_dir: Path,
     run_id: str,
     user_variables: Mapping[str, str] | None = None,
+    clobber_steps: "Sequence[str] | None" = None,
 ) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
@@ -330,6 +329,9 @@ async def prepare_workplan(
         The unique ID for the current run.
     user_variables : Mapping | None
         User-defined variables specified at runtime
+    clobber_steps : Sequence[str] | None
+        Names or safe_names of steps whose prior state should be cleared and
+        re-executed, as supplied via `--clobber-step`.
 
     Returns
     -------
@@ -370,6 +372,8 @@ async def prepare_workplan(
         fill_transform,
     )
     wp = transformer.apply()
+
+    _apply_clobber_overrides(wp, clobber_steps)
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = WorkplanTransformer.derived_path(
@@ -525,48 +529,49 @@ class ExecutiveRunSummary(BaseModel):
         )
 
 
-def _resolve_clobber_steps(steps: "list[LiveStep]") -> frozenset[str]:
-    """Validate, canonicalize, and warn about the raw ``--clobber-step`` selection.
+def _apply_clobber_overrides(
+    wp: Workplan, clobber_steps: "Sequence[str] | None"
+) -> None:
+    """Validate the raw ``--clobber-step`` selection and record it on the workplan.
 
-    Resolves each raw token against `steps` (matching on either `name` or
-    `safe_name`), then re-sets the env var to the matched steps' `safe_name`s.
-    Also warns about any untargeted step that depends on a targeted one, since
-    it will not be re-run and may hold stale outputs.
+    Resolves each raw token against `wp.steps` (matching on either `name` or
+    `safe_name`), then mutates the matched steps' `workflow_overrides` in place
+    so the selection is persisted with the workplan. Also warns about any
+    untargeted step that depends on a targeted one, since it will not be
+    re-run and may hold stale outputs.
 
     Parameters
     ----------
-    steps : list[LiveStep]
-        The flattened steps of the workplan being executed.
-
-    Returns
-    -------
-    frozenset[str]
-        The `safe_name`s of the steps selected for per-step clobber.
+    wp : Workplan
+        The workplan whose steps should be marked for per-step clobber.
+    clobber_steps : Sequence[str] | None
+        The raw step names or safe_names supplied via `--clobber-step`.
 
     Raises
     ------
     ValueError
         If any token does not match a step's `name` or `safe_name`.
     """
-    tokens = get_clobber_steps()
+    tokens = [x for token in clobber_steps or [] if (x := token.strip())]
     if not tokens:
-        return frozenset()
+        return
 
+    steps = wp.steps
     by_token = {key: step for step in steps for key in (step.name, step.safe_name)}
 
-    if unknown := tokens.difference(by_token):
+    if unknown := set(tokens).difference(by_token):
         valid_names = sorted(step.name for step in steps)
         msg = f"Unknown {ARG_CLOBBER_STEP} value(s) {sorted(unknown)}. Valid steps: {valid_names}"
         raise ValueError(msg)
 
     matched = [by_token[token] for token in tokens]
     targeted_names = {step.name for step in matched}
-    targeted_safe_names = frozenset(step.safe_name for step in matched)
 
-    set_clobber_steps(sorted(targeted_safe_names))
+    for step in matched:
+        step.workflow_overrides[KEY_CLOBBER] = True
 
     for step in steps:
-        if step.safe_name in targeted_safe_names:
+        if step.name in targeted_names:
             continue
         if stale := sorted(targeted_names.intersection(step.depends_on)):
             msg = (
@@ -575,8 +580,6 @@ def _resolve_clobber_steps(steps: "list[LiveStep]") -> frozenset[str]:
                 "re-run and may hold stale outputs derived from the clobbered step(s)."
             )
             log.warning(msg)
-
-    return targeted_safe_names
 
 
 async def on_status_changed(handle: ProcessHandle) -> None:
@@ -597,6 +600,7 @@ async def build_and_run_dag(
     output_dir: Path | None = None,
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
+    clobber_steps: "Sequence[str] | None" = None,
 ) -> ExecutiveRunSummary:
     """Execute the steps in the workplan.
 
@@ -613,6 +617,9 @@ async def build_and_run_dag(
     dry_run : bool
         If set to `true`, the execution plan will be built and persisted to disk
         but not executed.
+    clobber_steps : Sequence[str] | None
+        Names or safe_names of steps whose prior state should be cleared and
+        re-executed, as supplied via `--clobber-step`.
 
     Returns
     -------
@@ -631,13 +638,11 @@ async def build_and_run_dag(
 
     check_environment()
     wp, prepared_wp_path = await prepare_workplan(
-        wp_path, output_dir, run_id, user_variables
+        wp_path, output_dir, run_id, user_variables, clobber_steps
     )
 
     planner = Planner(workplan=wp)
     steps = t.cast("list[LiveStep]", planner.flatten())
-
-    _resolve_clobber_steps(steps)
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,

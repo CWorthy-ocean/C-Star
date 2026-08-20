@@ -11,7 +11,6 @@ from _pytest.monkeypatch import MonkeyPatch
 
 from cstar.base.env import (
     ENV_CSTAR_CACHE_HOME,
-    ENV_CSTAR_CLOBBER_STEPS,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_CONFIG_HOME,
     ENV_CSTAR_DATA_HOME,
@@ -20,7 +19,6 @@ from cstar.base.env import (
     ENV_CSTAR_STATE_HOME,
     FLAG_OFF,
     FLAG_ON,
-    get_clobber_steps,
     get_env_item,
     hpc_data_directory,
 )
@@ -1076,25 +1074,3 @@ def test_lmodenvsettings_variable_resolution(
     for key in lmod_settings_keys:
         expected_key = f"LMOD_{key}"
         assert LmodEnvSettings.variable(key) == expected_key
-
-
-def test_get_clobber_steps_unset() -> None:
-    """Verify an empty frozenset is returned when the variable is not set."""
-    with mock.patch.dict(os.environ, {}, clear=True):
-        assert get_clobber_steps() == frozenset()
-
-
-def test_get_clobber_steps_parses_entries() -> None:
-    """Verify entries are split on commas and returned as a frozenset."""
-    with mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_STEPS: "a,b"}, clear=True):
-        assert get_clobber_steps() == frozenset({"a", "b"})
-
-
-def test_get_clobber_steps_strips_whitespace_and_drops_empties() -> None:
-    """Verify whitespace is stripped and empty entries are dropped."""
-    with mock.patch.dict(
-        os.environ,
-        {ENV_CSTAR_CLOBBER_STEPS: " a , ,b ,"},
-        clear=True,
-    ):
-        assert get_clobber_steps() == frozenset({"a", "b"})

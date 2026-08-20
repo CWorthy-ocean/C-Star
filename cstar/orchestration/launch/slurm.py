@@ -12,7 +12,6 @@ from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
 from cstar.base.env import (
     ENV_CSTAR_RUNID,
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
-    get_clobber_steps,
     get_env_item,
 )
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
@@ -436,8 +435,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                     active = set(x.pid for x in dependencies).difference(successes)
                     dependencies = list(filter(lambda x: x.pid in active, dependencies))
 
-        if step.safe_name in get_clobber_steps():
-            step.fsm.clear_prior()
+        if step.clobber:
             submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
         handle = await submit_fn(step, dependencies)

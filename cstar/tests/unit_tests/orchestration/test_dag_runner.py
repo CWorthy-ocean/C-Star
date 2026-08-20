@@ -8,26 +8,28 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.base.env import ENV_CSTAR_CLOBBER_STEPS, ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import (
-    _resolve_clobber_steps,
+    _apply_clobber_overrides,
     get_status_detail_map,
     load_run_state,
+    prepare_workplan,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.models import (
+    KEY_CLOBBER,
     Application,
     BlueprintState,
     Step,
     Workplan,
     WorkplanState,
 )
-from cstar.orchestration.orchestration import LiveStep, Planner, Status
-from cstar.orchestration.serialization import serialize
+from cstar.orchestration.orchestration import LiveWorkplan, Planner, Status
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
@@ -313,104 +315,126 @@ async def test_dag_runner_get_status_detail_map(
                 assert detail.ready
 
 
-def _make_live_step(
+def _make_step(
     tmp_path: Path,
     name: str,
     depends_on: list[str] | None = None,
-) -> LiveStep:
-    """Build a minimal `LiveStep` for use in `_resolve_clobber_steps` tests."""
+) -> Step:
+    """Build a minimal `Step` for use in `_apply_clobber_overrides` tests."""
     bp_path = tmp_path / f"{name}.yaml"
     bp_path.touch()
-    return LiveStep(
+    return Step(
         name=name,
         application=Application.HELLO_WORLD,
         blueprint=bp_path,
-        working_dir=tmp_path / f"wd-{name}",
         depends_on=depends_on or [],
     )
 
 
-def test_resolve_clobber_steps_noop_when_unset(tmp_path: Path) -> None:
-    """Verify no resolution occurs when no `--clobber-step` tokens are supplied."""
-    steps = [_make_live_step(tmp_path, "Step A")]
+def _make_workplan(steps: list[Step]) -> Workplan:
+    """Build a minimal `Workplan` wrapping the given steps."""
+    return Workplan(
+        name="test-workplan",
+        description="A workplan used to test `_apply_clobber_overrides`",
+        steps=steps,
+    )
 
-    with mock.patch.dict(os.environ, {}, clear=True):
-        result = _resolve_clobber_steps(steps)
 
-    assert result == frozenset()
+def test_apply_clobber_overrides_noop_when_none(tmp_path: Path) -> None:
+    """Verify no overrides are applied when `clobber_steps` is `None`."""
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
+
+    _apply_clobber_overrides(wp, None)
+
+    assert wp.steps[0].workflow_overrides == {}
 
 
-def test_resolve_clobber_steps_matches_name_and_safe_name(tmp_path: Path) -> None:
-    """Verify a token matching either `name` or `safe_name` resolves to the
-    step's `safe_name`, and the env var is re-set to the canonical form.
+def test_apply_clobber_overrides_noop_when_empty(tmp_path: Path) -> None:
+    """Verify no overrides are applied when `clobber_steps` is empty."""
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
+
+    _apply_clobber_overrides(wp, [])
+
+    assert wp.steps[0].workflow_overrides == {}
+
+
+def test_apply_clobber_overrides_matches_name_and_safe_name(tmp_path: Path) -> None:
+    """Verify a token matching either `name` or `safe_name` marks only the
+    matching step's `workflow_overrides` with `clobber: True`.
     """
-    step_a = _make_live_step(tmp_path, "Step A")
-    step_b = _make_live_step(tmp_path, "Step B")
+    step_a = _make_step(tmp_path, "Step A")
+    step_b = _make_step(tmp_path, "Step B")
+    step_c = _make_step(tmp_path, "Step C")
+    wp = _make_workplan([step_a, step_b, step_c])
 
-    with mock.patch.dict(
-        os.environ,
-        {ENV_CSTAR_CLOBBER_STEPS: f"{step_a.name},{step_b.safe_name}"},
-        clear=True,
-    ):
-        result = _resolve_clobber_steps([step_a, step_b])
-        assert os.environ[ENV_CSTAR_CLOBBER_STEPS] == ",".join(
-            sorted({step_a.safe_name, step_b.safe_name})
-        )
+    _apply_clobber_overrides(wp, [step_a.name, step_b.safe_name])
 
-    assert result == frozenset({step_a.safe_name, step_b.safe_name})
+    assert wp.steps[0].workflow_overrides[KEY_CLOBBER] is True
+    assert wp.steps[1].workflow_overrides[KEY_CLOBBER] is True
+    assert not wp.steps[2].workflow_overrides.get(KEY_CLOBBER, False)
 
 
-def test_resolve_clobber_steps_unknown_raises(tmp_path: Path) -> None:
+def test_apply_clobber_overrides_unknown_raises(tmp_path: Path) -> None:
     """Verify an unresolvable token raises `ValueError` listing valid step names."""
-    step_a = _make_live_step(tmp_path, "Step A")
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
 
-    with (
-        mock.patch.dict(
-            os.environ, {ENV_CSTAR_CLOBBER_STEPS: "does-not-exist"}, clear=True
-        ),
-        pytest.raises(ValueError, match=r"Unknown --clobber-step value\(s\)"),
-    ):
-        _resolve_clobber_steps([step_a])
+    with pytest.raises(ValueError, match=r"Unknown --clobber-step value\(s\)"):
+        _apply_clobber_overrides(wp, ["does-not-exist"])
 
 
-def test_resolve_clobber_steps_unknown_lists_all_bad_tokens(tmp_path: Path) -> None:
+def test_apply_clobber_overrides_unknown_lists_all_bad_tokens(tmp_path: Path) -> None:
     """Verify all unresolvable tokens are reported in a single `ValueError`."""
-    step_a = _make_live_step(tmp_path, "Step A")
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
 
-    with (
-        mock.patch.dict(
-            os.environ,
-            {ENV_CSTAR_CLOBBER_STEPS: "bad-one,bad-two"},
-            clear=True,
-        ),
-        pytest.raises(ValueError, match=r"'bad-one'.*'bad-two'|'bad-two'.*'bad-one'"),
-    ):
-        _resolve_clobber_steps([step_a])
+    with pytest.raises(ValueError, match=r"'bad-one'.*'bad-two'|'bad-two'.*'bad-one'"):
+        _apply_clobber_overrides(wp, ["bad-one", "bad-two"])
 
 
-def test_resolve_clobber_steps_warns_untargeted_dependents(
+def test_apply_clobber_overrides_warns_untargeted_dependents(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Verify an untargeted step logs one warning listing all of its stale
     (clobbered) dependencies.
     """
-    step_a = _make_live_step(tmp_path, "Step A")
-    step_b = _make_live_step(tmp_path, "Step B")
-    step_c = _make_live_step(tmp_path, "Step C", depends_on=[step_a.name, step_b.name])
+    step_a = _make_step(tmp_path, "Step A")
+    step_b = _make_step(tmp_path, "Step B")
+    step_c = _make_step(tmp_path, "Step C", depends_on=[step_a.name, step_b.name])
+    wp = _make_workplan([step_a, step_b, step_c])
 
-    with (
-        mock.patch.dict(
-            os.environ,
-            {ENV_CSTAR_CLOBBER_STEPS: f"{step_a.safe_name},{step_b.safe_name}"},
-            clear=True,
-        ),
-        caplog.at_level("WARNING"),
-    ):
-        _resolve_clobber_steps([step_a, step_b, step_c])
+    with caplog.at_level("WARNING"):
+        _apply_clobber_overrides(wp, [step_a.safe_name, step_b.safe_name])
 
     assert len(caplog.records) == 1
     assert "Step C" in caplog.text
     assert "Step A" in caplog.text
     assert "Step B" in caplog.text
     assert "stale" in caplog.text
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+async def test_prepare_workplan_persists_clobber_overrides(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify the transformed workplan written to disk carries the
+    `--clobber-step` selection in the targeted step's `workflow_overrides`.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    output_dir = tmp_path / "output"
+    run_id = "clobber-persist-run"
+
+    _, prepared_path = await prepare_workplan(
+        wp_path, output_dir, run_id, clobber_steps=["Prepare"]
+    )
+
+    persisted = deserialize(prepared_path, LiveWorkplan)
+    by_name = {step.name: step for step in persisted.steps}
+
+    assert by_name["Prepare"].workflow_overrides[KEY_CLOBBER] is True
+    assert not by_name["Ensemble X"].workflow_overrides.get(KEY_CLOBBER, False)

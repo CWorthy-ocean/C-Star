@@ -7,14 +7,14 @@ import pytest
 
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
-from cstar.base.env import ENV_CSTAR_CLOBBER_STEPS, ENV_CSTAR_CLOBBER_WORKING_DIR
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
 from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.adapter import (
     StepToPlaceholderAdapter,
     StepToRunRequestAdapter,
 )
-from cstar.orchestration.models import Application
+from cstar.orchestration.models import KEY_CLOBBER, Application
 from cstar.orchestration.orchestration import LiveStep, RunRequestCommandFormatter
 from cstar.orchestration.serialization import deserialize
 
@@ -214,8 +214,8 @@ def test_continuance_transform(
 
 
 def test_adapt_appends_clobber_for_targeted_step(tmp_path: Path) -> None:
-    """Verify `--clobber` is appended when the step's `safe_name` is present
-    in `CSTAR_CLOBBER_STEPS`, even though the global clobber flag is unset.
+    """Verify `--clobber` is appended when the step's `workflow_overrides`
+    mark it for per-step clobber, even though the global clobber flag is unset.
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
@@ -225,21 +225,18 @@ def test_adapt_appends_clobber_for_targeted_step(tmp_path: Path) -> None:
         application=Application.HELLO_WORLD,
         blueprint=bp_path,
         working_dir=tmp_path / "unit-test-work-dir",
+        workflow_overrides={KEY_CLOBBER: True},
     )
 
-    with mock.patch.dict(
-        os.environ,
-        {ENV_CSTAR_CLOBBER_STEPS: step.safe_name},
-        clear=True,
-    ):
+    with mock.patch.dict(os.environ, {}, clear=True):
         request = StepToRunRequestAdapter().adapt(step)
 
     assert ARG_CLOBBER in request.command
 
 
 def test_adapt_omits_clobber_for_untargeted_step(tmp_path: Path) -> None:
-    """Verify `--clobber` is not appended when the step's `safe_name` is
-    absent from `CSTAR_CLOBBER_STEPS` and the global flag is unset.
+    """Verify `--clobber` is not appended when the step's `workflow_overrides`
+    do not mark it for per-step clobber and the global flag is unset.
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
@@ -251,11 +248,7 @@ def test_adapt_omits_clobber_for_untargeted_step(tmp_path: Path) -> None:
         working_dir=tmp_path / "unit-test-work-dir",
     )
 
-    with mock.patch.dict(
-        os.environ,
-        {ENV_CSTAR_CLOBBER_STEPS: "some-other-step"},
-        clear=True,
-    ):
+    with mock.patch.dict(os.environ, {}, clear=True):
         request = StepToRunRequestAdapter().adapt(step)
 
     assert ARG_CLOBBER not in request.command

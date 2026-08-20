@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from cstar.base.adapter import ConfiguredModelAdapter, ModelEnricher
-from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR, get_clobber_steps
+from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.base.feature import is_flag_enabled
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
 from cstar.orchestration.orchestration import RunRequest, RunRequestCommandFormatter
@@ -72,9 +72,7 @@ class StepToRunRequestAdapter(ConfiguredModelAdapter["LiveStep", "RunRequest"]):
             str(model.blueprint_path),
         ]
 
-        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR) or (
-            model.safe_name in get_clobber_steps()
-        ):
+        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR) or model.clobber:
             cmd_array.append(ARG_CLOBBER)
 
         if model.directives:

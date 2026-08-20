@@ -5,9 +5,9 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_CLOBBER_STEPS
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
+from cstar.orchestration.models import KEY_CLOBBER
 from cstar.orchestration.orchestration import LiveStep, Status, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
@@ -248,13 +248,15 @@ def test_slurmlauncher_adapt_step_with_overrides(
 async def test_slurmlauncher_launch_clobbers_targeted_step(
     wp_templates_dir: Path,
 ) -> None:
-    """Verify a step named in `CSTAR_CLOBBER_STEPS` has its prior state
-    cleared and is resubmitted with a refreshed cache, even though its prior
-    sentinel reports success.
+    """Verify a step whose `workflow_overrides` mark it for per-step clobber
+    is resubmitted with a refreshed cache (without clearing prior state,
+    which is delegated to the blueprint subprocess via `--clobber`), even
+    though its prior sentinel reports success.
     """
     wp_path = wp_templates_dir / "single_step.yaml"
     workplan = deserialize(wp_path, Workplan)
     step = LiveStep.from_step(workplan.steps[0])
+    step.workflow_overrides[KEY_CLOBBER] = True
 
     prior_handle = SlurmHandle(pid="1", name=step.name, run_id="rid")
     default_handle = SlurmHandle(pid="2", name=step.name, run_id="rid")
@@ -278,13 +280,10 @@ async def test_slurmlauncher_launch_clobbers_targeted_step(
         mock.patch.object(SlurmLauncher, "_submit", mock_submit),
         mock.patch.object(SlurmLauncher, "update_status", mock.AsyncMock()),
         mock.patch.object(JobFileSystemManager, "clear_prior") as mock_clear_prior,
-        mock.patch.dict(
-            os.environ, {ENV_CSTAR_CLOBBER_STEPS: step.safe_name}, clear=True
-        ),
     ):
         task = await SlurmLauncher.launch(step, [])
 
-    mock_clear_prior.assert_called_once()
+    mock_clear_prior.assert_not_called()
     mock_submit.with_options.assert_called_once_with(refresh_cache=True)
     mock_refreshed_submit.assert_called_once_with(step, [])
     assert task.handle == refreshed_handle
@@ -294,8 +293,9 @@ async def test_slurmlauncher_launch_clobbers_targeted_step(
 async def test_slurmlauncher_launch_leaves_untargeted_step_untouched(
     wp_templates_dir: Path,
 ) -> None:
-    """Verify a step not named in `CSTAR_CLOBBER_STEPS` is not cleared and is
-    resubmitted via the default (non-refreshed) submission path.
+    """Verify a step whose `workflow_overrides` do not mark it for per-step
+    clobber is not cleared and is resubmitted via the default
+    (non-refreshed) submission path.
     """
     wp_path = wp_templates_dir / "single_step.yaml"
     workplan = deserialize(wp_path, Workplan)
@@ -323,7 +323,6 @@ async def test_slurmlauncher_launch_leaves_untargeted_step_untouched(
         mock.patch.object(SlurmLauncher, "_submit", mock_submit),
         mock.patch.object(SlurmLauncher, "update_status", mock.AsyncMock()),
         mock.patch.object(JobFileSystemManager, "clear_prior") as mock_clear_prior,
-        mock.patch.dict(os.environ, {}, clear=True),
     ):
         task = await SlurmLauncher.launch(step, [])
 
