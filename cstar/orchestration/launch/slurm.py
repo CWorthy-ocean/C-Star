@@ -441,9 +441,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 step.fsm.clear_prior()
                 submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
-        # always drop dependencies on jobs that already completed successfully
-        # (e.g. steps satisfied by a prior run) so SLURM does not reject the
-        # submission over an already-finished job id
         dependencies = await cls._prune_completed_dependencies(dependencies)
 
         handle = await submit_fn(step, dependencies)
