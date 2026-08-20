@@ -9,7 +9,6 @@ from pydantic import BaseModel
 
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
 )
@@ -31,9 +30,7 @@ from cstar.cli.workplan.shared import (
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
-    ARG_CLOBBER_HELP,
-    ARG_CLOBBER_STEP,
-    ARG_CLOBBER_STEP_HELP,
+    ARG_CLOBBER_WORKPLAN_HELP,
     ARG_DRY_RUN,
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
@@ -308,14 +305,15 @@ def preprocess_clobber_steps(
     ctx: typer.Context,
     values: list[str],
 ) -> list[str]:
-    """Perform validation and formatting of the `--clobber-step` option.
+    """Perform validation and formatting of the `--clobber` option.
 
     Parameters
     ----------
     ctx : typer.Context
         A context object containing state for the typer app.
     values : list[str]
-        The user-supplied step names or safe_names, one per `--clobber-step` use.
+        The user-supplied step names, safe_names, or the literal token
+        `all`, one per `--clobber` use.
 
     Returns
     -------
@@ -454,19 +452,10 @@ def run(
         ),
     ] = LogLevelChoices.INFO,
     clobber: t.Annotated[
-        bool,
-        typer.Option(
-            ARG_CLOBBER,
-            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
-            help=ARG_CLOBBER_HELP,
-            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
-        ),
-    ] = False,
-    clobber_step: t.Annotated[
         list[str],
         typer.Option(
-            ARG_CLOBBER_STEP,
-            help=ARG_CLOBBER_STEP_HELP,
+            ARG_CLOBBER,
+            help=ARG_CLOBBER_WORKPLAN_HELP,
             callback=preprocess_clobber_steps,
         ),
     ] = [],
@@ -490,7 +479,7 @@ def run(
                     run_id,
                     user_variables=t.cast("Mapping[str, str]", ctx.obj),
                     dry_run=dry_run,
-                    clobber_steps=clobber_step,
+                    clobber_steps=clobber,
                 ),
             )
             console.print(get_run_summary_display(summary))

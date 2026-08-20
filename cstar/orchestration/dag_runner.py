@@ -17,7 +17,7 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.entrypoint.utils import ARG_CLOBBER_STEP
+from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -331,7 +331,8 @@ async def prepare_workplan(
         User-defined variables specified at runtime
     clobber_steps : Sequence[str] | None
         Names or safe_names of steps whose prior state should be cleared and
-        re-executed, as supplied via `--clobber-step`.
+        re-executed, or `all` to target every step, as supplied via
+        `--clobber`.
 
     Returns
     -------
@@ -532,7 +533,7 @@ class ExecutiveRunSummary(BaseModel):
 def _apply_clobber_overrides(
     wp: Workplan, clobber_steps: "Sequence[str] | None"
 ) -> None:
-    """Validate the raw ``--clobber-step`` selection and record it on the workplan.
+    """Validate the raw ``--clobber`` selection and record it on the workplan.
 
     Resolves each raw token against `wp.steps` (matching on either `name` or
     `safe_name`), then mutates the matched steps' `workflow_overrides` in place
@@ -540,28 +541,44 @@ def _apply_clobber_overrides(
     untargeted step that depends on a targeted one, since it will not be
     re-run and may hold stale outputs.
 
+    The token `all` is reserved: it marks every step for clobber and shadows
+    any step literally named `all` (that step can never be targeted
+    individually by name once `all` is reserved). It cannot be combined with
+    other tokens.
+
     Parameters
     ----------
     wp : Workplan
         The workplan whose steps should be marked for per-step clobber.
     clobber_steps : Sequence[str] | None
-        The raw step names or safe_names supplied via `--clobber-step`.
+        The raw step names, safe_names, or the literal token `all`, supplied
+        via `--clobber`.
 
     Raises
     ------
     ValueError
-        If any token does not match a step's `name` or `safe_name`.
+        If `all` is combined with other tokens, or if any other token does
+        not match a step's `name` or `safe_name`.
     """
     tokens = [x for token in clobber_steps or [] if (x := token.strip())]
     if not tokens:
         return
 
     steps = wp.steps
+
+    if "all" in tokens:
+        if len(tokens) > 1:
+            msg = f"{ARG_CLOBBER} 'all' cannot be combined with step names"
+            raise ValueError(msg)
+        for step in steps:
+            step.workflow_overrides[KEY_CLOBBER] = True
+        return
+
     by_token = {key: step for step in steps for key in (step.name, step.safe_name)}
 
     if unknown := set(tokens).difference(by_token):
         valid_names = sorted(step.name for step in steps)
-        msg = f"Unknown {ARG_CLOBBER_STEP} value(s) {sorted(unknown)}. Valid steps: {valid_names}"
+        msg = f"Unknown {ARG_CLOBBER} value(s) {sorted(unknown)}. Valid steps: {valid_names}"
         raise ValueError(msg)
 
     matched = [by_token[token] for token in tokens]
@@ -576,7 +593,7 @@ def _apply_clobber_overrides(
         if stale := sorted(targeted_names.intersection(step.depends_on)):
             msg = (
                 f"Step {step.name!r} depends on clobbered step(s) {stale} but "
-                "was not itself targeted by --clobber-step; it will not be "
+                f"was not itself targeted by {ARG_CLOBBER}; it will not be "
                 "re-run and may hold stale outputs derived from the clobbered step(s)."
             )
             log.warning(msg)
@@ -619,7 +636,8 @@ async def build_and_run_dag(
         but not executed.
     clobber_steps : Sequence[str] | None
         Names or safe_names of steps whose prior state should be cleared and
-        re-executed, as supplied via `--clobber-step`.
+        re-executed, or `all` to target every step, as supplied via
+        `--clobber`.
 
     Returns
     -------

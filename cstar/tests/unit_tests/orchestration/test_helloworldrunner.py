@@ -309,7 +309,7 @@ def test_hello_world_workplan_dry_run(
 def test_workplan_run_unknown_clobber_step_fails_fast(
     hw_single_step_wp_path: Path,
 ) -> None:
-    """Verify an unrecognized `--clobber-step` value fails fast as a CLI usage
+    """Verify an unrecognized `--clobber` step value fails fast as a CLI usage
     error (rather than a generic failure) and lists the valid step names.
 
     Parameters
@@ -341,7 +341,7 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
                 "--run-id",
                 str(uuid.uuid4()),
                 "--dry-run",
-                "--clobber-step",
+                "--clobber",
                 "does-not-exist",
             ],
             color=False,

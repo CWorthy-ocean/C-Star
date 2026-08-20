@@ -4,10 +4,10 @@ ARG_CLOBBER: t.Final[str] = "--clobber"
 ARG_CLOBBER_HELP: t.Final[str] = (
     "Set this flag to remove any pre-existing files in the working directory."
 )
-ARG_CLOBBER_STEP: t.Final[str] = "--clobber-step"
-ARG_CLOBBER_STEP_HELP: t.Final[str] = (
+ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "Name of a step whose prior state should be cleared and re-executed on "
-    "rerun. Repeatable. Accepts the step name or its slugified form."
+    "rerun, or 'all' to clobber every step. Repeatable. Accepts the step "
+    "name or its slugified form."
 )
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 

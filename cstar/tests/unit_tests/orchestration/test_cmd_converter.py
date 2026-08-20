@@ -254,11 +254,14 @@ def test_adapt_omits_clobber_for_untargeted_step(tmp_path: Path) -> None:
     assert ARG_CLOBBER not in request.command
 
 
-def test_adapt_appends_clobber_for_all_steps_when_global_flag_set(
+def test_adapt_omits_clobber_when_only_global_env_flag_set(
     tmp_path: Path,
 ) -> None:
-    """Verify the global `CSTAR_CLOBBER_WORKING_DIR` flag appends `--clobber`
-    regardless of per-step targeting.
+    """Verify the global `CSTAR_CLOBBER_WORKING_DIR` env var alone does not
+    cause `--clobber` to be appended to the generated command. Workplan-run
+    clobber selection now flows exclusively through the step's
+    `workflow_overrides`; the env var only takes effect inside the
+    subprocess started by the generated `cstar blueprint run` command.
     """
     bp_path = tmp_path / "blueprint.yaml"
     bp_path.touch()
@@ -277,4 +280,4 @@ def test_adapt_appends_clobber_for_all_steps_when_global_flag_set(
     ):
         request = StepToRunRequestAdapter().adapt(step)
 
-    assert ARG_CLOBBER in request.command
+    assert ARG_CLOBBER not in request.command

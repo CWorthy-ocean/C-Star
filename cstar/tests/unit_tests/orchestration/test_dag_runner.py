@@ -381,7 +381,7 @@ def test_apply_clobber_overrides_unknown_raises(tmp_path: Path) -> None:
     step_a = _make_step(tmp_path, "Step A")
     wp = _make_workplan([step_a])
 
-    with pytest.raises(ValueError, match=r"Unknown --clobber-step value\(s\)"):
+    with pytest.raises(ValueError, match=r"Unknown --clobber value\(s\)"):
         _apply_clobber_overrides(wp, ["does-not-exist"])
 
 
@@ -392,6 +392,32 @@ def test_apply_clobber_overrides_unknown_lists_all_bad_tokens(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match=r"'bad-one'.*'bad-two'|'bad-two'.*'bad-one'"):
         _apply_clobber_overrides(wp, ["bad-one", "bad-two"])
+
+
+def test_apply_clobber_overrides_all_marks_every_step(tmp_path: Path) -> None:
+    """Verify the reserved token `all` marks every step's
+    `workflow_overrides` with `clobber: True`, including a step literally
+    named `all`.
+    """
+    step_a = _make_step(tmp_path, "Step A")
+    step_b = _make_step(tmp_path, "all")
+    wp = _make_workplan([step_a, step_b])
+
+    _apply_clobber_overrides(wp, ["all"])
+
+    assert wp.steps[0].workflow_overrides[KEY_CLOBBER] is True
+    assert wp.steps[1].workflow_overrides[KEY_CLOBBER] is True
+
+
+def test_apply_clobber_overrides_all_combined_with_step_name_raises(
+    tmp_path: Path,
+) -> None:
+    """Verify `all` combined with a step name raises `ValueError`."""
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
+
+    with pytest.raises(ValueError, match=r"'all' cannot be combined"):
+        _apply_clobber_overrides(wp, ["all", step_a.name])
 
 
 def test_apply_clobber_overrides_warns_untargeted_dependents(
@@ -423,7 +449,7 @@ async def test_prepare_workplan_persists_clobber_overrides(
     wp_templates_dir: Path,
 ) -> None:
     """Verify the transformed workplan written to disk carries the
-    `--clobber-step` selection in the targeted step's `workflow_overrides`.
+    `--clobber` selection in the targeted step's `workflow_overrides`.
     """
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
