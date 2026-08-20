@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    FLAG_OFF,
     capture_environment,
 )
 from cstar.base.feature import is_flag_enabled
@@ -530,6 +532,27 @@ class ExecutiveRunSummary(BaseModel):
         )
 
 
+def _ignore_ambient_clobber_env() -> None:
+    """Drop ``CSTAR_CLOBBER_WORKING_DIR`` from the workplan process environment.
+
+    The variable remains a blueprint-level control (``cstar blueprint run
+    --clobber`` sets it for a single simulation), but workplan runs select
+    steps to clobber with ``--clobber <step|all>``. An exported value would be
+    inherited by every step subprocess and silently clobber all of them,
+    bypassing that selection -- and it also carries a different meaning for
+    blueprint migration, so it is scrubbed from the whole run deliberately.
+    Called before the environment is configured and captured into the run
+    record; warns when the value would have had an effect.
+    """
+    value = os.environ.pop(ENV_CSTAR_CLOBBER_WORKING_DIR, None)
+    if value is not None and value != FLAG_OFF:
+        msg = (
+            f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
+            f"runs; use `{ARG_CLOBBER} <step-name|all>` to clear and re-run steps."
+        )
+        log.warning(msg)
+
+
 def _apply_clobber_overrides(
     wp: Workplan, clobber_steps: "Sequence[str] | None"
 ) -> None:
@@ -647,6 +670,8 @@ async def build_and_run_dag(
     """
     if run_id:
         run_id = slugify(run_id)
+
+    _ignore_ambient_clobber_env()
 
     default_output_dir = StateDirectoryManager.data_dir(run_id or None)
     output_dir = (output_dir or default_output_dir).expanduser().resolve()

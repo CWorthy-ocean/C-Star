@@ -8,13 +8,21 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_DATA_HOME,
+    ENV_CSTAR_RUNID,
+    FLAG_OFF,
+    FLAG_ON,
+)
+from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import (
     _apply_clobber_overrides,
+    _ignore_ambient_clobber_env,
     get_status_detail_map,
     load_run_state,
     prepare_workplan,
@@ -338,6 +346,54 @@ def _make_workplan(steps: list[Step]) -> Workplan:
         description="A workplan used to test `_apply_clobber_overrides`",
         steps=steps,
     )
+
+
+def test_ignore_ambient_clobber_env_pops_and_warns(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An exported CSTAR_CLOBBER_WORKING_DIR is scrubbed (so it cannot leak
+    into every step subprocess) and the user is pointed at `--clobber`.
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_ON)
+
+    with caplog.at_level("WARNING"):
+        _ignore_ambient_clobber_env()
+
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
+    assert len(caplog.records) == 1
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR in caplog.text
+    assert ARG_CLOBBER in caplog.text
+
+
+def test_ignore_ambient_clobber_env_silent_when_off(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An explicit "off" value is scrubbed without a warning (it would have
+    had no effect on the steps).
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_OFF)
+
+    with caplog.at_level("WARNING"):
+        _ignore_ambient_clobber_env()
+
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
+    assert not caplog.records
+
+
+def test_ignore_ambient_clobber_env_noop_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Absence of the variable is a silent no-op."""
+    monkeypatch.delenv(ENV_CSTAR_CLOBBER_WORKING_DIR, raising=False)
+
+    with caplog.at_level("WARNING"):
+        _ignore_ambient_clobber_env()
+
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
+    assert not caplog.records
 
 
 def test_apply_clobber_overrides_noop_when_none(tmp_path: Path) -> None:

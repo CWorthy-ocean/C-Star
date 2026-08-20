@@ -7,7 +7,9 @@ ARG_CLOBBER_HELP: t.Final[str] = (
 ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "Name of a step whose prior state should be cleared and re-executed on "
     "rerun, or 'all' to clobber every step. Repeatable. Accepts the step "
-    "name or its slugified form."
+    "name or its slugified form. This option is the only workplan-level "
+    "clobber control; the CSTAR_CLOBBER_WORKING_DIR environment variable is "
+    "ignored (with a warning) by workplan runs."
 )
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 
