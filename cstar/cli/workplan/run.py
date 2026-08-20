@@ -35,15 +35,17 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    OPT_CLOBBER_ALL,
 )
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
     build_and_run_dag,
+    check_clobber_targets,
 )
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.orchestration import ProcessHandle
+from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle
 from cstar.orchestration.serialization import (
     try_deserialize,
     validate_serialized_entity,
@@ -324,6 +326,53 @@ def preprocess_clobber_steps(
     return [x for value in values if (x := value.strip())]
 
 
+def resolve_clobber_selection(wp_path: Path, clobber_steps: list[str]) -> list[str]:
+    """Resolve the raw `--clobber` selections against the workplan.
+
+    Expands the CLI-only token `all` into every step's safe_name and fails
+    fast -- before any run machinery starts -- when a selection matches no
+    step, so the user gets immediate feedback instead of a mid-run error.
+
+    Parameters
+    ----------
+    wp_path : Path
+        Local path to the workplan file (an original workplan, or the
+        transformed workplan persisted by a prior run when re-running).
+    clobber_steps : list[str]
+        The cleaned `--clobber` values.
+
+    Returns
+    -------
+    list[str]
+        Concrete step selections to pass to `build_and_run_dag`.
+
+    Raises
+    ------
+    typer.BadParameter
+        If `all` is combined with step names, or a selection matches no
+        step's `name` or `safe_name`.
+    """
+    if not clobber_steps:
+        return clobber_steps
+
+    wp = try_deserialize(wp_path, Workplan) or try_deserialize(wp_path, LiveWorkplan)
+    if wp is None:
+        return clobber_steps
+
+    if OPT_CLOBBER_ALL in clobber_steps:
+        if len(clobber_steps) > 1:
+            msg = f"{OPT_CLOBBER_ALL!r} cannot be combined with step names"
+            raise typer.BadParameter(msg, param_hint=ARG_CLOBBER)
+        return [step.safe_name for step in wp.steps]
+
+    if unknown := check_clobber_targets(wp, clobber_steps):
+        valid_names = sorted(step.name for step in wp.steps)
+        msg = f"Unknown step(s) {unknown}. Valid steps: {valid_names}"
+        raise typer.BadParameter(msg, param_hint=ARG_CLOBBER)
+
+    return clobber_steps
+
+
 def preprocess_path(workplan_path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
@@ -473,6 +522,7 @@ def run(
 
     try:
         with local_copy(path) as wp_path:
+            clobber = resolve_clobber_selection(wp_path, clobber)
             summary = asyncio.run(
                 build_and_run_dag(
                     wp_path,
@@ -483,6 +533,8 @@ def run(
                 ),
             )
             console.print(get_run_summary_display(summary))
+    except typer.BadParameter:
+        raise
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
         log.exception(msg)

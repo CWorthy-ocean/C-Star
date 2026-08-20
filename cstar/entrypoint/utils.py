@@ -11,6 +11,11 @@ ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "clobber control; the CSTAR_CLOBBER_WORKING_DIR environment variable is "
     "ignored (with a warning) by workplan runs."
 )
+OPT_CLOBBER_ALL: t.Final[str] = "all"
+"""Reserved `--clobber` value that selects every step in the workplan. It
+shadows any step literally named `all`, which can therefore never be targeted
+individually by name."""
+
 ARG_DRY_RUN: t.Final[str] = "--dry-run"
 
 ARG_DIRECTIVES_URI_LONG: t.Final[str] = "--directives"

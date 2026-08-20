@@ -19,7 +19,6 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
@@ -548,78 +547,108 @@ def _ignore_ambient_clobber_env() -> None:
     if value is not None and value != FLAG_OFF:
         msg = (
             f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
-            f"runs; use `{ARG_CLOBBER} <step-name|all>` to clear and re-run steps."
+            "runs; select the steps to clear and re-run explicitly instead "
+            "(`--clobber <step-name|all>` on the command line)."
         )
         log.warning(msg)
+
+
+def check_clobber_targets(wp: Workplan, clobber_steps: "Sequence[str]") -> list[str]:
+    """Return the clobber selections that match no step in the workplan.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan the selections are resolved against.
+    clobber_steps : Sequence[str]
+        Step names or safe_names selected for clobber.
+
+    Returns
+    -------
+    list[str]
+        The selections (sorted) that match neither a step's `name` nor its
+        `safe_name`; empty when every selection is valid.
+    """
+    known = {key for step in wp.steps for key in (step.name, step.safe_name)}
+    return sorted({token for token in clobber_steps if token not in known})
+
+
+def check_clobber_dependents(wp: Workplan, clobber_steps: "Sequence[str]") -> list[str]:
+    """Return the untargeted steps that depend on a step selected for clobber.
+
+    Such steps will not be re-run and may consume stale outputs derived from
+    their re-executed dependencies.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan the selections are resolved against.
+    clobber_steps : Sequence[str]
+        Step names or safe_names selected for clobber.
+
+    Returns
+    -------
+    list[str]
+        The names (sorted) of steps at risk of consuming stale outputs; empty
+        when every dependent is itself selected.
+    """
+    by_token = {key: step for step in wp.steps for key in (step.name, step.safe_name)}
+    targeted = {by_token[token].name for token in clobber_steps if token in by_token}
+    if not targeted:
+        return []
+    return sorted(
+        step.name
+        for step in wp.steps
+        if step.name not in targeted and targeted.intersection(step.depends_on)
+    )
 
 
 def _apply_clobber_overrides(
     wp: Workplan, clobber_steps: "Sequence[str] | None"
 ) -> None:
-    """Validate the raw ``--clobber`` selection and record it on the workplan.
+    """Validate the clobber selection and record it on the workplan.
 
-    Resolves each raw token against `wp.steps` (matching on either `name` or
-    `safe_name`), then mutates the matched steps' `workflow_overrides` in place
-    so the selection is persisted with the workplan. Also warns about any
-    untargeted step that depends on a targeted one, since it will not be
-    re-run and may hold stale outputs.
+    Resolves each selection against `wp.steps` (matching on either `name` or
+    `safe_name`), then mutates the matched steps' `workflow_overrides` in
+    place so the selection is persisted with the workplan. Emits a single
+    warning listing any untargeted steps that depend on a targeted one, since
+    they will not be re-run and may consume stale outputs.
 
-    The token `all` is reserved: it marks every step for clobber and shadows
-    any step literally named `all` (that step can never be targeted
-    individually by name once `all` is reserved). It cannot be combined with
-    other tokens.
+    Selections must be concrete step identifiers; the CLI-only token `all` is
+    expanded to every step's safe_name before it reaches this layer.
 
     Parameters
     ----------
     wp : Workplan
         The workplan whose steps should be marked for per-step clobber.
     clobber_steps : Sequence[str] | None
-        The raw step names, safe_names, or the literal token `all`, supplied
-        via `--clobber`.
+        The step names or safe_names selected for clobber.
 
     Raises
     ------
     ValueError
-        If `all` is combined with other tokens, or if any other token does
-        not match a step's `name` or `safe_name`.
+        If any selection does not match a step's `name` or `safe_name`.
     """
     tokens = [x for token in clobber_steps or [] if (x := token.strip())]
     if not tokens:
         return
 
-    steps = wp.steps
-
-    if "all" in tokens:
-        if len(tokens) > 1:
-            msg = f"{ARG_CLOBBER} 'all' cannot be combined with step names"
-            raise ValueError(msg)
-        for step in steps:
-            step.workflow_overrides[KEY_CLOBBER] = True
-        return
-
-    by_token = {key: step for step in steps for key in (step.name, step.safe_name)}
-
-    if unknown := set(tokens).difference(by_token):
-        valid_names = sorted(step.name for step in steps)
-        msg = f"Unknown {ARG_CLOBBER} value(s) {sorted(unknown)}. Valid steps: {valid_names}"
+    if unknown := check_clobber_targets(wp, tokens):
+        valid_names = sorted(step.name for step in wp.steps)
+        msg = f"Unknown clobber step selection(s) {unknown}. Valid steps: {valid_names}"
         raise ValueError(msg)
 
-    matched = [by_token[token] for token in tokens]
-    targeted_names = {step.name for step in matched}
+    by_token = {key: step for step in wp.steps for key in (step.name, step.safe_name)}
+    for token in tokens:
+        by_token[token].workflow_overrides[KEY_CLOBBER] = True
 
-    for step in matched:
-        step.workflow_overrides[KEY_CLOBBER] = True
-
-    for step in steps:
-        if step.name in targeted_names:
-            continue
-        if stale := sorted(targeted_names.intersection(step.depends_on)):
-            msg = (
-                f"Step {step.name!r} depends on clobbered step(s) {stale} but "
-                f"was not itself targeted by {ARG_CLOBBER}; it will not be "
-                "re-run and may hold stale outputs derived from the clobbered step(s)."
-            )
-            log.warning(msg)
+    if stale := check_clobber_dependents(wp, tokens):
+        msg = (
+            "Some steps depend on clobbered steps but were not selected for "
+            "clobber themselves; they will not be re-run and may consume "
+            f"stale outputs. Review the following steps: {', '.join(stale)}"
+        )
+        log.warning(msg)
 
 
 async def on_status_changed(handle: ProcessHandle) -> None:
