@@ -970,18 +970,20 @@ class DomainCatalog:
         bgc_mode: str | None = None,
         use_pio: bool | None = None,
         roms_ref: str | None = None,
+        marbl_ref: str | None = None,
     ) -> None:
         """Create a new ModelSpec entry (``ModelSpec/<name>/model.yaml``).
 
         Clones ``code``/``templates_commit`` verbatim from ``base_model_dir``'s
         ``model.yaml`` and swaps in ``model_settings`` (the model-owned subset --
         see the wizard's ``_model_owned_settings``). ``bgc_mode``/``use_pio``/
-        ``roms_ref`` clone the base value when left ``None``, or take the given
-        override when not -- these are the live per-run toggles the wizard's
-        widgets carry (``use_pio`` and ``code.marbl``/``bgc_mode`` don't survive
-        in ``model_settings`` since they're resolver-derived leaves stripped by
-        ``_model_owned_settings``, and ``code.roms.commit`` isn't part of
-        ``model_settings`` at all). Refuses to overwrite an existing entry.
+        ``roms_ref``/``marbl_ref`` clone the base value when left ``None``, or
+        take the given override when not -- these are the live per-run toggles
+        the wizard's widgets carry (``use_pio`` and ``code.marbl``/``bgc_mode``
+        don't survive in ``model_settings`` since they're resolver-derived
+        leaves stripped by ``_model_owned_settings``, and ``code.roms.commit``/
+        ``code.marbl.commit`` aren't part of ``model_settings`` at all).
+        Refuses to overwrite an existing entry.
         """
         self._check_writable()
         model_dir = self.catalog_root / "ModelSpec" / name
@@ -990,16 +992,22 @@ class DomainCatalog:
         base_model_path = self._resolve_stem_file(Path(base_model_dir), "model")
         base = yaml.safe_load(base_model_path.read_text()) or {}
         code = dict(base.get("code") or {})
-        if roms_ref and code.get("roms"):
-            # Mirror forge_blueprint_resolve.py's roms_ref handling: commit/branch/
-            # tag are all valid checkout targets, so store the override in `commit`
-            # and drop `branch` (C-Star requires exactly one of the two). Keep every
-            # other repo (pio/marbl) verbatim -- even if currently unused -- so the
-            # saved spec stays toggleable for use_pio/bgc_mode later.
-            roms = dict(code["roms"])
-            roms["commit"] = roms_ref
-            roms.pop("branch", None)
-            code["roms"] = roms
+
+        def _override_ref(repo_key: str, ref: str | None) -> None:
+            # Mirror forge_blueprint_resolve.py's roms_ref/marbl_ref handling:
+            # commit/branch/tag are all valid checkout targets, so store the
+            # override in `commit` and drop `branch` (C-Star requires exactly one
+            # of the two). Keep every other repo verbatim -- even if currently
+            # unused -- so the saved spec stays toggleable for use_pio/bgc_mode
+            # later.
+            if ref and code.get(repo_key):
+                repo = dict(code[repo_key])
+                repo["commit"] = ref
+                repo.pop("branch", None)
+                code[repo_key] = repo
+
+        _override_ref("roms", roms_ref)
+        _override_ref("marbl", marbl_ref)
         data = {
             "description": description or base.get("description", ""),
             "bgc_mode": (
@@ -1478,6 +1486,7 @@ class LayeredCatalog:
         bgc_mode: str | None = None,
         use_pio: bool | None = None,
         roms_ref: str | None = None,
+        marbl_ref: str | None = None,
     ) -> None:
         self._check_unique("model", name)
         self.top.register_model_from_settings(
@@ -1488,6 +1497,7 @@ class LayeredCatalog:
             bgc_mode=bgc_mode,
             use_pio=use_pio,
             roms_ref=roms_ref,
+            marbl_ref=marbl_ref,
         )
 
     def register_model(self, model_dir: Path | str) -> None:

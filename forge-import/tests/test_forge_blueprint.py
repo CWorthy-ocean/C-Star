@@ -1889,8 +1889,8 @@ def test_resolver_bgc_mode_default_marbl():
     cfg = _build()
     assert cfg.model_settings["cppdefs"]["marbl"] is True
     assert cfg.code.marbl is not None
-    assert cfg.code.marbl.location == "https://github.com/marbl-ecosys/MARBL.git"
-    assert cfg.code.marbl.commit == "marbl0.45.0"
+    assert cfg.code.marbl.location == "https://github.com/CWorthy-ocean/MARBL.git"
+    assert cfg.code.marbl.commit == "marbl0.45.0-max-it-10"
 
 
 def test_resolver_bgc_mode_none_raises_with_bgc_forcing():
@@ -2054,6 +2054,44 @@ def test_roms_ref_round_trips_through_yaml(tmp_path):
     back = ForgeBlueprint.from_yaml(p)
     assert back.code.roms.commit == "pio-refdate"
     assert back.code.roms.branch is None
+
+
+def test_resolver_marbl_ref_overrides_commit_and_clears_branch():
+    cfg = _build(marbl_ref="marbl0.99.0")
+    assert cfg.code.marbl.commit == "marbl0.99.0"
+    assert cfg.code.marbl.branch is None
+    # location is untouched -- only the checkout target changes
+    assert cfg.code.marbl.location == "https://github.com/CWorthy-ocean/MARBL.git"
+
+
+def test_resolver_marbl_ref_default_uses_model_yml_pin():
+    cfg = _build()
+    assert cfg.code.marbl.commit == "marbl0.45.0-max-it-10"
+
+
+def test_resolver_marbl_ref_ignored_when_bgc_none():
+    # bgc_mode="none" never populates code.marbl, so a stray marbl_ref is inert.
+    cfg = _build(
+        bgc_mode="none",
+        marbl_ref="marbl0.99.0",
+        forcing_inputs=_PHYSICS_ONLY_FORCING,
+    )
+    assert cfg.code.marbl is None
+
+
+def test_content_hash_changes_with_marbl_ref():
+    cfg = _build()
+    h = cfg.content_hash()
+    cfg_override = _build(marbl_ref="marbl0.99.0")
+    assert cfg_override.content_hash() != h
+
+
+def test_marbl_ref_round_trips_through_yaml(tmp_path):
+    cfg = _build(marbl_ref="marbl0.99.0")
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+    back = ForgeBlueprint.from_yaml(p)
+    assert back.code.marbl.commit == "marbl0.99.0"
+    assert back.code.marbl.branch is None
 
 
 def test_settings_is_flat_and_omits_processing_filled_sections():
@@ -2982,6 +3020,48 @@ class TestForgeBlueprintWizard:
         w3._on_load_path(None)
         assert w3.roms_ref.value == "my-custom-branch"
 
+    def test_marbl_ref_gather_and_default_round_trip(self, tmp_path):
+        w1 = self._wizard()
+        w1.marbl_ref.value = "marbl0.99.0"
+        assert w1.config.code.marbl.commit == "marbl0.99.0"
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.marbl_ref.value == "marbl0.99.0"
+        assert w2.config.code.marbl.commit == "marbl0.99.0"
+
+    def test_marbl_ref_prefilled_with_model_default_and_editable(self, tmp_path):
+        """Mirror of the roms_ref test above: the MARBL ref is prefilled from the
+        selected Model's pinned default, an unmodified default reloads showing that
+        same default (not blank), and an override round-trips through save/reload.
+        """
+        w1 = self._wizard()
+        default_ref = w1._model_default_marbl_ref()
+        assert default_ref  # this model.yaml pins a MARBL tag
+        assert w1.marbl_ref.value == default_ref
+
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.marbl_ref.value = "stale-value-from-a-prior-load"
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.marbl_ref.value == default_ref
+
+        # An actual override round-trips through save/reload unchanged.
+        w1.marbl_ref.value = "my-custom-marbl-branch"
+        w1._on_save(None)
+        w3 = self._wizard()
+        w3.load_path.value = str(p)
+        w3._on_load_path(None)
+        assert w3.marbl_ref.value == "my-custom-marbl-branch"
+
     def test_loading_file_with_bad_settings_is_flagged(self, tmp_path):
         import yaml
 
@@ -3603,6 +3683,59 @@ class TestSaveModifiedSpecsToCatalog:
 
         wiz.roms_ref.value = ""  # blank => clone the base pin, not a deviation
         assert wiz.config.composition.model.modified is False
+
+        wiz.marbl_ref.value = "some-marbl-branch"
+        assert wiz.config.composition.model.modified is True
+
+        wiz.marbl_ref.value = ""  # blank => clone the base pin, not a deviation
+        assert wiz.config.composition.model.modified is False
+
+    def test_save_model_spec_persists_marbl_ref(self, isolated_catalog):
+        spec_name = "marbl-ref-test"
+        wiz = self._wizard(isolated_catalog)
+        wiz.model_dd.value = "cson_roms-marbl_v0.1"
+        wiz.marbl_ref.value = "my-marbl-tag"
+        assert wiz.config.composition.model.modified is True  # spec deviation
+
+        wiz.save_model_name.value = spec_name
+        wiz._on_save_model(None)
+
+        data = isolated_catalog.model_data(spec_name)
+        assert data["code"]["marbl"]["commit"] == "my-marbl-tag"
+        assert "branch" not in data["code"]["marbl"]
+        assert (
+            data["code"]["marbl"]["location"]
+            == "https://github.com/CWorthy-ocean/MARBL.git"
+        )
+
+        assert wiz.model_dd.value == spec_name
+        assert wiz.config.composition.model.modified is False
+        assert "✓" in wiz.save_model_status.value
+
+        # A fresh wizard picking this ModelSpec must reload the same ref.
+        wiz2 = self._wizard(isolated_catalog)
+        wiz2.model_dd.value = spec_name
+        assert wiz2.marbl_ref.value == "my-marbl-tag"
+        assert wiz2.config.code.marbl.commit == "my-marbl-tag"
+
+    def test_verify_model_roundtrip_false_when_spec_loses_marbl_ref(
+        self, isolated_catalog
+    ):
+        from cstar_forge.forge_blueprint_wizard import _model_owned_settings
+
+        wiz = self._wizard(isolated_catalog)
+        wiz.model_dd.value = "cson_roms-marbl_v0.1"
+        wiz.marbl_ref.value = "some-other-marbl-tag"
+        # Simulate a pre-fix writer: a spec saved without the live marbl_ref.
+        isolated_catalog.register_model_from_settings(
+            "stale-marbl-ref",
+            _model_owned_settings(wiz.config.model_settings),
+            isolated_catalog.model_dir(wiz.model_dd.value),
+            use_pio=wiz.use_pio_chk.value,
+            roms_ref=wiz.roms_ref.value.strip() or None,
+            marbl_ref=None,
+        )
+        assert wiz._verify_spec_roundtrip("model", "stale-marbl-ref") is False
 
     def test_save_forcing_spec_marks_unmodified(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)

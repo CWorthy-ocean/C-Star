@@ -2093,6 +2093,16 @@ class ForgeBlueprintWizard:
             tooltip="ucla-roms checkout target (commit hash, tag, or branch). "
             "Prefilled from the selected Model's pinned default; edit to override.",
         )
+        self.marbl_ref = W.Text(
+            value="",  # populated from the selected Model's pinned default below
+            description="MARBL ref:",
+            style={"description_width": "120px"},
+            layout=W.Layout(width="260px"),
+            placeholder="commit / tag / branch",
+            tooltip="MARBL checkout target (commit hash, tag, or branch). "
+            "Prefilled from the selected Model's pinned default; edit to override. "
+            'Only used when BGC mode is "marbl".',
+        )
 
         # --- nesting (optional child grid) ---
         self.nest_enable = W.Checkbox(
@@ -2534,8 +2544,10 @@ class ForgeBlueprintWizard:
         )
 
         self.roms_ref.value = self._model_default_roms_ref()
+        self.marbl_ref.value = self._model_default_marbl_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
         self.use_pio_chk.value = self._model_default_use_pio()
+        self._sync_marbl_ref_visibility()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         self._forcing_seed = self._forcing_editor.gather()
         self._wire()
@@ -2566,6 +2578,7 @@ class ForgeBlueprintWizard:
         self.cdr_file_clear_btn.on_click(self._on_cdr_file_clear)
         self.cdr_file_upload.observe(self._on_cdr_file_upload, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
+        self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
         self.parent_domain_dd.observe(self._on_parent_domain, names="value")
         self.parent_plot_btn.on_click(self._on_parent_plot)
@@ -2580,6 +2593,7 @@ class ForgeBlueprintWizard:
             self.use_pio_chk,
             self.bgc_dd,
             self.roms_ref,
+            self.marbl_ref,
             self.start,
             self.end,
             self.model_ref_date,
@@ -2911,6 +2925,10 @@ class ForgeBlueprintWizard:
         self._v_sponge_touched = True
         self._rebuild()
 
+    def _sync_marbl_ref_visibility(self, _change=None):
+        # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
+        self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
+
     def _on_model_change(self, _change):
         # a different model has different defaults -> existing overrides no longer apply.
         # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
@@ -2919,6 +2937,7 @@ class ForgeBlueprintWizard:
             return
         self._overrides = {}
         self.roms_ref.value = self._model_default_roms_ref()
+        self.marbl_ref.value = self._model_default_marbl_ref()
         self.bgc_dd.value = self._model_default_bgc_mode()
         self.use_pio_chk.value = self._model_default_use_pio()
         self._rebuild()
@@ -2979,27 +2998,39 @@ class ForgeBlueprintWizard:
 
     # ---- forcing spec -------------------------------------------------------
     def _model_spec_declared(self) -> dict[str, Any]:
-        """The selected ModelSpec's declared ``roms_ref``/``bgc_mode``/``use_pio``.
+        """The selected ModelSpec's declared ``roms_ref``/``marbl_ref``/``bgc_mode``/
+        ``use_pio``.
 
         Single re-parse of ``model.yaml`` backing ``_model_default_*`` below and
-        the spec-deviation check in ``_rebuild`` -- both need the same three
+        the spec-deviation check in ``_rebuild`` -- both need the same
         catalog-declared values to compare live widget state against.
         """
         try:
             data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
             model = data["model"]
             roms = model.get("code", {}).get("roms", {}) or {}
+            marbl = model.get("code", {}).get("marbl", {}) or {}
             return {
                 "roms_ref": roms.get("commit") or roms.get("branch") or "",
+                "marbl_ref": marbl.get("commit") or marbl.get("branch") or "",
                 "bgc_mode": model.get("bgc_mode", "marbl"),
                 "use_pio": bool(model.get("use_pio", False)),
             }
         except Exception:
-            return {"roms_ref": "", "bgc_mode": "marbl", "use_pio": False}
+            return {
+                "roms_ref": "",
+                "marbl_ref": "",
+                "bgc_mode": "marbl",
+                "use_pio": False,
+            }
 
     def _model_default_roms_ref(self) -> str:
         """The selected model's pinned ucla-roms checkout target (commit or branch)."""
         return self._model_spec_declared()["roms_ref"]
+
+    def _model_default_marbl_ref(self) -> str:
+        """The selected model's pinned MARBL checkout target (commit or branch)."""
+        return self._model_spec_declared()["marbl_ref"]
 
     def _model_default_bgc_mode(self) -> str:
         """The selected model's ModelSpec-declared bgc_mode (prepopulates self.bgc_dd)."""
@@ -3120,10 +3151,11 @@ class ForgeBlueprintWizard:
                 kw["model_dir"] = self.catalog.model_dir(new_name)
                 # Let the saved spec speak for these: the resolver falls back to the
                 # ModelSpec when use_pio/bgc_mode are None (resolve.py:418-421) and to
-                # code.roms verbatim when roms_ref is absent. Re-applying the live
-                # widget values here would apply them to BOTH sides and make the
-                # verifier structurally blind to a spec that dropped them.
-                for k in ("use_pio", "bgc_mode", "roms_ref"):
+                # code.roms/code.marbl verbatim when roms_ref/marbl_ref are absent.
+                # Re-applying the live widget values here would apply them to BOTH
+                # sides and make the verifier structurally blind to a spec that
+                # dropped them.
+                for k in ("use_pio", "bgc_mode", "roms_ref", "marbl_ref"):
                     kw.pop(k, None)
                 overrides2 = {k: v for k, v in overrides2.items() if _is_output_key(*k)}
             elif spec == "forcing":
@@ -3713,6 +3745,18 @@ class ForgeBlueprintWizard:
             self.roms_ref.value = (
                 default_ref if stored_ref == default_ref else stored_ref
             )
+            # Same for MARBL -- code.marbl is absent when the file was saved with
+            # bgc_mode="none", in which case fall back to the model's default so
+            # re-enabling BGC picks the pinned ref back up.
+            stored_marbl = ""
+            if cfg.code.marbl is not None:
+                stored_marbl = cfg.code.marbl.commit or cfg.code.marbl.branch or ""
+            default_marbl = self._model_default_marbl_ref()
+            self.marbl_ref.value = (
+                stored_marbl
+                if stored_marbl and stored_marbl != default_marbl
+                else default_marbl
+            )
             self.topo_source.value = getattr(
                 cfg.domain.topography_source, "value", cfg.domain.topography_source
             )
@@ -3863,6 +3907,8 @@ class ForgeBlueprintWizard:
         kw["bgc_mode"] = self.bgc_dd.value
         if self.roms_ref.value.strip():
             kw["roms_ref"] = self.roms_ref.value.strip()
+        if self.marbl_ref.value.strip():
+            kw["marbl_ref"] = self.marbl_ref.value.strip()
         if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
             kw["model_reference_date"] = datetime.combine(
                 self.model_ref_date.value, datetime.min.time()
@@ -4002,6 +4048,9 @@ class ForgeBlueprintWizard:
             or self.bgc_dd.value != declared["bgc_mode"]
             or bool(
                 (ref := self.roms_ref.value.strip()) and ref != declared["roms_ref"]
+            )
+            or bool(
+                (mref := self.marbl_ref.value.strip()) and mref != declared["marbl_ref"]
             )
         )
         model_modified = (
@@ -4476,12 +4525,13 @@ class ForgeBlueprintWizard:
                 self.catalog.model_dir(self.model_dd.value),
                 description=self.description.value,
                 # Live widget values, using _gather()'s exact conventions (use_pio/
-                # bgc_mode unconditional, roms_ref only when non-blank) -- the
-                # round-trip verifier below compares against _gather()'s kw, so any
-                # divergence here would be a spurious mismatch.
+                # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --
+                # the round-trip verifier below compares against _gather()'s kw, so
+                # any divergence here would be a spurious mismatch.
                 bgc_mode=self.bgc_dd.value,
                 use_pio=self.use_pio_chk.value,
                 roms_ref=self.roms_ref.value.strip() or None,
+                marbl_ref=self.marbl_ref.value.strip() or None,
             )
         except FileExistsError as exc:
             self.save_model_status.value = f"<span style='color:#b00'>{exc}</span>"
@@ -4950,7 +5000,7 @@ class ForgeBlueprintWizard:
                 ),
                 section(
                     "Specs",
-                    W.HBox([self.model_dd, self.roms_ref, self.bgc_dd]),
+                    W.HBox([self.model_dd, self.roms_ref, self.bgc_dd, self.marbl_ref]),
                     self.forcing_dd,
                     self.output_dd,
                     self.domain_dd,

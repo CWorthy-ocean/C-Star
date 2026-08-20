@@ -426,8 +426,8 @@ code:
     commit: 0.4.1
     branch: null
   marbl:
-    location: https://github.com/marbl-ecosys/MARBL.git
-    commit: marbl0.45.0
+    location: https://github.com/CWorthy-ocean/MARBL.git
+    commit: marbl0.45.0-max-it-10
     branch: null
   pio:
     location: https://github.com/CWorthy-ocean/ParallelIO.git
@@ -471,5 +471,5 @@ provenance:
   cstar_version: cstar-ocean==0.10.0
   roms_tools_version: roms-tools==4.0.2.dev5+g8b6cd6c7c
   override_files_applied: []
-  content_hash: 4e21875788a60c94f842c67036f80240644dc49ea8742e2b7b5a91382c95ca36
+  content_hash: dfdd6460bf1e1a70366247b53640a5190f6d7d5298f3c9211b34857818d77677
   notes: null

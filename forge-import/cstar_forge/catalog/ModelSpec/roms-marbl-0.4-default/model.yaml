@@ -6,8 +6,8 @@ code:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
     commit: 0.4.1
   marbl:
-    location: https://github.com/marbl-ecosys/MARBL.git
-    commit: marbl0.45.0
+    location: https://github.com/CWorthy-ocean/MARBL.git
+    commit: marbl0.45.0-max-it-10
   pio:
     location: https://github.com/CWorthy-ocean/ParallelIO.git
     commit: 2.7.1-fork

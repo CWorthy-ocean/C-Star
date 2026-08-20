@@ -318,6 +318,49 @@ def test_roms_ref_repopulates_on_model_change(monkeypatch):
     assert wiz.roms_ref.value == "some-other-ref"
 
 
+def test_marbl_ref_prefilled_and_placed_next_to_model_dropdown():
+    """MARBL ref mirrors the ucla-roms ref: prefilled from the selected model's
+    pinned default (stays editable) and lives in the Model row of the Specs section.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.marbl_ref.value == wiz._model_default_marbl_ref()
+    assert wiz.marbl_ref.value  # this model.yaml pins a concrete MARBL tag
+
+    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
+    assert specs_box is not None
+    model_row = next(
+        c for c in specs_box.children if wiz.model_dd in getattr(c, "children", [])
+    )
+    assert wiz.marbl_ref in model_row.children  # same row as the Model dropdown
+    children = list(model_row.children)
+    assert children.index(wiz.marbl_ref) == children.index(wiz.bgc_dd) + 1
+
+
+def test_marbl_ref_hidden_unless_bgc_is_marbl():
+    """The MARBL ref field only shows when BGC mode is "marbl". Its value is
+    kept (not cleared) while hidden, so toggling BGC back restores the pin.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.bgc_dd.value == "marbl"
+    assert wiz.marbl_ref.layout.display != "none"
+    kept = wiz.marbl_ref.value
+
+    wiz.bgc_dd.value = "none"
+    assert wiz.marbl_ref.layout.display == "none"
+    assert wiz.marbl_ref.value == kept
+
+    wiz.bgc_dd.value = "marbl"
+    assert wiz.marbl_ref.layout.display != "none"
+
+
+def test_marbl_ref_repopulates_on_model_change(monkeypatch):
+    """Switching models refreshes the MARBL ref to the new model's pinned default."""
+    wiz = ForgeBlueprintWizard()
+    monkeypatch.setattr(wiz, "_model_default_marbl_ref", lambda: "some-other-marbl")
+    wiz._on_model_change(None)
+    assert wiz.marbl_ref.value == "some-other-marbl"
+
+
 def test_co2_tvarying_is_not_user_editable():
     """co2_tvarying is controlled solely by the presence of an MBL_co2 bgc surface
     source; the wizard must not expose a checkbox letting the user override it --

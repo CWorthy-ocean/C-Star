@@ -29,8 +29,8 @@ code:
     commit: <hash>  # or 'branch: main' instead
 
   marbl:  # optional
-    location: https://github.com/marbl-ecosys/MARBL.git
-    commit: marbl0.45.0
+    location: https://github.com/CWorthy-ocean/MARBL.git
+    commit: marbl0.45.0-max-it-10
 
   pio:  # optional; required if use_pio can be set true
     location: https://github.com/CWorthy-ocean/ParallelIO.git

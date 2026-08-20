@@ -392,6 +392,7 @@ def build_forge_blueprint(
     use_pio: bool | None = None,
     bgc_mode: Literal["marbl", "none"] | None = None,
     roms_ref: str | None = None,
+    marbl_ref: str | None = None,
     run_time_overrides: dict[str, Any] | None = None,
     compile_time_overrides: dict[str, Any] | None = None,
     dt: float | None = None,
@@ -421,6 +422,13 @@ def build_forge_blueprint(
     default), it falls back to the ModelSpec's own ``bgc_mode`` (itself defaulting
     to ``"marbl"``) -- the ModelSpec is the single source of the default; pass an
     explicit value to override it for one run.
+
+    ``roms_ref``/``marbl_ref`` are per-run checkout-target overrides (commit hash,
+    tag, or branch) for ``code.roms``/``code.marbl``. If ``None`` (the default),
+    the ModelSpec's own pin is snapshotted verbatim; when set, the override is
+    stored in ``commit`` with ``branch`` cleared (C-Star's CodeRepository treats
+    all three as the same checkout target). ``marbl_ref`` only takes effect when
+    ``bgc_mode == "marbl"`` (otherwise ``code.marbl`` is not populated at all).
 
     ``use_pio`` is a per-run toggle mirroring ``bgc_mode``: it overwrites
     ``cppdefs.use_pio`` and gates whether ``code.pio`` is populated (raising if PIO
@@ -804,6 +812,7 @@ def build_forge_blueprint(
         use_pio=use_pio,
         bgc_mode=bgc_mode,
         roms_ref=roms_ref,
+        marbl_ref=marbl_ref,
     )
 
     default_name = sanitize_name(f"{model_name}_{grid_name}_{npx * npy}procs")
@@ -1046,6 +1055,7 @@ def _build_code(
     use_pio: bool = False,
     bgc_mode: str = "marbl",
     roms_ref: str | None = None,
+    marbl_ref: str | None = None,
 ) -> Code:
     code_block = model.get("code", {}) or {}
 
@@ -1102,6 +1112,10 @@ def _build_code(
                 'bgc_mode="marbl" but the ModelSpec model.yaml has no code.marbl '
                 "repository (Forge pins codebases for reproducibility)"
             )
+        if marbl_ref:
+            # Same convention as roms_ref above: any git checkout target lands in
+            # `commit`, `branch` is cleared for C-Star's exactly-one validator.
+            marbl = CodeRepo(location=marbl.location, commit=marbl_ref, branch=None)
     return Code(
         roms=roms,
         marbl=marbl,

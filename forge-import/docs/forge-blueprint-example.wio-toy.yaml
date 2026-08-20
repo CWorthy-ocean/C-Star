@@ -506,8 +506,8 @@ code:
     commit: 0.2.0
     branch: null
   marbl:
-    location: https://github.com/marbl-ecosys/MARBL.git
-    commit: marbl0.45.0
+    location: https://github.com/CWorthy-ocean/MARBL.git
+    commit: marbl0.45.0-max-it-10
     branch: null
   pio: null
   templates_compile_time:
@@ -547,5 +547,5 @@ provenance:
   forge_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: 47140b94b4e273bcff352a350bf89f0cd546cd4d998634ce61eb260ab20d9295
+  content_hash: 6d148fcaf630276f405b645e7d3274b84aa5557865a676cca1f44617a94ad98e
   notes: null

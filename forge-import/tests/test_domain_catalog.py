@@ -197,6 +197,26 @@ def test_register_model_from_settings_applies_live_overrides(isolated_catalog):
     assert data["code"]["marbl"] == base_code["marbl"]
 
 
+def test_register_model_from_settings_applies_marbl_ref(isolated_catalog):
+    from cstar_forge.domain_catalog import default_catalog as _cat
+
+    base_dir = _cat.model_dir("cson_roms-marbl_v0.1")
+    base_code = _cat.model_data("cson_roms-marbl_v0.1")["code"]
+    isolated_catalog.register_model_from_settings(
+        "my-model-marbl",
+        {"param": {"nt_passive": 0}},
+        base_dir,
+        description="m",
+        marbl_ref="my-marbl-tag",
+    )
+    data = isolated_catalog.model_data("my-model-marbl")
+    assert data["code"]["marbl"]["commit"] == "my-marbl-tag"
+    assert "branch" not in data["code"]["marbl"]
+    assert data["code"]["marbl"]["location"] == base_code["marbl"]["location"]
+    # roms untouched when only marbl_ref is overridden
+    assert data["code"]["roms"] == base_code["roms"]
+
+
 # ---------------------------------------------------------------------------
 # LayeredCatalog (user layer over the read-only bundled layer) + user_catalog_root
 # ---------------------------------------------------------------------------
