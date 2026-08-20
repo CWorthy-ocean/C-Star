@@ -42,3 +42,4 @@ Miscellaneous
 
 - Pin ``compilers<2`` for laptop installs; see [here](https://github.com/conda-forge/mpich-feedstock/issues/142) for details (`#630 <https://github.com/CWorthy-ocean/C-Star/pull/630>`_)
 - Revert compilers<2, add compiler-specific mpich packages to ensure macos has the exact compilers needed (`#631 <https://github.com/CWorthy-ocean/C-Star/pull/631>`_)
+- Silence sqlalchemy errors related to Prefect shutdown (`#637 <https://github.com/CWorthy-ocean/C-Star/pull/637>`_)
