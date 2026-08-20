@@ -432,7 +432,7 @@ class BoundaryFile(BaseModel):
     """The expected file extension for a boundary file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
     """The expected timestamp format in the boundary file name"""
-    PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
+    PATTERN_BRY: t.ClassVar[t.Literal[r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
         r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
     )
     """A regex identifying full boundary or partitioned files."""
@@ -532,7 +532,7 @@ class BoundaryFile(BaseModel):
             msg = f"File extension does not match expected naming convention: {value.suffix}"
             raise ValueError(msg)
 
-        if re.fullmatch(BoundaryFile.PATTERN_RST, value.name, flags=re.ASCII):
+        if re.fullmatch(BoundaryFile.PATTERN_BRY, value.name, flags=re.ASCII):
             return value
 
         msg = f"File name does not match expected naming convention: {value}"
@@ -547,7 +547,7 @@ class BoundaryFile(BaseModel):
         BoundaryFile
         """
         matches = re.fullmatch(
-            BoundaryFile.PATTERN_RST, self.path.as_posix(), flags=re.ASCII
+            BoundaryFile.PATTERN_BRY, self.path.as_posix(), flags=re.ASCII
         )
         if not matches:
             msg = f"File name does not match expected naming convention: {self.path}"
