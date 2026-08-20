@@ -27,6 +27,7 @@ Bug Fixes
 - Fixes a bug where the ``continue-from`` directive would obtain the wrong file if partitioning was enabled and multiple restart file timestamps were present (`#629 <https://github.com/CWorthy-ocean/C-Star/pull/629>`_)
 - Normalize run-id casing at intake to fix mixed-case run breakage (`#632 <https://github.com/CWorthy-ocean/C-Star/pull/632>`_)
 - Fix bug where slurm account, walltime, and queue env vars are not updated with compute customizations (`#634 <https://github.com/CWorthy-ocean/C-Star/pull/634>`_)
+- Depending on already-completed SLURM jobs should now seamlessly drop the dependencies (`#633 <https://github.com/CWorthy-ocean/C-Star/pull/633>`_)
 
 Improvements
 ~~~~~~~~~~~~
