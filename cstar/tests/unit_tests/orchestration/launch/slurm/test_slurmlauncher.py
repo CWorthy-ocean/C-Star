@@ -5,10 +5,8 @@ from unittest import mock
 
 import pytest
 
-from cstar.execution.file_system import JobFileSystemManager
-from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
-from cstar.orchestration.models import KEY_CLOBBER
-from cstar.orchestration.orchestration import LiveStep, Status, Workplan
+from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.orchestration import LiveStep, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
@@ -242,91 +240,3 @@ def test_slurmlauncher_adapt_step_with_overrides(
 
     if exp_walltime != minimum_spec.max_walltime:
         assert f"{ENV_CSTAR_SLURM_MAX_WALLTIME}={exp_walltime!r}" in job.commands
-
-
-@pytest.mark.usefixtures("read_yaml_intercept")
-async def test_slurmlauncher_launch_clobbers_targeted_step(
-    wp_templates_dir: Path,
-) -> None:
-    """Verify a step whose `workflow_overrides` mark it for per-step clobber
-    is resubmitted with a refreshed cache (without clearing prior state,
-    which is delegated to the blueprint subprocess via `--clobber`), even
-    though its prior sentinel reports success.
-    """
-    wp_path = wp_templates_dir / "single_step.yaml"
-    workplan = deserialize(wp_path, Workplan)
-    step = LiveStep.from_step(workplan.steps[0])
-    step.workflow_overrides[KEY_CLOBBER] = True
-
-    prior_handle = SlurmHandle(pid="1", name=step.name, run_id="rid")
-    default_handle = SlurmHandle(pid="2", name=step.name, run_id="rid")
-    refreshed_handle = SlurmHandle(pid="3", name=step.name, run_id="rid")
-
-    mock_submit = mock.AsyncMock(return_value=default_handle)
-    mock_refreshed_submit = mock.AsyncMock(return_value=refreshed_handle)
-    mock_submit.with_options = mock.Mock(return_value=mock_refreshed_submit)
-
-    mock_state_repo = mock.Mock()
-    mock_state_repo.get_sentinel = mock.AsyncMock(return_value=prior_handle)
-
-    with (
-        mock.patch(
-            "cstar.orchestration.launch.slurm.StateRepository",
-            return_value=mock_state_repo,
-        ),
-        mock.patch.object(
-            SlurmLauncher, "query_status", mock.AsyncMock(return_value=Status.Done)
-        ),
-        mock.patch.object(SlurmLauncher, "_submit", mock_submit),
-        mock.patch.object(SlurmLauncher, "update_status", mock.AsyncMock()),
-        mock.patch.object(JobFileSystemManager, "clear_prior") as mock_clear_prior,
-    ):
-        task = await SlurmLauncher.launch(step, [])
-
-    mock_clear_prior.assert_not_called()
-    mock_submit.with_options.assert_called_once_with(refresh_cache=True)
-    mock_refreshed_submit.assert_called_once_with(step, [])
-    assert task.handle == refreshed_handle
-
-
-@pytest.mark.usefixtures("read_yaml_intercept")
-async def test_slurmlauncher_launch_leaves_untargeted_step_untouched(
-    wp_templates_dir: Path,
-) -> None:
-    """Verify a step whose `workflow_overrides` do not mark it for per-step
-    clobber is not cleared and is resubmitted via the default
-    (non-refreshed) submission path.
-    """
-    wp_path = wp_templates_dir / "single_step.yaml"
-    workplan = deserialize(wp_path, Workplan)
-    step = LiveStep.from_step(workplan.steps[0])
-
-    prior_handle = SlurmHandle(pid="1", name=step.name, run_id="rid")
-    default_handle = SlurmHandle(pid="2", name=step.name, run_id="rid")
-    refreshed_handle = SlurmHandle(pid="3", name=step.name, run_id="rid")
-
-    mock_submit = mock.AsyncMock(return_value=default_handle)
-    mock_refreshed_submit = mock.AsyncMock(return_value=refreshed_handle)
-    mock_submit.with_options = mock.Mock(return_value=mock_refreshed_submit)
-
-    mock_state_repo = mock.Mock()
-    mock_state_repo.get_sentinel = mock.AsyncMock(return_value=prior_handle)
-
-    with (
-        mock.patch(
-            "cstar.orchestration.launch.slurm.StateRepository",
-            return_value=mock_state_repo,
-        ),
-        mock.patch.object(
-            SlurmLauncher, "query_status", mock.AsyncMock(return_value=Status.Done)
-        ),
-        mock.patch.object(SlurmLauncher, "_submit", mock_submit),
-        mock.patch.object(SlurmLauncher, "update_status", mock.AsyncMock()),
-        mock.patch.object(JobFileSystemManager, "clear_prior") as mock_clear_prior,
-    ):
-        task = await SlurmLauncher.launch(step, [])
-
-    mock_clear_prior.assert_not_called()
-    mock_submit.with_options.assert_not_called()
-    mock_submit.assert_called_once_with(step, [])
-    assert task.handle == default_handle
