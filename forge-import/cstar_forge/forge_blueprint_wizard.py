@@ -783,13 +783,13 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 # and the output/model "modified" tracking are all unaffected by the grouping.
 #
 # Sections deliberately absent (time_stepping, reference_date_settings, grid,
-# s_coord, param, title, output_root_name, initial, forcing) are filled
+# s_coord, param, title, output_root_name, initial, forcing, river_frc) are filled
 # dynamically at resolve/run time (ntimes from the run duration, grid/IC/forcing
-# paths from generated files) or edited by a dedicated widget elsewhere in the
-# wizard (theta_s/theta_b/hc, dt, np_xi/np_eta, reference date, PIO/open-boundary
-# checkboxes). Their resolver-composed value still flows through untouched --
-# omitting the pane only removes an editor that would be clobbered or duplicated,
-# never the value.
+# paths from generated files, river_frc entirely generation-derived) or edited by a
+# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, np_xi/np_eta,
+# reference date, PIO/open-boundary checkboxes). Their resolver-composed value still
+# flows through untouched -- omitting the pane only removes an editor that would be
+# clobbered or duplicated, never the value.
 #
 # ``cppdefs`` is almost entirely resolver-derived (obc_*/marbl/use_pio/cdr_forcing/
 # co2_tvarying/sal_restore/tides) and stays out of the accordion for those fields --
@@ -826,7 +826,13 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "blk_frc",
             "flux_frc",
             "tides",
-            "river_frc",
+            # river_frc is deliberately absent: all three of its typed fields
+            # (river_source/analytical/nriv) are generation-derived -- see
+            # GENERATION_DERIVED_LEAF_KEYS["river_frc"] in forge_blueprint_engine.py
+            # -- so the executor overwrites every one from the actual river forcing
+            # (nriv = the "nriver" dimension of the generated/attached dataset).
+            # An accordion editor here would only record overrides that generation
+            # discards. The resolver-composed value still flows through untouched.
             "pipe_frc",
             "sss_correction",
             "sst_correction",
