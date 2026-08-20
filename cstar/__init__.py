@@ -2,6 +2,7 @@
 # Build module environment at import time
 # NOTE: need to set ROMS_ROOT,MARBL_ROOT,CSTAR_ROOT,CSTAR_SYSTEM, and maybe modify PATH on conda install
 
+import logging
 import os
 from importlib.metadata import version as _version
 
@@ -21,3 +22,13 @@ except Exception:
     # Local copy or not installed with setuptools.
     # Disable minimum version checks on downstream libraries.
     __version__ = "9999"
+
+# Prefect's ephemeral-server teardown logs a harmless CancelledError-driven
+# SQLAlchemy pool ERROR at process exit (prefect #16504 / sqlalchemy #12710).
+# SQLAlchemy is only used via Prefect, so mute its log output entirely — via
+# the propagate flag, which (unlike a level) reset_log_level cannot undo; the
+# NullHandler keeps logging.lastResort from printing the record instead.
+# Remove along with the Prefect dependency.
+_sqlalchemy_logger = logging.getLogger("sqlalchemy")
+_sqlalchemy_logger.propagate = False
+_sqlalchemy_logger.addHandler(logging.NullHandler())
