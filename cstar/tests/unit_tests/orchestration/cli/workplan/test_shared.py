@@ -5,10 +5,12 @@ from unittest import mock
 import pytest
 import typer
 
-from cstar.cli.workplan.shared import (
-    autocomplete_step_list,
+from cstar.cli.common import (
     check_and_capture_kvp,
     check_and_capture_kvps,
+)
+from cstar.cli.workplan.shared import (
+    autocomplete_step_list,
     list_steps,
 )
 from cstar.orchestration.models import Workplan

@@ -1033,7 +1033,7 @@ def configure_environment(
     updates : Mapping[str, str] | None
         Additional environment variable updates.
     """
-    if output_dir:
+    if output_dir and not os.getenv(ENV_CSTAR_DATA_HOME):
         os.environ[ENV_CSTAR_DATA_HOME] = output_dir.expanduser().resolve().as_posix()
 
     if run_id:

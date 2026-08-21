@@ -98,6 +98,17 @@ ENV_FF_CLI_BP_MIGRATE_SHOW: t.Annotated[
 """Enable CLI for migrating blueprints to the latest schema."""
 
 
+ENV_FF_CLI_MANAGE_CACHE: t.Annotated[
+    t.Literal["CSTAR_FF_CLI_MANAGE_CACHE"],
+    EnvVar(
+        "Enable CLI for promoting cache entries from user to group-level cache.",
+        GROUP_FF,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_FF_CLI_MANAGE_CACHE"
+"""Enable CLI for promoting cache entries from user to group-level cache."""
+
+
 ENV_FF_DEBUG_BUILD_MODE: t.Annotated[
     t.Literal["CSTAR_FF_DEBUG_BUILD_MODE"],
     EnvVar(

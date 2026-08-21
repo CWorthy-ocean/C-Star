@@ -100,6 +100,7 @@ class TestRemoteFileRetriever:
 
 
 class TestRemoteTextFileRetriever:
+    @pytest.mark.usefixtures("mock_run_id")
     def test_save_writes_file(
         self,
         tmp_path: Path,
@@ -125,6 +126,7 @@ class TestRemoteTextFileRetriever:
         assert result.read_bytes() == fake_data
 
 
+@pytest.mark.usefixtures("mock_run_id")
 class TestRemoteBinaryFileRetriever:
     def test_save_writes_file(
         self,
@@ -142,7 +144,7 @@ class TestRemoteBinaryFileRetriever:
 
         with mock.patch("cstar.io.retriever.requests.get", return_value=fake_response):
             r = retriever.RemoteBinaryFileRetriever(source)
-            path = r._save(tmp_path)
+            path = r.save(tmp_path)
 
         assert path.exists()
         assert path.read_bytes() == fake_chunk
@@ -164,9 +166,10 @@ class TestRemoteBinaryFileRetriever:
         with mock.patch("cstar.io.retriever.requests.get", return_value=fake_response):
             r = retriever.RemoteBinaryFileRetriever(source=source)
             with pytest.raises(ValueError, match="Hash mismatch"):
-                r._save(tmp_path)
+                r.save(tmp_path)
 
 
+@pytest.mark.usefixtures("mock_run_id")
 class TestLocalFileRetriever:
     def test_read_and_save(
         self,

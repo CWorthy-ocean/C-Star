@@ -11,7 +11,7 @@ We are designing and building C-Star with these high-level principles in mind:
 - **Ease of use:** Ensures consistent application by diverse user groups including the commercial sector.
 - **Standardization:** Ensures a consistent level of quality across CDR projects.
 
-A key strength of C-Star lies in its ability to run regional ocean simulations using a `“blueprint” <https://c-star.readthedocs.io/en/latest/terminology.html#term-blueprint>`_ that consolidates all the necessary data to define a model setup. This enables the creation of curated databases containing both scientifically validated and research-grade blueprints. These blueprints offer users the flexibility to easily reproduce simulations, making the modeling process more accessible and consistent.
+A key strength of C-Star lies in its ability to run regional ocean simulations using a :term:`blueprint` that consolidates all the necessary data to define a model setup. This enables the creation of curated databases containing both scientifically validated and research-grade blueprints. These blueprints offer users the flexibility to easily reproduce simulations, making the modeling process more accessible and consistent.
 
 .. toctree::
     :maxdepth: 1
@@ -53,6 +53,7 @@ A key strength of C-Star lies in its ability to run regional ocean simulations u
 
     api-blueprint
     api-orchestration
+    api-caching
     api
     schemas/index
 
@@ -62,4 +63,5 @@ A key strength of C-Star lies in its ability to run regional ocean simulations u
 
     contributing
     custom_applications
+    caching
     releases

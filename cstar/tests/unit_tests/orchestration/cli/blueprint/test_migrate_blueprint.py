@@ -89,7 +89,7 @@ def test_blueprint_migrate_persist_to_default(
     latest = bounds["max"]
 
     bp_path = plotter_v1_0_0_bp
-    state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, "")))
+    state_dir = Path(str(os.getenv(ENV_CSTAR_STATE_HOME, ""))) / "cstar"
     expected_output_path = state_dir / f"{bp_path.stem}_{latest}{bp_path.suffix}"
 
     runner = CliRunner()

@@ -255,7 +255,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     msg = f"Reloading workplan run: {wp.name}"
     log.debug(msg)
 
-    configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
+    configure_environment(None, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
     launcher = get_launcher()
@@ -534,7 +534,6 @@ async def on_status_changed(handle: ProcessHandle) -> None:
 async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
-    output_dir: Path | None = None,
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
 ) -> ExecutiveRunSummary:
@@ -546,8 +545,6 @@ async def build_and_run_dag(
         The path to the blueprint to execute
     run_id : str | None
         The run-id to be used by the orchestrator.
-    output_dir : Path | None
-        The path to the output directory.
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
     dry_run : bool
@@ -563,8 +560,8 @@ async def build_and_run_dag(
     if run_id:
         run_id = slugify(run_id)
 
-    default_output_dir = StateDirectoryManager.data_dir(run_id or None)
-    output_dir = (output_dir or default_output_dir).expanduser().resolve()
+    output_dir = StateDirectoryManager.data_dir(run_id or None)
+    output_dir = output_dir.expanduser().resolve()
     configure_environment(output_dir, run_id)
 
     launcher = get_launcher()

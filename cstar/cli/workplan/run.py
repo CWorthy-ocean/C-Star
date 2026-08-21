@@ -8,6 +8,7 @@ import typer
 from pydantic import BaseModel
 
 from cstar.base.env import (
+    ENV_CSTAR_ARTIFACT_CACHE_BYPASS,
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
@@ -18,12 +19,13 @@ from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     cb_pipeline,
     normalize_runid,
+    preprocess_kvpfile,
+    preprocess_kvps,
     set_env,
     set_flag,
     update_loggers,
 )
 from cstar.cli.workplan.shared import (
-    check_and_capture_kvps,
     colored,
     console,
     list_runs,
@@ -36,6 +38,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_NO_CACHE,
+    ARG_NO_CACHE_HELP,
 )
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import (
@@ -70,77 +74,6 @@ CATEGORY_HEADER_COLOR: t.Final[str] = "white"
 SECTION_HEADER_COLOR: t.Final[str] = "yellow"
 ATTR_COLOR: t.Final[str] = "cyan"
 INDENT = " "
-
-
-def preprocess_vars(
-    ctx: typer.Context,
-    user_variables: list[str],
-) -> list[str] | None:
-    """Perform validation and formatting on user-supplied variables.
-
-    Places the processed variables into the user data slot of the typer context object.
-
-    Parameters
-    ----------
-    ctx : typer.Context
-        A context object containing state for the typer app
-    user_variables : list[str]
-        A list of key-value pairs supplied by a user.
-
-    Returns
-    -------
-    list[str] | None
-        The original input with leading/trailing whitespace stripped from the keys
-        and values.
-
-    Raises
-    ------
-    typer.BadParameter
-        - If the key-value pair does not meet `key=value` convention
-    """
-    if not user_variables:
-        return None
-
-    ctx.obj = check_and_capture_kvps(user_variables)
-
-    return user_variables
-
-
-def preprocess_varfile(
-    ctx: typer.Context,
-    user_varfile_path: Path | None,
-) -> Path | None:
-    """Perform validation and formatting on user-supplied variables
-    supplied through a path to a variables file.
-
-    Places the processed variables into the user data slot of the typer context object.
-
-    Parameters
-    ----------
-    ctx : typer.Context
-        A context object containing state for the typer app.
-    user_varfile_path : Path | None
-        A path to a file containing the variable configuration.
-
-    Returns
-    -------
-    Path | None
-
-    Raises
-    ------
-    typer.BadParameter
-        - If the source file does not exist
-        - If any individual key-value pair is malformed
-    """
-    if user_varfile_path is None:
-        return None
-
-    with user_varfile_path.open("r") as fp:
-        lines = [x.strip() for x in fp.readlines() if x.strip()]
-
-    ctx.obj = check_and_capture_kvps(lines)
-
-    return user_varfile_path
 
 
 def _ft(model_type: type[BaseModel], field_name: str) -> str:
@@ -383,7 +316,7 @@ def run(
                 "Specify 0-to-many replacements as key-value pairs in "
                 "the form `key=value`."
             ),
-            callback=preprocess_vars,
+            callback=preprocess_kvps,
         ),
     ] = None,
     user_variables_path: t.Annotated[
@@ -395,7 +328,7 @@ def run(
                 "Specify the path to a file containing one replacements per line "
                 "as key-value pairs in the form `key=value`."
             ),
-            callback=preprocess_varfile,
+            callback=preprocess_kvpfile,
             exists=True,
             file_okay=True,
             dir_okay=False,
@@ -436,6 +369,15 @@ def run(
             callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
             help=ARG_CLOBBER_HELP,
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+        ),
+    ] = False,
+    _disable_cache: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_NO_CACHE,
+            callback=set_flag(ENV_CSTAR_ARTIFACT_CACHE_BYPASS),
+            help=ARG_NO_CACHE_HELP,
+            envvar=ENV_CSTAR_ARTIFACT_CACHE_BYPASS,
         ),
     ] = False,
 ) -> None:

@@ -28,7 +28,7 @@ def test_directory_mgr_cachedir_no_config(
     fn_under_test: Callable[[], Path], default_value: str
 ) -> None:
     """Verify the default state directory is returned if no environment config is set."""
-    expected_path = (Path(default_value) / "cstar").expanduser().resolve()
+    expected_path = (Path(default_value)).expanduser().resolve()
 
     with mock.patch.dict(os.environ, {}, clear=True):
         actual_path = fn_under_test()
@@ -50,7 +50,11 @@ def test_directory_mgr_cachedir_xdg_config(
     xdg_var: str,
     xdg_value: str,
 ) -> None:
-    """Verify the XDG config is used instead of returning defaults when it is set."""
+    """Verify the XDG config is used instead of returning defaults when it is set.
+
+    Secondarily, ensure the directory manager automatically adds /cstar subdirectory
+    to the raw XDG location.
+    """
     # expect the output to be the base path from the XDG setting with a cstar subdir
     xdg_path = Path(xdg_value) / "cstar"
     expected_path = xdg_path.expanduser().resolve()
@@ -135,7 +139,13 @@ def test_directory_mgr_datadir_hpc_override(
     expected_path = (hpc_path / "cstar").expanduser().resolve()
 
     with mock.patch.dict(
-        os.environ, {xdg_var: xdg_value, scratch_var: scratch_val}, clear=True
+        os.environ,
+        {
+            "CSTAR_SCRATCH_DIRS": scratch_var,
+            xdg_var: xdg_value,
+            scratch_var: scratch_val,
+        },
+        clear=True,
     ):
         actual_path = DirMgr.data_home()
 

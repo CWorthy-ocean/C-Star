@@ -100,7 +100,7 @@ def test_cli_workplan_check_file_bad_content(
     assert "is invalid" in result.stderr
 
 
-@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.usefixtures("read_yaml_intercept", "mock_run_id")
 @pytest.mark.parametrize(
     "repo_relative_path",
     [
