@@ -157,6 +157,34 @@ def test_migration_identify_bounds() -> None:
     assert bounds["max"] != global_max
 
 
+def test_migration_identify_bounds_orders_versions_numerically() -> None:
+    """Verify bounds discovery compares versions numerically per component.
+
+    Lexicographic string comparison would order "10.0.0" before "2.0.0",
+    yielding min="10.0.0" and max="9.0.0" for the adapters below.
+    """
+    mock_adapter0 = mock.MagicMock(spec=type[SchemaAdapter])
+    type(mock_adapter0).application = lambda _cls: APP_ROMS
+    type(mock_adapter0).source = lambda _cls: "2.0.0"
+    type(mock_adapter0).target = lambda _cls: "9.0.0"
+
+    mock_adapter1 = mock.MagicMock(spec=type[SchemaAdapter])
+    type(mock_adapter1).application = lambda _cls: APP_ROMS
+    type(mock_adapter1).source = lambda _cls: "10.0.0"
+    type(mock_adapter1).target = lambda _cls: "10.1.0"
+
+    adapters: list[type[SchemaAdapter]] = [
+        mock_adapter0,
+        mock_adapter1,
+    ]  # type: ignore  # noqa: PGH003
+
+    migrator = BlueprintMigration(adapters=adapters)
+
+    bounds = migrator.schema_bounds[APP_ROMS]
+    assert bounds["min"] == "2.0.0"
+    assert bounds["max"] == "10.1.0"
+
+
 @pytest.mark.parametrize(
     ("dumped", "exp_min", "exp_max"),
     [
