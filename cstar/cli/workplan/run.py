@@ -41,8 +41,8 @@ from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
+    apply_clobber_overrides,
     build_and_run_dag,
-    # build_and_run_dag,
     check_clobber_targets,
     run_dag,
 )
@@ -537,10 +537,12 @@ def run(
                         run_id,
                         user_variables=user_vars,
                         dry_run=dry_run,
+                        clobber_steps=clobber,
                     ),
                 )
             else:
                 wp = deserialize(wp_path, LiveWorkplan)
+                apply_clobber_overrides(wp, clobber)
                 planner = Planner(wp)
                 summary = asyncio.run(
                     run_dag(

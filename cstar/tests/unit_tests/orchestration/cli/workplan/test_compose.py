@@ -234,7 +234,7 @@ async def test_build_and_run_dag_env(
             template=WorkplanTemplate[workplan_name.upper()],
         )
 
-        await build_and_run_dag(generated_wp_path, run_id, working_dir)
+        await build_and_run_dag(generated_wp_path, run_id)
 
     assert key in str(ex)
 

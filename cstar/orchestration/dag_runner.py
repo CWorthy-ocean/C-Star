@@ -374,7 +374,7 @@ async def prepare_workplan(
     )
     wp = transformer.apply()
 
-    _apply_clobber_overrides(wp, clobber_steps)
+    apply_clobber_overrides(wp, clobber_steps)
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = WorkplanTransformer.derived_path(
@@ -602,7 +602,7 @@ def check_clobber_dependents(wp: Workplan, clobber_steps: "Sequence[str]") -> li
     )
 
 
-def _apply_clobber_overrides(
+def apply_clobber_overrides(
     wp: Workplan, clobber_steps: "Sequence[str] | None"
 ) -> None:
     """Validate the clobber selection and record it on the workplan.

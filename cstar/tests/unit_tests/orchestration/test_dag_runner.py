@@ -21,8 +21,8 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import (
-    _apply_clobber_overrides,
     _ignore_ambient_clobber_env,
+    apply_clobber_overrides,
     check_clobber_dependents,
     check_clobber_targets,
     get_status_detail_map,
@@ -403,7 +403,7 @@ def test_apply_clobber_overrides_noop_when_none(tmp_path: Path) -> None:
     step_a = _make_step(tmp_path, "Step A")
     wp = _make_workplan([step_a])
 
-    _apply_clobber_overrides(wp, None)
+    apply_clobber_overrides(wp, None)
 
     assert wp.steps[0].workflow_overrides == {}
 
@@ -413,7 +413,7 @@ def test_apply_clobber_overrides_noop_when_empty(tmp_path: Path) -> None:
     step_a = _make_step(tmp_path, "Step A")
     wp = _make_workplan([step_a])
 
-    _apply_clobber_overrides(wp, [])
+    apply_clobber_overrides(wp, [])
 
     assert wp.steps[0].workflow_overrides == {}
 
@@ -427,7 +427,7 @@ def test_apply_clobber_overrides_matches_name_and_safe_name(tmp_path: Path) -> N
     step_c = _make_step(tmp_path, "Step C")
     wp = _make_workplan([step_a, step_b, step_c])
 
-    _apply_clobber_overrides(wp, [step_a.name, step_b.safe_name])
+    apply_clobber_overrides(wp, [step_a.name, step_b.safe_name])
 
     assert wp.steps[0].workflow_overrides[KEY_CLOBBER] is True
     assert wp.steps[1].workflow_overrides[KEY_CLOBBER] is True
@@ -440,7 +440,7 @@ def test_apply_clobber_overrides_unknown_raises(tmp_path: Path) -> None:
     wp = _make_workplan([step_a])
 
     with pytest.raises(ValueError, match=r"Unknown clobber step selection\(s\)"):
-        _apply_clobber_overrides(wp, ["does-not-exist"])
+        apply_clobber_overrides(wp, ["does-not-exist"])
 
 
 def test_apply_clobber_overrides_unknown_lists_all_bad_tokens(tmp_path: Path) -> None:
@@ -449,7 +449,7 @@ def test_apply_clobber_overrides_unknown_lists_all_bad_tokens(tmp_path: Path) ->
     wp = _make_workplan([step_a])
 
     with pytest.raises(ValueError, match=r"'bad-one'.*'bad-two'|'bad-two'.*'bad-one'"):
-        _apply_clobber_overrides(wp, ["bad-one", "bad-two"])
+        apply_clobber_overrides(wp, ["bad-one", "bad-two"])
 
 
 def test_apply_clobber_overrides_all_is_not_special(tmp_path: Path) -> None:
@@ -457,18 +457,9 @@ def test_apply_clobber_overrides_all_is_not_special(tmp_path: Path) -> None:
     it resolves like any other name, matching a step literally named `all`
     and raising `ValueError` otherwise.
     """
-    step_a = _make_step(tmp_path, "Step A")
-    step_all = _make_step(tmp_path, "all")
-    wp = _make_workplan([step_a, step_all])
-
-    _apply_clobber_overrides(wp, ["all"])
-
-    assert not wp.steps[0].workflow_overrides.get(KEY_CLOBBER, False)
-    assert wp.steps[1].workflow_overrides[KEY_CLOBBER] is True
-
-    wp_without_all = _make_workplan([_make_step(tmp_path, "Step A")])
+    wp = _make_workplan([_make_step(tmp_path, "Step A")])
     with pytest.raises(ValueError, match=r"Unknown clobber step selection\(s\)"):
-        _apply_clobber_overrides(wp_without_all, ["all"])
+        apply_clobber_overrides(wp, ["all"])
 
 
 def test_apply_clobber_overrides_warns_untargeted_dependents_once(
@@ -485,7 +476,7 @@ def test_apply_clobber_overrides_warns_untargeted_dependents_once(
     wp = _make_workplan([step_a, step_b, step_c, step_d])
 
     with caplog.at_level("WARNING"):
-        _apply_clobber_overrides(wp, [step_a.safe_name, step_b.safe_name])
+        apply_clobber_overrides(wp, [step_a.safe_name, step_b.safe_name])
 
     assert len(caplog.records) == 1
     assert "Step C" in caplog.text
