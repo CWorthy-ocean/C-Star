@@ -1,6 +1,8 @@
 """Tests for the versioned ROMS namelist schemas in `cstar.roms.namelist`."""
 
+import subprocess
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from pydantic import ValidationError
@@ -50,6 +52,116 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
+    assert schema is RomsNamelistV0_5_0
+
+
+@pytest.fixture
+def tagged_ucla_roms_clone(tmp_path: Path) -> dict[str, str | Path]:
+    """A tiny local git repo mimicking ucla-roms release-tag history.
+
+    History: commit tagged ``0.4.2`` -> commit tagged only ``exp-marker`` (a
+    non-release tag, which release resolution must ignore) -> commit tagged
+    ``0.5.0``. Returns the repo path and the three commit hashes.
+    """
+    repo = tmp_path / "ucla-roms"
+    repo.mkdir()
+
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
+    _git("init", "-q")
+    (repo / "f").write_text("1")
+    _git("add", "f")
+    _git("commit", "-q", "-m", "release 0.4.2")
+    hash_0_4_2 = _git("rev-parse", "HEAD")
+    _git("tag", "0.4.2")
+
+    (repo / "f").write_text("2")
+    _git("commit", "-aq", "-m", "post-0.4.2 work")
+    hash_after_0_4_2 = _git("rev-parse", "HEAD")
+    _git("tag", "exp-marker")
+
+    (repo / "f").write_text("3")
+    _git("commit", "-aq", "-m", "release 0.5.0")
+    hash_0_5_0 = _git("rev-parse", "HEAD")
+    _git("tag", "0.5.0")
+
+    return {
+        "repo": repo,
+        "hash_0_4_2": hash_0_4_2,
+        "hash_after_0_4_2": hash_after_0_4_2,
+        "hash_0_5_0": hash_0_5_0,
+    }
+
+
+def test_namelist_schema_for_ref_resolves_hash_at_release_tag(
+    tagged_ucla_roms_clone,
+    recwarn,
+):
+    """A commit hash sitting exactly on a release tag selects that release's
+    schema, without any warning.
+    """
+    info = tagged_ucla_roms_clone
+    assert (
+        namelist_schema_for_ref(info["hash_0_4_2"], repo_path=info["repo"])
+        is RomsNamelist
+    )
+    assert (
+        namelist_schema_for_ref(info["hash_0_5_0"], repo_path=info["repo"])
+        is RomsNamelistV0_5_0
+    )
+    assert len(recwarn) == 0
+
+
+def test_namelist_schema_for_ref_resolves_hash_ahead_of_release_tag(
+    tagged_ucla_roms_clone,
+):
+    """A commit hash between releases selects the nearest ancestor release's
+    schema and warns that the commit may contain unreleased changes.
+
+    The commit carries a non-release tag (``exp-marker``) that resolution
+    must skip over in favor of the release tag ``0.4.2``.
+    """
+    info = tagged_ucla_roms_clone
+    with pytest.warns(UserWarning, match="commit\\(s\\) after release 0.4.2"):
+        schema = namelist_schema_for_ref(
+            info["hash_after_0_4_2"], repo_path=info["repo"]
+        )
+    assert schema is RomsNamelist
+
+
+def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone):
+    """A branch name is never resolved via the local clone: it falls back to
+    the latest schema with the use-at-your-own-risk warning even when a repo
+    path is available.
+    """
+    info = tagged_ucla_roms_clone
+    with pytest.warns(UserWarning, match="use at your own risk"):
+        schema = namelist_schema_for_ref("main", repo_path=info["repo"])
+    assert schema is RomsNamelistV0_5_0
+
+
+def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
+    """A hash that resolves to a non-release tag (or fails to resolve) falls
+    back to the latest schema with the use-at-your-own-risk warning.
+    """
+    with mock.patch(
+        "cstar.roms.namelist._describe_nearest_tag", return_value=("not-semver", 0)
+    ):
+        with pytest.warns(UserWarning, match="use at your own risk"):
+            schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
+    assert schema is RomsNamelistV0_5_0
+
+    with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
+        with pytest.warns(UserWarning, match="use at your own risk"):
+            schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
     assert schema is RomsNamelistV0_5_0
 
 

@@ -758,7 +758,11 @@ class ROMSSimulation(Simulation):
             )
 
         checkout_target = self.codebase.source.checkout_target
-        schema = namelist_schema_for_ref(checkout_target)
+        codebase_copy = self.codebase.working_copy
+        schema = namelist_schema_for_ref(
+            checkout_target,
+            repo_path=codebase_copy.path if codebase_copy is not None else None,
+        )
         namelist_path = (
             self.runtime_code.working_copy.common_parent / self._namelist_file
         )

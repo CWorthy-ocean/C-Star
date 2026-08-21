@@ -48,6 +48,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final, Self
 import f90nml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cstar.base.gitutils import _describe_nearest_tag
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -895,7 +897,14 @@ def _parse_semver(ref: str) -> tuple[int, int, int] | None:
     return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
 
 
-def namelist_schema_for_ref(checkout_target: str | None) -> type[RomsNamelistBase]:
+_COMMIT_HASH_RE = re.compile(r"[0-9a-fA-F]{7,40}")
+"""A plausible (possibly abbreviated) git commit hash — used to decide whether
+an unparseable ref is worth resolving to a release tag via the local clone."""
+
+
+def namelist_schema_for_ref(
+    checkout_target: str | None, repo_path: str | Path | None = None
+) -> type[RomsNamelistBase]:
     """Select the ``RomsNamelistBase`` subclass matching a ucla-roms ref.
 
     Parameters
@@ -903,19 +912,48 @@ def namelist_schema_for_ref(checkout_target: str | None) -> type[RomsNamelistBas
     checkout_target : str or None
         The ucla-roms git ref (tag, branch, or commit hash) C-Star is pinned
         to, e.g. from ``ExternalCodeBase.source.checkout_target``.
+    repo_path : str or Path, optional
+        Path to a local clone of ucla-roms. When given and `checkout_target`
+        looks like a commit hash, the hash is resolved to its nearest
+        ancestor release tag (``git describe --tags``) and that release's
+        schema is selected — a commit hash pins the ucla-roms source exactly,
+        so its namelist layout is the one of the release it descends from. A
+        `UserWarning` is emitted if the commit is ahead of the tag (it could
+        contain unreleased namelist changes).
 
     Returns
     -------
     type[RomsNamelistBase]
         The namelist schema class whose ucla-roms version range contains
         `checkout_target`, if it parses as a strict ``major.minor.patch``
-        semantic version (an optional leading ``v`` is stripped first). If
-        `checkout_target` is `None` or is not a release tag (a branch name,
-        commit hash, or otherwise unparsable string), a `UserWarning` is
-        emitted and the last (most recent) registry entry's class is
-        returned.
+        semantic version (an optional leading ``v`` is stripped first) or is
+        a commit hash resolvable to a release tag via `repo_path`. Otherwise
+        (`None`, a branch name, an unresolvable hash, or an unparsable
+        string), a `UserWarning` is emitted and the last (most recent)
+        registry entry's class is returned.
     """
     version = _parse_semver(checkout_target) if checkout_target is not None else None
+
+    if (
+        version is None
+        and checkout_target is not None
+        and repo_path is not None
+        and _COMMIT_HASH_RE.fullmatch(checkout_target)
+    ):
+        described = _describe_nearest_tag(repo_path, checkout_target)
+        if described is not None:
+            tag, commits_ahead = described
+            version = _parse_semver(tag)
+            if version is not None and commits_ahead:
+                warnings.warn(
+                    f"ucla-roms commit {checkout_target!r} is {commits_ahead} "
+                    f"commit(s) after release {tag}; using that release's "
+                    f"namelist schema. If the commit contains unreleased "
+                    f"breaking namelist changes, C-Star may not match them.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
     last_cls = NAMELIST_SCHEMA_REGISTRY[-1][2]
     if version is None:
         warnings.warn(

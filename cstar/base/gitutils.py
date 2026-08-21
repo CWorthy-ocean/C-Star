@@ -172,6 +172,43 @@ def _get_repo_head_hash(local_path: str | Path) -> str:
     )
 
 
+def _describe_nearest_tag(local_path: str | Path, ref: str) -> tuple[str, int] | None:
+    """Resolve `ref` to its nearest ancestor release tag in a local repository.
+
+    Runs ``git describe --tags <ref>`` and parses the output (``<tag>`` or
+    ``<tag>-<N>-g<hash>``) into the tag and the number of commits `ref` is
+    ahead of it. Only release-shaped tags (``[v]<digits>.<digits>.<digits>``,
+    e.g. ``0.4.2`` or ``v1.10.0``) are considered, so stray non-release tags
+    (e.g. an experiment marker) cannot shadow the nearest release.
+
+    Parameters
+    ----------
+    local_path : str or Path
+        The path to a local directory where a git repository is cloned.
+    ref : str
+        Any commit-ish accepted by ``git describe`` (typically a commit hash).
+
+    Returns
+    -------
+    tuple[str, int] or None
+        The ``(tag, commits_ahead)`` pair, or `None` if `ref` has no
+        release-tagged ancestor or the command fails.
+    """
+    match_glob = "[0-9]*.[0-9]*.[0-9]*"
+    described = _run_cmd(
+        f"git -C {local_path} describe --tags "
+        f"--match '{match_glob}' --match 'v{match_glob}' {ref}",
+        msg_pre=f"Resolving `{ref}` to its nearest release tag in `{local_path}`.",
+        msg_err=f"Could not resolve {ref} to a release tag in repository {local_path}.",
+    ).strip()
+    if not described:
+        return None
+    match = re.fullmatch(r"(?P<tag>.+?)(?:-(?P<ahead>\d+)-g[0-9a-f]+)?", described)
+    if match is None:
+        return None
+    return match.group("tag"), int(match.group("ahead") or 0)
+
+
 def _get_hash_from_checkout_target(repo_url: str, checkout_target: str) -> str:
     """Take a git checkout target (any `arg` accepted by `git checkout arg`) and return
     a commit hash.

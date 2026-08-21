@@ -585,7 +585,9 @@ class TestROMSSimulationInitialization:
         with pytest.warns(UserWarning, match="use at your own risk"):
             result = sim.roms_runtime_settings
 
-        mock_schema_for_ref.assert_called_once_with(checkout_target)
+        # the stub's codebase has no working copy, so no repo path is available
+        # for commit-hash-to-release-tag resolution
+        mock_schema_for_ref.assert_called_once_with(checkout_target, repo_path=None)
         assert isinstance(result, RomsNamelistV0_5_0)
         assert result.time_stepping.ntimes == sim._n_time_steps
 
