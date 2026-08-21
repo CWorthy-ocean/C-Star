@@ -27,13 +27,15 @@ log = get_logger(__name__)
 app = typer.Typer()
 
 
-ARG_GC: t.Final[str] = "--garbage"
+ARG_CUTOFF: t.Final[str] = "--cutoff"
 gc_help: t.Final[str] = (
-    "Pass the number of days to be used as a stale indicator. All resources unused in that period are removed."
+    "The threshold for artifact removal (in days); anything unused within the time period will be removed."
 )
 
-command_help: t.Final[str] = "Manually remove artifacts from the cache."
-yes_help: t.Final[str] = "Perform user-level deletions without confirmation."
+command_help: t.Final[str] = (
+    "Execute the garbage collector to remove unused items from the cache."
+)
+yes_help: t.Final[str] = "Automatically confirm all removals (non-interactive mode)"
 
 
 class CleanupStatusDict(t.TypedDict):
@@ -254,7 +256,7 @@ def collect(
     age_limit: t.Annotated[
         int,
         typer.Option(
-            ARG_GC,
+            ARG_CUTOFF,
             help=gc_help,
             is_eager=True,
             callback=check_age_limit,
