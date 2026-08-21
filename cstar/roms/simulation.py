@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
 
 import yaml
+from pydantic import ValidationError
 
 from cstar.applications.roms_marbl.adapter import (
     AddtlCodeAdapter,
@@ -71,7 +72,7 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.namelist import RomsNamelist
+from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr
 
@@ -185,7 +186,7 @@ class ROMSSimulation(Simulation):
         The repository containing the source code for the ParallelIO library (if use_pio is True).
     runtime_code : AdditionalCode
         Additional code needed by ROMS at runtime (e.g. a `.nml` Fortran namelist)
-    roms_runtime_settings : RomsNamelist
+    roms_runtime_settings : RomsNamelistBase
         A validated namelist read from the runtime_code, with key parameters overridden
         from the simulation configuration.
     compile_time_code : AdditionalCode
@@ -720,28 +721,34 @@ class ROMSSimulation(Simulation):
         return run_length_seconds // self.discretization.time_step
 
     @property
-    def roms_runtime_settings(self) -> "RomsNamelist":
-        """Generate and return a :class:`RomsNamelist` for the simulation.
+    def roms_runtime_settings(self) -> "RomsNamelistBase":
+        """Generate and return a :class:`RomsNamelistBase` for the simulation.
 
-        Reads the Fortran namelist from the `runtime_code`, validates it into a
-        :class:`~cstar.roms.namelist.RomsNamelist`, and overrides key parameters
+        Reads the Fortran namelist from the `runtime_code`, validates it into
+        the :class:`~cstar.roms.namelist.RomsNamelistBase` subclass selected
+        by :func:`~cstar.roms.namelist.namelist_schema_for_ref` for this
+        simulation's ucla-roms `checkout_target`, and overrides key parameters
         based on the current simulation configuration: time step, number of time
         steps, grid path, initial conditions, forcing datasets, MARBL/CDR/nesting
         files, output root, and extract root.
 
         Returns
         -------
-        RomsNamelist
+        RomsNamelistBase
             A validated namelist with simulation-specific parameters applied.
 
         Raises
         ------
         ValueError
             If the runtime namelist has not been retrieved locally via `setup()` or
-            `runtime_code.get()`.
+            `runtime_code.get()`, or if it fails validation against the schema
+            selected for this simulation's ucla-roms `checkout_target` (the
+            original `pydantic.ValidationError` is chained as `__cause__`) —
+            this can happen if the namelist file targets a different ucla-roms
+            version than the one this simulation pins.
         pydantic.ValidationError
-            If the runtime namelist is missing a required group/key or contains an
-            invalid value (RomsNamelist is a strict, fully-typed schema).
+            If a simulation-derived override value is invalid for its namelist
+            field (the namelist models re-validate on assignment).
         """
         if self.runtime_code.working_copy is None:
             raise ValueError(
@@ -750,9 +757,24 @@ class ROMSSimulation(Simulation):
                 + "ROMSSimulation.runtime_code.get() and try again."
             )
 
-        nml = RomsNamelist.read(
+        checkout_target = self.codebase.source.checkout_target
+        codebase_copy = self.codebase.working_copy
+        schema = namelist_schema_for_ref(
+            checkout_target,
+            repo_path=codebase_copy.path if codebase_copy is not None else None,
+        )
+        namelist_path = (
             self.runtime_code.working_copy.common_parent / self._namelist_file
         )
+        try:
+            nml = schema.read(namelist_path)
+        except ValidationError as err:
+            raise ValueError(
+                f"namelist at {namelist_path} failed validation against "
+                f"{schema.__name__} (selected for ucla-roms ref "
+                f"{checkout_target!r}). The namelist file may target a "
+                f"different ucla-roms version than the one this simulation pins."
+            ) from err
 
         nml.time_stepping.dt = self.discretization.time_step
         nml.time_stepping.ntimes = self._n_time_steps
@@ -1321,18 +1343,13 @@ class ROMSSimulation(Simulation):
             if not (inp.exists_locally):
                 # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                 # If no start or end date, it should be found locally:
-                if (not isinstance(inp.start_date, datetime)) or (
-                    not isinstance(inp.end_date, datetime)
-                ):
-                    return False
-                # If no start or end date for case, all files should be found locally:
-                elif (not isinstance(self.start_date, datetime)) or (
-                    not isinstance(self.end_date, datetime)
-                ):
-                    return False
-                # If inp and case start and end dates overlap, should be found locally:
-                elif (inp.start_date <= self.end_date) and (
-                    inp.end_date >= self.start_date
+                if (
+                    (not isinstance(inp.start_date, datetime))
+                    or (not isinstance(inp.end_date, datetime))
+                    or (not isinstance(self.start_date, datetime))
+                    or (not isinstance(self.end_date, datetime))
+                    or (inp.start_date <= self.end_date)
+                    and (inp.end_date >= self.start_date)
                 ):
                     return False
         return True

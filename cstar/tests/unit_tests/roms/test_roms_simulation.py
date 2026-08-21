@@ -8,6 +8,7 @@ from typing import Any, cast
 from unittest import mock
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.external_codebase import ExternalCodeBase
@@ -27,7 +28,11 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.namelist import RomsNamelist
+from cstar.roms.namelist import (
+    RomsNamelist,
+    RomsNamelistV0_5_0,
+    namelist_schema_for_ref,
+)
 from cstar.roms.simulation import ROMSSimulation
 from cstar.system.environment import CStarEnvironment
 from cstar.system.manager import get_sysmgr
@@ -35,9 +40,14 @@ from cstar.system.manager import get_sysmgr
 # A complete, forge-produced runtime namelist used to back the
 # roms_runtime_settings tests (RomsNamelist is a strict 40-group schema).
 EXAMPLE_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist.nml"
-# Captured before any test patches RomsNamelist.read, so side_effects can read a
-# fixture from disk without re-entering the mock (which would recurse).
+# Its ucla-roms >= 0.5.0 counterpart (nrpf_rst dropped, particles keys renamed).
+EXAMPLE_NAMELIST_V0_5_0 = (
+    Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
+)
+# Captured before any test patches the namelist read machinery, so side_effects
+# can read a fixture from disk without re-entering the mock (which would recurse).
 _REAL_NAMELIST_READ = RomsNamelist.read
+_REAL_NAMELIST_READ_V0_5_0 = RomsNamelistV0_5_0.read
 
 
 class TestROMSSimulationInitialization:
@@ -385,7 +395,7 @@ class TestROMSSimulationInitialization:
         assert sim._n_time_steps == 524160
         pass
 
-    @mock.patch("cstar.roms.simulation.RomsNamelist.read")
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
     @mock.patch.object(
         ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
@@ -396,7 +406,7 @@ class TestROMSSimulationInitialization:
         mock_grid_path,
         mock_ini_path,
         mock_forcing_paths,
-        mock_namelist_read,
+        mock_schema_for_ref,
         stub_romssimulation,
         additionalcode_local,
         stageddatacollection_remote_files,
@@ -414,7 +424,9 @@ class TestROMSSimulationInitialization:
 
         # Each property access mutates the returned model, so hand out a fresh
         # RomsNamelist read from the fixture on every call.
-        mock_namelist_read.side_effect = lambda _: _REAL_NAMELIST_READ(EXAMPLE_NAMELIST)
+        mock_schema_for_ref.return_value.read.side_effect = lambda _: (
+            _REAL_NAMELIST_READ(EXAMPLE_NAMELIST)
+        )
 
         # Set up fake staged working copies for CDR forcing and nesting info
         fake_cdr_path = Path("/staged/input_datasets/cdr.nc")
@@ -502,13 +514,12 @@ class TestROMSSimulationInitialization:
         stub_romssimulation,
         stageddatacollection_remote_files,
     ):
-        """Test that ``roms_runtime_settings`` surfaces a pydantic ``ValidationError``
-        naming the missing group when the runtime namelist omits a section C-Star
-        must populate. ``RomsNamelist`` is a strict schema, so an incomplete namelist
-        fails validation on read rather than producing a partial object.
+        """Test that ``roms_runtime_settings`` wraps the pydantic ``ValidationError``
+        in a ``ValueError`` naming the missing group when the runtime namelist omits
+        a section C-Star must populate. ``RomsNamelist`` is a strict schema, so an
+        incomplete namelist fails validation on read rather than producing a partial
+        object.
         """
-        from pydantic import ValidationError
-
         sim = stub_romssimulation
         sim.runtime_code._working_copy = stageddatacollection_remote_files()
 
@@ -517,12 +528,68 @@ class TestROMSSimulationInitialization:
         empty_nml = tmp_path / "empty.nml"
         empty_nml.write_text("")
 
-        with mock.patch(
-            "cstar.roms.simulation.RomsNamelist.read",
-            side_effect=lambda _: _REAL_NAMELIST_READ(empty_nml),
-        ):
-            with pytest.raises(ValidationError, match=r"time_stepping"):
+        with mock.patch("cstar.roms.simulation.namelist_schema_for_ref") as mock_schema:
+            mock_schema.return_value.__name__ = "MockRomsNamelistSchema"
+            mock_schema.return_value.read.side_effect = lambda _: _REAL_NAMELIST_READ(
+                empty_nml
+            )
+            with pytest.raises(ValueError, match="failed validation against") as exc:
                 sim.roms_runtime_settings
+
+        assert isinstance(exc.value.__cause__, ValidationError)
+        assert "time_stepping" in str(exc.value.__cause__)
+
+    @mock.patch("cstar.roms.namelist.RomsNamelistBase.read")
+    @mock.patch(
+        "cstar.roms.simulation.namelist_schema_for_ref", wraps=namelist_schema_for_ref
+    )
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_roms_runtime_settings_consults_checkout_target(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        mock_base_read,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Test that ``roms_runtime_settings`` consults the codebase's
+        ``checkout_target`` to select a namelist schema, and that a non-release
+        ``checkout_target`` (as set up by the ``stub_romssimulation`` fixture)
+        surfaces the ``namelist_schema_for_ref`` fallback warning through the
+        property while still returning a valid namelist.
+
+        The read is stubbed (the stub's working copy has no real files on
+        disk), but the stub performs a genuine ``RomsNamelistV0_5_0``
+        validation of the 0.5.0-style fixture — the schema the fallback
+        selects — so the property's overrides are exercised against the
+        selected schema, not the legacy one.
+        """
+        sim = stub_romssimulation
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        mock_grid_path.return_value = [Path("grid.nc")]
+        mock_ini_path.return_value = [Path("fake_ini.nc")]
+        mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
+        mock_base_read.side_effect = lambda _: _REAL_NAMELIST_READ_V0_5_0(
+            EXAMPLE_NAMELIST_V0_5_0
+        )
+
+        checkout_target = sim.codebase.source.checkout_target
+        assert checkout_target == "roms_branch"  # not a release tag
+
+        with pytest.warns(UserWarning, match="use at your own risk"):
+            result = sim.roms_runtime_settings
+
+        # the stub's codebase has no working copy, so no repo path is available
+        # for commit-hash-to-release-tag resolution
+        mock_schema_for_ref.assert_called_once_with(checkout_target, repo_path=None)
+        assert isinstance(result, RomsNamelistV0_5_0)
+        assert result.time_stepping.ntimes == sim._n_time_steps
 
     def test_input_datasets(self, stub_romssimulation):
         """Test that the `input_datasets` property returns the correct list of

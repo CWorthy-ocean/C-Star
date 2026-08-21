@@ -12,7 +12,8 @@ valid_end_date: 2012-12-31 12:00:00
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 585512b63b31dea2a7fba12b5d3de1cbd6b0546c
+    # release 0.4.2 — namelist schema selection resolves this hash to that tag
+    commit: 7c99a5d04c2ed5014cad28ab975e6a3eeac77d2a
     documentation: cworthy fork
   marbl:
     location: https://github.com/marbl-ecosys/MARBL.git
