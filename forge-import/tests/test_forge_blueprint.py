@@ -1188,6 +1188,40 @@ def test_resolver_child_grid_is_parent_and_keeps_boundary_forcing():
     assert cfg.forcing.boundary  # a parent-only grid keeps its own boundary forcing
 
 
+def test_resolver_parent_grid_skips_initial_conditions():
+    # A child grid (has a parent) receives its state from the parent's
+    # nesting.nc extraction, so IC is optional -- omitting it must not leak
+    # any IC source into resolved_datasets/datasets, mirroring the boundary
+    # skip above.
+    import copy
+
+    fi = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    assert fi["initial_conditions"]["source"]  # sanity: fixture has an IC
+    del fi["initial_conditions"]
+    cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS, forcing_inputs=fi)
+    assert cfg.forcing.initial_conditions is None
+    # GLORYS_REGIONAL is the resolved dataset key for the IC's glorys_layout;
+    # it must not leak into datasets/resolved_datasets when IC is skipped.
+    assert "GLORYS_REGIONAL" not in cfg.datasets
+    assert "GLORYS" not in cfg.forcing.resolved_datasets
+
+
+def test_resolver_non_child_requires_initial_conditions():
+    import copy
+
+    fi = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    del fi["initial_conditions"]
+    with pytest.raises(ValueError, match="initial_conditions"):
+        _build(forcing_inputs=fi)
+
+
+def test_resolver_child_with_explicit_ic_keeps_it():
+    cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS)
+    assert cfg.forcing.initial_conditions is not None
+    assert cfg.forcing.initial_conditions.source.name == "GLORYS"
+    assert "GLORYS" in cfg.forcing.resolved_datasets
+
+
 def test_resolver_restoring_sets_sal_restore():
     # the cson model.yaml includes a WOA surface source with type=restoring and
     # restoring_forces=['sss'], so the resolver derives sal_restore=True
@@ -1298,6 +1332,25 @@ def test_sources_to_forcing_override_carries_river_custom_file():
         "location": "/data/staged/river.nc",
         "content_hash": "a" * 64,
     }
+
+
+def test_sources_to_forcing_override_omits_initial_conditions_for_child_no_ic():
+    """A child domain with no explicit IC resolves cfg.forcing.initial_conditions
+    to None -- sources_to_forcing_override must omit the key entirely rather
+    than crash on `_ic(None)` or emit a None/placeholder value.
+    """
+    import copy
+
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+
+    fi = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
+    del fi["initial_conditions"]
+    cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS, forcing_inputs=fi)
+    assert cfg.forcing.initial_conditions is None
+
+    ov = sources_to_forcing_override(cfg)
+    assert "initial_conditions" not in ov
+    assert "forcing" in ov
 
 
 def test_forge_blueprint_to_builder_kwargs_carries_cdr_forcing_file(tmp_path):
@@ -2977,6 +3030,72 @@ class TestForgeBlueprintWizard:
         assert w2.config.domain.is_child is True
         assert w2.config.forcing.boundary == []
 
+    def test_parent_toggle_clears_ic_and_reselecting_source_restores_it(self):
+        """Enabling a parent defaults IC to "(none)" (mirrors boundary), but
+        unlike boundary this is only a default -- re-selecting GLORYS on the
+        dropdown must restore an explicit IC in the built blueprint.
+        """
+        w = self._wizard()
+        assert w.config.forcing.initial_conditions is not None  # sanity
+        w.parent_enable.value = True
+        cfg = w.config
+        assert cfg.domain.is_child is True
+        assert cfg.forcing.initial_conditions is None
+        assert w._forcing_editor.ic_name.value == "(none)"
+
+        w._forcing_editor.ic_name.value = "GLORYS"
+        cfg2 = w.config
+        assert cfg2.forcing.initial_conditions is not None
+        assert cfg2.forcing.initial_conditions.source.name == "GLORYS"
+
+    def test_parent_toggle_off_restores_ic_default(self):
+        """Enabling then disabling the parent checkbox must not strand the user
+        on the resolver's non-child hard error: disabling restores IC to the
+        default source when it's still at the "(none)" default the enable-
+        toggle applied.
+        """
+        w = self._wizard()
+        w.parent_enable.value = True
+        assert w._forcing_editor.ic_name.value == "(none)"
+        assert w.config.forcing.initial_conditions is None
+
+        w.parent_enable.value = False
+        assert w._forcing_editor.ic_name.value == "GLORYS"
+        cfg = w.config
+        assert cfg.domain.is_child is False
+        assert cfg.forcing.initial_conditions is not None
+
+    def test_reselecting_forcing_spec_keeps_ic_cleared_for_child(self):
+        """Reseeding the forcing editor from a newly-selected ForcingSpec (which
+        always carries a real IC block) must not silently undo the "(none)"
+        default a parent toggle already applied -- mirrors the boundary-forcing
+        strip that already happens in ``_on_forcing_spec``.
+        """
+        w = self._wizard()
+        if "simple-bgc-demo" not in w._dd_values(w.forcing_dd):
+            pytest.skip("simple-bgc-demo ForcingSpec not in catalog")
+        w.parent_enable.value = True
+        assert w.config.forcing.initial_conditions is None
+        other = next(v for v in w._dd_values(w.forcing_dd) if v != w.forcing_dd.value)
+        w.forcing_dd.value = other
+        assert w._forcing_editor.ic_name.value == "(none)"
+        assert w.config.forcing.initial_conditions is None
+
+    def test_load_preserves_child_no_ic(self, tmp_path):
+        w1 = self._wizard()
+        w1.parent_enable.value = True
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        assert w1.config.forcing.initial_conditions is None
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.parent_enable.value is True
+        assert w2.config.forcing.initial_conditions is None
+        assert w2._forcing_editor.ic_name.value == "(none)"
+
     def test_roms_ref_gather_and_default_round_trip(self, tmp_path):
         w1 = self._wizard()
         w1.roms_ref.value = "pio-refdate"
@@ -3751,6 +3870,28 @@ class TestSaveModifiedSpecsToCatalog:
         assert "my-forcing" in isolated_catalog.forcing_names
         assert wiz.forcing_dd.value == "my-forcing"
         assert wiz.config.composition.forcing.modified is False
+
+    def test_save_forcing_spec_for_child_with_no_ic_marks_unmodified(
+        self, isolated_catalog
+    ):
+        """A child domain's forcing (IC defaulted to "(none)") saved to the
+        catalog omits the initial_conditions key from the written YAML.
+        ``_verify_spec_roundtrip`` rebuilds via the resolver (not the wizard's
+        sentinel-aware ``_ForcingEditor``), so re-resolving the freshly-written
+        file must still reproduce content_hash-equal to the live config.
+        """
+        wiz = self._wizard(isolated_catalog)
+        wiz.parent_enable.value = True
+        assert wiz.config.forcing.initial_conditions is None
+
+        wiz.save_forcing_name.value = "child-no-ic-forcing"
+        wiz._on_save_forcing(None)
+
+        assert "child-no-ic-forcing" in isolated_catalog.forcing_names
+        assert wiz.forcing_dd.value == "child-no-ic-forcing"
+        assert wiz.config.composition.forcing.modified is False
+        saved = isolated_catalog.forcing_data("child-no-ic-forcing")
+        assert "initial_conditions" not in saved
 
     def test_save_forcing_spec_embeds_and_reloads_cdr(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)

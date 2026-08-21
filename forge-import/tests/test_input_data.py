@@ -32,6 +32,7 @@ from cstar_forge.config import DataPaths
 from cstar_forge.forge import source_data
 from cstar_forge.forge.input_data import (
     CDR_FORCING_NETCDF_STEM,
+    CHILD_IC_PLACEHOLDER_LOCATION,
     INPUT_REGISTRY,
     InputData,
     InputStep,
@@ -112,6 +113,9 @@ def _build_forcing_override(ic, surface=(), boundary=(), tidal=(), river=()):
     ModelSpec no longer carries embedded forcing data (that's a ForcingSpec's job),
     so this builds the dict straight from the roms-tools item models instead of
     deriving it from a ModelSpec.inputs block.
+
+    ``ic=None`` mirrors the resolver's child-domain-with-no-IC output: the
+    ``initial_conditions`` key is omitted entirely (not emitted as ``None``).
     """
     forcing = {}
     for category, items in (
@@ -122,7 +126,10 @@ def _build_forcing_override(ic, surface=(), boundary=(), tidal=(), river=()):
     ):
         if items:
             forcing[category] = [it.model_dump() for it in items]
-    return {"forcing": forcing, "initial_conditions": ic.model_dump()}
+    out = {"forcing": forcing}
+    if ic is not None:
+        out["initial_conditions"] = ic.model_dump()
+    return out
 
 
 @pytest.fixture
@@ -645,6 +652,96 @@ class TestRomsMarblInputDataInitialization:
         assert len(forcing.boundary.data) == 0
         # No boundary-generation step should have been planned.
         assert all(key != "forcing.boundary" for key, _ in data.input_list)
+
+    def _forcing_override_without_boundary_or_ic(self):
+        """forcing_override shaped like the resolver's child-domain-with-no-IC
+        output: both 'boundary' and 'initial_conditions' are absent entirely
+        (the resolver skips IC for a child with no explicit source the same
+        way it already skips boundary -- see ``_build_forcing``).
+        """
+        surface_item = forge_models.SurfaceForcingItem(
+            source=forge_models.SourceSpec(name="ERA5"), type="physics"
+        )
+        return _build_forcing_override(None, surface=[surface_item])
+
+    def _forcing_override_without_ic(self):
+        """forcing_override with boundary present but 'initial_conditions'
+        absent -- isolates the IC check from the boundary check for a
+        non-child domain (which requires both).
+        """
+        surface_item = forge_models.SurfaceForcingItem(
+            source=forge_models.SourceSpec(name="ERA5"), type="physics"
+        )
+        boundary_item = forge_models.BoundaryForcingItem(
+            source=forge_models.SourceSpec(name="GLORYS"), type="physics"
+        )
+        return _build_forcing_override(
+            None, surface=[surface_item], boundary=[boundary_item]
+        )
+
+    def test_child_domain_without_initial_conditions_initializes(
+        self, tmp_path, sample_grid, sample_partitioning
+    ):
+        """Regression: a child/nested domain (grid_parent set) may have no IC --
+        it receives state from the parent's nesting.nc extraction -- and must
+        not fail initialization (the non-child hard error lives in the
+        resolver, not here).
+
+        C-Star's RomsMarblBlueprint requires a non-empty initial_conditions
+        Dataset (min_length=1) and its orchestrator validates the emitted
+        blueprint eagerly -- before the runtime 'nest-from' directive can
+        replace it with the parent-derived initial state -- so the emitted
+        blueprint element must carry a schema-valid PLACEHOLDER resource here,
+        not None/an empty Dataset the way boundary does.
+        """
+        roms_marbl_blueprint_dir = tmp_path / "blueprints"
+        roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
+
+        data = RomsMarblInputData(
+            domain_name="test_child_grid",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            forcing_override=self._forcing_override_without_boundary_or_ic(),
+            grid=sample_grid,
+            grid_parent=sample_grid,
+            boundaries=forge_models.OpenBoundaries(),
+            source_data=MagicMock(),
+            roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
+            partitioning=sample_partitioning,
+            input_data_dir=tmp_path,
+            use_dask=False,
+        )
+
+        assert all(key != "initial_conditions" for key, _ in data.input_list)
+        ic = data.roms_marbl_blueprint_elements.initial_conditions
+        assert ic is not None
+        assert len(ic.data) == 1
+        assert ic.data[0].location == CHILD_IC_PLACEHOLDER_LOCATION
+
+    def test_missing_initial_conditions_raises_without_parent(
+        self, tmp_path, sample_grid, sample_partitioning
+    ):
+        """A regular (non-nested) domain must still fail loudly when IC is
+        missing from forcing_override -- defense in depth mirroring the
+        resolver's own hard error for this case.
+        """
+        roms_marbl_blueprint_dir = tmp_path / "blueprints"
+        roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
+
+        with pytest.raises(ValueError, match="Missing required 'initial_conditions'"):
+            RomsMarblInputData(
+                domain_name="test_grid",
+                start_date=datetime(2012, 1, 1),
+                end_date=datetime(2012, 1, 2),
+                forcing_override=self._forcing_override_without_ic(),
+                grid=sample_grid,
+                boundaries=forge_models.OpenBoundaries(),
+                source_data=MagicMock(),
+                roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
+                partitioning=sample_partitioning,
+                input_data_dir=tmp_path,
+                use_dask=False,
+            )
 
     def test_missing_boundary_forcing_raises_without_parent(
         self, tmp_path, sample_grid, sample_partitioning

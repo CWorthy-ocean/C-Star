@@ -1046,7 +1046,10 @@ _SOURCE_OPTS: dict[Any, list[str]] = {
     ("tidal", None): [e.value for e in TidalSource],
     ("river", None): [e.value for e in RiverSource],
 }
-_IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource]
+# Sentinel dropdown value meaning "no initial conditions" -- valid only for a
+# child domain (state comes from the parent's nesting extraction instead).
+_IC_NONE = "(none)"
+_IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource] + [_IC_NONE]
 _IC_BGC_SOURCE_OPTS = [""] + [e.value for e in BgcInitialConditionsSource]
 _RIVER_BGC_SOURCE_OPTS = [""] + [e.value for e in RiverBgcSource]
 
@@ -1197,13 +1200,22 @@ class _ForcingEditor:
         self.W = W
         self.on_change = on_change
         fi = forcing_inputs or {}
-        ic = fi.get("initial_conditions", {}) or {}
+        # An explicit `None` (emitted by `_sources_to_inputs` for a loaded child
+        # blueprint with no IC) means "seed as (none)"; a plain missing key (fresh-
+        # wizard startup, which always supplies a real initial_conditions block)
+        # keeps the historical GLORYS default.
+        if "initial_conditions" in fi and fi["initial_conditions"] is None:
+            ic: dict[str, Any] = {}
+            _ic_default = _IC_NONE
+        else:
+            ic = fi.get("initial_conditions") or {}
+            _ic_default = _IC_SOURCE_OPTS[0]
         forc = fi.get("forcing", {}) or {}
 
         # initial conditions
-        _ic_name_val = str((ic.get("source") or {}).get("name", _IC_SOURCE_OPTS[0]))
+        _ic_name_val = str((ic.get("source") or {}).get("name", _ic_default))
         if _ic_name_val not in _IC_SOURCE_OPTS:
-            _ic_name_val = _IC_SOURCE_OPTS[0]
+            _ic_name_val = _ic_default
         self.ic_name = W.Dropdown(
             options=_IC_SOURCE_OPTS,
             value=_ic_name_val,
@@ -1319,11 +1331,27 @@ class _ForcingEditor:
         ):
             _w.observe(lambda _ch: on_change(), names="value")
 
-        # "glorys_layout" only applies to a GLORYS source (item 7).
+        # "glorys_layout" only applies to a GLORYS source (item 7). When "(none)"
+        # is selected, this domain carries no IC at all -- hide every other IC
+        # widget too so the UI doesn't imply they still apply.
         def _sync_ic_layout_visibility(_change=None):
+            has_ic = self.ic_name.value != _IC_NONE
             self.ic_layout.layout.display = (
-                "" if self.ic_name.value == "GLORYS" else "none"
+                "" if has_ic and self.ic_name.value == "GLORYS" else "none"
             )
+            for w in (
+                self.ic_path,
+                self.ic_bgc_name,
+                self.ic_bgc_clim,
+                self.ic_bgc_path,
+                self.ic_bgc_interp,
+                self.ic_flex_time,
+                self.ic_prefill,
+                self.ic_regrid_method,
+                self.ic_extrap_method,
+                self.ic_options,
+            ):
+                w.layout.display = "" if has_ic else "none"
 
         self.ic_name.observe(_sync_ic_layout_visibility, names="value")
         _sync_ic_layout_visibility()
@@ -1798,6 +1826,17 @@ class _ForcingEditor:
         return item
 
     def gather(self) -> dict[str, Any]:
+        forcing = {
+            cat: [self._gather_item(cat, w) for w in self._rows[cat]]
+            for cat in _FORCING_CATEGORIES
+        }
+        if self.ic_name.value == _IC_NONE:
+            # No IC for this domain -- omit the key entirely (the resolver
+            # requires a hard error for a non-child domain with no IC, and
+            # treats an omitted/sourceless block as "inherit from parent" for
+            # a child domain).
+            return {"forcing": forcing}
+
         ic_source = {"name": self.ic_name.value}
         if self.ic_layout.value:  # Dropdown: "" means not specified
             ic_source["glorys_layout"] = self.ic_layout.value
@@ -1827,10 +1866,6 @@ class _ForcingEditor:
         ic_opts = _parse_options(self.ic_options.value)
         if ic_opts:
             ic["options"] = ic_opts
-        forcing = {
-            cat: [self._gather_item(cat, w) for w in self._rows[cat]]
-            for cat in _FORCING_CATEGORIES
-        }
         return {
             "initial_conditions": ic,
             "forcing": forcing,
@@ -2981,6 +3016,7 @@ class ForgeBlueprintWizard:
                 if k in gk:
                     w.value = gk[k]
         self._clear_boundary_forcing()
+        self._clear_initial_conditions()
         self._rebuild()
         self._on_parent_plot(None)
 
@@ -2988,12 +3024,22 @@ class ForgeBlueprintWizard:
         """Enabling a parent clears boundary forcing: a child grid receives its
         boundary values from the parent's nesting.nc extraction, not reanalysis
         boundary forcing (open-boundary edge flags are left untouched -- the
-        edges stay open, just fed differently).
+        edges stay open, just fed differently). It also clears IC to "(none)"
+        as a *default* -- unlike boundary, IC is widget-state-authoritative, so
+        the user can undo this by re-selecting a source.
+
+        Disabling a parent restores the IC default (if it's still "(none)")
+        so a non-child domain isn't stranded on the resolver's hard error for
+        a missing IC -- a user who had manually re-added an explicit IC while
+        parented is left alone.
         """
         if getattr(self, "_suspended", False):
             return
         if change["new"]:
             self._clear_boundary_forcing()
+            self._clear_initial_conditions()
+        else:
+            self._restore_initial_conditions_default()
 
     def _clear_boundary_forcing(self):
         """Remove any boundary-forcing rows from the forcing editor (UX mirror of
@@ -3001,6 +3047,28 @@ class ForgeBlueprintWizard:
         """
         if getattr(self, "_forcing_editor", None) is not None:
             self._forcing_editor.clear_category("boundary")
+
+    def _clear_initial_conditions(self):
+        """Default a child domain's IC dropdown to "(none)" -- a child receives
+        state from the parent's nesting extraction, so IC is optional. Unlike
+        boundary forcing, this is only a default: the user can re-select a
+        source (e.g. GLORYS) to re-add an explicit IC for the child.
+        """
+        if getattr(self, "_forcing_editor", None) is not None:
+            self._forcing_editor.ic_name.value = _IC_NONE
+
+    def _restore_initial_conditions_default(self):
+        """Undo ``_clear_initial_conditions``'s default when a parent is turned
+        back off -- a non-child domain has no other source of state, so leaving
+        IC at "(none)" would strand the user on the resolver's hard error. Only
+        resets it when it's still at the "(none)" default; a user who manually
+        re-added an explicit IC while parented is left alone.
+        """
+        if (
+            getattr(self, "_forcing_editor", None) is not None
+            and self._forcing_editor.ic_name.value == _IC_NONE
+        ):
+            self._forcing_editor.ic_name.value = _IC_SOURCE_OPTS[0]
 
     # ---- forcing spec -------------------------------------------------------
     def _model_spec_declared(self) -> dict[str, Any]:
@@ -3065,6 +3133,10 @@ class ForgeBlueprintWizard:
             # nesting.nc extraction, not reanalysis boundary forcing -- strip any
             # boundary items the freshly-built editor just reseeded from the spec.
             self._clear_boundary_forcing()
+            # Same reasoning for IC: the freshly-built editor reseeds from the
+            # spec's real IC block, which would silently undo the "(none)"
+            # default a parent toggle already applied.
+            self._clear_initial_conditions()
         self._cdr_forcing = cdr
         if cdr and self._cdr_forcing_file is not None:
             # A ForcingSpec carrying CDR forcing is mutually exclusive with an
@@ -3235,23 +3307,32 @@ class ForgeBlueprintWizard:
             return d
 
         f = cfg.forcing
-        ic = {"source": src(f.initial_conditions.source)}
-        if f.initial_conditions.bgc_source:
-            ic["bgc_source"] = src(f.initial_conditions.bgc_source)
-        _ic_interp = getattr(f.initial_conditions, "bgc_interpolation_method", None)
-        if (
-            _ic_interp is not None
-            and getattr(_ic_interp, "value", _ic_interp) != BgcInterpMethod.DEPTH.value
-        ):
-            ic["bgc_interpolation_method"] = getattr(_ic_interp, "value", _ic_interp)
-        if getattr(f.initial_conditions, "allow_flex_time", False):
-            ic["allow_flex_time"] = True
-        for f2 in ("prefill", "regrid_method", "extrap_method"):
-            v2 = getattr(f.initial_conditions, f2, None)
-            if v2 is not None:
-                ic[f2] = getattr(v2, "value", v2)
-        if getattr(f.initial_conditions, "options", None):
-            ic["options"] = dict(f.initial_conditions.options)
+        if f.initial_conditions is None:
+            # Explicit sentinel (as opposed to a plain missing key) so
+            # `_ForcingEditor.__init__` seeds the "(none)" dropdown option
+            # instead of falling back to the fresh-wizard GLORYS default.
+            ic: dict[str, Any] | None = None
+        else:
+            ic = {"source": src(f.initial_conditions.source)}
+            if f.initial_conditions.bgc_source:
+                ic["bgc_source"] = src(f.initial_conditions.bgc_source)
+            _ic_interp = getattr(f.initial_conditions, "bgc_interpolation_method", None)
+            if (
+                _ic_interp is not None
+                and getattr(_ic_interp, "value", _ic_interp)
+                != BgcInterpMethod.DEPTH.value
+            ):
+                ic["bgc_interpolation_method"] = getattr(
+                    _ic_interp, "value", _ic_interp
+                )
+            if getattr(f.initial_conditions, "allow_flex_time", False):
+                ic["allow_flex_time"] = True
+            for f2 in ("prefill", "regrid_method", "extrap_method"):
+                v2 = getattr(f.initial_conditions, f2, None)
+                if v2 is not None:
+                    ic[f2] = getattr(v2, "value", v2)
+            if getattr(f.initial_conditions, "options", None):
+                ic["options"] = dict(f.initial_conditions.options)
         forcing: dict[str, Any] = {}
         for cat, items in (
             ("surface", f.surface),

@@ -837,7 +837,10 @@ class Forcing(_Section):
     items are flat here under a single ``forcing:`` key in the YAML.
     """
 
-    initial_conditions: InitialConditions
+    initial_conditions: InitialConditions | None = None
+    """None only when the domain has a parent grid: child domains inherit state
+    from the parent's nesting extraction, so IC is optional for them (a child
+    may still provide one explicitly to override the inherited state)."""
     surface: list[SurfaceForcingItem] = Field(default_factory=list)
     boundary: list[BoundaryForcingItem] = Field(default_factory=list)
     tidal: list[TidalForcingItem] = Field(default_factory=list)

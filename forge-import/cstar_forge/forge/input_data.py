@@ -39,6 +39,15 @@ log = logging.getLogger(__name__)
 # substring ``cdr.nc`` by convention (a former C-Star build check enforced this).
 CDR_FORCING_NETCDF_STEM = "cdr"
 
+# Sentinel Resource.location for a child domain with no generated initial
+# conditions -- see the ``initial_conditions`` placeholder in
+# RomsMarblInputData.__init__ for why this exists. A plain string validates
+# fine (Resource.location is ``FilePath | HttpUrl | str``); the "cstar-forge:"
+# prefix and greppable name make it obvious this was never a real file path.
+CHILD_IC_PLACEHOLDER_LOCATION = (
+    "cstar-forge:child-domain-initial-conditions-placeholder"
+)
+
 # Matches the part of a candidate filename's stem that follows a planned output's
 # stem, for the known roms-tools multi-file suffixes: grouped time chunks
 # (``_YYYYMM``/``_YYYY``, e.g. ``_202001``), climatology (``_clim``), and
@@ -459,12 +468,43 @@ class RomsMarblInputData(InputData):
         if forcing_dict:
             forcing_config = cstar_models.ForcingConfiguration(**forcing_dict)
 
+        # Initial conditions: normally present in unique_keys (generation is
+        # planned via input_list/_generate_initial_conditions) and left as an
+        # empty placeholder Dataset here, like grid -- filled in once generated.
+        # Absent means a child domain with no explicit IC (the resolver already
+        # rejects a non-child domain with no IC upstream -- see
+        # forge_blueprint_resolve._build_forcing -- this is defense in depth).
+        # A child can't just get None/an empty Dataset the way boundary does:
+        # C-Star's RomsMarblBlueprint requires initial_conditions non-empty
+        # (min_length=1), and its orchestrator validates the emitted blueprint
+        # eagerly at workplan-prep time -- BEFORE the runtime 'nest-from'
+        # directive gets a chance to replace it with the parent-derived initial
+        # state. So a child with no IC needs a schema-valid PLACEHOLDER resource
+        # here instead, which 'nest-from' overrides at run time.
+        _ic_settings_placeholder = False
+        if "initial_conditions" in unique_keys:
+            initial_conditions = cstar_models.Dataset(data=[])
+        elif self.grid_parent is not None:
+            initial_conditions = cstar_models.Dataset(
+                data=[Resource(location=CHILD_IC_PLACEHOLDER_LOCATION)],
+                documentation=(
+                    "Placeholder for a child domain with no generated initial "
+                    "conditions; C-Star's 'nest-from' directive replaces this "
+                    "with the parent-derived initial state at run time."
+                ),
+            )
+            _ic_settings_placeholder = True
+        else:
+            raise ValueError(
+                "Missing required 'initial_conditions' forcing category. "
+                "Initial conditions must be specified in forcing_override, "
+                "required unless a parent grid is provided."
+            )
+
         # Initialize roms_marbl_blueprint_elements
         self.roms_marbl_blueprint_elements = RomsMarblBlueprintInputData(
             grid=cstar_models.Dataset(data=[]) if "grid" in unique_keys else None,
-            initial_conditions=cstar_models.Dataset(data=[])
-            if "initial_conditions" in unique_keys
-            else None,
+            initial_conditions=initial_conditions,
             forcing=forcing_config,
             cdr_forcing=cstar_models.Dataset(data=[])
             if "cdr_forcing" in unique_keys
@@ -474,6 +514,16 @@ class RomsMarblInputData(InputData):
         # Initialize settings dictionaries to empty dicts
         self._settings_compile_time = {}
         self._settings_run_time = {}
+        if _ic_settings_placeholder:
+            # The namelist's "initial" section (inifile) is required non-None,
+            # but _generate_initial_conditions never runs for this child (no
+            # explicit IC) so it never populates this key. Seed the same
+            # sentinel as the blueprint placeholder above; the run-time
+            # namelist is regenerated downstream from the blueprint after the
+            # 'nest-from' directive supplies the real parent-derived IC.
+            self._settings_run_time["initial"] = {
+                "initial_file": CHILD_IC_PLACEHOLDER_LOCATION
+            }
 
     def _pio_mangle(self, path: Path) -> Path:
         """When ``use_pio``, insert an ``_nc4`` token before the final ``.nc`` suffix

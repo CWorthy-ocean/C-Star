@@ -139,10 +139,13 @@ GENERATION_DERIVED_LEAF_KEYS: dict[str, tuple[str, ...]] = {
 def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Convert cfg.forcing to the forcing_override dict for RomsMarblInputData.
 
-    Always returns a dict with ``initial_conditions`` and ``forcing`` keys mirroring
-    the model.yaml inputs block. ``cfg.forcing`` is fully resolved by the
-    resolver (from the model default or an authored/edited selection), so the executor
-    always drives input generation from this dict and never reads ``model_spec.inputs``.
+    Always returns a dict with a ``forcing`` key, mirroring the model.yaml inputs
+    block. ``initial_conditions`` is included too unless ``cfg.forcing.initial_conditions``
+    is ``None`` (a child domain with no explicit IC -- state comes from the parent's
+    nesting extraction instead), in which case the key is omitted entirely.
+    ``cfg.forcing`` is fully resolved by the resolver (from the model default or an
+    authored/edited selection), so the executor always drives input generation from
+    this dict and never reads ``model_spec.inputs``.
     """
 
     def _src(spec) -> dict[str, Any]:
@@ -177,7 +180,6 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         return {k: v for k, v in d.items() if v is not None}
 
     f = cfg.forcing
-    ic = _ic(f.initial_conditions)
 
     forc: dict[str, Any] = {}
     for cat, items in [
@@ -189,7 +191,13 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         if items:
             forc[cat] = [_item(it) for it in items]
 
-    return {"initial_conditions": ic, "forcing": forc}
+    out: dict[str, Any] = {"forcing": forc}
+    # None only for a child domain with no explicit IC (state comes from the
+    # parent's nesting extraction) -- omit the key entirely rather than
+    # emitting a None/placeholder value.
+    if f.initial_conditions is not None:
+        out["initial_conditions"] = _ic(f.initial_conditions)
+    return out
 
 
 def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:

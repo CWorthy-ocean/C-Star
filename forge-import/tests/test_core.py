@@ -49,6 +49,7 @@ from cstar_forge.forge.executor import ForgeExecutor, _deep_merge_settings_dict
 from cstar_forge.forge.forge_blueprint import ForgeBlueprint
 from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 from cstar_forge.forge.host import HostPaths
+from cstar_forge.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
 requires_cstar_pio = pytest.mark.skipif(
@@ -2249,6 +2250,173 @@ class TestGoldenNamelist:
             "review the diff, and commit the updated fixture; otherwise this is a "
             "regression."
         )
+
+
+class TestChildDomainNoInitialConditionsValidatesAtEmit:
+    """End-to-end proof that a child domain with no explicit initial conditions
+    (``Forcing.initial_conditions=None``; see
+    ``forge_blueprint_resolve._build_forcing``) survives the real
+    ``generate_inputs()`` -> ``configure_build()`` chain (the same
+    roms-tools-mocked chain ``TestGoldenNamelist`` drives) and emits a
+    schema-valid roms_marbl blueprint plus a valid namelist.
+
+    C-Star's ``RomsMarblBlueprint.initial_conditions`` requires a non-empty
+    Dataset (min_length=1), and its orchestrator validates the emitted
+    blueprint eagerly -- before the runtime 'nest-from' directive can replace
+    it with the parent-derived initial state -- so ``RomsMarblInputData`` must
+    emit a schema-valid PLACEHOLDER resource for a child with no generated IC
+    (``CHILD_IC_PLACEHOLDER_LOCATION`` in input_data.py). This closes the gap
+    ``_validated_roms_marbl_blueprint`` would otherwise hit at emit time.
+
+    Separately, C-Star's namelist ``InitialConditions.inifile`` is also
+    required non-None, and ``_generate_initial_conditions`` (the only code
+    that normally populates the run-time "initial" settings section) never
+    runs for this child -- so ``RomsMarblInputData.__init__`` seeds the same
+    sentinel into ``self._settings_run_time["initial"]`` up front. The
+    run-time namelist gets regenerated downstream from the blueprint once the
+    'nest-from' directive supplies the real parent-derived IC.
+    """
+
+    _GRID_KWARGS: ClassVar[dict] = TestGoldenNamelist._GRID_KWARGS
+    _BOUNDARIES: ClassVar[dict] = TestGoldenNamelist._BOUNDARIES
+    _PARTITIONING: ClassVar[dict] = TestGoldenNamelist._PARTITIONING
+    _PARENT_GRID_KWARGS: ClassVar[dict] = dict(
+        nx=20,
+        ny=20,
+        size_x=2000,
+        size_y=2000,
+        center_lon=0,
+        center_lat=55,
+        rot=0,
+        N=10,
+        theta_s=6.0,
+        theta_b=3.0,
+        hc=250.0,
+    )
+
+    def test_configure_build_succeeds_with_ic_placeholder(self, mock_grid, tmp_path):
+        import copy
+
+        forcing_inputs = copy.deepcopy(_FORCING_INPUTS)
+        assert forcing_inputs["initial_conditions"]["source"]  # sanity: fixture has IC
+        del forcing_inputs["initial_conditions"]
+
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name="test-tiny",
+            grid_kwargs=self._GRID_KWARGS,
+            grid_kwargs_parent=self._PARENT_GRID_KWARGS,
+            open_boundaries=self._BOUNDARIES,
+            partitioning=self._PARTITIONING,
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            description="Child domain, no IC",
+            dt=7200,
+            forcing_inputs=forcing_inputs,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        assert cfg.domain.is_child is True
+        assert cfg.forcing.initial_conditions is None
+
+        grid_mock = _create_grid_mock()
+        grid_mock.nx = self._GRID_KWARGS["nx"]
+        grid_mock.ny = self._GRID_KWARGS["ny"]
+        grid_mock.N = self._GRID_KWARGS["N"]
+        grid_mock.theta_s = self._GRID_KWARGS["theta_s"]
+        grid_mock.theta_b = self._GRID_KWARGS["theta_b"]
+        grid_mock.hc = self._GRID_KWARGS["hc"]
+        grid_mock.save.side_effect = TestGoldenNamelist._touch_save
+        mock_grid.return_value = grid_mock
+
+        run_dir = tmp_path / "run"
+        host = HostPaths(working_dir=run_dir, source_data_cache=run_dir, system="test")
+
+        # A child (has a parent, but is not itself a parent) makes the executor
+        # build grid_parent + align this grid to it -- align_grids is a real
+        # roms-tools function that expects real xarray Grid internals, which the
+        # autouse rt.Grid mock doesn't provide, so it's stubbed too.
+        with patch("cstar_forge.forge.executor.rt.align_grids", return_value=grid_mock):
+            builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        builder.src_data = TestGoldenNamelist._mock_source_data(tmp_path)
+
+        with (
+            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
+            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
+            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
+            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES",
+                {"ERA5"},
+            ),
+        ):
+            mock_surface_instance = MagicMock()
+            mock_surface_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_surface_instance.use_coarse_grid = False
+            mock_surface.return_value = mock_surface_instance
+
+            mock_tidal_instance = MagicMock()
+            mock_tidal_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_tidal_instance.ntides = 15
+            mock_tidal.return_value = mock_tidal_instance
+
+            mock_river_instance = MagicMock()
+            mock_river_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_river_instance.ds = xr.Dataset(
+                {
+                    "river_volume": (["nriver", "time"], np.zeros((3, 2))),
+                    "river_tracer": (
+                        ["nriver", "time", "tracer"],
+                        np.zeros((3, 2, 2)),
+                    ),
+                }
+            )
+            mock_river.return_value = mock_river_instance
+
+            builder.generate_inputs(clobber=True, use_dask=False, test=False)
+
+        # Neither IC nor boundary generation is planned for this child: IC has no
+        # explicit source, and boundary is skipped for a child by the resolver.
+        mock_ic.assert_not_called()
+        mock_boundary.assert_not_called()
+        assert builder._inputs_generated is True
+
+        # Right after generate_inputs the in-memory blueprint is a plain dict
+        # (model_construct round-tripped via model_dump -- see generate_inputs);
+        # the typed-model assertion comes after configure_build re-validates.
+        ic_elem = builder.roms_marbl_blueprint.initial_conditions
+        assert len(ic_elem["data"]) == 1
+        assert ic_elem["data"][0]["location"] == CHILD_IC_PLACEHOLDER_LOCATION
+        assert (
+            builder._settings_run_time["initial"]["initial_file"]
+            == CHILD_IC_PLACEHOLDER_LOCATION
+        )
+
+        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+
+        run_ov, compile_ov = split_model_settings(cfg)
+        with patch("cstar_forge.forge.executor.render_roms_settings") as mock_render:
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["cppdefs.opt"]},
+                "branch": "main",
+            }
+            builder.configure_build(
+                compile_time_settings=compile_ov, run_time_settings=run_ov
+            )
+
+        validated = builder.roms_marbl_blueprint
+        assert isinstance(validated, cstar_models.RomsMarblBlueprint)
+        assert len(validated.initial_conditions.data) == 1
+        assert (
+            validated.initial_conditions.data[0].location
+            == CHILD_IC_PLACEHOLDER_LOCATION
+        )
+
+        namelist_path = builder.run_time_code_dir / "namelist.nml"
+        assert namelist_path.exists()
+        raw = namelist_path.read_text()
+        assert CHILD_IC_PLACEHOLDER_LOCATION in raw
 
 
 class TestForgeRunnerEndToEnd:

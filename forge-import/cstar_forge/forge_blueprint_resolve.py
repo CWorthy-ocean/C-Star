@@ -789,7 +789,10 @@ def build_forge_blueprint(
             if it.type == "bgc":
                 src_name = it.source.name if it.source else "?"
                 bgc_signals.append(f"boundary[{i}] (source={src_name}, type=bgc)")
-        if sources.initial_conditions.bgc_source is not None:
+        if (
+            sources.initial_conditions is not None
+            and sources.initial_conditions.bgc_source is not None
+        ):
             bgc_signals.append(
                 "initial_conditions.bgc_source (source="
                 f"{sources.initial_conditions.bgc_source.name})"
@@ -904,7 +907,10 @@ def _build_forcing(
 
     ``is_child`` (this domain has a parent grid) skips boundary items entirely --
     not just clears them afterward -- so a boundary-only source is never noted
-    into ``resolved_datasets``/``datasets`` either.
+    into ``resolved_datasets``/``datasets`` either. The same applies to
+    initial_conditions when no source is given: it resolves to ``None`` for a
+    child domain (state comes from the parent's nesting extraction) instead of
+    the hard error a non-child domain gets.
 
     ``cdr_forcing_file``, if given, is already a normalized :class:`UserProvidedFile`
     (see ``build_forge_blueprint``'s ``_normalize_user_file`` call) -- passed straight
@@ -944,16 +950,30 @@ def _build_forcing(
         "extrap_kwargs",
     )
 
-    ic_kw = {
-        "source": _parse_source(ic_block.get("source")),
-        "bgc_source": _parse_source(ic_block["bgc_source"])
-        if ic_block.get("bgc_source")
-        else None,
-    }
-    for f in ("bgc_interpolation_method", "allow_flex_time", *_REGRID_FIELDS):
-        if f in ic_block:
-            ic_kw[f] = ic_block[f]
-    ic = InitialConditions(**ic_kw)
+    if not ic_block.get("source"):
+        # No IC source given. A child domain gets its state from the parent's
+        # nesting extraction, so IC is optional -- skip building it entirely,
+        # the same way boundary items are skipped above, so nothing leaks into
+        # resolved_datasets/datasets. A non-child domain has no other source of
+        # state, so this is a hard error.
+        if not is_child:
+            raise ValueError(
+                "initial_conditions is required unless the domain has a parent "
+                "grid (child domains inherit state from the parent's nesting "
+                "extraction)"
+            )
+        ic = None
+    else:
+        ic_kw = {
+            "source": _parse_source(ic_block.get("source")),
+            "bgc_source": _parse_source(ic_block["bgc_source"])
+            if ic_block.get("bgc_source")
+            else None,
+        }
+        for f in ("bgc_interpolation_method", "allow_flex_time", *_REGRID_FIELDS):
+            if f in ic_block:
+                ic_kw[f] = ic_block[f]
+        ic = InitialConditions(**ic_kw)
 
     surface = _items(
         "surface",
@@ -1013,8 +1033,9 @@ def _build_forcing(
             return
         resolved.setdefault(src.name, _resolved_dataset(src.name, src.glorys_layout))
 
-    _note(ic.source)
-    _note(ic.bgc_source)
+    if ic is not None:
+        _note(ic.source)
+        _note(ic.bgc_source)
     for grp in (surface, boundary, tidal, river):
         for it in grp:
             _note(it.source)
