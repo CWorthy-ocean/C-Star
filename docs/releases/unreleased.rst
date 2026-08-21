@@ -18,6 +18,8 @@ New features
 - Add ``LocalComputeSpec`` and ``SlurmComputeSpec`` models exposing available overridable per-launcher compute settings. (`#608 <https://github.com/CWorthy-ocean/C-Star/pull/608>`_)
 - Implement overriding global compute settings on per-step level via workplan config (`#608 <https://github.com/CWorthy-ocean/C-Star/pull/608>`_)
 - The NestIc app will now do CDF-5 conversion of the new IC file if PIO is enabled (default: true) (`#636 <https://github.com/CWorthy-ocean/C-Star/pull/636>`_)
+- Add ability to write different namelist versions based on ucla-roms codebase tag (`#638 <https://github.com/CWorthy-ocean/C-Star/pull/638>`_)
+- Add support for upcoming ucla-roms 0.5.0 namelist changes (`#638 <https://github.com/CWorthy-ocean/C-Star/pull/638>`_)
 
 Bug Fixes
 ~~~~~~~~~
