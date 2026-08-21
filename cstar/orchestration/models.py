@@ -321,6 +321,14 @@ class Step(ConfiguredBaseModel):
         """
         return bool(self.workflow_overrides.get(KEY_CLOBBER, False))
 
+    @field_validator("name")
+    @classmethod
+    def reject_reserved_keywords(cls, value: str) -> str:
+        keyword = "all"
+        if value == keyword:
+            raise ValueError(f"The value {keyword!r} is a reserved keyword")
+        return value
+
 
 class Workplan(ConfiguredBaseModel):
     """A collection of executable steps and the associated configuration to run them."""

@@ -332,8 +332,7 @@ async def prepare_workplan(
         User-defined variables specified at runtime
     clobber_steps : Sequence[str] | None
         Names or safe_names of steps whose prior state should be cleared and
-        re-executed, or `all` to target every step, as supplied via
-        `--clobber`.
+        re-executed, or `all` to target every step.
 
     Returns
     -------

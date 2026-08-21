@@ -54,6 +54,8 @@ def test_step_defaults(fake_blueprint_path: Path) -> None:
         "",
         "   ",
         None,
+        pytest.param("all", id="reserved keyword"),
+        pytest.param(" all ", id="reserved keyword w/ws"),
     ],
 )
 def test_step_name_validation(
