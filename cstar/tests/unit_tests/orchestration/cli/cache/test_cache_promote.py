@@ -11,7 +11,6 @@ from typer.testing import CliRunner
 from cstar.cli.cache.common import (
     ARG_KEY,
     ARG_RUNID,
-    confirm_overwrite,
     key_callback,
     runid_callback,
 )
@@ -92,32 +91,6 @@ async def test_cli_admin_promote_key_callback(input_value: str, exp_value: str) 
 
     # confirm the run-id is returned with any callback cleaning appleid
     assert actual_run_id == exp_value
-
-
-@pytest.mark.parametrize(
-    ("answer", "exp_value"),
-    [
-        ("y", True),
-        ("n", False),
-    ],
-)
-@pytest.mark.asyncio
-async def test_cli_admin_promote_overwrite(answer: str, exp_value: bool) -> None:
-    """Verify that `key_callback` strips whitespace from inputs and returns
-    the cleaned value.
-
-    Parameters
-    ----------
-    answer : str
-        Parameterized inputs for the target function.
-    exp_value : str
-        Parameterized output values expected after executing the target function.
-    """
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value=answer)):
-        actual_value = confirm_overwrite()
-
-    # confirm the run-id is returned with any callback cleaning appleid
-    assert actual_value == exp_value
 
 
 @pytest.mark.parametrize(

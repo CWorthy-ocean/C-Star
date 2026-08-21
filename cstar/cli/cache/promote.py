@@ -9,7 +9,8 @@ from cstar.cli.cache.common import (
     ARG_KEY,
     ARG_RUNID,
     ARG_YES,
-    confirm_overwrite,
+    Prompter,
+    call_to_action,
     console,
     key_callback,
     key_help,
@@ -92,7 +93,13 @@ def promote(
     except ArtifactNotFoundError:
         console.print(f"No cache artifact found for run-id {run_id!r} with key {key!r}")
     except ArtifactExistsError:
-        if confirm_overwrite(force_overwrite=overwrite):
+        prompt = f"An existing asset will be overwritten. {call_to_action}"
+
+        if not overwrite and not Prompter(primary=prompt, mode="double").confirm():
+            msg = "Overwrite permission denied by user for shared asset. Aborting."
+            log.info(msg)
+            raise typer.Exit()
+        else:
             location = cache.promote(key, run_id, on_conflict=OnConflict.OVERWRITE)
 
     if location:

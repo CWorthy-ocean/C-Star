@@ -2,10 +2,8 @@ import typing as t
 
 import typer
 from rich.console import Console
-from rich.prompt import Prompt
 
 from cstar.io.utils import get_artifact_cache
-from cstar.orchestration.artifact_cache import Location, Tier
 
 key_help: t.Final[str] = "A key that will identifies a cached resource."
 move_help: t.Final[str] = (
@@ -32,6 +30,8 @@ CHOICE_NO: t.Final[str] = "n"
 CHOICE_ALL: t.Final[str] = "all"
 choices: t.Final[list[str]] = [CHOICE_YES, CHOICE_NO]
 
+call_to_action: t.Final[str] = f"Press {CHOICE_YES!r} to allow"
+cancellation_msg: t.Final[str] = "Action cancelled"
 
 console = Console()
 
@@ -92,96 +92,39 @@ def list_runs_with_cache() -> list[str]:
     return cache.list_runs()
 
 
-def confirm_overwrite(
-    force_overwrite: bool = False,
-    location: Location | None = None,
-) -> bool:
-    if location is None:
-        console.print("An artifact with the specified key already exists")
-    else:
-        console.print(f"The artifact at {location.path} already exists for that key.")
+class Prompter:
+    """Manages the conditional delivery of confirmation prompts to a user."""
 
-    if force_overwrite:
-        answer = CHOICE_YES
-    else:
-        prompt = f"Press {CHOICE_YES!r} to overwrite (any other key to skip)."
+    interactive: bool = True
+    mode: t.Literal["single", "double"] = "single"
+    primary: str = call_to_action
+    secondary: str = f"Are you sure? {call_to_action}"
 
-        answer = Prompt.ask(
-            prompt,
-            default=CHOICE_NO,
-            choices=choices,
-            case_sensitive=False,
-        )
+    def __init__(
+        self,
+        *,
+        interactive: bool | None = None,
+        mode: t.Literal["single", "double"] = "single",
+        primary: str | None = None,
+        secondary: str | None = None,
+    ) -> None:
+        if interactive is not None:
+            self.interactive = interactive
+        self.mode = mode
+        if primary is not None:
+            self.primary = primary
+        if secondary is not None:
+            self.secondary = secondary
 
-    return answer.lower() == CHOICE_YES
+    def confirm(
+        self,
+        primary: str | None = None,
+        secondary: str | None = None,
+        mode: t.Literal["single", "double"] | None = None,
+    ) -> bool:
+        confirmation = typer.confirm(primary or self.primary)
 
+        if (mode or self.mode) == "double":
+            confirmation = typer.confirm(secondary or self.secondary)
 
-def confirm_remove_run(run_id: str, force_remove: bool = False) -> bool:
-    """Ask whether every artifact cached for a run should be removed.
-
-    Separate from :func:`confirm_remove`, which describes one artifact and
-    treats a missing location as "nothing to remove". A whole-run deletion has
-    no single location to name, so passing ``None`` there both prints the wrong
-    message and reports a refusal the caller may then ignore.
-
-    Parameters
-    ----------
-    run_id : str
-        Run whose artifacts would be removed.
-    force_remove : bool, optional
-        Skip the prompt, for unattended use.
-
-    Returns
-    -------
-    bool
-        Whether the removal should proceed.
-    """
-    console.print(f"Every artifact cached for run {run_id!r} will be removed.")
-
-    if force_remove:
-        return True
-
-    answer = Prompt.ask(
-        f"Press {CHOICE_YES!r} to delete (any other key to skip)",
-        default=CHOICE_NO,
-        choices=choices,
-        case_sensitive=False,
-    )
-    return answer.lower() == CHOICE_YES
-
-
-def confirm_remove(
-    force_remove: bool = False,
-    location: Location | None = None,
-) -> bool:
-    if location is None:
-        console.print("An artifact with the specified key does not exist")
-        return False
-    else:
-        console.print(f"The artifact at {location.path} will be removed.")
-
-    if force_remove:
-        answer = CHOICE_YES
-    else:
-        prompt1 = f"Press {CHOICE_YES!r} to delete (any other key to skip)"
-        prompt2 = f"Confirm with {CHOICE_YES!r} again to remove this shared artifact"
-
-        answer = Prompt.ask(
-            prompt1,
-            default=CHOICE_NO,
-            choices=choices,
-            case_sensitive=False,
-        )
-
-        if location.tier == Tier.SHARED and answer.lower() == CHOICE_YES:
-            # Both answers must be yes. Reassigning here would discard the
-            # first refusal, so answering "n" then "y" would delete a shared
-            # artifact the user had already declined to remove.
-            answer = Prompt.ask(
-                prompt2,
-                default=CHOICE_NO,
-                choices=choices,
-                case_sensitive=False,
-            )
-
-    return answer.lower() == CHOICE_YES
+        return confirmation

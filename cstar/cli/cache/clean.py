@@ -8,12 +8,12 @@ from cstar.cli.cache.common import (
     ARG_KEY,
     ARG_RUNID,
     ARG_YES,
-    confirm_remove,
-    confirm_remove_run,
+    Prompter,
+    call_to_action,
+    cancellation_msg,
     console,
     key_callback,
     key_help,
-    print_not_found,
     run_id_help,
     runid_callback,
 )
@@ -25,7 +25,10 @@ from cstar.cli.common import (
 from cstar.entrypoint.utils import ARG_VERBOSE, ARG_VERBOSE_HELP
 from cstar.io.utils import get_artifact_cache
 from cstar.orchestration.artifact_cache import (
+    ArtifactCache,
     ArtifactNotFoundError,
+    Location,
+    Tier,
     UnsafePathError,
 )
 
@@ -33,8 +36,68 @@ log = get_logger(__name__)
 app = typer.Typer()
 
 
-command_help: t.Final[str] = "Manually remove artifacts from the cache."
+command_help: t.Final[str] = "Manually remove assets from the cache."
 yes_help: t.Final[str] = "Perform user-level deletions without confirmation."
+
+
+def handle_shared_deletion(
+    cache: ArtifactCache,
+    prompter: Prompter,
+    location: Location,
+) -> bool:
+    """Perform the deletion of a shared artifact."""
+    if confirmation := prompter.confirm(
+        primary=f"Delete the shared asset in {location.path}? {call_to_action}",
+        secondary=f"Are you sure you want to delete a shared asset? {call_to_action}",
+        mode="double",
+    ):
+        if removed := cache.delete_shared(location.name, confirmation):
+            console.print(f"Shared asset {location.name!r} deleted")
+        return removed
+
+    console.print(cancellation_msg)
+    raise typer.Exit(0)
+
+
+def handle_user_deletion(
+    cache: ArtifactCache,
+    prompter: Prompter,
+    location: Location,
+) -> bool:
+    """Perform the deletion of a user-level artifact."""
+    if not location.run_id:
+        console.print("The asset location is missing a run-id. Unable to continue")
+        raise typer.Exit(1)
+
+    if prompter.confirm(
+        primary=f"Delete your artifact in {location.path}? {call_to_action}",
+        mode="single",
+    ):
+        if removed := cache.delete_user(location.name, location.run_id):
+            console.print(f"User asset {location.name!r} deleted")
+        return removed
+
+    console.print(cancellation_msg)
+    raise typer.Exit(0)
+
+
+def handle_run_deletion(
+    cache: ArtifactCache,
+    prompter: Prompter,
+    run_id: str,
+) -> bool:
+    """Perform the deletion of all artifacts for a run."""
+    if confirmation := prompter.confirm(
+        primary=f"Delete all assets for the run? {call_to_action}",
+        secondary=f"Are you sure you want to delete all assets for the run? {call_to_action}",
+        mode="double",
+    ):
+        if removed := cache.delete_shared(run_id, confirmation):
+            console.print(f"All assets for run {run_id!r} deleted")
+        return removed
+
+    console.print(cancellation_msg)
+    raise typer.Exit(0)
 
 
 @app.command(
@@ -52,15 +115,15 @@ def clean_cache(
         ),
     ] = "",
     run_id: t.Annotated[
-        str,
+        str | None,
         typer.Option(
             ARG_RUNID,
             help=run_id_help,
             callback=cb_pipeline(runid_callback, set_env(ENV_CSTAR_RUNID)),
             min=1,
         ),
-    ] = "",
-    confirm_all: t.Annotated[
+    ] = None,
+    noninteractive: t.Annotated[
         bool,
         typer.Option(
             ARG_YES,
@@ -79,55 +142,38 @@ def clean_cache(
 ) -> None:
     """Manually remove artifacts from the cache."""
     cache = get_artifact_cache()
+    prompter = Prompter(interactive=not noninteractive)
 
-    resolve_runid: str | None = None
-    if run_id:
-        resolve_runid = run_id
-
-    if key:
-        if location := cache.resolve(key, resolve_runid):
-            confirm_all = confirm_remove(confirm_all, location)
-            if not confirm_all:
-                console.print("Artifact was not removed")
-                raise typer.Exit(0)
-        else:
-            print_not_found(run_id, key)
-            raise typer.Exit(0)
-    elif run_id:
-        # Gate the deletion on the answer. Computing it and then deleting
-        # regardless would discard a refusal, and a whole run is a lot to lose.
-        if not confirm_remove_run(run_id, confirm_all):
-            console.print("No artifacts were removed")
-            raise typer.Exit(0)
-    else:
-        console.print("A key or run-id is required")
-        raise typer.Exit(2)
-
-    is_removed = False
-
-    try:
-        if key and run_id:
-            is_removed = cache.delete_user(key, run_id)
-        elif key:
-            is_removed = cache.delete_shared(key, confirm_all)
-        else:
-            is_removed = cache.delete_user_run(run_id)
-    except UnsafePathError:
-        console.print(
-            f"Confirmation required to remove shared artifact with key {key!r}"
-        )
-    except ArtifactNotFoundError:
-        console.print(
-            f"Artifact with key {key!r} could not be removed for run {run_id!r}"
-        )
-
-    if is_removed:
-        msg = (
-            f"{key} has been deleted"
-            if key
-            else f"Artifacts from run {run_id} have been deleted"
-        )
-        console.print(msg)
+    match (key, run_id):
+        case (k, r) if k and not r:
+            # no run-id targets a shared artifact (or is a mistake)
+            if location := cache.resolve(k, r):
+                handle_shared_deletion(cache, prompter, location)
+            else:
+                console.print(
+                    f"No shared asset found for key: {k}. Did you forget a run-id?"
+                )
+        case (k, r) if k and r:
+            # key and run-id may find a user-level or shared artifact
+            if location := cache.resolve(k, r, prefer_local=True):
+                if location.tier == Tier.USER:
+                    handle_user_deletion(cache, prompter, location)
+                else:
+                    msg = "Do not pass a run-id to delete a shared asset."
+                    raise typer.BadParameter(msg, param_hint="run_id")
+            else:
+                console.print(f"No asset found for key {k!r} and run-id {r!r}?")
+        case (k, r) if not k and r:
+            # no key indicates either a mistake or a delete-full-run attempt
+            try:
+                handle_run_deletion(cache, prompter, r)
+            except ArtifactNotFoundError:
+                console.print(f"No assets found for run-id {r!r}?")
+            except UnsafePathError:
+                console.print("The asset is outside the cache. Permission denied")
+        case _:
+            console.print("No key or run-id provided")
+            raise typer.Exit()
 
 
 if __name__ == "__main__":

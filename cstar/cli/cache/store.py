@@ -6,13 +6,14 @@ import typer
 from cstar.base.env import ENV_CSTAR_CLI_VERBOSE, ENV_CSTAR_RUNID
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
+from cstar.cli.cache.clean import call_to_action
 from cstar.cli.cache.common import (
     ARG_KEY,
     ARG_MOVE,
     ARG_PATH,
     ARG_RUNID,
     ARG_YES,
-    confirm_overwrite,
+    Prompter,
     console,
     key_callback,
     key_help,
@@ -113,9 +114,15 @@ def store(
     action = "added to"
     path = path.expanduser().resolve()
 
-    if location := cache.resolve(key, run_id, prefer_local=True):
-        overwrite = confirm_overwrite(overwrite, location)
-        action = "updated in"
+    if location := cache.resolve(key, run_id, prefer_local=True) and not overwrite:
+        prompt = f"An existing asset will be overwritten. {call_to_action}"
+
+        if not overwrite and not Prompter(primary=prompt).confirm():
+            msg = "Overwrite permission denied by user. Aborting."
+            log.info(msg)
+            raise typer.Exit()
+        else:
+            action = "updated in"
 
     try:
         user_meta = t.cast("dict[str, str] | None", context.obj)
