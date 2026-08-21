@@ -119,14 +119,26 @@ def on_deleting(report: UsageReport) -> UsageReport:
     return report
 
 
-def run_gc_with_hooks(
-    func: Callable[[ArtifactCache, UsageReport], UsageReport],
+def run_with_hooks(
+    executor: ThreadPoolExecutor,
+    on_start: Callable[[UsageReport], UsageReport],
+    on_stop: Callable[[Future[UsageReport]], object],
     cache: ArtifactCache,
     report: UsageReport,
-) -> UsageReport:
-    """Provide an on-start hook for action processed by threadpool."""
-    on_deleting(report)
-    return func(cache, report)
+) -> Future[UsageReport]:
+    """Provide an on-start hook for running gc in the threadpool."""
+
+    def _wrapper(c: ArtifactCache, r: UsageReport) -> UsageReport:
+        on_start(report)
+        return run_garbage_collector(c, r)
+
+    future = executor.submit(
+        _wrapper,
+        cache,
+        report,
+    )
+    future.add_done_callback(on_stop)
+    return future
 
 
 def on_deleted(future: Future[UsageReport]) -> object:
@@ -140,6 +152,12 @@ def on_deleted(future: Future[UsageReport]) -> object:
     if live:
         live.update(generate_gc_status_table(wip, statuses))
     return report
+
+
+def get_work_in_progress() -> Sequence[UsageReport]:
+    """Utility method for retrieving tasks assigned to the threadpool."""
+    global statuses
+    return [x["report"] for x in statuses.values() if x["status"]]
 
 
 def collect_garbage(age_limit: int, confirm_all: bool, cache: ArtifactCache) -> None:
@@ -177,7 +195,7 @@ def collect_garbage(age_limit: int, confirm_all: bool, cache: ArtifactCache) -> 
     global statuses
 
     for report in reports:
-        statuses[report.name] = {"status": "", "report": report}
+        statuses[report.name] = CleanupStatusDict(status="", report=report)
 
     if not confirm_all:
         prompt = f"Delete {len(reports)} stale artifacts without reviewing?"
@@ -188,38 +206,32 @@ def collect_garbage(age_limit: int, confirm_all: bool, cache: ArtifactCache) -> 
 
     for report in reports:
         if confirm_all or Confirm.ask(generate_gc_prompt(report), default=False):
-            statuses[report.name] = {"status": "ready", "report": report}
-            future = executor.submit(
-                run_gc_with_hooks,
-                run_garbage_collector,
-                cache,
-                report,
-            )
-            future.add_done_callback(on_deleted)
+            statuses[report.name] = CleanupStatusDict(status="ready", report=report)
+            future = run_with_hooks(executor, on_deleting, on_deleted, cache, report)
             pending.add(future)
 
     global live
     live = Live()
 
     with live:
-        wip = [x["report"] for x in statuses.values() if x["status"]]
+        wip = get_work_in_progress()
         live.update(generate_gc_status_table(wip, statuses))
 
         for report in reports:
-            wip = [x["report"] for x in statuses.values() if x["status"]]
+            wip = get_work_in_progress()
             t = generate_gc_status_table(wip, statuses)
             live.update(t)
 
         _, pending = wait(pending, timeout=0.25)
         while pending:
-            wip = [x["report"] for x in statuses.values() if x["status"]]
+            wip = get_work_in_progress()
             t = generate_gc_status_table(wip, statuses)
             live.update(t)
             _, pending = wait(pending, timeout=0.25)
 
         executor.shutdown(wait=True)
 
-    completed = [x["report"] for x in statuses.values() if x["status"]]
+    completed = get_work_in_progress()
     summary = generate_gc_summary(list(completed), "reclaimed from")
     console.print(summary)
 
