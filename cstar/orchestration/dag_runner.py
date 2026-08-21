@@ -661,11 +661,115 @@ async def on_status_changed(handle: ProcessHandle) -> None:
             await run_repo.put_workplan_run(run)
 
 
+async def build_dag(
+    wp_path: Path,
+    run_id: str = "",
+    user_variables: Mapping[str, str] | None = None,
+    clobber_steps: "Sequence[str] | None" = None,
+) -> tuple[Planner, Path]:
+    """Execute the steps in the workplan.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The path to the blueprint to execute
+    run_id : str | None
+        The run-id to be used by the orchestrator.
+    user_variables : NamedConfiguration | None
+        User-provided key-value pairs for use during templating.
+    clobber_steps : Sequence[str] | None
+        Names or safe_names of steps whose prior state should be cleared and
+        re-executed, or `all` to target every step, as supplied via
+        `--clobber`.
+
+    Returns
+    -------
+    Path
+        The path to the workplan that was executed after any tranformations
+        were applied.
+    """
+    if run_id:
+        run_id = slugify(run_id)
+
+    _ignore_ambient_clobber_env()
+    output_dir = StateDirectoryManager.data_dir(run_id)
+    configure_environment(run_id=run_id)
+
+    check_environment()
+    wp, prepared_wp_path = await prepare_workplan(
+        wp_path, output_dir, run_id, user_variables, clobber_steps
+    )
+    planner = Planner(workplan=wp)
+
+    return planner, prepared_wp_path
+
+
+@flow(log_prints=True)
+async def run_dag(
+    wp_path: Path,
+    run_id: str,
+    planner: Planner,
+    user_variables: Mapping[str, str] | None = None,
+    dry_run: bool = False,
+) -> ExecutiveRunSummary:
+    """Execute the steps in the workplan.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The path to the blueprint to execute
+    run_id : str
+        The run-id to be used by the orchestrator.
+    planner : Planner
+        The planner to execute
+    user_variables : NamedConfiguration | None
+        User-provided key-value pairs for use during templating.
+    dry_run : bool
+        If set to `true`, the execution plan will be built and persisted to disk
+        but not executed.
+
+    Returns
+    -------
+    Path
+        The path to the workplan that was executed after any tranformations
+        were applied.
+    """
+    steps = t.cast("list[LiveStep]", planner.flatten())
+    output_dir = StateDirectoryManager.data_dir(run_id)
+
+    wp_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=wp_path,
+        output_path=output_dir,
+        run_id=run_id,
+        environment=capture_environment(),
+        user_variables=user_variables or {},
+        sentinels={StateRepository.sentinel_path(s) for s in steps},
+    )
+
+    launcher = get_launcher()
+
+    orchestrator = Orchestrator(planner, launcher)
+    orchestrator.set_callback("status_changed", on_status_changed)
+    orchestrator.set_callback("launched", on_status_changed)
+
+    if dry_run:
+        msg = f"Dry run complete. Prepared workplan location: {wp_path}"
+        log.debug(msg)
+        return await ExecutiveRunSummary.from_run(wp_run)
+
+    run_repo = TrackingRepository()
+    await run_repo.put_workplan_run(wp_run)
+
+    # schedule the tasks without waiting for completion
+    await process_plan(orchestrator, RunMode.Schedule)
+    return await ExecutiveRunSummary.from_run(wp_run)
+
+
 @flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
-    output_dir: Path | None = None,
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
     clobber_steps: "Sequence[str] | None" = None,
@@ -696,47 +800,16 @@ async def build_and_run_dag(
         The path to the workplan that was executed after any tranformations
         were applied.
     """
-    if run_id:
-        run_id = slugify(run_id)
-
-    _ignore_ambient_clobber_env()
-
-    default_output_dir = StateDirectoryManager.data_dir(run_id or None)
-    output_dir = (output_dir or default_output_dir).expanduser().resolve()
-    configure_environment(output_dir, run_id)
-
-    launcher = get_launcher()
-
-    check_environment()
-    wp, prepared_wp_path = await prepare_workplan(
-        wp_path, output_dir, run_id, user_variables, clobber_steps
+    planner, prepared_wp_path = await build_dag(
+        wp_path,
+        run_id,
+        user_variables=user_variables,
+        clobber_steps=clobber_steps,
     )
-
-    planner = Planner(workplan=wp)
-    steps = t.cast("list[LiveStep]", planner.flatten())
-
-    wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=prepared_wp_path,
-        output_path=output_dir,
-        run_id=run_id,
-        environment=capture_environment(),
-        user_variables=user_variables or {},
-        sentinels={StateRepository.sentinel_path(s) for s in steps},
+    return await run_dag(
+        prepared_wp_path,
+        run_id,
+        planner,
+        user_variables=user_variables,
+        dry_run=dry_run,
     )
-
-    orchestrator = Orchestrator(planner, launcher)
-    orchestrator.set_callback("status_changed", on_status_changed)
-    orchestrator.set_callback("launched", on_status_changed)
-
-    if dry_run:
-        msg = f"Dry run complete. Prepared workplan location: {prepared_wp_path}"
-        log.debug(msg)
-        return await ExecutiveRunSummary.from_run(wp_run)
-
-    run_repo = TrackingRepository()
-    await run_repo.put_workplan_run(wp_run)
-
-    # schedule the tasks without waiting for completion
-    await process_plan(orchestrator, RunMode.Schedule)
-    return await ExecutiveRunSummary.from_run(wp_run)

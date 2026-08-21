@@ -42,11 +42,14 @@ from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
     build_and_run_dag,
+    # build_and_run_dag,
     check_clobber_targets,
+    run_dag,
 )
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.orchestration import LiveWorkplan, ProcessHandle
+from cstar.orchestration.orchestration import LiveWorkplan, Planner, ProcessHandle
 from cstar.orchestration.serialization import (
+    deserialize,
     try_deserialize,
     validate_serialized_entity,
 )
@@ -517,21 +520,37 @@ def run(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
+    reload = False
     if not path:
+        reload = True
         path = handle_run_reloading(run_id)
 
     try:
         with local_copy(path) as wp_path:
             clobber = resolve_clobber_selection(wp_path, clobber)
-            summary = asyncio.run(
-                build_and_run_dag(
-                    wp_path,
-                    run_id,
-                    user_variables=t.cast("Mapping[str, str]", ctx.obj),
-                    dry_run=dry_run,
-                    clobber_steps=clobber,
-                ),
-            )
+            user_vars = t.cast("Mapping[str, str]", ctx.obj)
+
+            if not reload:
+                summary = asyncio.run(
+                    build_and_run_dag(
+                        wp_path,
+                        run_id,
+                        user_variables=user_vars,
+                        dry_run=dry_run,
+                    ),
+                )
+            else:
+                wp = deserialize(wp_path, LiveWorkplan)
+                planner = Planner(wp)
+                summary = asyncio.run(
+                    run_dag(
+                        wp_path,
+                        run_id,
+                        planner,
+                        user_variables=user_vars,
+                        dry_run=dry_run,
+                    ),
+                )
             console.print(get_run_summary_display(summary))
     except typer.BadParameter:
         raise
