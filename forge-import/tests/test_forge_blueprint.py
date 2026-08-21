@@ -63,6 +63,25 @@ def _build(**over):
     return build_forge_blueprint(**kw)
 
 
+def test_resolver_does_not_alias_output_settings():
+    """_deep_merge must deep-copy override values: a section the ModelSpec
+    doesn't define (e.g. ocean_vars) used to be assigned into model_settings by
+    reference, so mutating one resolved blueprint in place cross-contaminated
+    the shared OutputSpec dict and every other blueprint resolved from it.
+    """
+    output_settings = _CATALOG.output_data("standard")
+    cfg_a = _build(output_settings=output_settings)
+    cfg_b = _build(output_settings=output_settings)
+
+    assert cfg_a.model_settings["ocean_vars"] is not output_settings["ocean_vars"]
+    assert cfg_a.model_settings["ocean_vars"] is not cfg_b.model_settings["ocean_vars"]
+
+    original = output_settings["ocean_vars"]["output_period_rst"]
+    cfg_a.model_settings["ocean_vars"]["output_period_rst"] = original * 2
+    assert output_settings["ocean_vars"]["output_period_rst"] == original
+    assert cfg_b.model_settings["ocean_vars"]["output_period_rst"] == original
+
+
 def test_naming_is_derived_not_stored():
     cfg = _build()
     assert cfg.n_procs == 1
@@ -2729,6 +2748,187 @@ class TestForgeBlueprintWizard:
         wid = w.editor._widgets[("ocean_vars", "wrt_z")][0]
         wid.value = not wid.value
         assert w.config.model_settings["ocean_vars"]["wrt_z"] == wid.value
+
+    # -- ocean_vars/cdr_output bool<->dropdown + cross-field rules -------------
+    def test_cdr_do_avg_dropdown_maps_to_bool(self):
+        w = self._wizard()
+        dd = w.editor._widgets[("cdr_output", "do_avg")][0]
+        dd.value = "instantaneous"
+        assert w.config.model_settings["cdr_output"]["do_avg"] is False
+        dd.value = "averaged"
+        assert w.config.model_settings["cdr_output"]["do_avg"] is True
+
+    def test_bool_dropdown_load_back(self):
+        """sync() maps a real bool from the composed/effective settings back onto
+        the dropdown's string value (do_avg/monthly_averages). Guarded by the
+        wizard's own ``_syncing`` flag, exactly as ``_rebuild`` does, so the
+        generic on_edit observers don't mistake the programmatic push for a
+        user edit and record a (stale, mid-sync) override.
+        """
+        w = self._wizard()
+        w._syncing = True
+        try:
+            w.editor.sync({"cdr_output": {"do_avg": False, "monthly_averages": True}})
+        finally:
+            w._syncing = False
+        assert w.editor._widgets[("cdr_output", "do_avg")][0].value == "instantaneous"
+        assert (
+            w.editor._widgets[("cdr_output", "monthly_averages")][0].value == "monthly"
+        )
+
+    def test_do_avg_persists_through_load(self, tmp_path):
+        """The real user-facing round trip: set the dropdown -> save (which
+        reconstructs a real-bool override via _diff_overrides) -> YAML -> reload
+        -> sync back onto a fresh wizard's dropdown. Exercises the override/YAML
+        layer, not just sync()'s in-memory mapping (see test_bool_dropdown_load_back).
+        """
+        w1 = self._wizard()
+        w1.editor._widgets[("cdr_output", "do_avg")][0].value = "instantaneous"
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.config.model_settings["cdr_output"]["do_avg"] is False
+        assert w2.editor._widgets[("cdr_output", "do_avg")][0].value == "instantaneous"
+
+    def test_ocean_vars_rst_dependents_visibility_follows_wrt_file_rst(self):
+        w = self._wizard()
+        wrt = w.editor._widgets[("ocean_vars", "wrt_file_rst")][0]
+        monthly = w.editor._widgets[("ocean_vars", "monthly_restarts")][0]
+        nrpf = w.editor._widgets[("ocean_vars", "nrpf_rst")][0]
+        period = w.editor._widgets[("ocean_vars", "output_period_rst")][0]
+        wrt.value = False
+        assert monthly.layout.display == "none"
+        assert nrpf.layout.display == "none"
+        assert period.layout.display == "none"
+        wrt.value = True
+        assert monthly.layout.display == ""
+        assert nrpf.layout.display == ""
+        assert period.layout.display == ""
+
+    def test_ocean_vars_output_period_rst_disabled_when_monthly(self):
+        w = self._wizard()
+        wrt = w.editor._widgets[("ocean_vars", "wrt_file_rst")][0]
+        monthly = w.editor._widgets[("ocean_vars", "monthly_restarts")][0]
+        period = w.editor._widgets[("ocean_vars", "output_period_rst")][0]
+        wrt.value = True
+        monthly.value = True
+        assert period.disabled is True
+        monthly.value = False
+        assert period.disabled is False
+
+    def test_monthly_restarts_forces_wrt_file_rst_on(self):
+        """A real user edit that checks monthly_restarts while wrt_file_rst is off
+        pulls wrt_file_rst on -- the one value-mutating rule (forcing, not display).
+        """
+        w = self._wizard()
+        wrt = w.editor._widgets[("ocean_vars", "wrt_file_rst")][0]
+        monthly = w.editor._widgets[("ocean_vars", "monthly_restarts")][0]
+        wrt.value = False
+        monthly.value = True
+        assert wrt.value is True
+        assert w.config.model_settings["ocean_vars"]["wrt_file_rst"] is True
+
+    def test_monthly_restarts_forcing_rule_persists_through_load(self, tmp_path):
+        """The wrt_file_rst override recorded by the forcing rule is a cascaded
+        widget mutation, not a direct user edit -- make sure it still survives
+        _diff_overrides/YAML/reload (not just the in-memory check in
+        test_monthly_restarts_forces_wrt_file_rst_on), so a future refactor of
+        the overrides layer can't silently drop it.
+        """
+        w1 = self._wizard()
+        wrt1 = w1.editor._widgets[("ocean_vars", "wrt_file_rst")][0]
+        monthly1 = w1.editor._widgets[("ocean_vars", "monthly_restarts")][0]
+        wrt1.value = False  # user edit
+        monthly1.value = True  # user edit -> forcing rule flips wrt_file_rst back on
+        assert wrt1.value is True
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        assert w2.config.model_settings["ocean_vars"]["wrt_file_rst"] is True
+        assert w2.config.model_settings["ocean_vars"]["monthly_restarts"] is True
+        assert w2.editor._widgets[("ocean_vars", "wrt_file_rst")][0].value is True
+        assert w2.editor._widgets[("ocean_vars", "monthly_restarts")][0].value is True
+
+    def test_cdr_output_dependents_visibility_follows_master_switch(self):
+        w = self._wizard()
+        cdr_on = w.editor._widgets[("cdr_output", "do_cdr_output")][0]
+        do_avg = w.editor._widgets[("cdr_output", "do_avg")][0]
+        monthly_avg = w.editor._widgets[("cdr_output", "monthly_averages")][0]
+        period = w.editor._widgets[("cdr_output", "output_period")][0]
+        nrpf = w.editor._widgets[("cdr_output", "nrpf")][0]
+        cdr_on.value = False
+        for widget in (do_avg, monthly_avg, period, nrpf):
+            assert widget.layout.display == "none"
+        cdr_on.value = True
+        do_avg.value = "averaged"  # show the cadence dropdown too
+        for widget in (do_avg, monthly_avg, period, nrpf):
+            assert widget.layout.display == ""
+
+    def test_cdr_output_period_disabled_when_averaged_monthly(self):
+        w = self._wizard()
+        cdr_on = w.editor._widgets[("cdr_output", "do_cdr_output")][0]
+        do_avg = w.editor._widgets[("cdr_output", "do_avg")][0]
+        monthly_avg = w.editor._widgets[("cdr_output", "monthly_averages")][0]
+        period = w.editor._widgets[("cdr_output", "output_period")][0]
+        cdr_on.value = True
+        do_avg.value = "averaged"
+        monthly_avg.value = "monthly"
+        assert period.disabled is True
+        monthly_avg.value = "periodic"
+        assert period.disabled is False
+        do_avg.value = "instantaneous"
+        assert monthly_avg.layout.display == "none"
+        assert period.disabled is False
+
+    def test_field_rules_apply_after_sync(self):
+        """sync() (the load path) must leave visibility/disabled consistent with
+        the synced values, not just widgets driven by a live user edit.
+        """
+        w = self._wizard()
+        w._syncing = True
+        try:
+            w.editor.sync(
+                {
+                    "ocean_vars": {
+                        "wrt_file_rst": False,
+                        "monthly_restarts": True,
+                        "nrpf_rst": 2,
+                        "output_period_rst": 100.0,
+                    },
+                    "cdr_output": {
+                        "do_cdr_output": True,
+                        "do_avg": False,
+                        "monthly_averages": True,
+                        "output_period": 50.0,
+                        "nrpf": 3,
+                    },
+                }
+            )
+        finally:
+            w._syncing = False
+        monthly = w.editor._widgets[("ocean_vars", "monthly_restarts")][0]
+        nrpf = w.editor._widgets[("ocean_vars", "nrpf_rst")][0]
+        period = w.editor._widgets[("ocean_vars", "output_period_rst")][0]
+        # wrt_file_rst off hides its dependents even though monthly_restarts is True.
+        assert monthly.layout.display == "none"
+        assert nrpf.layout.display == "none"
+        assert period.layout.display == "none"
+
+        do_avg = w.editor._widgets[("cdr_output", "do_avg")][0]
+        monthly_avg = w.editor._widgets[("cdr_output", "monthly_averages")][0]
+        period_cdr = w.editor._widgets[("cdr_output", "output_period")][0]
+        assert do_avg.value == "instantaneous"
+        assert monthly_avg.layout.display == "none"
+        assert period_cdr.disabled is False
 
     def test_advanced_edit_persists_across_atomic_change(self):
         w = self._wizard()

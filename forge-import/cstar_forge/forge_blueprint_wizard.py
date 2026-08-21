@@ -522,11 +522,37 @@ def _base_type(ann, value):
     return str
 
 
-def _make_field_widget(W, name: str, base: type, value: Any, tooltip: str = ""):
+# Boolean fields that read better as a two-option mode dropdown than a checkbox.
+# ``base`` stays bool everywhere else (widgets dict, overrides layer) -- only the
+# rendering + read/sync string<->bool mapping is special-cased for these keys.
+_BOOL_DROPDOWN_FIELDS: dict[tuple[str, str], tuple[str, str]] = {
+    ("cdr_output", "do_avg"): ("averaged", "instantaneous"),
+    ("cdr_output", "monthly_averages"): ("monthly", "periodic"),
+}
+
+
+def _make_field_widget(
+    W,
+    name: str,
+    base: type,
+    value: Any,
+    tooltip: str = "",
+    bool_dropdown: tuple[str, str] | None = None,
+):
     style = {"description_width": "170px"}
     wide = W.Layout(width="430px")
     num = W.Layout(width="300px")
     kw = {"tooltip": tooltip} if tooltip else {}
+    if bool_dropdown is not None:
+        true_label, false_label = bool_dropdown
+        return W.Dropdown(
+            options=(true_label, false_label),
+            value=true_label if value else false_label,
+            description=name,
+            style=style,
+            layout=num,
+            **kw,
+        )
     if base is bool:
         return W.Checkbox(
             value=bool(value) if value is not None else False,
@@ -569,8 +595,14 @@ def _make_field_widget(W, name: str, base: type, value: Any, tooltip: str = ""):
     )
 
 
-def _read_field_widget(widget, base: type, original: Any = None) -> Any:
+def _read_field_widget(
+    widget, base: type, original: Any = None, key: tuple[str, str] | None = None
+) -> Any:
     v = widget.value
+    labels = _BOOL_DROPDOWN_FIELDS.get(key) if key is not None else None
+    if labels is not None:
+        true_label, _false_label = labels
+        return v == true_label
     if base is bool:
         return bool(v)
     if base is int:
@@ -921,6 +953,12 @@ class _SettingsEditor:
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
         self._section_fields: dict[str, list[str | None]] = {}
+        # True while sync() is pushing composed values into widgets -- distinct from
+        # the wizard's own _syncing flag, which guards the *wizard-level* on_edit
+        # override recording. This one guards the editor-internal forcing rule (see
+        # _register_field_rule_observers) so a sync-driven value push never mutates
+        # a sibling widget the way a real user edit is allowed to.
+        self._syncing_internal = False
         # category title -> sections shown under it (a section may appear under two
         # panes when split along PARTIAL_OUTPUT_SECTIONS, e.g. bgc/marbl_bgc).
         self._pane_sections: dict[str, list[str]] = {}
@@ -957,29 +995,127 @@ class _SettingsEditor:
                 widget.observe(
                     lambda _ch, s=section, f=field: on_edit(s, f), names="value"
                 )
+        self._register_field_rule_observers()
+        self._apply_field_rules()
 
     def sync(self, model_settings: dict[str, Any]):
         """Set every widget to the effective values (caller suspends edit tracking)."""
-        for (section, field), (widget, base) in self._widgets.items():
-            if section not in model_settings:
-                continue
-            sec = model_settings[section]
-            value = (
-                sec
-                if field is None
-                else (sec.get(field) if isinstance(sec, dict) else None)
-            )
-            try:
-                if base is list:
-                    widget.value = ", ".join(str(x) for x in (value or []))
-                elif value is not None:
-                    widget.value = base(value)
-            except (ValueError, TypeError):
-                pass
+        self._syncing_internal = True
+        try:
+            for (section, field), (widget, base) in self._widgets.items():
+                if section not in model_settings:
+                    continue
+                sec = model_settings[section]
+                value = (
+                    sec
+                    if field is None
+                    else (sec.get(field) if isinstance(sec, dict) else None)
+                )
+                try:
+                    labels = _BOOL_DROPDOWN_FIELDS.get((section, field))
+                    if labels is not None and value is not None:
+                        true_label, false_label = labels
+                        widget.value = true_label if bool(value) else false_label
+                    elif base is list:
+                        widget.value = ", ".join(str(x) for x in (value or []))
+                    elif value is not None:
+                        widget.value = base(value)
+                except (ValueError, TypeError):
+                    pass
+        finally:
+            self._syncing_internal = False
+        self._apply_field_rules()
 
     def read(self, section, field):
         widget, base = self._widgets[(section, field)]
-        return _read_field_widget(widget, base)
+        return _read_field_widget(widget, base, key=(section, field))
+
+    # ocean_vars/cdr_output cross-field rules -----------------------------------
+    def _register_field_rule_observers(self) -> None:
+        """Wire the controlling widgets to `_apply_field_rules` for instant
+        show/hide + disable feedback, plus the one forcing rule (monthly
+        restarts implies file restarts) on its own dedicated handler.
+        """
+
+        def _rerun(_change=None):
+            self._apply_field_rules()
+
+        for key in (
+            ("ocean_vars", "wrt_file_rst"),
+            ("ocean_vars", "monthly_restarts"),
+            ("cdr_output", "do_cdr_output"),
+            ("cdr_output", "do_avg"),
+            ("cdr_output", "monthly_averages"),
+        ):
+            entry = self._widgets.get(key)
+            if entry is not None:
+                entry[0].observe(_rerun, names="value")
+
+        wrt_entry = self._widgets.get(("ocean_vars", "wrt_file_rst"))
+        monthly_entry = self._widgets.get(("ocean_vars", "monthly_restarts"))
+        if wrt_entry is not None and monthly_entry is not None:
+            wrt_widget = wrt_entry[0]
+
+            def _force_wrt_on_monthly(change) -> None:
+                # monthly_restarts is meaningless without wrt_file_rst -- a real
+                # user edit that turns it on pulls wrt_file_rst on too, so the
+                # setting isn't silently ignored downstream. Skipped during
+                # sync() (self._syncing_internal), which pushes both widgets'
+                # values independently and must not cross-mutate them.
+                if self._syncing_internal:
+                    return
+                if change["new"] and not wrt_widget.value:
+                    wrt_widget.value = True
+
+            monthly_entry[0].observe(_force_wrt_on_monthly, names="value")
+
+    def _apply_field_rules(self) -> None:
+        """Show/hide and enable/disable ocean_vars/cdr_output widgets from their
+        CURRENT values -- never mutates a value, only visibility/``disabled``.
+
+        Rationale: the dependent fields are meaningless (and ignored by the
+        namelist) once their master switch is off, and `output_period_*` has no
+        effect once a "monthly" cadence fixes the period implicitly -- hiding/
+        disabling them keeps the form from offering a control with no effect.
+        """
+
+        def _show(entry, on: bool) -> None:
+            if entry is not None:
+                entry[0].layout.display = "" if on else "none"
+
+        wrt = self._widgets.get(("ocean_vars", "wrt_file_rst"))
+        monthly_r = self._widgets.get(("ocean_vars", "monthly_restarts"))
+        nrpf_r = self._widgets.get(("ocean_vars", "nrpf_rst"))
+        period_r = self._widgets.get(("ocean_vars", "output_period_rst"))
+        if wrt is not None:
+            wrt_on = bool(wrt[0].value)
+            _show(monthly_r, wrt_on)
+            _show(nrpf_r, wrt_on)
+            _show(period_r, wrt_on)
+            if monthly_r is not None and period_r is not None:
+                period_r[0].disabled = bool(monthly_r[0].value)
+
+        cdr_on = self._widgets.get(("cdr_output", "do_cdr_output"))
+        do_avg = self._widgets.get(("cdr_output", "do_avg"))
+        monthly_avg = self._widgets.get(("cdr_output", "monthly_averages"))
+        period = self._widgets.get(("cdr_output", "output_period"))
+        nrpf = self._widgets.get(("cdr_output", "nrpf"))
+        if cdr_on is not None:
+            on = bool(cdr_on[0].value)
+            _show(do_avg, on)
+            _show(monthly_avg, on)
+            _show(period, on)
+            _show(nrpf, on)
+            if on and do_avg is not None:
+                is_avg = self.read("cdr_output", "do_avg")
+                _show(monthly_avg, is_avg)
+                if period is not None:
+                    is_monthly = (
+                        self.read("cdr_output", "monthly_averages")
+                        if is_avg and monthly_avg is not None
+                        else False
+                    )
+                    period[0].disabled = bool(is_avg and is_monthly)
 
     def _build_section(
         self,
@@ -1017,7 +1153,10 @@ class _SettingsEditor:
             base = _base_type(ann, val)
             tip = _namelist_tooltip(section, key)
             label = _namelist_label(section, key)
-            w = _make_field_widget(W, label, base, val, tooltip=tip)
+            bool_dropdown = _BOOL_DROPDOWN_FIELDS.get((section, key))
+            w = _make_field_widget(
+                W, label, base, val, tooltip=tip, bool_dropdown=bool_dropdown
+            )
             self._widgets[(section, key)] = (w, base)
             rows.append(w)
             fields.append(key)

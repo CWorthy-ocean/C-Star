@@ -170,12 +170,19 @@ def _normalize_user_file(
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Recursively merge ``override`` into ``base`` (override wins). Returns base."""
+    """Recursively merge ``override`` into ``base`` (override wins). Returns base.
+
+    Values taken from ``override`` are deep-copied (mirroring the executor's
+    ``_deep_merge_settings_dict``): assigning by reference would alias e.g. a
+    whole OutputSpec section dict into every blueprint resolved from it, so a
+    later in-place edit of one resolved ``model_settings`` could silently
+    mutate the shared spec dict and cross-contaminate other resolves.
+    """
     for k, v in (override or {}).items():
         if isinstance(v, dict) and isinstance(base.get(k), dict):
             _deep_merge(base[k], v)
         else:
-            base[k] = v
+            base[k] = copy.deepcopy(v)
     return base
 
 
