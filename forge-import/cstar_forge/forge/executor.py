@@ -41,7 +41,10 @@ from cstar_forge.forge.forge_blueprint import (
     vert_kwargs_from_grid_kwargs,
 )
 from cstar_forge.forge.host import HostPaths
-from cstar_forge.forge.namelist_model import ensure_cdr_output_marbl_diagnostics
+from cstar_forge.forge.namelist_model import (
+    check_rst_period_divisible,
+    ensure_cdr_output_marbl_diagnostics,
+)
 from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
 from cstar_forge.forge.user_files import verify_user_file
 from cstar_forge.utils import mem_log
@@ -1853,6 +1856,14 @@ class ForgeExecutor(BaseModel):
                 # Convert to integer if it's a float
                 if isinstance(ntimes, float):
                     self._settings_run_time["time_stepping"]["ntimes"] = round(ntimes)
+
+        # Restart-period consistency net, mirroring the resolver's guard: stored
+        # blueprints (hand-edited or not) reach configure_build without
+        # re-resolving, so this is the enforcement point of record for that path.
+        check_rst_period_divisible(
+            self._settings_run_time.get("time_stepping", {}).get("dt"),
+            self._settings_run_time.get("ocean_vars", {}),
+        )
 
         # CDR-output consistency net, mirroring the resolver's consistency block:
         # stored blueprints reach configure_build without re-resolving, and wizard

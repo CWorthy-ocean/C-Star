@@ -21,7 +21,7 @@ wrapper over ``build_namelist``.
 from __future__ import annotations
 
 import os
-from typing import Annotated
+from typing import Annotated, Any
 
 from cstar.roms.namelist import (
     BasicOutputSettings,
@@ -75,6 +75,7 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
+    model_validator,
 )
 
 
@@ -227,6 +228,41 @@ class OceanVarsCfg(_SettingsSection):
     monthly_restarts: bool
     output_period_rst: float
     nrpf_rst: int
+
+
+def check_rst_period_divisible(
+    dt: float | None, ocean_vars: OceanVarsCfg | dict[str, Any]
+) -> None:
+    """Raise ``ValueError`` if ``ocean_vars.output_period_rst`` isn't an integer
+    multiple of ``dt`` -- restart writes must land on a timestep.
+
+    Enforced only when restarts are written on a fixed period (``wrt_file_rst``
+    True and ``monthly_restarts`` False); otherwise ``output_period_rst`` is
+    unused and any value is accepted. ``dt`` missing/non-positive skips the
+    check (other validation owns ``dt`` sanity). Accepts either a plain dict
+    (the resolver's world) or an ``OceanVarsCfg`` (the pydantic validator's
+    world) so both enforcement points share one message.
+    """
+    if isinstance(ocean_vars, dict):
+        wrt_file_rst = ocean_vars.get("wrt_file_rst")
+        monthly_restarts = ocean_vars.get("monthly_restarts")
+        output_period_rst = ocean_vars.get("output_period_rst")
+    else:
+        wrt_file_rst = ocean_vars.wrt_file_rst
+        monthly_restarts = ocean_vars.monthly_restarts
+        output_period_rst = ocean_vars.output_period_rst
+
+    if not wrt_file_rst or monthly_restarts:
+        return
+    if dt is None or output_period_rst is None or dt <= 0:
+        return
+    ratio = output_period_rst / dt
+    if abs(ratio - round(ratio)) > 1e-9:
+        raise ValueError(
+            f"ocean_vars.output_period_rst ({output_period_rst} s) is not an "
+            f"integer multiple of time_stepping.dt ({dt} s): restart writes "
+            "must land on a timestep"
+        )
 
 
 class TsOutputCfg(_SettingsSection):
@@ -510,6 +546,11 @@ class RunTimeSettings(_SettingsSection):
     dic_alk_correction: DicAlkCorrectionCfg
     marbl_bgc: MarblBgcCfg
 
+    @model_validator(mode="after")
+    def _rst_period_divisible_by_dt(self) -> RunTimeSettings:
+        check_rst_period_divisible(self.time_stepping.dt, self.ocean_vars)
+        return self
+
 
 # Canonical forcing order -> frcfiles (matches write_roms_namelist).
 _FORCING_ORDER = (
@@ -627,4 +668,19 @@ def validate_run_time_sections(settings: dict) -> list[str]:
             for err in exc.errors():
                 loc = ".".join(str(p) for p in (key, *err["loc"]))
                 errors.append(f"{loc}: {err['msg']}")
+
+    # Cross-section invariant: the per-section loop above validates each section
+    # independently (TypeAdapter can't see across keys), so it never catches
+    # output_period_rst/dt divisibility -- only checkable when both sections are
+    # present (both are user-authored, not in _PROCESSING_FILLED_SECTIONS, so a
+    # full blueprint's model_settings always carries them). Delegates entirely to
+    # check_rst_period_divisible -- no gating logic duplicated here.
+    settings = settings or {}
+    if "time_stepping" in settings and "ocean_vars" in settings:
+        try:
+            check_rst_period_divisible(
+                (settings["time_stepping"] or {}).get("dt"), settings["ocean_vars"]
+            )
+        except ValueError as exc:
+            errors.append(str(exc))
     return errors

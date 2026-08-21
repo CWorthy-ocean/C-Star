@@ -104,10 +104,12 @@ DEFAULT_TEMPLATE_REPO = CodeRepo(
 # the executor can share it. Dual import keeps the resolver standalone-importable.
 try:  # pragma: no cover - exercised both ways
     from cstar_forge.forge.namelist_model import (
+        check_rst_period_divisible,
         ensure_cdr_output_marbl_diagnostics,
     )
 except ImportError:  # pragma: no cover
     from namelist_model import (  # type: ignore
+        check_rst_period_divisible,
         ensure_cdr_output_marbl_diagnostics,
     )
 
@@ -762,6 +764,13 @@ def build_forge_blueprint(
         marbl["marbl_diagnostics_to_write"] = ensure_cdr_output_marbl_diagnostics(
             marbl.get("marbl_diagnostics_to_write")
         )
+
+    # ----- restart period consistency ----------------------------------------
+    # Fail fast at authoring time (mirrors the executor's net for hand-edited
+    # blueprints): restart writes must land on a timestep.
+    check_rst_period_divisible(
+        settings.get("time_stepping", {}).get("dt"), settings.get("ocean_vars", {})
+    )
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
     # A child grid (has a parent) receives its boundary values from the parent's

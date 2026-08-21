@@ -129,10 +129,13 @@ def test_defaults_come_from_yaml_not_the_model():
     """
     d = _populated_rt_dict()
     d["param"]["ntrc_bio"] = 18  # a different ModelSpec's value
-    d["ocean_vars"]["output_period_rst"] = 12345.0
+    # Must stay an integer multiple of time_stepping.dt (7200) -- see
+    # _rst_period_divisible_by_dt -- so this exercises "a different value" without
+    # tripping the restart-period validator.
+    d["ocean_vars"]["output_period_rst"] = 21600.0
     rt = RunTimeSettings.model_validate(d)
     assert rt.param.ntrc_bio == 18
-    assert rt.ocean_vars.output_period_rst == 12345.0
+    assert rt.ocean_vars.output_period_rst == 21600.0
 
 
 def test_path_objects_coerced_to_str():
@@ -212,6 +215,40 @@ def test_validation_rejects_bad_values():
         RunTimeSettings.model_validate(bad)
 
 
+def test_rst_period_not_divisible_by_dt_rejected():
+    bad = _populated_rt_dict()
+    bad["time_stepping"]["dt"] = 100.0
+    bad["ocean_vars"]["output_period_rst"] = 150.0
+    with pytest.raises(ValidationError, match="output_period_rst"):
+        RunTimeSettings.model_validate(bad)
+
+
+def test_rst_period_divisible_by_dt_accepted():
+    good = _populated_rt_dict()
+    good["time_stepping"]["dt"] = 100.0
+    good["ocean_vars"]["output_period_rst"] = 200.0
+    rt = RunTimeSettings.model_validate(good)
+    assert rt.ocean_vars.output_period_rst == 200.0
+
+
+def test_rst_period_not_divisible_accepted_with_monthly_restarts():
+    d = _populated_rt_dict()
+    d["time_stepping"]["dt"] = 100.0
+    d["ocean_vars"]["output_period_rst"] = 150.0
+    d["ocean_vars"]["monthly_restarts"] = True
+    rt = RunTimeSettings.model_validate(d)
+    assert rt.ocean_vars.output_period_rst == 150.0
+
+
+def test_rst_period_not_divisible_accepted_with_rst_writing_off():
+    d = _populated_rt_dict()
+    d["time_stepping"]["dt"] = 100.0
+    d["ocean_vars"]["output_period_rst"] = 150.0
+    d["ocean_vars"]["wrt_file_rst"] = False
+    rt = RunTimeSettings.model_validate(d)
+    assert rt.ocean_vars.output_period_rst == 150.0
+
+
 def test_edit_assignment_is_validated(tmp_path):
     rt = RunTimeSettings.model_validate(_populated_rt_dict())
     nml = build_namelist(rt, n_tracers=34)
@@ -282,3 +319,52 @@ def test_validate_run_time_sections_flags_bad_value():
         }
     )
     assert errs and any("np_xi" in e for e in errs)
+
+
+def _rst_period_sections(
+    dt: float,
+    output_period_rst: float,
+    monthly_restarts: bool = False,
+    wrt_file_rst: bool = True,
+) -> dict:
+    """Full, otherwise-valid time_stepping/ocean_vars sections (so the per-section
+    TypeAdapter pass in validate_run_time_sections stays silent), with only the
+    restart-period-relevant leaves overridden -- isolates the cross-section check.
+    """
+    rt = _populated_rt_dict()
+    time_stepping = dict(rt["time_stepping"])
+    time_stepping["dt"] = dt
+    ocean_vars = dict(rt["ocean_vars"])
+    ocean_vars["output_period_rst"] = output_period_rst
+    ocean_vars["monthly_restarts"] = monthly_restarts
+    ocean_vars["wrt_file_rst"] = wrt_file_rst
+    return {"time_stepping": time_stepping, "ocean_vars": ocean_vars}
+
+
+def test_validate_run_time_sections_flags_non_divisible_rst_period():
+    sections = _rst_period_sections(dt=100.0, output_period_rst=150.0)
+    errs = validate_run_time_sections(sections)
+    assert errs and any("output_period_rst" in e for e in errs)
+
+
+def test_validate_run_time_sections_accepts_divisible_rst_period():
+    sections = _rst_period_sections(dt=100.0, output_period_rst=200.0)
+    assert validate_run_time_sections(sections) == []
+
+
+def test_validate_run_time_sections_ignores_rst_period_when_monthly():
+    sections = _rst_period_sections(
+        dt=100.0, output_period_rst=150.0, monthly_restarts=True
+    )
+    assert validate_run_time_sections(sections) == []
+
+
+def test_validate_run_time_sections_skips_rst_period_check_when_section_missing():
+    """Only one of the two sections present -> the cross-section check can't run
+    (and must not crash), regardless of how invalid the missing pairing would be.
+    """
+    sections = _rst_period_sections(dt=100.0, output_period_rst=150.0)
+    assert (
+        validate_run_time_sections({"time_stepping": sections["time_stepping"]}) == []
+    )
+    assert validate_run_time_sections({"ocean_vars": sections["ocean_vars"]}) == []

@@ -1847,6 +1847,56 @@ def test_cdr_output_requires_marbl():
         )
 
 
+def test_rst_period_not_divisible_by_dt_raises():
+    """output_period_rst must be an integer multiple of dt when restarts are
+    written on a fixed period (the default: wrt_file_rst=True,
+    monthly_restarts=False) -- 150s / 100s = 1.5, not a whole number of steps.
+    """
+    with pytest.raises(ValueError, match="output_period_rst"):
+        _build(
+            run_time_overrides={
+                "time_stepping": {"dt": 100.0},
+                "ocean_vars": {"output_period_rst": 150.0},
+            }
+        )
+
+
+def test_rst_period_divisible_by_dt_accepted():
+    cfg = _build(
+        run_time_overrides={
+            "time_stepping": {"dt": 100.0},
+            "ocean_vars": {"output_period_rst": 200.0},
+        }
+    )
+    assert cfg.model_settings["ocean_vars"]["output_period_rst"] == 200.0
+
+
+def test_rst_period_not_divisible_accepted_with_monthly_restarts():
+    """monthly_restarts=True means output_period_rst is unused -- any value must
+    be accepted.
+    """
+    cfg = _build(
+        run_time_overrides={
+            "time_stepping": {"dt": 100.0},
+            "ocean_vars": {"output_period_rst": 150.0, "monthly_restarts": True},
+        }
+    )
+    assert cfg.model_settings["ocean_vars"]["output_period_rst"] == 150.0
+
+
+def test_rst_period_not_divisible_accepted_with_rst_writing_off():
+    """wrt_file_rst=False means output_period_rst is unused -- any value must be
+    accepted.
+    """
+    cfg = _build(
+        run_time_overrides={
+            "time_stepping": {"dt": 100.0},
+            "ocean_vars": {"output_period_rst": 150.0, "wrt_file_rst": False},
+        }
+    )
+    assert cfg.model_settings["ocean_vars"]["output_period_rst"] == 150.0
+
+
 class TestEnsureCdrOutputMarblDiagnostics:
     def test_none_input_returns_all_required(self):
         from cstar_forge.forge.namelist_model import (
@@ -2984,7 +3034,10 @@ class TestForgeBlueprintWizard:
         in _populate_from. Lock that in explicitly.
         """
         w1 = self._wizard()
-        w1.dt.value = 1234.0
+        # Must stay an integer multiple of the default output_period_rst (86400)
+        # -- see check_rst_period_divisible -- so this exercises round-tripping
+        # a non-default dt without tripping the restart-period validator.
+        w1.dt.value = 1200.0
         p = tmp_path / "forge_blueprint.yaml"
         w1.save_path.value = str(p)
         w1._boundaries_touched = True  # not exercising boundary derivation here
@@ -2992,8 +3045,8 @@ class TestForgeBlueprintWizard:
         w2 = self._wizard()
         w2.load_path.value = str(p)
         w2._on_load_path(None)
-        assert w2.dt.value == 1234.0
-        assert w2.config.model_settings["time_stepping"]["dt"] == 1234.0
+        assert w2.dt.value == 1200.0
+        assert w2.config.model_settings["time_stepping"]["dt"] == 1200.0
         assert "time_stepping" not in w2.config.composition.overrides
 
     def test_model_ref_date_persists_through_load(self, tmp_path):
@@ -4191,19 +4244,21 @@ class TestSaveModifiedSpecsToCatalog:
         whether or not the user ever edited it.
         """
         wiz = self._wizard(isolated_catalog)
-        wiz.dt.value = 3333.0
+        # Must stay an integer multiple of the default output_period_rst (86400)
+        # -- see check_rst_period_divisible.
+        wiz.dt.value = 3600.0
 
         wiz.save_domain_name.value = "my-domain-dt"
         wiz._on_save_domain(None)
 
         assert "my-domain-dt" in isolated_catalog.domain_names
         saved = isolated_catalog.domain_data("my-domain-dt")
-        assert saved.get("dt") == 3333.0
+        assert saved.get("dt") == 3600.0
 
         wiz2 = self._wizard(isolated_catalog)
         wiz2.domain_dd.value = "my-domain-dt"
-        assert wiz2.dt.value == 3333.0
-        assert wiz2.config.domain.dt == 3333.0
+        assert wiz2.dt.value == 3600.0
+        assert wiz2.config.domain.dt == 3600.0
         # domain.dt and the model_settings leaf must never diverge.
         assert (
             wiz2.config.domain.dt == wiz2.config.model_settings["time_stepping"]["dt"]
@@ -4219,7 +4274,11 @@ class TestSaveModifiedSpecsToCatalog:
         wiz.domain_dd.value = "my-domain-dt-seed"
         assert wiz.config.composition.domain.modified is False
 
-        wiz.dt.value = wiz.dt.value + 100.0
+        # +100 would land on 7300, no longer an integer multiple of the default
+        # output_period_rst (86400) -- see check_rst_period_divisible -- so
+        # double instead (7200 -> 14400, still divisible) to isolate the
+        # "editing dt flags domain modified" behavior under test.
+        wiz.dt.value = wiz.dt.value * 2
         assert wiz.config.composition.domain.modified is True
 
     def test_invalid_name_refuses_without_writing(self, isolated_catalog):

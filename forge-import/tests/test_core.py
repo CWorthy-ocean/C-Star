@@ -1216,6 +1216,30 @@ class TestForgeExecutorBuildAndRun:
         with pytest.raises(ValueError, match="requires MARBL"):
             self._run_configure_build(cfg, host)
 
+    def test_configure_build_rejects_non_divisible_rst_period(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The resolver's restart-period guard re-checked at configure_build: a
+        stored/hand-edited blueprint reaches here without re-resolving, so a
+        hand-mutated output_period_rst that no longer divides evenly by dt must
+        still be caught before any build side effects.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+        )
+        assert cfg.model_settings["time_stepping"]["dt"] == 7200
+        # Reassign rather than mutate in place: ocean_vars isn't in the ModelSpec's
+        # own model_settings, so the resolver's deep-merge aliases this dict
+        # straight from the (test-module-shared) OutputSpec dict -- mutating it
+        # in place would leak into every other test using the default fixture.
+        cfg.model_settings["ocean_vars"] = {
+            **cfg.model_settings["ocean_vars"],
+            "output_period_rst": 10000.0,
+        }
+
+        with pytest.raises(ValueError, match="output_period_rst"):
+            self._run_configure_build(cfg, host)
+
     def test_configure_build_generated_cdr_forcing_wins_over_stored_disabled(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
     ):
