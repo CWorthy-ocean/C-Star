@@ -857,6 +857,7 @@ class ArtifactCache:
             for action in actions:
                 try:
                     action.mkdir(parents=True)
+                    log.debug(f"ArtifactCache created root dir: {action}")
                 except Exception:
                     log.error(f"Unable to create directory: {action}")
 

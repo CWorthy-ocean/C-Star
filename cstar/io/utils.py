@@ -20,8 +20,10 @@ def get_artifact_cache() -> ArtifactCache:
     if _cache is not None:
         return _cache
 
-    user_root = DirectoryManager().cache_home()
-    shared_root = DirectoryManager().shared_cache_home()
+    user_root = DirectoryManager.cache_home() / CACHE_DIR
+    log.debug(f"ArtifactCache user root initialized to: {user_root}")
+    shared_root = DirectoryManager.shared_cache_home() / SHARED_DIR
+    log.debug(f"ArtifactCache shared root initialized to: {shared_root}")
 
     _cache = ArtifactCache(user_root, shared_root, create_roots=True)
     return _cache
