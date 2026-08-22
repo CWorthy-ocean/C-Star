@@ -230,6 +230,43 @@ relocation stays a later step.
 violation allowlist). `namelist_model.py` and `util.py` are same-package siblings
 inside `forge/` and are covered by the guard's `_FORGE_APP_MODULES` list.
 
+### 4a. Versioned namelist schemas (ucla-roms 0.5.0+)
+
+ucla-roms 0.5.0 made its first breaking namelist change (`nrpf_rst` removed from
+`&BASIC_OUTPUT_SETTINGS`; `&PARTICLES_SETTINGS` `output_period`/`nrpf` renamed to
+`output_period_particles`/`nrpf_particles`). C-Star versions the namelist schema
+by ucla-roms release (`cstar.roms.namelist`: `RomsNamelist` for < 0.5.0,
+`RomsNamelistV0_5_0` for >= 0.5.0, selected by `namelist_schema_for_ref(ref)` —
+semver tags select exactly; branch names/hashes warn and fall back to the latest
+schema). Forge mirrors this in `namelist_model.py`: `RunTimeSettings` (legacy)
+vs `RunTimeSettingsV0_5_0`, selected by `run_time_settings_for_ref(roms_ref)`,
+where `roms_ref` is the blueprint's pinned `code.roms.commit` (threaded
+resolver → executor → `write_roms_namelist`). C-Star's registry is the single
+source of version-boundary truth — forge only maps its result to the matching
+settings class. The forge **settings vocabulary is version-stable**: YAML keys
+(`particles.output_period`, `particles.nrpf`) don't change; only the
+`serialization_alias` to namelist names differs per version, and `nrpf_rst`
+(still present in the shared `OutputSpec/standard`) is silently ignored for
+0.5.0+ models via `extra="ignore"`. One ModelSpec per tagged ucla-roms release:
+`roms-marbl-0.5-default` pins `0.5.0`; older specs stay fixed and keep emitting
+byte-identical legacy namelists.
+
+ucla-roms 0.5.0 also added a run-start precheck (`check_output_divides_rst`):
+each enabled output stream's `nrpf × output_period` must evenly divide
+`output_period_rst` (vacuous for monthly restarts / a 0 period). Three bundled
+OutputSpecs conform for every stream — `daily-restarts` (the wizard default,
+see `_DEFAULT_OUTPUT_SPEC`), `weekly-restarts`, and `monthly-restarts`
+(upstream's own convention: `monthly_restarts=T`, `output_period_rst=0`).
+`OutputSpec/standard` predates the precheck and is kept unchanged for
+blueprints that reference it — enabling its his/avg streams under a 0.5.0+
+model trips the precheck. A guard test
+(`test_bundled_output_specs_satisfy_roms_divides_rst_precheck`) pins the
+conforming specs, including `roms-marbl-0.5-default`'s ModelSpec-owned
+sponge/particles streams. The nesting extract stream is resolve-time-derived
+(child DomainSpec metadata `period` × a seeded `nrpf`), so it's enforced at
+authoring time instead: `check_extract_divides_rst` (namelist_model.py), called
+from the resolver and gated to >= 0.5.0 pins.
+
 ## 5. `models.py` vs `forge/forge_blueprint.py`
 
 The forcing/IC item models (`BoundaryForcingItem`, `SurfaceForcingItem`,

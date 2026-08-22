@@ -305,3 +305,31 @@ def test_str_list_warns_over_max_len():
 def test_str_list_no_warn_at_max_len(recwarn):
     _namelist_str_list(["x"] * 2, max_len=2, name="field_x")
     assert len(recwarn) == 0
+
+
+# ---------------------------------------------------------------------------
+# roms_ref -- versioned namelist schema selection
+# ---------------------------------------------------------------------------
+def test_write_roms_namelist_roms050_drops_nrpf_rst_and_renames_particles(tmp_path):
+    rt = _base_settings()
+    write_roms_namelist(rt, tmp_path, n_tracers=34, roms_ref="0.5.0")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "nrpf_rst" not in text
+    assert "output_period_particles" in text
+    assert "nrpf_particles" in text
+
+
+def test_write_roms_namelist_none_ref_matches_legacy_ref(tmp_path):
+    """``roms_ref=None`` preserves forge's historical (legacy, < 0.5.0) behavior
+    -- it must write byte-identical output to an explicit pre-0.5.0 ref.
+    """
+    rt = _base_settings()
+    none_dir = tmp_path / "none_ref"
+    legacy_dir = tmp_path / "legacy_ref"
+    none_dir.mkdir()
+    legacy_dir.mkdir()
+    write_roms_namelist(rt, none_dir, n_tracers=34, roms_ref=None)
+    write_roms_namelist(rt, legacy_dir, n_tracers=34, roms_ref="0.4.1")
+    assert (none_dir / "namelist.nml").read_text() == (
+        legacy_dir / "namelist.nml"
+    ).read_text()

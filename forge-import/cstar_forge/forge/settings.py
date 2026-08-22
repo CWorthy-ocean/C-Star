@@ -12,7 +12,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, meta, select_autoescape
 
-from cstar_forge.forge.namelist_model import RunTimeSettings, build_namelist
+from cstar_forge.forge.namelist_model import build_namelist, run_time_settings_for_ref
 
 
 def _fortran_cdr_file_decl(path: Any, max_line_len: int = 72) -> str:
@@ -337,29 +337,35 @@ def write_roms_namelist(
     settings_run_time: dict[str, Any],
     output_dir: str | Path,
     n_tracers: int,
+    roms_ref: str | None = None,
 ) -> None:
     """
     Write the ROMS Fortran namelist file (``<output_dir>/namelist.nml``) from
     the run-time settings dict.
 
     Thin wrapper over the Pydantic model API: validates ``settings_run_time``
-    into :class:`~cstar_forge.forge.namelist_model.RunTimeSettings`, transforms it to
-    a :class:`~cstar_forge.forge.namelist_model.RomsNamelist` via
-    :func:`~cstar_forge.forge.namelist_model.build_namelist`, and writes it with
-    ``f90nml``. (``cppdefs.opt`` is produced separately via
+    into the run-time settings class matching ``roms_ref`` (see
+    :func:`~cstar_forge.forge.namelist_model.run_time_settings_for_ref`),
+    transforms it to a :class:`~cstar.roms.namelist.RomsNamelistBase` subclass
+    via :func:`~cstar_forge.forge.namelist_model.build_namelist`, and writes it
+    with ``f90nml``. (``cppdefs.opt`` is produced separately via
     :func:`render_roms_settings`.)
 
     Parameters
     ----------
     settings_run_time : dict
         Fully merged run-time settings (every namelist section as a top-level
-        key). Validated against ``RunTimeSettings`` — a missing or mistyped
-        field raises ``pydantic.ValidationError``.
+        key). Validated against the selected run-time settings class — a
+        missing or mistyped field raises ``pydantic.ValidationError``.
     output_dir : str or Path
         Directory to write ``namelist.nml`` into (must already exist).
     n_tracers : int
         Total tracers (temp + salt + passive + bgc); used to expand scalar
         mixing/diffusion defaults into per-tracer arrays (``akt_bak``, ``tnu2``).
+    roms_ref : str or None
+        The ucla-roms git ref (tag, branch, or commit hash) the blueprint's
+        code is pinned to; selects the namelist schema variant. ``None``
+        (default) preserves the legacy (< 0.5.0) schema.
     """
-    rt = RunTimeSettings.model_validate(settings_run_time)
+    rt = run_time_settings_for_ref(roms_ref).model_validate(settings_run_time)
     build_namelist(rt, n_tracers).write(Path(output_dir) / "namelist.nml")

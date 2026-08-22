@@ -1,21 +1,26 @@
 """
-Forge's run-time settings schema (``RunTimeSettings``) and the settings →
-namelist transform (``build_namelist``).
+Forge's run-time settings schema (``RunTimeSettings`` and its
+``RunTimeSettingsV0_5_0`` counterpart) and the settings → namelist transform
+(``build_namelist``).
 
-* :class:`RunTimeSettings` validates and types forge's run-time settings dict —
-  the YAML vocabulary (``tcline``, ``np_xi``, ``analytical`` …). Defaults live
-  in each ModelSpec's ``run-time-defaults.yaml``, not here: fields are required
-  so an incomplete YAML fails loudly; only the runtime-filled fields (grid file,
-  IC file, s-coord, forcing paths, casename, output root) are ``Optional``.
-* :func:`build_namelist` transforms a validated ``RunTimeSettings`` into a
-  :class:`cstar.roms.namelist.RomsNamelist` (renames via ``serialization_alias``,
-  cross-section regrouping, scalar → per-tracer-array expansion, ``frcfiles``
-  assembly), reading typed fields — no ``bool()/int()/float()/str()`` coercion.
+* :class:`RunTimeSettings` / :class:`RunTimeSettingsV0_5_0` validate and type
+  forge's run-time settings dict — the YAML vocabulary (``tcline``, ``np_xi``,
+  ``analytical`` …). Defaults live in each ModelSpec's ``model.yaml``
+  (``model_settings``), merged with the catalog's Domain/Forcing/Output specs —
+  not here: fields are required so an incomplete settings dict fails loudly;
+  only the runtime-filled fields (grid file, IC file, s-coord, forcing paths,
+  casename, output root) are ``Optional``. :func:`run_time_settings_for_ref`
+  picks the variant matching a pinned ucla-roms ref.
+* :func:`build_namelist` transforms a validated run-time settings model into
+  the matching :class:`cstar.roms.namelist.RomsNamelistBase` subclass (renames
+  via ``serialization_alias``, cross-section regrouping, scalar →
+  per-tracer-array expansion, ``frcfiles`` assembly), reading typed fields —
+  no ``bool()/int()/float()/str()`` coercion.
 
-The namelist schema itself — ``RomsNamelist`` and its 40 ``&group`` models —
-lives in C-Star (:mod:`cstar.roms.namelist`) and is imported here; that is the
-reusable read/edit/write schema. ``settings.write_roms_namelist`` is a thin
-wrapper over ``build_namelist``.
+The namelist schema itself — ``RomsNamelistBase`` and its versioned
+subclasses/``&group`` models — lives in C-Star (:mod:`cstar.roms.namelist`) and
+is imported here; that is the reusable read/edit/write schema.
+``settings.write_roms_namelist`` is a thin wrapper over ``build_namelist``.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from typing import Annotated, Any
 
 from cstar.roms.namelist import (
     BasicOutputSettings,
+    BasicOutputSettingsV0_5_0,
     BgcSettings,
     BottomDragSettings,
     CalcPflxSettings,
@@ -43,12 +49,15 @@ from cstar.roms.namelist import (
     MarblBiogeochemistrySettings,
     ParamSettings,
     ParticlesSettings,
+    ParticlesSettingsV0_5_0,
     PipeFrcSettings,
     RandomOutputSettings,
     ReferenceDateSettings,
     Rho0Settings,
     RiverFrcSettings,
     RomsNamelist,
+    RomsNamelistBase,
+    RomsNamelistV0_5_0,
     SCoord,
     SimulationNameSettings,
     SpongeTuneSettings,
@@ -66,6 +75,7 @@ from cstar.roms.namelist import (
     VerticalMixingSettings,
     VSpongeSettings,
     ZsliceSettings,
+    namelist_schema_for_ref,
 )
 from pydantic import (
     AliasChoices,
@@ -191,7 +201,7 @@ class TidesCfg(_SettingsSection):
     ntides: int
 
 
-class OceanVarsCfg(_SettingsSection):
+class _OceanVarsCfgCommon(_SettingsSection):
     wrt_file_his: bool
     output_period_his: float
     nrpf_his: int
@@ -227,11 +237,24 @@ class OceanVarsCfg(_SettingsSection):
     wrt_file_rst: bool
     monthly_restarts: bool
     output_period_rst: float
+
+
+class OceanVarsCfg(_OceanVarsCfgCommon):
+    """``ocean_vars`` settings for ucla-roms < 0.5.0."""
+
     nrpf_rst: int
 
 
+class OceanVarsCfgV0_5_0(_OceanVarsCfgCommon):
+    """``ocean_vars`` settings for ucla-roms >= 0.5.0.
+
+    ``nrpf_rst`` was removed in ucla-roms 0.5.0: the restart record count is
+    now hardcoded in Fortran rather than namelist-configurable.
+    """
+
+
 def check_rst_period_divisible(
-    dt: float | None, ocean_vars: OceanVarsCfg | dict[str, Any]
+    dt: float | None, ocean_vars: _OceanVarsCfgCommon | dict[str, Any]
 ) -> None:
     """Raise ``ValueError`` if ``ocean_vars.output_period_rst`` isn't an integer
     multiple of ``dt`` -- restart writes must land on a timestep.
@@ -262,6 +285,48 @@ def check_rst_period_divisible(
             f"ocean_vars.output_period_rst ({output_period_rst} s) is not an "
             f"integer multiple of time_stepping.dt ({dt} s): restart writes "
             "must land on a timestep"
+        )
+
+
+def check_extract_divides_rst(
+    ocean_vars: _OceanVarsCfgCommon | dict[str, Any],
+    extract_data: ExtractDataCfg | dict[str, Any],
+) -> None:
+    """Raise ``ValueError`` if nesting extraction files wouldn't roll on restart
+    boundaries -- mirrors ucla-roms >= 0.5.0's ``check_output_divides_rst`` for
+    the extract stream, which aborts the run when ``nrpf * extract_period``
+    doesn't evenly divide ``output_period_rst``.
+
+    Exactly mirrors the Fortran semantics: enforced only when both restarts
+    (``wrt_file_rst``) and extraction (``do_extract``) are on; a zero
+    ``output_period_rst`` (the monthly-restart convention) passes trivially
+    (``mod(0, x) == 0``); a non-positive ``nrpf * extract_period`` is an error.
+    The caller gates on the pinned ucla-roms version -- older releases don't
+    enforce this. Missing fields skip the check (partial dicts; presence is
+    owned by schema validation). Accepts a plain dict (the resolver's world) or
+    the typed sections, like :func:`check_rst_period_divisible`.
+    """
+
+    def _get(section: Any, key: str) -> Any:
+        return section.get(key) if isinstance(section, dict) else getattr(section, key)
+
+    if not _get(ocean_vars, "wrt_file_rst") or not _get(extract_data, "do_extract"):
+        return
+    output_period_rst = _get(ocean_vars, "output_period_rst")
+    nrpf = _get(extract_data, "nrpf")
+    extract_period = _get(extract_data, "extract_period")
+    if output_period_rst is None or nrpf is None or extract_period is None:
+        return
+    newfile_freq = nrpf * extract_period
+    ratio = output_period_rst / newfile_freq if newfile_freq > 0 else None
+    if ratio is None or abs(ratio - round(ratio)) > 1e-9:
+        raise ValueError(
+            f"extract_data.nrpf ({nrpf}) * extract_data.extract_period "
+            f"({extract_period} s) = {newfile_freq} s must be positive and "
+            f"evenly divide ocean_vars.output_period_rst ({output_period_rst} s): "
+            f"ucla-roms >= 0.5.0 aborts at startup otherwise "
+            f"(check_output_divides_rst, partial-file prevention). Adjust the "
+            f"child DomainSpec metadata 'period' or the extract_data overrides."
         )
 
 
@@ -452,17 +517,35 @@ class PipeFrcCfg(_SettingsSection):
     npip: int
 
 
-class ParticlesCfg(_SettingsSection):
+class _ParticlesCfgCommon(_SettingsSection):
     floats: bool
     np: int
     extra_space_fac: float
     exchange_facx: float
     exchange_facy: float
     exchange_facc: float
-    output_period: float
-    nrpf: int
     ppm3: float
     pmin: int
+
+
+class ParticlesCfg(_ParticlesCfgCommon):
+    """``particles`` settings for ucla-roms < 0.5.0."""
+
+    output_period: float
+    nrpf: int
+
+
+class ParticlesCfgV0_5_0(_ParticlesCfgCommon):
+    """``particles`` settings for ucla-roms >= 0.5.0.
+
+    ucla-roms 0.5.0 renamed the namelist keys ``output_period``/``nrpf`` to
+    ``output_period_particles``/``nrpf_particles``; forge's settings
+    vocabulary keeps the original names (``output_period``/``nrpf``) and only
+    the ``serialization_alias`` changes.
+    """
+
+    output_period: float = Field(serialization_alias="output_period_particles")
+    nrpf: int = Field(serialization_alias="nrpf_particles")
 
 
 class LateralViscCfg(_SettingsSection):
@@ -496,11 +579,16 @@ class MarblBgcCfg(_SettingsSection):
     marbl_timestep: float
 
 
-class RunTimeSettings(_SettingsSection):
+class _RunTimeSettingsCommon(_SettingsSection):
     """Forge's run-time settings dict, typed + validated.
 
     Sections are required: the (per-ModelSpec) YAML must define them all. There
     are no value defaults here — the YAML is the single source of defaults.
+
+    Not meant to be used directly: the version-varying sections (``ocean_vars``,
+    ``particles``) are typed as the loose common models here; use
+    :class:`RunTimeSettings` (ucla-roms < 0.5.0) or :class:`RunTimeSettingsV0_5_0`
+    (>= 0.5.0), or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -522,7 +610,7 @@ class RunTimeSettings(_SettingsSection):
     bgc: BgcCfg
     blk_frc: BlkFrcCfg
     cdr_output: CdrOutputCfg
-    ocean_vars: OceanVarsCfg
+    ocean_vars: _OceanVarsCfgCommon
     surf_flux: SurfFluxCfg
     tides: TidesCfg
     river_frc: RiverFrcCfg
@@ -539,7 +627,7 @@ class RunTimeSettings(_SettingsSection):
     stdout_diag: StdoutDiagCfg
     random_output: RandomOutputCfg
     pipe_frc: PipeFrcCfg
-    particles: ParticlesCfg
+    particles: _ParticlesCfgCommon
     lin_rho_eos: LinRhoEosCfg
     sss_correction: SssCorrectionCfg
     sst_correction: SstCorrectionCfg
@@ -547,9 +635,83 @@ class RunTimeSettings(_SettingsSection):
     marbl_bgc: MarblBgcCfg
 
     @model_validator(mode="after")
-    def _rst_period_divisible_by_dt(self) -> RunTimeSettings:
+    def _rst_period_divisible_by_dt(self) -> _RunTimeSettingsCommon:
         check_rst_period_divisible(self.time_stepping.dt, self.ocean_vars)
         return self
+
+
+class RunTimeSettings(_RunTimeSettingsCommon):
+    """Forge's run-time settings dict for ucla-roms < 0.5.0, typed + validated.
+
+    Kept unversioned (no suffix) for backward compatibility: this is the name
+    historically used by forge.
+    """
+
+    ocean_vars: OceanVarsCfg
+    particles: ParticlesCfg
+
+
+class RunTimeSettingsV0_5_0(_RunTimeSettingsCommon):
+    """Forge's run-time settings dict for ucla-roms >= 0.5.0, typed + validated."""
+
+    ocean_vars: OceanVarsCfgV0_5_0
+    particles: ParticlesCfgV0_5_0
+
+
+# Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
+# the matching run-time settings class (forge's settings vocabulary).
+_RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
+    type[RomsNamelistBase], type[_RunTimeSettingsCommon]
+] = {
+    RomsNamelist: RunTimeSettings,
+    RomsNamelistV0_5_0: RunTimeSettingsV0_5_0,
+}
+
+
+def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsCommon]:
+    """Select the run-time settings class matching a ucla-roms ref.
+
+    Parameters
+    ----------
+    roms_ref : str or None
+        The ucla-roms git ref (tag, branch, or commit hash) the blueprint's
+        code is pinned to, e.g. ``code.roms.commit or code.roms.branch``.
+        ``None`` preserves forge's historical behavior (the legacy schema),
+        so existing callers that don't yet thread a ref through keep working
+        unchanged.
+
+    Returns
+    -------
+    type[_RunTimeSettingsCommon]
+        :class:`RunTimeSettings` for ucla-roms < 0.5.0 or when `roms_ref` is
+        `None`; :class:`RunTimeSettingsV0_5_0` for ucla-roms >= 0.5.0.
+
+    Warns
+    -----
+    UserWarning
+        Propagated unchanged from :func:`cstar.roms.namelist.namelist_schema_for_ref`
+        when `roms_ref` isn't a release tag (branch name, commit hash, or
+        unparseable) — the latest known schema is used in that case.
+    """
+    # Falsy covers "" as well as None: a hand-edited blueprint can carry
+    # commit=null + branch="", and callers pass `commit or branch` — an empty
+    # string must mean "no ref" (legacy), not "unparseable ref" (latest).
+    if not roms_ref:
+        return RunTimeSettings
+    schema = namelist_schema_for_ref(roms_ref)
+    try:
+        return _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA[schema]
+    except KeyError:
+        # C-Star is installed from its main branch, so its schema registry can
+        # grow a new version before forge maps it — fail with the fix, not a
+        # bare KeyError.
+        raise ValueError(
+            f"C-Star selected namelist schema {schema.__name__} for ucla-roms "
+            f"ref {roms_ref!r}, but this cstar-forge version has no matching "
+            f"run-time settings model. Update cstar-forge (add the new variant "
+            f"to _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA) or pin an older "
+            f"ucla-roms release."
+        ) from None
 
 
 # Canonical forcing order -> frcfiles (matches write_roms_namelist).
@@ -563,7 +725,7 @@ _FORCING_ORDER = (
 )
 
 
-def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
+def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBase:
     """The settings -> namelist transform.
 
     Most groups map 1:1 from a settings section via ``model_dump(by_alias=True)``
@@ -573,7 +735,21 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
     regroup, the frcfiles assembly, the scalar -> per-tracer-array expansion, and
     the cross-section read of ``rho0`` from ``lateral_visc``. ``exclude=`` drops
     the settings-only fields with no namelist counterpart.
+
+    ``rt``'s concrete type (:class:`RunTimeSettings` or
+    :class:`RunTimeSettingsV0_5_0`) selects the matching namelist schema and
+    ``basic_output_settings``/``particles_settings`` group classes — the
+    ``ocean_vars``/``particles`` sections already carry the right fields and
+    aliases for that variant, so no other branch is needed.
     """
+    if isinstance(rt, RunTimeSettingsV0_5_0):
+        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_5_0
+        basic_output_cls = BasicOutputSettingsV0_5_0
+        particles_cls = ParticlesSettingsV0_5_0
+    else:
+        namelist_cls = RomsNamelist
+        basic_output_cls = BasicOutputSettings
+        particles_cls = ParticlesSettings
 
     def grp(section) -> dict:
         return section.model_dump(by_alias=True)
@@ -584,7 +760,7 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         if getattr(rt.forcing, k) is not None
     ]
 
-    return RomsNamelist(
+    return namelist_cls(
         # ---- structural transforms (regroup / computed / cross-section) ----
         simulation_name_settings=SimulationNameSettings(
             output_root_name=rt.output_root_name.output_root_name,
@@ -600,7 +776,7 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         gamma2_settings=Gamma2Settings(gamma2=rt.gamma2),
         ubind_settings=UbindSettings(ubind=rt.ubind),
         diagnostics_settings=DiagnosticsSettings(**grp(rt.diagnostics)),
-        basic_output_settings=BasicOutputSettings(
+        basic_output_settings=basic_output_cls(
             **rt.ocean_vars.model_dump(by_alias=True)
         ),
         lateral_visc_settings=LateralViscSettings(
@@ -640,25 +816,36 @@ def build_namelist(rt: RunTimeSettings, n_tracers: int) -> RomsNamelist:
         random_output_settings=RandomOutputSettings(**grp(rt.random_output)),
         surf_flx_output_settings=SurfFlxOutputSettings(**grp(rt.surf_flux)),
         pipe_frc_settings=PipeFrcSettings(**grp(rt.pipe_frc)),
-        particles_settings=ParticlesSettings(**grp(rt.particles)),
+        particles_settings=particles_cls(**grp(rt.particles)),
         v_sponge_settings=VSpongeSettings(**grp(rt.v_sponge)),
     )
 
 
-def validate_run_time_sections(settings: dict) -> list[str]:
+def validate_run_time_sections(
+    settings: dict, roms_ref: str | None = None
+) -> list[str]:
     """Validate the *present* run-time sections of a (possibly partial) settings dict
-    against the ``RunTimeSettings`` schema, returning a list of human-readable errors
+    against the run-time settings schema, returning a list of human-readable errors
     (empty if all good).
 
     Unlike ``RunTimeSettings.model_validate``, this does NOT require every section —
     it checks only the sections that are present, so it works on a ``ForgeBlueprint``'s
     flat ``model_settings`` (which omits the processing-filled sections). Keys with no
-    ``RunTimeSettings`` counterpart (e.g. ``cppdefs``, a compile-time section) are
+    run-time-settings counterpart (e.g. ``cppdefs``, a compile-time section) are
     skipped. Use it for fail-fast feedback on hand-edited / loaded configs, where the
     inner values are otherwise opaque (``model_settings`` is ``Dict[str, Any]``).
+
+    Parameters
+    ----------
+    settings : dict
+        The (possibly partial) run-time settings dict to validate.
+    roms_ref : str or None
+        The ucla-roms ref the blueprint's code is pinned to, forwarded to
+        :func:`run_time_settings_for_ref` to select the schema variant.
+        ``None`` (default) preserves the legacy schema.
     """
     errors: list[str] = []
-    fields = RunTimeSettings.model_fields
+    fields = run_time_settings_for_ref(roms_ref).model_fields
     for key, value in (settings or {}).items():
         if key not in fields:
             continue  # not a run-time section (e.g. cppdefs) — nothing to check here

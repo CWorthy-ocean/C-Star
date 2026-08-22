@@ -12,10 +12,12 @@ from pathlib import Path
 
 import pytest
 
+from cstar_forge.forge.namelist_model import RunTimeSettings, RunTimeSettingsV0_5_0
 from cstar_forge.forge_blueprint_wizard import (
     ForgeBlueprintWizard,
     _drain_stream_buffer,
     _ForcingEditor,
+    _SettingsEditor,
 )
 
 try:
@@ -680,6 +682,87 @@ def test_ntides_syncs_from_tidal_forcing_into_model_settings():
     wiz._overrides[("tides", "ntides")] = 42
     wiz._rebuild()
     assert wiz.config.model_settings["tides"]["ntides"] == 42
+
+
+def test_settings_editor_nrpf_rst_only_for_legacy_settings_cls():
+    """``ocean_vars.nrpf_rst`` was removed from ucla-roms 0.5.0 -- the editor must
+    generate a widget for it when introspecting the legacy ``RunTimeSettings``
+    class, and must NOT when introspecting ``RunTimeSettingsV0_5_0``, even
+    though the raw ``model_settings`` dict carries the key either way (e.g. a
+    stale value passed through from a hand-edited/legacy-authored blueprint).
+    """
+    import ipywidgets as W
+
+    model_settings = {"ocean_vars": {"nrpf_rst": 2, "wrt_file_rst": True}}
+
+    legacy_editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettings)
+    assert ("ocean_vars", "nrpf_rst") in legacy_editor._widgets
+
+    v0_5_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_5_0
+    )
+    assert ("ocean_vars", "nrpf_rst") not in v0_5_0_editor._widgets
+    # wrt_file_rst has no version-varying field set, so it's unaffected either way.
+    assert ("ocean_vars", "wrt_file_rst") in v0_5_0_editor._widgets
+
+    # Constructor default (no settings_cls passed) stays legacy, for back-compat.
+    default_editor = _SettingsEditor(W, model_settings)
+    assert ("ocean_vars", "nrpf_rst") in default_editor._widgets
+
+
+def test_wizard_editor_rebuilds_across_roms_ref_schema_boundary():
+    """Overriding the ``roms_ref`` box across the ucla-roms 0.5.0 line (with the
+    same ModelSpec selected) must regenerate the Advanced-settings editor
+    against the matching RunTimeSettings variant -- not just on a model switch.
+
+    Explicitly sets a pre-0.5.0 override throughout (rather than relying on the
+    default model's own pin, which is a "main" branch ref -- a non-semver ref
+    resolves to the *latest* schema, so it can't stand in for "legacy" here).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.roms_ref.value = "0.2.0"
+    wiz._rebuild()
+    assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
+
+    wiz.roms_ref.value = "0.5.0"
+    wiz._rebuild()
+    assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+    wiz.roms_ref.value = "0.2.0"  # back across the boundary
+    wiz._rebuild()
+    assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
+
+
+def test_output_spec_defaults_to_daily_restarts():
+    """The Output dropdown preselects the precheck-safe 'daily-restarts' spec
+    (explicitly, not by sort position); 'standard' stays available for
+    back-compat.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.output_dd.value == "daily-restarts"
+    assert "standard" in wiz.catalog.output_names
+
+
+def test_default_model_pinned_to_main_uses_latest_settings_schema():
+    """The default (first) catalog model is pinned to ucla-roms branch ``main``
+    (see ModelSpec ``pio-dev``) -- a non-semver ref, which both the wizard and
+    the executor (``write_roms_namelist`` -> ``run_time_settings_for_ref``)
+    resolve to the *latest* known schema (currently ``RunTimeSettingsV0_5_0``),
+    not the legacy one. This is an intentional behavior change from before this
+    ref-awareness was added (the editor used to hardcode legacy
+    ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
+    executor will actually write. (The tests in tests/test_forge_blueprint.py
+    that exercise the ``nrpf_rst`` widget rules now pin a legacy ref
+    explicitly.)
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz._editor_settings_cls is RunTimeSettingsV0_5_0
+    assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 
 def test_domain_modified_reflects_deviation_from_catalog_pick():

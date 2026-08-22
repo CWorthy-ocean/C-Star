@@ -28,6 +28,7 @@ It should be unified with ``source_data.py`` once the two-phase refactor lands.
 from __future__ import annotations
 
 import copy
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -104,8 +105,11 @@ DEFAULT_TEMPLATE_REPO = CodeRepo(
 # the executor can share it. Dual import keeps the resolver standalone-importable.
 try:  # pragma: no cover - exercised both ways
     from cstar_forge.forge.namelist_model import (
+        RunTimeSettings,
+        check_extract_divides_rst,
         check_rst_period_divisible,
         ensure_cdr_output_marbl_diagnostics,
+        run_time_settings_for_ref,
     )
 except ImportError:  # pragma: no cover
     from namelist_model import (  # type: ignore
@@ -771,6 +775,28 @@ def build_forge_blueprint(
     check_rst_period_divisible(
         settings.get("time_stepping", {}).get("dt"), settings.get("ocean_vars", {})
     )
+    # Nesting extraction files must roll on restart boundaries under
+    # ucla-roms >= 0.5.0 (its check_output_divides_rst aborts the run
+    # otherwise); older releases don't enforce it, so gate on the schema the
+    # pinned ref selects. The extract values are resolver-derived (child
+    # DomainSpec metadata 'period' x a seeded nrpf), so authoring time is the
+    # only place the author sees the failure with the knobs still in hand.
+    roms_block = (model.get("code") or {}).get("roms") or {}
+    effective_roms_ref = (
+        roms_ref or roms_block.get("commit") or roms_block.get("branch")
+    )
+    with warnings.catch_warnings():
+        # A non-semver pin (e.g. pio-dev's 'main') warns on every schema
+        # selection; this internal version probe shouldn't repeat it -- the
+        # engine/executor selection paths already surface it once per run.
+        warnings.simplefilter("ignore", UserWarning)
+        settings_cls = run_time_settings_for_ref(
+            str(effective_roms_ref) if effective_roms_ref is not None else None
+        )
+    if settings_cls is not RunTimeSettings:
+        check_extract_divides_rst(
+            settings.get("ocean_vars", {}), settings.get("extract_data", {})
+        )
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
     # A child grid (has a parent) receives its boundary values from the parent's

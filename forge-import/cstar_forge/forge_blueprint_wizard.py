@@ -28,6 +28,7 @@ import copy
 import json
 import re
 import typing
+import warnings
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, get_args, get_origin
@@ -58,7 +59,11 @@ from cstar_forge.forge.forge_blueprint import (
     SurfaceType,
     TidalSource,
 )
-from cstar_forge.forge.namelist_model import RunTimeSettings, validate_run_time_sections
+from cstar_forge.forge.namelist_model import (
+    RunTimeSettings,
+    run_time_settings_for_ref,
+    validate_run_time_sections,
+)
 from cstar_forge.forge.user_files import hash_netcdf_contents
 from cstar_forge.forge_blueprint_resolve import (
     OUTPUT_SECTIONS,
@@ -624,13 +629,34 @@ def _read_field_widget(
     return v
 
 
-def _section_submodel(section: str):
-    """The RunTimeSettings sub-model for a section, or None (scalar / unknown)."""
-    field = RunTimeSettings.model_fields.get(section)
+def _section_submodel(section: str, settings_cls: type[BaseModel] = RunTimeSettings):
+    """The ``settings_cls`` sub-model for a section, or None (scalar / unknown).
+
+    ``settings_cls`` defaults to the legacy :class:`RunTimeSettings` for
+    back-compat; callers that know the blueprint's ucla-roms ref should pass
+    the class picked by :func:`_wizard_settings_cls_for_ref` instead, so a
+    section that varies by ucla-roms version (e.g. ``ocean_vars``) is
+    introspected against the right field set.
+    """
+    field = settings_cls.model_fields.get(section)
     if field is None:
         return None
     ann = field.annotation
     return ann if isinstance(ann, type) and issubclass(ann, BaseModel) else None
+
+
+def _wizard_settings_cls_for_ref(roms_ref: str | None) -> type[BaseModel]:
+    """``run_time_settings_for_ref`` with the non-semver-ref ``UserWarning`` swallowed.
+
+    The wizard calls this on every live rebuild -- including every keystroke
+    typed into the ``roms_ref`` override text box -- so letting a branch-name
+    pin's warning (e.g. ``"main"``) through would spam the notebook output on
+    each edit; the schema selection itself is unaffected, only the warning is
+    dropped.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        return run_time_settings_for_ref(roms_ref)
 
 
 # --- overrides layer: effective = composed(specs) ⊕ overrides -----------------
@@ -939,8 +965,14 @@ class _SettingsEditor:
     Each pane groups several namelist sections under a sub-header per section, so the
     grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR, output)
     while every widget is still keyed by its real ``(section, field)``. Auto-generates
-    typed widgets per field using the ``RunTimeSettings`` sub-model schema (falling
-    back to value-type inference). All panes are collapsed by default. ``sync()``
+    typed widgets per field using the ``settings_cls`` sub-model schema (falling
+    back to value-type inference). ``settings_cls`` defaults to the legacy
+    :class:`RunTimeSettings` for back-compat; pass the class matching the
+    blueprint's ucla-roms ref (see :func:`_wizard_settings_cls_for_ref`) so a
+    version-varying section (``ocean_vars``, ``particles``) is introspected
+    against the right field set -- e.g. ``ocean_vars.nrpf_rst`` only exists pre
+    ucla-roms 0.5.0, so a widget for it is only generated when `settings_cls`
+    is the legacy class. All panes are collapsed by default. ``sync()``
     pushes values in (used on load); ``read()`` returns a single field. Fields listed
     in ``_ACCORDION_EXCLUDED_FIELDS`` (and sections not named in a category) are
     skipped -- their value still flows through from the resolver-composed settings
@@ -948,8 +980,15 @@ class _SettingsEditor:
     hiding the widget cannot drop or reset the value.
     """
 
-    def __init__(self, W, model_settings: dict[str, Any], on_edit=None):
+    def __init__(
+        self,
+        W,
+        model_settings: dict[str, Any],
+        on_edit=None,
+        settings_cls: type[BaseModel] = RunTimeSettings,
+    ):
         self.W = W
+        self._settings_cls = settings_cls
         # (section, field|None) -> (widget, base_type)
         self._widgets: dict[Any, Any] = {}
         self._section_fields: dict[str, list[str | None]] = {}
@@ -1125,7 +1164,7 @@ class _SettingsEditor:
         exclude: frozenset = frozenset(),
     ):
         W = self.W
-        sub = _section_submodel(section)
+        sub = _section_submodel(section, self._settings_cls)
         if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
             base = _base_type(None, value)
             tip = _namelist_tooltip(section, section)
@@ -2036,6 +2075,12 @@ class _ForcingEditor:
 # the first catalog model otherwise).
 _DEFAULT_MODEL = "pio-dev"
 
+# Preselected in the Output dropdown when present in the catalog (falls back to
+# the first catalog spec otherwise). 'daily-restarts' conforms to the
+# ucla-roms >= 0.5.0 check_output_divides_rst precheck; 'standard' is kept
+# unchanged for blueprints that reference it.
+_DEFAULT_OUTPUT_SPEC = "daily-restarts"
+
 _GRID_INT = ("nx", "ny", "N")
 _GRID_FLOAT = ("size_x", "size_y", "center_lon", "center_lat", "rot")
 _SCOORD = ("theta_s", "theta_b", "hc")
@@ -2582,7 +2627,14 @@ class ForgeBlueprintWizard:
         _output_names = list(self.catalog.output_names)
         self.output_dd = W.Dropdown(
             options=self._dd_options(_output_names, "output"),
-            value=(_output_names[0] if _output_names else None),
+            # Prefer the bundled default explicitly -- output_names is sorted
+            # alphabetically, so relying on position would silently change the
+            # default whenever a new spec sorts first.
+            value=(
+                _DEFAULT_OUTPUT_SPEC
+                if _DEFAULT_OUTPUT_SPEC in _output_names
+                else (_output_names[0] if _output_names else None)
+            ),
             description="Output:",
             style={"description_width": "110px"},
             tooltip=_tip("output", "output_dd"),
@@ -2591,6 +2643,11 @@ class ForgeBlueprintWizard:
         # --- advanced settings editor (built lazily on first rebuild) ---
         self.editor: _SettingsEditor | None = None
         self._editor_model: str | None = None
+        # The RunTimeSettings variant the editor was last built against -- rebuilt
+        # not only on a model switch but also when the effective ucla-roms ref
+        # crosses a schema boundary (e.g. editing the roms_ref override across the
+        # 0.5.0 line while keeping the same ModelSpec selected).
+        self._editor_settings_cls: type[BaseModel] | None = None
         self.editor_box = W.VBox([])  # placeholder; filled with the editor's accordion
         # sparse manual overrides layer: (section, field|None) -> value
         self._overrides: dict[Any, Any] = {}
@@ -3253,6 +3310,18 @@ class ForgeBlueprintWizard:
         """The selected model's ModelSpec-declared use_pio (prepopulates self.use_pio_chk)."""
         return self._model_spec_declared()["use_pio"]
 
+    def _effective_roms_ref(self) -> str | None:
+        """The ucla-roms ref that determines the run-time-settings schema.
+
+        Mirrors the resolver's own precedence for ``roms_ref`` (see
+        ``_gather()``): the live override in ``self.roms_ref`` when non-blank,
+        else the selected ModelSpec's pinned ``code.roms`` ref. ``None`` when
+        neither is set, so :func:`_wizard_settings_cls_for_ref`/
+        ``run_time_settings_for_ref`` fall back to the legacy schema instead of
+        warning on an empty ref.
+        """
+        return self.roms_ref.value.strip() or self._model_default_roms_ref() or None
+
     def _build_forcing_editor(self, base_inputs: dict[str, Any]):
         self._forcing_editor = _ForcingEditor(
             self.W, base_inputs, on_change=self._on_forcing_change
@@ -3911,7 +3980,14 @@ class ForgeBlueprintWizard:
 
         Returns any validation problems found in the *loaded file's* model_settings.
         """
-        loaded_problems = validate_run_time_sections(cfg.model_settings)
+        # The file's own pinned ucla-roms ref selects the schema variant it was
+        # authored against -- not the (possibly different) currently-selected
+        # model's default. Computed once here and reused below when seeding
+        # self.roms_ref, so the two never drift apart.
+        stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
+        loaded_problems = validate_run_time_sections(
+            cfg.model_settings, roms_ref=stored_ref or None
+        )
         with self._suspend():
             # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
             self.domain_dd.value = "<custom>"
@@ -3965,8 +4041,9 @@ class ForgeBlueprintWizard:
                 else "none"
             )
             # Show the file's actual pinned ref, falling back to the (now-selected)
-            # model's default when the file matches it exactly.
-            stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
+            # model's default when the file matches it exactly. (stored_ref was
+            # already computed above, before the suspend block, to feed the
+            # loaded-file validation with the right schema variant.)
             default_ref = self._model_default_roms_ref()
             self.roms_ref.value = (
                 default_ref if stored_ref == default_ref else stored_ref
@@ -4239,13 +4316,28 @@ class ForgeBlueprintWizard:
         # Advanced settings editor: every section is editable. The resolver composes
         # a baseline from the specs; the user's manual edits are a sparse overrides
         # layer applied on top (effective = composed ⊕ overrides). The editor is
-        # rebuilt only when the *model* changes (its field set depends on the model).
+        # rebuilt when the *model* changes (its field set depends on the model) or
+        # when the effective ucla-roms ref crosses a schema boundary (e.g. editing
+        # the roms_ref override across the 0.5.0 line with the same model selected)
+        # -- see run_time_settings_for_ref / RunTimeSettingsV0_5_0.
         composed = cfg.model_settings
-        if self.editor is None or self._editor_model != self.model_dd.value:
+        # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
+        # reused for the validation call below.
+        effective_roms_ref = self._effective_roms_ref()
+        settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
+        if (
+            self.editor is None
+            or self._editor_model != self.model_dd.value
+            or self._editor_settings_cls is not settings_cls
+        ):
             self.editor = _SettingsEditor(
-                self.W, composed, on_edit=self._on_editor_edit
+                self.W,
+                composed,
+                on_edit=self._on_editor_edit,
+                settings_cls=settings_cls,
             )
             self._editor_model = self.model_dd.value
+            self._editor_settings_cls = settings_cls
             self.editor_box.children = [self.editor.accordion]
 
         effective = _apply_overrides(composed, self._overrides)
@@ -4340,7 +4432,14 @@ class ForgeBlueprintWizard:
                 "<span style='color:#b58900'>⚠ boundaries not derived yet — "
                 'click "Derive from grid" (Save/Run derive automatically)</span>'
             )
-        problems = validate_run_time_sections(cfg.model_settings)
+        # Suppressed for the same reason as _wizard_settings_cls_for_ref above --
+        # _rebuild runs on every keystroke, including typing into the roms_ref
+        # override box, so a non-semver ref's UserWarning would otherwise spam.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            problems = validate_run_time_sections(
+                cfg.model_settings, roms_ref=effective_roms_ref
+            )
         if problems:
             self.validation.value = (
                 "<b style='color:#b00'>⚠ settings validation:</b><br>"

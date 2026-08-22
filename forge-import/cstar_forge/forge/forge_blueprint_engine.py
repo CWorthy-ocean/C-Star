@@ -387,7 +387,9 @@ def process_forge_blueprint(
         warnings.warn(integrity, UserWarning, stacklevel=2)
 
     if validate:
-        problems = validate_run_time_sections(cfg.model_settings)
+        problems = validate_run_time_sections(
+            cfg.model_settings, roms_ref=cfg.code.roms.commit or cfg.code.roms.branch
+        )
         if problems:
             raise ValueError(
                 "forge_blueprint.model_settings has invalid values (fix before "

@@ -11,14 +11,17 @@ from pathlib import Path
 
 import pytest
 import yaml
-from cstar.roms.namelist import RomsNamelist
+from cstar.roms.namelist import RomsNamelist, RomsNamelistV0_5_0
 from pydantic import ValidationError
 
 import cstar_forge
 from cstar_forge.domain_catalog import default_catalog
 from cstar_forge.forge.namelist_model import (
     RunTimeSettings,
+    RunTimeSettingsV0_5_0,
     build_namelist,
+    check_extract_divides_rst,
+    run_time_settings_for_ref,
     validate_run_time_sections,
 )
 from cstar_forge.forge.settings import write_roms_namelist
@@ -249,6 +252,41 @@ def test_rst_period_not_divisible_accepted_with_rst_writing_off():
     assert rt.ocean_vars.output_period_rst == 150.0
 
 
+# --- check_extract_divides_rst (mirrors ucla-roms >= 0.5.0's precheck for the
+#     nesting extract stream) ------------------------------------------------
+_EXTRACT_OK = {"do_extract": True, "nrpf": 24, "extract_period": 3600.0}
+_RST_ON = {"wrt_file_rst": True, "output_period_rst": 86400.0}
+
+
+def test_extract_divides_rst_accepted():
+    check_extract_divides_rst(_RST_ON, _EXTRACT_OK)  # 24 * 3600 == 86400
+
+
+def test_extract_not_dividing_rst_rejected():
+    bad = {**_EXTRACT_OK, "extract_period": 5000.0}  # 24 * 5000 = 120000
+    with pytest.raises(ValueError, match="evenly divide"):
+        check_extract_divides_rst(_RST_ON, bad)
+
+
+def test_extract_nonpositive_frequency_rejected():
+    with pytest.raises(ValueError, match="must be positive"):
+        check_extract_divides_rst(_RST_ON, {**_EXTRACT_OK, "nrpf": 0})
+
+
+def test_extract_check_skipped_when_extract_or_rst_off():
+    bad = {**_EXTRACT_OK, "extract_period": 5000.0}
+    check_extract_divides_rst({**_RST_ON, "wrt_file_rst": False}, bad)
+    check_extract_divides_rst(_RST_ON, {**bad, "do_extract": False})
+
+
+def test_extract_check_vacuous_for_zero_rst_period():
+    """The monthly-restart convention (output_period_rst = 0) passes trivially,
+    mirroring the Fortran ``mod(0, x) == 0``.
+    """
+    bad = {**_EXTRACT_OK, "extract_period": 5000.0}
+    check_extract_divides_rst({**_RST_ON, "output_period_rst": 0.0}, bad)
+
+
 def test_edit_assignment_is_validated(tmp_path):
     rt = RunTimeSettings.model_validate(_populated_rt_dict())
     nml = build_namelist(rt, n_tracers=34)
@@ -368,3 +406,135 @@ def test_validate_run_time_sections_skips_rst_period_check_when_section_missing(
         validate_run_time_sections({"time_stepping": sections["time_stepping"]}) == []
     )
     assert validate_run_time_sections({"ocean_vars": sections["ocean_vars"]}) == []
+
+
+# ---------------------------------------------------------------------------
+# run_time_settings_for_ref -- schema-variant selection by ucla-roms ref
+# ---------------------------------------------------------------------------
+def test_run_time_settings_for_ref_none_and_pre_0_5_0_select_legacy():
+    assert run_time_settings_for_ref(None) is RunTimeSettings
+    for ref in ("0.4.1", "v0.4.9", "0.2.0"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettings
+
+
+def test_run_time_settings_for_ref_0_5_0_and_later_select_v0_5_0():
+    for ref in ("0.5.0", "v0.5.0", "0.7.3"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_5_0
+
+
+def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
+    with pytest.warns(UserWarning, match="not a release tag"):
+        cls = run_time_settings_for_ref("main")
+    assert cls is RunTimeSettingsV0_5_0
+
+
+def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
+    """A commit hash needs ``repo_path`` (not passed here) to resolve to a
+    release tag, so it falls back the same way an unparseable/branch ref does.
+    """
+    with pytest.warns(UserWarning, match="not a release tag"):
+        cls = run_time_settings_for_ref("a1b2c3d4")
+    assert cls is RunTimeSettingsV0_5_0
+
+
+def test_run_time_settings_for_ref_empty_string_selects_legacy():
+    """`""` means "no ref" (callers pass ``commit or branch``, and a hand-edited
+    blueprint can carry ``commit: null`` + ``branch: ""``) -- it must select the
+    legacy schema like ``None``, not fall through to "latest" like an
+    unparseable ref.
+    """
+    assert run_time_settings_for_ref("") is RunTimeSettings
+
+
+def test_run_time_settings_for_ref_unknown_schema_raises_actionable_error(
+    monkeypatch,
+):
+    """A C-Star (installed from its main branch) can grow a new namelist schema
+    before forge maps it; the selector must fail with an actionable message,
+    not a bare ``KeyError``.
+    """
+
+    class _FutureSchema:
+        pass
+
+    monkeypatch.setattr(
+        "cstar_forge.forge.namelist_model.namelist_schema_for_ref",
+        lambda ref: _FutureSchema,
+    )
+    with pytest.raises(ValueError, match="no matching\\s+run-time settings model"):
+        run_time_settings_for_ref("9.9.9")
+
+
+# ---------------------------------------------------------------------------
+# build_namelist -- RunTimeSettingsV0_5_0 / RomsNamelistV0_5_0 dispatch
+# ---------------------------------------------------------------------------
+def test_build_namelist_v0_5_0_drops_nrpf_rst_and_renames_particles(tmp_path):
+    d = _populated_rt_dict()
+    rt = RunTimeSettingsV0_5_0.model_validate(d)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_5_0
+
+    basic_output = nml.basic_output_settings.model_dump()
+    assert "nrpf_rst" not in basic_output
+
+    particles = nml.particles_settings.model_dump()
+    assert "output_period" not in particles
+    assert "nrpf" not in particles
+    assert particles["output_period_particles"] == d["particles"]["output_period"]
+    assert particles["nrpf_particles"] == d["particles"]["nrpf"]
+
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "nrpf_rst" not in text
+    assert "output_period_particles" in text
+    assert "nrpf_particles" in text
+
+
+def test_build_namelist_legacy_keeps_nrpf_rst_and_particles_keys():
+    """Regression: the same settings dict through the legacy schema still yields
+    ``nrpf_rst`` and the un-renamed particles keys.
+    """
+    rt = RunTimeSettings.model_validate(_populated_rt_dict())
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelist
+
+    basic_output = nml.basic_output_settings.model_dump()
+    assert "nrpf_rst" in basic_output
+
+    particles = nml.particles_settings.model_dump()
+    assert "output_period" in particles
+    assert "nrpf" in particles
+    assert "output_period_particles" not in particles
+    assert "nrpf_particles" not in particles
+
+
+# ---------------------------------------------------------------------------
+# validate_run_time_sections -- roms_ref-selected schema variant
+# ---------------------------------------------------------------------------
+def test_validate_run_time_sections_roms050_ignores_stray_nrpf_rst():
+    """``ocean_vars`` from a full settings dict carries ``nrpf_rst`` (the shared
+    'standard' OutputSpec always sets it) -- against the >= 0.5.0 schema, that's
+    an unmodeled key silently dropped by ``extra="ignore"``, not an error.
+    """
+    d = _populated_rt_dict()
+    sections = {"time_stepping": d["time_stepping"], "ocean_vars": d["ocean_vars"]}
+    assert validate_run_time_sections(sections, roms_ref="0.5.0") == []
+
+
+def test_validate_run_time_sections_roms050_flags_bad_value():
+    d = _populated_rt_dict()
+    bad_ocean_vars = dict(d["ocean_vars"])
+    bad_ocean_vars["wrt_file_rst"] = "notabool"
+    errs = validate_run_time_sections({"ocean_vars": bad_ocean_vars}, roms_ref="0.5.0")
+    assert errs and any("wrt_file_rst" in e for e in errs)
+
+
+# ---------------------------------------------------------------------------
+# _rst_period_divisible_by_dt -- enforced on both schema variants
+# ---------------------------------------------------------------------------
+def test_rst_period_not_divisible_by_dt_rejected_v0_5_0():
+    bad = _populated_rt_dict()
+    bad["time_stepping"]["dt"] = 100.0
+    bad["ocean_vars"]["output_period_rst"] = 150.0
+    with pytest.raises(ValidationError, match="output_period_rst"):
+        RunTimeSettingsV0_5_0.model_validate(bad)

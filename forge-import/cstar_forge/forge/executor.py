@@ -1966,6 +1966,13 @@ class ForgeExecutor(BaseModel):
             settings_run_time=self._settings_run_time,
             output_dir=self.run_time_code_dir,
             n_tracers=n_tracers,
+            # Selects the namelist schema variant; None (code_spec unset) keeps
+            # the legacy (< 0.5.0) schema.
+            roms_ref=(
+                self.code_spec.roms.commit or self.code_spec.roms.branch
+                if self.code_spec is not None
+                else None
+            ),
         )
 
         # Build the run-time code descriptor: namelist + any copied static files.

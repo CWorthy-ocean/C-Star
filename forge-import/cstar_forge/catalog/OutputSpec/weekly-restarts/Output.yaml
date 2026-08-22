@@ -1,0 +1,139 @@
+# OutputSpec 'weekly-restarts' — weekly restart files, every stream conforming
+# to the ucla-roms >= 0.5.0 precheck (check_output_divides_rst): for each
+# enabled output stream, nrpf * output_period must evenly divide
+# output_period_rst (604800 s here), so restart boundaries never truncate a
+# partially-written output file. Derived from 'standard' (kept for back-compat)
+# with the fewest edits: 'standard's weekly averages and 7-records-per-file
+# daily-period streams already divide a week, so only the restart period and
+# the surf_flux/upscale/random packing change.
+description: "Weekly restarts; all output streams divide the restart period (ucla-roms >= 0.5.0 precheck-safe)"
+
+ocean_vars:
+  wrt_file_rst: true
+  output_period_rst: 604800
+  monthly_restarts: false
+  nrpf_rst: 2
+  wrt_file_his: false
+  output_period_his: 86400
+  nrpf_his: 7
+  wrt_z: true
+  wrt_ub: true
+  wrt_vb: true
+  wrt_u: true
+  wrt_v: true
+  wrt_r: false
+  wrt_o: false
+  wrt_w: true
+  wrt_akv: false
+  wrt_akt: false
+  wrt_aks: false
+  wrt_hbls: false
+  wrt_hbbl: false
+  wrt_file_avg: false
+  output_period_avg: 604800
+  nrpf_avg: 1
+  wrt_avg_z: true
+  wrt_avg_ub: true
+  wrt_avg_vb: true
+  wrt_avg_u: true
+  wrt_avg_v: true
+  wrt_avg_r: true
+  wrt_avg_o: true
+  wrt_avg_w: true
+  wrt_avg_akv: true
+  wrt_avg_akt: true
+  wrt_avg_aks: true
+  wrt_avg_hbls: true
+  wrt_avg_hbbl: true
+surf_flux:
+  wrt_smflx: false
+  wrt_stflx: false
+  wrt_rstflx: false
+  wrt_swflx: false
+  sflx_avg: false
+  output_period: 86400
+  nrpf: 7
+  sst_vname: sst
+  sst_tname: sst_time
+  sss_vname: sss
+  sss_tname: sss_time
+diagnostics:
+  diag_avg: false
+  output_period: 86400
+  nrpf: 7
+  diag_uv: false
+  diag_trc: false
+stdout_diag:
+  code_check_mode: false
+ts_output:
+  wrt_temp: false
+  wrt_salt: false
+  wrt_temp_dia: false
+  wrt_salt_dia: false
+frc_output:
+  wrt_frc: false
+  wrt_frc_avg: false
+  output_period: 3600.0
+  nrpf: 4
+cdr_output:
+  do_cdr_output: false
+  do_avg: true
+  monthly_averages: false
+  output_period: 3600
+  nrpf: 24
+upscale_output:
+  do_upscale: false
+  nrpf_uscl: 24
+  output_period_uscl: 3600
+zslice:
+  do_zslice: false
+  zslice_avg: false
+  wrt_t_zsl: false
+  wrt_u_zsl: false
+  wrt_v_zsl: false
+  output_period: 1200
+  nrpf: 72
+  ndep: 2
+  vecdep:
+  - -2.0
+  - -15.0
+  nt_z: 2
+  trc2zsc:
+  - 1
+  - 2
+random_output:
+  do_random: false
+  output_period: 3600
+  nrpf: 24
+bgc:
+  wrt_his: false
+  output_period_his: 86400
+  nrpf_his: 7
+  wrt_avg: false
+  output_period_avg: 86400
+  nrpf_avg: 7
+  wrt_his_dia: false
+  output_period_his_dia: 86400
+  nrpf_his_dia: 7
+  wrt_avg_dia: false
+  output_period_avg_dia: 60
+  nrpf_avg_dia: 1
+marbl_bgc:
+  marbl_tracers_to_write:
+  - PO4
+  - NO3
+  - SiO3
+  - NH4
+  - Fe
+  - O2
+  - DIC
+  - ALK
+  - spChl
+  - diatChl
+  marbl_diagnostics_to_write:
+  - PH
+  - PH_ALT_CO2
+  - pCO2SURF_ALT_CO2
+  - pCO2SURF
+  - FG_CO2
+  - FG_ALT_CO2

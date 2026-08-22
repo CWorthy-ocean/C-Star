@@ -63,6 +63,13 @@ requires_cstar_pio = pytest.mark.skipif(
 _MODEL_DIR = (
     Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
 )
+# ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
+_MODEL_DIR_ROMS050 = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "roms-marbl-0.5-default"
+)
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -2128,9 +2135,25 @@ class TestGoldenNamelist:
         )
         return mock_sd
 
-    def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
+    def _run_golden_namelist_case(
+        self, mock_grid, tmp_path, model_dir, golden_filename
+    ) -> str:
+        """Shared body for the golden namelist tests: drives the real
+        ``generate_inputs()`` -> ``configure_build()`` chain against ``model_dir``
+        and diffs the rendered ``namelist.nml`` against
+        ``tests/fixtures/<golden_filename>``.
+
+        Factored out (rather than ``pytest.mark.parametrize``) so
+        ``UPDATE_GOLDEN=1 pytest -k <test name>`` regenerates exactly one fixture
+        at a time -- the two golden tests stay independently selectable and the
+        pre-existing fixture is never at risk from a run targeting the other.
+
+        Returns the normalized rendered namelist text (workdir paths replaced by
+        ``<WORKDIR>``) so callers can layer additional assertions on top of the
+        byte-for-byte golden comparison.
+        """
         cfg = build_forge_blueprint(
-            model_dir=_MODEL_DIR,
+            model_dir=model_dir,
             grid_name="test-tiny",
             grid_kwargs=self._GRID_KWARGS,
             open_boundaries=self._BOUNDARIES,
@@ -2142,6 +2165,13 @@ class TestGoldenNamelist:
             forcing_inputs=_FORCING_INPUTS,
             output_settings=_OUTPUT_SETTINGS,
             cdr_forcing=self._CDR_FORCING,
+            # Explicit False (matches cson_roms-marbl_v0.1's own default) so both
+            # golden cases stay decoupled from PIO: roms-marbl-0.5-default bakes in
+            # use_pio: true, which would otherwise route grid generation through
+            # the real ``nccopy`` CDF-5 conversion (_pio_finalize) -- unrelated to
+            # the versioned-namelist behavior this test targets, and incompatible
+            # with the mocked (empty-file) grid.save() used here.
+            use_pio=False,
         )
 
         grid_mock = _create_grid_mock()
@@ -2255,7 +2285,7 @@ class TestGoldenNamelist:
             Path(cstar_forge.__file__).parents[1]
             / "tests"
             / "fixtures"
-            / "golden_namelist_test-tiny.nml"
+            / golden_filename
         )
 
         if os.environ.get("UPDATE_GOLDEN"):
@@ -2267,13 +2297,46 @@ class TestGoldenNamelist:
 
         golden = golden_path.read_text()
         assert normalized == golden, (
-            "Rendered namelist.nml drifted from "
-            "tests/fixtures/golden_namelist_test-tiny.nml. If this is an intentional "
-            "schema/default/template change, regenerate with "
-            "UPDATE_GOLDEN=1 pytest tests/test_core.py -k golden_namelist_test_tiny, "
+            f"Rendered namelist.nml drifted from tests/fixtures/{golden_filename}. "
+            "If this is an intentional schema/default/template change, regenerate "
+            f"with UPDATE_GOLDEN=1 pytest tests/test_core.py -k <this test name>, "
             "review the diff, and commit the updated fixture; otherwise this is a "
             "regression."
         )
+        return normalized
+
+    def test_golden_namelist_test_tiny(self, mock_grid, tmp_path):
+        self._run_golden_namelist_case(
+            mock_grid, tmp_path, _MODEL_DIR, "golden_namelist_test-tiny.nml"
+        )
+
+    def test_golden_namelist_test_tiny_roms050(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.5-default`` ModelSpec (ucla-roms >= 0.5.0) -- proves the
+        versioned namelist path end to end: ``configure_build`` threads
+        ``code_spec.roms.commit`` ("0.5.0") through to ``write_roms_namelist``,
+        which selects ``RunTimeSettingsV0_5_0``/``RomsNamelistV0_5_0``.
+
+        The two schema-visible differences from the < 0.5.0 golden are: no
+        ``nrpf_rst`` in ``&basic_output_settings``, and
+        ``output_period_particles``/``nrpf_particles`` (not ``output_period``/
+        ``nrpf``) in ``&particles_settings``.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS050,
+            "golden_namelist_test-tiny-roms050.nml",
+        )
+
+        basic_output = normalized.split("&basic_output_settings")[1].split("/", 1)[0]
+        assert "nrpf_rst" not in basic_output
+
+        particles = normalized.split("&particles_settings")[1].split("/", 1)[0]
+        assert "output_period_particles" in particles
+        assert "nrpf_particles" in particles
+        assert "output_period =" not in particles
+        assert "nrpf =" not in particles
 
 
 class TestChildDomainNoInitialConditionsValidatesAtEmit:

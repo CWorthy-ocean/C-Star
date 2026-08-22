@@ -26,6 +26,13 @@ from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 _MODEL_DIR = (
     Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
 )
+# ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
+_MODEL_DIR_ROMS050 = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "roms-marbl-0.5-default"
+)
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -1088,6 +1095,41 @@ def test_golden_model_settings_test_tiny():
     )
 
 
+def test_golden_model_settings_test_tiny_roms050():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.5-default`` ModelSpec
+    (ucla-roms >= 0.5.0), resolved from the same test-tiny domain/forcing/output
+    setup as ``test_golden_model_settings_test_tiny``.
+
+    ``model_settings`` itself is schema-version-agnostic (the resolver doesn't
+    validate it against ``RunTimeSettings``/``RunTimeSettingsV0_5_0`` -- that
+    happens downstream, at ``write_roms_namelist`` time), so this is a plain
+    resolver-drift snapshot for the new ModelSpec, not a versioned-namelist
+    assertion (see ``TestGoldenNamelist.test_golden_namelist_test_tiny_roms050``
+    in ``tests/test_core.py`` for that). It intentionally differs from
+    ``golden_model_settings_test-tiny.json`` because that fixture is resolved
+    from the unrelated ``cson_roms-marbl_v0.1`` ModelSpec, with its own physics/
+    numerics defaults.
+    """
+    import json
+
+    golden_path = (
+        Path(cstar_forge.__file__).parents[1]
+        / "tests"
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms050.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_dir=_MODEL_DIR_ROMS050)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.5-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms050.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
 def test_resolver_nesting_enables_extract_data():
     cfg = _build(
         grid_kwargs_child=dict(
@@ -1615,6 +1657,138 @@ def test_catalog_scans_outputspec():
         "marbl_tracers_to_write",
         "marbl_diagnostics_to_write",
     }
+
+
+# Every (period, nrpf) stream pair ucla-roms >= 0.5.0's check_output_divides_rst
+# covers within OutputSpec-owned sections. The precheck requires, per ENABLED
+# stream, that nrpf * output_period evenly divide output_period_rst (skipped
+# when restarts are monthly / the periodic frequency is 0), so spec defaults
+# must satisfy it for every stream a user might enable.
+_OUTPUT_SPEC_STREAMS = (
+    ("ocean_vars", "output_period_his", "nrpf_his"),
+    ("ocean_vars", "output_period_avg", "nrpf_avg"),
+    ("surf_flux", "output_period", "nrpf"),
+    ("diagnostics", "output_period", "nrpf"),
+    ("frc_output", "output_period", "nrpf"),
+    ("cdr_output", "output_period", "nrpf"),
+    ("upscale_output", "output_period_uscl", "nrpf_uscl"),
+    ("zslice", "output_period", "nrpf"),
+    ("random_output", "output_period", "nrpf"),
+    ("bgc", "output_period_his", "nrpf_his"),
+    ("bgc", "output_period_avg", "nrpf_avg"),
+    ("bgc", "output_period_his_dia", "nrpf_his_dia"),
+    ("bgc", "output_period_avg_dia", "nrpf_avg_dia"),
+)
+
+# ModelSpec-owned stream pairs the same precheck covers (extract_data is
+# nesting-derived at resolve time, so it can't be checked from static specs).
+_MODEL_SPEC_STREAMS = (
+    ("sponge_tune", "output_period", "nrpf"),
+    ("particles", "output_period", "nrpf"),
+)
+
+
+def _assert_streams_divide_rst(sections: dict, streams, rst: float, origin: str):
+    for section, period_key, nrpf_key in streams:
+        newfile_freq = sections[section][nrpf_key] * sections[section][period_key]
+        assert newfile_freq > 0 and rst % newfile_freq == 0, (
+            f"{origin}: {section}.{nrpf_key} * {section}.{period_key} "
+            f"= {newfile_freq} s does not evenly divide output_period_rst "
+            f"= {rst} s -- ucla-roms >= 0.5.0's check_output_divides_rst "
+            f"aborts if this stream is enabled."
+        )
+
+
+@pytest.mark.parametrize(
+    "spec_name", ["daily-restarts", "weekly-restarts", "monthly-restarts"]
+)
+def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
+    """The precheck-safe OutputSpecs must stay self-consistent: every stream a
+    user might enable divides the restart period ('standard' is exempt -- it is
+    kept unchanged for blueprints that reference it).
+    """
+    data = _CATALOG.output_data(spec_name)
+    ov = data["ocean_vars"]
+    if ov["monthly_restarts"] or ov["output_period_rst"] == 0:
+        return  # the precheck is vacuous (mod 0) -- nothing to assert
+    _assert_streams_divide_rst(
+        data, _OUTPUT_SPEC_STREAMS, ov["output_period_rst"], spec_name
+    )
+
+
+@pytest.mark.parametrize("spec_name", ["daily-restarts", "weekly-restarts"])
+def test_roms050_model_spec_streams_satisfy_roms_divides_rst_precheck(spec_name):
+    """roms-marbl-0.5-default's own streams (sponge, particles) must divide the
+    restart period of every periodic-restart precheck-safe OutputSpec, since a
+    resolved blueprint combines the two.
+    """
+    model_settings = yaml.safe_load(
+        (
+            Path(cstar_forge.__file__).parent
+            / "catalog"
+            / "ModelSpec"
+            / "roms-marbl-0.5-default"
+            / "model.yaml"
+        ).read_text()
+    )["model_settings"]
+    rst = _CATALOG.output_data(spec_name)["ocean_vars"]["output_period_rst"]
+    _assert_streams_divide_rst(
+        model_settings,
+        _MODEL_SPEC_STREAMS,
+        rst,
+        f"roms-marbl-0.5-default + {spec_name}",
+    )
+
+
+# Child grid used by the resolver-layer extract-divides-rst tests below
+# (same shape as test_resolver_nesting_enables_extract_data's).
+_CHILD_GRID = dict(
+    nx=30,
+    ny=30,
+    size_x=300,
+    size_y=300,
+    center_lon=0,
+    center_lat=55,
+    rot=0,
+    N=20,
+    theta_s=6.0,
+    theta_b=3.0,
+    hc=250.0,
+)
+
+
+def test_resolver_rejects_extract_period_not_dividing_rst_for_roms050():
+    """Nesting with a child period whose files don't roll on restart boundaries
+    fails at authoring time for a >= 0.5.0 model (ucla-roms's own
+    check_output_divides_rst would abort the run at startup).
+    """
+    # seeded nrpf=24; 24 * 5000 = 120000 s does not divide rst 86400 s
+    with pytest.raises(ValueError, match="evenly divide"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS050,
+            grid_kwargs_child=_CHILD_GRID,
+            metadata_child={"period": 5000.0},
+        )
+
+
+def test_resolver_accepts_conforming_extract_period_for_roms050():
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS050,
+        grid_kwargs_child=_CHILD_GRID,
+        metadata_child={"period": 1800.0},  # 24 * 1800 = 43200 | 86400
+    )
+    assert cfg.model_settings["extract_data"]["do_extract"] is True
+
+
+def test_resolver_extract_check_gated_off_for_legacy_roms():
+    """The same nonconforming period resolves fine for a pre-0.5.0 model --
+    older ucla-roms has no such precheck, so authoring isn't blocked.
+    """
+    cfg = _build(  # default _MODEL_DIR pins roms 0.2.0 (legacy schema)
+        grid_kwargs_child=_CHILD_GRID,
+        metadata_child={"period": 5000.0},
+    )
+    assert cfg.model_settings["extract_data"]["extract_period"] == 5000.0
 
 
 def test_resolver_output_settings_override():
@@ -2846,6 +3020,10 @@ class TestForgeBlueprintWizard:
 
     def test_ocean_vars_rst_dependents_visibility_follows_wrt_file_rst(self):
         w = self._wizard()
+        # nrpf_rst exists only pre ucla-roms 0.5.0; pin a legacy ref so the
+        # editor generates the widget (the default model pins "main" -> latest).
+        w.roms_ref.value = "0.2.0"
+        w._rebuild()
         wrt = w.editor._widgets[("ocean_vars", "wrt_file_rst")][0]
         monthly = w.editor._widgets[("ocean_vars", "monthly_restarts")][0]
         nrpf = w.editor._widgets[("ocean_vars", "nrpf_rst")][0]
@@ -2944,6 +3122,10 @@ class TestForgeBlueprintWizard:
         the synced values, not just widgets driven by a live user edit.
         """
         w = self._wizard()
+        # nrpf_rst exists only pre ucla-roms 0.5.0; pin a legacy ref so the
+        # editor generates the widget (the default model pins "main" -> latest).
+        w.roms_ref.value = "0.2.0"
+        w._rebuild()
         w._syncing = True
         try:
             w.editor.sync(
@@ -3129,7 +3311,9 @@ class TestForgeBlueprintWizard:
         # "<model default>" fallback.
         if "standard" not in w._dd_values(w.output_dd):
             pytest.skip("example OutputSpec not in catalog")
-        assert w.output_dd.value == "standard"
+        # 'daily-restarts' is the preselected default (_DEFAULT_OUTPUT_SPEC);
+        # 'standard' remains selectable for back-compat.
+        assert w.output_dd.value == "daily-restarts"
         assert w.config.composition.output.origin == "catalog"
         assert (
             "marbl_config_file" in w.config.model_settings["marbl_bgc"]
