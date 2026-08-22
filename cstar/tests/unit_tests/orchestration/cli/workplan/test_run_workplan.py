@@ -106,6 +106,202 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     mock_exec.assert_called_once()
 
 
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_reaches_build_and_run_dag() -> None:
+    """Verify repeated `--clobber` options are forwarded to
+    `build_and_run_dag`'s `clobber_steps` keyword argument.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+    )
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "--run-id",
+                "12345",
+                "--clobber",
+                "Prepare",
+                "--clobber",
+                "Ensemble X",
+                wp_uri,
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.await_args is not None
+    assert mock_build_and_run_dag.await_args.kwargs["clobber_steps"] == [
+        "Prepare",
+        "Ensemble X",
+    ]
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_all_reaches_build_and_run_dag() -> None:
+    """Verify `--clobber all` is expanded by the CLI into every step's
+    safe_name before reaching `build_and_run_dag`.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+    )
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "--run-id",
+                "12345",
+                "--clobber",
+                "all",
+                wp_uri,
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.await_args is not None
+    assert mock_build_and_run_dag.await_args.kwargs["clobber_steps"] == [
+        "prepare",
+        "ensemble-x",
+        "ensemble-y",
+        "aggregate-results",
+    ]
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_unknown_step_fails_fast() -> None:
+    """Verify an unresolvable `--clobber` selection exits with a usage error
+    before `build_and_run_dag` is invoked.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    mock_build_and_run_dag = mock.AsyncMock()
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", "--clobber", "does-not-exist", wp_uri],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "Unknown step(s)" in result.output
+    assert "does-not-exist" in result.output
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_all_with_step_name_fails_fast() -> None:
+    """Verify combining `all` with a step name exits with a usage error
+    before `build_and_run_dag` is invoked.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    mock_build_and_run_dag = mock.AsyncMock()
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", "--clobber", "all", "--clobber", "Prepare", wp_uri],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_bare_clobber_fails_fast() -> None:
+    """Verify a bare `--clobber` with no value (as the last argv token) exits
+    non-zero due to typer's missing-argument error, rather than clobbering
+    every step implicitly.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "--run-id",
+            "12345",
+            wp_uri,
+            "--clobber",
+        ],
+        color=False,
+    )
+
+    assert result.exit_code == 2
+    assert "requires an argument" in result.stderr
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_step_defaults_to_empty_list() -> None:
+    """Verify `clobber_steps` defaults to an empty list when `--clobber`
+    is not supplied.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        )
+    )
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", wp_uri],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.await_args is not None
+    assert mock_build_and_run_dag.await_args.kwargs["clobber_steps"] == []
+
+
 @pytest.mark.usefixtures("prefect_server_url", "read_yaml_intercept")
 def test_workplan_run_variable_unknown(
     wp_templates_dir: Path,

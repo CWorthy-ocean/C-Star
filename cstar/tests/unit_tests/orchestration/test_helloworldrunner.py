@@ -306,6 +306,52 @@ def test_hello_world_workplan_dry_run(
 
 
 @pytest.mark.usefixtures("prefect_server_url")
+def test_workplan_run_unknown_clobber_step_fails_fast(
+    hw_single_step_wp_path: Path,
+) -> None:
+    """Verify an unrecognized `--clobber` step value fails fast as a CLI usage
+    error (rather than a generic failure) and lists the valid step names.
+
+    Parameters
+    ----------
+    hw_single_step_wp_path : Path
+        The path to the workplan containing a single step that runs the
+        hello_world application.
+    prefect_server_url: str
+        Implicitly declare dependence on the prefect server
+    """
+    runner = CliRunner()
+    custom_env = {
+        ENV_CSTAR_ORCH_DELAYS: "0.01",
+        ENV_CSTAR_SLURM_MAX_WALLTIME: "00:02:00",
+        ENV_CSTAR_SLURM_QUEUE: "debug",
+    }
+
+    with (
+        mock.patch.dict(os.environ, custom_env),
+        mock.patch(
+            "cstar.system.manager.CStarSystemManager.scheduler",
+            mock.PropertyMock(return_value=None),
+        ),
+    ):
+        result = runner.invoke(
+            app_run_workplan,
+            [
+                hw_single_step_wp_path.as_posix(),
+                "--run-id",
+                str(uuid.uuid4()),
+                "--dry-run",
+                "--clobber",
+                "does-not-exist",
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "does-not-exist" in result.stderr
+
+
+@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     "dry_run",
     [

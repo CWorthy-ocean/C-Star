@@ -443,6 +443,9 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         dependencies = await cls._prune_completed_dependencies(dependencies)
 
+        if step.clobber:
+            submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
+
         handle = await submit_fn(step, dependencies)
         await SlurmLauncher.update_status(handle)
 
