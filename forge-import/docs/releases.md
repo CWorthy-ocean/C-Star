@@ -1,5 +1,48 @@
 # Release notes
 
+## 0.5.0
+
+### Breaking Changes
+
+* Requires cstar-ocean 0.11.0 or higher ([#137](https://github.com/CWorthy-ocean/cstar-forge/pull/137))
+
+### New Features
+
+* Users can attach existing netcdf files for grids, CDR Forcing, and rivers ([#121](https://github.com/CWorthy-ocean/cstar-forge/pull/121))
+* The repo-bundled catalog is no longer the default save location and sole catalog location. A new multi-tier catalog is implemented, allowing read-only from any number of locations, automatic appending of bundled catalog items, and a default read/write catalog layer in the user's home directory. More catalog configuration and features will be coming soon, but this change at least decouples the repo location from the primary catalog save location. ([#122](https://github.com/CWorthy-ocean/cstar-forge/pull/122))
+* The MARBL codebase tag can now be specified in the wizard. ([#131](https://github.com/CWorthy-ocean/cstar-forge/pull/131))
+* The MARBL codebase defaults to the [C]Worthy fork (but can still be edited in the model spec) ([#131](https://github.com/CWorthy-ocean/cstar-forge/pull/131))
+* Tie in to new C-Star namelist versioning features ([#137](https://github.com/CWorthy-ocean/cstar-forge/pull/137))
+* Provide new default ModelSpec for ROMS 0.5.0 ([#137](https://github.com/CWorthy-ocean/cstar-forge/pull/137))
+* Add precheck-safe output specs for daily, weekly, monthly restarts ([#137](https://github.com/CWorthy-ocean/cstar-forge/pull/137))
+* Add up-front checks for incompatible output frequencies ([#137](https://github.com/CWorthy-ocean/cstar-forge/pull/137))
+
+### Bug Fixes
+
+* Fixed bug where exceptions were not printed into forge log files ([#121](https://github.com/CWorthy-ocean/cstar-forge/pull/121))
+* Fixed "ValueError: Separator is not found, and chunk exceed the limit" error in wizard run box ([#121](https://github.com/CWorthy-ocean/cstar-forge/pull/121))
+* The executor will no longer error out if boundary conditions are not generated (a legitimate use case for child domains) ([#126](https://github.com/CWorthy-ocean/cstar-forge/pull/126))
+* Remove river forcing params that have no effect from Advanced Settings (these get dynamically determined by the river forcing setup) ([#132](https://github.com/CWorthy-ocean/cstar-forge/pull/132))
+* fix _deep_merge in the resolver to deep-copy override values, so resolved blueprints never alias the shared OutputSpec section dicts. ([#134](https://github.com/CWorthy-ocean/cstar-forge/pull/134))
+
+### Improvements
+
+* Relocation of data output to SCRATCH space on HPCs is now backwards-compatible with blueprints that point to the old default location. ([#120](https://github.com/CWorthy-ocean/cstar-forge/pull/120))
+* Machine yamls have been removed from Forge. They needlessly duplicated C-Star machine configurations and were no longer used. Machine-based directory setup remains, but will be abstracted/consolidated in upcoming work. ([#124](https://github.com/CWorthy-ocean/cstar-forge/pull/124))
+* The "register kernel" procedure is now available through the CLI for conda installations ([#127](https://github.com/CWorthy-ocean/cstar-forge/pull/127))
+* Downloaded source data (previous and new downloads) will receive group read permissions if possible ([#128](https://github.com/CWorthy-ocean/cstar-forge/pull/128))
+* Make initial conditions optional for child grids ([#133](https://github.com/CWorthy-ocean/cstar-forge/pull/133))
+* Improve UI/UX for selecting monthly/periodic average/instantaneous optionality for restarts and cdr_output ([#134](https://github.com/CWorthy-ocean/cstar-forge/pull/134))
+* Validate restart-output period divides evenly by dt at blueprint creation and forge execution ([#135](https://github.com/CWorthy-ocean/cstar-forge/pull/135))
+
+### Miscellaneous
+
+* Get rid of "pieces" terminology throughout code, wizard, docs ([#123](https://github.com/CWorthy-ocean/cstar-forge/pull/123))
+* Voila backing notebook moved to avoid confusion with user-runnable wizard notebook. ([#125](https://github.com/CWorthy-ocean/cstar-forge/pull/125))
+* A conda activate/deactivate script will be in the next conda build that performs runtime protection against .local shadowing (similar to harden-env.sh, but for conda installs) ([#127](https://github.com/CWorthy-ocean/cstar-forge/pull/127))
+* Pin `compilers<2` to get around temporary mpicc wrapper error from mpich ([#129](https://github.com/CWorthy-ocean/cstar-forge/pull/129))
+* Revert compilers<2, add compiler-specific mpich packages to ensure macos has the exact compilers needed ([#130](https://github.com/CWorthy-ocean/cstar-forge/pull/130))
+
 ## 0.4.0
 
 ### Breaking Changes
