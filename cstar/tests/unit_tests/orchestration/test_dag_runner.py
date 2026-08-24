@@ -10,13 +10,13 @@ import pytest
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
-    ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
     FLAG_OFF,
     FLAG_ON,
 )
 from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import (
+    DirectoryManager,
     JobFileSystemManager,
     StateDirectoryManager,
 )
@@ -75,7 +75,7 @@ async def layered_workplan(
     last_parent: str | None = None
     asset_path = tmp_path / "assets"
     handles: dict[str, LocalHandle] = {}
-    mock_data_dir = Path(str(os.getenv(ENV_CSTAR_DATA_HOME)))
+    mock_data_dir = DirectoryManager.data_home()
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
         fsm_map = {"": JobFileSystemManager(mock_data_dir)}

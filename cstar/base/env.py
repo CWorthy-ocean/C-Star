@@ -273,7 +273,7 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
     EnvVar(
         "Environment variable used to override the home directory for C-Star dataset storage.",
         GROUP_FS,
-        "~/.local/share",
+        "~/cstar",
         indirect_var="XDG_DATA_HOME",
         default_factory=lambda x: hpc_data_directory() or indirect_default_factory(x),
     ),
