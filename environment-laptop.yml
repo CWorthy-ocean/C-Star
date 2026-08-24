@@ -9,6 +9,9 @@ dependencies:
   - compilers
   - cmake
   - mpich
+  # mpicc / mpifort flavors needed to ensure we get the matching compilers on macos
+  - mpich-mpicc
+  - mpich-mpifort
   - netcdf-fortran
   - libpnetcdf
   # ucla-roms Makefiles need GNU-flavored rsync; macOS's system rsync lacks

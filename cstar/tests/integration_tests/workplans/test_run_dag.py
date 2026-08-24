@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from cstar.orchestration.dag_runner import build_and_run_dag
+from cstar.orchestration.dag_runner import build_dag, run_dag
 from cstar.orchestration.models import Step, Workplan
 
 
@@ -109,7 +109,9 @@ async def test_build_and_run_local(
 
     # create unique run name only once per hour, cache otherwise.
     my_run_name = f"{tmp_path.stem}_{workplan_name}"
-    await build_and_run_dag(wp_path, my_run_name, tmp_path)
+
+    planner, path = await build_dag(wp_path, my_run_name)
+    await run_dag(path, my_run_name, planner)
 
 
 # @pytest.mark.skipif(not slurm())
@@ -148,4 +150,5 @@ async def test_build_and_run(
 
     # create unique run name only once per hour, cache otherwise.
     my_run_name = f"{tmp_path.stem}_{workplan_name}"
-    await build_and_run_dag(wp_path, my_run_name, tmp_path)
+    planner, path = await build_dag(wp_path, my_run_name)
+    await run_dag(path, my_run_name, planner)

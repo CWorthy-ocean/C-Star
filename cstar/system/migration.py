@@ -285,6 +285,15 @@ class BlueprintMigration(Migration):
         )
 
 
+def _version_key(version: str) -> tuple[int, ...]:
+    """Return a numeric sort key for a dotted-integer schema version.
+
+    Schema versions must compare numerically per component: lexicographic
+    string comparison would order ``"10.0.0"`` before ``"2.0.0"``.
+    """
+    return tuple(int(part) for part in version.split("."))
+
+
 def identify_bounds(
     adapters: Sequence[type[SchemaAdapter]],
 ) -> dict[str, SchemaBounds]:
@@ -309,11 +318,8 @@ def identify_bounds(
     schema_bounds: dict[str, SchemaBounds] = {}
 
     for app_name, adapter_list in app_adapters.items():
-        sources = sorted(x.source() for x in adapter_list)
-        targets = sorted((x.target() for x in adapter_list), reverse=True)
-
-        vmin = next(iter(sources))
-        vmax = next(iter(targets))
+        vmin = min((x.source() for x in adapter_list), key=_version_key)
+        vmax = max((x.target() for x in adapter_list), key=_version_key)
 
         schema_bounds[app_name] = SchemaBounds(min=vmin, max=vmax)
     return schema_bounds

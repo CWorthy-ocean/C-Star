@@ -19,6 +19,7 @@ from cstar.applications.roms_marbl.transforms import (
 from cstar.base.env import FLAG_OFF
 from cstar.base.exceptions import CstarError
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (
     Application,
     BlueprintState,
@@ -259,7 +260,21 @@ def test_override_transform_system_precedence(
 
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("use_pio", "expected_dir_attr", "expected_name"),
+    [
+        pytest.param(
+            False, "output_dir", "output_rst.20120201000000.000.nc", id="no_pio"
+        ),
+        pytest.param(
+            True, "joined_output_dir", "output_rst.20120201000000.nc", id="pio"
+        ),
+    ],
+)
 async def test_continuance_directive_step_resolution(
+    use_pio: bool,
+    expected_dir_attr: str,
+    expected_name: str,
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
@@ -269,8 +284,14 @@ async def test_continuance_directive_step_resolution(
     """Verify that a continuance directive uses context information to identify
     the search path when a step name is provided.
 
+    When `use_pio` is enabled the prior step writes joined (unpartitioned)
+    restart files to `joined_output`, so the directive must search there
+    instead of `output`.
+
     Parameters
     ----------
+    use_pio : bool
+        Whether the prior step ran with ParallelIO enabled.
     tmp_path : Path
         Temporary directory for test outputs
     bp_templates_dir: Path
@@ -310,6 +331,11 @@ async def test_continuance_directive_step_resolution(
 
     await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
 
+    # inject `use_pio` here to ensure it survives into the directive's blueprint read.
+    bp = deserialize(local_bp, RomsMarblBlueprint)
+    bp.model_params.use_pio = use_pio
+    assert serialize(local_bp, bp)
+
     for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):
         if i > 0:
             prior_step = live_plan.steps[i - 1]
@@ -333,11 +359,16 @@ async def test_continuance_directive_step_resolution(
             assert ContinuanceDirective.KEY_STEP in config
             assert ContinuanceDirective.KEY_PATH not in config
 
-            # confirm the initial conditions have been overridden to reference the named step
+            # confirm the initial conditions were overridden to continue from the
+            # latest restart of the named step (see parametrization for the
+            # expected directory and file per PIO mode).
+            prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
+            expected_dir = getattr(prior_fsm, expected_dir_attr)
+
             bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
-            assert Path(bp.initial_conditions.data[0].location).is_relative_to(
-                prior_step.fsm.output_dir
-            )
+            location = Path(bp.initial_conditions.data[0].location)
+            assert location.is_relative_to(expected_dir)
+            assert location.name == expected_name
 
 
 @pytest.mark.asyncio
@@ -1003,6 +1034,42 @@ def test_restart_file_find(tmp_path: Path, pad_size: int) -> None:
     reset_file = RestartFile.find(tmp_path)
     assert reset_file
     assert reset_file.path == Path(reset_path).expanduser().resolve()
+
+
+def test_restart_file_find_selects_latest_partition_zero(tmp_path: Path) -> None:
+    """Verify that `RestartFile.find` continues from partition 0 of the most
+    recent restart timestamp when the directory holds several timestamps, each
+    with a full set of partition files.
+    """
+    search_path = tmp_path / "output"
+    search_path.mkdir(parents=True)
+
+    # two timestamps, each with a 3-partition set (deliberately created out of
+    # chronological / partition order to prove the selection, not the order)
+    for timestamp in ("20120201000000", "20120101000000"):
+        for segment in ("002", "000", "001"):
+            (search_path / f"foo_rst.{timestamp}.{segment}.nc").touch()
+
+    reset_file = RestartFile.find(search_path, notfound_ok=False)
+    assert reset_file
+    assert reset_file.path.name == "foo_rst.20120201000000.000.nc"
+
+
+def test_restart_file_find_skips_malformed(tmp_path: Path) -> None:
+    """Verify that a stray file matching the restart glob shape but not the
+    strict naming convention is skipped rather than aborting the search.
+    """
+    search_path = tmp_path / "output"
+    search_path.mkdir(parents=True)
+
+    (search_path / "foo_rst.20120101000000.000.nc").touch()
+    # matches the glob (valid timestamp) but not `PATTERN_RST` (non-numeric
+    # partition segment), so it must be filtered out rather than constructed
+    (search_path / "foo_rst.20120101000000.xyz.nc").touch()
+
+    reset_file = RestartFile.find(search_path, notfound_ok=False)
+    assert reset_file
+    assert reset_file.path.name == "foo_rst.20120101000000.000.nc"
 
 
 def test_restart_file_find_dne(tmp_path: Path) -> None:

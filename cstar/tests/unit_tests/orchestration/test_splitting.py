@@ -8,15 +8,17 @@ from unittest import mock
 import pytest
 
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.transforms import (
+    SplitFrequency,
     get_time_slices,
     get_transforms,
 )
+from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 N_MONTHS: t.Final[int] = 12
 
@@ -80,21 +82,20 @@ def test_sleep_transform_registry(application: str) -> None:
 
 def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
     """Verify the splitter returns the expected steps for a given time range."""
-    transform = RomsMarblTimeSplitter()
-
     original_step = LiveStep.from_step(single_step_workplan.steps[0])
 
     # mock data home to ensure test works on HPC if scratch directories are identified
-    data_home = tmp_path / "data"
     with mock.patch.dict(
         os.environ,
         {
             ENV_CSTAR_RUNID: "12345",
-            ENV_CSTAR_DATA_HOME: data_home.as_posix(),
             ENV_FF_ORCH_TRX_TIMESPLIT: "1",
+            ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
         },
         clear=True,
     ):
+        transform = RomsMarblTimeSplitter()
+
         transformed_steps = list(transform(original_step))
 
         # one step transforms into 12 monthly steps

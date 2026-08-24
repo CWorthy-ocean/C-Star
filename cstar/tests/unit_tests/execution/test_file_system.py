@@ -5,8 +5,9 @@ from unittest import mock
 
 import pytest
 
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.execution.file_system import (
+    DirectoryManager,
     JobFileSystemManager,
     RomsFileSystemManager,
     is_remote_resource,
@@ -132,7 +133,6 @@ def test_live_step(tmp_path: Path) -> None:
     bp = tmp_path / "bp.yml"
     bp.touch()
 
-    data_home = tmp_path / "data"
     run_id = "fake-run-id"
 
     step_1 = Step(name="A", application="roms_marbl", blueprint=bp)
@@ -142,7 +142,6 @@ def test_live_step(tmp_path: Path) -> None:
     with mock.patch.dict(
         os.environ,
         {
-            ENV_CSTAR_DATA_HOME: data_home.as_posix(),
             ENV_CSTAR_RUNID: run_id,
         },
         clear=True,
@@ -163,6 +162,9 @@ def test_live_step(tmp_path: Path) -> None:
 
         task_dir_name = JobFileSystemManager._TASKS_NAME  # type: ignore
         actual = ls_1.working_dir
+
+        directory_mgr = DirectoryManager()
+        data_home = directory_mgr.data_home()
         expected = data_home / run_id / task_dir_name / ls_1.safe_name  # noqa: SLF001
         assert actual == expected
 

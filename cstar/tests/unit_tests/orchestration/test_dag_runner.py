@@ -8,16 +8,38 @@ from unittest import mock
 import pytest
 
 from cstar.applications.hello_world import HelloWorldBlueprint
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import (
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    ENV_CSTAR_RUNID,
+    FLAG_OFF,
+    FLAG_ON,
+)
+from cstar.entrypoint.utils import ARG_CLOBBER
 from cstar.execution.file_system import (
+    DirectoryManager,
     JobFileSystemManager,
     StateDirectoryManager,
 )
-from cstar.orchestration.dag_runner import get_status_detail_map, load_run_state
+from cstar.orchestration.dag_runner import (
+    _ignore_ambient_clobber_env,
+    apply_clobber_overrides,
+    check_clobber_dependents,
+    check_clobber_targets,
+    get_status_detail_map,
+    load_run_state,
+    prepare_workplan,
+)
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
-from cstar.orchestration.models import BlueprintState, Step, Workplan, WorkplanState
-from cstar.orchestration.orchestration import Planner, Status
-from cstar.orchestration.serialization import serialize
+from cstar.orchestration.models import (
+    KEY_CLOBBER,
+    Application,
+    BlueprintState,
+    Step,
+    Workplan,
+    WorkplanState,
+)
+from cstar.orchestration.orchestration import LiveWorkplan, Planner, Status
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
@@ -53,7 +75,7 @@ async def layered_workplan(
     last_parent: str | None = None
     asset_path = tmp_path / "assets"
     handles: dict[str, LocalHandle] = {}
-    mock_data_dir = Path(str(os.getenv(ENV_CSTAR_DATA_HOME)))
+    mock_data_dir = DirectoryManager.data_home()
 
     with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
         fsm_map = {"": JobFileSystemManager(mock_data_dir)}
@@ -301,3 +323,214 @@ async def test_dag_runner_get_status_detail_map(
             elif step.name in open_names:
                 # it has no dependencies in the open set
                 assert detail.ready
+
+
+def _make_step(
+    tmp_path: Path,
+    name: str,
+    depends_on: list[str] | None = None,
+) -> Step:
+    """Build a minimal `Step` for use in `_apply_clobber_overrides` tests."""
+    bp_path = tmp_path / f"{name}.yaml"
+    bp_path.touch()
+    return Step(
+        name=name,
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        depends_on=depends_on or [],
+    )
+
+
+def _make_workplan(steps: list[Step]) -> Workplan:
+    """Build a minimal `Workplan` wrapping the given steps."""
+    return Workplan(
+        name="test-workplan",
+        description="A workplan used to test `_apply_clobber_overrides`",
+        steps=steps,
+    )
+
+
+def test_ignore_ambient_clobber_env_pops_and_warns(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An exported CSTAR_CLOBBER_WORKING_DIR is scrubbed (so it cannot leak
+    into every step subprocess) and the user is pointed at `--clobber`.
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_ON)
+
+    with caplog.at_level("WARNING"):
+        _ignore_ambient_clobber_env()
+
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
+    assert len(caplog.records) == 1
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR in caplog.text
+    assert ARG_CLOBBER in caplog.text
+
+
+def test_ignore_ambient_clobber_env_silent_when_off(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An explicit "off" value is scrubbed without a warning (it would have
+    had no effect on the steps).
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_OFF)
+
+    with caplog.at_level("WARNING"):
+        _ignore_ambient_clobber_env()
+
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
+    assert not caplog.records
+
+
+def test_ignore_ambient_clobber_env_noop_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Absence of the variable is a silent no-op."""
+    monkeypatch.delenv(ENV_CSTAR_CLOBBER_WORKING_DIR, raising=False)
+
+    with caplog.at_level("WARNING"):
+        _ignore_ambient_clobber_env()
+
+    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
+    assert not caplog.records
+
+
+def test_apply_clobber_overrides_noop_when_none(tmp_path: Path) -> None:
+    """Verify no overrides are applied when `clobber_steps` is `None`."""
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
+
+    apply_clobber_overrides(wp, None)
+
+    assert wp.steps[0].workflow_overrides == {}
+
+
+def test_apply_clobber_overrides_noop_when_empty(tmp_path: Path) -> None:
+    """Verify no overrides are applied when `clobber_steps` is empty."""
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
+
+    apply_clobber_overrides(wp, [])
+
+    assert wp.steps[0].workflow_overrides == {}
+
+
+def test_apply_clobber_overrides_matches_name_and_safe_name(tmp_path: Path) -> None:
+    """Verify a token matching either `name` or `safe_name` marks only the
+    matching step's `workflow_overrides` with `clobber: True`.
+    """
+    step_a = _make_step(tmp_path, "Step A")
+    step_b = _make_step(tmp_path, "Step B")
+    step_c = _make_step(tmp_path, "Step C")
+    wp = _make_workplan([step_a, step_b, step_c])
+
+    apply_clobber_overrides(wp, [step_a.name, step_b.safe_name])
+
+    assert wp.steps[0].workflow_overrides[KEY_CLOBBER] is True
+    assert wp.steps[1].workflow_overrides[KEY_CLOBBER] is True
+    assert not wp.steps[2].workflow_overrides.get(KEY_CLOBBER, False)
+
+
+def test_apply_clobber_overrides_unknown_raises(tmp_path: Path) -> None:
+    """Verify an unresolvable token raises `ValueError` listing valid step names."""
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
+
+    with pytest.raises(ValueError, match=r"Unknown clobber step selection\(s\)"):
+        apply_clobber_overrides(wp, ["does-not-exist"])
+
+
+def test_apply_clobber_overrides_unknown_lists_all_bad_tokens(tmp_path: Path) -> None:
+    """Verify all unresolvable tokens are reported in a single `ValueError`."""
+    step_a = _make_step(tmp_path, "Step A")
+    wp = _make_workplan([step_a])
+
+    with pytest.raises(ValueError, match=r"'bad-one'.*'bad-two'|'bad-two'.*'bad-one'"):
+        apply_clobber_overrides(wp, ["bad-one", "bad-two"])
+
+
+def test_apply_clobber_overrides_all_is_not_special(tmp_path: Path) -> None:
+    """Verify `all` carries no meaning at this layer (the CLI expands it):
+    it resolves like any other name, matching a step literally named `all`
+    and raising `ValueError` otherwise.
+    """
+    wp = _make_workplan([_make_step(tmp_path, "Step A")])
+    with pytest.raises(ValueError, match=r"Unknown clobber step selection\(s\)"):
+        apply_clobber_overrides(wp, ["all"])
+
+
+def test_apply_clobber_overrides_warns_untargeted_dependents_once(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a single warning lists every untargeted step that depends on a
+    clobbered step.
+    """
+    step_a = _make_step(tmp_path, "Step A")
+    step_b = _make_step(tmp_path, "Step B")
+    step_c = _make_step(tmp_path, "Step C", depends_on=[step_a.name, step_b.name])
+    step_d = _make_step(tmp_path, "Step D", depends_on=[step_a.name])
+    wp = _make_workplan([step_a, step_b, step_c, step_d])
+
+    with caplog.at_level("WARNING"):
+        apply_clobber_overrides(wp, [step_a.safe_name, step_b.safe_name])
+
+    assert len(caplog.records) == 1
+    assert "Step C" in caplog.text
+    assert "Step D" in caplog.text
+    assert "stale" in caplog.text
+
+
+def test_check_clobber_targets_reports_unknown_selections(tmp_path: Path) -> None:
+    """Verify names and safe_names resolve while unknown selections are
+    returned sorted.
+    """
+    step_a = _make_step(tmp_path, "Step A")
+    step_b = _make_step(tmp_path, "Step B")
+    wp = _make_workplan([step_a, step_b])
+
+    assert check_clobber_targets(wp, [step_a.name, step_b.safe_name]) == []
+    assert check_clobber_targets(wp, ["zzz", "aaa", step_a.name]) == ["aaa", "zzz"]
+
+
+def test_check_clobber_dependents_reports_untargeted_dependents(
+    tmp_path: Path,
+) -> None:
+    """Verify untargeted dependents of clobbered steps are returned, and that
+    targeting every step yields none.
+    """
+    step_a = _make_step(tmp_path, "Step A")
+    step_b = _make_step(tmp_path, "Step B", depends_on=[step_a.name])
+    step_c = _make_step(tmp_path, "Step C", depends_on=[step_b.name])
+    wp = _make_workplan([step_a, step_b, step_c])
+
+    assert check_clobber_dependents(wp, [step_a.safe_name]) == [step_b.name]
+    assert check_clobber_dependents(wp, [step_c.name]) == []
+    assert check_clobber_dependents(wp, [step_a.name, step_b.name, step_c.name]) == []
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+async def test_prepare_workplan_persists_clobber_overrides(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify the transformed workplan written to disk carries the
+    `--clobber` selection in the targeted step's `workflow_overrides`.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+    output_dir = tmp_path / "output"
+    run_id = "clobber-persist-run"
+
+    _, prepared_path = await prepare_workplan(
+        wp_path, output_dir, run_id, clobber_steps=["Prepare"]
+    )
+
+    persisted = deserialize(prepared_path, LiveWorkplan)
+    by_name = {step.name: step for step in persisted.steps}
+
+    assert by_name["Prepare"].workflow_overrides[KEY_CLOBBER] is True
+    assert not by_name["Ensemble X"].workflow_overrides.get(KEY_CLOBBER, False)

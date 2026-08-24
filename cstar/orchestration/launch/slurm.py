@@ -1,7 +1,6 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Mapping
 
 from prefect import State, task
 from prefect import Task as PrefectTask
@@ -33,10 +32,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.state import (
-    StateRepository,
-    load_sentinels,
-)
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -102,6 +98,24 @@ class SlurmComputeSpec(BaseModel):
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure model to ignore empty strings."""
+
+    @property
+    def environment(self) -> dict[str, str]:
+        environment: dict[str, str] = {}
+        if self.account_name and self.account_name != os.getenv(
+            ENV_CSTAR_SLURM_ACCOUNT
+        ):
+            environment[ENV_CSTAR_SLURM_ACCOUNT] = self.account_name
+
+        if self.queue_name and self.queue_name != os.getenv(ENV_CSTAR_SLURM_QUEUE):
+            environment[ENV_CSTAR_SLURM_QUEUE] = self.queue_name
+
+        if self.max_walltime and self.max_walltime != os.getenv(
+            ENV_CSTAR_SLURM_MAX_WALLTIME
+        ):
+            environment[ENV_CSTAR_SLURM_MAX_WALLTIME] = self.max_walltime
+
+        return environment
 
 
 class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec]):
@@ -220,22 +234,19 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         )
 
     @staticmethod
-    def adapt_step(
-        step: "LiveStep",
-        dependencies: list[SlurmHandle],
-    ) -> SchedulerJob:
-        """Create a `SchedulerJob` that will execute the desired command for a
-        `Step` while also waiting for any dependencies to complete.
+    def _get_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
+        """Return a compute spec that has been customized with any
+        overrides specified in the step.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step to use for configuring overrides
 
         Returns
         -------
-        str
+        SlurmComputeSpec
         """
-        job_dep_ids = [d.pid for d in dependencies]
-
-        request_adapter = StepToRunRequestAdapter()
-        command = RunRequestCommandFormatter().format(request_adapter.adapt(step))
-
         default_compute = SlurmLauncher._get_default_compute_spec(step)
         compute = default_compute
 
@@ -248,6 +259,29 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             except CstarAdaptationError:
                 msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
                 log.warning(msg, exc_info=True)
+        return compute
+
+    @staticmethod
+    def adapt_step(
+        step: "LiveStep",
+        dependencies: list[SlurmHandle],
+    ) -> SchedulerJob:
+        """Create a `SchedulerJob` that will execute the desired command for a
+        `Step` while also waiting for any dependencies to complete.
+
+        Returns
+        -------
+        str
+        """
+        compute = SlurmLauncher._get_compute_spec(step)
+
+        job_dep_ids = [d.pid for d in dependencies]
+        request_adapter = StepToRunRequestAdapter()
+        run_request = request_adapter.adapt(step)
+        if compute.environment:
+            run_request.environment.update(compute.environment)
+
+        command = RunRequestCommandFormatter().format(run_request)
 
         return create_scheduler_job(
             commands=command,
@@ -334,17 +368,44 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         return batch.status
 
     @staticmethod
-    async def _locate_priors() -> Mapping[str, SlurmHandle]:
-        """Retrieve all task sentinels discovered in the output path.
+    async def _prune_completed_dependencies(
+        dependencies: list[SlurmHandle],
+    ) -> list[SlurmHandle]:
+        """Remove dependencies whose SLURM jobs have already completed successfully.
 
+        SLURM cannot use dependencies on previously completed jobs: submitting
+        with `--dependency=afterok:<jobid>` referencing a job that already
+        finished (e.g. a step satisfied by a prior run and not resubmitted)
+        causes the submission to fail or the job to be killed for an invalid
+        dependency. Such dependencies are already satisfied and can be dropped.
+
+        Parameters
+        ----------
+        dependencies : list[SlurmHandle]
+            The dependency handles for a step about to be submitted.
 
         Returns
         -------
-        Mapping[str, Task[SlurmHandle]]
-            Mapping of all previously run PIDs to their sentinel content.
+        list[SlurmHandle]
+            The dependencies whose jobs have not yet completed.
         """
-        sentinels = await load_sentinels(SlurmHandle)
-        return {h.pid: h for h in sentinels}
+        if not dependencies:
+            return dependencies
+
+        batch_map = await get_slurm_batches([d.pid for d in dependencies])
+        successes = {
+            k for k, v in batch_map.items() if v.status == ExecutionStatus.COMPLETED
+        }
+
+        if not successes:
+            return dependencies
+
+        satisfied = {d.pid for d in dependencies}.intersection(successes)
+        msg = f"Dependencies previously satisfied: {', '.join(sorted(satisfied))}"
+        log.info(msg)
+
+        # only keep dependencies that are not already satisfied
+        return [d for d in dependencies if d.pid not in successes]
 
     @classmethod
     async def launch(
@@ -380,22 +441,10 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 step.fsm.clear_prior()
                 submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
-                # SLURM cannot use dependencies on previously completed jobs
-                pid_to_task = await cls._locate_priors()
-                batch_map = await get_slurm_batches(pid_to_task.keys())
-                successes = {
-                    k
-                    for k, v in batch_map.items()
-                    if v.status == ExecutionStatus.COMPLETED
-                }
-                if dependencies and successes:
-                    reusable = set(x.pid for x in dependencies).intersection(successes)
-                    msg = f"Dependencies previously satisfied: {', '.join(reusable)}"
-                    log.info(msg)
+        dependencies = await cls._prune_completed_dependencies(dependencies)
 
-                    # only keep dependencies that are not re-usable
-                    active = set(x.pid for x in dependencies).difference(successes)
-                    dependencies = list(filter(lambda x: x.pid in active, dependencies))
+        if step.clobber:
+            submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
         handle = await submit_fn(step, dependencies)
         await SlurmLauncher.update_status(handle)

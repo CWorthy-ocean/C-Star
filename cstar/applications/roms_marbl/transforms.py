@@ -26,6 +26,7 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
+from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
@@ -201,6 +202,8 @@ class RestartFile(BaseModel):
     """The expected file extension for a restart file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
     """The expected timestamp format in the restart file name"""
+    TS_GLOB: t.ClassVar[str] = "[0-9]" * 14
+    """Glob fragment matching the fixed-width (14-digit) timestamp (see `FMT_TS`)."""
     PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
         r"^(.*?)_rst\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
     )
@@ -212,10 +215,11 @@ class RestartFile(BaseModel):
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
-        If `search_path` identifies a directory, the first item matching the `RestartFile`
-        naming convention is returned.
+        If `search_path` identifies a directory, the item matching the _latest_
+        timestamp and the 0th partition piece (if partitioned) is returned.
 
         If `search_path` identifies a file, that `RestartFile` will be returned.
+
 
         Parameters
         ----------
@@ -244,13 +248,21 @@ class RestartFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        if matches := sorted(search_path.rglob(f"*{cls.SUFFIX}.*.*.{cls.EXT}")):
-            # prefer use of pre-partitioned data when available
-            return RestartFile(path=matches[0])
+        partitioned_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.*.{cls.EXT}"
+        joined_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.{cls.EXT}"
 
-        matches = sorted(search_path.rglob(f"*{cls.SUFFIX}*.{cls.EXT}"), reverse=True)
-        if matches:
-            return RestartFile(path=matches.pop(0))
+        for glob_pattern in (partitioned_glob, joined_glob):
+            rst_files = [
+                RestartFile(path=match)
+                for match in search_path.rglob(glob_pattern)
+                if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
+            ]
+            if rst_files:
+                latest_ts = max(rst.timestamp for rst in rst_files)
+                return min(
+                    (rst for rst in rst_files if rst.timestamp == latest_ts),
+                    key=lambda rst: rst.partition or 0,
+                )
 
         if not notfound_ok:
             msg = f"No restart files located. Unable to continue from {search_path!r}"
@@ -420,7 +432,7 @@ class BoundaryFile(BaseModel):
     """The expected file extension for a boundary file."""
     FMT_TS: t.ClassVar[t.Literal["%Y%m%d%H%M%S"]] = "%Y%m%d%H%M%S"
     """The expected timestamp format in the boundary file name"""
-    PATTERN_RST: t.ClassVar[t.Literal[r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
+    PATTERN_BRY: t.ClassVar[t.Literal[r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"]] = (
         r"^(.*?)_bry\.(\d{14})(?:\.(\d{1,9}))?\.nc$"
     )
     """A regex identifying full boundary or partitioned files."""
@@ -520,7 +532,7 @@ class BoundaryFile(BaseModel):
             msg = f"File extension does not match expected naming convention: {value.suffix}"
             raise ValueError(msg)
 
-        if re.fullmatch(BoundaryFile.PATTERN_RST, value.name, flags=re.ASCII):
+        if re.fullmatch(BoundaryFile.PATTERN_BRY, value.name, flags=re.ASCII):
             return value
 
         msg = f"File name does not match expected naming convention: {value}"
@@ -535,7 +547,7 @@ class BoundaryFile(BaseModel):
         BoundaryFile
         """
         matches = re.fullmatch(
-            BoundaryFile.PATTERN_RST, self.path.as_posix(), flags=re.ASCII
+            BoundaryFile.PATTERN_BRY, self.path.as_posix(), flags=re.ASCII
         )
         if not matches:
             msg = f"File name does not match expected naming convention: {self.path}"
@@ -686,7 +698,19 @@ class ContinuanceDirective(OverrideDirective):
         if name := self._config.get(self.KEY_STEP, None):
             if name in self.workplan:
                 step = self.workplan[name]
-                search_path = step.fsm.output_dir
+                fsm = RomsFileSystemManager(step.fsm.root_dir)
+
+                search_path = fsm.output_dir
+
+                # With ParallelIO there are no partitioned restart files to
+                # reuse; the joined restart files live in `joined_output`.
+                blueprint = step.blueprint
+                if (
+                    isinstance(blueprint, RomsMarblBlueprint)
+                    and blueprint.model_params.use_pio
+                ):
+                    search_path = fsm.joined_output_dir
+
             else:
                 msg = f"Unable to locate step {name!r} in workplan"
                 raise KeyError(msg)
