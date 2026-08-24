@@ -247,7 +247,6 @@ async def test_hello_world_workplan(
     assert workplan_copy.steps[0].blueprint_path == workplan.steps[0].blueprint_path
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     "dry_run",
     [
@@ -267,8 +266,6 @@ def test_hello_world_workplan_dry_run(
         The path to the workplan containing a single step that runs the hello_world application.
     dry_run : bool
         Whether to run the workplan in dry-run mode.
-    prefect_server_url: str
-        Implicitly declare dependence on the prefect server
     """
     runner = CliRunner()
     custom_env = {
@@ -305,7 +302,6 @@ def test_hello_world_workplan_dry_run(
     assert result.exit_code == 0
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 def test_workplan_run_unknown_clobber_step_fails_fast(
     hw_single_step_wp_path: Path,
 ) -> None:
@@ -317,8 +313,6 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
     hw_single_step_wp_path : Path
         The path to the workplan containing a single step that runs the
         hello_world application.
-    prefect_server_url: str
-        Implicitly declare dependence on the prefect server
     """
     runner = CliRunner()
     custom_env = {
@@ -351,7 +345,6 @@ def test_workplan_run_unknown_clobber_step_fails_fast(
     assert "does-not-exist" in result.stderr
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     "dry_run",
     [
@@ -372,8 +365,6 @@ def test_heterogeneous_workplan(
         and a step relying on the ROMS-MARBL application.
     dry_run : bool
         Whether to run the workplan in dry-run mode.
-    prefect_server_url: str
-        Implicitly declare dependence on the prefect server
     """
     runner = CliRunner()
     custom_env = {
@@ -409,7 +400,6 @@ def test_heterogeneous_workplan(
     assert result.exit_code == 0
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 def test_hw_runner_bp_only(
     hello_world_bp_path: Path,
 ) -> None:
@@ -420,8 +410,6 @@ def test_hw_runner_bp_only(
     ----------
     hello_world_bp_path : Path
         A fixture that stores an HW blueprint and returns the path.
-    prefect_server_url: str
-        Implicitly declare dependence on the prefect server
     """
     runner = CliRunner()
     custom_env: dict[str, str] = {

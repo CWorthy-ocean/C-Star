@@ -152,7 +152,6 @@ async def test_compose_host_run_parameter(
         mock_run.assert_not_called()
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     ("drop_var", "key", "settings_klass"),
     [
@@ -380,7 +379,7 @@ async def test_run_composed_dag(
         )
         serialize(tweak_path, wp)
 
-        summary = await build_and_run_dag(tweak_path, run_id, working_dir)
+        summary = await build_and_run_dag(tweak_path, run_id)
         wp_path = summary.final_workplan
 
     wp = deserialize(wp_path, Workplan)

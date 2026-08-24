@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
 
-from prefect import flow
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.env import (
@@ -704,7 +703,6 @@ async def build_dag(
     return planner, prepared_wp_path
 
 
-@flow(log_prints=True)
 async def run_dag(
     wp_path: Path,
     run_id: str,
@@ -766,7 +764,6 @@ async def run_dag(
     return await ExecutiveRunSummary.from_run(wp_run)
 
 
-@flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",

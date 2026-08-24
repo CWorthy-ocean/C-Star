@@ -302,7 +302,7 @@ def test_workplan_run_clobber_step_defaults_to_empty_list() -> None:
     assert mock_build_and_run_dag.await_args.kwargs["clobber_steps"] == []
 
 
-@pytest.mark.usefixtures("prefect_server_url", "read_yaml_intercept")
+@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_variable_unknown(
     wp_templates_dir: Path,
 ) -> None:

@@ -70,7 +70,7 @@ def create_host_workplan(
 def _run(wp_path: Path, working_dir: Path, run_id: str) -> None:
     """Execute the DAG synchronously."""
     try:
-        asyncio.run(build_and_run_dag(wp_path, run_id, working_dir))
+        asyncio.run(build_and_run_dag(wp_path, run_id))
         print(f"Completed execution of composed workplan: {wp_path}.")
     except Exception as ex:
         print(

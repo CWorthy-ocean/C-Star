@@ -2,9 +2,6 @@ import asyncio
 import os
 import typing as t
 
-from prefect import State, task
-from prefect import Task as PrefectTask
-from prefect.client.schemas import TaskRun
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
@@ -40,33 +37,16 @@ from cstar.orchestration.utils import (
 )
 
 if t.TYPE_CHECKING:
-    from prefect.context import TaskRunContext
-
     from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
 
 
-async def on_submit_complete(
-    task: PrefectTask[["LiveStep", list["SlurmHandle"]], "SlurmHandle"],
-    task_run: TaskRun,
-    state: State["SlurmHandle"],
-) -> None:
-    """Perform actions required when a job submission completes
-    successfully.
-    """
-    if state.is_completed() and state.name == "Cached":
-        handle = await state.aresult()
-        log.debug(f"Re-using result from cached SLURM job: {handle}")
-
-
-def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
+def cache_key_func(task_name: str, params: dict[str, t.Any]) -> str:
     """Cache on a combination of the task name and user-assigned run id.
 
     Parameters
     ----------
-    context : TaskRunContext
-        The prefect context object for the currently running task
     params : dict[str, t.Any]
         A dictionary containing all thee input values to the task
 
@@ -76,7 +56,7 @@ def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
         The cache key for the current context.
     """
     run_id = os.getenv(ENV_CSTAR_RUNID)
-    cache_key = f"{run_id}_{params['step'].name}_{context.task.name}"
+    cache_key = f"{run_id}_{params['step'].name}_{task_name}"
 
     log.trace("Cache check: %s", cache_key)
     return cache_key
@@ -298,11 +278,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             depends_on=job_dep_ids,
         )
 
-    @task(
-        persist_result=True,
-        cache_key_fn=cache_key_func,
-        on_completion=[on_submit_complete],
-    )
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
@@ -439,12 +414,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             if Status.is_failure(last_status):
                 # force cache refresh for any tasks that didn't succeed
                 step.fsm.clear_prior()
-                submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
         dependencies = await cls._prune_completed_dependencies(dependencies)
-
-        if step.clobber:
-            submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
 
         handle = await submit_fn(step, dependencies)
         await SlurmLauncher.update_status(handle)
