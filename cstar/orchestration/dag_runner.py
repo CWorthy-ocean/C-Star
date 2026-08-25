@@ -12,8 +12,8 @@ from pydantic import BaseModel, Field, computed_field
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
-    FLAG_OFF,
     capture_environment,
+    unset,
 )
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
@@ -541,8 +541,9 @@ def _ignore_ambient_clobber_env() -> None:
     Called before the environment is configured and captured into the run
     record; warns when the value would have had an effect.
     """
-    value = os.environ.pop(ENV_CSTAR_CLOBBER_WORKING_DIR, None)
-    if value is not None and value != FLAG_OFF:
+    if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
+        unset(ENV_CSTAR_CLOBBER_WORKING_DIR)
+
         msg = (
             f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
             "runs; select the steps to clear and re-run explicitly instead "

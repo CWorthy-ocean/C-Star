@@ -356,3 +356,19 @@ def env_var_groups() -> dict[str, list[EnvItem]]:
         groups[item.group].append(item)
 
     return groups
+
+
+def unset(key: str) -> str | None:
+    """Unset an environment variable.
+
+    Parameters
+    ----------
+    key : str
+        The key to unset
+
+    Returns
+    -------
+    str
+        The value that was previously stored for the key
+    """
+    return os.environ.pop(key, None)
