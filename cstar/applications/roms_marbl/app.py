@@ -12,6 +12,7 @@ from cstar.applications.core import (
 from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapter2025v1,
     RomsMarblSchemaAdapterV2V21,
+    RomsMarblSchemaAdapterV21V3,
 )
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
@@ -138,7 +139,11 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
     applicable_transforms = (RomsMarblTimeSplitter,)
-    migrations = (RomsMarblSchemaAdapter2025v1, RomsMarblSchemaAdapterV2V21)
+    migrations = (
+        RomsMarblSchemaAdapter2025v1,
+        RomsMarblSchemaAdapterV2V21,
+        RomsMarblSchemaAdapterV21V3,
+    )
 
 
 def main() -> int:

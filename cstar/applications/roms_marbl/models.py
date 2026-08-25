@@ -169,8 +169,12 @@ class RuntimeParameterSet(ParameterSet):
         return value
 
     @model_validator(mode="after")
-    def _model_validator(self) -> "RuntimeParameterSet":
-        """Perform validation on the model after field-level validation is complete."""
+    def _validate_date_range(self) -> "RuntimeParameterSet":
+        """Perform validation on the model after field-level validation is complete.
+
+        Named distinctly from `ParameterSet._model_validator` so the inherited
+        locked/hash check is not shadowed and both validators run.
+        """
         if self.end_date <= self.start_date:
             msg = "start_date must precede end_date"
             raise ValueError(msg)
@@ -181,30 +185,73 @@ class RuntimeParameterSet(ParameterSet):
 class PartitioningParameterSet(ParameterSet):
     """Parameters for the partitioning of the model."""
 
-    n_procs_x: PositiveInt
+    n_procs_x: PositiveInt | None = None
     """Number of processes used to subdivide the domain on the x-axis."""
 
-    n_procs_y: PositiveInt
+    n_procs_y: PositiveInt | None = None
     """Number of processes used to subdivide the domain on the y-axis."""
-
-
-class ModelParameterSet(ParameterSet):
-    """
-    Parameters that can override ROMS.in values. Unlike RuntimeParameters, these affect the validity of the
-    model solution, and should be locked for validated blueprints.
-    """
-
-    time_step: PositiveInt
-    """The time step the model integrates over."""
 
     use_pio: bool = False
     """Use the ParallelIO library for model input/output."""
+
+    auto_tiling: bool = False
+    """Automatically determine the tiling layout instead of using `n_procs_x`/`n_procs_y`.
+
+    NOTE: this feature is in development.
+    """
+
+    n_cores: PositiveInt | None = None
+    """Total number of cores to use when `auto_tiling` selects the tiling layout."""
+
+    @model_validator(mode="after")
+    def _validate_partitioning(self) -> "PartitioningParameterSet":
+        """Perform validation on the model after field-level validation is complete.
+
+        Named distinctly from `ParameterSet._model_validator` so the inherited
+        locked/hash check is not shadowed and both validators run.
+        """
+        violations: list[str] = []
+
+        if self.auto_tiling and not self.use_pio:
+            violations.append("auto_tiling requires use_pio to be true")
+
+        if not self.auto_tiling and (self.n_procs_x is None or self.n_procs_y is None):
+            violations.append(
+                "n_procs_x and n_procs_y are required unless auto_tiling is enabled"
+            )
+
+        if self.n_cores is not None and not self.auto_tiling:
+            violations.append("n_cores is only accepted with auto_tiling")
+
+        if (
+            self.auto_tiling
+            and self.n_cores is None
+            and (self.n_procs_x is None or self.n_procs_y is None)
+        ):
+            violations.append(
+                "auto_tiling requires either n_cores or both n_procs_x and n_procs_y"
+            )
+
+        if (
+            self.n_cores is not None
+            and self.n_procs_x is not None
+            and self.n_procs_y is not None
+            and self.n_cores != self.n_procs_x * self.n_procs_y
+        ):
+            violations.append(
+                "n_cores must equal n_procs_x * n_procs_y when all are supplied"
+            )
+
+        if violations:
+            raise ValueError("; ".join(violations))
+
+        return self
 
 
 class RomsMarblBlueprint(Blueprint):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    schema_version: str = "2.1.0"
+    schema_version: str = "3.0.0"
     """The blueprint schema version."""
 
     application: str = APP_NAME
@@ -231,9 +278,6 @@ class RomsMarblBlueprint(Blueprint):
     partitioning: PartitioningParameterSet
     """User-defined partitioning parameters."""
 
-    model_params: ModelParameterSet
-    """User-defined model parameters."""
-
     runtime_params: RuntimeParameterSet
     """User-defined runtime parameters."""
 
@@ -242,6 +286,18 @@ class RomsMarblBlueprint(Blueprint):
 
     nesting_info: Dataset | None = Field(default=None)
     """Location of nesting info input file for this run. Optional."""
+
+    namelist_overrides: dict[str, dict[str, t.Any]] = Field(default_factory=dict)
+    """Mapping of ROMS namelist group to key/value overrides.
+
+    These overrides are layered onto the runtime namelist LAST, after C-Star's
+    own derived settings, so they take precedence over anything C-Star would
+    otherwise compute; list values replace the existing list wholesale. Keys
+    are validated at runtime against the namelist
+    schema for the pinned ucla-roms version. Overriding `param_settings.np_xi`/
+    `param_settings.np_eta` to values that conflict with `partitioning` is an
+    error.
+    """
 
     @model_validator(mode="after")
     def _model_validator(self) -> "RomsMarblBlueprint":
@@ -258,8 +314,8 @@ class RomsMarblBlueprint(Blueprint):
             msg = "start_date is outside the valid range"
             raise ValueError(msg)
 
-        if self.code.pio is not None and not self.model_params.use_pio:
-            msg = "code.pio was supplied but model_params.use_pio is false"
+        if self.code.pio is not None and not self.partitioning.use_pio:
+            msg = "code.pio was supplied but partitioning.use_pio is false"
             raise ValueError(msg)
 
         return self
@@ -267,4 +323,12 @@ class RomsMarblBlueprint(Blueprint):
     @property
     def cpus_needed(self) -> int:
         """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
-        return self.partitioning.n_procs_x * self.partitioning.n_procs_y
+        if self.partitioning.n_cores is not None:
+            return self.partitioning.n_cores
+
+        n_procs_x, n_procs_y = self.partitioning.n_procs_x, self.partitioning.n_procs_y
+        if n_procs_x is None or n_procs_y is None:
+            msg = "partitioning must supply n_cores or both n_procs_x and n_procs_y"
+            raise ValueError(msg)
+
+        return n_procs_x * n_procs_y

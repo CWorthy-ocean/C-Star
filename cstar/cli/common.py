@@ -11,6 +11,7 @@ import cstar
 from cstar.applications.core import get_application
 from cstar.base.env import (
     ENV_CSTAR_CLI_VERBOSE,
+    ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
     FLAG_ON,
 )
@@ -348,6 +349,9 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     ------
     CStarMigrationNotRegisteredError
         If there are no registered migrations for the requested schema.
+    typer.Exit
+        If the blueprint requires migration but migration is disabled via
+        `CSTAR_DISABLE_MIGRATION`.
     """
     validation_result = validate_serialized_entity(request.source, BlueprintCore)
     if validation_result.item is None:
@@ -380,6 +384,21 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     if not migration_result.plan:
         print("Migration failed to produce a plan.")
         raise typer.Exit(2)
+
+    # An up-to-date blueprint needs no migration: return it untouched unless
+    # the user explicitly requested an output copy.
+    if not migration_result.plan.adapters and request.target is None:
+        return PersistedMigrateResult(migration_result, request.source)
+
+    if migration_result.plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
+        print(
+            f"Blueprint at '{request.source}' requires schema migration from "
+            f"{migration_result.plan.source!r} to {migration_result.plan.target!r}, "
+            f"but migration is disabled ({ENV_CSTAR_DISABLE_MIGRATION}=1). Unset "
+            f"{ENV_CSTAR_DISABLE_MIGRATION} to allow migration, or update the "
+            "blueprint to the current schema."
+        )
+        raise typer.Exit(1)
 
     persisted_to = persist_migration(request, migration_result)
 

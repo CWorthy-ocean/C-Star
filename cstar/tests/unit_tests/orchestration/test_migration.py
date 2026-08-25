@@ -20,8 +20,10 @@ from cstar.applications.roms_marbl.migration import (
     APP_ROMS_MARBL_SCHEMA_1_0_0,
     APP_ROMS_MARBL_SCHEMA_2_0_0,
     APP_ROMS_MARBL_SCHEMA_2_1_0,
+    APP_ROMS_MARBL_SCHEMA_3_0_0,
     RomsMarblSchemaAdapter2025v1,
     RomsMarblSchemaAdapterV2V21,
+    RomsMarblSchemaAdapterV21V3,
 )
 from cstar.orchestration.serialization import deserialize
 from cstar.system.migration import (
@@ -42,12 +44,12 @@ APP_SLEEP: t.Final[str] = "sleep"
     [
         pytest.param(
             {KEY_APP: APP_ROMS},
-            APP_ROMS_MARBL_SCHEMA_2_1_0,
+            APP_ROMS_MARBL_SCHEMA_3_0_0,
             id="rm::app-only",
         ),
         pytest.param(
             {KEY_APP: APP_ROMS, KEY_SV: APP_ROMS_MARBL_SCHEMA_1_0_0},
-            APP_ROMS_MARBL_SCHEMA_2_1_0,
+            APP_ROMS_MARBL_SCHEMA_3_0_0,
             id="rm::with source schema",
         ),
         pytest.param(
@@ -64,6 +66,7 @@ def test_migration_version(model: dict[str, t.Any], exp_version: str) -> None:
     adapters: list[type[SchemaAdapter]] = [
         RomsMarblSchemaAdapter2025v1,
         RomsMarblSchemaAdapterV2V21,
+        RomsMarblSchemaAdapterV21V3,
         HelloWorldSchemaAdapterV1V1,
     ]
 
@@ -74,6 +77,60 @@ def test_migration_version(model: dict[str, t.Any], exp_version: str) -> None:
     # we now expect the result to reflect the target schema version
     assert "schema_version" in result.migrated
     assert exp_version == result.migrated["schema_version"]
+
+
+def test_migrate_v21_to_v3_moves_time_step_and_use_pio() -> None:
+    """Verify `time_step` moves to `namelist_overrides.time_stepping.dt`,
+    `use_pio` moves to `partitioning.use_pio`, and `model_params` is removed.
+    """
+    model = {
+        KEY_APP: APP_ROMS,
+        KEY_SV: APP_ROMS_MARBL_SCHEMA_2_1_0,
+        "model_params": {"time_step": 360, "use_pio": True},
+        "partitioning": {"n_procs_x": 2, "n_procs_y": 2},
+    }
+
+    adapted = RomsMarblSchemaAdapterV21V3(model).adapt()
+
+    assert adapted["namelist_overrides"]["time_stepping"]["dt"] == 360
+    assert adapted["partitioning"]["use_pio"] is True
+    assert "model_params" not in adapted
+    assert adapted[KEY_SV] == APP_ROMS_MARBL_SCHEMA_3_0_0
+
+    # source model is not mutated
+    assert model["model_params"] == {"time_step": 360, "use_pio": True}
+
+
+def test_migrate_v21_to_v3_without_model_params_passes_through() -> None:
+    """Verify a model with no `model_params` migrates cleanly."""
+    model = {
+        KEY_APP: APP_ROMS,
+        KEY_SV: APP_ROMS_MARBL_SCHEMA_2_1_0,
+        "partitioning": {"n_procs_x": 2, "n_procs_y": 2},
+    }
+
+    adapted = RomsMarblSchemaAdapterV21V3(model).adapt()
+
+    assert "model_params" not in adapted
+    assert "namelist_overrides" not in adapted
+    assert adapted["partitioning"] == {"n_procs_x": 2, "n_procs_y": 2}
+    assert adapted[KEY_SV] == APP_ROMS_MARBL_SCHEMA_3_0_0
+
+
+def test_migrate_v21_to_v3_existing_namelist_override_wins() -> None:
+    """Verify a pre-existing `namelist_overrides.time_stepping.dt` is not
+    overwritten by the value seeded from `model_params.time_step`.
+    """
+    model = {
+        KEY_APP: APP_ROMS,
+        KEY_SV: APP_ROMS_MARBL_SCHEMA_2_1_0,
+        "model_params": {"time_step": 360},
+        "namelist_overrides": {"time_stepping": {"dt": 999}},
+    }
+
+    adapted = RomsMarblSchemaAdapterV21V3(model).adapt()
+
+    assert adapted["namelist_overrides"]["time_stepping"]["dt"] == 999
 
 
 def test_migration_simple_plan() -> None:

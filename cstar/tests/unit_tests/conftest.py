@@ -895,7 +895,7 @@ def stub_simulation(
         codebase=fakeexternalcodebase_with_mock_get,
         runtime_code=additionalcode_local(),
         compile_time_code=additionalcode_local(),
-        discretization=Discretization(time_step=60),
+        discretization=Discretization(),
         start_date="2025-01-01",
         end_date="2025-12-31",
         valid_start_date="2024-01-01",
@@ -1613,7 +1613,7 @@ def stub_romssimulation(
     sim = ROMSSimulation(
         name="ROMSTest",
         directory=directory,
-        discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
+        discretization=ROMSDiscretization(n_procs_x=2, n_procs_y=3),
         codebase=romsexternalcodebase,
         runtime_code=roms_runtime_code,
         compile_time_code=roms_compile_time_code,
@@ -1667,9 +1667,9 @@ def stub_romssimulation_dict(stub_romssimulation: ROMSSimulation) -> dict[str, A
             "checkout_target": sim.codebase.source.checkout_target,
         },
         "discretization": {
-            "time_step": sim.discretization.time_step,
             "n_procs_x": sim.discretization.n_procs_x,
             "n_procs_y": sim.discretization.n_procs_y,
+            "n_cores": sim.discretization.n_cores,
         },
         "runtime_code": sim.runtime_code._constructor_args,  # type: ignore
         "compile_time_code": sim.compile_time_code._constructor_args,  # type: ignore

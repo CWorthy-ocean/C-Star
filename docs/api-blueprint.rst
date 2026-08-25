@@ -32,7 +32,6 @@ Simulation Components
    cstar.applications.roms_marbl.models.BlueprintState
    cstar.applications.roms_marbl.models.RuntimeParameterSet
    cstar.applications.roms_marbl.models.PartitioningParameterSet
-   cstar.applications.roms_marbl.models.ModelParameterSet
 
 ROMS-MARBL
 ----------

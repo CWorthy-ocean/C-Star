@@ -1,16 +1,18 @@
 import typing as t
 
 from cstar.base.adapter import SchemaAdapter
+from cstar.base.utils import deep_merge
 
 APP_NAME: t.Final[str] = "roms_marbl"
 APP_ROMS_MARBL_SCHEMA_1_0_0: t.Final[str] = "1.0.0"
 APP_ROMS_MARBL_SCHEMA_2_0_0: t.Final[str] = "2.0.0"
 APP_ROMS_MARBL_SCHEMA_2_1_0: t.Final[str] = "2.1.0"
+APP_ROMS_MARBL_SCHEMA_3_0_0: t.Final[str] = "3.0.0"
 
 
 rm_bounds = {
     "min": APP_ROMS_MARBL_SCHEMA_1_0_0,
-    "max": APP_ROMS_MARBL_SCHEMA_2_1_0,
+    "max": APP_ROMS_MARBL_SCHEMA_3_0_0,
 }
 """Schema bounds for the roms_marbl blueprint schema.
 
@@ -73,4 +75,46 @@ class RomsMarblSchemaAdapterV2V21(SchemaAdapter):
 
     @classmethod
     def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        return {**model}
+
+
+class RomsMarblSchemaAdapterV21V3(SchemaAdapter):
+    """Schema migration from schema version `2.1.0` to `3.0.0`.
+
+    Adapting `2.1.0` to `3.0.0`:
+    - `model_params` is removed. `model_params.time_step` moves to
+      `namelist_overrides.time_stepping.dt`; a pre-existing
+      `namelist_overrides.time_stepping.dt` takes precedence over the seeded
+      value. `model_params.use_pio` moves to `partitioning.use_pio`.
+    - `model_params`' own `documentation`/`locked`/`hash` metadata is discarded;
+      it does not carry over to either destination.
+    """
+
+    @classmethod
+    def application(cls) -> str:
+        return APP_NAME
+
+    @classmethod
+    def source(cls) -> str:
+        return APP_ROMS_MARBL_SCHEMA_2_1_0
+
+    @classmethod
+    def target(cls) -> str:
+        return APP_ROMS_MARBL_SCHEMA_3_0_0
+
+    @classmethod
+    def _migrate_schema(cls, model: dict[str, t.Any]) -> dict[str, t.Any]:
+        model_params = model.get("model_params") or {}
+
+        if (ts := model_params.pop("time_step", None)) is not None:
+            model["namelist_overrides"] = deep_merge(
+                {"time_stepping": {"dt": ts}},
+                model.get("namelist_overrides") or {},
+            )
+
+        if (use_pio := model_params.pop("use_pio", None)) is not None:
+            model.setdefault("partitioning", {})["use_pio"] = use_pio
+
+        model.pop("model_params", None)
+
         return {**model}

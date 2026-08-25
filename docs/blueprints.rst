@@ -51,7 +51,7 @@ handled by **MARBL**. It adds the following attributes:
   ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.grid
   ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.forcing
   ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.partitioning
-  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.model_params
+  ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.namelist_overrides
   ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.runtime_params
   ~cstar.applications.roms_marbl.app.RomsMarblBlueprint.cdr_forcing
 
@@ -78,13 +78,15 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
 - Remote or local resources can be used to build and execute a simulation, under :attr:`compile_time:`
 - C-Star handles both partitioned and unpartitioned data
 - Runtime and compile-time behaviors can be customized in the ``.opt`` and ``.in`` files
+- ``use_pio`` (whether to use the ParallelIO library for model input/output) is set under ``partitioning:``
+- ``namelist_overrides`` maps a ROMS namelist group to key/value overrides. These are applied last, over C-Star's own derived runtime namelist settings, so user-supplied values win. For example, the model time step is set via ``namelist_overrides.time_stepping.dt`` (or directly in the namelist file itself).
 
 .. code:: yaml
 
     name: 2node_1wk_example
     description: this is mainly to test infra like containers and workplans. it should run on 256 processors (2 nodes)
     application: roms_marbl
-    schema_version: 2.1.0
+    schema_version: 3.0.0
     working_dir: /anvil/scratch/x-seilerman/2node_1wk_job1/
     state: draft
     valid_start_date: 2000-01-15 0:00:00
@@ -151,8 +153,9 @@ This example YAML demonstrates a configured ``RomsMarblBlueprint``. Notice that:
       n_procs_x: 16
       n_procs_y: 16
 
-    model_params:
-      time_step: 900
+    namelist_overrides:
+      time_stepping:
+        dt: 900
 
     runtime_params:
       start_date: "2000-01-15 00:00:00"
