@@ -90,7 +90,7 @@ def path_callback(
 
                 bp_path = Path(persist_result.target)
             except CStarMigrationNotRegisteredError:
-                log.info("Skipping schema migration; no registered adapters")
+                log.debug("Skipping schema migration; no registered adapters")
             return str(bp_path)
 
     except FileNotFoundError as ex:

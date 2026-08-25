@@ -701,6 +701,12 @@ class RomsNamelistBase(BaseModel):
         extra="forbid", validate_assignment=True, use_attribute_docstrings=True
     )
 
+    _NOT_A_USABLE_SCHEMA_MSG: ClassVar[str] = (
+        "RomsNamelistBase is not a usable schema; use a versioned "
+        "subclass (e.g. RomsNamelist, RomsNamelistV0_5_0) or select "
+        "one with namelist_schema_for_ref()."
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _reject_direct_use(cls, data: Any) -> Any:
@@ -711,11 +717,7 @@ class RomsNamelistBase(BaseModel):
         namelist that no actual ucla-roms version reads.
         """
         if cls is RomsNamelistBase:
-            raise TypeError(
-                "RomsNamelistBase is not a usable schema; use a versioned "
-                "subclass (e.g. RomsNamelist, RomsNamelistV0_5_0) or select "
-                "one with namelist_schema_for_ref()."
-            )
+            raise TypeError(cls._NOT_A_USABLE_SCHEMA_MSG)
         return data
 
     simulation_name_settings: SimulationNameSettings
@@ -782,11 +784,7 @@ class RomsNamelistBase(BaseModel):
             every name exists in the schema.
         """
         if cls is RomsNamelistBase:
-            raise TypeError(
-                "RomsNamelistBase is not a usable schema; use a versioned "
-                "subclass (e.g. RomsNamelist, RomsNamelistV0_5_0) or select "
-                "one with namelist_schema_for_ref()."
-            )
+            raise TypeError(cls._NOT_A_USABLE_SCHEMA_MSG)
 
         violations: list[str] = []
         for group, entries in overrides.items():
