@@ -272,41 +272,6 @@ class TrackingRepository(LoggingMixin):
 
         return tuple(filter(lambda p: p.exists(), run_paths))
 
-    async def get_workplan_run(
-        self, run_id: str, run_date: datetime | None = None
-    ) -> WorkplanRun | None:
-        """Locate a WorkplanRun record.
-
-        Parameters
-        ----------
-        run_id : str
-            The run_id of the WorkplanRun
-        run_date : datetime | None
-            The datetime the run was executed or `None`.
-
-        Returns
-        -------
-        WorkplanRun | None
-            The record when it can be located in history or latest runs, otherwise `None`.
-        """
-        run_id = run_id.strip()
-
-        if not run_id:
-            msg = "A valid run-id was not provided; unable to retrieve run"
-            raise ValueError(msg)
-
-        run_id = slugify(run_id)
-
-        run_path = self._find_run_path(run_id, run_date)
-
-        if not run_path.exists():
-            rd_out = run_date or "latest"
-            msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-            self.log.debug(msg)
-            return None
-
-        return deserialize(run_path, WorkplanRun)
-
     def get_workplan_run_sync(
         self, run_id: str, run_date: datetime | None = None
     ) -> WorkplanRun | None:
@@ -324,11 +289,11 @@ class TrackingRepository(LoggingMixin):
         WorkplanRun | None
             The record when it can be located in history or latest runs, otherwise `None`.
         """
+        run_id = slugify(run_id)
+
         if not run_id:
             msg = "A valid run-id was not provided; unable to retrieve run"
             raise ValueError(msg)
-
-        run_id = slugify(run_id)
 
         run_path = self._find_run_path(run_id, run_date)
 
@@ -340,7 +305,26 @@ class TrackingRepository(LoggingMixin):
 
         return deserialize(run_path, WorkplanRun)
 
-    async def put_workplan_run(self, run: WorkplanRun) -> Path:
+    async def get_workplan_run(
+        self, run_id: str, run_date: datetime | None = None
+    ) -> WorkplanRun | None:
+        """Locate a WorkplanRun record.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+        run_date : datetime | None
+            The datetime the run was executed or `None`.
+
+        Returns
+        -------
+        WorkplanRun | None
+            The record when it can be located in history or latest runs, otherwise `None`.
+        """
+        return await asyncio.to_thread(self.get_workplan_run_sync, run_id, run_date)
+
+    def put_workplan_run_sync(self, run: WorkplanRun) -> Path:
         """Persist a run record to disk.
 
         Inserts a new history record and updates the "latest" record for the run-id
@@ -370,6 +354,23 @@ class TrackingRepository(LoggingMixin):
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)
         return run_path
+
+    async def put_workplan_run(self, run: WorkplanRun) -> Path:
+        """Persist a run record to disk.
+
+        Inserts a new history record and updates the "latest" record for the run-id
+
+        Parameters
+        ----------
+        run : WorkplanRun
+            The run to persist
+
+        Returns
+        -------
+        Path
+            The path to the persisted history record
+        """
+        return await asyncio.to_thread(self.put_workplan_run_sync, run)
 
     async def list_latest_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
