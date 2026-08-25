@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -11,7 +12,12 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app
 from cstar.orchestration.dag_runner import get_launcher
-from cstar.orchestration.models import UserDefinedVariables
+from cstar.orchestration.launch.local import LocalHandle
+from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
+from cstar.orchestration.models import UserDefinedVariables, Workplan
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
+from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
@@ -811,12 +817,18 @@ def test_workplan_run_invalid_file_content(
     mock_build_and_run_dag.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_workplan_run_reload_prior_run(
+@pytest.mark.parametrize("status", [Status.Unsubmitted, Status.Submitted, Status.Done])
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_reload_prior_run(
     tmp_path: Path,
     wp_templates_dir: Path,
+    mock_run_id: str,
+    status: Status,
 ) -> None:
     """Verify that passing a valid run-id and no path causes the prior run to be loaded.
+
+    Ensure that a prior run with successfully completed steps doesn't repeat the step and
+    when the sentinels don't reflect "real state" they are updated.
 
     Parameters
     ----------
@@ -825,44 +837,171 @@ async def test_workplan_run_reload_prior_run(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    state_dir = tmp_path / "state"
+    run_id = mock_run_id
     wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    lwp_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
+
+    sentinel_paths = set[Path]()
+    for i, s in enumerate(lwp.steps):
+        n = -len(lwp.steps) + i
+        h = LocalHandle(
+            pid=str(1000 + n),
+            name=s.safe_name,
+            run_id=run_id,
+            status=status,
+            start_at=datetime.now() + timedelta(days=n),
+        )
+        p = StateRepository.sentinel_path(h)
+        assert serialize(p, h), "serializing the mock handles failed in test"
+        sentinel_paths.add(p)
 
     fake_run = WorkplanRun(
         workplan_path=wp_path,
-        trx_workplan_path=wp_path,
-        output_path=wp_path.parent,
-        run_id="12345",
+        trx_workplan_path=lwp_path,
+        output_path=lwp_path.parent,
+        run_id=run_id,
         environment={"CSTAR_LOG_LEVEL": "TRACE"},
+        sentinels=sentinel_paths,
     )
 
     repo = TrackingRepository()
-    await repo.put_workplan_run(fake_run)
+    repo.put_workplan_run_sync(fake_run)
 
     def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
-        raise typer.Exit(0)
-
-    mock_get_wp = mock.Mock(return_value=fake_run)
+        raise typer.Exit(1)
 
     runner = CliRunner()
     with (
-        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
         mock.patch(
-            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
-            mock_get_wp,
+            "cstar.orchestration.dag_runner.get_launcher",
+            SlurmLauncher,
         ),
-        mock.patch("cstar.cli.workplan.run.asyncio.run", side_effect=typer_exit),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
+            mock.AsyncMock(return_value=Status.Done),
+        ) as mock_query_status,
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher._submit",
+            side_effect=typer_exit,
+        ) as mock_submit,
     ):
         result = runner.invoke(
             app,
-            ["--run-id", "12345"],
+            ["--run-id", mock_run_id],
             color=False,
         )
 
+    # RC would be 1 if submit was called for any task due to side_effect
     assert result.exit_code == 0
 
     # confirm the attempt to load the old record was made
-    mock_get_wp.assert_called()
+    assert mock_query_status.call_count == 4  # always query status for each step
+    assert not mock_submit.called
+
+    # confirm the status-change handler fires to update the persisted record
+    statuses = {deserialize(p, SlurmHandle).status for p in sentinel_paths}
+    assert statuses == {Status.Done}
+
+
+@pytest.mark.parametrize("status", [Status.Cancelled, Status.Failed])
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_reload_prior_run_repeat_failures(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    status: Status,
+) -> None:
+    """Verify that passing a valid run-id and no path causes the prior run to be loaded.
+
+    Ensure that a prior run with _failed_ steps re-runs the failed steps and updates
+    the sentinels to reflect the newly submitted status.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    lwp_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
+
+    sentinel_paths = set[Path]()
+    for i, s in enumerate(lwp.steps):
+        n = -len(lwp.steps) + i
+        h = LocalHandle(
+            pid=str(1000 + n),
+            name=s.safe_name,
+            run_id=run_id,
+            status=Status.Submitted,
+            start_at=datetime.now() + timedelta(days=n),
+        )
+        p = StateRepository.sentinel_path(h)
+        assert serialize(p, h), "serializing the mock handles failed in test"
+        sentinel_paths.add(p)
+
+    fake_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=lwp_path,
+        output_path=lwp_path.parent,
+        run_id=run_id,
+        environment={"CSTAR_LOG_LEVEL": "TRACE"},
+        sentinels=sentinel_paths,
+    )
+
+    repo = TrackingRepository()
+    repo.put_workplan_run_sync(fake_run)
+
+    submission_results = (
+        SlurmHandle(
+            pid=str(9996 + i),
+            name=s.name,
+            run_id=run_id,
+            status=Status.Submitted,
+        )
+        for i, s in enumerate(lwp.steps)
+    )
+    runner = CliRunner()
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            SlurmLauncher,
+        ),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
+            mock.AsyncMock(return_value=status),
+        ) as mock_query_status,
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher._submit",
+            mock.AsyncMock(side_effect=submission_results),
+        ) as mock_submit,
+    ):
+        result = runner.invoke(
+            app,
+            ["--run-id", mock_run_id],
+            color=False,
+        )
+
+    # RC would be 1 if submit was called for any task due to side_effect
+    assert result.exit_code == 0
+
+    # confirm the attempt to load the old record was made
+    assert mock_query_status.call_count == 4  # always query status for each step
+    assert mock_submit.called  # for fail states, expect a new task submission
+
+    # confirm the status-change handler fires to update the persisted record
+    statuses = {deserialize(p, SlurmHandle).status for p in sentinel_paths}
+    # ... and the old fail states from the sentinel records are replaced
+    assert statuses == {Status.Submitted}
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

@@ -21,7 +21,7 @@ from cstar.execution.scheduler_job import (
     get_slurm_batches,
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
-from cstar.orchestration.models import KeyValueStore
+from cstar.orchestration.models import KEY_CLOBBER, KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -406,19 +406,31 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         prior_handle = await state_repo.get_sentinel(step.name, SlurmHandle)
         submit_fn = SlurmLauncher._submit
+        last_status: Status = Status.Unsubmitted
+        reuse_prior: bool = False
 
         if prior_handle:
             # use persisted task as sentinel only; query SLURM for up-to-date status
             last_status = await SlurmLauncher.query_status(prior_handle)
+            name = prior_handle.name
 
             if Status.is_failure(last_status):
                 # force cache refresh for any tasks that didn't succeed
-                step.fsm.clear_prior()
+                log.debug(f"Prior run of {name!r} in fail state. Re-running.")
+                # step.fsm.clear_prior()
+                step.workflow_overrides[KEY_CLOBBER] = True
+            elif Status.is_terminal(last_status):
+                # re-use the result from a prior run if it terminated
+                # successfully and isn't configured to be clobbered
+                reuse_prior = not step.clobber
+                log.debug(f"Prior run of {name!r} in term state. Re-use: {reuse_prior}")
 
-        dependencies = await cls._prune_completed_dependencies(dependencies)
-
-        handle = await submit_fn(step, dependencies)
-        await SlurmLauncher.update_status(handle)
+        if not reuse_prior or not prior_handle:
+            dependencies = await cls._prune_completed_dependencies(dependencies)
+            handle = await submit_fn(step, dependencies)
+        else:
+            handle = prior_handle
+            handle.status = last_status
 
         return Task(
             step=step,

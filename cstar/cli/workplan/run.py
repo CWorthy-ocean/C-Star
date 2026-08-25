@@ -410,7 +410,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
     return workplan_path
 
 
-def handle_run_reloading(run_id: str) -> str:
+async def handle_run_reloading(run_id: str) -> str:
     """Locate a prior run for the run ID and update the `RunCmdContext` with
     the correct `Workplan`.
 
@@ -420,7 +420,7 @@ def handle_run_reloading(run_id: str) -> str:
         The run-id to reload
     """
     repo = TrackingRepository()
-    wp_run = asyncio.run(repo.get_workplan_run(run_id))
+    wp_run = await repo.get_workplan_run(run_id)
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
@@ -523,7 +523,7 @@ def run(
     reload = False
     if not path:
         reload = True
-        path = handle_run_reloading(run_id)
+        path = asyncio.run(handle_run_reloading(run_id))
 
     try:
         with local_copy(path) as wp_path:
