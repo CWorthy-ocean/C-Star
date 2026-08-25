@@ -20,7 +20,8 @@ New features
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+
+- On srun-based SLURM systems (Anvil, Perlmutter, Expanse), a ROMS task dying mid-run (OOM kill, segfault) left the job hung until the walltime limit; the job step is now terminated immediately when any task exits abnormally (``srun --kill-on-bad-exit=1``). (`#644 <https://github.com/CWorthy-ocean/C-Star/pull/644>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -28,6 +29,7 @@ Improvements
 
 - Avoid default user-facing output directory that is hidden. (`#641 <https://github.com/CWorthy-ocean/C-Star/pull/641>`_)
 - Avoid changing env var in tests where an autouse fixture already handles it (`#641 <https://github.com/CWorthy-ocean/C-Star/pull/641>`_)
+- Generated sbatch scripts set ``ulimit -s unlimited`` before running, preventing stack-overflow segfaults from large Fortran automatic arrays at larger tile counts. (`#644 <https://github.com/CWorthy-ocean/C-Star/pull/644>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
