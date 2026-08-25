@@ -125,6 +125,7 @@ class TestSlurmJob:
             "#SBATCH --time=01:00:00",
             "#SBATCH -mock_directive mock_value",
             "set -e",
+            "ulimit -s unlimited",
             "echo Hello, World",
         }
         actual_content = set(job.script.strip().split("\n"))
@@ -189,6 +190,7 @@ class TestSlurmJob:
             "#SBATCH --time=01:00:00",
             "#SBATCH -mock_directive mock_value",
             "set -e",
+            "ulimit -s unlimited",
             "echo Hello, World",
         }
         actual_content = set(job.script.strip().split("\n"))
