@@ -1,4 +1,5 @@
 import typing as t
+import warnings
 from datetime import datetime
 
 from pydantic import (
@@ -292,11 +293,14 @@ class RomsMarblBlueprint(Blueprint):
 
     These overrides are layered onto the runtime namelist LAST, after C-Star's
     own derived settings, so they take precedence over anything C-Star would
-    otherwise compute; list values replace the existing list wholesale. Keys
-    are validated at runtime against the namelist
-    schema for the pinned ucla-roms version. Overriding `param_settings.np_xi`/
-    `param_settings.np_eta` to values that conflict with `partitioning` is an
-    error.
+    otherwise compute; list values replace the existing list wholesale.
+
+    Group and key names are checked when the blueprint is validated: unknown
+    names are an error when `code.roms` pins a release version, and a warning
+    (against the best-guess schema) otherwise. Values are validated at runtime
+    against the namelist schema for the pinned ucla-roms version. Overriding
+    `param_settings.np_xi`/`param_settings.np_eta` to values that conflict
+    with `partitioning` is an error.
     """
 
     @model_validator(mode="after")
@@ -318,7 +322,62 @@ class RomsMarblBlueprint(Blueprint):
             msg = "code.pio was supplied but partitioning.use_pio is false"
             raise ValueError(msg)
 
+        self._validate_namelist_overrides()
+
         return self
+
+    def _validate_namelist_overrides(self) -> None:
+        """Check `namelist_overrides` names and partitioning consistency early.
+
+        Unknown group/key names are an error when `code.roms` pins a release
+        version (the namelist schema is then certain) and a warning otherwise,
+        where the latest schema is only a best guess. `np_xi`/`np_eta`
+        conflicts with `partitioning` are schema-independent and always an
+        error. Values are not checked here — the merge onto the real namelist
+        in `roms_runtime_settings` re-validates against the full schema.
+        """
+        if not self.namelist_overrides:
+            return
+
+        # deferred import: the cstar.roms package init pulls in ROMSSimulation,
+        # which imports this module back (circular at module import time)
+        from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
+
+        param_overrides = self.namelist_overrides.get("param_settings", {})
+        violations = [
+            f"param_settings.{key}={value!r} conflicts with partitioning value "
+            f"{expected!r}"
+            for key, expected in (
+                ("np_xi", self.partitioning.n_procs_x),
+                ("np_eta", self.partitioning.n_procs_y),
+            )
+            if (value := param_overrides.get(key)) is not None
+            and expected is not None
+            and value != expected
+        ]
+
+        ref = self.code.roms.checkout_target
+        pinned_release = _parse_semver(ref) is not None
+        if pinned_release:
+            schema = namelist_schema_for_ref(ref)
+            violations += schema.unknown_override_keys(self.namelist_overrides)
+        else:
+            with warnings.catch_warnings():
+                # suppress the unparseable-ref fallback warning; unknown names
+                # are reported below only if any are found
+                warnings.simplefilter("ignore", UserWarning)
+                schema = namelist_schema_for_ref(ref)
+            if unknown := schema.unknown_override_keys(self.namelist_overrides):
+                warnings.warn(
+                    f"namelist_overrides contain names not in {schema.__name__} "
+                    f"(assumed for unpinned ucla-roms ref {ref!r}): "
+                    + "; ".join(unknown),
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        if violations:
+            raise ValueError("invalid namelist_overrides: " + "; ".join(violations))
 
     @property
     def cpus_needed(self) -> int:

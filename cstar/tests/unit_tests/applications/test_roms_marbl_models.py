@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -150,6 +151,72 @@ class TestNamelistOverrides:
         complete_blueprint_dict["model_params"] = {"time_step": 60}
         with pytest.raises(ValidationError, match="model_params"):
             RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_unknown_names_rejected_for_pinned_release(self, complete_blueprint_dict):
+        """Test that unknown groups/keys are an error when `code.roms` pins a
+        release version, with all violations in one message.
+        """
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.5.0"
+        complete_blueprint_dict["namelist_overrides"] = {
+            "not_a_group": {"dt": 1},
+            "time_stepping": {"not_a_key": 1},
+        }
+        with pytest.raises(ValidationError, match="not_a_group.*not_a_key"):
+            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_version_specific_key_checked_against_pinned_schema(
+        self, complete_blueprint_dict
+    ):
+        """Test that `nrpf_rst` (removed in ucla-roms 0.5.0) is rejected for a
+        0.5.0 pin but accepted for an older pin.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {
+            "basic_output_settings": {"nrpf_rst": 1}
+        }
+
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.5.0"
+        with pytest.raises(ValidationError, match="nrpf_rst"):
+            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.4.9"
+        bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides["basic_output_settings"]["nrpf_rst"] == 1
+
+    def test_unknown_names_warn_for_unpinned_ref(self, complete_blueprint_dict):
+        """Test that unknown names only warn when `code.roms` is an unpinned
+        ref (branch name), since the schema is a best guess.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {"not_a_group": {"dt": 1}}
+        with pytest.warns(UserWarning, match="not_a_group"):
+            bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {"not_a_group": {"dt": 1}}
+
+    def test_valid_names_no_warning_for_unpinned_ref(self, complete_blueprint_dict):
+        """Test that valid overrides on an unpinned ref validate silently."""
+        complete_blueprint_dict["namelist_overrides"] = {"time_stepping": {"dt": 30.0}}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_np_xi_conflict_rejected_even_unpinned(self, complete_blueprint_dict):
+        """Test that a `param_settings.np_xi`/`np_eta` conflict with
+        `partitioning` is an error regardless of schema certainty.
+        """
+        n_procs_x = complete_blueprint_dict["partitioning"]["n_procs_x"]
+        complete_blueprint_dict["namelist_overrides"] = {
+            "param_settings": {"np_xi": n_procs_x + 1}
+        }
+        with pytest.raises(ValidationError, match="conflicts with partitioning"):
+            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_np_xi_matching_value_accepted(self, complete_blueprint_dict):
+        """Test that `np_xi`/`np_eta` overrides matching `partitioning` pass."""
+        complete_blueprint_dict["namelist_overrides"] = {
+            "param_settings": {
+                "np_xi": complete_blueprint_dict["partitioning"]["n_procs_x"]
+            }
+        }
+        RomsMarblBlueprint.model_validate(complete_blueprint_dict)
 
 
 class TestPartitioningParameterSet:
