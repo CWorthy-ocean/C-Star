@@ -531,7 +531,7 @@ def run(
             user_vars = t.cast("Mapping[str, str]", ctx.obj)
 
             if not reload:
-                summary = asyncio.run(
+                wp_run = asyncio.run(
                     build_and_run_dag(
                         wp_path,
                         run_id,
@@ -544,7 +544,7 @@ def run(
                 wp = deserialize(wp_path, LiveWorkplan)
                 apply_clobber_overrides(wp, clobber)
                 planner = Planner(wp)
-                summary = asyncio.run(
+                wp_run = asyncio.run(
                     run_dag(
                         wp_path,
                         run_id,
@@ -553,6 +553,8 @@ def run(
                         dry_run=dry_run,
                     ),
                 )
+
+            summary = asyncio.run(ExecutiveRunSummary.from_run(wp_run))
             console.print(get_run_summary_display(summary))
     except typer.BadParameter:
         raise
