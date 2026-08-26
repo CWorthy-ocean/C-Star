@@ -42,26 +42,6 @@ if t.TYPE_CHECKING:
 log = get_logger(__name__)
 
 
-def cache_key_func(task_name: str, params: dict[str, t.Any]) -> str:
-    """Cache on a combination of the task name and user-assigned run id.
-
-    Parameters
-    ----------
-    params : dict[str, t.Any]
-        A dictionary containing all thee input values to the task
-
-    Returns
-    -------
-    str
-        The cache key for the current context.
-    """
-    run_id = os.getenv(ENV_CSTAR_RUNID)
-    cache_key = f"{run_id}_{params['step'].name}_{task_name}"
-
-    log.trace("Cache check: %s", cache_key)
-    return cache_key
-
-
 class SlurmComputeSpec(BaseModel):
     num_cpus: int = 0
     """Total number of CPUs required by the job."""
