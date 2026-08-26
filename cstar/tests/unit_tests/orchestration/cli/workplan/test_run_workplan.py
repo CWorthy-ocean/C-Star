@@ -23,6 +23,23 @@ from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_Q
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
 
 
+async def fake_build_and_run_dag(
+    wp_path: Path,
+    run_id: str,
+    user_variables: dict[str, str] | None = None,
+    dry_run: bool = False,
+    clobber_steps: list[str] | None = None,
+) -> WorkplanRun:
+    return WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=wp_path,
+        output_path=wp_path.parent,
+        run_id=run_id,
+        environment={},
+        user_variables={},
+    )
+
+
 def test_workplan_run_file_dne(
     tmp_path: Path,
 ) -> None:
@@ -88,28 +105,26 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     wp_uri : str
         A working URL referencing a valid workplan
     """
-    mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="12345",
-            state_dir="/tmp/state",
-        )
-    )
-
+    arg_runid = "12345"
     with mock.patch(
-        "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ) as mock_exec:
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
-            ["--run-id", "12345", wp_uri],
+            ["--run-id", arg_runid, wp_uri],
             color=False,
         )
 
     assert result.exit_code == 0
-    mock_exec.assert_called_once()
+    mock_build_and_run_dag.assert_called_once()
+
+    # confirm the URL is copied local and a file exists
+    wp_path = mock_build_and_run_dag.call_args.args[0]
+    assert isinstance(wp_path, Path)
+    assert wp_path.exists()
+    # confirm the run ID passed from CLI args is used
+    assert mock_build_and_run_dag.call_args.args[1] == arg_runid
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -119,19 +134,10 @@ def test_workplan_run_clobber_reaches_build_and_run_dag() -> None:
     """
     wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
 
-    mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="12345",
-            state_dir="/tmp/state",
-        )
-    )
-
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ):
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -163,19 +169,10 @@ def test_workplan_run_clobber_all_reaches_build_and_run_dag() -> None:
     """
     wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
 
-    mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="12345",
-            state_dir="/tmp/state",
-        )
-    )
-
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ):
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -207,12 +204,10 @@ def test_workplan_run_clobber_unknown_step_fails_fast() -> None:
     """
     wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
 
-    mock_build_and_run_dag = mock.AsyncMock()
-
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ):
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -233,12 +228,10 @@ def test_workplan_run_clobber_all_with_step_name_fails_fast() -> None:
     """
     wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
 
-    mock_build_and_run_dag = mock.AsyncMock()
-
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ):
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -282,19 +275,10 @@ def test_workplan_run_clobber_step_defaults_to_empty_list() -> None:
     """
     wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
 
-    mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="12345",
-            state_dir="/tmp/state",
-        )
-    )
-
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ):
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -747,24 +731,23 @@ def test_workplan_run_default_run_id(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    state_dir = tmp_path / "state"
     wp_path = wp_templates_dir / "workplan.yaml"
+    exp_default_run_id = "sample-workplan"
 
     runner = CliRunner()
 
     mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="12345",
-            state_dir="/tmp/state",
+        return_value=WorkplanRun(
+            workplan_path=wp_path,
+            trx_workplan_path=wp_path,
+            output_path=wp_path.parent,
+            run_id=exp_default_run_id,
+            environment={},
+            user_variables={},
         )
     )
 
-    with (
-        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
-        mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag),
-    ):
+    with mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag):
         result = runner.invoke(
             app,
             ["--dry-run", wp_path.as_posix()],
@@ -971,19 +954,27 @@ def test_workplan_run_reload_prior_run_repeat_failures(
         for i, s in enumerate(lwp.steps)
     )
     runner = CliRunner()
+
     with (
+        mock.patch.object(
+            SlurmLauncher,
+            "query_status",
+            mock.AsyncMock(return_value=status),
+        ) as mock_query_status,
+        mock.patch.object(
+            SlurmLauncher,
+            "_prune_completed_dependencies",
+            mock.AsyncMock(return_value=[]),
+        ),
+        mock.patch.object(
+            SlurmLauncher,
+            "_submit",
+            mock.AsyncMock(side_effect=submission_results),
+        ) as mock_submit,
         mock.patch(
             "cstar.orchestration.dag_runner.get_launcher",
             SlurmLauncher,
         ),
-        mock.patch(
-            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
-            mock.AsyncMock(return_value=status),
-        ) as mock_query_status,
-        mock.patch(
-            "cstar.orchestration.launch.slurm.SlurmLauncher._submit",
-            mock.AsyncMock(side_effect=submission_results),
-        ) as mock_submit,
     ):
         result = runner.invoke(
             app,
@@ -1005,7 +996,10 @@ def test_workplan_run_reload_prior_run_repeat_failures(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
-def test_cli_workplan_run_normalizes_mixed_case_runid() -> None:
+def test_cli_workplan_run_normalizes_mixed_case_runid(
+    wp_templates_dir: Path,
+    tmp_path: Path,
+) -> None:
     """Verify a user-supplied run-id is slugified (lowercased) by the run-id
     callback pipeline before it reaches the environment or the dag runner.
 
@@ -1014,31 +1008,34 @@ def test_cli_workplan_run_normalizes_mixed_case_runid() -> None:
     variable was slugified while directories and tracking records used the
     raw value.
     """
-    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="myrun_01",
-            state_dir="/tmp/state",
+        return_value=WorkplanRun(
+            workplan_path=wp_path,
+            trx_workplan_path=wp_path,
+            output_path=tmp_path,
+            run_id="not-used",
+            environment={},
+            user_variables={},
         )
     )
 
-    with mock.patch(
-        "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ) as mock_exec:
+    args: list[str] = ["--run-id", "  MyRun_01  ", str(wp_path)]
+
+    with (
+        mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag),
+    ):
         runner = CliRunner()
         result = runner.invoke(
             app,
-            ["--run-id", "  MyRun_01  ", wp_uri],
+            args,
             color=False,
         )
 
     assert result.exit_code == 0
     assert os.environ[ENV_CSTAR_RUNID] == "myrun_01"
-    assert mock_exec.call_args.args[1] == "myrun_01"
+    assert mock_build_and_run_dag.call_args.args[1] == "myrun_01"
 
 
 @pytest.mark.parametrize(
