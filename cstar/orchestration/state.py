@@ -1,4 +1,5 @@
 import asyncio
+import fcntl
 import typing as t
 from pathlib import Path
 
@@ -156,10 +157,17 @@ class StateRepository:
         """
         persist_to = self.sentinel_path(proxy, mode=mode)
 
-        if persist_to.exists():
-            persist_to.unlink()
+        lock_path = persist_to.with_suffix(".lock")
+        if not lock_path.parent.exists():
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        num_bytes = await asyncio.to_thread(serialize, persist_to, proxy, mode=mode)
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            if persist_to.exists():
+                persist_to.unlink()
+
+            num_bytes = await asyncio.to_thread(serialize, persist_to, proxy, mode=mode)
         return persist_to if num_bytes > 0 else None
 
     async def list_sentinels(

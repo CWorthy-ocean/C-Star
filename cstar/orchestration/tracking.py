@@ -1,4 +1,5 @@
 import asyncio
+import fcntl
 import os
 import typing as t
 from collections.abc import Mapping, Sequence
@@ -100,7 +101,7 @@ class TrackingRepository(LoggingMixin):
         """
         target_path = self._root / self._LATEST_DIR
         if not target_path.exists():
-            target_path.mkdir(parents=True)
+            target_path.mkdir(parents=True, exist_ok=True)
         return target_path
 
     @property
@@ -113,7 +114,7 @@ class TrackingRepository(LoggingMixin):
         """
         target_path = self._root / self._HISTORY_DIR
         if not target_path.exists():
-            target_path.mkdir(parents=True)
+            target_path.mkdir(parents=True, exist_ok=True)
         return target_path
 
     @classmethod
@@ -254,23 +255,28 @@ class TrackingRepository(LoggingMixin):
         run_paths: list[Path] = []
 
         latest = self.latest_path(run_id)
-        if latest.exists():
-            run_paths.append(latest)
+        lock_path = latest.with_suffix(".lock")
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-        search_dir = self.run_history_dir(run_id=run_id)
-        all_runs = search_dir.iterdir() if search_dir.exists() else list[Path]()
+            if latest.exists():
+                run_paths.append(latest)
 
-        if all_history:
-            run_paths.extend(all_runs)
-        else:
-            if ordered_runs := sorted(
-                all_runs,
-                key=lambda p: os.path.getctime(p),
-                reverse=True,
-            ):
-                run_paths.append(ordered_runs[0])
+            search_dir = self.run_history_dir(run_id=run_id)
+            all_runs = search_dir.iterdir() if search_dir.exists() else list[Path]()
 
-        return tuple(filter(lambda p: p.exists(), run_paths))
+            if all_history:
+                run_paths.extend(all_runs)
+            else:
+                if ordered_runs := sorted(
+                    all_runs,
+                    key=lambda p: os.path.getctime(p),
+                    reverse=True,
+                ):
+                    run_paths.append(ordered_runs[0])
+
+        items = tuple(filter(lambda p: p.exists(), run_paths))
+        return tuple(sorted(list({p.resolve() for p in items})))
 
     def get_workplan_run_sync(
         self, run_id: str, run_date: datetime | None = None
@@ -327,7 +333,7 @@ class TrackingRepository(LoggingMixin):
     def put_workplan_run_sync(self, run: WorkplanRun) -> Path:
         """Persist a run record to disk.
 
-        Inserts a new history record and updates the "latest" record for the run-id
+        Inserts a new history record and updates the "latest" record for the run-id.
 
         Parameters
         ----------
@@ -342,14 +348,23 @@ class TrackingRepository(LoggingMixin):
         run_path = self.history_path(run.run_id, run.start_at)
         latest_path = self.latest_path(run.run_id)
 
-        if not serialize(run_path, run):
-            self.log.warning("Run could not be persisted")
+        # use the latest path (e.g. /tmp/<run-id>.yaml) as a lock in case
+        # multiple runs occur simultaneously.
+        lock_path = latest_path.with_suffix(".lock")
+        if not lock_path.parent.exists():
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        if not latest_path.parent.exists():
-            latest_path.parent.mkdir(parents=True)
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-        latest_path.unlink(missing_ok=True)
-        latest_path.symlink_to(run_path)
+            if not serialize(run_path, run):
+                self.log.warning("Run could not be persisted")
+
+            if not latest_path.parent.exists():
+                latest_path.parent.mkdir(parents=True, exist_ok=True)
+
+            latest_path.unlink(missing_ok=True)
+            latest_path.symlink_to(run_path)
 
         msg = f"Run persisted to: {run_path}"
         self.log.debug(msg)

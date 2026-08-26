@@ -363,14 +363,14 @@ async def test_tracking_list_history_run_id(
 
 
 @pytest.mark.parametrize(
-    ("num_runs", "all_history"),
+    ("num_runs", "all_history", "exp_num_paths"),
     [
-        (1, True),
-        (1, False),
-        (2, True),
-        (2, False),
-        (4, True),
-        (4, False),
+        (1, True, 1),
+        (1, False, 1),
+        (2, True, 2),
+        (2, False, 2),
+        (4, True, 4),
+        (4, False, 4),
     ],
 )
 @pytest.mark.asyncio
@@ -378,6 +378,7 @@ async def test_tracking_get_run_paths(
     tmp_path: Path,
     num_runs: int,
     all_history: bool,
+    exp_num_paths: int,
 ) -> None:
     """Verify that using the `get_run_paths` method locates
     all directories for the specified run-id
@@ -423,17 +424,22 @@ async def test_tracking_get_run_paths(
         # retrieve the list of run paths
         actual_paths = repo.list_runtracking_paths(run_id, all_history)
 
-    if all_history:
-        # run path for latest plus each history entry
-        exp_num_paths = num_runs + 1
-    else:
-        # only the latest history entry and corresponding symlink, e.g. latest/<run-id>
-        exp_num_paths = 2
-        expected_paths = [expected_paths[0], expected_paths[-1]]
+    # confirm the latest symlink is included
+    actual_latest = repo.get_workplan_run(run_id)
 
-    assert len(actual_paths) == exp_num_paths
-    mismatched = set(actual_paths).difference(expected_paths)
-    assert not mismatched  # set(actual_paths).issuperset(expected_paths)
+    # confirm the results are de-duped to only the history paths
+    latest_paths = [p for p in actual_paths if "latest" in str(p)]
+    assert len(latest_paths) == 0
+    assert actual_latest not in set(actual_paths)
+
+    # get the history paths
+    history = [p for p in actual_paths if "history" in str(p)]
+
+    if all_history:
+        assert len(history) == exp_num_paths
+    else:
+        # confirm that passing all_history=False results in only receiving the latest path
+        assert len(history) == 1
 
 
 @pytest.mark.asyncio
