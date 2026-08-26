@@ -215,7 +215,8 @@ Workplan Examples
             from_step: make_blueprint
             filename: blueprint.yaml
           compute_overrides:
-            cpus: 64
+            slurm:
+              num_cpus: 64
           blueprint_overrides:
             runtime_params:
               end_date: "2025-02-01 00:00:00"
