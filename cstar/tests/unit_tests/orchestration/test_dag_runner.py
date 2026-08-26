@@ -350,14 +350,16 @@ def _make_workplan(steps: list[Step]) -> Workplan:
     )
 
 
+@pytest.mark.parametrize("value", [FLAG_OFF, FLAG_ON, "boo", "  "])
 def test_ignore_ambient_clobber_env_pops_and_warns(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
+    value: str,
 ) -> None:
     """An exported CSTAR_CLOBBER_WORKING_DIR is scrubbed (so it cannot leak
     into every step subprocess) and the user is pointed at `--clobber`.
     """
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_ON)
+    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, value)
 
     with caplog.at_level("WARNING"):
         _ignore_ambient_clobber_env()
@@ -366,22 +368,6 @@ def test_ignore_ambient_clobber_env_pops_and_warns(
     assert len(caplog.records) == 1
     assert ENV_CSTAR_CLOBBER_WORKING_DIR in caplog.text
     assert ARG_CLOBBER in caplog.text
-
-
-def test_ignore_ambient_clobber_env_silent_when_off(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An explicit "off" value is scrubbed without a warning (it would have
-    had no effect on the steps).
-    """
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_OFF)
-
-    with caplog.at_level("WARNING"):
-        _ignore_ambient_clobber_env()
-
-    assert ENV_CSTAR_CLOBBER_WORKING_DIR not in os.environ
-    assert not caplog.records
 
 
 def test_ignore_ambient_clobber_env_noop_when_unset(
