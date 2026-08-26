@@ -541,11 +541,11 @@ def _ignore_ambient_clobber_env() -> None:
     Called before the environment is configured and captured into the run
     record; warns when the value would have had an effect.
     """
-    if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
+    if os.environ.get(ENV_CSTAR_CLOBBER_WORKING_DIR, ""):
         unset(ENV_CSTAR_CLOBBER_WORKING_DIR)
 
         msg = (
-            f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
+            f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is unset and ignored by workplan "
             "runs; select the steps to clear and re-run explicitly instead "
             "(`--clobber <step-name|all>` on the command line)."
         )
