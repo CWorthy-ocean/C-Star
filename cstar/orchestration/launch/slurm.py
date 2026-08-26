@@ -485,7 +485,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        exec_status = await SlurmLauncher._get_status(handle.pid)
+        batch = await get_slurm_batch(handle.pid)
+        exec_status = batch.status
 
         msg = f"Retrieved status `{exec_status}` for SLURM job `{handle.pid}`"
         log.trace(msg)
