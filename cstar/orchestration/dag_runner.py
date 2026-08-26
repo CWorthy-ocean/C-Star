@@ -191,6 +191,16 @@ def get_launcher() -> Launcher[t.Any]:
     return launcher
 
 
+def get_orchestrator(planner: Planner) -> Orchestrator:
+    launcher = get_launcher()
+
+    orchestrator = Orchestrator(planner, launcher)
+    orchestrator.set_callback("status_changed", on_status_changed)
+    orchestrator.set_callback("launched", on_status_changed)
+
+    return orchestrator
+
+
 def incremental_delays() -> Generator[float, None, None]:
     """Return a value from an infinite cycle of incremental delays.
 
@@ -262,8 +272,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
-    launcher = get_launcher()
-    orchestrator = Orchestrator(planner, launcher)
+    orchestrator = get_orchestrator(planner)
 
     return await process_plan(orchestrator, RunMode.Monitor)
 
@@ -746,19 +755,15 @@ async def run_dag(
         sentinels={StateRepository.sentinel_path(s) for s in steps},
     )
 
-    launcher = get_launcher()
+    if not dry_run:
+        _ = await TrackingRepository().put_workplan_run(wp_run)
 
-    orchestrator = Orchestrator(planner, launcher)
-    orchestrator.set_callback("status_changed", on_status_changed)
-    orchestrator.set_callback("launched", on_status_changed)
+    orchestrator = get_orchestrator(planner)
 
     if dry_run:
         msg = f"Dry run complete. Prepared workplan location: {wp_path}"
         log.debug(msg)
         return wp_run
-
-    run_repo = TrackingRepository()
-    await run_repo.put_workplan_run(wp_run)
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
