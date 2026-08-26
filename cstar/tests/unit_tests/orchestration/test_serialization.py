@@ -40,6 +40,34 @@ def test_serialization_json_aliased_fields(tmp_path: Path) -> None:
     assert reloaded.value == model.value
 
 
+def test_serialization_yaml_unregistered_enums(tmp_path: Path) -> None:
+    """Verify enums without a registered representer serialize by value.
+
+    External applications declare their own enums, which must round-trip
+    through yaml without a class-specific representer (e.g. the blueprint
+    override files written at workplan-prep time).
+    """
+    import enum
+
+    class Mode(str, enum.Enum):  # noqa: UP042 -- the str-mixin form is the case under test
+        never = "never"
+
+    class Level(enum.IntEnum):
+        high = 2
+
+    class FakeModel(BaseModel):
+        mode: Mode
+        level: Level
+
+    serialize_to = tmp_path / "fake.yaml"
+    serialize(serialize_to, FakeModel(mode=Mode.never, level=Level.high))
+
+    assert "python/object" not in serialize_to.read_text()
+    reloaded = deserialize(serialize_to, FakeModel)
+    assert reloaded.mode == Mode.never
+    assert reloaded.level == Level.high
+
+
 def test_serialization_workplan_no_data(
     tmp_path: Path,
 ) -> None:
