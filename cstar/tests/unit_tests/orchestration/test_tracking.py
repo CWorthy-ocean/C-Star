@@ -424,8 +424,8 @@ async def test_tracking_get_run_paths(
         # retrieve the list of run paths
         actual_paths = repo.list_runtracking_paths(run_id, all_history)
 
-    # confirm the latest symlink is included
-    actual_latest = repo.get_workplan_run(run_id)
+        # confirm the latest symlink is included
+        actual_latest = repo.latest_path(run_id)
 
     # confirm the results are de-duped to only the history paths
     latest_paths = [p for p in actual_paths if "latest" in str(p)]
