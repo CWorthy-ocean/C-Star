@@ -61,7 +61,11 @@ class WorkplanRun(BaseModel):
         with local_copy(uri) as local_path:
             wp = deserialize(local_path, Workplan)
 
-        return slugify(wp.name)
+        try:
+            return slugify(wp.name)
+        except ValueError as ex:
+            msg = f"Unable to generate a default run-id from workplan at: {uri}"
+            raise ValueError(msg) from ex
 
     @property
     def state_dir(self) -> Path:
@@ -295,11 +299,11 @@ class TrackingRepository(LoggingMixin):
         WorkplanRun | None
             The record when it can be located in history or latest runs, otherwise `None`.
         """
-        run_id = slugify(run_id)
-
-        if not run_id:
+        try:
+            run_id = slugify(run_id)
+        except ValueError as ex:
             msg = "A valid run-id was not provided; unable to retrieve run"
-            raise ValueError(msg)
+            raise ValueError(msg) from ex
 
         run_path = self._find_run_path(run_id, run_date)
 
