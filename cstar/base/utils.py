@@ -321,10 +321,11 @@ def slugify(source: str) -> str:
     str
         The slugified version of the source string.
     """
-    if not source:
-        raise ValueError
+    value = source.strip().casefold()
+    if not value:
+        raise ValueError("Source collapses to empty string when slugified")
 
-    return re.sub(r"\W+", "-", source.strip().casefold()).strip("-")
+    return re.sub(r"\W+", "-", value).strip("-")
 
 
 def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
