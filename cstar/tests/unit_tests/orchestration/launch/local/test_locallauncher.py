@@ -1,11 +1,50 @@
+import asyncio
+import datetime
+import subprocess
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-from cstar.orchestration.launch.local import LocalLauncher
-from cstar.orchestration.orchestration import LiveStep, Workplan
+from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
+from cstar.orchestration.orchestration import LiveStep, Status, Workplan
 from cstar.orchestration.serialization import deserialize
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "expected"),
+    [
+        pytest.param(0, Status.Done, id="clean exit"),
+        pytest.param(3, Status.Failed, id="failure exit"),
+    ],
+)
+async def test_locallauncher_query_status_observes_exit(
+    exit_code: int,
+    expected: Status,
+) -> None:
+    """Verify a process that exits on its own is reported as terminal.
+
+    Popen only records an exit when it is polled; a status query that reads
+    `returncode` without polling reports the task as running forever.
+    """
+    process = subprocess.Popen(["sh", "-c", f"exit {exit_code}"])
+    handle = LocalHandle(
+        pid=str(process.pid),
+        name="observed",
+        run_id="test-run",
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+    handle.process = process
+
+    status = Status.Running
+    for _ in range(100):
+        status = await LocalLauncher.query_status(handle)
+        if status != Status.Running:
+            break
+        await asyncio.sleep(0.05)
+
+    assert status == expected
 
 
 @pytest.mark.parametrize(

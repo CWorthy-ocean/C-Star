@@ -367,7 +367,10 @@ class LocalLauncher(Launcher[LocalHandle]):
                 return "RUNNING"
             return "COMPLETED"
 
-        rc = handle.process.returncode
+        # poll() reaps the child and records its exit code; reading
+        # `returncode` alone never observes an exit the process made on
+        # its own, leaving the task RUNNING forever.
+        rc = handle.process.poll()
 
         if rc is None:
             status = "RUNNING"
