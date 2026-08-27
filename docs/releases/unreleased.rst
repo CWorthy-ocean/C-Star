@@ -11,6 +11,9 @@ Breaking Changes
 
 
 - Change creates a variation from XDG spec for ``CSTAR_DATA_HOME`` (`#641 <https://github.com/CWorthy-ocean/C-Star/pull/641>`_)
+- ``cstar workplan run`` on a local machine now schedules all steps and returns; use ``cstar workplan status`` to follow progress. (`#647 <https://github.com/CWorthy-ocean/C-Star/pull/647>`_)
+- A step whose dependency fails is now aborted and marked Failed instead of running against incomplete upstream output. (`#647 <https://github.com/CWorthy-ocean/C-Star/pull/647>`_)
+- The experimental ``CSTAR_FF_ENABLE_LOCAL_PROXY`` flag is removed; its behavior is now the default. (`#647 <https://github.com/CWorthy-ocean/C-Star/pull/647>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -22,6 +25,8 @@ Bug Fixes
 
 
 - On srun-based SLURM systems (Anvil, Perlmutter, Expanse), a ROMS task dying mid-run (OOM kill, segfault) left the job hung until the walltime limit; the job step is now terminated immediately when any task exits abnormally (``srun --kill-on-bad-exit=1``). (`#644 <https://github.com/CWorthy-ocean/C-Star/pull/644>`_)
+- Local workplan runs hung indefinitely because a step that finished was still reported as running. (`#647 <https://github.com/CWorthy-ocean/C-Star/pull/647>`_)
+- ``cstar workplan status`` showed local steps as Running forever after the launching process exited. (`#647 <https://github.com/CWorthy-ocean/C-Star/pull/647>`_)
 
 Improvements
 ~~~~~~~~~~~~
