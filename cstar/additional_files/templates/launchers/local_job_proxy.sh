@@ -1,8 +1,6 @@
-#!/bin/bash
+#!/bin/sh
 SENTINEL_PATH="{sentinel_path}"
 BLUEPRINT_PATH="{blueprint_path}"
-DEP_PIDS=({pids})
-DEP_SENTINELS=({dep_sentinels})
 
 {env_vars}
 
@@ -12,24 +10,26 @@ DONE={done}
 FAILED={failed}
 
 update_status() {{
-    local status=$1
     if [ "$(uname)" = "Darwin" ]; then
-        sed -i '' "s/^status:.*$/status: $status/" "$2"
+        sed -i '' "s/^status:.*$/status: $1/" "$2"
     else
-        sed -i "s/^status:.*$/status: $status/" "$2"
+        sed -i "s/^status:.*$/status: $1/" "$2"
     fi
 }}
 
 # wait for each dependency to complete, then verify that it succeeded --
 # a dependency that exited without reaching `Done` must abort this step.
-for i in "${{!DEP_PIDS[@]}}"; do
-    DEP_PID="${{DEP_PIDS[$i]}}"
+# POSIX sh has no arrays: the sentinel paths sit in the positional
+# parameters and are consumed in step with the pid list.
+set -- {dep_sentinels}
+for DEP_PID in {pids}; do
+    DEP_SENTINEL=$1
+    shift
     while kill -0 "$DEP_PID" 2>/dev/null; do
         echo "Awaiting process $DEP_PID"
         sleep {delay}
     done
 
-    DEP_SENTINEL="${{DEP_SENTINELS[$i]}}"
     DEP_STATUS=$(sed -n 's/^status: *//p' "$DEP_SENTINEL" 2>/dev/null)
     if [ "$DEP_STATUS" != "$DONE" ]; then
         echo "Dependency (pid $DEP_PID) ended with status '$DEP_STATUS'; aborting."

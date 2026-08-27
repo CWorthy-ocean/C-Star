@@ -14,7 +14,9 @@ subclasses:
 - :class:`RomsNamelist` — the schema for ucla-roms **< 0.5.0**. Kept
   unversioned (no suffix) for backward compatibility: this is the name
   historically imported by C-Star Forge and other consumers.
-- :class:`RomsNamelistV0_5_0` — the schema for ucla-roms **>= 0.5.0**.
+- :class:`RomsNamelistV0_5_0` — the schema for ucla-roms **>= 0.5.0, < 0.6.0**.
+- :class:`RomsNamelistV0_6_0` — the schema for ucla-roms **>= 0.6.0**. Adds
+  the ``&PIO_SETTINGS`` group (ucla-roms PR #346) on top of 0.5.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -166,6 +168,13 @@ class ParamSettings(_NmlGroup):
     """Number of passive tracers"""
     nt_bgc: int
     """Number of BGC tracers"""
+
+
+class PioSettings(_NmlGroup):
+    """Parallel-IO (PIO) library run-time settings (ucla-roms `&PIO_SETTINGS`)."""
+
+    pio_stride: int = Field(default=1, ge=1)
+    """Stride between MPI ranks assigned as PIO I/O tasks (requires PARALLEL_IO)"""
 
 
 class InitialConditions(_NmlGroup):
@@ -693,8 +702,9 @@ class RomsNamelistBase(BaseModel):
 
     Not meant to be instantiated directly: use a versioned subclass
     (:class:`RomsNamelist` for ucla-roms < 0.5.0, :class:`RomsNamelistV0_5_0`
-    for ucla-roms >= 0.5.0) or select one automatically with
-    :func:`namelist_schema_for_ref`.
+    for ucla-roms >= 0.5.0, < 0.6.0, or :class:`RomsNamelistV0_6_0` for
+    ucla-roms >= 0.6.0, which adds ``&PIO_SETTINGS``) or select one
+    automatically with :func:`namelist_schema_for_ref`.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -879,10 +889,20 @@ class RomsNamelist(RomsNamelistBase):
 
 
 class RomsNamelistV0_5_0(RomsNamelistBase):
-    """The ROMS namelist schema for ucla-roms >= 0.5.0 (PR #336)."""
+    """The ROMS namelist schema for ucla-roms >= 0.5.0, < 0.6.0 (PR #336)."""
 
     basic_output_settings: BasicOutputSettingsV0_5_0
     particles_settings: ParticlesSettingsV0_5_0
+
+
+class RomsNamelistV0_6_0(RomsNamelistV0_5_0):
+    """The ROMS namelist schema for ucla-roms >= 0.6.0.
+
+    Adds `&PIO_SETTINGS` (ucla-roms PR #346) on top of the 0.5.0 schema;
+    otherwise unchanged.
+    """
+
+    pio_settings: PioSettings = Field(default_factory=PioSettings)
 
 
 # ---- Schema version selection ----
@@ -890,6 +910,7 @@ class RomsNamelistV0_5_0(RomsNamelistBase):
 # ucla-roms releases with breaking namelist changes, as comparable version
 # tuples (named so registry entries read as versions, not bare tuples).
 UCLA_ROMS_0_5_0: Final[tuple[int, int, int]] = (0, 5, 0)
+UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
@@ -900,7 +921,7 @@ UCLA_ROMS_0_5_0: Final[tuple[int, int, int]] = (0, 5, 0)
 #   1. Add the release constant:
 #        UCLA_ROMS_0_8_0: Final[tuple[int, int, int]] = (0, 8, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_5_0, UCLA_ROMS_0_8_0, RomsNamelistV0_5_0),
+#        (UCLA_ROMS_0_6_0, UCLA_ROMS_0_8_0, RomsNamelistV0_6_0),
 #   3. Append a new open-ended entry for the new schema:
 #        (UCLA_ROMS_0_8_0, None, RomsNamelistV0_8_0),
 NAMELIST_SCHEMA_REGISTRY: tuple[
@@ -910,7 +931,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
     ...,
 ] = (
     (None, UCLA_ROMS_0_5_0, RomsNamelist),
-    (UCLA_ROMS_0_5_0, None, RomsNamelistV0_5_0),
+    (UCLA_ROMS_0_5_0, UCLA_ROMS_0_6_0, RomsNamelistV0_5_0),
+    (UCLA_ROMS_0_6_0, None, RomsNamelistV0_6_0),
 )
 
 

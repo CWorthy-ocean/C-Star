@@ -32,6 +32,7 @@ from cstar.roms.input_dataset import (
 from cstar.roms.namelist import (
     RomsNamelist,
     RomsNamelistV0_5_0,
+    RomsNamelistV0_6_0,
     namelist_schema_for_ref,
 )
 from cstar.roms.simulation import ROMSSimulation
@@ -562,13 +563,18 @@ class TestROMSSimulationInitialization:
         ``checkout_target`` to select a namelist schema, and that a non-release
         ``checkout_target`` (as set up by the ``stub_romssimulation`` fixture)
         surfaces the ``namelist_schema_for_ref`` fallback warning through the
-        property while still returning a valid namelist.
+        property, actually selects the latest schema (``RomsNamelistV0_6_0``),
+        while still returning a valid namelist.
 
         The read is stubbed (the stub's working copy has no real files on
-        disk), but the stub performs a genuine ``RomsNamelistV0_5_0``
-        validation of the 0.5.0-style fixture — the schema the fallback
-        selects — so the property's overrides are exercised against the
-        selected schema, not the legacy one.
+        disk) to always perform a genuine ``RomsNamelistV0_5_0`` validation of
+        the 0.5.0-style fixture — so the property's overrides are exercised
+        against a real versioned schema, not the legacy one — but which class
+        was actually *selected* is captured separately via the
+        ``namelist_schema_for_ref`` wrap below, since ``RomsNamelistV0_6_0``
+        is a subclass of ``RomsNamelistV0_5_0`` and the stubbed read makes
+        ``isinstance(result, RomsNamelistV0_5_0)`` true regardless of which
+        class was selected.
         """
         sim = stub_romssimulation
         sim.runtime_code._working_copy = stageddatacollection_remote_files()
@@ -579,6 +585,19 @@ class TestROMSSimulationInitialization:
             EXAMPLE_NAMELIST_V0_5_0
         )
 
+        # namelist_schema_for_ref is wrapped (not stubbed), so it still runs
+        # the real selection logic; capture what it actually returns so we can
+        # assert on the selected class itself, not just on isinstance() of the
+        # (separately stubbed) read result.
+        selected_schemas = []
+
+        def _select_and_record(*args, **kwargs):
+            cls = namelist_schema_for_ref(*args, **kwargs)
+            selected_schemas.append(cls)
+            return cls
+
+        mock_schema_for_ref.side_effect = _select_and_record
+
         checkout_target = sim.codebase.source.checkout_target
         assert checkout_target == "roms_branch"  # not a release tag
 
@@ -588,6 +607,7 @@ class TestROMSSimulationInitialization:
         # the stub's codebase has no working copy, so no repo path is available
         # for commit-hash-to-release-tag resolution
         mock_schema_for_ref.assert_called_once_with(checkout_target, repo_path=None)
+        assert selected_schemas == [RomsNamelistV0_6_0]
         assert isinstance(result, RomsNamelistV0_5_0)
         run_length_seconds = int((sim.end_date - sim.start_date).total_seconds())
         assert result.time_stepping.ntimes == run_length_seconds // 2160.0
