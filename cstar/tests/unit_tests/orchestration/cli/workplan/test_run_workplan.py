@@ -890,6 +890,94 @@ def test_workplan_run_reload_prior_run(
     assert statuses == {Status.Done}
 
 
+@pytest.mark.parametrize("status", [Status.Submitted, Status.Running, Status.Ending])
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_reload_prior_run_in_progress(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    status: Status,
+) -> None:
+    """Verify that reloading a run whose jobs are still queued or running
+    adopts the in-flight jobs instead of submitting duplicates.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    lwp_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
+
+    sentinel_paths = set[Path]()
+    for i, s in enumerate(lwp.steps):
+        n = -len(lwp.steps) + i
+        h = LocalHandle(
+            pid=str(1000 + n),
+            name=s.safe_name,
+            run_id=run_id,
+            status=Status.Submitted,
+            start_at=datetime.now() + timedelta(days=n),
+        )
+        p = StateRepository.sentinel_path(h)
+        assert serialize(p, h), "serializing the mock handles failed in test"
+        sentinel_paths.add(p)
+
+    fake_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=lwp_path,
+        output_path=lwp_path.parent,
+        run_id=run_id,
+        environment={"CSTAR_LOG_LEVEL": "TRACE"},
+        sentinels=sentinel_paths,
+    )
+
+    repo = TrackingRepository()
+    repo.put_workplan_run_sync(fake_run)
+
+    def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
+        raise typer.Exit(1)
+
+    runner = CliRunner()
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            SlurmLauncher,
+        ),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
+            mock.AsyncMock(return_value=status),
+        ) as mock_query_status,
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher._submit",
+            side_effect=typer_exit,
+        ) as mock_submit,
+    ):
+        result = runner.invoke(
+            app,
+            ["--run-id", mock_run_id],
+            color=False,
+        )
+
+    # RC would be 1 if submit was called for any task due to side_effect
+    assert result.exit_code == 0
+
+    # confirm the attempt to load the old record was made
+    assert mock_query_status.call_count == 4  # always query status for each step
+    assert not mock_submit.called  # in-flight jobs are adopted, not re-submitted
+
+    # confirm the status-change handler fires to update the persisted record
+    statuses = {deserialize(p, SlurmHandle).status for p in sentinel_paths}
+    assert statuses == {status}
+
+
 @pytest.mark.parametrize("status", [Status.Cancelled, Status.Failed])
 @pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_reload_prior_run_repeat_failures(
