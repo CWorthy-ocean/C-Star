@@ -380,7 +380,7 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
     list[CleanupAction]
     """
     cache_paths: list[Path] = []
-    runstate_paths: list[Path] = []
+    runstate_paths: set[Path] = set()
     rundata_paths: list[Path] = []
 
     run_repo = TrackingRepository()
@@ -396,7 +396,8 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
             log.debug(f"Run {run_id!r} not found")
 
     if run_paths := run_repo.list_runtracking_paths(run_id, all_history=True):
-        runstate_paths.extend(run_paths)
+        runstate_paths.update(run_paths)  # remove history entries
+        runstate_paths.add(run_repo.latest_path(run_id))  # remove symlink to latest
 
     actions: list[CleanupAction] = []
 
@@ -413,7 +414,7 @@ def get_run_actions(run_id: str) -> list[CleanupAction]:
             FileSystemCleanupAction(
                 name=f"{run_id!r} State",
                 description="Internal C-Star state information related to run history.",
-                asset_paths=runstate_paths,
+                asset_paths=list(runstate_paths),
             ),
         )
     if rundata_paths:
