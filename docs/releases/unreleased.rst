@@ -16,6 +16,7 @@ Breaking Changes
 
 - ``time_step`` is removed from ``Discretization``/``ROMSDiscretization``; previously serialized ``ROMSSimulation.to_dict()`` payloads carrying ``discretization.time_step`` no longer load. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - ``roms_runtime_settings`` derives ``ntimes`` from the effective (post-override) ``dt`` and now also writes ``param_settings.np_xi``/``np_eta`` from the partitioning, so the runtime namelist always matches the scheduled cores. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
+- Prefect removed from dependencies (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -36,6 +37,12 @@ Bug Fixes
 - ``cstar blueprint run`` exited with code 0 when the blueprint failed validation; it now exits 1. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Serialized blueprints/workplans omitted ``schema_version`` whenever it equaled the current default (``exclude_defaults``); it is now always written so persisted artifacts self-describe. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - The local launcher's job proxy script used bash-only syntax (arrays) but is executed with ``sh``, so every local step failed immediately with a syntax error on systems where ``sh`` is dash (Ubuntu/Debian, including CI). The script is now POSIX sh. (`#650 <https://github.com/CWorthy-ocean/C-Star/pull/650>`_)
+- Fix race condition error when performing simultaneous serializations of run records (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Fix bug causing run history list to contain duplicates (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Fix ``asyncio.run`` called from running thread bug (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Fix ``slugify`` checks-for-empty before stripping bug (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Fix latest status not written to sentinel in ``SlurmLauncher`` bug (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Fix unexpectedly re-creating assets when reloading and running a workplan by run-id (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -44,6 +51,8 @@ Improvements
 - ``deep_merge`` gains a ``replace_lists`` option (used by the namelist override path) so a shorter override list is not element-wise merged with stale values. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - The ``use_pio``/``PARALLEL_IO`` cppdefs check is generalized into ``_validate_cppdef_flag(define, enabled, ...)``, shared by the new ``MPI_MASKING`` check. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Auto-migration of an already-current blueprint is a no-op: nothing is persisted to the state directory and the original file is used as-is. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
+- Fixed reliance on an implicit dependency installed by pydantic (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- ``build_and_run_dag`` split into ``build_dag`` and ``run_dag`` to support proper plan reloading (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
