@@ -58,6 +58,7 @@ def draw_graph(planner: Planner) -> None:
 @pytest.fixture
 async def layered_workplan(
     tmp_path: Path,
+    mock_run_id: str,
 ) -> AsyncGenerator[tuple[Workplan, dict[str, LocalHandle]]]:
     """Create a layered workplan with the structure:
     0
@@ -68,7 +69,6 @@ async def layered_workplan(
            \
             5
     """
-    fake_run_id = "fake-run-id"
     app_name = "hello_world"
     schema = "1.0.0"
     steps: list[Step] = []
@@ -77,81 +77,80 @@ async def layered_workplan(
     handles: dict[str, LocalHandle] = {}
     mock_data_dir = DirectoryManager.data_home()
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
-        fsm_map = {"": JobFileSystemManager(mock_data_dir)}
+    fsm_map = {"": JobFileSystemManager(mock_data_dir)}
 
-        for idx in range(6):
-            depends_on = []
-            wd_path = asset_path / f"wd{idx}"
-            wd_path.mkdir(parents=True)
-            bp_path = wd_path / f"bp{idx}.yaml"
-            bp_name = f"BP {idx}"
-            step_name = f"Step {idx}"
-            target = f"@{idx}"
-            fsm_map[step_name] = JobFileSystemManager(
-                StateDirectoryManager.data_dir(run_id=fake_run_id)
-            )
-
-            bp = HelloWorldBlueprint(
-                name=bp_name,
-                description=bp_name,
-                application=app_name,
-                state=BlueprintState.Draft,
-                schema_version=schema,
-                working_dir=wd_path,
-                target=target,
-            )
-            serialize(bp_path, bp)
-
-            depends_on = [last_parent] if last_parent else []
-
-            if idx % 2 == 0:
-                last_parent = step_name
-
-            step = Step(
-                name=step_name,
-                application=app_name,
-                depends_on=depends_on,
-                blueprint=bp_path,
-            )
-
-            parent_fsm = fsm_map[last_parent] if last_parent else fsm_map[""]
-            step_fsm = parent_fsm.get_subtask_manager(step_name)
-            step_fsm.prepare()
-            log_path = step_fsm.logs_dir / f"{step.safe_name}.out"
-            log_path.write_text(f"{step.name} message {idx}")
-
-            handle = LocalHandle(
-                pid=f"100{idx}",
-                name=step.name,
-                run_id=fake_run_id,
-                start_at=datetime.now(),
-            )
-            handles[step.name] = handle
-            state_repo = StateRepository()
-            await state_repo.put_sentinel(handle)
-
-            steps.append(step)
-
-        workplan = Workplan(
-            name="test-wp-with-dependencies",
-            description="A workplan with nested dependencies demonstrating dependency-based status",
-            steps=steps,
-            state=WorkplanState.Draft,
+    for idx in range(6):
+        depends_on = []
+        wd_path = asset_path / f"wd{idx}"
+        wd_path.mkdir(parents=True)
+        bp_path = wd_path / f"bp{idx}.yaml"
+        bp_name = f"BP {idx}"
+        step_name = f"Step {idx}"
+        target = f"@{idx}"
+        fsm_map[step_name] = JobFileSystemManager(
+            StateDirectoryManager.data_dir(run_id=mock_run_id)
         )
-        wp_path = asset_path / "workplan.yaml"
-        serialize(wp_path, workplan)
 
-        repo = TrackingRepository()
-        wp_run = WorkplanRun(
-            workplan_path=wp_path,
-            trx_workplan_path=wp_path,
-            output_path=tmp_path / "mock-output",
-            run_id=fake_run_id,
+        bp = HelloWorldBlueprint(
+            name=bp_name,
+            description=bp_name,
+            application=app_name,
+            state=BlueprintState.Draft,
+            schema_version=schema,
+            working_dir=wd_path,
+            target=target,
         )
-        await repo.put_workplan_run(wp_run)
+        serialize(bp_path, bp)
 
-        yield workplan, handles
+        depends_on = [last_parent] if last_parent else []
+
+        if idx % 2 == 0:
+            last_parent = step_name
+
+        step = Step(
+            name=step_name,
+            application=app_name,
+            depends_on=depends_on,
+            blueprint=bp_path,
+        )
+
+        parent_fsm = fsm_map[last_parent] if last_parent else fsm_map[""]
+        step_fsm = parent_fsm.get_subtask_manager(step_name)
+        step_fsm.prepare()
+        log_path = step_fsm.logs_dir / f"{step.safe_name}.out"
+        log_path.write_text(f"{step.name} message {idx}")
+
+        handle = LocalHandle(
+            pid=f"100{idx}",
+            name=step.name,
+            run_id=mock_run_id,
+            start_at=datetime.now(),
+        )
+        handles[step.name] = handle
+        state_repo = StateRepository()
+        await state_repo.put_sentinel(handle)
+
+        steps.append(step)
+
+    workplan = Workplan(
+        name="test-wp-with-dependencies",
+        description="A workplan with nested dependencies demonstrating dependency-based status",
+        steps=steps,
+        state=WorkplanState.Draft,
+    )
+    wp_path = asset_path / "workplan.yaml"
+    serialize(wp_path, workplan)
+
+    repo = TrackingRepository()
+    wp_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=wp_path,
+        output_path=tmp_path / "mock-output",
+        run_id=mock_run_id,
+    )
+    await repo.put_workplan_run(wp_run)
+
+    yield workplan, handles
 
 
 @pytest.mark.parametrize(
@@ -185,6 +184,7 @@ async def test_dag_runner_load_run_state(
     open_indices: list[str],
     closed_indices: list[str],
     layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
+    mock_run_id: str,
 ) -> None:
     """Verify the status output matches expectations when all states are a single value."""
     workplan, handles = layered_workplan
@@ -208,9 +208,8 @@ async def test_dag_runner_load_run_state(
         await state_repo.put_sentinel(handle)
 
     launcher = LocalLauncher()
-    run_id = os.getenv(ENV_CSTAR_RUNID) or ""
 
-    dag_status = await load_run_state(run_id, launcher)
+    dag_status = await load_run_state(mock_run_id, launcher)
 
     # verify that state is loaded for every step
     open_items = list(dag_status.open_items)
