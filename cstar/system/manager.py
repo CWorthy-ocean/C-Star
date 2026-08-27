@@ -284,7 +284,7 @@ class BouchetEnvSettings(SlurmSettingsBase):
 
 @register_sys_context
 @dataclass(frozen=True)
-class BouchetystemContext(SystemContext):
+class BouchetSystemContext(SystemContext):
     """The contextual dependencies for the Anvil system."""
 
     name: ClassVar[str] = "bouchet"
