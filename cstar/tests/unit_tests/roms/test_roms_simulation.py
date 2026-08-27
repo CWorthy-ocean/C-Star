@@ -2,6 +2,7 @@ import logging
 import pickle
 import re
 import tempfile
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -899,8 +900,8 @@ class TestROMSSimulationInitialization:
         stageddatacollection_remote_files,
     ):
         """The discretization is authoritative for the processor grid: an
-        `np_xi` override is superseded (conflicting values are rejected at
-        blueprint validation, not here).
+        `np_xi` override is superseded with a warning (blueprint validation
+        rejects conflicts earlier; this covers the direct-API path).
         """
         sim = self._prepare_sim_for_runtime_settings(
             stub_romssimulation,
@@ -913,7 +914,43 @@ class TestROMSSimulationInitialization:
         assert sim.discretization.n_procs_x == 2
         sim.namelist_overrides = {"param_settings": {"np_xi": 99}}
 
-        result = sim.roms_runtime_settings
+        with pytest.warns(UserWarning, match="np_xi.*superseded by the partitioning"):
+            result = sim.roms_runtime_settings
+
+        assert result.param_settings.np_xi == 2
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_np_xi_matching_value_no_warning(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An `np_xi` override matching the discretization is applied without a
+        supersession warning.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        assert sim.discretization.n_procs_x == 2
+        sim.namelist_overrides = {"param_settings": {"np_xi": 2}}
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            result = sim.roms_runtime_settings
 
         assert result.param_settings.np_xi == 2
 

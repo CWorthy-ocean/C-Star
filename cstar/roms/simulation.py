@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shutil
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from itertools import chain
@@ -742,11 +743,12 @@ class ROMSSimulation(Simulation):
            MARBL/CDR/nesting files, output root, and extract root.
         2. `namelist_overrides`, layered on top of the derived settings so
            that user overrides win. The processor grid (`np_xi`/`np_eta`) is
-           then set from `discretization`, which is authoritative for it, and
-           the number of time steps (`ntimes`) is derived from the run length
-           and the *effective* `dt` (i.e. after any override), unless the
-           user has explicitly overridden `time_stepping.ntimes`, in which
-           case their value stands.
+           then set from `discretization`, which is authoritative for it (an
+           override of either is superseded, with a warning), and the number
+           of time steps (`ntimes`) is derived from the run length and the
+           *effective* `dt` (i.e. after any override), unless the user has
+           explicitly overridden `time_stepping.ntimes`, in which case their
+           value stands.
 
         Returns
         -------
@@ -855,12 +857,25 @@ class ROMSSimulation(Simulation):
 
         # The discretization is authoritative for the processor grid: applied
         # after the override merge so np_xi/np_eta cannot drift from the
-        # scheduled cores (conflicting overrides are rejected at blueprint
-        # validation).
-        if self.discretization.n_procs_x is not None:
-            nml.param_settings.np_xi = self.discretization.n_procs_x
-        if self.discretization.n_procs_y is not None:
-            nml.param_settings.np_eta = self.discretization.n_procs_y
+        # scheduled cores. Blueprint validation already rejects conflicting
+        # overrides; this warning covers the direct-API path, where a
+        # simulation is built without going through a blueprint.
+        param_overrides = overrides.get("param_settings", {})
+        for key, n_procs in (
+            ("np_xi", self.discretization.n_procs_x),
+            ("np_eta", self.discretization.n_procs_y),
+        ):
+            if n_procs is None:
+                continue
+            if (value := param_overrides.get(key)) is not None and value != n_procs:
+                warnings.warn(
+                    f"namelist override {key!r} ({value!r}) is superseded by the "
+                    f"partitioning value ({n_procs!r}); the discretization is "
+                    "authoritative for the processor grid.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            setattr(nml.param_settings, key, n_procs)
 
         dt = nml.time_stepping.dt
         if dt <= 0:
