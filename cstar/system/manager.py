@@ -350,6 +350,9 @@ class BouchetSystemContext(SystemContext):
         """Return `True` if the current system is identified as *Bouchet* by matching
         values contained in environment variables.
         """
+        if os.getenv("CLUSTER", "") == BouchetEnvSettings.HOST_IDENTIFIER:
+            return True
+
         return (
             os.getenv("SLURM_CLUSTER_NAME", "") == BouchetEnvSettings.CLUSTER_IDENTIFIER
         )
