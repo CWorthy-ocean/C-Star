@@ -41,7 +41,6 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize
@@ -2263,8 +2262,6 @@ def mock_local_delay() -> float:
 
     NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
     """
-    LocalLauncher.use_proxy = False
-
     delay = 0.1
     os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
     return delay

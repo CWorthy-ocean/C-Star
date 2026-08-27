@@ -17,7 +17,6 @@ from cstar.base.adapter import (
 )
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import ENV_FF_ENABLE_LOCAL_PROXY, is_feature_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, additional_files_dir
 from cstar.orchestration.adapter import StepToRunRequestAdapter
@@ -28,7 +27,6 @@ from cstar.orchestration.orchestration import (
     LiveStep,
     ProcessHandle,
     RunRequest,
-    RunRequestScriptFormatter,
     Status,
     Task,
 )
@@ -236,8 +234,6 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     tasks: t.ClassVar[dict[str, str]] = {}
     """Mapping of task name to process ID."""
-    use_proxy: t.ClassVar[bool] = is_feature_enabled(ENV_FF_ENABLE_LOCAL_PROXY)
-    """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
     @classmethod
     def check_preconditions(cls) -> None:
@@ -255,9 +251,9 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         str
         """
-        formatter: ModelFormatter[RunRequest] = RunRequestScriptFormatter()
-        if LocalLauncher.use_proxy:
-            formatter = ProxiedRunRequestFormatter(step, dependencies)
+        formatter: ModelFormatter[RunRequest] = ProxiedRunRequestFormatter(
+            step, dependencies
+        )
 
         enricher: ModelEnricher[RunRequest] | None = None
 
@@ -408,20 +404,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
 
+        # in-progress dependencies are awaited by the submitted proxy script
         failure_found = any(map(Status.is_failure, statuses))
-
-        if not LocalLauncher.use_proxy:
-            # without the proxy, the launcher must sit and wait for processes to end.
-            active_found = any(map(Status.is_in_progress, statuses))
-
-            # wait for the dependencies to complete before launching
-            while active_found and not failure_found:
-                await asyncio.sleep(1)
-
-                tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
-                statuses = await asyncio.gather(*tasks)
-                active_found = any(map(Status.is_in_progress, statuses))
-                failure_found = any(map(Status.is_failure, statuses))
 
         if failure_found:
             msg = f"Dependency of step {step.name} failed. Unable to continue."
@@ -556,8 +540,15 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
         str
         """
         pids = " "
+        dep_sentinels = " "
         if self.dependencies:
             pids = " ".join([f'"{h.pid}"' for h in self.dependencies])
+            dep_sentinels = " ".join(
+                [
+                    f'"{StateRepository.sentinel_path(h.name)}"'
+                    for h in self.dependencies
+                ]
+            )
 
         delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
         declarations = [f"export {k}='{v}'\n" for k, v in value.environment.items()]
@@ -567,6 +558,7 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
             "sentinel_path": str(StateRepository.sentinel_path(self.step.name)),
             "blueprint_path": str(self.step.blueprint_path),
             "pids": pids,
+            "dep_sentinels": dep_sentinels,
             "running": str(Status.Running.value),
             "done": str(Status.Done.value),
             "failed": str(Status.Failed.value),
