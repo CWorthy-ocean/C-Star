@@ -1500,6 +1500,7 @@ class ForgeExecutor(BaseModel):
                 grid_parent=self.grid_parent,
                 grid_child=self.grid_child,
                 metadata_child=self.metadata_child,
+                settings_compile_time_base=self._settings_compile_time,
                 boundaries=self.open_boundaries,
                 source_data=self.src_data,
                 forcing_override=self.forcing_override,

@@ -9,6 +9,7 @@ the ROMS-MARBL specific implementation.
 from __future__ import annotations
 
 import contextlib
+import copy
 import logging
 import re
 import subprocess
@@ -330,6 +331,13 @@ class RomsMarblInputData(InputData):
     grid_parent: rt.Grid | None = None
     grid_child: rt.Grid | None = None
     metadata_child: dict[str, Any] | None = None
+    settings_compile_time_base: dict[str, Any] | None = None
+    """Resolved compile-time settings (the executor's ``_settings_compile_time``,
+    i.e. ``{"cppdefs": {...}}`` from the ForgeBlueprint resolution). Deep-copied to
+    seed this object's own ``_settings_compile_time`` so generation steps can read
+    resolved flags — notably ``cppdefs.marbl``, which defaults ``include_bgc=True``
+    on ``make_nesting_info`` and gates the run-time ``bgc`` section. Without a
+    seed those reads see an empty dict and BGC handling is silently skipped."""
     use_dask: bool = True
     dask_num_workers: int = 8
     """Cap on dask's default threaded-scheduler worker count during ``generate_all``'s
@@ -511,8 +519,12 @@ class RomsMarblInputData(InputData):
             else None,
         )
 
-        # Initialize settings dictionaries to empty dicts
-        self._settings_compile_time = {}
+        # Seed compile-time settings from the resolved base (deep copy — steps
+        # mutate this dict, and the caller's copy must not alias it); run-time
+        # settings accumulate purely from the generation steps.
+        self._settings_compile_time = copy.deepcopy(
+            self.settings_compile_time_base or {}
+        )
         self._settings_run_time = {}
         if _ic_settings_placeholder:
             # The namelist's "initial" section (inifile) is required non-None,
@@ -1298,11 +1310,11 @@ class RomsMarblInputData(InputData):
 
         if input_args["type"] == "restoring":
             if "sss" in input_args["restoring_forces"]:
-                self._settings_compile_time["cppdefs"]["sal_restore"] = True
+                self._settings_compile_time.setdefault("cppdefs", {})["sal_restore"] = (
+                    True
+                )
         elif input_args["type"] == "bgc" and input_args["source"]["name"] == "MBL_co2":
-            if "cppdefs" not in self._settings_compile_time:
-                self._settings_compile_time["cppdefs"] = {}
-            self._settings_compile_time["cppdefs"]["co2_tvarying"] = True
+            self._settings_compile_time.setdefault("cppdefs", {})["co2_tvarying"] = True
 
         # Append Resources directly to roms_marbl_blueprint_elements.forcing[subkey]
 

@@ -1821,6 +1821,14 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert call_kwargs["start_date"] == builder.start_date
             assert call_kwargs["end_date"] == builder.end_date
             assert call_kwargs["use_pio"] is False
+            # The resolved compile-time settings (cppdefs, incl. marbl) must be
+            # handed to input generation — steps read e.g. cppdefs.marbl to
+            # default include_bgc on make_nesting_info.
+            assert (
+                call_kwargs["settings_compile_time_base"]
+                is builder._settings_compile_time
+            )
+            assert "cppdefs" in call_kwargs["settings_compile_time_base"]
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
     @requires_cstar_pio

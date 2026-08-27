@@ -3384,3 +3384,140 @@ class TestSubchunkDefaults:
         ).stdout
         assert "--no-subchunk" in helptext
         assert "--stage-ic-sources" not in helptext
+
+
+class TestCompileTimeSettingsSeed:
+    """Regression tests: ``settings_compile_time_base`` must reach the generation
+    steps that read resolved compile-time flags.
+
+    ``_settings_compile_time`` used to start empty, so ``cppdefs.marbl`` (set by the
+    resolver, held by the executor) was invisible here — ``include_bgc`` never
+    defaulted to True on ``make_nesting_info`` (nesting.nc silently lacked BGC
+    variables) and the run-time ``bgc`` section was never populated.
+    """
+
+    @pytest.fixture
+    def make_input_data(
+        self,
+        tmp_path,
+        sample_grid,
+        sample_forcing_override,
+        sample_open_boundaries,
+        sample_source_data,
+        sample_partitioning,
+    ):
+        def _make(**overrides):
+            roms_marbl_blueprint_dir = tmp_path / "blueprints"
+            roms_marbl_blueprint_dir.mkdir(parents=True, exist_ok=True)
+            data_dir = tmp_path / "input_data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            kwargs = dict(
+                domain_name="test_grid",
+                start_date=datetime(2012, 1, 1),
+                end_date=datetime(2012, 1, 2),
+                forcing_override=sample_forcing_override,
+                grid=sample_grid,
+                boundaries=sample_open_boundaries,
+                source_data=sample_source_data,
+                roms_marbl_blueprint_dir=roms_marbl_blueprint_dir,
+                partitioning=sample_partitioning,
+                use_dask=False,
+                input_data_dir=data_dir,
+            )
+            kwargs.update(overrides)
+            return RomsMarblInputData(**kwargs)
+
+        return _make
+
+    def _run_grid_step(self, data):
+        """Run the grid step with roms-tools writers mocked; return the
+        make_nesting_info mock.
+        """
+        with (
+            patch.object(rt.Grid, "to_yaml"),
+            patch.object(rt.Grid, "save"),
+            patch("cstar_forge.forge.input_data.rt.make_nesting_info") as mock_nesting,
+        ):
+            data._generate_grid(key="grid")
+        return mock_nesting
+
+    def test_seed_is_deep_copied(self, make_input_data):
+        base = {"cppdefs": {"marbl": True}}
+        data = make_input_data(settings_compile_time_base=base)
+        assert data._settings_compile_time == base
+        data._settings_compile_time["cppdefs"]["marbl"] = False
+        assert base["cppdefs"]["marbl"] is True
+
+    def test_no_seed_starts_empty(self, make_input_data):
+        data = make_input_data()
+        assert data._settings_compile_time == {}
+
+    def test_marbl_seed_defaults_include_bgc_on_nesting(
+        self, make_input_data, sample_grid_kwargs
+    ):
+        data = make_input_data(
+            grid_child=rt.Grid(**sample_grid_kwargs),
+            settings_compile_time_base={"cppdefs": {"marbl": True}},
+        )
+        mock_nesting = self._run_grid_step(data)
+        mock_nesting.assert_called_once()
+        assert mock_nesting.call_args.kwargs["include_bgc"] is True
+
+    def test_no_marbl_omits_include_bgc_on_nesting(
+        self, make_input_data, sample_grid_kwargs
+    ):
+        data = make_input_data(
+            grid_child=rt.Grid(**sample_grid_kwargs),
+            settings_compile_time_base={"cppdefs": {"marbl": False}},
+        )
+        mock_nesting = self._run_grid_step(data)
+        mock_nesting.assert_called_once()
+        assert "include_bgc" not in mock_nesting.call_args.kwargs
+
+    def test_metadata_child_include_bgc_wins_over_seed(
+        self, make_input_data, sample_grid_kwargs
+    ):
+        """An explicit include_bgc in metadata_child overrides the marbl default."""
+        data = make_input_data(
+            grid_child=rt.Grid(**sample_grid_kwargs),
+            metadata_child={"include_bgc": False},
+            settings_compile_time_base={"cppdefs": {"marbl": True}},
+        )
+        mock_nesting = self._run_grid_step(data)
+        assert mock_nesting.call_args.kwargs["include_bgc"] is False
+
+    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    def test_marbl_seed_populates_bgc_interp_frc(
+        self, mock_sf_class, make_input_data, tmp_path
+    ):
+        mock_sf = MagicMock()
+        surface_path = tmp_path / "surface.nc"
+        surface_path.touch()
+        mock_sf.save.return_value = surface_path
+        mock_sf_class.return_value = mock_sf
+
+        data = make_input_data(settings_compile_time_base={"cppdefs": {"marbl": True}})
+        data._generate_surface_forcing(
+            key="forcing.surface",
+            source={"name": "UNIFIED", "climatology": True},
+            type="bgc",
+        )
+        assert "interp_frc" in data._settings_run_time["bgc"]
+
+    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    def test_no_marbl_skips_bgc_runtime_section(
+        self, mock_sf_class, make_input_data, tmp_path
+    ):
+        mock_sf = MagicMock()
+        surface_path = tmp_path / "surface.nc"
+        surface_path.touch()
+        mock_sf.save.return_value = surface_path
+        mock_sf_class.return_value = mock_sf
+
+        data = make_input_data(settings_compile_time_base={"cppdefs": {"marbl": False}})
+        data._generate_surface_forcing(
+            key="forcing.surface",
+            source={"name": "UNIFIED", "climatology": True},
+            type="bgc",
+        )
+        assert "bgc" not in data._settings_run_time
