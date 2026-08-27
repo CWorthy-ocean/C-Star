@@ -8,14 +8,19 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.roms.namelist import (
+    PioSettings,
     RomsNamelist,
     RomsNamelistBase,
     RomsNamelistV0_5_0,
+    RomsNamelistV0_6_0,
     namelist_schema_for_ref,
 )
 
 OLD_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist.nml"
 NEW_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
+V0_6_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.nml"
+
+PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
 
 @pytest.mark.parametrize(
@@ -29,11 +34,20 @@ def test_namelist_schema_for_ref_pre_0_5_0(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.5.0", "v0.5.0", "0.7.3", "12.0.0"],
+    ["0.5.0", "v0.5.0", "0.5.9"],
 )
-def test_namelist_schema_for_ref_post_0_5_0(checkout_target):
-    """Refs at or above 0.5.0 select `RomsNamelistV0_5_0`."""
+def test_namelist_schema_for_ref_0_5_0_range(checkout_target):
+    """Refs in `[0.5.0, 0.6.0)` select `RomsNamelistV0_5_0`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_5_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.6.0", "v0.6.0", "0.6.1", "0.7.3", "12.0.0"],
+)
+def test_namelist_schema_for_ref_post_0_6_0(checkout_target):
+    """Refs at or above 0.6.0 select `RomsNamelistV0_6_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_6_0
 
 
 @pytest.mark.parametrize(
@@ -52,7 +66,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_5_0
+    assert schema is RomsNamelistV0_6_0
 
 
 @pytest.fixture
@@ -145,7 +159,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_5_0
+    assert schema is RomsNamelistV0_6_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -157,12 +171,12 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
     ):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_5_0
+    assert schema is RomsNamelistV0_6_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_5_0
+    assert schema is RomsNamelistV0_6_0
 
 
 def test_roms_namelist_round_trip():
@@ -181,6 +195,18 @@ def test_roms_namelist_v0_5_0_round_trip():
     assert "nrpf_rst" not in d["basic_output_settings"]
 
 
+def test_roms_namelist_v0_6_0_round_trip():
+    """`RomsNamelistV0_6_0.read` parses the 0.6.0 fixture, keeping the 0.5.0
+    renamed keys and adding `pio_settings`.
+    """
+    nml = RomsNamelistV0_6_0.read(V0_6_0_NAMELIST)
+    d = nml.to_f90nml_dict()
+    assert "output_period_particles" in d["particles_settings"]
+    assert "nrpf_particles" in d["particles_settings"]
+    assert "nrpf_rst" not in d["basic_output_settings"]
+    assert d["pio_settings"] == {"pio_stride": 1}
+
+
 def test_roms_namelist_v0_5_0_rejects_old_fixture():
     """`RomsNamelistV0_5_0` is strict: the pre-0.5.0 fixture has now-extra/missing keys."""
     with pytest.raises(ValidationError):
@@ -193,6 +219,15 @@ def test_roms_namelist_rejects_new_fixture():
         RomsNamelist.read(NEW_NAMELIST)
 
 
+def test_roms_namelist_v0_5_0_rejects_pio_settings_fixture():
+    """`RomsNamelistV0_5_0` is strict: `&pio_settings` was added in 0.6.0, so a
+    file carrying it (otherwise identical to the 0.5.0 fixture) is rejected as
+    an unknown group.
+    """
+    with pytest.raises(ValidationError):
+        RomsNamelistV0_5_0.read(V0_6_0_NAMELIST)
+
+
 def test_roms_namelist_base_rejects_direct_use():
     """`RomsNamelistBase` refuses validation against itself.
 
@@ -201,6 +236,53 @@ def test_roms_namelist_base_rejects_direct_use():
     """
     with pytest.raises(TypeError, match="not a usable schema"):
         RomsNamelistBase.read(OLD_NAMELIST)
+
+
+def test_pio_settings_defaults_when_group_missing(tmp_path):
+    """A 0.6.0-schema namelist without `&pio_settings` still validates,
+    defaulting `pio_stride` to 1.
+    """
+    text = V0_6_0_NAMELIST.read_text()
+    assert PIO_SETTINGS_BLOCK in text
+    trimmed = tmp_path / "no_pio_settings.nml"
+    trimmed.write_text(text.replace(PIO_SETTINGS_BLOCK, ""))
+
+    nml = RomsNamelistV0_6_0.read(trimmed)
+    assert nml.pio_settings.pio_stride == 1
+
+
+def test_pio_settings_reads_and_round_trips_through_write(tmp_path):
+    """`pio_settings.pio_stride` reads from the 0.6.0 fixture and a modified
+    value round-trips through `write`.
+    """
+    nml = RomsNamelistV0_6_0.read(V0_6_0_NAMELIST)
+    assert nml.pio_settings.pio_stride == 1
+
+    nml.pio_settings.pio_stride = 4
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+
+    reread = RomsNamelistV0_6_0.read(out)
+    assert reread.pio_settings.pio_stride == 4
+
+
+def test_pio_settings_always_written_even_when_constructed_without_it(tmp_path):
+    """`pio_settings` is present in written output even when the model was
+    constructed without an explicit `&pio_settings` group (using the default).
+    """
+    text = V0_6_0_NAMELIST.read_text().replace(PIO_SETTINGS_BLOCK, "")
+    trimmed = tmp_path / "no_pio_settings.nml"
+    trimmed.write_text(text)
+
+    nml = RomsNamelistV0_6_0.read(trimmed)
+    d = nml.to_f90nml_dict()
+    assert d["pio_settings"] == {"pio_stride": 1}
+
+
+def test_pio_settings_rejects_non_positive_stride():
+    """`pio_stride` must be >= 1."""
+    with pytest.raises(ValidationError):
+        PioSettings(pio_stride=0)
 
 
 class TestUnknownOverrideKeys:
@@ -237,3 +319,19 @@ class TestUnknownOverrideKeys:
         """The base class is not a usable schema for key checks."""
         with pytest.raises(TypeError, match="not a usable schema"):
             RomsNamelistBase.unknown_override_keys({"time_stepping": {"dt": 1}})
+
+    def test_pio_settings_key(self):
+        """`pio_settings.pio_stride` is only a known group/key from 0.6.0 on:
+        `RomsNamelistV0_6_0` accepts it, but `RomsNamelist` and
+        `RomsNamelistV0_5_0` (which lack the group) report it as unknown.
+        """
+        overrides = {"pio_settings": {"pio_stride": 4}}
+        assert RomsNamelistV0_6_0.unknown_override_keys(overrides) == []
+
+        violations = RomsNamelist.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert "pio_settings" in violations[0]
+
+        violations = RomsNamelistV0_5_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert "pio_settings" in violations[0]

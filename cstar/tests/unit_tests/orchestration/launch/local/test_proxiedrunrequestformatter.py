@@ -137,7 +137,8 @@ def test_proxiedrunrequestformatter_minimal_tpl_fill(
     tokens = [
         'SENTINEL_PATH="{sentinel_path}"',
         'BLUEPRINT_PATH="{blueprint_path}"',
-        "DEP_PIDS=({pids})",
+        "set -- {dep_sentinels}",
+        "for DEP_PID in {pids}; do",
         "RUNNING={running}",
         "DONE={done}",
         "FAILED={failed}",
@@ -214,7 +215,7 @@ def test_proxiedrunrequestformatter_environment_formatting(
 def test_proxiedrunrequestformatter_dependency_formatting(
     wp_templates_dir: Path, mock_run_id: str
 ) -> None:
-    """Verify that a formatter correctly adds the dependency array into the template."""
+    """Verify that a formatter correctly adds the dependency pid list into the template."""
     wp_path = wp_templates_dir / "single_step.yaml"
     workplan = deserialize(wp_path, Workplan)
     live_step = LiveStep.from_step(workplan.steps[0])
@@ -231,7 +232,7 @@ def test_proxiedrunrequestformatter_dependency_formatting(
     formatter = ProxiedRunRequestFormatter(live_step, deps)
     cmd = ["python", "-m", "venv", ".venv"]
 
-    deps_array = 'DEP_PIDS=("12345" "54321")\n'
+    deps_list = 'for DEP_PID in "12345" "54321"; do\n'
 
     run_request = RunRequest(
         command=cmd,
@@ -239,4 +240,4 @@ def test_proxiedrunrequestformatter_dependency_formatting(
     script = formatter.format(run_request)
 
     # confirm the dependencies are listed
-    assert deps_array in script
+    assert deps_list in script
