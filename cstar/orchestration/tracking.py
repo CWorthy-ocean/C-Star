@@ -371,9 +371,6 @@ class TrackingRepository(LoggingMixin):
             if not serialize(run_path, run):
                 self.log.warning("Run could not be persisted")
 
-            if not latest_path.parent.exists():
-                latest_path.parent.mkdir(parents=True, exist_ok=True)
-
             latest_path.unlink(missing_ok=True)
             latest_path.symlink_to(run_path)
 
