@@ -26,6 +26,7 @@ New features
 - In-development auto-tiling support on ``partitioning``: ``auto_tiling`` (requires ``use_pio``) and ``n_cores`` (usable in place of ``n_procs_x``/``n_procs_y``; consistency enforced when all three are given). Build-time check requires ``#define MPI_MASKING`` when ``auto_tiling`` is enabled. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Automatic blueprint schema migration during ``cstar blueprint run`` is now the default, and ``cstar blueprint migrate`` is always mounted (feature flags ``CSTAR_FF_CLI_BP_MIGRATE_AUTO``/``CSTAR_FF_CLI_BP_MIGRATE_SHOW`` removed). (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - New ``CSTAR_DISABLE_MIGRATION=1`` escape hatch: guarantees a blueprint is never modified — commands fail early if the blueprint is not at the current schema version. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
+- ROMS namelists now support the ``&PIO_SETTINGS`` group (``pio_stride``) added in ucla-roms 0.6.0. (`#650 <https://github.com/CWorthy-ocean/C-Star/pull/650>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -34,6 +35,7 @@ Bug Fixes
 - ``RuntimeParameterSet``'s model validator silently disabled the inherited ``ParameterSet`` locked/hash check (Pydantic v2 same-name validator shadowing): a ``locked: true`` parameter set with no hash validated cleanly. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - ``cstar blueprint run`` exited with code 0 when the blueprint failed validation; it now exits 1. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Serialized blueprints/workplans omitted ``schema_version`` whenever it equaled the current default (``exclude_defaults``); it is now always written so persisted artifacts self-describe. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
+- The local launcher's job proxy script used bash-only syntax (arrays) but is executed with ``sh``, so every local step failed immediately with a syntax error on systems where ``sh`` is dash (Ubuntu/Debian, including CI). The script is now POSIX sh. (`#650 <https://github.com/CWorthy-ocean/C-Star/pull/650>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -48,3 +50,4 @@ Miscellaneous
 
 - New versioned template ``blueprint.3.0.0.yaml`` and generated ``roms_marbl_schema.3.0.0.json``; ``docs/schemas/index.rst``, ``docs/blueprints.rst``, and the tutorial blueprints/notebook updated to the 3.0.0 shape; stale ``ModelParameterSet`` API listing removed. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Test fixtures (``blueprint_complete.yaml``, ``blueprint_template.yaml``, unit-test conftest data) migrated to 3.0.0. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
+- Made a migrate-CLI test assertion robust to console line-wrapping, which could split the expected error message at an arbitrary point depending on the tmp-path length (flaky in CI). (`#650 <https://github.com/CWorthy-ocean/C-Star/pull/650>`_)
