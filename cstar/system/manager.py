@@ -270,9 +270,9 @@ class AnvilSystemContext(SystemContext):
 class BouchetEnvSettings(SlurmSettingsBase):
     """Environment variables required to execute a simulation on the *Bouchet* system."""
 
-    HOST_IDENTIFIER: ClassVar[str] = "unknown"
+    HOST_IDENTIFIER: ClassVar[str] = "bouchet"
     """Fixed value in HOSTNAME env var on Bouchet that uniquely identifies the system."""
-    CLUSTER_IDENTIFIER: ClassVar[str] = "unknown"
+    CLUSTER_IDENTIFIER: ClassVar[str] = "bouchet"
     """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
 
     HOSTNAME: str = Field(default="", alias="HOSTNAME")
