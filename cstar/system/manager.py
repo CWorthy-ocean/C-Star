@@ -301,31 +301,31 @@ class BouchetSystemContext(SystemContext):
         day_queue = SlurmPartition(
             name="day",
             query_name="day",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
+            max_walltime_method=query_max_walltime_via_sinfo,
         )
         """Partition with 24 hour max walltime (1-00:00:00)."""
         week_queue = SlurmPartition(
             name="week",
             query_name="week",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
+            max_walltime_method=query_max_walltime_via_sinfo,
         )
         """Partition with 7 day max walltime (7-00:00:00)."""
         gpu_queue = SlurmPartition(
             name="gpu",
             query_name="gpu",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
+            max_walltime_method=query_max_walltime_via_sinfo,
         )
         """Partition with 2 day max walltime (2-00:00:00) and GPU nodes."""
         bigmem_queue = SlurmPartition(
             name="bigmem",
             query_name="bigmem",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
+            max_walltime_method=query_max_walltime_via_sinfo,
         )
         """Partition with 1 day max walltime (1-00:00:00) and 8000G memory limit."""
         mpi_queue = SlurmPartition(
             name="mpi",
             query_name="mpi",
-            max_walltime_method=query_max_walltime_via_sacctmgr,
+            max_walltime_method=query_max_walltime_via_sinfo,
         )
         """Partition with 2 day max walltime (2-00:00:00) and tuned for parallel MPI jobs."""
 
