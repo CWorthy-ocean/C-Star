@@ -1,0 +1,597 @@
+{
+    "$defs": {
+        "BlueprintState": {
+            "description": "The allowed states for a work plan.",
+            "enum": [
+                "notset",
+                "draft",
+                "validated"
+            ],
+            "title": "BlueprintState",
+            "type": "string"
+        },
+        "CodeRepository": {
+            "additionalProperties": false,
+            "description": "Reference to a remote code repository with optional path filtering\nand point-in-time specification.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "description": "Location of the remote code repository.",
+                    "title": "Location"
+                },
+                "commit": {
+                    "default": "",
+                    "description": "A specific commit to be used.",
+                    "title": "Commit",
+                    "type": "string"
+                },
+                "branch": {
+                    "default": "",
+                    "description": "A specific branch to be used.",
+                    "title": "Branch",
+                    "type": "string"
+                },
+                "filter": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/PathFilter"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "A filter specifying the files to be retrieved and persisted from the repository."
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "CodeRepository",
+            "type": "object"
+        },
+        "Dataset": {
+            "additionalProperties": false,
+            "description": "A dataset contains a data block alongside documentation and locking fields.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "data": {
+                    "description": "A list of one or more data resources.",
+                    "items": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/$defs/Resource"
+                            },
+                            {
+                                "$ref": "#/$defs/VersionedResource"
+                            }
+                        ]
+                    },
+                    "title": "Data",
+                    "type": "array"
+                }
+            },
+            "required": [
+                "data"
+            ],
+            "title": "Dataset",
+            "type": "object"
+        },
+        "ForcingConfiguration": {
+            "additionalProperties": false,
+            "description": "Configuration of the forcing parameters of the model.",
+            "properties": {
+                "boundary": {
+                    "$ref": "#/$defs/Dataset",
+                    "description": "Boundary forcing."
+                },
+                "surface": {
+                    "$ref": "#/$defs/Dataset",
+                    "description": "Surface forcing"
+                },
+                "tidal": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Tidal forcing."
+                },
+                "river": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "River forcing."
+                },
+                "corrections": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/Dataset"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Wind or other forcing corrections."
+                }
+            },
+            "required": [
+                "boundary",
+                "surface"
+            ],
+            "title": "ForcingConfiguration",
+            "type": "object"
+        },
+        "PartitioningParameterSet": {
+            "additionalProperties": false,
+            "description": "Parameters for the partitioning of the model.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Hash used to verify the parameters are unchanged.",
+                    "title": "Hash"
+                },
+                "n_procs_x": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Number of processes used to subdivide the domain on the x-axis.",
+                    "title": "N Procs X"
+                },
+                "n_procs_y": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Number of processes used to subdivide the domain on the y-axis.",
+                    "title": "N Procs Y"
+                },
+                "use_pio": {
+                    "default": false,
+                    "description": "Use the ParallelIO library for model input/output.",
+                    "title": "Use Pio",
+                    "type": "boolean"
+                },
+                "auto_tiling": {
+                    "default": false,
+                    "description": "Automatically determine the tiling layout instead of using `n_procs_x`/`n_procs_y`.\n\nNOTE: this feature is in development.",
+                    "title": "Auto Tiling",
+                    "type": "boolean"
+                },
+                "n_cores": {
+                    "anyOf": [
+                        {
+                            "exclusiveMinimum": 0,
+                            "type": "integer"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Total number of cores to use when `auto_tiling` selects the tiling layout.",
+                    "title": "N Cores"
+                }
+            },
+            "title": "PartitioningParameterSet",
+            "type": "object"
+        },
+        "PathFilter": {
+            "additionalProperties": false,
+            "description": "A filter used to specify a subset of files.",
+            "properties": {
+                "directory": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": "",
+                    "description": "Subdirectory that should be searched or kept.",
+                    "title": "Directory"
+                },
+                "files": {
+                    "description": "List of specific file names that must be kept.\n\nFile name filtering is combined with the directory filter, if one\nis provided.",
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Files",
+                    "type": "array"
+                }
+            },
+            "title": "PathFilter",
+            "type": "object"
+        },
+        "ROMSCompositeCodeRepository": {
+            "additionalProperties": false,
+            "description": "Collection of repositories used to build, configure, and execute ROMS.",
+            "properties": {
+                "roms": {
+                    "$ref": "#/$defs/CodeRepository",
+                    "description": "The baseline ROMS repository."
+                },
+                "run_time": {
+                    "$ref": "#/$defs/CodeRepository",
+                    "description": "Codebase used to modify the runtime behavior of ROMS."
+                },
+                "compile_time": {
+                    "$ref": "#/$defs/CodeRepository",
+                    "description": "Codebase used to modify base ROMS compilation."
+                },
+                "marbl": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/CodeRepository"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Codebase used to add MARBL to the simulation."
+                },
+                "pio": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/$defs/CodeRepository"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Codebase used to add the ParallelIO library to the simulation."
+                }
+            },
+            "required": [
+                "roms",
+                "run_time",
+                "compile_time"
+            ],
+            "title": "ROMSCompositeCodeRepository",
+            "type": "object"
+        },
+        "Resource": {
+            "additionalProperties": false,
+            "properties": {
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "file-path",
+                            "type": "string"
+                        },
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "description": "Location of the file to retrieve.",
+                    "title": "Location"
+                },
+                "partitioned": {
+                    "default": false,
+                    "description": "Flag indicating whether the resource is pre-partitioned.",
+                    "title": "Partitioned",
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "location"
+            ],
+            "title": "Resource",
+            "type": "object"
+        },
+        "RuntimeParameterSet": {
+            "additionalProperties": false,
+            "description": "Parameters for the execution of the model.\n\nThese parameters can be varied (within bounds defined elsewhere in the blueprint, e.g. valid_start/end_date),\nwithout changing the validity of the model solution.",
+            "properties": {
+                "documentation": {
+                    "default": "",
+                    "description": "Description of input data provenance; used in provenance roll-up.",
+                    "title": "Documentation",
+                    "type": "string"
+                },
+                "locked": {
+                    "default": false,
+                    "description": "Mutability of the parameter set.",
+                    "title": "Locked",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "anyOf": [
+                        {
+                            "type": "string"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": null,
+                    "description": "Hash used to verify the parameters are unchanged.",
+                    "title": "Hash"
+                },
+                "start_date": {
+                    "description": "Start of data time range to be used in the simulation.",
+                    "format": "date-time",
+                    "title": "Start Date",
+                    "type": "string"
+                },
+                "end_date": {
+                    "description": "End of data time range to be used in the simulation.",
+                    "format": "date-time",
+                    "title": "End Date",
+                    "type": "string"
+                },
+                "checkpoint_frequency": {
+                    "default": "1d",
+                    "description": "Time period between creation of checkpoint files.\n\nSupply a string representing the desired time period, such as:\n- every day: \"1d\"\n- every week: \"1w\"\n- every month: \"1m\" or \"4w\" or \"31d\"\n- every 2.5 days: \"2d 12h\" or \"60h\"\n\nA short time period will reduce data re-processing upon restart at the cost\nof additional disk usage and compute used for checkpointing.",
+                    "minLength": 2,
+                    "pattern": "([1-9][0-9]*)([hdwmy])",
+                    "title": "Checkpoint Frequency",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "start_date",
+                "end_date"
+            ],
+            "title": "RuntimeParameterSet",
+            "type": "object"
+        },
+        "VersionedResource": {
+            "additionalProperties": false,
+            "description": "A physical asset that is used as an input or configuration and\nhas an associated hash used to identify a specific version.",
+            "properties": {
+                "location": {
+                    "anyOf": [
+                        {
+                            "format": "file-path",
+                            "type": "string"
+                        },
+                        {
+                            "format": "uri",
+                            "maxLength": 2083,
+                            "minLength": 1,
+                            "type": "string"
+                        },
+                        {
+                            "type": "string"
+                        }
+                    ],
+                    "description": "Location of the file to retrieve.",
+                    "title": "Location"
+                },
+                "partitioned": {
+                    "default": false,
+                    "description": "Flag indicating whether the resource is pre-partitioned.",
+                    "title": "Partitioned",
+                    "type": "boolean"
+                },
+                "hash": {
+                    "description": "Expected hash of the file.",
+                    "minLength": 1,
+                    "title": "Hash",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "location",
+                "hash"
+            ],
+            "title": "VersionedResource",
+            "type": "object"
+        }
+    },
+    "additionalProperties": false,
+    "description": "Blueprint schema for running a ROMS-MARBL simulation.",
+    "properties": {
+        "name": {
+            "description": "A unique, user-friendly name for this blueprint.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+        },
+        "description": {
+            "description": "A user-friendly description of the scenario to be executed by the blueprint.",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+        },
+        "application": {
+            "default": "roms_marbl",
+            "description": "The process type to be executed by the blueprint.",
+            "title": "Application",
+            "type": "string"
+        },
+        "state": {
+            "$ref": "#/$defs/BlueprintState",
+            "default": "notset",
+            "description": "The current validation status of the blueprint."
+        },
+        "schema_version": {
+            "default": "3.0.0",
+            "description": "The blueprint schema version.",
+            "title": "Schema Version",
+            "type": "string"
+        },
+        "working_dir": {
+            "default": ".",
+            "description": "Path to a directory where assets are stored when executing the blueprint.",
+            "format": "path",
+            "title": "Working Dir",
+            "type": "string"
+        },
+        "valid_start_date": {
+            "description": "Beginning of the time range for the available data.",
+            "format": "date-time",
+            "title": "Valid Start Date",
+            "type": "string"
+        },
+        "valid_end_date": {
+            "description": "End of the time range for the available data.",
+            "format": "date-time",
+            "title": "Valid End Date",
+            "type": "string"
+        },
+        "code": {
+            "$ref": "#/$defs/ROMSCompositeCodeRepository",
+            "description": "Code repositories used to build, configure, and execute the ROMS simulation."
+        },
+        "initial_conditions": {
+            "$ref": "#/$defs/Dataset",
+            "description": "File containing the starting conditions of the simulation.",
+            "maxLength": 1,
+            "minLength": 1
+        },
+        "grid": {
+            "$ref": "#/$defs/Dataset",
+            "description": "File defining the grid geometry.",
+            "maxLength": 1,
+            "minLength": 1
+        },
+        "forcing": {
+            "$ref": "#/$defs/ForcingConfiguration",
+            "description": "Forcing configuration."
+        },
+        "partitioning": {
+            "$ref": "#/$defs/PartitioningParameterSet",
+            "description": "User-defined partitioning parameters."
+        },
+        "runtime_params": {
+            "$ref": "#/$defs/RuntimeParameterSet",
+            "description": "User-defined runtime parameters."
+        },
+        "cdr_forcing": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/Dataset"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Location of CDR input file for this run. Optional. User has more control over this compared to other forcing."
+        },
+        "nesting_info": {
+            "anyOf": [
+                {
+                    "$ref": "#/$defs/Dataset"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "default": null,
+            "description": "Location of nesting info input file for this run. Optional."
+        },
+        "namelist_overrides": {
+            "additionalProperties": {
+                "additionalProperties": true,
+                "type": "object"
+            },
+            "description": "Mapping of ROMS namelist group to key/value overrides.\n\nThese overrides are layered onto the runtime namelist LAST, after C-Star's\nown derived settings, so they take precedence over anything C-Star would\notherwise compute; list values replace the existing list wholesale. Keys\nare validated at runtime against the namelist\nschema for the pinned ucla-roms version. Overriding `param_settings.np_xi`/\n`param_settings.np_eta` to values that conflict with `partitioning` is an\nerror.",
+            "title": "Namelist Overrides",
+            "type": "object"
+        }
+    },
+    "required": [
+        "name",
+        "description",
+        "valid_start_date",
+        "valid_end_date",
+        "code",
+        "initial_conditions",
+        "grid",
+        "forcing",
+        "partitioning",
+        "runtime_params"
+    ],
+    "title": "RomsMarblBlueprint",
+    "type": "object"
+}

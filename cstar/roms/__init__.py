@@ -1,29 +1,7 @@
-from cstar.roms.discretization import ROMSDiscretization
-from cstar.roms.external_codebase import ROMSExternalCodeBase
-from cstar.roms.input_dataset import (
-    ROMSBoundaryForcing,
-    ROMSForcingCorrections,
-    ROMSInitialConditions,
-    ROMSInputDataset,
-    ROMSModelGrid,
-    ROMSPartitioning,
-    ROMSRiverForcing,
-    ROMSSurfaceForcing,
-    ROMSTidalForcing,
-)
-from cstar.roms.simulation import ROMSSimulation
+"""ROMS-specific simulation, codebase, dataset, and namelist components.
 
-__all__ = [
-    "ROMSExternalCodeBase",
-    "ROMSSimulation",
-    "ROMSDiscretization",
-    "ROMSInputDataset",
-    "ROMSPartitioning",
-    "ROMSModelGrid",
-    "ROMSInitialConditions",
-    "ROMSTidalForcing",
-    "ROMSBoundaryForcing",
-    "ROMSSurfaceForcing",
-    "ROMSRiverForcing",
-    "ROMSForcingCorrections",
-]
+Import from the concrete submodules (e.g. ``cstar.roms.simulation``,
+``cstar.roms.input_dataset``): this package deliberately re-exports nothing,
+so that importing a leaf module such as ``cstar.roms.namelist`` does not drag
+in ``ROMSSimulation`` and its application-layer dependencies.
+"""

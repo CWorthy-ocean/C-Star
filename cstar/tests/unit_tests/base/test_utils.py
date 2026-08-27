@@ -367,6 +367,20 @@ def test_deep_merge(
     assert actual == expected
 
 
+def test_deep_merge_replace_lists() -> None:
+    """With `replace_lists=True`, a merged list replaces the original wholesale
+    (a shorter list is not padded with the original's trailing items), including
+    inside nested dicts; the default remains element-wise merging.
+    """
+    original = {"a": {"b": [0.0, 0.0, 0.0, 0.0]}}
+    to_merge = {"a": {"b": [1.0, 2.0]}}
+
+    assert deep_merge(original, to_merge) == {"a": {"b": [1.0, 2.0, 0.0, 0.0]}}
+    assert deep_merge(original, to_merge, replace_lists=True) == {
+        "a": {"b": [1.0, 2.0]}
+    }
+
+
 def test_deep_merge_purity() -> None:
     """Confirm the deep_merge function does not modify the input dictionaries."""
     d0: dict[str, int | list[str]] = {"a": 0, "b": 1, "l": ["x"]}

@@ -333,7 +333,7 @@ async def test_continuance_directive_step_resolution(
 
     # inject `use_pio` here to ensure it survives into the directive's blueprint read.
     bp = deserialize(local_bp, RomsMarblBlueprint)
-    bp.model_params.use_pio = use_pio
+    bp.partitioning.use_pio = use_pio
     assert serialize(local_bp, bp)
 
     for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):

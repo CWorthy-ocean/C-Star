@@ -2,6 +2,7 @@ import logging
 import pickle
 import re
 import tempfile
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -69,9 +70,9 @@ class TestROMSSimulationInitialization:
         assert sim.name == "ROMSTest"
         assert sim.directory.is_dir()
         assert sim.discretization.__dict__ == {
-            "time_step": 60,
             "n_procs_x": 2,
             "n_procs_y": 3,
+            "n_cores": None,
         }
 
         assert sim.codebase.source.location == "https://github.com/roms/repo.git"
@@ -174,7 +175,7 @@ class TestROMSSimulationInitialization:
             ROMSSimulation(
                 name="test",
                 directory=tmp_path,
-                discretization=ROMSDiscretization(time_step=60),
+                discretization=ROMSDiscretization(),
                 runtime_code=None,
                 compile_time_code=additionalcode_local,
                 start_date="2012-01-01",
@@ -197,7 +198,7 @@ class TestROMSSimulationInitialization:
             ROMSSimulation(
                 name="test",
                 directory=tmp_path,
-                discretization=ROMSDiscretization(time_step=60),
+                discretization=ROMSDiscretization(),
                 runtime_code=additionalcode_local,
                 compile_time_code=None,
                 start_date="2012-01-01",
@@ -235,7 +236,7 @@ class TestROMSSimulationInitialization:
         sim = ROMSSimulation(
             name="test",
             directory=tmp_path,
-            discretization=ROMSDiscretization(time_step=60),
+            discretization=ROMSDiscretization(),
             runtime_code=roms_runtime_code,
             compile_time_code=roms_compile_time_code,
             start_date="2012-01-01",
@@ -309,7 +310,7 @@ class TestROMSSimulationInitialization:
             ROMSSimulation(
                 name="test",
                 directory=tmp_path,
-                discretization=ROMSDiscretization(time_step=60),
+                discretization=ROMSDiscretization(),
                 codebase=ROMSExternalCodeBase(),
                 runtime_code=roms_runtime_code,
                 compile_time_code=roms_compile_time_code,
@@ -389,12 +390,6 @@ class TestROMSSimulationInitialization:
         with pytest.raises(FileNotFoundError):
             sim._forcing_paths
 
-    def test_n_time_steps(self, stub_romssimulation):
-        sim = stub_romssimulation
-
-        assert sim._n_time_steps == 524160
-        pass
-
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
     @mock.patch.object(
@@ -439,8 +434,13 @@ class TestROMSSimulationInitialization:
         tested_settings = sim.roms_runtime_settings
 
         assert tested_settings.simulation_name_settings.title == "test_settings"
-        assert tested_settings.time_stepping.dt == sim.discretization.time_step
-        assert tested_settings.time_stepping.ntimes == sim._n_time_steps
+        # dt is not derived: it keeps the fixture namelist's own value.
+        assert tested_settings.time_stepping.dt == 2160.0
+        # ntimes is derived from the run length and that (unoverridden) dt.
+        run_length_seconds = int((sim.end_date - sim.start_date).total_seconds())
+        assert tested_settings.time_stepping.ntimes == run_length_seconds // 2160.0
+        assert tested_settings.param_settings.np_xi == sim.discretization.n_procs_x
+        assert tested_settings.param_settings.np_eta == sim.discretization.n_procs_y
         assert tested_settings.grid_settings.grdname == str(
             sim.model_grid.path_for_roms[0]
         )
@@ -589,7 +589,370 @@ class TestROMSSimulationInitialization:
         # for commit-hash-to-release-tag resolution
         mock_schema_for_ref.assert_called_once_with(checkout_target, repo_path=None)
         assert isinstance(result, RomsNamelistV0_5_0)
-        assert result.time_stepping.ntimes == sim._n_time_steps
+        run_length_seconds = int((sim.end_date - sim.start_date).total_seconds())
+        assert result.time_stepping.ntimes == run_length_seconds // 2160.0
+
+    def _prepare_sim_for_runtime_settings(
+        self,
+        sim,
+        stageddatacollection_remote_files,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+    ):
+        """Shared setup for `roms_runtime_settings` override tests: stages the
+        runtime code, mocks path resolution for grid/initial conditions/
+        forcing, and hands out a fresh `RomsNamelist` read from the example
+        fixture on every schema read (properties mutate the returned model).
+        """
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        mock_grid_path.return_value = [Path("grid.nc")]
+        mock_ini_path.return_value = [Path("fake_ini.nc")]
+        mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
+        mock_schema_for_ref.return_value.__name__ = "RomsNamelist"
+        mock_schema_for_ref.return_value.read.side_effect = lambda _: (
+            _REAL_NAMELIST_READ(EXAMPLE_NAMELIST)
+        )
+        return sim
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_derived_value_wins(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An override of a value C-Star derives (`output_root_name`) wins over
+        the derived value.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {
+            "simulation_name_settings": {"output_root_name": "custom/output_root"}
+        }
+
+        result = sim.roms_runtime_settings
+
+        assert result.simulation_name_settings.output_root_name == (
+            "custom/output_root"
+        )
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_nested_partial_override(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """A nested partial override only touches the named key: sibling keys
+        in the same group keep the namelist file's values.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        file_namelist = _REAL_NAMELIST_READ(EXAMPLE_NAMELIST)
+        sim.namelist_overrides = {"time_stepping": {"ndtfast": 5}}
+
+        result = sim.roms_runtime_settings
+
+        assert result.time_stepping.ndtfast == 5
+        assert result.time_stepping.ninfo == file_namelist.time_stepping.ninfo
+        assert result.time_stepping.dt == file_namelist.time_stepping.dt
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_dt_recomputes_ntimes(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Overriding `time_stepping.dt` recomputes `ntimes` from the new,
+        effective `dt` and the run length.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {"time_stepping": {"dt": 100.0}}
+
+        result = sim.roms_runtime_settings
+
+        run_length_seconds = int((sim.end_date - sim.start_date).total_seconds())
+        assert result.time_stepping.dt == 100.0
+        assert result.time_stepping.ntimes == run_length_seconds // 100.0
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_explicit_ntimes_stands(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Overriding both `dt` and `ntimes` leaves the explicit `ntimes` as-is
+        (it is not recomputed from the overridden `dt`).
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {"time_stepping": {"dt": 100.0, "ntimes": 42}}
+
+        result = sim.roms_runtime_settings
+
+        assert result.time_stepping.dt == 100.0
+        assert result.time_stepping.ntimes == 42
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_nonpositive_dt_raises_even_with_ntimes(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """A non-positive effective `dt` is rejected even when `ntimes` is also
+        overridden (the check must not be skipped with the ntimes derivation).
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {"time_stepping": {"dt": -10.0, "ntimes": 100}}
+
+        with pytest.raises(ValueError, match="must be positive"):
+            _ = sim.roms_runtime_settings
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_list_value_replaces_wholesale(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """A list-valued override replaces the existing list wholesale — a
+        shorter override list must not be padded with the file's trailing values.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {"tracer_diff2": {"tnu2": [2.0, 2.0]}}
+
+        result = sim.roms_runtime_settings
+
+        assert result.tracer_diff2.tnu2 == [2.0, 2.0]
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_unknown_group_raises(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An unknown namelist group in `namelist_overrides` raises a
+        `ValueError` naming the schema (the strict, `extra="forbid"` model
+        rejects it on `model_validate`).
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {"not_a_real_group": {"foo": 1}}
+
+        with pytest.raises(ValueError, match="failed validation against") as exc:
+            sim.roms_runtime_settings
+
+        assert isinstance(exc.value.__cause__, ValidationError)
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_unknown_key_raises(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An unknown key within a known namelist group raises a `ValueError`
+        naming the schema.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        sim.namelist_overrides = {"time_stepping": {"not_a_real_key": 1}}
+
+        with pytest.raises(ValueError, match="failed validation against") as exc:
+            sim.roms_runtime_settings
+
+        assert isinstance(exc.value.__cause__, ValidationError)
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_np_xi_superseded_by_discretization(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """The discretization is authoritative for the processor grid: an
+        `np_xi` override is superseded with a warning (blueprint validation
+        rejects conflicts earlier; this covers the direct-API path).
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        assert sim.discretization.n_procs_x == 2
+        sim.namelist_overrides = {"param_settings": {"np_xi": 99}}
+
+        with pytest.warns(UserWarning, match="np_xi.*superseded by the partitioning"):
+            result = sim.roms_runtime_settings
+
+        assert result.param_settings.np_xi == 2
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_np_xi_matching_value_no_warning(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An `np_xi` override matching the discretization is applied without a
+        supersession warning.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        assert sim.discretization.n_procs_x == 2
+        sim.namelist_overrides = {"param_settings": {"np_xi": 2}}
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            result = sim.roms_runtime_settings
+
+        assert result.param_settings.np_xi == 2
 
     def test_input_datasets(self, stub_romssimulation):
         """Test that the `input_datasets` property returns the correct list of
@@ -693,7 +1056,7 @@ class TestROMSSimulationInitialization:
                 directory=tmp_path,
                 runtime_code=[],
                 compile_time_code=[],
-                discretization=ROMSDiscretization(time_step=1),
+                discretization=ROMSDiscretization(),
                 start_date=start_date,
                 end_date=end_date,
                 valid_start_date=valid_start_date,
@@ -1227,7 +1590,6 @@ class TestProcessingAndExecution:
             ),
             mock.patch("cstar.roms.input_dataset.ROMSInputDataset") as MockDataset,
         ):
-            #
             mock_dataset = MockDataset()
             mock_dataset.exists_locally = dataset_exists
             mock_dataset.start_date = dataset_start
@@ -1308,6 +1670,57 @@ class TestProcessingAndExecution:
 
         assert sim.exe_path == build_dir / "roms"
         assert sim._exe_hash == "mockhash123"
+
+    @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch("cstar.roms.simulation.assert_single_toolchain_stack")
+    @mock.patch("cstar.roms.simulation.explicit_mpi_wrapper", return_value=None)
+    @mock.patch("cstar.roms.simulation._get_sha256_hash", return_value="dummy_hash")
+    @mock.patch("subprocess.run")
+    @mock.patch.object(ROMSSimulation, "_validate_cppdef_flag")
+    def test_build_validates_parallel_io_and_mpi_masking_cppdefs(
+        self,
+        mock_validate_cppdef_flag,
+        mock_subprocess,
+        mock_get_hash,
+        mock_explicit_mpi_wrapper,
+        mock_assert_toolchain,
+        mock_verify_linkage,
+        mock_rpath_flags,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Test that `build` checks both the `PARALLEL_IO` cppdef against
+        `use_pio` and the `MPI_MASKING` cppdef against `auto_tiling`.
+        """
+        sim = stub_romssimulation
+        build_dir = sim.fs_manager.compile_time_code_dir
+        (build_dir / "Compile").mkdir(exist_ok=True, parents=True)
+
+        assert sim.compile_time_code
+        sim.compile_time_code._working_copy = stageddatacollection_remote_files(
+            paths=[build_dir / f.basename for f in sim.compile_time_code.source]
+        )
+        mock_subprocess.return_value = mock.MagicMock(returncode=0, stderr="")
+        mock_get_hash.return_value = "mockhash123"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sim.codebase = mock.MagicMock()
+            sim.codebase.working_copy = mock.MagicMock()
+            sim.codebase.working_copy.path = Path(tmpdir)
+            (Path(tmpdir) / "Work").mkdir(exist_ok=True, parents=True)
+            (Path(tmpdir) / "Work" / "Makefile").touch()
+            sim.build()
+
+        assert mock_validate_cppdef_flag.call_count == 2
+        defines = [
+            call.kwargs["define"] for call in mock_validate_cppdef_flag.call_args_list
+        ]
+        enabled = [
+            call.kwargs["enabled"] for call in mock_validate_cppdef_flag.call_args_list
+        ]
+        assert defines == ["PARALLEL_IO", "MPI_MASKING"]
+        assert enabled == [sim.use_pio, sim.auto_tiling]
 
     @mock.patch("cstar.roms.simulation.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
@@ -1655,15 +2068,15 @@ class TestProcessingAndExecution:
         """
         sim = stub_romssimulation
         sim.exe_path = sim.directory / "ROMS/compile_time_code/roms"
-        with mock.patch(
-            "cstar.roms.simulation.ROMSDiscretization.n_procs_tot",
-            new_callable=mock.PropertyMock,
-            return_value=None,
+        with (
+            mock.patch(
+                "cstar.roms.simulation.ROMSDiscretization.n_procs_tot",
+                new_callable=mock.PropertyMock,
+                return_value=None,
+            ),
+            pytest.raises(ValueError, match="Unable to calculate node distribution"),
         ):
-            with pytest.raises(
-                ValueError, match="Unable to calculate node distribution"
-            ):
-                sim.run()
+            sim.run()
 
     @mock.patch.object(
         ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
@@ -2087,6 +2500,29 @@ class TestROMSSimulationUsePIO:
                 pio_codebase=pioexternalcodebase,
             )
 
+    def test_init_raises_if_auto_tiling_without_use_pio(self, stub_romssimulation):
+        """Test that `auto_tiling=True` with `use_pio=False` raises a
+        `ValueError`.
+        """
+        sim = stub_romssimulation
+        with pytest.raises(
+            ValueError, match="'auto_tiling' is True but 'use_pio' is False"
+        ):
+            ROMSSimulation(
+                name=sim.name,
+                directory=sim.directory / "auto_tiling_sim",
+                discretization=sim.discretization,
+                codebase=sim.codebase,
+                runtime_code=sim.runtime_code,
+                compile_time_code=sim.compile_time_code,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+                valid_start_date=sim.valid_start_date,
+                valid_end_date=sim.valid_end_date,
+                use_pio=False,
+                auto_tiling=True,
+            )
+
     def test_init_use_pio_creates_default_pio_codebase(
         self, stub_romssimulation, mocksourcedata_remote_repo
     ):
@@ -2128,7 +2564,7 @@ class TestROMSSimulationUsePIO:
         sim.pio_codebase = pioexternalcodebase
         assert sim.codebases[-1] is pioexternalcodebase
 
-    @mock.patch("cstar.roms.ROMSSimulation._validate_pio_inputs")
+    @mock.patch("cstar.roms.simulation.ROMSSimulation._validate_pio_inputs")
     @mock.patch.object(ROMSInputDataset, "partition")
     def test_pre_run_skips_partitioning(
         self, mock_partition, mock_validate, stub_romssimulation
@@ -2292,6 +2728,27 @@ class TestROMSSimulationUsePIO:
 
         assert "No suitable output found" in caplog.text
 
+    def _assert_pio_cppdef_flag(
+        self, sim: ROMSSimulation, build_dir: Path, *, should_raise: bool
+    ) -> None:
+        """Call `_validate_cppdef_flag` the same way `build` does for PARALLEL_IO."""
+        cppdefs = build_dir / "cppdefs.opt"
+        kwargs: dict[str, Any] = {
+            "define": "PARALLEL_IO",
+            "enabled": sim.use_pio,
+            "error_if_missing": (
+                f"use_pio is True but 'PARALLEL_IO' is not defined in {cppdefs}."
+            ),
+            "error_if_defined_but_disabled": (
+                f"'PARALLEL_IO' is defined in {cppdefs} but use_pio is False."
+            ),
+        }
+        if should_raise:
+            with pytest.raises(ValueError, match="PARALLEL_IO"):
+                sim._validate_cppdef_flag(build_dir, **kwargs)
+        else:
+            sim._validate_cppdef_flag(build_dir, **kwargs)
+
     @pytest.mark.parametrize(
         "use_pio, cppdefs_content, should_raise",
         [
@@ -2309,7 +2766,7 @@ class TestROMSSimulationUsePIO:
             (True, "  #  define   PARALLEL_IO\n", False),
         ],
     )
-    def test_validate_pio_cppdefs(
+    def test_validate_cppdef_flag_parallel_io(
         self,
         stub_romssimulation: ROMSSimulation,
         tmp_path: Path,
@@ -2317,8 +2774,10 @@ class TestROMSSimulationUsePIO:
         cppdefs_content: str,
         should_raise: bool,
     ):
-        """Test that `_validate_pio_cppdefs` raises when `use_pio` and the presence
-        of `#define PARALLEL_IO` in cppdefs.opt disagree, in either direction.
+        """Test that `_validate_cppdef_flag` raises when `use_pio` and the presence
+        of `#define PARALLEL_IO` in cppdefs.opt disagree, in either direction
+        (both `error_if_missing` and `error_if_defined_but_disabled` are set for
+        this flag).
         """
         sim = stub_romssimulation
         sim.use_pio = use_pio
@@ -2326,19 +2785,66 @@ class TestROMSSimulationUsePIO:
         build_dir.mkdir()
         (build_dir / "cppdefs.opt").write_text(cppdefs_content)
 
-        if should_raise:
-            with pytest.raises(ValueError, match="PARALLEL_IO"):
-                sim._validate_pio_cppdefs(build_dir)
-        else:
-            sim._validate_pio_cppdefs(build_dir)
+        self._assert_pio_cppdef_flag(sim, build_dir, should_raise=should_raise)
 
-    def test_validate_pio_cppdefs_skips_if_no_cppdefs(
+    @pytest.mark.parametrize(
+        "auto_tiling, cppdefs_content, should_raise",
+        [
+            # auto_tiling and the define agree
+            (True, "#define MPI_MASKING\n#define MARBL\n", False),
+            # auto_tiling without the define
+            (True, "#define MARBL\n", True),
+            # define present but auto_tiling False: one-directional, no error
+            (False, "#define MPI_MASKING\n", False),
+            (False, "#define MARBL\n", False),
+        ],
+    )
+    def test_validate_cppdef_flag_mpi_masking(
+        self,
+        stub_romssimulation: ROMSSimulation,
+        tmp_path: Path,
+        auto_tiling: bool,
+        cppdefs_content: str,
+        should_raise: bool,
+    ):
+        """Test that `_validate_cppdef_flag` checks `MPI_MASKING` against
+        `auto_tiling` in the forward direction only: no
+        `error_if_defined_but_disabled` is passed, so a define present without
+        `auto_tiling` is not an error.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = True  # auto_tiling requires use_pio
+        sim.auto_tiling = auto_tiling
+        build_dir = tmp_path / "cppdefs_test"
+        build_dir.mkdir()
+        (build_dir / "cppdefs.opt").write_text(cppdefs_content)
+
+        cppdefs = build_dir / "cppdefs.opt"
+        kwargs: dict[str, Any] = {
+            "define": "MPI_MASKING",
+            "enabled": sim.auto_tiling,
+            "error_if_missing": (
+                f"auto_tiling is True but 'MPI_MASKING' is not defined in {cppdefs}."
+            ),
+        }
+        if should_raise:
+            with pytest.raises(ValueError, match="MPI_MASKING"):
+                sim._validate_cppdef_flag(build_dir, **kwargs)
+        else:
+            sim._validate_cppdef_flag(build_dir, **kwargs)
+
+    def test_validate_cppdef_flag_skips_if_no_cppdefs(
         self, stub_romssimulation: ROMSSimulation, tmp_path: Path
     ):
-        """Test that `_validate_pio_cppdefs` is a no-op when cppdefs.opt is absent."""
+        """Test that `_validate_cppdef_flag` is a no-op when cppdefs.opt is absent."""
         sim = stub_romssimulation
         sim.use_pio = True
-        sim._validate_pio_cppdefs(tmp_path)  # Should not raise
+        sim._validate_cppdef_flag(
+            tmp_path,
+            define="PARALLEL_IO",
+            enabled=True,
+            error_if_missing="should not be raised",
+        )  # Should not raise
 
     def test_dict_roundtrip_with_pio(
         self,
@@ -2374,6 +2880,44 @@ class TestROMSSimulationUsePIO:
 
         assert sim2.use_pio is True
         assert isinstance(sim2.pio_codebase, PIOExternalCodeBase)
+        assert sim2.to_dict() == sim_dict
+
+    def test_dict_roundtrip_with_namelist_overrides_and_auto_tiling(
+        self,
+        stub_romssimulation,
+        pioexternalcodebase,
+        patch_romssimulation_init_sourcedata,
+    ):
+        """Test that `namelist_overrides` and `auto_tiling` survive a
+        to_dict/from_dict round trip, and are only emitted by `to_dict` when
+        non-default.
+        """
+        sim = stub_romssimulation
+
+        # Inactive/default: keys are not emitted
+        assert "namelist_overrides" not in sim.to_dict()
+        assert "auto_tiling" not in sim.to_dict()
+
+        # auto_tiling requires use_pio; supply an explicit pio_codebase
+        # so `to_dict`/`from_dict` don't need to fabricate a default one.
+        sim.use_pio = True
+        sim.pio_codebase = pioexternalcodebase
+        sim.auto_tiling = True
+        sim.namelist_overrides = {"time_stepping": {"dt": 360}}
+        sim_dict = sim.to_dict()
+        assert sim_dict["auto_tiling"] is True
+        assert sim_dict["namelist_overrides"] == {"time_stepping": {"dt": 360}}
+
+        with patch_romssimulation_init_sourcedata():
+            sim2 = ROMSSimulation.from_dict(
+                sim_dict,
+                directory=sim.directory,
+                start_date=sim.start_date,
+                end_date=sim.end_date,
+            )
+
+        assert sim2.auto_tiling is True
+        assert sim2.namelist_overrides == {"time_stepping": {"dt": 360}}
         assert sim2.to_dict() == sim_dict
 
     @mock.patch.object(ROMSInputDataset, "path_for_roms_unpartitioned")

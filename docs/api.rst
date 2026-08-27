@@ -8,7 +8,7 @@ Simulation
    :toctree: generated/
 	     
    cstar.simulation.Simulation
-   cstar.roms.ROMSSimulation
+   cstar.roms.simulation.ROMSSimulation
 
 External Codebases
 ------------------------

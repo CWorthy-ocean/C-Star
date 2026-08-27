@@ -1,4 +1,5 @@
 import typing as t
+import warnings
 from datetime import datetime
 
 from pydantic import (
@@ -18,6 +19,7 @@ from cstar.orchestration.models import (
     DocLocMixin,
     PathFilter,
 )
+from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
 
 APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
 
@@ -169,8 +171,12 @@ class RuntimeParameterSet(ParameterSet):
         return value
 
     @model_validator(mode="after")
-    def _model_validator(self) -> "RuntimeParameterSet":
-        """Perform validation on the model after field-level validation is complete."""
+    def _validate_date_range(self) -> "RuntimeParameterSet":
+        """Perform validation on the model after field-level validation is complete.
+
+        Named distinctly from `ParameterSet._model_validator` so the inherited
+        locked/hash check is not shadowed and both validators run.
+        """
         if self.end_date <= self.start_date:
             msg = "start_date must precede end_date"
             raise ValueError(msg)
@@ -179,32 +185,80 @@ class RuntimeParameterSet(ParameterSet):
 
 
 class PartitioningParameterSet(ParameterSet):
-    """Parameters for the partitioning of the model."""
+    """Parameters for the partitioning of the model.
 
-    n_procs_x: PositiveInt
+    Namelist overrides of the processor grid (`np_xi`/`np_eta` in
+    `param_settings`) must agree with these parameters; the partitioning is
+    authoritative for the processor grid at runtime.
+    """
+
+    n_procs_x: PositiveInt | None = None
     """Number of processes used to subdivide the domain on the x-axis."""
 
-    n_procs_y: PositiveInt
+    n_procs_y: PositiveInt | None = None
     """Number of processes used to subdivide the domain on the y-axis."""
-
-
-class ModelParameterSet(ParameterSet):
-    """
-    Parameters that can override ROMS.in values. Unlike RuntimeParameters, these affect the validity of the
-    model solution, and should be locked for validated blueprints.
-    """
-
-    time_step: PositiveInt
-    """The time step the model integrates over."""
 
     use_pio: bool = False
     """Use the ParallelIO library for model input/output."""
+
+    auto_tiling: bool = False
+    """Automatically determine the tiling layout instead of using `n_procs_x`/`n_procs_y`.
+
+    NOTE: this feature is in development.
+    """
+
+    n_cores: PositiveInt | None = None
+    """Total number of cores to use when `auto_tiling` selects the tiling layout."""
+
+    @property
+    def dims(self) -> tuple[PositiveInt, PositiveInt] | None:
+        """The `(n_procs_x, n_procs_y)` pair, or `None` unless both are set."""
+        if self.n_procs_x is None or self.n_procs_y is None:
+            return None
+        return (self.n_procs_x, self.n_procs_y)
+
+    @model_validator(mode="after")
+    def _validate_partitioning(self) -> "PartitioningParameterSet":
+        """Perform validation on the model after field-level validation is complete.
+
+        Named distinctly from `ParameterSet._model_validator` so the inherited
+        locked/hash check is not shadowed and both validators run.
+        """
+        violations: list[str] = []
+
+        if self.auto_tiling:
+            if not self.use_pio:
+                violations.append("auto_tiling requires use_pio to be true")
+            if self.n_cores is None and self.dims is None:
+                violations.append(
+                    "auto_tiling requires n_cores or both n_procs_x and n_procs_y"
+                )
+            if (
+                self.n_cores is not None
+                and (dims := self.dims) is not None
+                and self.n_cores != dims[0] * dims[1]
+            ):
+                violations.append(
+                    "n_cores must equal n_procs_x * n_procs_y when all are supplied"
+                )
+        else:
+            if self.dims is None:
+                violations.append(
+                    "n_procs_x and n_procs_y are required unless auto_tiling is enabled"
+                )
+            if self.n_cores is not None:
+                violations.append("n_cores is only accepted with auto_tiling")
+
+        if violations:
+            raise ValueError("; ".join(violations))
+
+        return self
 
 
 class RomsMarblBlueprint(Blueprint):
     """Blueprint schema for running a ROMS-MARBL simulation."""
 
-    schema_version: str = "2.1.0"
+    schema_version: str = "3.0.0"
     """The blueprint schema version."""
 
     application: str = APP_NAME
@@ -231,9 +285,6 @@ class RomsMarblBlueprint(Blueprint):
     partitioning: PartitioningParameterSet
     """User-defined partitioning parameters."""
 
-    model_params: ModelParameterSet
-    """User-defined model parameters."""
-
     runtime_params: RuntimeParameterSet
     """User-defined runtime parameters."""
 
@@ -242,6 +293,21 @@ class RomsMarblBlueprint(Blueprint):
 
     nesting_info: Dataset | None = Field(default=None)
     """Location of nesting info input file for this run. Optional."""
+
+    namelist_overrides: dict[str, dict[str, t.Any]] = Field(default_factory=dict)
+    """Mapping of ROMS namelist group to key/value overrides.
+
+    These overrides are layered onto the runtime namelist LAST, after C-Star's
+    own derived settings, so they take precedence over anything C-Star would
+    otherwise compute; list values replace the existing list wholesale.
+
+    Group and key names are checked when the blueprint is validated: unknown
+    names are an error when `code.roms` pins a release version, and a warning
+    (against the best-guess schema) otherwise. Values are validated at runtime
+    against the namelist schema for the pinned ucla-roms version. See the
+    :class:`PartitioningParameterSet` documentation for potential conflicts
+    with the partitioning configuration.
+    """
 
     @model_validator(mode="after")
     def _model_validator(self) -> "RomsMarblBlueprint":
@@ -258,13 +324,74 @@ class RomsMarblBlueprint(Blueprint):
             msg = "start_date is outside the valid range"
             raise ValueError(msg)
 
-        if self.code.pio is not None and not self.model_params.use_pio:
-            msg = "code.pio was supplied but model_params.use_pio is false"
+        if self.code.pio is not None and not self.partitioning.use_pio:
+            msg = (
+                "A ParallelIO codebase was supplied, but PIO is not enabled "
+                "in the partitioning configuration for this blueprint"
+            )
             raise ValueError(msg)
 
+        self._validate_namelist_overrides()
+
         return self
+
+    def _validate_namelist_overrides(self) -> None:
+        """Check `namelist_overrides` names and partitioning consistency early.
+
+        Unknown group/key names are an error when `code.roms` pins a release
+        version (the namelist schema is then certain) and a warning otherwise,
+        where the latest schema is only a best guess. `np_xi`/`np_eta`
+        conflicts with `partitioning` are schema-independent and always an
+        error. Values are not checked here — the merge onto the real namelist
+        in `roms_runtime_settings` re-validates against the full schema.
+        """
+        if not self.namelist_overrides:
+            return
+
+        param_overrides = self.namelist_overrides.get("param_settings", {})
+        violations = [
+            f"namelist override {key!r} ({value!r}) conflicts with the "
+            f"blueprint partitioning ({expected!r})"
+            for key, expected in (
+                ("np_xi", self.partitioning.n_procs_x),
+                ("np_eta", self.partitioning.n_procs_y),
+            )
+            if (value := param_overrides.get(key)) is not None
+            and expected is not None
+            and value != expected
+        ]
+
+        ref = self.code.roms.checkout_target
+        pinned_release = _parse_semver(ref) is not None
+        if pinned_release:
+            schema = namelist_schema_for_ref(ref)
+            violations += schema.unknown_override_keys(self.namelist_overrides)
+        else:
+            with warnings.catch_warnings():
+                # suppress the unparseable-ref fallback warning; unknown names
+                # are reported below only if any are found
+                warnings.simplefilter("ignore", UserWarning)
+                schema = namelist_schema_for_ref(ref)
+            if unknown := schema.unknown_override_keys(self.namelist_overrides):
+                warnings.warn(
+                    f"namelist_overrides contain names not in {schema.__name__} "
+                    f"(assumed for unpinned ucla-roms ref {ref!r}): "
+                    + "; ".join(unknown),
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+        if violations:
+            raise ValueError("invalid namelist_overrides: " + "; ".join(violations))
 
     @property
     def cpus_needed(self) -> int:
         """Number of CPUs needed for ROMS (derived from the partitioning parameters)."""
-        return self.partitioning.n_procs_x * self.partitioning.n_procs_y
+        if self.partitioning.n_cores is not None:
+            return self.partitioning.n_cores
+
+        if (dims := self.partitioning.dims) is None:
+            msg = "partitioning must supply n_cores or both n_procs_x and n_procs_y"
+            raise ValueError(msg)
+
+        return dims[0] * dims[1]

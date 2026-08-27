@@ -77,26 +77,6 @@ ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
 ] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"
 """Enable long name generation during time-splitting."""
 
-ENV_FF_CLI_BP_MIGRATE_AUTO: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_AUTO"],
-    EnvVar(
-        "Enable automatic blueprint migration to the latest schema during execution.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_BP_MIGRATE_AUTO"
-"""Enable automatic blueprint migration to the latest schema during execution."""
-
-ENV_FF_CLI_BP_MIGRATE_SHOW: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_SHOW"],
-    EnvVar(
-        "Enable CLI for migrating blueprints to the latest schema.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_BP_MIGRATE_SHOW"
-"""Enable CLI for migrating blueprints to the latest schema."""
-
 
 ENV_FF_DEBUG_BUILD_MODE: t.Annotated[
     t.Literal["CSTAR_FF_DEBUG_BUILD_MODE"],
@@ -118,17 +98,6 @@ ENV_FF_SLURM_DISABLE_MT: t.Annotated[
     ),
 ] = "CSTAR_FF_SLURM_DISABLE_MT"
 """Enable passing a hint to SLURM to disable multi-threading."""
-
-
-ENV_FF_ENABLE_LOCAL_PROXY: t.Annotated[
-    t.Literal["CSTAR_FF_ENABLE_LOCAL_PROXY"],
-    EnvVar(
-        "Enable experimental support for asynchronous status updates in the local launcher.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_ENABLE_LOCAL_PROXY"
-"""Enable experimental support for asynchronous status updates in the local launcher."""
 
 
 def is_flag_enabled(flag: str) -> bool:

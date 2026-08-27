@@ -988,19 +988,6 @@ class RunRequestCommandFormatter(ModelFormatter[RunRequest]):
         return f"{variables} {cmd}".strip()
 
 
-class RunRequestScriptFormatter(ModelFormatter[RunRequest]):
-    """Format a `RunRequest` as script content."""
-
-    def _to_string(self, value: RunRequest) -> str:
-        command = " ".join(value.command)
-        exports = ";".join(f"export {k}='{v}'" for k, v in value.environment.items())
-
-        if exports:
-            return f"{exports}; {command};"
-
-        return f"{command};"
-
-
 def check_environment() -> None:
     """Verify the environment is configured correctly.
 

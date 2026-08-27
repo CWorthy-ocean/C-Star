@@ -182,7 +182,7 @@ class TestSimulationInitialization:
                 name="InvalidSim",
                 directory=tmp_path,
                 codebase=fakeexternalcodebase,
-                discretization=Discretization(time_step=60),
+                discretization=Discretization(),
                 start_date="2023-12-31",  # Too early
                 end_date="2025-12-31",
                 valid_start_date="2024-01-01",
@@ -213,7 +213,7 @@ class TestSimulationInitialization:
                 name="InvalidSim",
                 directory=tmp_path,
                 codebase=fakeexternalcodebase,
-                discretization=Discretization(time_step=60),
+                discretization=Discretization(),
                 start_date="2025-01-01",
                 end_date="2026-02-01",  # Too late
                 valid_start_date="2024-01-01",
@@ -242,7 +242,7 @@ class TestSimulationInitialization:
                 name="InvalidSim",
                 directory=tmp_path,
                 codebase=fakeexternalcodebase,
-                discretization=Discretization(time_step=60),
+                discretization=Discretization(),
                 start_date="2025-12-31",
                 end_date="2025-01-01",
                 valid_start_date="2025-12-01",
@@ -277,7 +277,7 @@ class TestSimulationInitialization:
                 name="TestSim",
                 directory="some/dir",
                 codebase=fakeexternalcodebase,
-                discretization=Discretization(time_step=60),
+                discretization=Discretization(),
                 start_date="2025-01-01",
                 end_date="2025-12-31",
                 valid_start_date="2024-01-01",
@@ -320,7 +320,7 @@ class TestSimulationInitialization:
             name="FallbackSim",
             directory=tmp_path,
             codebase=fakeexternalcodebase,
-            discretization=Discretization(time_step=60),
+            discretization=Discretization(),
             valid_start_date="2025-01-01",
             valid_end_date="2025-12-31",
         )
@@ -357,7 +357,7 @@ class TestSimulationInitialization:
             name="FallbackSim",
             codebase=fakeexternalcodebase,
             directory=tmp_path,
-            discretization=Discretization(time_step=60),
+            discretization=Discretization(),
             start_date="2025-01-01",
             end_date="2025-01-02",
         )
@@ -384,7 +384,7 @@ def test_to_dict(stub_simulation):
     test_dict = sim.to_dict()
 
     assert test_dict["name"] == "TestSim"
-    assert test_dict["discretization"] == {"time_step": 60}
+    assert test_dict["discretization"] == {}
     assert test_dict["codebase"]["source_repo"] == "https://github.com/test/repo.git"
     assert test_dict["codebase"]["checkout_target"] == "test_target"
     assert test_dict["runtime_code"]["location"] == "/some/local/directory"

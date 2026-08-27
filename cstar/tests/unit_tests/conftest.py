@@ -39,7 +39,6 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize
@@ -893,7 +892,7 @@ def stub_simulation(
         codebase=fakeexternalcodebase_with_mock_get,
         runtime_code=additionalcode_local(),
         compile_time_code=additionalcode_local(),
-        discretization=Discretization(time_step=60),
+        discretization=Discretization(),
         start_date="2025-01-01",
         end_date="2025-12-31",
         valid_start_date="2024-01-01",
@@ -1004,11 +1003,8 @@ def custom_system_env(
 ## tests should remain general (e.g. using a generic 'Simulation' subclass) rather than
 ## using ROMS-specific fixtures (e.g. 'ROMSSimulation')
 ################################################################################
-from cstar.roms import (  # noqa: E402
-    ROMSDiscretization,
-    ROMSExternalCodeBase,
-    ROMSSimulation,
-)
+from cstar.roms.discretization import ROMSDiscretization  # noqa: E402
+from cstar.roms.external_codebase import ROMSExternalCodeBase  # noqa: E402
 from cstar.roms.input_dataset import (  # noqa: E402
     ROMSBoundaryForcing,
     ROMSCdrForcing,
@@ -1021,6 +1017,7 @@ from cstar.roms.input_dataset import (  # noqa: E402
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
+from cstar.roms.simulation import ROMSSimulation  # noqa: E402
 from cstar.tests.unit_tests.fake_abc_subclasses import (  # noqa: E402
     FakeROMSInputDataset,
 )
@@ -1611,7 +1608,7 @@ def stub_romssimulation(
     sim = ROMSSimulation(
         name="ROMSTest",
         directory=directory,
-        discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
+        discretization=ROMSDiscretization(n_procs_x=2, n_procs_y=3),
         codebase=romsexternalcodebase,
         runtime_code=roms_runtime_code,
         compile_time_code=roms_compile_time_code,
@@ -1665,9 +1662,9 @@ def stub_romssimulation_dict(stub_romssimulation: ROMSSimulation) -> dict[str, A
             "checkout_target": sim.codebase.source.checkout_target,
         },
         "discretization": {
-            "time_step": sim.discretization.time_step,
             "n_procs_x": sim.discretization.n_procs_x,
             "n_procs_y": sim.discretization.n_procs_y,
+            "n_cores": sim.discretization.n_cores,
         },
         "runtime_code": sim.runtime_code._constructor_args,  # type: ignore
         "compile_time_code": sim.compile_time_code._constructor_args,  # type: ignore
@@ -2218,8 +2215,6 @@ def mock_local_delay() -> float:
 
     NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
     """
-    LocalLauncher.use_proxy = False
-
     delay = 0.1
     os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
     return delay

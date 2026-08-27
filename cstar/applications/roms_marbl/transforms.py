@@ -164,9 +164,8 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
 
             # determine padding on partition segment of name from number of partitions
             partition_segment: str | None = None
-            if partitioning := bp_copy.partitioning:
-                num_partitions = partitioning.n_procs_x * partitioning.n_procs_y
-                partition_segment = min_padded_index(0, num_partitions)
+            if bp_copy.partitioning:
+                partition_segment = min_padded_index(0, bp_copy.cpus_needed)
 
             # Use the last restart file as initial conditions for the follow-up step
             restart_file = RestartFile.from_parts(
@@ -707,7 +706,7 @@ class ContinuanceDirective(OverrideDirective):
                 blueprint = step.blueprint
                 if (
                     isinstance(blueprint, RomsMarblBlueprint)
-                    and blueprint.model_params.use_pio
+                    and blueprint.partitioning.use_pio
                 ):
                     search_path = fsm.joined_output_dir
 

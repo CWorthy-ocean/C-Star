@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, cast
 
 import f90nml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -701,6 +701,12 @@ class RomsNamelistBase(BaseModel):
         extra="forbid", validate_assignment=True, use_attribute_docstrings=True
     )
 
+    _NOT_A_USABLE_SCHEMA_MSG: ClassVar[str] = (
+        "RomsNamelistBase is not a usable schema; use a versioned "
+        "subclass (e.g. RomsNamelist, RomsNamelistV0_5_0) or select "
+        "one with namelist_schema_for_ref()."
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _reject_direct_use(cls, data: Any) -> Any:
@@ -711,11 +717,7 @@ class RomsNamelistBase(BaseModel):
         namelist that no actual ucla-roms version reads.
         """
         if cls is RomsNamelistBase:
-            raise TypeError(
-                "RomsNamelistBase is not a usable schema; use a versioned "
-                "subclass (e.g. RomsNamelist, RomsNamelistV0_5_0) or select "
-                "one with namelist_schema_for_ref()."
-            )
+            raise TypeError(cls._NOT_A_USABLE_SCHEMA_MSG)
         return data
 
     simulation_name_settings: SimulationNameSettings
@@ -761,6 +763,43 @@ class RomsNamelistBase(BaseModel):
     surf_flx_output_settings: SurfFlxOutputSettings
     pipe_frc_settings: PipeFrcSettings
     particles_settings: _ParticlesSettingsCommon
+
+    @classmethod
+    def unknown_override_keys(cls, overrides: dict[str, dict[str, Any]]) -> list[str]:
+        """List override entries whose names do not exist in this schema.
+
+        Checks group and key *names* only — values are not validated here; the
+        authoritative validation happens when overrides are merged onto a real
+        namelist and re-validated against the full schema.
+
+        Parameters
+        ----------
+        overrides : dict[str, dict[str, Any]]
+            Mapping of namelist group name to key/value overrides.
+
+        Returns
+        -------
+        list[str]
+            One human-readable violation per unknown group or key; empty when
+            every name exists in the schema.
+        """
+        if cls is RomsNamelistBase:
+            raise TypeError(cls._NOT_A_USABLE_SCHEMA_MSG)
+
+        violations: list[str] = []
+        for group, entries in overrides.items():
+            field = cls.model_fields.get(group)
+            annotation = field.annotation if field is not None else None
+            if not (isinstance(annotation, type) and issubclass(annotation, BaseModel)):
+                violations.append(f"unknown namelist group {group!r}")
+                continue
+            group_model = cast("type[BaseModel]", annotation)
+            violations.extend(
+                f"unknown key {key!r} in namelist group {group!r}"
+                for key in entries
+                if key not in group_model.model_fields
+            )
+        return violations
 
     # ---- f90nml round-trip ----
     @classmethod
