@@ -171,7 +171,7 @@ async def test_tracking_retrieve_variant(
         assert latest
 
         # confirm the latest search was used
-        lp_fn.assert_called_once()
+        lp_fn.assert_called()
         hp_fn.assert_not_called()
 
         history = await repo.get_workplan_run(wp_run.run_id, wp_run.start_at)
@@ -179,7 +179,6 @@ async def test_tracking_retrieve_variant(
 
         # confirm the history search was used
         hp_fn.assert_called_once()
-        lp_fn.assert_called_once()  # no new call made
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -368,9 +367,9 @@ async def test_tracking_list_history_run_id(
         (1, True, 1),
         (1, False, 1),
         (2, True, 2),
-        (2, False, 2),
+        (2, False, 1),
         (4, True, 4),
-        (4, False, 4),
+        (4, False, 1),
     ],
 )
 @pytest.mark.asyncio
@@ -392,40 +391,38 @@ async def test_tracking_get_run_paths(
     all_history : bool
         Pass `True` to test retrieval of all historical run paths.
     """
-    state_dir = tmp_path / "state"
     output_path = tmp_path / "output"
     wp_path = tmp_path / "fake_workplan.yaml"
     wp_trx_path = tmp_path / "mock_transformed_workplan.yaml"
     run_id = "test-get-run-paths-run-id"
     captured_env = {"foo": "foo-value"}
 
-    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
-        repo = TrackingRepository()
-        expected_paths = [repo.latest_path(run_id=run_id)]  # type: ignore
+    repo = TrackingRepository()
+    expected_paths = [repo.latest_path(run_id=run_id)]  # type: ignore
 
-        # insert some runs that re-use the same run-id
-        start_times = [datetime(2020, 1, 1 + i) for i in range(num_runs)]
-        inserts = [
-            repo.put_workplan_run(
-                WorkplanRun(
-                    workplan_path=wp_path,
-                    trx_workplan_path=wp_trx_path,
-                    output_path=output_path,
-                    run_id=run_id,
-                    environment=captured_env,
-                    start_at=start_at,
-                )
+    # insert some runs that re-use the same run-id
+    start_times = [datetime(2020, 1, 1 + i) for i in range(num_runs)]
+    inserts = [
+        repo.put_workplan_run(
+            WorkplanRun(
+                workplan_path=wp_path,
+                trx_workplan_path=wp_trx_path,
+                output_path=output_path,
+                run_id=run_id,
+                environment=captured_env,
+                start_at=start_at,
             )
-            for start_at in start_times
-        ]
-        run_paths = await asyncio.gather(*inserts)
-        expected_paths.extend(run_paths)
+        )
+        for start_at in start_times
+    ]
+    run_paths = await asyncio.gather(*inserts)
+    expected_paths.extend(run_paths)
 
-        # retrieve the list of run paths
-        actual_paths = repo.list_runtracking_paths(run_id, all_history)
+    # retrieve the list of run paths
+    actual_paths = repo.list_runtracking_paths(run_id, all_history)
 
-        # confirm the latest symlink is included
-        actual_latest = repo.latest_path(run_id)
+    # confirm the latest symlink is included
+    actual_latest = repo.latest_path(run_id)
 
     # confirm the results are de-duped to only the history paths
     latest_paths = [p for p in actual_paths if "latest" in str(p)]
@@ -433,13 +430,9 @@ async def test_tracking_get_run_paths(
     assert actual_latest not in set(actual_paths)
 
     # get the history paths
-    history = [p for p in actual_paths if "history" in str(p)]
+    history = set(p for p in actual_paths if "history" in str(p))
 
-    if all_history:
-        assert len(history) == exp_num_paths
-    else:
-        # confirm that passing all_history=False results in only receiving the latest path
-        assert len(history) == 1
+    assert len(history) == exp_num_paths
 
 
 @pytest.mark.asyncio

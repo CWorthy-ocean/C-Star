@@ -305,9 +305,10 @@ class TrackingRepository(LoggingMixin):
             msg = "A valid run-id was not provided; unable to retrieve run"
             raise ValueError(msg) from ex
 
+        latest_path = self.latest_path(run_id)
         run_path = self._find_run_path(run_id, run_date)
 
-        lock_path = run_path.with_suffix(".lock")
+        lock_path = latest_path.with_suffix(".lock")
         if not lock_path.parent.exists():
             lock_path.parent.mkdir(parents=True, exist_ok=True)
 
