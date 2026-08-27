@@ -210,7 +210,9 @@ def test_blueprint_run_disable_migration_outdated_rejected(
         )
 
     assert result.exit_code != 0
-    assert "migration is disabled" in result.stdout
+    # rich wraps the message at the terminal width, so a line break may land
+    # inside the phrase; normalize whitespace before matching.
+    assert "migration is disabled" in " ".join(result.stdout.split())
     mock_exec.assert_not_called()
 
 
