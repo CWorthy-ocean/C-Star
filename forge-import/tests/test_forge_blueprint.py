@@ -98,6 +98,152 @@ def test_naming_is_derived_not_stored():
     assert cfg.output_root_name("/scratch").startswith("/scratch/cson_roms-marbl")
 
 
+def test_partitioning_auto_tiling_with_n_cores_is_valid():
+    from cstar_forge.forge.forge_blueprint import Partitioning
+
+    p = Partitioning(auto_tiling=True, n_cores=4)
+    assert p.n_procs_x is None
+    assert p.n_procs_y is None
+    assert p.n_cores == 4
+
+
+def test_partitioning_requires_n_procs_without_auto_tiling():
+    from cstar_forge.forge.forge_blueprint import Partitioning
+
+    with pytest.raises(ValueError, match="n_procs_x and n_procs_y are required"):
+        Partitioning()
+
+
+def test_partitioning_rejects_n_cores_without_auto_tiling():
+    from cstar_forge.forge.forge_blueprint import Partitioning
+
+    with pytest.raises(ValueError, match="n_cores is only accepted with auto_tiling"):
+        Partitioning(n_procs_x=1, n_procs_y=1, n_cores=4)
+
+
+def test_partitioning_rejects_auto_tiling_without_n_cores():
+    from cstar_forge.forge.forge_blueprint import Partitioning
+
+    with pytest.raises(ValueError, match="auto_tiling requires n_cores"):
+        Partitioning(auto_tiling=True)
+
+
+def test_partitioning_rejects_auto_tiling_combined_with_n_procs():
+    from cstar_forge.forge.forge_blueprint import Partitioning
+
+    with pytest.raises(ValueError, match="must not be set when auto_tiling"):
+        Partitioning(auto_tiling=True, n_cores=8, n_procs_x=4, n_procs_y=2)
+
+
+def test_build_forge_blueprint_auto_tiling_derives_n_cores_from_n_procs():
+    """Switching auto_tiling on over an existing explicit grid (e.g. a loaded
+    blueprint's n_procs_x/n_procs_y) derives n_cores from the product; the
+    resolved Partitioning still carries only n_cores.
+    """
+    cfg = _build(
+        partitioning={"auto_tiling": True, "n_procs_x": 2, "n_procs_y": 2},
+        use_pio=True,
+    )
+    assert cfg.domain.partitioning.n_cores == 4
+    assert cfg.domain.partitioning.n_procs_x is None
+    assert cfg.domain.partitioning.n_procs_y is None
+    assert cfg.n_procs == 4
+
+
+def test_build_forge_blueprint_auto_tiling_accepts_consistent_n_procs_and_n_cores():
+    cfg = _build(
+        partitioning={
+            "auto_tiling": True,
+            "n_cores": 4,
+            "n_procs_x": 2,
+            "n_procs_y": 2,
+        },
+        use_pio=True,
+    )
+    assert cfg.domain.partitioning.n_cores == 4
+    assert cfg.domain.partitioning.n_procs_x is None
+
+
+def test_build_forge_blueprint_auto_tiling_rejects_inconsistent_n_cores():
+    with pytest.raises(ValueError, match="inconsistent with"):
+        _build(
+            partitioning={
+                "auto_tiling": True,
+                "n_cores": 8,
+                "n_procs_x": 2,
+                "n_procs_y": 2,
+            },
+            use_pio=True,
+        )
+
+
+def test_n_procs_property_uses_n_cores_when_set():
+    cfg = _build(partitioning={"auto_tiling": True, "n_cores": 4}, use_pio=True)
+    assert cfg.n_procs == 4
+
+
+def test_n_procs_property_raises_when_neither_available():
+    """Reachable only via direct/unvalidated construction (``Partitioning``'s own
+    validator forbids this combination) -- mirrors the ``model_copy`` bypass used
+    elsewhere in this file (e.g. ``test_domain_grid_file_rejects_generation_geometry_keys``'s
+    docstring) for exercising a validator-adjacent code path directly.
+    """
+    from cstar_forge.forge.forge_blueprint import Partitioning
+
+    cfg = _build()
+    cfg.domain.partitioning = Partitioning.model_construct(
+        n_procs_x=None, n_procs_y=None, auto_tiling=False, n_cores=None
+    )
+    with pytest.raises(ValueError, match="cannot determine n_procs"):
+        _ = cfg.n_procs
+
+
+def test_build_forge_blueprint_auto_tiling_resolves_cppdefs_and_partitioning():
+    cfg = _build(partitioning={"auto_tiling": True, "n_cores": 4}, use_pio=True)
+    assert cfg.model_settings["cppdefs"]["auto_tiling"] is True
+    assert cfg.model_settings["param"]["np_xi"] == 1
+    assert cfg.model_settings["param"]["np_eta"] == 1
+    assert cfg.domain.partitioning.auto_tiling is True
+    assert cfg.domain.partitioning.n_cores == 4
+    assert cfg.domain.partitioning.n_procs_x is None
+    assert cfg.domain.partitioning.n_procs_y is None
+    assert cfg.n_procs == 4
+    assert cfg.name == "cson_roms-marbl_v0.1_test-tiny_4procs"
+
+
+def test_build_forge_blueprint_auto_tiling_requires_use_pio():
+    with pytest.raises(ValueError, match="auto_tiling requires use_pio"):
+        _build(partitioning={"auto_tiling": True, "n_cores": 4}, use_pio=False)
+
+
+def test_build_forge_blueprint_auto_tiling_requires_n_cores():
+    """Only raises when there is no explicit grid to derive n_cores from."""
+    with pytest.raises(ValueError, match="auto_tiling requires partitioning.n_cores"):
+        _build(partitioning={"auto_tiling": True}, use_pio=True)
+    with pytest.raises(ValueError, match="auto_tiling requires partitioning.n_cores"):
+        _build(partitioning={"auto_tiling": True, "n_procs_x": 2}, use_pio=True)
+
+
+def test_build_forge_blueprint_auto_tiling_partitioning_round_trips():
+    """``domain.partitioning.model_dump()`` is exactly the DomainSpec save/load
+    shape (``forge_blueprint_wizard.py``'s ``_domain_spec_data``/``_apply_domain_spec``
+    round-trip a saved ``partitioning`` dict straight back into ``build_forge_blueprint``'s
+    ``partitioning=`` kwarg) -- confirm it feeds back in cleanly, with ``use_pio``
+    passed separately at the top level as the wizard does.
+    """
+    cfg = _build(partitioning={"auto_tiling": True, "n_cores": 4}, use_pio=True)
+    saved = cfg.domain.partitioning.model_dump()
+    cfg2 = _build(partitioning=saved, use_pio=True)
+    assert cfg2.domain.partitioning.auto_tiling is True
+    assert cfg2.domain.partitioning.n_cores == 4
+    assert cfg2.n_procs == 4
+
+
+def test_build_forge_blueprint_n_cores_requires_auto_tiling():
+    with pytest.raises(ValueError, match="n_cores is only accepted with auto_tiling"):
+        _build(partitioning={"n_procs_x": 1, "n_procs_y": 1, "n_cores": 1})
+
+
 def test_resolved_provenance_is_unstamped():
     """generated_at/forge_version/cstar_version/roms_tools_version are left None by
     the resolver -- ``ForgeBlueprint.to_yaml_str`` is what stamps them (see
@@ -3768,7 +3914,13 @@ class TestForgeBlueprintEngine:
         kw = forge_blueprint_to_builder_kwargs(cfg)
         assert kw["name"] == cfg.name
         assert kw["grid_name"] == "test-tiny"
-        assert kw["partitioning"] == {"n_procs_x": 1, "n_procs_y": 1}
+        # Subset, not full-dict equality: forge_blueprint_engine.py also injects a
+        # use_pio leaf (from cppdefs) into this dict for ForgeExecutor's
+        # PartitioningParameterSet, which is out of scope here -- see
+        # forge_blueprint_to_builder_kwargs's own docstring/comment for why.
+        assert kw["partitioning"]["n_procs_x"] == 1
+        assert kw["partitioning"]["n_procs_y"] == 1
+        assert kw["partitioning"]["auto_tiling"] is False
         assert kw["open_boundaries"]["east"] is True
         # host/machine/paths must NOT be passed (builder resolves them)
         assert not any(k in kw for k in ("machine", "paths", "scratch", "source_data"))

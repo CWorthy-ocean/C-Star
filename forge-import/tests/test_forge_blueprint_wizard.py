@@ -550,6 +550,84 @@ def test_use_pio_chk_emit_is_unconditional():
     assert wiz.config.code.pio is not None
 
 
+def test_auto_tiling_chk_toggles_dependent_widget_state():
+    """Checking auto_tiling disables npx/npy, reveals n_cores, and force-locks
+    use_pio on; unchecking reverses all of it but leaves use_pio's value as-is.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.use_pio_chk.value = False
+    assert wiz.auto_tiling_chk.value is False
+    assert wiz.npx.disabled is False
+    assert wiz.npy.disabled is False
+    assert "none" in (wiz.n_cores.layout.display or "none")
+    assert wiz.use_pio_chk.disabled is False
+
+    wiz.auto_tiling_chk.value = True
+    assert wiz.npx.disabled is True
+    assert wiz.npy.disabled is True
+    assert (wiz.n_cores.layout.display or "") == ""
+    assert wiz.use_pio_chk.value is True
+    assert wiz.use_pio_chk.disabled is True
+
+    wiz.auto_tiling_chk.value = False
+    assert wiz.npx.disabled is False
+    assert wiz.npy.disabled is False
+    assert "none" in (wiz.n_cores.layout.display or "none")
+    assert wiz.use_pio_chk.disabled is False
+    assert wiz.use_pio_chk.value is True  # left as-is, not reset
+
+
+def test_auto_tiling_toggle_seeds_n_cores_from_n_procs():
+    """Checking the auto_tiling box seeds n_cores = npx * npy from the grid
+    already entered (or loaded), so the user doesn't multiply by hand; the
+    seed only happens on the off->on toggle, so a later manual n_cores edit
+    survives unrelated _sync_auto_tiling() calls.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.npx.value = 4
+    wiz.npy.value = 6
+
+    wiz.auto_tiling_chk.value = True
+    assert wiz.n_cores.value == 24
+
+    # A manual n_cores edit is not clobbered by direct sync calls.
+    wiz.n_cores.value = 30
+    wiz._sync_auto_tiling()
+    assert wiz.n_cores.value == 30
+
+    # Re-toggling recomputes from the (re-enabled, possibly edited) grid.
+    wiz.auto_tiling_chk.value = False
+    wiz.npx.value = 2
+    wiz.auto_tiling_chk.value = True
+    assert wiz.n_cores.value == 12
+
+
+def test_auto_tiling_gathers_n_cores_partitioning():
+    """_gather() (and so the resolved config) swaps to auto_tiling/n_cores
+    partitioning when checked, and back to n_procs_x/y when unchecked.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz.auto_tiling_chk.value = True
+    wiz.n_cores.value = 24
+    wiz._rebuild()
+    assert wiz.config is not None
+    part = wiz.config.domain.partitioning
+    assert part.auto_tiling is True
+    assert part.n_cores == 24
+    assert part.n_procs_x is None
+    assert part.n_procs_y is None
+
+    wiz.auto_tiling_chk.value = False
+    wiz._rebuild()
+    part = wiz.config.domain.partitioning
+    assert part.auto_tiling is False
+    assert part.n_procs_x == wiz.npx.value
+    assert part.n_procs_y == wiz.npy.value
+
+
 _CDR_SAMPLE_YAML = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml"
 
 

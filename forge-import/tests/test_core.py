@@ -53,10 +53,11 @@ from cstar_forge.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
 requires_cstar_pio = pytest.mark.skipif(
-    "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields,
+    "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
+    or "use_pio" not in cstar_models.PartitioningParameterSet.model_fields,
     reason=(
         "installed C-Star predates ParallelIO support "
-        "(code.pio / model_params.use_pio fields, cstar #594)"
+        "(code.pio / partitioning.use_pio fields, cstar #594)"
     ),
 )
 
@@ -191,12 +192,6 @@ def sample_runtime_params():
         end_date=datetime(2012, 1, 2),
         checkpoint_frequency="1d",
     )
-
-
-@pytest.fixture
-def sample_model_params():
-    """Sample model parameters."""
-    return cstar_models.ModelParameterSet(time_step=60)
 
 
 @pytest.fixture
@@ -674,7 +669,6 @@ class TestForgeExecutorGetDs:
         self,
         minimal_cstar_spec_builder_args,
         sample_runtime_params,
-        sample_model_params,
         tmp_path,
     ):
         """Test getting grid dataset from blueprint."""
@@ -713,7 +707,6 @@ class TestForgeExecutorGetDs:
                 ),
             ),
             partitioning=minimal_cstar_spec_builder_args["partitioning"],
-            model_params=sample_model_params,
             runtime_params=sample_runtime_params,
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
@@ -753,7 +746,6 @@ class TestForgeExecutorGetDs:
         self,
         minimal_cstar_spec_builder_args,
         sample_runtime_params,
-        sample_model_params,
         tmp_path,
     ):
         """Test getting forcing.surface dataset."""
@@ -790,7 +782,6 @@ class TestForgeExecutorGetDs:
                 surface=surface_dataset,
             ),
             partitioning=minimal_cstar_spec_builder_args["partitioning"],
-            model_params=sample_model_params,
             runtime_params=sample_runtime_params,
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
@@ -984,11 +975,11 @@ class TestForgeExecutorBuildAndRun:
             assert (Path(template_dir) / "cppdefs.opt.j2").exists()
 
     @requires_cstar_pio
-    def test_build_with_use_pio_emits_code_pio_and_model_param(
+    def test_build_with_use_pio_emits_code_pio_and_partitioning_use_pio(
         self, minimal_cstar_spec_builder_args
     ):
         """With use_pio, the emitted RomsMarblBlueprint carries code.pio and
-        model_params.use_pio: true.
+        partitioning.use_pio: true.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args, use_pio=True)
 
@@ -1009,15 +1000,17 @@ class TestForgeExecutorBuildAndRun:
         bp_path = builder.path_roms_marbl_blueprint()
         with open(bp_path) as f:
             data = yaml.safe_load(f)
-        assert data["model_params"]["use_pio"] is True
+        assert data["partitioning"]["use_pio"] is True
         assert data["code"]["pio"]["location"] == (
             "https://github.com/CWorthy-ocean/ParallelIO.git"
         )
         assert data["code"]["pio"]["commit"] == "2.7.1-fork"
 
-    def test_build_without_use_pio_omits_pio(self, minimal_cstar_spec_builder_args):
-        """Without use_pio, model_params has no use_pio key and code.pio is unset
-        (keeps non-PIO blueprints loadable by main-branch C-Star).
+    def test_build_without_use_pio_sets_partitioning_use_pio_false(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Without use_pio, partitioning.use_pio is stamped False and code.pio is
+        unset (keeps non-PIO blueprints loadable by main-branch C-Star).
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
@@ -1038,8 +1031,49 @@ class TestForgeExecutorBuildAndRun:
         bp_path = builder.path_roms_marbl_blueprint()
         with open(bp_path) as f:
             data = yaml.safe_load(f)
-        assert "use_pio" not in data["model_params"]
+        assert data["partitioning"]["use_pio"] is False
         assert data["code"].get("pio") is None
+
+    @requires_cstar_pio
+    def test_build_with_auto_tiling_partitioning_persists_auto_tiling_and_n_cores(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """An auto_tiling partitioning (n_procs_x/y omitted, n_cores set) round-trips
+        through configure_build into the persisted YAML, alongside the cppdefs-derived
+        partitioning.use_pio it requires.
+        """
+        builder = _make_builder(
+            minimal_cstar_spec_builder_args,
+            partitioning={
+                "n_procs_x": None,
+                "n_procs_y": None,
+                "auto_tiling": True,
+                "n_cores": 8,
+            },
+            use_pio=True,
+        )
+
+        assert builder._use_pio is True
+
+        with (
+            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch("cstar_forge.forge.executor.write_roms_namelist"),
+        ):
+            mock_render.return_value = {
+                "location": str(builder.compile_time_code_dir),
+                "filter": {"files": ["test.opt"]},
+                "branch": "main",
+            }
+
+            builder.configure_build()
+
+        bp_path = builder.path_roms_marbl_blueprint()
+        with open(bp_path) as f:
+            data = yaml.safe_load(f)
+        assert data["partitioning"]["auto_tiling"] is True
+        assert data["partitioning"]["n_cores"] == 8
+        assert data["partitioning"]["use_pio"] is True
+        assert builder.n_procs == 8
 
     def test_configure_build_does_not_clobber_generated_river_and_tidal_settings(
         self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
@@ -1301,6 +1335,73 @@ class TestForgeExecutorBuildAndRun:
         assert ct["files"] == ["cppdefs.opt.j2"]
 
 
+class TestForgeBlueprintToBuilderKwargsPartitioning:
+    """Tests for forge_blueprint_engine.forge_blueprint_to_builder_kwargs' partitioning
+    handling. These belong conceptually with test_forge_blueprint.py's other engine
+    tests, but that file is owned by another workstream on this branch -- kept here.
+    """
+
+    def test_injects_use_pio_from_cppdefs_into_partitioning(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Forge's own Partitioning model has no use_pio field; the engine must
+        derive PartitioningParameterSet.use_pio from model_settings.cppdefs.use_pio
+        so ForgeExecutor construction (which validates auto_tiling requires use_pio)
+        doesn't reject a use_pio=True blueprint.
+        """
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name=minimal_cstar_spec_builder_args["grid_name"],
+            grid_kwargs=minimal_cstar_spec_builder_args["grid_kwargs"],
+            open_boundaries=minimal_cstar_spec_builder_args[
+                "open_boundaries"
+            ].model_dump(),
+            partitioning=minimal_cstar_spec_builder_args["partitioning"].model_dump(),
+            start_date=minimal_cstar_spec_builder_args["start_date"],
+            end_date=minimal_cstar_spec_builder_args["end_date"],
+            use_pio=True,
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+
+        from cstar_forge.forge.forge_blueprint_engine import (
+            forge_blueprint_to_builder_kwargs,
+        )
+
+        kwargs = forge_blueprint_to_builder_kwargs(cfg)
+
+        assert kwargs["partitioning"]["use_pio"] is True
+
+    def test_omits_use_pio_when_cppdefs_use_pio_false(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """Without use_pio in cppdefs, the injected partitioning.use_pio is False."""
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name=minimal_cstar_spec_builder_args["grid_name"],
+            grid_kwargs=minimal_cstar_spec_builder_args["grid_kwargs"],
+            open_boundaries=minimal_cstar_spec_builder_args[
+                "open_boundaries"
+            ].model_dump(),
+            partitioning=minimal_cstar_spec_builder_args["partitioning"].model_dump(),
+            start_date=minimal_cstar_spec_builder_args["start_date"],
+            end_date=minimal_cstar_spec_builder_args["end_date"],
+            use_pio=False,
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+
+        from cstar_forge.forge.forge_blueprint_engine import (
+            forge_blueprint_to_builder_kwargs,
+        )
+
+        kwargs = forge_blueprint_to_builder_kwargs(cfg)
+
+        assert kwargs["partitioning"]["use_pio"] is False
+
+
 class TestForgeExecutorPathRomsMarblBlueprint:
     """Tests for path_roms_marbl_blueprint method."""
 
@@ -1383,7 +1484,6 @@ class TestValidatedRomsMarblBlueprint:
             grid=ds,
             initial_conditions=ds,
             forcing=cstar_models.ForcingConfiguration(boundary=ds, surface=ds),
-            model_params={"time_step": 60},
             runtime_params={
                 "start_date": builder.start_date,
                 "end_date": builder.end_date,
@@ -1405,7 +1505,10 @@ class TestValidatedRomsMarblBlueprint:
 
         assert isinstance(validated, cstar_models.RomsMarblBlueprint)
         assert validated.runtime_params.start_date == builder.start_date
-        assert validated.model_params.time_step == 60
+        # model_params (schema < 3.0.0) is gone; time_step now comes solely
+        # from the namelist. partitioning survives the round trip instead.
+        assert validated.partitioning.n_procs_x == 2
+        assert validated.partitioning.n_procs_y == 2
 
     def test_validated_blueprint_rejects_smuggled_extra_field(
         self, minimal_cstar_spec_builder_args, tmp_path
@@ -1879,9 +1982,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
 class TestForgeExecutorGetDsComprehensive:
     """Comprehensive tests for get_ds method."""
 
-    def test_get_ds_returns_list(
-        self, minimal_cstar_spec_builder_args, sample_model_params, tmp_path
-    ):
+    def test_get_ds_returns_list(self, minimal_cstar_spec_builder_args, tmp_path):
         """Test get_ds returns list of datasets."""
         test_file1 = tmp_path / "test1.nc"
         test_file1.touch()
@@ -1904,7 +2005,6 @@ class TestForgeExecutorGetDsComprehensive:
                 surface=_create_empty_dataset(tmp_path),
             ),
             partitioning=minimal_cstar_spec_builder_args["partitioning"],
-            model_params=sample_model_params,
             runtime_params=cstar_models.RuntimeParameterSet(
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
@@ -1925,7 +2025,7 @@ class TestForgeExecutorGetDsComprehensive:
             assert mock_open.call_count == 1
 
     def test_get_ds_returns_none_when_no_locations(
-        self, minimal_cstar_spec_builder_args, sample_model_params, tmp_path
+        self, minimal_cstar_spec_builder_args, tmp_path
     ):
         """Test get_ds propagates FileNotFoundError when file doesn't exist."""
         placeholder_file = tmp_path / "placeholder_grid.nc"
@@ -1949,7 +2049,6 @@ class TestForgeExecutorGetDsComprehensive:
                 surface=_create_empty_dataset(tmp_path),
             ),
             partitioning=minimal_cstar_spec_builder_args["partitioning"],
-            model_params=sample_model_params,
             runtime_params=cstar_models.RuntimeParameterSet(
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),
@@ -1964,7 +2063,7 @@ class TestForgeExecutorGetDsComprehensive:
                 builder.get_ds("grid", from_file=False)
 
     def test_get_ds_filters_none_locations(
-        self, minimal_cstar_spec_builder_args, sample_model_params, tmp_path
+        self, minimal_cstar_spec_builder_args, tmp_path
     ):
         """Test get_ds filters out resources with None location."""
         test_file = tmp_path / "test.nc"
@@ -1988,7 +2087,6 @@ class TestForgeExecutorGetDsComprehensive:
                 surface=_create_empty_dataset(tmp_path),
             ),
             partitioning=minimal_cstar_spec_builder_args["partitioning"],
-            model_params=sample_model_params,
             runtime_params=cstar_models.RuntimeParameterSet(
                 start_date=datetime(2012, 1, 1),
                 end_date=datetime(2012, 1, 2),

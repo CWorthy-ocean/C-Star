@@ -25,6 +25,7 @@ model_settings:
     sponge_tune: false
     nhy_forcing: true
     nox_forcing: true
+    auto_tiling: false
   lateral_visc:
     visc2: 0.0
     rho0: 1000.0

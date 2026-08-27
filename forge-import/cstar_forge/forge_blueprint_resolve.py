@@ -384,7 +384,7 @@ def build_forge_blueprint(
     grid_name: str,
     grid_kwargs: dict[str, Any],
     open_boundaries: dict[str, bool],
-    partitioning: dict[str, int],
+    partitioning: dict[str, Any],
     start_date: datetime,
     end_date: datetime,
     model_reference_date: datetime | None = None,
@@ -449,6 +449,17 @@ def build_forge_blueprint(
     default), it falls back to the ModelSpec's own ``use_pio`` (itself defaulting to
     ``False``) -- the ModelSpec is the single source of the default; pass an
     explicit value to override it for one run.
+
+    ``partitioning["auto_tiling"]`` (default ``False``) overwrites ``cppdefs.auto_tiling``,
+    ucla-roms 0.5.0's MPI_MASKING cppdef: ROMS picks NP_XI/NP_ETA at runtime from the
+    land mask instead of the fixed decomposition, so ``np_xi``/``np_eta`` are written
+    as placeholder ``1``s. Requires ``use_pio=True`` and ``partitioning["n_cores"]``,
+    which is derived as ``n_procs_x * n_procs_y`` when an explicit grid is supplied
+    instead (both may be given only when consistent). The emitted blueprint always
+    carries ``n_cores`` alone (the resolved ``Partitioning`` is stricter than
+    C-Star's: ``n_procs_x``/``n_procs_y`` are nulled under ``auto_tiling``).
+    ``n_procs_x``/``n_procs_y`` are required only when ``auto_tiling`` is off, and
+    ``n_cores`` is rejected when it is off.
 
     ``cdr_forcing_yaml``, if given, takes precedence over ``cdr_forcing``: it is a
     path to (or the raw text of) a roms-tools ``CDRForcing.to_yaml(...)`` dump, read
@@ -578,8 +589,39 @@ def build_forge_blueprint(
         nx = grid_kwargs["nx"]
         ny = grid_kwargs["ny"]
         nvert = grid_kwargs["N"]
-    npx = partitioning["n_procs_x"]
-    npy = partitioning["n_procs_y"]
+    npx = partitioning.get("n_procs_x")
+    npy = partitioning.get("n_procs_y")
+    auto_tiling = bool(partitioning.get("auto_tiling", False))
+    n_cores = partitioning.get("n_cores")
+    if auto_tiling and not use_pio:
+        raise ValueError("partitioning.auto_tiling requires use_pio=True")
+    if not auto_tiling and n_cores is not None:
+        raise ValueError("partitioning.n_cores is only accepted with auto_tiling")
+    if not auto_tiling and (npx is None or npy is None):
+        raise ValueError(
+            "partitioning.n_procs_x and partitioning.n_procs_y are required "
+            "unless partitioning.auto_tiling is enabled"
+        )
+    if auto_tiling:
+        # Graceful path for callers that switch auto_tiling on while still
+        # carrying an explicit n_procs_x/n_procs_y grid (e.g. a saved
+        # DomainSpec/blueprint): derive n_cores from the product rather than
+        # making the user multiply by hand. When both are given they must
+        # agree; the emitted Partitioning always carries only n_cores
+        # (n_procs_x/n_procs_y are nulled below).
+        if n_cores is None:
+            if npx is None or npy is None:
+                raise ValueError(
+                    "partitioning.auto_tiling requires partitioning.n_cores "
+                    "(or both n_procs_x/n_procs_y to derive it from)"
+                )
+            n_cores = npx * npy
+        elif npx is not None and npy is not None and npx * npy != n_cores:
+            raise ValueError(
+                f"partitioning.n_cores={n_cores} is inconsistent with "
+                f"n_procs_x*n_procs_y={npx * npy}; with auto_tiling, set "
+                "n_cores alone (or a matching n_procs_x/n_procs_y pair)"
+            )
 
     # ----- derived numerics --------------------------------------------------
     if dt is None:
@@ -632,8 +674,11 @@ def build_forge_blueprint(
             "llm": nx,
             "mmm": ny,
             "n": nvert,
-            "np_xi": npx,
-            "np_eta": npy,
+            # Placeholder namelist values under MPI_MASKING: np_xi/np_eta are
+            # required namelist fields (see ParamCfg), but ROMS overwrites them
+            # at runtime from the land mask when auto_tiling is on.
+            "np_xi": npx if not auto_tiling else 1,
+            "np_eta": npy if not auto_tiling else 1,
             "nsub_x": 1,
             "nsub_e": 1,
         }
@@ -648,6 +693,7 @@ def build_forge_blueprint(
     cppdefs["obc_south"] = bool(open_boundaries.get("south", False))
     cppdefs["cdr_forcing"] = cdr_forcing is not None or cdr_forcing_file_obj is not None
     cppdefs["use_pio"] = bool(use_pio)
+    cppdefs["auto_tiling"] = bool(auto_tiling)
     cppdefs["marbl"] = bgc_mode == "marbl"
     # nhy_forcing/nox_forcing default from the ModelSpec (advanced-settings editable)
     # but are always forced off when BGC is disabled.
@@ -860,7 +906,8 @@ def build_forge_blueprint(
         marbl_ref=marbl_ref,
     )
 
-    default_name = sanitize_name(f"{model_name}_{grid_name}_{npx * npy}procs")
+    default_n_procs = n_cores if auto_tiling else npx * npy
+    default_name = sanitize_name(f"{model_name}_{grid_name}_{default_n_procs}procs")
     return ForgeBlueprint(
         name=name or default_name,
         description=description,
@@ -884,7 +931,12 @@ def build_forge_blueprint(
                     for k in ("north", "south", "east", "west")
                 }
             ),
-            partitioning=Partitioning(n_procs_x=npx, n_procs_y=npy),
+            partitioning=Partitioning(
+                n_procs_x=npx if not auto_tiling else None,
+                n_procs_y=npy if not auto_tiling else None,
+                auto_tiling=auto_tiling,
+                n_cores=n_cores,
+            ),
             grid_kwargs_child=grid_kwargs_child,
             grid_kwargs_parent=grid_kwargs_parent,
             metadata_child=metadata_child,

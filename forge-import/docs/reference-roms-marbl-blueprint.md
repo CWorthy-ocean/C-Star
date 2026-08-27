@@ -16,9 +16,16 @@ What a current blueprint contains:
 - **Input datasets**: one `Resource` entry (location + partitioned flag) per
   generated NetCDF input — grid, initial conditions, surface/boundary forcing,
   tides, rivers, CDR.
-- **`model_params` / `runtime_params`**: `time_step`, `start_date`/`end_date`,
-  and the blueprint `working_dir` (there is no `output_dir` — it was a
-  pre-2.0.0 field superseded by `working_dir`).
+- **`partitioning`**: `n_procs_x`/`n_procs_y`, `use_pio`, and — when
+  auto-tiling is enabled — `auto_tiling: true` with `n_cores` instead of the
+  explicit processor grid (ROMS then picks the tiling at runtime via
+  `MPI_MASKING`).
+- **`runtime_params`**: `start_date`/`end_date`, and the blueprint
+  `working_dir` (there is no `output_dir` — it was a pre-2.0.0 field superseded
+  by `working_dir`). There is no `model_params` section as of schema 3.0.0:
+  the time step lives only in the namelist (`time_stepping.dt`), and `use_pio`
+  moved into `partitioning`. Forge leaves the schema's `namelist_overrides`
+  map empty — it emits the complete `namelist.nml` directly.
 
 To see a complete, current example, process the bundled toy domain and inspect
 the result:

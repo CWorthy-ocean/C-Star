@@ -2309,6 +2309,22 @@ class ForgeBlueprintWizard:
             tooltip="Build ROMS against the ParallelIO library: inputs are written as "
             "classic-format (CDF-5) netCDF and ROMS reads/writes joined files.",
         )
+        self.auto_tiling_chk = W.Checkbox(
+            value=False,
+            description="auto tiling",
+            indent=False,
+            tooltip="Pick the MPI tiling at runtime from the land mask "
+            "(ucla-roms >= 0.5.0 MPI_MASKING). Requires PIO -- forces it on and "
+            "locks it. In development.",
+        )
+        self.n_cores = W.IntText(
+            value=1,
+            description="n_cores:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px", display="none"),
+            tooltip="Total MPI ranks; the tiling itself is chosen at runtime "
+            "from the land mask when auto tiling is on.",
+        )
         self.roms_ref = W.Text(
             value="",  # populated from the selected Model's pinned default below
             description="ucla-roms ref:",
@@ -2785,6 +2801,7 @@ class ForgeBlueprintWizard:
         self.bgc_dd.value = self._model_default_bgc_mode()
         self.use_pio_chk.value = self._model_default_use_pio()
         self._sync_marbl_ref_visibility()
+        self._sync_auto_tiling()
         self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
         self._forcing_seed = self._forcing_editor.gather()
         self._wire()
@@ -2816,6 +2833,7 @@ class ForgeBlueprintWizard:
         self.cdr_file_upload.observe(self._on_cdr_file_upload, names="value")
         self.model_dd.observe(self._on_model_change, names="value")
         self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
+        self.auto_tiling_chk.observe(self._sync_auto_tiling, names="value")
         self.nest_domain_dd.observe(self._on_nest_domain, names="value")
         self.parent_domain_dd.observe(self._on_parent_domain, names="value")
         self.parent_plot_btn.on_click(self._on_parent_plot)
@@ -2828,6 +2846,8 @@ class ForgeBlueprintWizard:
             self.npx,
             self.npy,
             self.use_pio_chk,
+            self.auto_tiling_chk,
+            self.n_cores,
             self.bgc_dd,
             self.roms_ref,
             self.marbl_ref,
@@ -3165,6 +3185,25 @@ class ForgeBlueprintWizard:
     def _sync_marbl_ref_visibility(self, _change=None):
         # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
         self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
+
+    def _sync_auto_tiling(self, _change=None):
+        # Auto tiling picks n_procs_x/y at runtime from the land mask, so those
+        # boxes become meaningless (disabled) and n_cores takes over; it also
+        # requires PIO, so use_pio is forced on and locked while it's active.
+        on = self.auto_tiling_chk.value
+        if on and _change is not None and _change.get("old") is False:
+            # Real off->on toggle (user click, or a load path flipping the
+            # checkbox): seed n_cores from the explicit grid already entered,
+            # so the user doesn't multiply by hand. Load paths restore a saved
+            # n_cores AFTER setting the checkbox, so this seed never clobbers
+            # it; direct _sync_auto_tiling() calls (_change=None) never seed.
+            self.n_cores.value = int(self.npx.value) * int(self.npy.value)
+        self.npx.disabled = on
+        self.npy.disabled = on
+        self.n_cores.layout.display = "" if on else "none"
+        if on:
+            self.use_pio_chk.value = True
+        self.use_pio_chk.disabled = on
 
     def _on_model_change(self, _change):
         # a different model has different defaults -> existing overrides no longer apply.
@@ -3665,8 +3704,17 @@ class ForgeBlueprintWizard:
             if saved_dt is not None:
                 self.dt.value = float(saved_dt)
             part = data.get("partitioning", {}) or {}
-            self.npx.value = int(part.get("n_procs_x", self.npx.value))
-            self.npy.value = int(part.get("n_procs_y", self.npy.value))
+            saved_npx = part.get("n_procs_x")
+            if saved_npx is not None:
+                self.npx.value = int(saved_npx)
+            saved_npy = part.get("n_procs_y")
+            if saved_npy is not None:
+                self.npy.value = int(saved_npy)
+            self.auto_tiling_chk.value = bool(part.get("auto_tiling", False))
+            saved_n_cores = part.get("n_cores")
+            if saved_n_cores is not None:
+                self.n_cores.value = int(saved_n_cores)
+            self._sync_auto_tiling()
             for key, picker in (("start_time", self.start), ("end_time", self.end)):
                 if data.get(key):
                     picker.value = datetime.fromisoformat(str(data[key])).date()
@@ -3725,6 +3773,8 @@ class ForgeBlueprintWizard:
             "dt": self.dt.value,
             "npx": self.npx.value,
             "npy": self.npy.value,
+            "auto_tiling": self.auto_tiling_chk.value,
+            "n_cores": self.n_cores.value,
             "topo_source": self.topo_source.value,
             "topo_path": self.topo_path.value,
             "nest_enable": self.nest_enable.value,
@@ -4030,11 +4080,22 @@ class ForgeBlueprintWizard:
             if loaded_v_sponge is not None:
                 self.v_sponge.value = float(loaded_v_sponge)
             self._v_sponge_touched = loaded_v_sponge is not None
-            self.npx.value = cfg.domain.partitioning.n_procs_x
-            self.npy.value = cfg.domain.partitioning.n_procs_y
+            if cfg.domain.partitioning.n_procs_x is not None:
+                self.npx.value = cfg.domain.partitioning.n_procs_x
+            if cfg.domain.partitioning.n_procs_y is not None:
+                self.npy.value = cfg.domain.partitioning.n_procs_y
             self.use_pio_chk.value = bool(
                 (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
             )
+            self.auto_tiling_chk.value = cfg.domain.partitioning.auto_tiling
+            loaded_n_cores = cfg.domain.partitioning.n_cores
+            if loaded_n_cores is not None:
+                self.n_cores.value = int(loaded_n_cores)
+            # auto_tiling_chk.observe fires synchronously above regardless of
+            # _suspend() (which only sets a flag other handlers check -- see
+            # _Suspender), so the disabled/visible state is already correct;
+            # call again explicitly for robustness in case that ever changes.
+            self._sync_auto_tiling()
             self.bgc_dd.value = (
                 "marbl"
                 if bool((cfg.model_settings.get("cppdefs") or {}).get("marbl", True))
@@ -4186,10 +4247,14 @@ class ForgeBlueprintWizard:
             grid_name=self.grid_name.value,
             grid_kwargs=gk,
             open_boundaries={d: w.value for d, w in self.bnd.items()},
-            partitioning={
-                "n_procs_x": int(self.npx.value),
-                "n_procs_y": int(self.npy.value),
-            },
+            partitioning=(
+                {"auto_tiling": True, "n_cores": int(self.n_cores.value)}
+                if self.auto_tiling_chk.value
+                else {
+                    "n_procs_x": int(self.npx.value),
+                    "n_procs_y": int(self.npy.value),
+                }
+            ),
             start_date=datetime.combine(self.start.value, datetime.min.time()),
             end_date=datetime.combine(self.end.value, datetime.min.time()),
             description=self.description.value,
@@ -5391,7 +5456,15 @@ class ForgeBlueprintWizard:
                 ),
                 section(
                     "Partitioning",
-                    W.HBox([self.npx, self.npy, self.use_pio_chk]),
+                    W.HBox(
+                        [
+                            self.npx,
+                            self.npy,
+                            self.n_cores,
+                            self.use_pio_chk,
+                            self.auto_tiling_chk,
+                        ]
+                    ),
                 ),
                 section(
                     "Run window",

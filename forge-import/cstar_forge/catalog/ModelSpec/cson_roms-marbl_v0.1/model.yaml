@@ -79,10 +79,14 @@ model_settings:
     # forcing selection, restoring-forcing SSS component, tidal-forcing presence,
     # CDR-forcing presence, and the top-level use_pio toggle, respectively) and are
     # intentionally absent here -- there is no separate cppdefs-level default to
-    # duplicate (use_pio's own default lives at the top level, above).
+    # duplicate (use_pio's own default lives at the top level, above). auto_tiling is
+    # also fully resolver-derived (from partitioning["auto_tiling"], no ModelSpec-level
+    # fallback) but is declared below anyway, mirroring sponge_tune/nhy_forcing/
+    # nox_forcing, so the schema documents its default inline.
     sponge_tune: false  # advanced setting only (nested-domain pressure flux forcing); not resolver-derived
     nhy_forcing: true  # ammonia atmospheric forcing; forced off by the resolver when bgc_mode="none"
     nox_forcing: true  # nitrogen oxide atmospheric forcing; forced off by the resolver when bgc_mode="none"
+    auto_tiling: false  # MPI_MASKING (ucla-roms 0.5.0); resolver always overwrites this from partitioning["auto_tiling"]
 
   lateral_visc:
     visc2: 0.0  # m^2/sec

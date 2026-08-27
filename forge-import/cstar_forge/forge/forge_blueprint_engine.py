@@ -216,7 +216,16 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
         ),
         topography_path=cfg.domain.topography_path,
         open_boundaries=cfg.domain.open_boundaries.model_dump(),
-        partitioning=cfg.domain.partitioning.model_dump(),
+        # PartitioningParameterSet.use_pio is validated against cppdefs at
+        # ForgeExecutor construction time (auto_tiling requires use_pio) --
+        # forge's own Partitioning model doesn't carry use_pio, so inject it
+        # here from the reviewed model_settings' cppdefs section.
+        partitioning={
+            **cfg.domain.partitioning.model_dump(),
+            "use_pio": bool(
+                (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
+            ),
+        },
         start_time=cfg.run.start_date,
         end_time=cfg.run.end_date,
         cdr_forcing=cfg.forcing.cdr_forcing,

@@ -842,6 +842,19 @@ class DomainCatalog:
         domain_dir.mkdir(parents=True, exist_ok=True)
         (domain_dir / "Assets").mkdir(exist_ok=True)
 
+        # n_procs_x/y are None under auto_tiling (mutually exclusive with
+        # n_cores) -- write whichever pair the builder actually carries rather
+        # than a null placeholder, mirroring v_sponge/dt's omit-when-absent
+        # convention below.
+        partitioning: dict[str, Any] = {}
+        if builder.partitioning.n_procs_x is not None:
+            partitioning["n_procs_x"] = builder.partitioning.n_procs_x
+        if builder.partitioning.n_procs_y is not None:
+            partitioning["n_procs_y"] = builder.partitioning.n_procs_y
+        if builder.partitioning.auto_tiling:
+            partitioning["auto_tiling"] = True
+            partitioning["n_cores"] = builder.partitioning.n_cores
+
         domain_data: dict[str, Any] = {
             "description": builder.description,
             "grid_name": builder.grid_name,
@@ -849,10 +862,7 @@ class DomainCatalog:
             "end_time": builder.end_date.isoformat(),
             "grid_kwargs": builder.grid_kwargs,
             "open_boundaries": builder.open_boundaries.model_dump(),
-            "partitioning": {
-                "n_procs_x": builder.partitioning.n_procs_x,
-                "n_procs_y": builder.partitioning.n_procs_y,
-            },
+            "partitioning": partitioning,
         }
         if builder.grid_kwargs_parent:
             domain_data["grid_kwargs_parent"] = builder.grid_kwargs_parent

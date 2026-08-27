@@ -3054,6 +3054,47 @@ class TestRomsMarblInputDataPartitionFiles:
             # Should not call partition_netcdf for empty datasets
             # (exact behavior depends on input_list)
 
+    def test_partition_files_raises_clear_error_under_auto_tiling(
+        self, sample_roms_marbl_input_data
+    ):
+        """Under auto_tiling, n_procs_x/n_procs_y are None -- _partition_files
+        (which requires a fixed decomposition) must raise a clear ValueError
+        rather than a TypeError from roms_tools.partition_netcdf.
+        """
+        sample_roms_marbl_input_data.partitioning = (
+            cstar_models.PartitioningParameterSet(
+                n_procs_x=None,
+                n_procs_y=None,
+                use_pio=True,
+                auto_tiling=True,
+                n_cores=4,
+            )
+        )
+
+        with pytest.raises(ValueError, match="incompatible with file"):
+            sample_roms_marbl_input_data._partition_files()
+
+    def test_partition_files_raises_under_auto_tiling_even_with_n_procs(
+        self, sample_roms_marbl_input_data
+    ):
+        """C-Star's PartitioningParameterSet accepts auto_tiling alongside a
+        matching n_procs_x/n_procs_y -- the guard must key on auto_tiling
+        itself, not on None n_procs, or the files get split into a fixed
+        layout ROMS would ignore at runtime.
+        """
+        sample_roms_marbl_input_data.partitioning = (
+            cstar_models.PartitioningParameterSet(
+                n_procs_x=2,
+                n_procs_y=2,
+                use_pio=True,
+                auto_tiling=True,
+                n_cores=4,
+            )
+        )
+
+        with pytest.raises(ValueError, match="incompatible with file"):
+            sample_roms_marbl_input_data._partition_files()
+
     @patch("cstar_forge.forge.input_data.rt.partition_netcdf")
     def test_partition_files_skips_none_location(
         self, mock_partition, sample_roms_marbl_input_data, tmp_path

@@ -628,8 +628,23 @@ class ForgeExecutor(BaseModel):
 
     @property
     def n_procs(self) -> int:
-        """Return the number of processors."""
-        return self.partitioning.n_procs_x * self.partitioning.n_procs_y
+        """Return the number of processors.
+
+        Mirrors ``RomsMarblBlueprint.cpus_needed``: ``n_cores`` (set under
+        ``auto_tiling``) is authoritative when present, else the explicit
+        ``n_procs_x * n_procs_y`` product.
+        """
+        if self.partitioning.n_cores is not None:
+            return self.partitioning.n_cores
+        if (
+            self.partitioning.n_procs_x is not None
+            and self.partitioning.n_procs_y is not None
+        ):
+            return self.partitioning.n_procs_x * self.partitioning.n_procs_y
+        raise ValueError(
+            "Cannot determine n_procs: partitioning has neither n_cores nor "
+            "both n_procs_x/n_procs_y set."
+        )
 
     @property
     def datestr(self) -> str:
@@ -709,8 +724,8 @@ class ForgeExecutor(BaseModel):
 
         The blueprint is assembled with ``model_construct`` because the
         pre-generation stages are deliberately partial (placeholder resources;
-        ``model_params``/``runtime_params`` live in the sidecar until
-        ``configure_build``), so nothing checks it against the cstar models --
+        ``runtime_params`` lives in the sidecar until ``configure_build``), so
+        nothing checks it against the cstar models --
         which are ``extra="forbid"`` -- until C-Star loads the persisted file.
         Round-tripping the exact serialized form (the same ``model_dump`` that
         ``persist`` writes, minus the ``$schema`` key that ``deserialize``
@@ -1148,7 +1163,6 @@ class ForgeExecutor(BaseModel):
             valid_start_date=self.start_date,
             valid_end_date=self.end_date,
             partitioning=self.partitioning,
-            model_params=None,  # stored in sidecar files
             runtime_params=None,  # stored in sidecar files
             code=self._cstar_code_repository(),
             grid=empty_dataset,
@@ -1546,7 +1560,6 @@ class ForgeExecutor(BaseModel):
         )
 
         # Settings are stored in a sidecar YAML, not in the blueprint itself.
-        roms_marbl_blueprint_dict["model_params"] = None
         roms_marbl_blueprint_dict["runtime_params"] = None
 
         self.roms_marbl_blueprint = cstar_models.RomsMarblBlueprint.model_construct(
@@ -1774,7 +1787,7 @@ class ForgeExecutor(BaseModel):
            - Run-time: writes namelist.nml (write_roms_namelist) and copies
              static run-time files (e.g., marbl_in)
         5. Updates blueprint with rendered code locations and file lists
-        6. Sets blueprint model_params and runtime_params
+        6. Sets blueprint partitioning.use_pio and runtime_params
         7. Re-validates the final blueprint against the installed C-Star models
            (only when `generate_inputs()` has run -- the placeholder blueprint
            cannot validate), so an extra="forbid" mismatch fails at emit time
@@ -2001,11 +2014,14 @@ class ForgeExecutor(BaseModel):
                 cstar_models.ROMSCompositeCodeRepository.model_construct(**code_dict)
             )
 
-            roms_marbl_blueprint_dict["model_params"] = {
-                "time_step": self._settings_run_time["time_stepping"]["dt"],
-            }
-            if self._use_pio:
-                roms_marbl_blueprint_dict["model_params"]["use_pio"] = True
+            # model_params (and its time_step/use_pio fields) is gone in schema
+            # 3.0.0+: time_step now comes solely from the namelist's
+            # time_stepping.dt (already written above), and use_pio moves onto
+            # partitioning. model_dump() serialized partitioning as a plain
+            # dict here (mode="json"), so stamp use_pio directly on it -- this
+            # is the authoritative write for direct ForgeExecutor constructions
+            # whose supplied partitioning didn't already carry use_pio.
+            roms_marbl_blueprint_dict["partitioning"]["use_pio"] = self._use_pio
             # No output_dir here: it is a pre-2.0.0 field superseded by the
             # blueprint working_dir (set just below).
             roms_marbl_blueprint_dict["runtime_params"] = {

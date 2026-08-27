@@ -60,6 +60,7 @@
     "output_period": 3600
   },
   "cppdefs": {
+    "auto_tiling": false,
     "cdr_forcing": false,
     "co2_tvarying": true,
     "marbl": true,

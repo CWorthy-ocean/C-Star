@@ -442,6 +442,16 @@ class TestCppdefsTemplate:
         assert "#define NHY_FORCING" not in text
         assert "#define NOX_FORCING" not in text
 
+    def test_auto_tiling_true_defines_mpi_masking(self, tmp_path):
+        text = self._render(tmp_path, {"auto_tiling": True})
+        assert "#define MPI_MASKING\n" in text
+        assert "#undef MPI_MASKING\n" not in text
+
+    def test_auto_tiling_false_undefs_mpi_masking(self, tmp_path):
+        text = self._render(tmp_path, {"auto_tiling": False})
+        assert "#undef MPI_MASKING\n" in text
+        assert "#define MPI_MASKING\n" not in text
+
 
 class TestROMSTemplateRenderer:
     """Tests for ROMSTemplateRenderer class."""

@@ -1135,8 +1135,15 @@ class RomsMarblInputData(InputData):
         self._settings_run_time["param"]["llm"] = self.grid.nx
         self._settings_run_time["param"]["mmm"] = self.grid.ny
         self._settings_run_time["param"]["n"] = self.grid.N
-        self._settings_run_time["param"]["np_xi"] = self.partitioning.n_procs_x
-        self._settings_run_time["param"]["np_eta"] = self.partitioning.n_procs_y
+        # Under auto_tiling, ROMS computes the actual decomposition at runtime;
+        # leave the resolver's placeholder np_xi/np_eta (1/1) rather than
+        # overwriting with None (forge) or a stale explicit layout (C-Star's
+        # PartitioningParameterSet allows auto_tiling alongside n_procs_x/y).
+        if not self.partitioning.auto_tiling:
+            if self.partitioning.n_procs_x is not None:
+                self._settings_run_time["param"]["np_xi"] = self.partitioning.n_procs_x
+            if self.partitioning.n_procs_y is not None:
+                self._settings_run_time["param"]["np_eta"] = self.partitioning.n_procs_y
 
         if out_path_nesting is not None:
             if "extract_data" not in self._settings_run_time:
@@ -2090,6 +2097,23 @@ class RomsMarblInputData(InputData):
         two don't co-occur. If that changes, tile outputs would need the same
         ``_pio_mangle``/``_pio_finalize`` nccopy treatment as the whole-field saves.
         """
+        if (
+            self.partitioning.auto_tiling
+            or self.partitioning.n_procs_x is None
+            or self.partitioning.n_procs_y is None
+        ):
+            # Unreachable in practice: auto_tiling requires use_pio, and PIO
+            # skips file partitioning entirely (see the docstring above). Guard
+            # on auto_tiling itself (not just None n_procs -- C-Star's
+            # PartitioningParameterSet allows both set together) rather than
+            # letting roms_tools.partition_netcdf split files into a fixed
+            # layout ROMS would ignore, or raise a TypeError on None.
+            raise ValueError(
+                "Cannot partition input files: auto_tiling is on or "
+                "partitioning.n_procs_x/n_procs_y are not set (the tiling is "
+                "chosen at runtime, which is incompatible with file "
+                "partitioning)."
+            )
         input_args = dict(
             np_eta=self.partitioning.n_procs_y,
             np_xi=self.partitioning.n_procs_x,
