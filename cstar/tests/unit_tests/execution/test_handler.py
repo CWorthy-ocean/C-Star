@@ -101,7 +101,7 @@ class TestExecutionHandlerUpdates:
 
     @pytest.mark.asyncio
     async def test_updates_running_job_with_tmp_file(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ):
         """Verifies that `updates()` streams live updates from the job's output file
         when the job is running.
@@ -166,7 +166,7 @@ class TestExecutionHandlerUpdates:
 
     @pytest.mark.asyncio
     async def test_updates_indefinite_with_seconds_param_0(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ):
         """Confirms that `updates()` runs indefinitely when `seconds=0` and allows
         termination via user interruption.
@@ -229,7 +229,7 @@ class TestExecutionHandlerUpdates:
 
     @pytest.mark.asyncio
     async def test_updates_forwards_tail_when_status_becomes_terminal(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ):
         """Regression: when the job reaches a terminal state mid-stream, `updates()`
         must forward the remaining output (the tail) before stopping, and must return
@@ -278,7 +278,7 @@ class TestExecutionHandlerUpdates:
 
     @pytest.mark.asyncio
     async def test_updates_forwards_output_when_already_terminal(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ):
         """Regression: if the job finished between polls (already terminal when
         `updates()` is called), output not yet forwarded must still be logged rather

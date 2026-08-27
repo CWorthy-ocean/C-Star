@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
 
-from prefect import flow
 from pydantic import BaseModel, Field, computed_field
 
 from cstar.base.env import (
@@ -15,6 +14,7 @@ from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     FLAG_OFF,
     capture_environment,
+    unset,
 )
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
@@ -192,6 +192,16 @@ def get_launcher() -> Launcher[t.Any]:
     return launcher
 
 
+def get_orchestrator(planner: Planner) -> Orchestrator:
+    launcher = get_launcher()
+
+    orchestrator = Orchestrator(planner, launcher)
+    orchestrator.set_callback("status_changed", on_status_changed)
+    orchestrator.set_callback("launched", on_status_changed)
+
+    return orchestrator
+
+
 def incremental_delays() -> Generator[float, None, None]:
     """Return a value from an infinite cycle of incremental delays.
 
@@ -263,8 +273,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
-    launcher = get_launcher()
-    orchestrator = Orchestrator(planner, launcher)
+    orchestrator = get_orchestrator(planner)
 
     return await process_plan(orchestrator, RunMode.Monitor)
 
@@ -542,7 +551,7 @@ def _ignore_ambient_clobber_env() -> None:
     Called before the environment is configured and captured into the run
     record; warns when the value would have had an effect.
     """
-    value = os.environ.pop(ENV_CSTAR_CLOBBER_WORKING_DIR, None)
+    value = unset(ENV_CSTAR_CLOBBER_WORKING_DIR)
     if value is not None and value != FLAG_OFF:
         msg = (
             f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
@@ -655,10 +664,12 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     state_repo = StateRepository()
     run_repo = TrackingRepository()
 
-    if path := await state_repo.put_sentinel(handle):
-        if run := await run_repo.get_workplan_run(handle.run_id):
-            run.sentinels.add(path)
-            await run_repo.put_workplan_run(run)
+    path = await state_repo.put_sentinel(handle)
+    run = await run_repo.get_workplan_run(handle.run_id)
+
+    if path and run:
+        run.sentinels.add(path)
+        await run_repo.put_workplan_run(run)
 
 
 async def build_dag(
@@ -704,14 +715,13 @@ async def build_dag(
     return planner, prepared_wp_path
 
 
-@flow(log_prints=True)
 async def run_dag(
     wp_path: Path,
     run_id: str,
     planner: Planner,
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
-) -> ExecutiveRunSummary:
+) -> WorkplanRun:
     """Execute the steps in the workplan.
 
     Parameters
@@ -730,9 +740,8 @@ async def run_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    WorkplanRun
+        The persisted record describing the run.
     """
     steps = t.cast("list[LiveStep]", planner.flatten())
     output_dir = StateDirectoryManager.data_dir(run_id)
@@ -747,33 +756,28 @@ async def run_dag(
         sentinels={StateRepository.sentinel_path(s) for s in steps},
     )
 
-    launcher = get_launcher()
+    if not dry_run:
+        _ = await TrackingRepository().put_workplan_run(wp_run)
 
-    orchestrator = Orchestrator(planner, launcher)
-    orchestrator.set_callback("status_changed", on_status_changed)
-    orchestrator.set_callback("launched", on_status_changed)
+    orchestrator = get_orchestrator(planner)
 
     if dry_run:
         msg = f"Dry run complete. Prepared workplan location: {wp_path}"
         log.debug(msg)
-        return await ExecutiveRunSummary.from_run(wp_run)
-
-    run_repo = TrackingRepository()
-    await run_repo.put_workplan_run(wp_run)
+        return wp_run
 
     # schedule the tasks without waiting for completion
     await process_plan(orchestrator, RunMode.Schedule)
-    return await ExecutiveRunSummary.from_run(wp_run)
+    return wp_run
 
 
-@flow(log_prints=True)
 async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
     clobber_steps: "Sequence[str] | None" = None,
-) -> ExecutiveRunSummary:
+) -> WorkplanRun:
     """Execute the steps in the workplan.
 
     Parameters
@@ -796,9 +800,8 @@ async def build_and_run_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    WorkplanRun
+        The persisted record describing the run.
     """
     planner, prepared_wp_path = await build_dag(
         wp_path,

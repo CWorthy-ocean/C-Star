@@ -129,7 +129,9 @@ def test_blueprint_migrate_disabled(
     )
 
     assert result.exit_code != 0
-    assert "migration is disabled" in result.stdout
+    # rich wraps the message at the terminal width, so a line break may land
+    # inside the phrase; normalize whitespace before matching.
+    assert "migration is disabled" in " ".join(result.stdout.split())
 
 
 def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:

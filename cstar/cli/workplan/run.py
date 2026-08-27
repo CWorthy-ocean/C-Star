@@ -410,7 +410,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
     return workplan_path
 
 
-def handle_run_reloading(run_id: str) -> str:
+async def handle_run_reloading(run_id: str) -> str:
     """Locate a prior run for the run ID and update the `RunCmdContext` with
     the correct `Workplan`.
 
@@ -420,7 +420,7 @@ def handle_run_reloading(run_id: str) -> str:
         The run-id to reload
     """
     repo = TrackingRepository()
-    wp_run = asyncio.run(repo.get_workplan_run(run_id))
+    wp_run = await repo.get_workplan_run(run_id)
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
@@ -523,7 +523,7 @@ def run(
     reload = False
     if not path:
         reload = True
-        path = handle_run_reloading(run_id)
+        path = asyncio.run(handle_run_reloading(run_id))
 
     try:
         with local_copy(path) as wp_path:
@@ -531,7 +531,7 @@ def run(
             user_vars = t.cast("Mapping[str, str]", ctx.obj)
 
             if not reload:
-                summary = asyncio.run(
+                wp_run = asyncio.run(
                     build_and_run_dag(
                         wp_path,
                         run_id,
@@ -544,7 +544,7 @@ def run(
                 wp = deserialize(wp_path, LiveWorkplan)
                 apply_clobber_overrides(wp, clobber)
                 planner = Planner(wp)
-                summary = asyncio.run(
+                wp_run = asyncio.run(
                     run_dag(
                         wp_path,
                         run_id,
@@ -553,6 +553,8 @@ def run(
                         dry_run=dry_run,
                     ),
                 )
+
+            summary = asyncio.run(ExecutiveRunSummary.from_run(wp_run))
             console.print(get_run_summary_display(summary))
     except typer.BadParameter:
         raise

@@ -34,12 +34,15 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_NPROCS_POST,
-    FLAG_OFF,
     FLAG_ON,
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE, is_feature_enabled
+from cstar.base.feature import (
+    ENV_FF_DEBUG_BUILD_MODE,
+    is_feature_enabled,
+    is_flag_enabled,
+)
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
@@ -640,8 +643,7 @@ class ROMSSimulation(Simulation):
         return cast("RomsFileSystemManager", self._fs_manager)
 
     def _conditionally_clear_root(self):
-        env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
-        if env_item.value != FLAG_OFF:
+        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
             self.fs_manager.clear()
 
     @property
