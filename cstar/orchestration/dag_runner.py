@@ -664,10 +664,12 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     state_repo = StateRepository()
     run_repo = TrackingRepository()
 
-    if path := await state_repo.put_sentinel(handle):
-        if run := await run_repo.get_workplan_run(handle.run_id):
-            run.sentinels.add(path)
-            await run_repo.put_workplan_run(run)
+    path = await state_repo.put_sentinel(handle)
+    run = await run_repo.get_workplan_run(handle.run_id)
+
+    if path and run:
+        run.sentinels.add(path)
+        await run_repo.put_workplan_run(run)
 
 
 async def build_dag(

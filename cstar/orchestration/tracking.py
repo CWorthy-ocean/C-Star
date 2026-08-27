@@ -307,13 +307,20 @@ class TrackingRepository(LoggingMixin):
 
         run_path = self._find_run_path(run_id, run_date)
 
-        if not run_path.exists():
-            rd_out = run_date or "latest"
-            msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-            self.log.warning(msg)
-            return None
+        lock_path = run_path.with_suffix(".lock")
+        if not lock_path.parent.exists():
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        return deserialize(run_path, WorkplanRun)
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            if not run_path.exists():
+                rd_out = run_date or "latest"
+                msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
+                self.log.warning(msg)
+                return None
+
+            return deserialize(run_path, WorkplanRun)
 
     async def get_workplan_run(
         self, run_id: str, run_date: datetime | None = None
