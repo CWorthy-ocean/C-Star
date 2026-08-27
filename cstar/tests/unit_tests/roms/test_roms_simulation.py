@@ -1723,8 +1723,8 @@ class TestProcessingAndExecution:
         [
             ["darwin_arm64", "mpirun"],
             ["derecho", "mpirun"],
-            ["expanse", "srun --mpi=pmi2"],
-            ["perlmutter", "srun"],
+            ["expanse", "srun --mpi=pmi2 --kill-on-bad-exit=1"],
+            ["perlmutter", "srun --kill-on-bad-exit=1"],
         ],
     )
     @mock.patch.object(

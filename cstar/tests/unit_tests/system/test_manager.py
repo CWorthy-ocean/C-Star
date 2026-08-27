@@ -52,14 +52,14 @@ class TestEnvironmentProperty:
             (
                 ExpanseSystemContext,
                 {
-                    "mpi_exec_prefix": "srun --mpi=pmi2",
+                    "mpi_exec_prefix": "srun --mpi=pmi2 --kill-on-bad-exit=1",
                     "compiler": "intel",
                 },
             ),
             (
                 PerlmutterSystemContext,
                 {
-                    "mpi_exec_prefix": "srun",
+                    "mpi_exec_prefix": "srun --kill-on-bad-exit=1",
                     "compiler": "gnu",
                 },
             ),
