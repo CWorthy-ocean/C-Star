@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, computed_field
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
+    FLAG_OFF,
     capture_environment,
     unset,
 )
@@ -550,11 +551,10 @@ def _ignore_ambient_clobber_env() -> None:
     Called before the environment is configured and captured into the run
     record; warns when the value would have had an effect.
     """
-    if os.environ.get(ENV_CSTAR_CLOBBER_WORKING_DIR, ""):
-        unset(ENV_CSTAR_CLOBBER_WORKING_DIR)
-
+    value = unset(ENV_CSTAR_CLOBBER_WORKING_DIR)
+    if value is not None and value != FLAG_OFF:
         msg = (
-            f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is unset and ignored by workplan "
+            f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
             "runs; select the steps to clear and re-run explicitly instead "
             "(`--clobber <step-name|all>` on the command line)."
         )
@@ -740,9 +740,8 @@ async def run_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    WorkplanRun
+        The persisted record describing the run.
     """
     steps = t.cast("list[LiveStep]", planner.flatten())
     output_dir = StateDirectoryManager.data_dir(run_id)
@@ -801,9 +800,8 @@ async def build_and_run_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    WorkplanRun
+        The persisted record describing the run.
     """
     planner, prepared_wp_path = await build_dag(
         wp_path,

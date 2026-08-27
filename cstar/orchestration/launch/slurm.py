@@ -306,23 +306,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _get_status(job_id: str) -> ExecutionStatus:
-        """Retrieve the status of a step running in SLURM.
-
-        Parameters
-        ----------
-        job_id : str
-            The slurm job ID to retrieve status for.
-
-        Returns
-        -------
-        ExecutionStatus
-            The current status of the step.
-        """
-        batch = await get_slurm_batch(job_id)
-        return batch.status
-
-    @staticmethod
     async def _prune_completed_dependencies(
         dependencies: list[SlurmHandle],
     ) -> list[SlurmHandle]:
@@ -395,15 +378,18 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             name = prior_handle.name
 
             if Status.is_failure(last_status):
-                # force cache refresh for any tasks that didn't succeed
+                # clear prior state and re-run any tasks that didn't succeed
                 log.debug(f"Prior run of {name!r} in fail state. Re-running.")
-                # step.fsm.clear_prior()
                 step.workflow_overrides[KEY_CLOBBER] = True
-            elif Status.is_terminal(last_status):
-                # re-use the result from a prior run if it terminated
-                # successfully and isn't configured to be clobbered
+            elif Status.is_terminal(last_status) or Status.is_in_progress(last_status):
+                # re-use the result from a run that terminated successfully, or
+                # adopt a job that is still queued/running instead of submitting
+                # a duplicate, unless the step is configured to be clobbered
                 reuse_prior = not step.clobber
-                log.debug(f"Prior run of {name!r} in term state. Re-use: {reuse_prior}")
+                log.debug(
+                    f"Prior run of {name!r} in {last_status.name!r} state. "
+                    f"Re-use: {reuse_prior}"
+                )
 
         if not reuse_prior or not prior_handle:
             dependencies = await cls._prune_completed_dependencies(dependencies)
