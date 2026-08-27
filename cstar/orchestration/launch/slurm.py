@@ -10,7 +10,7 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
-from cstar.base.exceptions import CstarError, CstarExpectationFailed
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, _run_cmd
 from cstar.execution.handler import ExecutionStatus
@@ -278,10 +278,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        if step.blueprint is None and not step.is_deferred:
-            msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
-            raise CstarError(msg)
-
         step.script_path.parent.mkdir(parents=True, exist_ok=True)
         step.log_path.parent.mkdir(parents=True, exist_ok=True)
 

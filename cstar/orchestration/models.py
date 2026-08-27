@@ -578,11 +578,6 @@ class Workplan(ConfiguredBaseModel):
 
         return value
 
-    @model_validator(mode="after")
-    def _model_validator(self) -> "Workplan":
-        """Validate attribute relationships."""
-        return self
-
 
 class UserDefinedVariables(ConfiguredBaseModel):
     """A collection of key-value pairs that provides validation of the static
