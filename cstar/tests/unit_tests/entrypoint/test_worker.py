@@ -951,7 +951,7 @@ def test_worker_main_exec_continue_from(
             autospec=True,
         ) as mock_exec_runner,
         mock.patch(
-            "cstar.roms.ROMSSimulation",
+            "cstar.roms.simulation.ROMSSimulation",
             mock_roms_sim_class,
         ),
         mock.patch(
@@ -1063,7 +1063,7 @@ def test_worker_main_directive_args_parsed(
             autospec=True,
         ) as mock_exec_runner,
         mock.patch(
-            "cstar.roms.ROMSSimulation",
+            "cstar.roms.simulation.ROMSSimulation",
             mock_roms_sim_class,
         ),
         mock.patch(

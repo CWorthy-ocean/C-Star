@@ -738,14 +738,15 @@ class ROMSSimulation(Simulation):
         stages:
 
         1. Derived settings, computed from the current simulation
-           configuration: processor grid (`np_xi`/`np_eta`, from
-           `discretization`), grid path, initial conditions, forcing datasets,
+           configuration: grid path, initial conditions, forcing datasets,
            MARBL/CDR/nesting files, output root, and extract root.
         2. `namelist_overrides`, layered on top of the derived settings so
-           that user overrides win. The number of time steps (`ntimes`) is
-           then derived from the run length and the *effective* `dt` (i.e.
-           after any override), unless the user has explicitly overridden
-           `time_stepping.ntimes`, in which case their value stands.
+           that user overrides win. The processor grid (`np_xi`/`np_eta`) is
+           then set from `discretization`, which is authoritative for it, and
+           the number of time steps (`ntimes`) is derived from the run length
+           and the *effective* `dt` (i.e. after any override), unless the
+           user has explicitly overridden `time_stepping.ntimes`, in which
+           case their value stands.
 
         Returns
         -------
@@ -764,9 +765,6 @@ class ROMSSimulation(Simulation):
             If `namelist_overrides` fails validation against the selected
             schema (e.g. an unknown group or key), the original
             `pydantic.ValidationError` is chained as `__cause__`.
-            If `namelist_overrides` sets `param_settings.np_xi` or
-            `param_settings.np_eta` to a value that conflicts with
-            `discretization.n_procs_x`/`n_procs_y`.
             If the effective `time_stepping.dt` (after overrides) is not
             positive.
         pydantic.ValidationError
@@ -798,11 +796,6 @@ class ROMSSimulation(Simulation):
                 f"{checkout_target!r}). The namelist file may target a "
                 f"different ucla-roms version than the one this simulation pins."
             ) from err
-
-        if self.discretization.n_procs_x is not None:
-            nml.param_settings.np_xi = self.discretization.n_procs_x
-        if self.discretization.n_procs_y is not None:
-            nml.param_settings.np_eta = self.discretization.n_procs_y
 
         if self.initial_conditions:
             nml.initial_conditions.inifile = str(
@@ -849,23 +842,6 @@ class ROMSSimulation(Simulation):
         # any of the derived settings above.
         overrides = self.namelist_overrides
         if overrides:
-            # np_xi/np_eta must agree with the blueprint partitioning
-            param_overrides = overrides.get("param_settings", {})
-            conflicts = [
-                f"{key}={value!r} conflicts with partitioning value {expected!r}"
-                for key, expected in (
-                    ("np_xi", self.discretization.n_procs_x),
-                    ("np_eta", self.discretization.n_procs_y),
-                )
-                if (value := param_overrides.get(key)) is not None
-                and expected is not None
-                and value != expected
-            ]
-            if conflicts:
-                raise ValueError(
-                    "namelist_overrides conflict with partitioning: "
-                    + "; ".join(conflicts)
-                )
             try:
                 nml = type(nml).model_validate(
                     deep_merge(nml.model_dump(), overrides, replace_lists=True)
@@ -876,6 +852,15 @@ class ROMSSimulation(Simulation):
                     f"(selected for ucla-roms ref {checkout_target!r}); check group and "
                     "key names against that schema."
                 ) from err
+
+        # The discretization is authoritative for the processor grid: applied
+        # after the override merge so np_xi/np_eta cannot drift from the
+        # scheduled cores (conflicting overrides are rejected at blueprint
+        # validation).
+        if self.discretization.n_procs_x is not None:
+            nml.param_settings.np_xi = self.discretization.n_procs_x
+        if self.discretization.n_procs_y is not None:
+            nml.param_settings.np_eta = self.discretization.n_procs_y
 
         dt = nml.time_stepping.dt
         if dt <= 0:

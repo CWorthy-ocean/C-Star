@@ -889,7 +889,7 @@ class TestROMSSimulationInitialization:
         ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
     )
     @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
-    def test_namelist_overrides_np_xi_conflict_raises(
+    def test_namelist_overrides_np_xi_superseded_by_discretization(
         self,
         mock_grid_path,
         mock_ini_path,
@@ -898,8 +898,9 @@ class TestROMSSimulationInitialization:
         stub_romssimulation,
         stageddatacollection_remote_files,
     ):
-        """Overriding `param_settings.np_xi` to a value that conflicts with
-        `discretization.n_procs_x` raises a `ValueError`.
+        """The discretization is authoritative for the processor grid: an
+        `np_xi` override is superseded (conflicting values are rejected at
+        blueprint validation, not here).
         """
         sim = self._prepare_sim_for_runtime_settings(
             stub_romssimulation,
@@ -911,38 +912,6 @@ class TestROMSSimulationInitialization:
         )
         assert sim.discretization.n_procs_x == 2
         sim.namelist_overrides = {"param_settings": {"np_xi": 99}}
-
-        with pytest.raises(ValueError, match="np_xi.*conflicts with partitioning"):
-            sim.roms_runtime_settings
-
-    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
-    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
-    @mock.patch.object(
-        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
-    )
-    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
-    def test_namelist_overrides_np_xi_matching_value_no_error(
-        self,
-        mock_grid_path,
-        mock_ini_path,
-        mock_forcing_paths,
-        mock_schema_for_ref,
-        stub_romssimulation,
-        stageddatacollection_remote_files,
-    ):
-        """Overriding `param_settings.np_xi` to the same value as
-        `discretization.n_procs_x` does not raise.
-        """
-        sim = self._prepare_sim_for_runtime_settings(
-            stub_romssimulation,
-            stageddatacollection_remote_files,
-            mock_grid_path,
-            mock_ini_path,
-            mock_forcing_paths,
-            mock_schema_for_ref,
-        )
-        assert sim.discretization.n_procs_x == 2
-        sim.namelist_overrides = {"param_settings": {"np_xi": 2}}
 
         result = sim.roms_runtime_settings
 
@@ -2558,7 +2527,7 @@ class TestROMSSimulationUsePIO:
         sim.pio_codebase = pioexternalcodebase
         assert sim.codebases[-1] is pioexternalcodebase
 
-    @mock.patch("cstar.roms.ROMSSimulation._validate_pio_inputs")
+    @mock.patch("cstar.roms.simulation.ROMSSimulation._validate_pio_inputs")
     @mock.patch.object(ROMSInputDataset, "partition")
     def test_pre_run_skips_partitioning(
         self, mock_partition, mock_validate, stub_romssimulation

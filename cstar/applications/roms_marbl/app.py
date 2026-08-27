@@ -34,7 +34,7 @@ from cstar.orchestration.transforms import (
 
 if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-    from cstar.roms import ROMSSimulation
+    from cstar.roms.simulation import ROMSSimulation
 
 
 _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
@@ -72,7 +72,7 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
         """
         super().__init__(request, service_cfg, job_cfg)
 
-        from cstar.roms import ROMSSimulation
+        from cstar.roms.simulation import ROMSSimulation
 
         self.simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
         self.simulation.name = slugify(self.simulation.name)

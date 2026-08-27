@@ -42,7 +42,7 @@ class TestUsePIOSchema:
         complete_blueprint_dict["partitioning"]["use_pio"] = False
         with pytest.raises(
             ValidationError,
-            match="code.pio was supplied but partitioning.use_pio is false",
+            match="PIO is not enabled in the partitioning configuration",
         ):
             RomsMarblBlueprint.model_validate(complete_blueprint_dict)
 
@@ -206,7 +206,9 @@ class TestNamelistOverrides:
         complete_blueprint_dict["namelist_overrides"] = {
             "param_settings": {"np_xi": n_procs_x + 1}
         }
-        with pytest.raises(ValidationError, match="conflicts with partitioning"):
+        with pytest.raises(
+            ValidationError, match="conflicts with the blueprint partitioning"
+        ):
             RomsMarblBlueprint.model_validate(complete_blueprint_dict)
 
     def test_np_xi_matching_value_accepted(self, complete_blueprint_dict):

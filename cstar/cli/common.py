@@ -391,10 +391,13 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         return PersistedMigrateResult(migration_result, request.source)
 
     if migration_result.plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
-        print(
+        from rich.console import Console  # noqa: PLC0415
+
+        Console().print(
             f"Blueprint at '{request.source}' requires schema migration from "
-            f"{migration_result.plan.source!r} to {migration_result.plan.target!r}, "
-            f"but migration is disabled ({ENV_CSTAR_DISABLE_MIGRATION}=1). Unset "
+            f"[green]{migration_result.plan.source}[/green] to "
+            f"[red]{migration_result.plan.target}[/red], but migration is "
+            f"disabled ({ENV_CSTAR_DISABLE_MIGRATION}=1). Unset "
             f"{ENV_CSTAR_DISABLE_MIGRATION} to allow migration, or update the "
             "blueprint to the current schema."
         )

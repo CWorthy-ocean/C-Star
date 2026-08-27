@@ -1006,11 +1006,8 @@ def custom_system_env(
 ## tests should remain general (e.g. using a generic 'Simulation' subclass) rather than
 ## using ROMS-specific fixtures (e.g. 'ROMSSimulation')
 ################################################################################
-from cstar.roms import (  # noqa: E402
-    ROMSDiscretization,
-    ROMSExternalCodeBase,
-    ROMSSimulation,
-)
+from cstar.roms.discretization import ROMSDiscretization  # noqa: E402
+from cstar.roms.external_codebase import ROMSExternalCodeBase  # noqa: E402
 from cstar.roms.input_dataset import (  # noqa: E402
     ROMSBoundaryForcing,
     ROMSCdrForcing,
@@ -1023,6 +1020,7 @@ from cstar.roms.input_dataset import (  # noqa: E402
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
+from cstar.roms.simulation import ROMSSimulation  # noqa: E402
 from cstar.tests.unit_tests.fake_abc_subclasses import (  # noqa: E402
     FakeROMSInputDataset,
 )

@@ -19,6 +19,7 @@ from cstar.orchestration.models import (
     DocLocMixin,
     PathFilter,
 )
+from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
 
 APP_NAME: t.Literal["roms_marbl"] = "roms_marbl"
 
@@ -184,7 +185,12 @@ class RuntimeParameterSet(ParameterSet):
 
 
 class PartitioningParameterSet(ParameterSet):
-    """Parameters for the partitioning of the model."""
+    """Parameters for the partitioning of the model.
+
+    Namelist overrides of the processor grid (`np_xi`/`np_eta` in
+    `param_settings`) must agree with these parameters; the partitioning is
+    authoritative for the processor grid at runtime.
+    """
 
     n_procs_x: PositiveInt | None = None
     """Number of processes used to subdivide the domain on the x-axis."""
@@ -204,6 +210,13 @@ class PartitioningParameterSet(ParameterSet):
     n_cores: PositiveInt | None = None
     """Total number of cores to use when `auto_tiling` selects the tiling layout."""
 
+    @property
+    def dims(self) -> tuple[PositiveInt, PositiveInt] | None:
+        """The `(n_procs_x, n_procs_y)` pair, or `None` unless both are set."""
+        if self.n_procs_x is None or self.n_procs_y is None:
+            return None
+        return (self.n_procs_x, self.n_procs_y)
+
     @model_validator(mode="after")
     def _validate_partitioning(self) -> "PartitioningParameterSet":
         """Perform validation on the model after field-level validation is complete.
@@ -213,35 +226,28 @@ class PartitioningParameterSet(ParameterSet):
         """
         violations: list[str] = []
 
-        if self.auto_tiling and not self.use_pio:
-            violations.append("auto_tiling requires use_pio to be true")
-
-        if not self.auto_tiling and (self.n_procs_x is None or self.n_procs_y is None):
-            violations.append(
-                "n_procs_x and n_procs_y are required unless auto_tiling is enabled"
-            )
-
-        if self.n_cores is not None and not self.auto_tiling:
-            violations.append("n_cores is only accepted with auto_tiling")
-
-        if (
-            self.auto_tiling
-            and self.n_cores is None
-            and (self.n_procs_x is None or self.n_procs_y is None)
-        ):
-            violations.append(
-                "auto_tiling requires either n_cores or both n_procs_x and n_procs_y"
-            )
-
-        if (
-            self.n_cores is not None
-            and self.n_procs_x is not None
-            and self.n_procs_y is not None
-            and self.n_cores != self.n_procs_x * self.n_procs_y
-        ):
-            violations.append(
-                "n_cores must equal n_procs_x * n_procs_y when all are supplied"
-            )
+        if self.auto_tiling:
+            if not self.use_pio:
+                violations.append("auto_tiling requires use_pio to be true")
+            if self.n_cores is None and self.dims is None:
+                violations.append(
+                    "auto_tiling requires n_cores or both n_procs_x and n_procs_y"
+                )
+            if (
+                self.n_cores is not None
+                and (dims := self.dims) is not None
+                and self.n_cores != dims[0] * dims[1]
+            ):
+                violations.append(
+                    "n_cores must equal n_procs_x * n_procs_y when all are supplied"
+                )
+        else:
+            if self.dims is None:
+                violations.append(
+                    "n_procs_x and n_procs_y are required unless auto_tiling is enabled"
+                )
+            if self.n_cores is not None:
+                violations.append("n_cores is only accepted with auto_tiling")
 
         if violations:
             raise ValueError("; ".join(violations))
@@ -298,9 +304,9 @@ class RomsMarblBlueprint(Blueprint):
     Group and key names are checked when the blueprint is validated: unknown
     names are an error when `code.roms` pins a release version, and a warning
     (against the best-guess schema) otherwise. Values are validated at runtime
-    against the namelist schema for the pinned ucla-roms version. Overriding
-    `param_settings.np_xi`/`param_settings.np_eta` to values that conflict
-    with `partitioning` is an error.
+    against the namelist schema for the pinned ucla-roms version. See the
+    :class:`PartitioningParameterSet` documentation for potential conflicts
+    with the partitioning configuration.
     """
 
     @model_validator(mode="after")
@@ -319,7 +325,10 @@ class RomsMarblBlueprint(Blueprint):
             raise ValueError(msg)
 
         if self.code.pio is not None and not self.partitioning.use_pio:
-            msg = "code.pio was supplied but partitioning.use_pio is false"
+            msg = (
+                "A ParallelIO codebase was supplied, but PIO is not enabled "
+                "in the partitioning configuration for this blueprint"
+            )
             raise ValueError(msg)
 
         self._validate_namelist_overrides()
@@ -339,14 +348,10 @@ class RomsMarblBlueprint(Blueprint):
         if not self.namelist_overrides:
             return
 
-        # deferred import: the cstar.roms package init pulls in ROMSSimulation,
-        # which imports this module back (circular at module import time)
-        from cstar.roms.namelist import _parse_semver, namelist_schema_for_ref
-
         param_overrides = self.namelist_overrides.get("param_settings", {})
         violations = [
-            f"param_settings.{key}={value!r} conflicts with partitioning value "
-            f"{expected!r}"
+            f"namelist override {key!r} ({value!r}) conflicts with the "
+            f"blueprint partitioning ({expected!r})"
             for key, expected in (
                 ("np_xi", self.partitioning.n_procs_x),
                 ("np_eta", self.partitioning.n_procs_y),
@@ -385,9 +390,8 @@ class RomsMarblBlueprint(Blueprint):
         if self.partitioning.n_cores is not None:
             return self.partitioning.n_cores
 
-        n_procs_x, n_procs_y = self.partitioning.n_procs_x, self.partitioning.n_procs_y
-        if n_procs_x is None or n_procs_y is None:
+        if (dims := self.partitioning.dims) is None:
             msg = "partitioning must supply n_cores or both n_procs_x and n_procs_y"
             raise ValueError(msg)
 
-        return n_procs_x * n_procs_y
+        return dims[0] * dims[1]
