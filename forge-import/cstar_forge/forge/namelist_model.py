@@ -50,6 +50,7 @@ from cstar.roms.namelist import (
     ParamSettings,
     ParticlesSettings,
     ParticlesSettingsV0_5_0,
+    PioSettings,
     PipeFrcSettings,
     RandomOutputSettings,
     ReferenceDateSettings,
@@ -58,6 +59,7 @@ from cstar.roms.namelist import (
     RomsNamelist,
     RomsNamelistBase,
     RomsNamelistV0_5_0,
+    RomsNamelistV0_6_0,
     SCoord,
     SimulationNameSettings,
     SpongeTuneSettings,
@@ -162,6 +164,13 @@ class ParamCfg(_SettingsSection):
     np_eta: int
     nt_passive: int
     ntrc_bio: int = Field(serialization_alias="nt_bgc")
+
+
+class PioSettingsCfg(_SettingsSection):
+    # Deliberate default (like ExtractDataCfg.extract_root_name above): blueprints
+    # saved before &PIO_SETTINGS existed bypass the resolver and hit
+    # model_validate directly, so the Pydantic default is what keeps them valid.
+    pio_stride: int = Field(default=1, ge=1)
 
 
 class InitialCfg(_SettingsSection):
@@ -586,9 +595,12 @@ class _RunTimeSettingsCommon(_SettingsSection):
     are no value defaults here — the YAML is the single source of defaults.
 
     Not meant to be used directly: the version-varying sections (``ocean_vars``,
-    ``particles``) are typed as the loose common models here; use
-    :class:`RunTimeSettings` (ucla-roms < 0.5.0) or :class:`RunTimeSettingsV0_5_0`
-    (>= 0.5.0), or select one with :func:`run_time_settings_for_ref`.
+    ``particles``) are typed as the loose common models here, and a
+    version-varying section that some schemas lack entirely (``pio_settings``,
+    added by :class:`RunTimeSettingsV0_6_0`) is simply absent here; use
+    :class:`RunTimeSettings` (ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
+    (0.5.0 <= ucla-roms < 0.6.0), or :class:`RunTimeSettingsV0_6_0` (>= 0.6.0),
+    or select one with :func:`run_time_settings_for_ref`.
     """
 
     title: TitleCfg
@@ -658,6 +670,20 @@ class RunTimeSettingsV0_5_0(_RunTimeSettingsCommon):
     particles: ParticlesCfgV0_5_0
 
 
+class RunTimeSettingsV0_6_0(RunTimeSettingsV0_5_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.6.0, typed + validated.
+
+    Subclasses :class:`RunTimeSettingsV0_5_0` directly (rather than
+    ``_RunTimeSettingsCommon``) to inherit its ``ocean_vars``/``particles``
+    variants unchanged -- mirrors C-Star's ``RomsNamelistV0_6_0(RomsNamelistV0_5_0)``.
+    Adds ``pio_settings`` (ucla-roms PR #346, ``&PIO_SETTINGS``); the field
+    carries a default (see :class:`PioSettingsCfg`) so a 0.6.0-pinned blueprint
+    saved before this section existed still validates.
+    """
+
+    pio_settings: PioSettingsCfg = Field(default_factory=PioSettingsCfg)
+
+
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
 # the matching run-time settings class (forge's settings vocabulary).
 _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
@@ -665,7 +691,31 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
 ] = {
     RomsNamelist: RunTimeSettings,
     RomsNamelistV0_5_0: RunTimeSettingsV0_5_0,
+    RomsNamelistV0_6_0: RunTimeSettingsV0_6_0,
 }
+
+
+def version_gated_section_names() -> frozenset[str]:
+    """Section names modeled by at least one registered run-time settings tier
+    (:data:`_RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA`).
+
+    Distinguishes a section that's *version-gated* -- schema-modeled by some
+    tier but not necessarily the active one, e.g. ``pio_settings`` (only on
+    :class:`RunTimeSettingsV0_6_0`) -- from a section that's *never*
+    schema-modeled by any run-time settings class at all, e.g. ``cppdefs`` (a
+    compile-time settings dict with no run-time settings model counterpart).
+    The wizard's accordion editor (``_SettingsEditor``, ``forge_blueprint_wizard.py``)
+    uses this to decide whether a section absent from the *active* schema
+    should still render via type-inference (cppdefs: yes, always) or be
+    skipped (a version-gated section under an older ref: yes, skip -- the
+    active schema is ``extra="ignore"`` at the top level, so an inferred
+    widget's edits would be silently discarded downstream rather than raising).
+    """
+    return frozenset(
+        name
+        for cls in _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA.values()
+        for name in cls.model_fields
+    )
 
 
 def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsCommon]:
@@ -684,7 +734,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
     -------
     type[_RunTimeSettingsCommon]
         :class:`RunTimeSettings` for ucla-roms < 0.5.0 or when `roms_ref` is
-        `None`; :class:`RunTimeSettingsV0_5_0` for ucla-roms >= 0.5.0.
+        `None`; :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
+        :class:`RunTimeSettingsV0_6_0` for ucla-roms >= 0.6.0.
 
     Warns
     -----
@@ -736,14 +787,23 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     the cross-section read of ``rho0`` from ``lateral_visc``. ``exclude=`` drops
     the settings-only fields with no namelist counterpart.
 
-    ``rt``'s concrete type (:class:`RunTimeSettings` or
-    :class:`RunTimeSettingsV0_5_0`) selects the matching namelist schema and
+    ``rt``'s concrete type (:class:`RunTimeSettings`, :class:`RunTimeSettingsV0_5_0`,
+    or :class:`RunTimeSettingsV0_6_0`) selects the matching namelist schema and
     ``basic_output_settings``/``particles_settings`` group classes — the
     ``ocean_vars``/``particles`` sections already carry the right fields and
-    aliases for that variant, so no other branch is needed.
+    aliases for that variant, so no other branch is needed. ``pio_settings`` is
+    the one section a variant can lack entirely rather than just carry a
+    different subtype (pre-0.6.0 namelist schemas reject the group outright,
+    ``extra="forbid"``), so it's added to the constructor kwargs only when
+    ``rt`` is :class:`RunTimeSettingsV0_6_0`, checked *before* the (subclass)
+    ``RunTimeSettingsV0_5_0`` check below.
     """
-    if isinstance(rt, RunTimeSettingsV0_5_0):
-        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_5_0
+    if isinstance(rt, RunTimeSettingsV0_6_0):
+        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_6_0
+        basic_output_cls = BasicOutputSettingsV0_5_0
+        particles_cls = ParticlesSettingsV0_5_0
+    elif isinstance(rt, RunTimeSettingsV0_5_0):
+        namelist_cls = RomsNamelistV0_5_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     else:
@@ -760,7 +820,7 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
         if getattr(rt.forcing, k) is not None
     ]
 
-    return namelist_cls(
+    kwargs: dict[str, Any] = dict(
         # ---- structural transforms (regroup / computed / cross-section) ----
         simulation_name_settings=SimulationNameSettings(
             output_root_name=rt.output_root_name.output_root_name,
@@ -819,6 +879,9 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
         particles_settings=particles_cls(**grp(rt.particles)),
         v_sponge_settings=VSpongeSettings(**grp(rt.v_sponge)),
     )
+    if isinstance(rt, RunTimeSettingsV0_6_0):
+        kwargs["pio_settings"] = PioSettings(**grp(rt.pio_settings))
+    return namelist_cls(**kwargs)
 
 
 def validate_run_time_sections(

@@ -1,10 +1,10 @@
-description: ucla-roms main + PIO enabled
+description: Generated blueprint (ucla-roms 0.6.0, adds &PIO_SETTINGS support)
 bgc_mode: marbl
 use_pio: true
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: main
+    commit: 0.6.0
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
     commit: marbl0.45.0-max-it-10
@@ -44,7 +44,7 @@ model_settings:
     nt_passive: 0
     ntrc_bio: 32
   pio_settings:
-    pio_stride: 1  # PIO I/O-task rank stride; unread by ucla-roms releases predating the PIO_SETTINGS namelist group
+    pio_stride: 1  # PIO I/O-task rank stride (ucla-roms >= 0.6.0 &PIO_SETTINGS group)
   bgc:
     nbgc_flx: 2
     interp_frc: 0
@@ -69,7 +69,10 @@ model_settings:
     spn_avg: true
     sp_timscale: 86400
     wrt_sponge: false
-    nrpf: 7
+    # nrpf * output_period (one file per day) evenly divides the restart period
+    # for both the daily- and weekly-restarts OutputSpecs -- required by the
+    # ucla-roms >= 0.5.0 check_output_divides_rst precheck when enabled.
+    nrpf: 1
     output_period: 86400
   flux_frc:
     interp_flux_frc: true
@@ -88,7 +91,10 @@ model_settings:
     exchange_facy: 0.1
     exchange_facc: 0.01
     output_period: 400
-    nrpf: 100
+    # 216 * 400 s = one file per day, which evenly divides the restart period
+    # for both the daily- and weekly-restarts OutputSpecs -- required by the
+    # ucla-roms >= 0.5.0 check_output_divides_rst precheck when enabled.
+    nrpf: 216
     ppm3: 1.0e-06
     pmin: 200
   lin_rho_eos:

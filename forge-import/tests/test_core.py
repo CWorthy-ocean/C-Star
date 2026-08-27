@@ -71,6 +71,14 @@ _MODEL_DIR_ROMS050 = (
     / "ModelSpec"
     / "roms-marbl-0.5-default"
 )
+# ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
+# golden test below.
+_MODEL_DIR_ROMS060 = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "roms-marbl-0.6-default"
+)
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -2435,6 +2443,41 @@ class TestGoldenNamelist:
         assert "nrpf_particles" in particles
         assert "output_period =" not in particles
         assert "nrpf =" not in particles
+
+    def test_golden_namelist_test_tiny_roms060(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.6-default`` ModelSpec (ucla-roms >= 0.6.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_6_0``/
+        ``RomsNamelistV0_6_0`` end to end.
+
+        The one schema-visible difference from the roms050 golden is the added
+        ``&pio_settings`` group (``pio_stride``); everything else about the
+        0.5.0 schema (no ``nrpf_rst``, renamed particles output keys) carries
+        forward unchanged since ``RunTimeSettingsV0_6_0``/``RomsNamelistV0_6_0``
+        subclass the 0.5.0 variants.
+
+        Test name note: this must NOT contain ``roms050`` -- the legacy golden
+        is selected with ``-k "golden_namelist_test_tiny and not roms050 and not
+        roms060"`` (see ``docs/architecture-details.md`` Sec 7), which would
+        otherwise also catch this test.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS060,
+            "golden_namelist_test-tiny-roms060.nml",
+        )
+
+        basic_output = normalized.split("&basic_output_settings")[1].split("/", 1)[0]
+        assert "nrpf_rst" not in basic_output
+
+        particles = normalized.split("&particles_settings")[1].split("/", 1)[0]
+        assert "output_period_particles" in particles
+        assert "nrpf_particles" in particles
+
+        assert "&pio_settings" in normalized
+        pio_settings = normalized.split("&pio_settings")[1].split("/", 1)[0]
+        assert "pio_stride = 1" in pio_settings
 
 
 class TestChildDomainNoInitialConditionsValidatesAtEmit:

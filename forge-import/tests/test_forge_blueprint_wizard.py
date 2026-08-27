@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pytest
 
-from cstar_forge.forge.namelist_model import RunTimeSettings, RunTimeSettingsV0_5_0
+from cstar_forge.forge.namelist_model import (
+    RunTimeSettings,
+    RunTimeSettingsV0_5_0,
+    RunTimeSettingsV0_6_0,
+)
 from cstar_forge.forge_blueprint_wizard import (
     ForgeBlueprintWizard,
     _drain_stream_buffer,
@@ -788,6 +792,58 @@ def test_settings_editor_nrpf_rst_only_for_legacy_settings_cls():
     assert ("ocean_vars", "nrpf_rst") in default_editor._widgets
 
 
+def test_settings_editor_skips_version_gated_section_not_in_active_schema():
+    """``pio_settings`` is version-gated: only ``RunTimeSettingsV0_6_0`` models
+    it. A ``model_settings`` dict can still carry the key under an older
+    ``settings_cls`` -- e.g. the ``pio-dev``/``roms-marbl-0.6-default``
+    ModelSpecs always include it, but a user can override ``roms_ref`` down to
+    "0.5.0" in the wizard while keeping that model selected. Regression: the
+    editor used to fall back to type-inference (like it does for a *never*
+    schema-modeled section, e.g. ``cppdefs``) and render an editable widget
+    anyway; ``RunTimeSettings``/``RunTimeSettingsV0_5_0`` are ``extra="ignore"``
+    at the top level, so any edit made there was silently discarded downstream
+    instead of taking effect or raising. No widget must be built for
+    ``pio_settings`` under a settings_cls that doesn't model it; a widget MUST
+    still be built once the settings_cls does. ``cppdefs`` (never modeled by
+    any tier) must keep rendering under both, guarding the distinction
+    ``version_gated_section_names()`` draws between "version-gated" and
+    "never schema-modeled".
+    """
+    import ipywidgets as W
+
+    model_settings = {
+        "pio_settings": {"pio_stride": 4},
+        "cppdefs": {"sponge_tune": True},
+    }
+
+    v0_5_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_5_0
+    )
+    assert ("pio_settings", "pio_stride") not in v0_5_0_editor._widgets
+    assert "pio_settings" not in v0_5_0_editor._pane_sections.get(
+        "Physics & subgrid tuning", []
+    )
+    assert ("cppdefs", "sponge_tune") in v0_5_0_editor._widgets
+
+    v0_6_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_6_0
+    )
+    assert ("pio_settings", "pio_stride") in v0_6_0_editor._widgets
+    assert "pio_settings" in v0_6_0_editor._pane_sections.get(
+        "Physics & subgrid tuning", []
+    )
+    assert ("cppdefs", "sponge_tune") in v0_6_0_editor._widgets
+
+    # A section with NOTHING else built for its pane under an older settings_cls
+    # must not leave a broken empty accordion pane (mirrors the "if not blocks:
+    # continue" guard in _SettingsEditor.__init__).
+    pio_only_editor = _SettingsEditor(
+        W, {"pio_settings": {"pio_stride": 4}}, settings_cls=RunTimeSettingsV0_5_0
+    )
+    assert "Physics & subgrid tuning" not in pio_only_editor._pane_sections
+    assert pio_only_editor._widgets == {}
+
+
 def test_wizard_editor_rebuilds_across_roms_ref_schema_boundary():
     """Overriding the ``roms_ref`` box across the ucla-roms 0.5.0 line (with the
     same ModelSpec selected) must regenerate the Advanced-settings editor
@@ -827,7 +883,7 @@ def test_default_model_pinned_to_main_uses_latest_settings_schema():
     """The default (first) catalog model is pinned to ucla-roms branch ``main``
     (see ModelSpec ``pio-dev``) -- a non-semver ref, which both the wizard and
     the executor (``write_roms_namelist`` -> ``run_time_settings_for_ref``)
-    resolve to the *latest* known schema (currently ``RunTimeSettingsV0_5_0``),
+    resolve to the *latest* known schema (currently ``RunTimeSettingsV0_6_0``),
     not the legacy one. This is an intentional behavior change from before this
     ref-awareness was added (the editor used to hardcode legacy
     ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
@@ -839,7 +895,7 @@ def test_default_model_pinned_to_main_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_settings_cls is RunTimeSettingsV0_5_0
+    assert wiz._editor_settings_cls is RunTimeSettingsV0_6_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
 
 

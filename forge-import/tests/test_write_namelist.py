@@ -138,6 +138,10 @@ def test_namelist_file_written(tmp_path):
 
 
 def test_core_groups_present(nml):
+    # The ``nml`` fixture writes with the default (legacy, pre-0.5.0) schema --
+    # ``pio_settings`` is version-gated to ucla-roms >= 0.6.0 (see
+    # test_pio_stride_defaults_when_omitted / test_pio_stride_override_is_written
+    # below) and must NOT appear here.
     for group in (
         "simulation_name_settings",
         "time_stepping",
@@ -149,6 +153,7 @@ def test_core_groups_present(nml):
         "marbl_biogeochemistry_settings",
     ):
         assert group in nml, f"missing &{group}"
+    assert "pio_settings" not in nml
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +209,48 @@ def test_extract_root_name_defaults_when_omitted(nml):
     # ``ExtractDataCfg`` Pydantic default must still land in the written namelist,
     # since the Fortran declaration has no initializer and requires the key.
     assert nml["extract_data_settings"]["extract_root_name"] == "child"
+
+
+def test_pio_stride_defaults_when_omitted(tmp_path):
+    # &PIO_SETTINGS is version-gated to ucla-roms >= 0.6.0 (RunTimeSettingsV0_6_0).
+    # ``_base_settings()`` (built from the cson ModelSpec, which has no
+    # ``pio_settings`` key at all -- it predates &PIO_SETTINGS) is representative
+    # of a pre-existing settings dict/blueprint pinned forward to 0.6.0 -- the
+    # ``PioSettingsCfg`` Pydantic default must still land in the written namelist,
+    # since ucla-roms >= 0.6.0 requires the group.
+    rt = _base_settings()
+    assert "pio_settings" not in rt
+    write_roms_namelist(
+        settings_run_time=rt, output_dir=tmp_path, n_tracers=34, roms_ref="0.6.0"
+    )
+    nml = f90nml.read(tmp_path / "namelist.nml")
+    assert nml["pio_settings"]["pio_stride"] == 1
+
+
+def test_pio_stride_override_is_written(tmp_path):
+    rt = _base_settings()
+    rt["pio_settings"] = {"pio_stride": 4}
+    write_roms_namelist(
+        settings_run_time=rt, output_dir=tmp_path, n_tracers=34, roms_ref="0.6.0"
+    )
+    nml = f90nml.read(tmp_path / "namelist.nml")
+    assert nml["pio_settings"]["pio_stride"] == 4
+
+
+def test_pio_settings_ignored_before_0_6_0(tmp_path):
+    # ``RunTimeSettings``/``RunTimeSettingsV0_5_0`` inherit ``_SettingsSection``'s
+    # ``extra="ignore"`` (not "forbid") at the top level, same as any other
+    # unmodeled key -- a settings dict that carries ``pio_settings`` under a
+    # pre-0.6.0 pin is silently dropped, not rejected, and the written namelist
+    # has no &pio_settings group (the pre-0.6.0 C-Star namelist schemas reject
+    # the group outright, so it must never be emitted for them).
+    rt = _base_settings()
+    rt["pio_settings"] = {"pio_stride": 1}
+    write_roms_namelist(
+        settings_run_time=rt, output_dir=tmp_path, n_tracers=34, roms_ref="0.5.0"
+    )
+    nml = f90nml.read(tmp_path / "namelist.nml")
+    assert "pio_settings" not in nml
 
 
 # ---------------------------------------------------------------------------

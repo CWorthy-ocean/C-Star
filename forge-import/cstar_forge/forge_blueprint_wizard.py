@@ -63,6 +63,7 @@ from cstar_forge.forge.namelist_model import (
     RunTimeSettings,
     run_time_settings_for_ref,
     validate_run_time_sections,
+    version_gated_section_names,
 )
 from cstar_forge.forge.user_files import hash_netcdf_contents
 from cstar_forge.forge_blueprint_resolve import (
@@ -875,6 +876,10 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "gamma2",
             "ubind",
             "lin_rho_eos",
+            # pio_settings is ModelSpec-owned (like the rest of this pane), NOT an
+            # output section: edits here must land in composition.model / "Save
+            # Model spec", so keep it out of _OUTPUT_CATEGORY.
+            "pio_settings",
             "cppdefs",
         ),
     ),
@@ -925,6 +930,15 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
+
+# Section names modeled by at least one registered run-time settings tier (e.g.
+# pio_settings, only on RunTimeSettingsV0_6_0) -- used by _SettingsEditor to skip
+# a section that's version-gated behind a namelist schema boundary but absent
+# from the *active* settings_cls, rather than rendering a type-inferred widget
+# whose edits an extra="ignore" top-level model would silently discard. A
+# section NEVER modeled by any tier (e.g. cppdefs) is not in this set and keeps
+# rendering via type-inference as before -- see version_gated_section_names().
+_VERSION_GATED_SECTIONS = version_gated_section_names()
 
 # cppdefs fields exposed per accordion pane -- everything else in cppdefs (obc_*/
 # marbl/use_pio/cdr_forcing/co2_tvarying/sal_restore/tides) is resolver-derived and
@@ -1006,6 +1020,20 @@ class _SettingsEditor:
             blocks = []
             for section in members:
                 if section not in model_settings:
+                    continue
+                if (
+                    section not in self._settings_cls.model_fields
+                    and section in _VERSION_GATED_SECTIONS
+                ):
+                    # section is modeled by some registered settings tier (e.g.
+                    # pio_settings on RunTimeSettingsV0_6_0) but not by the
+                    # active settings_cls -- e.g. a pre-0.6.0 roms_ref override
+                    # with a ModelSpec whose model_settings still carries the
+                    # key. Rendering a type-inferred widget here would let the
+                    # user edit a value the active (extra="ignore") schema
+                    # silently discards downstream. cppdefs is NOT in
+                    # _VERSION_GATED_SECTIONS (no tier ever models it) and so
+                    # is unaffected -- it keeps rendering via type-inference.
                     continue
                 include, exclude = _split_fields(title, section)
                 box, fields = self._build_section(
@@ -4383,8 +4411,9 @@ class ForgeBlueprintWizard:
         # layer applied on top (effective = composed ⊕ overrides). The editor is
         # rebuilt when the *model* changes (its field set depends on the model) or
         # when the effective ucla-roms ref crosses a schema boundary (e.g. editing
-        # the roms_ref override across the 0.5.0 line with the same model selected)
-        # -- see run_time_settings_for_ref / RunTimeSettingsV0_5_0.
+        # the roms_ref override across the 0.5.0 or 0.6.0 line with the same model
+        # selected) -- see run_time_settings_for_ref / RunTimeSettingsV0_5_0 /
+        # RunTimeSettingsV0_6_0.
         composed = cfg.model_settings
         # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
         # reused for the validation call below.

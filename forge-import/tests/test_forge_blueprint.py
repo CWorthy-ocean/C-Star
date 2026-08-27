@@ -33,6 +33,14 @@ _MODEL_DIR_ROMS050 = (
     / "ModelSpec"
     / "roms-marbl-0.5-default"
 )
+# ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
+# golden test below.
+_MODEL_DIR_ROMS060 = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "roms-marbl-0.6-default"
+)
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -1272,6 +1280,36 @@ def test_golden_model_settings_test_tiny_roms050():
         "from the golden fixture. If this is an intentional schema/default "
         "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
         "roms050.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
+def test_golden_model_settings_test_tiny_roms060():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.6-default`` ModelSpec
+    (ucla-roms >= 0.6.0, adds ``&PIO_SETTINGS``), resolved from the same
+    test-tiny domain/forcing/output setup as ``test_golden_model_settings_test_tiny``.
+
+    Mirrors ``test_golden_model_settings_test_tiny_roms050`` exactly; the only
+    resolved-settings difference from that fixture is the added ``pio_settings``
+    entry (see ``TestGoldenNamelist.test_golden_namelist_test_tiny_roms060`` in
+    ``tests/test_core.py`` for the versioned-namelist assertion).
+    """
+    import json
+
+    golden_path = (
+        Path(cstar_forge.__file__).parents[1]
+        / "tests"
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms060.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_dir=_MODEL_DIR_ROMS060)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.6-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms060.json; otherwise the change is a regression in the settings the "
         "executor feeds to namelist.nml / cppdefs.opt."
     )
 

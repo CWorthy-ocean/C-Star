@@ -319,9 +319,17 @@ any diff as a behavior change to justify, not noise):
   `configure_build()` chain (real `write_roms_namelist`; only roms-tools
   construction classes are mocked) and diffs the rendered `namelist.nml` against
   `tests/fixtures/golden_namelist_test-tiny.nml` (host-rooted absolute paths
-  normalized to a `<WORKDIR>` token). Regenerate via
-  `UPDATE_GOLDEN=1 pytest tests/test_core.py -k golden_namelist_test_tiny` (the
-  run intentionally fails after writing; rerun without the env var to confirm).
+  normalized to a `<WORKDIR>` token). Two sibling tests pin the versioned-namelist
+  schemas against the same test-tiny domain/forcing/output setup:
+  `test_golden_namelist_test_tiny_roms050` (`roms-marbl-0.5-default`,
+  `golden_namelist_test-tiny-roms050.nml`) and
+  `test_golden_namelist_test_tiny_roms060` (`roms-marbl-0.6-default`, adds
+  `&PIO_SETTINGS`, `golden_namelist_test-tiny-roms060.nml`). Regenerate one at a
+  time via `UPDATE_GOLDEN=1 pytest tests/test_core.py -k <test name>` (the run
+  intentionally fails after writing; rerun without the env var to confirm). To
+  select *only* the legacy test, use
+  `-k "golden_namelist_test_tiny and not roms050 and not roms060"` -- a bare
+  `-k golden_namelist_test_tiny` matches all three.
 
 Both fixtures resolve paths via `cstar_forge.__file__`, so they need the
 editable install.

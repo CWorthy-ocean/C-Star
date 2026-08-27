@@ -19,6 +19,7 @@ from cstar_forge.domain_catalog import default_catalog
 from cstar_forge.forge.namelist_model import (
     RunTimeSettings,
     RunTimeSettingsV0_5_0,
+    RunTimeSettingsV0_6_0,
     build_namelist,
     check_extract_divides_rst,
     run_time_settings_for_ref,
@@ -192,6 +193,18 @@ def test_transform_correctness():
     assert nml.forcing_files.frcfiles == ["/in/surf.nc", "/in/bry.nc", "/in/river.nc"]
 
 
+def test_pio_settings_default_stride():
+    # &PIO_SETTINGS is version-gated to ucla-roms >= 0.6.0 -- ``_populated_rt_dict()``
+    # (built from the cson ModelSpec, which predates &PIO_SETTINGS) has no
+    # ``pio_settings`` key at all, representative of a pre-existing settings
+    # dict/blueprint pinned forward to 0.6.0.
+    d = _populated_rt_dict()
+    assert "pio_settings" not in d
+    rt = RunTimeSettingsV0_6_0.model_validate(d)
+    nml = build_namelist(rt, n_tracers=34)
+    assert nml.pio_settings.pio_stride == 1
+
+
 def test_read_edit_write(tmp_path):
     """The other-repo use case: read a namelist, edit a field, write it back."""
     rt = RunTimeSettings.model_validate(_populated_rt_dict())
@@ -216,6 +229,13 @@ def test_validation_rejects_bad_values():
     bad["param"]["np_xi"] = "not-an-int"
     with pytest.raises(ValidationError):
         RunTimeSettings.model_validate(bad)
+
+
+def test_pio_stride_zero_rejected():
+    bad = _populated_rt_dict()
+    bad["pio_settings"] = {"pio_stride": 0}
+    with pytest.raises(ValidationError, match="pio_stride"):
+        RunTimeSettingsV0_6_0.model_validate(bad)
 
 
 def test_rst_period_not_divisible_by_dt_rejected():
@@ -417,15 +437,23 @@ def test_run_time_settings_for_ref_none_and_pre_0_5_0_select_legacy():
         assert run_time_settings_for_ref(ref) is RunTimeSettings
 
 
-def test_run_time_settings_for_ref_0_5_0_and_later_select_v0_5_0():
-    for ref in ("0.5.0", "v0.5.0", "0.7.3"):
+def test_run_time_settings_for_ref_0_5_0_up_to_0_6_0_selects_v0_5_0():
+    # 0.5.0 <= ucla-roms < 0.6.0 selects RunTimeSettingsV0_5_0; 0.6.0 and later
+    # (including anything beyond, e.g. 0.7.3) now selects RunTimeSettingsV0_6_0
+    # -- see test_run_time_settings_for_ref_0_6_0_and_later_selects_v0_6_0 below.
+    for ref in ("0.5.0", "v0.5.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_5_0
+
+
+def test_run_time_settings_for_ref_0_6_0_and_later_selects_v0_6_0():
+    for ref in ("0.6.0", "v0.6.0", "0.7.3"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_6_0
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_5_0
+    assert cls is RunTimeSettingsV0_6_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -434,7 +462,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_5_0
+    assert cls is RunTimeSettingsV0_6_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
