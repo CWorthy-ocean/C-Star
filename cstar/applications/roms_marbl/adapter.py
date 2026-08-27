@@ -27,9 +27,9 @@ class DiscretizationAdapter(ModelAdapter[RomsMarblBlueprint, ROMSDiscretization]
     @t.override
     def adapt(self) -> ROMSDiscretization:
         return ROMSDiscretization(
-            time_step=self.model.model_params.time_step,
             n_procs_x=self.model.partitioning.n_procs_x,
             n_procs_y=self.model.partitioning.n_procs_y,
+            n_cores=self.model.partitioning.n_cores,
         )
 
 

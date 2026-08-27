@@ -77,26 +77,6 @@ ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME: t.Annotated[
 ] = "CSTAR_FF_ORCH_TRX_TIMESPLIT_LONGNAME"
 """Enable long name generation during time-splitting."""
 
-ENV_FF_CLI_BP_MIGRATE_AUTO: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_AUTO"],
-    EnvVar(
-        "Enable automatic blueprint migration to the latest schema during execution.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_BP_MIGRATE_AUTO"
-"""Enable automatic blueprint migration to the latest schema during execution."""
-
-ENV_FF_CLI_BP_MIGRATE_SHOW: t.Annotated[
-    t.Literal["CSTAR_FF_CLI_BP_MIGRATE_SHOW"],
-    EnvVar(
-        "Enable CLI for migrating blueprints to the latest schema.",
-        GROUP_FF,
-        default=FLAG_OFF,
-    ),
-] = "CSTAR_FF_CLI_BP_MIGRATE_SHOW"
-"""Enable CLI for migrating blueprints to the latest schema."""
-
 
 ENV_FF_DEBUG_BUILD_MODE: t.Annotated[
     t.Literal["CSTAR_FF_DEBUG_BUILD_MODE"],

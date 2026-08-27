@@ -1,7 +1,7 @@
 name: roms_marbl_example_wales_new_bp
 description: toy domain near wales, for fast laptop/CI runs
 application: roms_marbl
-schema_version: 2.1.0
+schema_version: 3.0.0
 working_dir: temp_out_dir
 state: draft
 valid_start_date: 2012-01-01 00:00:00
@@ -70,9 +70,10 @@ forcing:
 partitioning:
   n_procs_x: 3
   n_procs_y: 3
-model_params:
-  time_step: 360
   use_pio: true
+namelist_overrides:
+  time_stepping:
+    dt: 360
 runtime_params:
   start_date: '2012-01-01 00:00:00'
   end_date: '2012-01-01 00:30:00'

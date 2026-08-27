@@ -252,6 +252,11 @@ def model_to_yaml(model: SerializableModel) -> str:
     if hasattr(model, "application"):
         dumped["application"] = str(getattr(model, "application"))  # noqa: B009
 
+    # 'schema_version' records which schema wrote the document; always include
+    # it (even at the current default) so persisted artifacts self-describe.
+    if hasattr(model, "schema_version"):
+        dumped["schema_version"] = str(getattr(model, "schema_version"))  # noqa: B009
+
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
     dumper.add_representer(set, set_representer)

@@ -12,6 +12,7 @@ from cstar.applications.core import (
 from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapter2025v1,
     RomsMarblSchemaAdapterV2V21,
+    RomsMarblSchemaAdapterV21V3,
 )
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
@@ -33,7 +34,7 @@ from cstar.orchestration.transforms import (
 
 if TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-    from cstar.roms import ROMSSimulation
+    from cstar.roms.simulation import ROMSSimulation
 
 
 _APP_NAME_LONG: t.Literal["ROMS-MARBL simulation runner"] = (
@@ -71,7 +72,7 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
         """
         super().__init__(request, service_cfg, job_cfg)
 
-        from cstar.roms import ROMSSimulation
+        from cstar.roms.simulation import ROMSSimulation
 
         self.simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
         self.simulation.name = slugify(self.simulation.name)
@@ -138,7 +139,11 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
     applicable_transforms = (RomsMarblTimeSplitter,)
-    migrations = (RomsMarblSchemaAdapter2025v1, RomsMarblSchemaAdapterV2V21)
+    migrations = (
+        RomsMarblSchemaAdapter2025v1,
+        RomsMarblSchemaAdapterV2V21,
+        RomsMarblSchemaAdapterV21V3,
+    )
 
 
 def main() -> int:

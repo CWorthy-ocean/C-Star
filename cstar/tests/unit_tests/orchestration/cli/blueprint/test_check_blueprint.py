@@ -117,8 +117,7 @@ def test_blueprint_valid_input(
         ("grid:", "initial_conditions:"),
         ("initial_conditions:", "forcing"),
         ("forcing:", "partitioning"),
-        ("partitioning:", "model_params:"),
-        ("model_params:", "runtime_params:"),
+        ("partitioning:", "namelist_overrides:"),
         ("runtime_params:", "<EOF>"),
         ("run_time:", "compile_time:"),
         ("compile_time:", "grid:"),
@@ -254,6 +253,14 @@ def test_blueprint_check_remote_blueprint_dne() -> None:
     assert "not found" in result.stderr
 
 
+@pytest.mark.xfail(
+    reason=(
+        "cstar_blueprint_roms_marbl_example's wales_toy_blueprint.yaml is still "
+        "schema 2.0.0 (has a bare `model_params` section) and roms_marbl schema "
+        "3.0.0 forbids it; remove once the sibling repo publishes a 3.0.0 blueprint"
+    ),
+    strict=False,
+)
 @pytest.mark.parametrize(
     "bp_uri",
     [

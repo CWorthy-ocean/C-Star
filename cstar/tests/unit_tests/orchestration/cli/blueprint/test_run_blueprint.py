@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from cstar.applications.core import (
@@ -13,6 +14,11 @@ from cstar.applications.core import (
 )
 from cstar.applications.roms_marbl.app import RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import (
+    ENV_CSTAR_DISABLE_MIGRATION,
+    ENV_CSTAR_STATE_HOME,
+    FLAG_ON,
+)
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
@@ -63,6 +69,9 @@ def test_blueprint_run_remote_blueprint_dne() -> None:
 def test_blueprint_run_remote_blueprint() -> None:
     """Verify that a URL to a remote blueprint is handled properly and the
     blueprint is executed.
+
+    The published wales_toy blueprint is still schema 2.0.0; automatic
+    migration brings it to the current schema during `run`.
     """
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
@@ -103,6 +112,222 @@ def test_blueprint_run_remote_blueprint() -> None:
         )
 
     mock_exec_runner.assert_called_once()
+
+
+def _write_2_1_0_blueprint(source: Path, dest_dir: Path) -> tuple[Path, int]:
+    """Reshape the (3.0.0) complete blueprint fixture into its 2.1.0 form.
+
+    Returns the path to the written file and the time step it carries in the
+    legacy `model_params.time_step` field.
+    """
+    data = yaml.safe_load(source.read_text())
+    data.pop("$schema", None)
+    time_step = data.pop("namelist_overrides")["time_stepping"]["dt"]
+    use_pio = data["partitioning"].pop("use_pio", False)
+    data["schema_version"] = "2.1.0"
+    data["model_params"] = {"time_step": time_step, "use_pio": use_pio}
+
+    bp_path = dest_dir / "blueprint_2_1_0.yaml"
+    bp_path.write_text(yaml.safe_dump(data))
+    return bp_path, time_step
+
+
+def test_blueprint_run_auto_migrates_2_1_0_blueprint(
+    tmp_path: Path,
+    complete_blueprint_path: Path,
+    mock_xdg_dirs: dict[str, Path],
+) -> None:
+    """`run` migrates a 2.1.0 blueprint to the current schema by default and
+    executes it: `model_params.time_step` lands in
+    `namelist_overrides.time_stepping.dt` and `use_pio` moves under
+    `partitioning` in the persisted, migrated blueprint.
+    """
+    bp_path, time_step = _write_2_1_0_blueprint(complete_blueprint_path, tmp_path)
+
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+        get_application("roms_marbl")
+    )
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            app_config.runner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+    ):
+        runner = CliRunner()
+        _ = runner.invoke(
+            app,
+            [bp_path.as_posix()],
+            color=False,
+        )
+
+    mock_exec_runner.assert_called_once()
+
+    state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
+    migrated_path = next(state_home.rglob(f"{bp_path.stem}_3.0.0*"))
+    migrated = yaml.safe_load(migrated_path.read_text())
+    assert "model_params" not in migrated
+    # serialize() excludes model defaults, so validate to see effective values
+    bp = RomsMarblBlueprint.model_validate(migrated)
+    assert bp.schema_version == "3.0.0"
+    assert bp.partitioning.use_pio is False
+    assert bp.namelist_overrides["time_stepping"]["dt"] == time_step
+
+
+def test_blueprint_run_disable_migration_outdated_rejected(
+    tmp_path: Path,
+    complete_blueprint_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With `CSTAR_DISABLE_MIGRATION` set, an out-of-date blueprint fails
+    early instead of being migrated, and is not executed.
+    """
+    monkeypatch.setenv(ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON)
+    bp_path, _ = _write_2_1_0_blueprint(complete_blueprint_path, tmp_path)
+
+    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [bp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code != 0
+    assert "migration is disabled" in result.stdout
+    mock_exec.assert_not_called()
+
+
+def test_blueprint_run_disable_migration_current_blueprint_ok(
+    complete_blueprint_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With `CSTAR_DISABLE_MIGRATION` set, an up-to-date blueprint is
+    unaffected and executes normally.
+    """
+    monkeypatch.setenv(ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON)
+
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+        get_application("roms_marbl")
+    )
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            app_config.runner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+    ):
+        runner = CliRunner()
+        _ = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix()],
+            color=False,
+        )
+
+    mock_exec_runner.assert_called_once()
+
+
+def test_blueprint_run_current_blueprint_not_persisted(
+    complete_blueprint_path: Path,
+    mock_xdg_dirs: dict[str, Path],
+) -> None:
+    """An up-to-date blueprint runs as-is: no migrated copy is written to the
+    state directory.
+    """
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    app_config: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
+        get_application("roms_marbl")
+    )
+
+    with (
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            app_config.runner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+    ):
+        runner = CliRunner()
+        _ = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix()],
+            color=False,
+        )
+
+    mock_exec_runner.assert_called_once()
+    state_home = mock_xdg_dirs[ENV_CSTAR_STATE_HOME]
+    assert not list(state_home.rglob(f"{complete_blueprint_path.stem}_*"))
+
+
+def test_blueprint_run_invalid_blueprint_exits_nonzero(
+    tmp_path: Path,
+    complete_blueprint_path: Path,
+) -> None:
+    """A blueprint that is schema-current but fails content validation exits
+    with a non-zero code and is not executed.
+    """
+    data = yaml.safe_load(complete_blueprint_path.read_text())
+    data.pop("$schema", None)
+    # violate the model validator: end_date beyond the valid range
+    data["runtime_params"]["end_date"] = "2200-01-01T00:00:00"
+    bp_path = tmp_path / "blueprint_invalid.yaml"
+    bp_path.write_text(yaml.safe_dump(data))
+
+    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [bp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code != 0
+    mock_exec.assert_not_called()
 
 
 @pytest.mark.parametrize(

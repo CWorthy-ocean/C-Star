@@ -201,3 +201,39 @@ def test_roms_namelist_base_rejects_direct_use():
     """
     with pytest.raises(TypeError, match="not a usable schema"):
         RomsNamelistBase.read(OLD_NAMELIST)
+
+
+class TestUnknownOverrideKeys:
+    """Tests for `RomsNamelistBase.unknown_override_keys`."""
+
+    def test_valid_names_return_no_violations(self):
+        """Known group and key names produce no violations."""
+        overrides = {
+            "time_stepping": {"dt": 60.0, "ntimes": 10},
+            "param_settings": {"np_xi": 2},
+        }
+        assert RomsNamelistV0_5_0.unknown_override_keys(overrides) == []
+
+    def test_unknown_group_and_key_all_reported(self):
+        """Unknown groups and unknown keys are each reported, in one pass."""
+        overrides = {
+            "not_a_group": {"dt": 1},
+            "time_stepping": {"not_a_key": 1, "dt": 60.0},
+        }
+        violations = RomsNamelistV0_5_0.unknown_override_keys(overrides)
+        assert len(violations) == 2
+        assert any("not_a_group" in v for v in violations)
+        assert any("not_a_key" in v for v in violations)
+
+    def test_version_specific_key(self):
+        """`nrpf_rst` exists pre-0.5.0 and was removed in 0.5.0."""
+        overrides = {"basic_output_settings": {"nrpf_rst": 1}}
+        assert RomsNamelist.unknown_override_keys(overrides) == []
+        violations = RomsNamelistV0_5_0.unknown_override_keys(overrides)
+        assert len(violations) == 1
+        assert "nrpf_rst" in violations[0]
+
+    def test_base_class_rejected(self):
+        """The base class is not a usable schema for key checks."""
+        with pytest.raises(TypeError, match="not a usable schema"):
+            RomsNamelistBase.unknown_override_keys({"time_stepping": {"dt": 1}})

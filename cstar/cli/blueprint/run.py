@@ -15,7 +15,6 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     get_env_item,
 )
-from cstar.base.feature import ENV_FF_CLI_BP_MIGRATE_AUTO, is_feature_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     MigrationRequest,
@@ -61,7 +60,9 @@ def path_callback(
     """Validate the blueprint content after typer has parsed the path.
 
     Additionally, loads the blueprint, performs automatic schema migration
-    if necessary, and stores the updated blueprint in the context for later use.
+    if necessary, and stores the updated blueprint in the context for later
+    use. An up-to-date blueprint is used as-is; set `CSTAR_DISABLE_MIGRATION`
+    to fail instead of migrating when the blueprint is not current.
 
     Parameters
     ----------
@@ -79,18 +80,17 @@ def path_callback(
         with local_copy(path) as local_path:
             bp_path = local_path
 
-            if is_feature_enabled(ENV_FF_CLI_BP_MIGRATE_AUTO):
-                request = MigrationRequest(path=local_path)
-                try:
-                    persist_result = execute_migration(request)
+            request = MigrationRequest(path=local_path)
+            try:
+                persist_result = execute_migration(request)
 
-                    if persist_result.migration_result.error:
-                        print(persist_result.migration_result.error)
-                        raise typer.Exit(1)
+                if persist_result.migration_result.error:
+                    print(persist_result.migration_result.error)
+                    raise typer.Exit(1)
 
-                    bp_path = Path(persist_result.target)
-                except CStarMigrationNotRegisteredError:
-                    log.info("Skipping schema migration; no registered adapters")
+                bp_path = Path(persist_result.target)
+            except CStarMigrationNotRegisteredError:
+                log.debug("Skipping schema migration; no registered adapters")
             return str(bp_path)
 
     except FileNotFoundError as ex:
@@ -200,7 +200,7 @@ def run(
     result = validate_serialized_entity(bp_path, app_config.blueprint)
     if not result.is_valid:
         print(result.error_msg)
-        return
+        raise typer.Exit(code=1)
 
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
