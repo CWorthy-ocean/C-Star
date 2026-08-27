@@ -59,8 +59,11 @@ def test_blueprint_migrate_file_dne(tmp_path: Path) -> None:
         color=False,
     )
 
-    assert "Invalid value for 'PATH'" in result.stderr
-    assert "was not found" in result.stderr
+    # Normalize away the rich error panel's hard wrapping, which can split
+    # the message at any point depending on the tmp path length.
+    plain_stderr = " ".join(result.stderr.replace("│", " ").split())
+    assert "Invalid value for 'PATH'" in plain_stderr
+    assert "was not found" in plain_stderr
 
 
 def test_blueprint_migrate_remote_blueprint_dne() -> None:
