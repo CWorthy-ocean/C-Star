@@ -94,8 +94,8 @@ PROCESSING_FILLED_SECTIONS = (
 # whatever the ModelSpec's disabled placeholder says (``river_frc``/``cdr_frc``/
 # ``cdr_output``) or at a merely *declared*, not actually-generated, value (``tides``'
 # ``ntides`` from a tidal item, if the item set one). Unlike ``PROCESSING_FILLED_SECTIONS``,
-# these sections DO exist in ``model_settings`` (so ``configure_build``'s ``allow_new=False``
-# path finds them and deep-merges into them) and carry some fields with real, reviewable
+# these sections DO exist in ``model_settings`` (so ``configure_build``'s strict merge
+# finds them and deep-merges into them) and carry some fields with real, reviewable
 # ModelSpec defaults (e.g. ``cdr_frc.relocate_to_wet_pts``) — so only the specific
 # generation-derived leaves are excluded from the overlay, not the whole section.
 #

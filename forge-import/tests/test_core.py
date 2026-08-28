@@ -1147,7 +1147,6 @@ class TestForgeExecutorBuildAndRun:
                     "ana_tides": False,
                 },
             },
-            allow_new=True,
         )
 
         run_ov, compile_ov = split_model_settings(cfg)
@@ -1805,9 +1804,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         mock_roms_marbl_blueprint_elements.forcing = MagicMock()
         mock_roms_marbl_blueprint_elements.cdr_forcing = None
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements,
-            {},
-            {},
+            mock_roms_marbl_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -1821,14 +1818,17 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert call_kwargs["start_date"] == builder.start_date
             assert call_kwargs["end_date"] == builder.end_date
             assert call_kwargs["use_pio"] is False
-            # The resolved compile-time settings (cppdefs, incl. marbl) must be
-            # handed to input generation — steps read e.g. cppdefs.marbl to
+            # The resolved compile-time/run-time settings dicts are handed to input
+            # generation BY REFERENCE (executor-owned, mutated in place by the
+            # generation steps) -- steps read e.g. cppdefs.marbl (has_bgc) to
             # default include_bgc on make_nesting_info.
             assert (
-                call_kwargs["settings_compile_time_base"]
-                is builder._settings_compile_time
+                call_kwargs["settings_compile_time"] is builder._settings_compile_time
             )
-            assert "cppdefs" in call_kwargs["settings_compile_time_base"]
+            assert call_kwargs["settings_run_time"] is builder._settings_run_time
+            assert "cppdefs" in call_kwargs["settings_compile_time"]
+            # The minimal fixture is a marbl (BGC) model.
+            assert call_kwargs["has_bgc"] is True
 
     @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
     @requires_cstar_pio
@@ -1845,9 +1845,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         mock_roms_marbl_blueprint_elements.forcing = MagicMock()
         mock_roms_marbl_blueprint_elements.cdr_forcing = None
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements,
-            {},
-            {},
+            mock_roms_marbl_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -1875,9 +1873,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         mock_roms_marbl_blueprint_elements.forcing = MagicMock()
         mock_roms_marbl_blueprint_elements.cdr_forcing = None
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements,
-            {},
-            {},
+            mock_roms_marbl_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -1899,7 +1895,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
     ):
         """Test generate_inputs raises RuntimeError when roms_marbl_blueprint_elements is None."""
         mock_input_data_instance = MagicMock()
-        mock_input_data_instance.generate_all.return_value = (None, {}, {})
+        mock_input_data_instance.generate_all.return_value = None
         mock_input_data_class.return_value = mock_input_data_instance
 
         with patch.object(ForgeExecutor, "ensure_source_data"):
@@ -1937,9 +1933,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements,
-            {},
-            {},
+            mock_roms_marbl_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 
@@ -1978,9 +1972,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
 
         mock_input_data_instance = MagicMock()
         mock_input_data_instance.generate_all.return_value = (
-            mock_roms_marbl_blueprint_elements,
-            {},
-            {},
+            mock_roms_marbl_blueprint_elements
         )
         mock_input_data_class.return_value = mock_input_data_instance
 

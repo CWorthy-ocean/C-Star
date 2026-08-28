@@ -1799,8 +1799,9 @@ def test_forcing_override_used_by_input_data(tmp_path):
     # Minimal mock of what __post_init__ needs beyond the input_list building
     mock_spec = MagicMock()
     mock_spec.inputs.grid = None  # skip grid
-    # Note: marbl is now read from _settings_compile_time["cppdefs"]["marbl"],
-    # not from model_spec.settings.properties — no need to set it on mock_spec.
+    # Note: BGC is now the explicit `has_bgc` constructor arg (mirroring
+    # ForgeExecutor._has_bgc, itself read from _settings_compile_time["cppdefs"]["marbl"]),
+    # not read from model_spec.settings.properties — no need to set it on mock_spec.
 
     with patch.object(
         id_mod.RomsMarblInputData,

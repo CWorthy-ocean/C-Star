@@ -33,15 +33,18 @@ class RomsMarblInputData(InputData):
     grid_parent: rt.Grid | None = None
     grid_child: rt.Grid | None = None
     metadata_child: dict[str, Any] | None = None
+    settings_compile_time: dict[str, Any] | None = None  # executor-owned, bound by reference
+    settings_run_time: dict[str, Any] | None = None  # executor-owned, bound by reference
     use_dask: bool = True
     dask_num_workers: int = 8
     use_pio: bool = False
     subchunk: bool = True
     verbose: bool = False
+    has_bgc: bool = False  # mirrors ForgeExecutor._has_bgc (cppdefs.marbl)
 
     roms_marbl_blueprint_elements: RomsMarblBlueprintInputData  # Auto-initialized
-    _settings_compile_time: dict  # Auto-initialized
-    _settings_run_time: dict  # Auto-initialized
+    _settings_compile_time: dict  # bound to `settings_compile_time`, or {} if not given
+    _settings_run_time: dict  # bound to `settings_run_time`, or {} if not given
     include_coarse_dims: bool | None = None  # Set during surface forcing generation
 ```
 
@@ -100,8 +103,16 @@ Creates `RomsMarblBlueprintInputData` instance with empty datasets:
 
 ### Settings Initialization
 
-- `_settings_compile_time`: Empty dictionary `{}`
-- `_settings_run_time`: Empty dictionary `{}`, populated per-section (a flat dict of sections: `grid`, `param`, `s_coord`, `initial`, `forcing`, `extract_data`, `bgc`, `blk_frc`, ...)
+`_settings_compile_time`/`_settings_run_time` are bound directly to the `settings_compile_time`/
+`settings_run_time` constructor args (no copy) -- in the normal `ForgeExecutor` path these ARE
+the executor's own live settings dicts, so generation steps mutate the executor's dicts in
+place and there is no merge-back step. When either arg is omitted (standalone/test use), a
+fresh empty dict `{}` is created instead.
+
+- `_settings_compile_time`: `cppdefs` only, populated by generation steps (open boundary flags,
+  `sal_restore`, `co2_tvarying`, `cdr_forcing`)
+- `_settings_run_time`: populated per-section (a flat dict of sections: `grid`, `param`,
+  `s_coord`, `initial`, `forcing`, `extract_data`, `bgc`, `blk_frc`, ...)
 
 ## Registry Framework
 
@@ -154,18 +165,19 @@ def generate_all(
     partition_files: bool = False,
     test: bool = False,
     only: set[str] | None = None,
-) -> tuple[RomsMarblBlueprintInputData, dict, dict]:
+) -> RomsMarblBlueprintInputData | None:
     """
     Generate all ROMS input files.
 
     Returns
     -------
-    roms_marbl_blueprint_elements: RomsMarblBlueprintInputData
-        Blueprint subset with generated input file paths
-    compile_time_settings: dict
-        Compile-time settings dictionary
-    run_time_settings: dict
-        Run-time settings dictionary
+    RomsMarblBlueprintInputData | None
+        Blueprint subset with generated input file paths, or None if the input
+        directory is non-empty and clobber is False. Settings are NOT returned:
+        `_settings_compile_time`/`_settings_run_time` are the executor-owned dicts
+        passed in via the `settings_compile_time`/`settings_run_time` constructor
+        args and mutated in place by generation steps -- the caller already holds
+        the up-to-date dicts through its own reference.
     """
 ```
 
@@ -189,7 +201,8 @@ grid object.
    disabled, and skipping any step not in `only` when `only` is given), calls the handler with
    `key` and `kwargs`
 6. **Partitioning**: Optionally partitions files across tiles if `partition_files=True`
-7. **Return**: Returns `roms_marbl_blueprint_elements` and the settings dictionaries
+7. **Return**: Returns `roms_marbl_blueprint_elements` (settings dicts are mutated in place,
+   not returned -- see `generate_all()` above)
 
 ### Handler Function Signature
 
@@ -676,23 +689,18 @@ input_args = dict(
 - `roms_marbl_blueprint_elements` updated with partitioned `Resource` objects
 - `partitioned` flag set to `True`
 
-## Return Values
+## Return Value
 
-`generate_all()` returns a tuple:
-
-```python
-(
-    roms_marbl_blueprint_elements: RomsMarblBlueprintInputData,
-    compile_time_settings: dict,
-    run_time_settings: dict
-)
-```
+`generate_all()` returns just `roms_marbl_blueprint_elements: RomsMarblBlueprintInputData`
+(or `None`; see `generate_all()` above). The settings dicts are not returned -- they are the
+executor-owned `_settings_compile_time`/`_settings_run_time`, mutated in place by generation:
 
 **Usage:**
 - `roms_marbl_blueprint_elements`: Merged into the in-memory `RomsMarblBlueprint` by `generate_inputs()`; persisted in `configure_build()`
-- `compile_time_settings`: Merged with template defaults, used to render `cppdefs.opt`
-- `run_time_settings`: Merged with template defaults, used to write `namelist.nml` (via `write_roms_namelist`)
+- `_settings_compile_time`: Merged with template defaults, used to render `cppdefs.opt`
+- `_settings_run_time`: Merged with template defaults, used to write `namelist.nml` (via `write_roms_namelist`)
 
-These are used by `ForgeExecutor.generate_inputs()` (`cstar_forge/forge/executor.py`) to
-update the blueprint and settings before persisting.
+`ForgeExecutor.generate_inputs()` (`cstar_forge/forge/executor.py`) passes its own
+`self._settings_compile_time`/`self._settings_run_time` in by reference, so it already holds
+the up-to-date settings after `generate_all()` returns -- no merge-back step.
 

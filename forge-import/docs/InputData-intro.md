@@ -86,7 +86,12 @@ The `RomsMarblInputData` class provides ROMS-MARBL specific input generation:
   (keys mirror the blueprint's `inputs` block: `initial_conditions`, `forcing.surface`, `forcing.boundary`, etc.)
 - `cdr_forcing`: optional user-provided CDR forcing dict
 - `roms_marbl_blueprint_elements`: `RomsMarblBlueprintInputData` subset, auto-initialized
-- `_settings_compile_time` / `_settings_run_time`: settings dictionaries, auto-initialized
+- `_settings_compile_time` / `_settings_run_time`: settings dictionaries. Bound directly (no copy)
+  from the `settings_compile_time`/`settings_run_time` constructor args when given -- the
+  executor's own live dicts, in the normal `ForgeExecutor` path -- or a fresh empty dict
+  when omitted (standalone/test use)
+- `has_bgc`: whether the model build includes MARBL BGC (mirrors `ForgeExecutor._has_bgc`);
+  gates `include_bgc` on `make_nesting_info` and the run-time `bgc` section
 - `input_list`: list of `(key, kwargs)` tuples derived from `forcing_override` (a plain attribute set in `__post_init__`, not a declared dataclass field; see below)
 
 **Workflow:**
@@ -260,8 +265,10 @@ input_gen = RomsMarblInputData(
     forcing_override=forcing_override,  # from ForgeBlueprint.forcing via sources_to_forcing_override
 )
 
-# Generate all inputs
-roms_marbl_blueprint_elements, compile_time_settings, run_time_settings = input_gen.generate_all(
+# Generate all inputs. Settings dicts are executor-owned: pass them in (or omit
+# for fresh empty dicts, as here) and they are mutated in place by generation --
+# no return value carries them back.
+roms_marbl_blueprint_elements = input_gen.generate_all(
     clobber=False,
     partition_files=False,
     test=False,
@@ -276,12 +283,14 @@ method is in turn called by `process_forge_blueprint()`
 (`cstar_forge/forge/forge_blueprint_engine.py`), which is what `cstar forge run`
 invokes:
 
-1. Creates `RomsMarblInputData` instance, passing `self.forcing_override` and the other
-   executor-resolved fields
-2. Calls `generate_all()` to create input files
+1. Creates `RomsMarblInputData` instance, passing `self.forcing_override`, the other
+   executor-resolved fields, and `self._settings_compile_time`/`self._settings_run_time`
+   BY REFERENCE (as `settings_compile_time=`/`settings_run_time=`) and `has_bgc=self._has_bgc`
+2. Calls `generate_all()` to create input files -- generation steps mutate the executor's
+   settings dicts in place; the executor already holds the up-to-date values through its
+   own reference, so there is no merge-back step
 3. Updates the in-memory blueprint with `roms_marbl_blueprint_elements`
-4. Merges settings dictionaries with template defaults
-5. Persists blueprint and settings to disk (in `configure_build()`)
+4. Persists blueprint and settings to disk (in `configure_build()`)
 
 This completes the `generate_inputs` stage; the blueprint and settings are persisted in `configure_build()`.
 

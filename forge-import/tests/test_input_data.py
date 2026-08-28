@@ -2650,14 +2650,15 @@ class TestRomsMarblInputDataGenerateAll:
                 )
 
         assert result is not None
-        roms_marbl_blueprint_elements, settings_compile_time, settings_run_time = result
+        roms_marbl_blueprint_elements = result
         assert (
             roms_marbl_blueprint_elements
             == sample_roms_marbl_input_data.roms_marbl_blueprint_elements
         )
-        # Settings should be populated (non-empty dicts)
-        assert settings_compile_time is not None
-        assert settings_run_time is not None
+        # Settings should be populated (non-empty dicts) on the executor-owned
+        # dicts, mutated in place by generation -- not on the return value.
+        assert sample_roms_marbl_input_data._settings_compile_time
+        assert sample_roms_marbl_input_data._settings_run_time
 
     @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
     @patch("xarray.combine_by_coords")
@@ -2756,10 +2757,8 @@ class TestRomsMarblInputDataGenerateAll:
         mock_open_dataset.return_value = mock_ds
         mock_combine.return_value = mock_ds
 
-        elements, _settings_compile_time, _settings_run_time = (
-            sample_roms_marbl_input_data.generate_all(
-                clobber=True, only={"forcing.boundary"}
-            )
+        elements = sample_roms_marbl_input_data.generate_all(
+            clobber=True, only={"forcing.boundary"}
         )
 
         # Selected: grid ran (always does) and boundary ran.
@@ -2881,11 +2880,10 @@ class TestRomsMarblInputDataGenerateAll:
                 )
 
         assert result is not None
-        assert result != (None, {}, {})
-        roms_marbl_blueprint_elements, settings_compile_time, settings_run_time = result
+        roms_marbl_blueprint_elements = result
         assert roms_marbl_blueprint_elements is not None
-        assert settings_compile_time is not None
-        assert settings_run_time is not None
+        assert sample_roms_marbl_input_data._settings_compile_time
+        assert sample_roms_marbl_input_data._settings_run_time
         assert (sample_roms_marbl_input_data.input_data_dir / "existing.nc").exists()
 
     @patch("cstar_forge.forge.input_data.rt.RiverForcing")
@@ -3386,14 +3384,14 @@ class TestSubchunkDefaults:
         assert "--stage-ic-sources" not in helptext
 
 
-class TestCompileTimeSettingsSeed:
-    """Regression tests: ``settings_compile_time_base`` must reach the generation
-    steps that read resolved compile-time flags.
+class TestExecutorOwnedSettings:
+    """Regression tests: ``settings_compile_time``/``settings_run_time`` are the
+    executor-owned live settings dicts, bound by reference (no copy, no
+    merge-back) -- generation steps mutate them in place, and the caller
+    observes the writes through its own reference to the same dict.
 
-    ``_settings_compile_time`` used to start empty, so ``cppdefs.marbl`` (set by the
-    resolver, held by the executor) was invisible here — ``include_bgc`` never
-    defaulted to True on ``make_nesting_info`` (nesting.nc silently lacked BGC
-    variables) and the run-time ``bgc`` section was never populated.
+    ``has_bgc`` (mirroring ``ForgeExecutor._has_bgc``, read from ``cppdefs.marbl``)
+    gates ``include_bgc`` on ``make_nesting_info`` and the run-time ``bgc`` section.
     """
 
     @pytest.fixture
@@ -3441,62 +3439,71 @@ class TestCompileTimeSettingsSeed:
             data._generate_grid(key="grid")
         return mock_nesting
 
-    def test_seed_is_deep_copied(self, make_input_data):
-        base = {"cppdefs": {"marbl": True}}
-        data = make_input_data(settings_compile_time_base=base)
-        assert data._settings_compile_time == base
-        data._settings_compile_time["cppdefs"]["marbl"] = False
-        assert base["cppdefs"]["marbl"] is True
-
-    def test_no_seed_starts_empty(self, make_input_data):
+    def test_no_injection_starts_empty(self, make_input_data):
         data = make_input_data()
         assert data._settings_compile_time == {}
 
-    def test_marbl_seed_defaults_include_bgc_on_nesting(
+    def test_settings_are_shared_not_copied(self, make_input_data):
+        """Injected dicts are bound directly (no copy) -- a write by the instance
+        is visible through the caller's own reference to the same dict.
+        """
+        compile_time = {"cppdefs": {"marbl": True}}
+        run_time = {}
+        data = make_input_data(
+            settings_compile_time=compile_time,
+            settings_run_time=run_time,
+        )
+        assert data._settings_compile_time is compile_time
+        assert data._settings_run_time is run_time
+
+        self._run_grid_step(data)
+
+        assert "obc_west" in compile_time["cppdefs"]
+        assert "grid" in run_time
+
+    def test_has_bgc_defaults_include_bgc_on_nesting(
         self, make_input_data, sample_grid_kwargs
     ):
         data = make_input_data(
             grid_child=rt.Grid(**sample_grid_kwargs),
-            settings_compile_time_base={"cppdefs": {"marbl": True}},
+            has_bgc=True,
         )
         mock_nesting = self._run_grid_step(data)
         mock_nesting.assert_called_once()
         assert mock_nesting.call_args.kwargs["include_bgc"] is True
 
-    def test_no_marbl_omits_include_bgc_on_nesting(
+    def test_no_bgc_omits_include_bgc_on_nesting(
         self, make_input_data, sample_grid_kwargs
     ):
-        data = make_input_data(
-            grid_child=rt.Grid(**sample_grid_kwargs),
-            settings_compile_time_base={"cppdefs": {"marbl": False}},
-        )
+        data = make_input_data(grid_child=rt.Grid(**sample_grid_kwargs))
         mock_nesting = self._run_grid_step(data)
         mock_nesting.assert_called_once()
         assert "include_bgc" not in mock_nesting.call_args.kwargs
 
-    def test_metadata_child_include_bgc_wins_over_seed(
+    def test_metadata_child_include_bgc_wins_over_has_bgc(
         self, make_input_data, sample_grid_kwargs
     ):
-        """An explicit include_bgc in metadata_child overrides the marbl default."""
+        """An explicit include_bgc in metadata_child overrides the has_bgc default."""
         data = make_input_data(
             grid_child=rt.Grid(**sample_grid_kwargs),
             metadata_child={"include_bgc": False},
-            settings_compile_time_base={"cppdefs": {"marbl": True}},
+            has_bgc=True,
         )
         mock_nesting = self._run_grid_step(data)
         assert mock_nesting.call_args.kwargs["include_bgc"] is False
 
     @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
-    def test_marbl_seed_populates_bgc_interp_frc(
+    def test_has_bgc_populates_bgc_interp_frc(
         self, mock_sf_class, make_input_data, tmp_path
     ):
         mock_sf = MagicMock()
+        mock_sf.use_coarse_grid = False
         surface_path = tmp_path / "surface.nc"
         surface_path.touch()
         mock_sf.save.return_value = surface_path
         mock_sf_class.return_value = mock_sf
 
-        data = make_input_data(settings_compile_time_base={"cppdefs": {"marbl": True}})
+        data = make_input_data(has_bgc=True)
         data._generate_surface_forcing(
             key="forcing.surface",
             source={"name": "UNIFIED", "climatology": True},
@@ -3505,19 +3512,81 @@ class TestCompileTimeSettingsSeed:
         assert "interp_frc" in data._settings_run_time["bgc"]
 
     @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
-    def test_no_marbl_skips_bgc_runtime_section(
+    def test_no_bgc_skips_bgc_runtime_section(
         self, mock_sf_class, make_input_data, tmp_path
     ):
         mock_sf = MagicMock()
+        mock_sf.use_coarse_grid = False
         surface_path = tmp_path / "surface.nc"
         surface_path.touch()
         mock_sf.save.return_value = surface_path
         mock_sf_class.return_value = mock_sf
 
-        data = make_input_data(settings_compile_time_base={"cppdefs": {"marbl": False}})
+        data = make_input_data()
         data._generate_surface_forcing(
             key="forcing.surface",
             source={"name": "UNIFIED", "climatology": True},
             type="bgc",
         )
         assert "bgc" not in data._settings_run_time
+
+    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    def test_interp_frc_immune_to_resolver_seeded_defaults(
+        self, mock_sf_class, make_input_data, tmp_path
+    ):
+        """The resolver pre-seeds blk_frc/bgc.interp_frc=0 in the shared run-time
+        dict before generation runs. The coarse-grid consistency check must
+        compare only against a value derived THIS run, not that seed -- so a
+        derived interp_frc of 1 must not spuriously conflict with the seeded 0.
+        """
+        mock_sf = MagicMock()
+        mock_sf.use_coarse_grid = True  # derived interp_frc = 1; seed says 0
+        surface_path = tmp_path / "surface.nc"
+        surface_path.touch()
+        mock_sf.save.return_value = surface_path
+        mock_sf_class.return_value = mock_sf
+
+        data = make_input_data(
+            settings_run_time={
+                "blk_frc": {"interp_frc": 0},
+                "bgc": {"interp_frc": 0},
+            },
+            has_bgc=True,
+        )
+        data._generate_surface_forcing(
+            key="forcing.surface",
+            source={"name": "UNIFIED", "climatology": True},
+            type="physics",
+        )
+        assert data._settings_run_time["blk_frc"]["interp_frc"] == 1
+
+    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    def test_interp_frc_mismatch_within_same_run_raises(
+        self, mock_sf_class, make_input_data, tmp_path
+    ):
+        """Two surface items generated in the SAME run that genuinely disagree on
+        coarse-grid usage must still raise.
+        """
+        surface_path = tmp_path / "surface.nc"
+        surface_path.touch()
+
+        mock_sf_1 = MagicMock()
+        mock_sf_1.use_coarse_grid = True
+        mock_sf_1.save.return_value = surface_path
+        mock_sf_2 = MagicMock()
+        mock_sf_2.use_coarse_grid = False
+        mock_sf_2.save.return_value = surface_path
+        mock_sf_class.side_effect = [mock_sf_1, mock_sf_2]
+
+        data = make_input_data()
+        data._generate_surface_forcing(
+            key="forcing.surface",
+            source={"name": "UNIFIED", "climatology": True},
+            type="physics",
+        )
+        with pytest.raises(ValueError, match="Mismatch in coarse grid settings"):
+            data._generate_surface_forcing(
+                key="forcing.surface",
+                source={"name": "UNIFIED", "climatology": True},
+                type="physics",
+            )

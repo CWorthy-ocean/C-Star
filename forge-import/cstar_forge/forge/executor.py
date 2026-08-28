@@ -719,6 +719,13 @@ class ForgeExecutor(BaseModel):
             (self._settings_compile_time.get("cppdefs") or {}).get("use_pio", False)
         )
 
+    @property
+    def _has_bgc(self) -> bool:
+        """Whether the model build includes MARBL BGC, read from compile-time cppdefs."""
+        return bool(
+            (self._settings_compile_time.get("cppdefs") or {}).get("marbl", False)
+        )
+
     def _validated_roms_marbl_blueprint(self) -> cstar_models.RomsMarblBlueprint:
         """Re-validate the assembled blueprint against the installed C-Star models.
 
@@ -1490,44 +1497,38 @@ class ForgeExecutor(BaseModel):
         if self.src_data is None:
             self.ensure_source_data(include_streamable=False)
 
-        roms_marbl_blueprint_elements, settings_compile_time, settings_run_time = (
-            input_data.RomsMarblInputData(
-                domain_name=self.name,
-                start_date=self.start_date,
-                end_date=self.end_date,
-                input_data_dir=self.input_data_dir,
-                grid=self.grid,
-                grid_parent=self.grid_parent,
-                grid_child=self.grid_child,
-                metadata_child=self.metadata_child,
-                settings_compile_time_base=self._settings_compile_time,
-                boundaries=self.open_boundaries,
-                source_data=self.src_data,
-                forcing_override=self.forcing_override,
-                model_reference_date=self.model_reference_date,
-                roms_marbl_blueprint_dir=self.roms_marbl_blueprint_dir,
-                partitioning=self.partitioning,
-                cdr_forcing=self.cdr_forcing,
-                cdr_forcing_file=self.cdr_forcing_file,
-                use_dask=use_dask,
-                dask_num_workers=dask_num_workers,
-                subchunk=subchunk,
-                use_pio=self._use_pio,
-                verbose=self.verbose,
-            ).generate_all(clobber=clobber, test=test, only=only)
-        )
+        roms_marbl_blueprint_elements = input_data.RomsMarblInputData(
+            domain_name=self.name,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            input_data_dir=self.input_data_dir,
+            grid=self.grid,
+            grid_parent=self.grid_parent,
+            grid_child=self.grid_child,
+            metadata_child=self.metadata_child,
+            settings_compile_time=self._settings_compile_time,
+            settings_run_time=self._settings_run_time,
+            has_bgc=self._has_bgc,
+            boundaries=self.open_boundaries,
+            source_data=self.src_data,
+            forcing_override=self.forcing_override,
+            model_reference_date=self.model_reference_date,
+            roms_marbl_blueprint_dir=self.roms_marbl_blueprint_dir,
+            partitioning=self.partitioning,
+            cdr_forcing=self.cdr_forcing,
+            cdr_forcing_file=self.cdr_forcing_file,
+            use_dask=use_dask,
+            dask_num_workers=dask_num_workers,
+            subchunk=subchunk,
+            use_pio=self._use_pio,
+            verbose=self.verbose,
+        ).generate_all(clobber=clobber, test=test, only=only)
 
         if roms_marbl_blueprint_elements is None:
             raise RuntimeError(
                 "Blueprint mismatch detected, but input files exist. "
                 "Set clobber=True to overwrite existing input files."
             )
-
-        # Apply settings from input data generation (deep merge to preserve existing
-        # settings). allow_new=True: the ForgeBlueprint base omits the sections that input
-        # generation fills (grid/initial/forcing/s_coord), so they arrive as new keys.
-        self._update_settings_compile_time(settings_compile_time, allow_new=True)
-        self._update_settings_run_time(settings_run_time, allow_new=True)
 
         if test:
             return
@@ -1629,7 +1630,7 @@ class ForgeExecutor(BaseModel):
         )
 
     def _update_settings_compile_time(
-        self, settings_compile_time: dict[str, Any], allow_new: bool = False
+        self, settings_compile_time: dict[str, Any]
     ) -> None:
         """
         Update compile-time settings by recursively merging nested dictionaries.
@@ -1673,19 +1674,13 @@ class ForgeExecutor(BaseModel):
                         if not isinstance(value, (str, int, float, bool, type(None)))
                         else value
                     )
-            elif allow_new:
-                # Generation-overlay path: the ForgeBlueprint base omits sections that are
-                # filled at processing time, so accept new top-level keys.
-                self._settings_compile_time[key] = copy.deepcopy(value)
             else:
                 raise ValueError(
                     f"Unknown compile-time setting key: '{key}'. "
                     f"Valid keys are: {sorted(self._settings_compile_time.keys())}"
                 )
 
-    def _update_settings_run_time(
-        self, settings_run_time: dict[str, Any], allow_new: bool = False
-    ) -> None:
+    def _update_settings_run_time(self, settings_run_time: dict[str, Any]) -> None:
         """
         Update run-time settings by recursively merging nested dictionaries.
 
@@ -1731,11 +1726,6 @@ class ForgeExecutor(BaseModel):
                         if not isinstance(value, (str, int, float, bool, type(None)))
                         else value
                     )
-            elif allow_new:
-                # Generation-overlay path: the ForgeBlueprint base omits sections that are
-                # filled at processing time (grid/initial/forcing/s_coord), so accept
-                # new top-level keys instead of raising.
-                self._settings_run_time[key] = copy.deepcopy(value)
             else:
                 # Unknown key - raise error
                 raise ValueError(
