@@ -43,6 +43,10 @@ Bug Fixes
 - Fix ``slugify`` checks-for-empty before stripping bug (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
 - Fix latest status not written to sentinel in ``SlurmLauncher`` bug (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
 - Fix unexpectedly re-creating assets when reloading and running a workplan by run-id (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Transformed-workplan artifacts are no longer written to a doubled ``<run_id>/<run_id>/`` directory; they now appear directly under the run directory. (`#651 <https://github.com/CWorthy-ocean/C-Star/pull/651>`_)
+
+  - developer note: ``prepare_workplan`` no longer takes a ``run_id`` parameter; its ``output_dir`` argument is now the run-specific root directory where artifacts are written.
+
 
 Improvements
 ~~~~~~~~~~~~
