@@ -515,14 +515,14 @@ code:
     branch: null
   templates_compile_time:
     location: https://github.com/CWorthy-ocean/cstar-forge.git
-    commit: 4208f4384431852daccea1ccad01d03c0cb473d9
+    commit: 692e04cebf1735951b377fcf44b1bde59a06bbc9
     branch: null
     directory: templates/compile-time
     files:
     - cppdefs.opt.j2
   templates_run_time:
     location: https://github.com/CWorthy-ocean/cstar-forge.git
-    commit: 4208f4384431852daccea1ccad01d03c0cb473d9
+    commit: 692e04cebf1735951b377fcf44b1bde59a06bbc9
     branch: null
     directory: templates/run-time
     files:
@@ -550,5 +550,5 @@ provenance:
   forge_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: b987773757d2928ec70061acc8527d6f8bd06ebb1bf56c87b47b19e187786b6c
+  content_hash: ef5c0071d8bb40bc248161e684cf893419525734d6ecf485d156cefdab45c9f8
   notes: null

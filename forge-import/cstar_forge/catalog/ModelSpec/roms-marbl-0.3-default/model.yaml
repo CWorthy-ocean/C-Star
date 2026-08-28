@@ -11,7 +11,7 @@ code:
   pio:
     location: https://github.com/CWorthy-ocean/ParallelIO.git
     commit: 2.7.1-fork
-  templates_commit: 4208f4384431852daccea1ccad01d03c0cb473d9
+  templates_commit: 692e04cebf1735951b377fcf44b1bde59a06bbc9
   templates_compile_time:
     directory: templates/compile-time
     files:

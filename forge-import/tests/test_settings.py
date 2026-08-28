@@ -198,6 +198,69 @@ class TestRenderRomsSettings:
 
         assert (output_dir / "bgc.opt").read_text() == "Output: True"
 
+    def test_partial_match_unconsumed_settings_key_raises(self, tmp_path):
+        """A settings key the template never references must fail the render.
+
+        Regression: a stale staged cppdefs.opt.j2 (pinned templates commit
+        predating auto_tiling) silently dropped cppdefs.auto_tiling.
+        """
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "bgc.opt.j2").write_text("Output: {{ bgc.wrt_his }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"bgc": {"wrt_his": True, "auto_tiling": True}}
+
+        with pytest.raises(ValueError, match=r"never references: \['auto_tiling'\]"):
+            render_roms_settings(
+                template_files=["bgc.opt.j2"],
+                template_dir=template_dir,
+                settings_dict=settings_dict,
+                code_output_dir=output_dir,
+            )
+
+    def test_partial_match_missing_template_attr_is_allowed(self, tmp_path):
+        """Templates may reference attrs absent from settings (undefined -> falsy)."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "bgc.opt.j2").write_text(
+            "{% if bgc.extra_flag %}EXTRA{% endif %}Output: {{ bgc.wrt_his }}"
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        render_roms_settings(
+            template_files=["bgc.opt.j2"],
+            template_dir=template_dir,
+            settings_dict={"bgc": {"wrt_his": True}},
+            code_output_dir=output_dir,
+        )
+
+        assert (output_dir / "bgc.opt").read_text() == "Output: True"
+
+    def test_partial_match_dynamic_access_skips_consumption_check(self, tmp_path):
+        """Dynamic access to the section (bare iteration) disables the static check."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "bgc.opt.j2").write_text(
+            "{% for k in bgc %}{{ k }} {% endfor %}"
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        render_roms_settings(
+            template_files=["bgc.opt.j2"],
+            template_dir=template_dir,
+            settings_dict={"bgc": {"wrt_his": True, "unlisted": 1}},
+            code_output_dir=output_dir,
+        )
+
+        assert "wrt_his" in (output_dir / "bgc.opt").read_text()
+
     def test_missing_template_directory(self, tmp_path):
         """Test that missing template directory raises FileNotFoundError."""
         template_dir = tmp_path / "nonexistent_templates"

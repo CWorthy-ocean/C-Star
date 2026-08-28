@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, meta, select_autoescape
+from jinja2 import Environment, FileSystemLoader, meta, nodes, select_autoescape
 
 from cstar_forge.forge.namelist_model import build_namelist, run_time_settings_for_ref
 
@@ -63,6 +63,40 @@ def _fortran_cdr_file_decl(path: Any, max_line_len: int = 72) -> str:
         else:
             lines.append(f"{cont}{ch}{tail_mid}")
     return "\n".join(lines)
+
+
+def _static_nested_keys(parsed_ast: Any, name: str) -> tuple[set[str], bool]:
+    """
+    Collect the attribute/item names a template statically accesses on *name*
+    (``name.attr`` or ``name['attr']``).
+
+    Returns ``(attrs, has_dynamic_access)``. *has_dynamic_access* is True when
+    the template also uses *name* in a way whose keys cannot be determined
+    statically (a non-literal subscript, or the bare object passed to a loop,
+    filter, or function), in which case consumption checks must be skipped.
+    """
+    attrs: set[str] = set()
+    access_count = 0
+    dynamic = False
+    for node in parsed_ast.find_all((nodes.Getattr, nodes.Getitem)):
+        target = node.node
+        if not (isinstance(target, nodes.Name) and target.name == name):
+            continue
+        access_count += 1
+        if isinstance(node, nodes.Getattr):
+            attrs.add(node.attr)
+        elif isinstance(node.arg, nodes.Const) and isinstance(node.arg.value, str):
+            attrs.add(node.arg.value)
+        else:
+            dynamic = True
+    # Bare uses of the name (loop/filter/function operand) outnumber the
+    # attribute accesses wrapping it: keys are consumed opaquely.
+    bare_uses = sum(
+        1 for n in parsed_ast.find_all(nodes.Name) if n.name == name and n.ctx == "load"
+    )
+    if bare_uses > access_count:
+        dynamic = True
+    return attrs, dynamic
 
 
 def render_roms_settings(
@@ -211,13 +245,28 @@ def render_roms_settings(
         else:
             # Partial match case: template variables like {{ bgc.wrt_his }} -> 'bgc'
             # We expect 'bgc' to be in template_vars, and settings_dict['bgc'] should exist
-            # The nested structure validation is less strict here since we can't easily extract
-            # nested attribute names (e.g., 'wrt_his') without AST walking
             if key not in template_vars:
                 raise ValueError(
                     f"Template '{template_file}' does not reference '{key}' but settings_dict expects it. "
                     f"Template variables: {sorted(template_vars)}"
                 )
+
+            # Every settings key must be consumed by the template; a key the
+            # template never references would otherwise render silently without
+            # effect (e.g. cppdefs.auto_tiling against a template staged from a
+            # commit that predates the flag). The reverse is allowed: templates
+            # may reference attrs absent from settings (undefined -> falsy).
+            template_attrs, has_dynamic_access = _static_nested_keys(parsed_ast, key)
+            if not has_dynamic_access:
+                unconsumed = settings_nested_keys - template_attrs
+                if unconsumed:
+                    raise ValueError(
+                        f"Settings_dict['{key}'] contains keys that template '{template_file}' "
+                        f"never references: {sorted(unconsumed)}. "
+                        f"Template accesses: {sorted(template_attrs)}. "
+                        f"The staged template may predate the settings schema -- check the "
+                        f"blueprint's templates commit pin."
+                    )
 
     # Initialize renderer
     renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
