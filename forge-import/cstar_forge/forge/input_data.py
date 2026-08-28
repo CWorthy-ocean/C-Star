@@ -31,9 +31,15 @@ from threadpoolctl import threadpool_limits
 from cstar_forge.forge import source_data
 from cstar_forge.forge.forge_blueprint import OpenBoundaries, UserProvidedFile
 from cstar_forge.forge.user_files import stage_user_netcdf, verify_user_file
+from cstar_forge.forge.xarray_lockfix import apply_combinedlock_leak_fix
 from cstar_forge.utils import mem_log
 
 log = logging.getLogger(__name__)
+
+# xarray's CachingFileManager.__del__ can leak a global netCDF lock during
+# dask-threaded saves, permanently deadlocking input generation (progress bar
+# frozen mid-save). See xarray_lockfix module docstring for the mechanism.
+apply_combinedlock_leak_fix()
 
 # Basename stem for CDR NetCDF: ``{domain_name}_cdr.nc``. The full name contains the
 # substring ``cdr.nc`` by convention (a former C-Star build check enforced this).
