@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import multiprocessing as mp
+import multiprocessing.synchronize as mp_sync
 import queue
 import time
 import types
@@ -166,28 +167,43 @@ class PrintingService(Service):
         self._shutdown()
 
 
-async def run_a_printer() -> None:
+async def _serve_printer(
+    started: "mp_sync.Event",
+    *,
+    fail_on_shutdown: bool,
+) -> None:
+    """Run a PrintingService until signalled, setting `started` once its
+    signal handlers are installed (they are registered in `__init__`).
+    """
+    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=10)
+
+    if fail_on_shutdown:
+        patcher = mock.patch.object(
+            service,
+            "_on_shutdown",
+            side_effect=RuntimeError("Kaboom!"),
+        )
+        patcher.start()
+
+    started.set()
+    await service.execute()
+
+
+def run_a_printer(started: "mp_sync.Event") -> None:
     """Run a PrintingService instance in a separate process.
 
     Utility method for testing signal handling or shutdown behavior.
     """
-    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=10)
-    await service.execute()
+    asyncio.run(_serve_printer(started, fail_on_shutdown=False))
 
 
-async def run_a_fail_on_shutdown_printer() -> None:
+def run_a_fail_on_shutdown_printer(started: "mp_sync.Event") -> None:
     """Run a PrintingService instance in a separate process.
 
     Utility method for testing signal handling or shutdown behavior. This service will
     raise an exception on shutdown.
     """
-    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=10)
-    mock.patch.object(
-        service,
-        "_on_shutdown",
-        side_effect=RuntimeError("Kaboom!"),
-    )
-    await service.execute()
+    asyncio.run(_serve_printer(started, fail_on_shutdown=True))
 
 
 @pytest.mark.asyncio
@@ -433,32 +449,46 @@ async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
 
     If the service is configured to fail on shutdown, the signal handler must gracefully
     handle the failure without crashing.
+
+    The child is started with the "spawn" method: forking the multi-threaded
+    pytest process can deadlock the child (and has hung CI teardown on Linux,
+    where fork is the default start method).
     """
-    process: mp.Process | None = None
+    ctx = mp.get_context("spawn")
+    started = ctx.Event()
+
+    printer_fn = run_a_fail_on_shutdown_printer
+    if not fail_on_shutdown:
+        # If not failing on shutdown, use the regular printer
+        printer_fn = run_a_printer
+
+    # The service is configured to run for 10 seconds so a signal will
+    # clearly cause it to exit early.
+    process = ctx.Process(target=printer_fn, args=(started,))
 
     try:
-        printer_fn = run_a_fail_on_shutdown_printer
-        if not fail_on_shutdown:
-            # If not failing on shutdown, use the regular printer
-            printer_fn = run_a_printer
-
-        # Configure the test service to run for 90 seconds so a signal will
-        # clearly cause it to exit early.
-        process = mp.Process(target=printer_fn)
         process.start()
-        await asyncio.sleep(0.1)
 
-        term_at = time.time()
+        # spawn boots a fresh interpreter, so wait until the service has
+        # installed its signal handlers before terminating it.
+        assert started.wait(timeout=30), "service process did not start"
+
         process.terminate()  # Send a signal to terminate the service
-        time_complete = time.time()
 
-        expected_time_to_terminate = 2.0
-        elapsed = time_complete - term_at
-        assert elapsed < expected_time_to_terminate
+        expected_time_to_terminate = 5.0
+        process.join(timeout=expected_time_to_terminate)
+
+        assert process.exitcode is not None, "service did not exit after SIGTERM"
+        # a clean shutdown exits 0; the fail-on-shutdown service re-raises on
+        # the main thread and exits nonzero, but must still exit promptly.
+        expected_exitcode = 1 if fail_on_shutdown else 0
+        assert process.exitcode == expected_exitcode
 
     finally:
-        if process and process.is_alive():
+        if process.is_alive():
             process.kill()
+        process.join(timeout=5)
+        process.close()
 
 
 @pytest.mark.skip(
