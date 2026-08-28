@@ -1,15 +1,50 @@
 # Release notes
 
-## Unreleased
+## 0.6.0
+
+### Breaking Changes
+
+* Emitted `roms_marbl` blueprints now use schema **3.0.0**, so running them requires a C-Star that includes C-Star #643 (already on C-Star `main`): `model_params` is gone — the time step lives only in the namelist, and `use_pio` moved into `partitioning`. ([#140](https://github.com/CWorthy-ocean/cstar-forge/pull/140))
+* In forge blueprints, `partitioning.n_procs_x`/`n_procs_y` are required only when auto-tiling is off. With `auto_tiling: true`, `n_cores` is used instead — if an explicit grid is still present (e.g. from a loaded blueprint), `n_cores` is derived as `n_procs_x * n_procs_y`; an `n_cores` that contradicts the grid is rejected with a clear validation error. ([#140](https://github.com/CWorthy-ocean/cstar-forge/pull/140))
+* Requires C-Star `0.12.0` and ucla-roms >= `0.6.0` ([#146](https://github.com/CWorthy-ocean/cstar-forge/pull/146))
 
 ### New Features
 
-* `namelist.nml` now emits a `&PIO_SETTINGS` group with `pio_stride` (default 1) for ucla-roms >= 0.6.0, matching ucla-roms PR #346 (the release that introduces the `PARALLEL_IO`-required group). This is version-gated, not always-emitted: the new `RunTimeSettingsV0_6_0`/`RomsNamelistV0_6_0` schema tier adds the section on top of the 0.5.0 schema, while the legacy and 0.5.0 namelist schemas continue to reject it (`extra="forbid"`), so it's only written when `code.roms.commit`/`branch` resolves to 0.6.0 or later. Added a new `roms-marbl-0.6-default` ModelSpec (pins ucla-roms `0.6.1`) that carries the `pio_settings` block; `pio-dev` (pins ucla-roms `main`) also picks it up via the existing latest-schema fallback. Existing ModelSpecs (`cson_roms-marbl_v0.1`, `roms-marbl-0.3-default`, `roms-marbl-0.4-default`, `roms-marbl-0.5-default`) are unchanged -- their pins predate the group and it is never emitted for them.
+* **Auto-tiling**: set `partitioning.auto_tiling: true` with `n_cores` (total MPI ranks) and ROMS chooses the tiling at runtime from the land mask, skipping fully-masked tiles. Requires PIO. ([#140](https://github.com/CWorthy-ocean/cstar-forge/pull/140))
+* The wizard has an "auto tiling" checkbox: it disables the `n_procs_x`/`n_procs_y` boxes, shows an `n_cores` field pre-filled with `n_procs_x × n_procs_y` from the grid already entered (still editable), and forces PIO on; the choice survives save/load. ([#140](https://github.com/CWorthy-ocean/cstar-forge/pull/140))
+* `namelist.nml` now includes a `&PIO_SETTINGS` group (`pio_stride`, default 1) when the model pins ucla-roms 0.6.0 or later ([#141](https://github.com/CWorthy-ocean/cstar-forge/pull/141))
+* New `roms-marbl-0.6-default` ModelSpec pinning ucla-roms 0.6.0, carrying the `pio_settings` block; the `pio-dev` spec (ucla-roms `main`) also emits the group via the existing latest-schema fallback ([#141](https://github.com/CWorthy-ocean/cstar-forge/pull/141))
+* `pio_settings` is editable in the wizard's advanced model-settings pane (ModelSpec-owned — edits save via "Save Model spec", not the output blueprint) ([#141](https://github.com/CWorthy-ocean/cstar-forge/pull/141))
+
+### Bug Fixes
+
+* Nested (child) domains with MARBL now get BGC variables in `nesting.nc`: `include_bgc` was never being enabled on `make_nesting_info` because the `cppdefs.marbl` flag was invisible to input generation. An explicit `include_bgc` in `metadata_child` still takes precedence. ([#142](https://github.com/CWorthy-ocean/cstar-forge/pull/142))
+* The run-time `bgc` namelist section (`bgc.interp_frc`) is now populated during surface-forcing generation for MARBL domains; previously it was silently skipped for the same reason. ([#142](https://github.com/CWorthy-ocean/cstar-forge/pull/142))
+* Input generation no longer deadlocks intermittently during NetCDF saves (progress bar frozen at a fixed percentage until the run was killed) — caused by an upstream xarray lock leak, now patched at runtime until fixed in xarray. ([#144](https://github.com/CWorthy-ocean/cstar-forge/pull/144))
 
 ### Improvements
 
-* The output from forge blueprints now defaults to `<root-path>/cstar/_forge_bp_runs` (instead of `<root-path>/cstar-forge-run`)
-* The output from roms blueprints now defaults to `<root-path>/cstar/_roms_bp_runs` (instead of `<root-path>/cstar-roms-run`)
+* The wizard settings editor now skips sections that are version-gated behind a newer namelist schema than the active ucla-roms ref (e.g. `pio_settings` with a pre-0.6.0 `roms_ref` override), instead of rendering a widget whose edits would be silently discarded downstream; never-modeled sections like `cppdefs` still render as before ([#141](https://github.com/CWorthy-ocean/cstar-forge/pull/141))
+* Input generation (`RomsMarblInputData`) is seeded with a deep copy of the executor's resolved compile-time settings (`settings_compile_time_base`) instead of starting empty, so generation steps can read resolved `cppdefs` flags. ([#142](https://github.com/CWorthy-ocean/cstar-forge/pull/142))
+* Hardened an unguarded `cppdefs` write in the surface-forcing step (`sal_restore`) that could `KeyError` if the step ran without the grid step. ([#142](https://github.com/CWorthy-ocean/cstar-forge/pull/142))
+* Input generation now works directly on the executor's settings dicts (single source of truth) instead of accumulating private copies that were merged back afterward — the class of "generation can't see resolved settings" bugs behind #142 is structurally eliminated. ([#143](https://github.com/CWorthy-ocean/cstar-forge/pull/143))
+* BGC capability is threaded as an explicit `has_bgc` flag (mirroring `use_pio`) instead of being fished out of the `cppdefs` dict at each point of use. ([#143](https://github.com/CWorthy-ocean/cstar-forge/pull/143))
+* The output from forge blueprints now defaults to `<root-path>/cstar/_forge_bp_runs/<run-name>` (instead of `<root-path>/cstar-forge-run/<run-name>`) ([#145](https://github.com/CWorthy-ocean/cstar-forge/pull/145))
+* The output from roms blueprints created by forge now defaults to `<root-path>/cstar/_roms_bp_runs/<run-name>` (instead of `<root-path>/cstar-roms-run/<run-name>`) ([#145](https://github.com/CWorthy-ocean/cstar-forge/pull/145))
+* Both defaults keep the existing HPC scratch substitution (`$SCRATCH` on Perlmutter, `$SCRATCH` falling back to `$WORK/scratch` on Anvil) ([#145](https://github.com/CWorthy-ocean/cstar-forge/pull/145))
+* The `roms-marbl-0.6-default` ModelSpec now pins ucla-roms `0.6.1` ([#145](https://github.com/CWorthy-ocean/cstar-forge/pull/145))
+
+### Miscellaneous
+
+* The tagged GitHub release is now created automatically when the "Finalize release notes for `<tag>`" PR is merged, using the release notes just finalized in the docs as the release body — instead of the manual tag-and-publish step with GitHub's weaker auto-generated summary. ([#139](https://github.com/CWorthy-ocean/cstar-forge/pull/139))
+* Merging the release-notes finalization PR no longer causes the release-notes updater to re-open a spurious "Unreleased" section. ([#139](https://github.com/CWorthy-ocean/cstar-forge/pull/139))
+* Shipped example blueprints re-stamped with fresh `content_hash`es; golden fixtures updated for the new `auto_tiling` default. ([#140](https://github.com/CWorthy-ocean/cstar-forge/pull/140))
+* Blueprint reference docs updated for schema 3.0.0. ([#140](https://github.com/CWorthy-ocean/cstar-forge/pull/140))
+* New golden fixtures for the 0.6.0 tier (`golden_namelist_test-tiny-roms060.nml`, `golden_model_settings_test-tiny-roms060.json`) with the same `UPDATE_GOLDEN=1` regeneration flow as the 0.5.0 siblings ([#141](https://github.com/CWorthy-ocean/cstar-forge/pull/141))
+* `docs/architecture-details.md` updated for the new schema tier; release-notes entry added to `docs/releases.md` ([#141](https://github.com/CWorthy-ocean/cstar-forge/pull/141))
+* Shipped catalog blueprints and example YAML updated to the new default paths (`working_dir` is excluded from `content_hash`, so no restamping) ([#145](https://github.com/CWorthy-ocean/cstar-forge/pull/145))
+* Docs updated to the new paths (getting-started, source-data guides, architecture details, roms-marbl blueprint reference) ([#145](https://github.com/CWorthy-ocean/cstar-forge/pull/145))
+
 
 ## 0.5.0
 
