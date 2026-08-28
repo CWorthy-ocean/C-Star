@@ -8,7 +8,7 @@ from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
 from cstar.base.adapter import (
     ConfiguredModelAdapter,
@@ -159,20 +159,24 @@ class LocalComputeAdapter(ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec
             msg = "Compute overrides were not supplied to the LocalComputeAdapter"
             raise CstarExpectationFailed(msg)
 
-        if overrides_ := model.get("local", {}):
+        overrides_ = model.get("local", {})
+        if not overrides_:
+            if self.allow_unmodified:
+                return LocalComputeSpec()
+            msg = "No local overrides were supplied to the LocalComputeAdapter"
+            raise CstarExpectationFailed(msg)
+
+        try:
             compute = LocalComputeSpec.model_validate(overrides_)
+        except ValidationError as ex:
+            msg = f"Unable to adapt model {model!r} into LocalComputeSpec"
+            raise CstarAdaptationError(msg) from ex
 
-            if not compute.model_dump(exclude_defaults=True):
-                msg = "Non-default local compute overrides were not specified."
-                log.debug(msg)
+        if not compute.model_dump(exclude_defaults=True):
+            msg = "Non-default local compute overrides were not specified."
+            log.debug(msg)
 
-            return compute
-
-        if self.allow_unmodified:
-            return LocalComputeSpec()
-
-        msg = f"Unable to adapt model {model!r} into LocalComputeSpec"
-        raise CstarAdaptationError(msg)
+        return compute
 
 
 class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
@@ -257,12 +261,15 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         enricher: ModelEnricher[RunRequest] | None = None
 
-        # overrides for other launchers (e.g. the slurm cpu requirement the
-        # workplan transformer records) are not this launcher's concern
-        if step.compute_overrides.get("local"):
+        if step.compute_overrides:
             try:
                 compute = LocalComputeAdapter().adapt(step.compute_overrides)
                 enricher = TimeConstrainedRunRequestEnricher(compute)
+            except CstarExpectationFailed:
+                # overrides carry nothing for this launcher (e.g. the slurm
+                # cpu requirement the workplan transformer records)
+                msg = f"No local overrides for step {step.name!r}"
+                log.debug(msg)
             except CstarAdaptationError:
                 msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
                 log.warning(msg, exc_info=True)

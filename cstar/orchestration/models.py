@@ -260,13 +260,20 @@ class DeferredBlueprintRef(BaseModel):
     from_step: RequiredString
     """The name of the step that generates the blueprint."""
 
-    filename: RequiredString | None = None
+    filename: str = Field(default="")
     """Optional name of the blueprint file within the producing step's output
     directory.
 
     When omitted, exactly one blueprint file must exist in the producing
     step's output directory.
     """
+
+    model_config: t.ClassVar[ConfigDict] = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_attribute_docstrings=True,
+    )
+    """Configures the behavior of the pydantic model."""
 
     def __str__(self) -> str:
         """Return the reference as a ``step://`` URI.
@@ -296,7 +303,7 @@ class DeferredBlueprintRef(BaseModel):
         -------
         bool
         """
-        return uri.startswith(cls.SCHEME)
+        return uri.strip().casefold().startswith(cls.SCHEME)
 
     @classmethod
     def from_uri(cls, uri: str) -> "DeferredBlueprintRef":
@@ -320,11 +327,12 @@ class DeferredBlueprintRef(BaseModel):
             msg = f"Not a deferred blueprint URI: {uri!r}"
             raise ValueError(msg)
 
-        remainder = uri.removeprefix(cls.SCHEME)
+        # the scheme matched case-insensitively; strip it by length
+        remainder = uri.strip()[len(cls.SCHEME) :]
         step_part, _, file_part = remainder.partition("/")
         return cls(
             from_step=unquote(step_part),
-            filename=unquote(file_part) if file_part else None,
+            filename=unquote(file_part),
         )
 
 
@@ -549,12 +557,12 @@ class Workplan(ConfiguredBaseModel):
 
     @field_validator("steps", mode="after")
     @classmethod
-    def _check_deferred_blueprints(cls, value: list[Step]) -> list[Step]:
+    def _check_deferred_blueprints(cls, value: Sequence[Step]) -> Sequence[Step]:
         """Verify deferred blueprint references point at valid producer steps.
 
         Parameters
         ----------
-        value : list[Step]
+        value : Sequence[Step]
             The steps in the workplan.
         """
         names = {step.name for step in value}

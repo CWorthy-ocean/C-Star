@@ -547,8 +547,8 @@ class WorkplanTransformer(LoggingMixin):
                     msg = (
                         f"Step {trx_step.name!r} defers its blueprint to step "
                         f"{ref.from_step!r}, which was split "
-                        "into sub-steps by an application transform; deferred "
-                        "blueprints cannot reference split steps"
+                        "into sub-steps by an application transform; step "
+                        "references are not yet remapped across split steps"
                     )
                     raise CstarExpectationFailed(msg)
 

@@ -1190,15 +1190,15 @@ def test_deferred_blueprint_ref_parsing(fake_blueprint_path: Path) -> None:
 @pytest.mark.parametrize(
     ("from_step", "filename"),
     [
-        ("producer", None),
+        ("producer", ""),
         ("producer", "generated.yaml"),
         ("step with spaces", "file with spaces.yaml"),
-        ("step/with/slashes", None),
+        ("step/with/slashes", ""),
     ],
 )
 def test_deferred_blueprint_ref_uri_roundtrip(
     from_step: str,
-    filename: str | None,
+    filename: str,
 ) -> None:
     """Verify the `step://` wire form of a deferred reference is reversible.
 
@@ -1206,7 +1206,7 @@ def test_deferred_blueprint_ref_uri_roundtrip(
     ----------
     from_step : str
         The name of the producing step.
-    filename : str | None
+    filename : str
         An optional file name within the producing step's output directory.
     """
     ref = DeferredBlueprintRef(from_step=from_step, filename=filename)
@@ -1217,6 +1217,17 @@ def test_deferred_blueprint_ref_uri_roundtrip(
     parsed = DeferredBlueprintRef.from_uri(uri)
     assert parsed.from_step == from_step
     assert parsed.filename == filename
+
+
+def test_deferred_blueprint_ref_matches_case_and_whitespace() -> None:
+    """Verify scheme matching tolerates case variations and stray whitespace."""
+    uri = "  STEP://producer/generated.yaml "
+
+    assert DeferredBlueprintRef.matches(uri)
+
+    parsed = DeferredBlueprintRef.from_uri(uri)
+    assert parsed.from_step == "producer"
+    assert parsed.filename == "generated.yaml"
 
 
 def test_deferred_blueprint_ref_from_uri_rejects_other_schemes() -> None:
