@@ -21,7 +21,7 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import DagDetailRecord
-from cstar.orchestration.models import Blueprint, Workplan
+from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository
@@ -374,7 +374,7 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     set_ctxmap(context, "run", wp_run)
 
     wp_path = wp_run.trx_workplan_path
-    wp = try_deserialize(wp_path, Workplan)
+    wp = try_deserialize(wp_path, LiveWorkplan)
     if not wp:
         msg = f"Unable to deserialize workplan for run {run_id!r} from {str(wp_path)!r}"
         raise typer.BadParameter(
