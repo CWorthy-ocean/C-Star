@@ -25,8 +25,8 @@ from cstar.base.log import LoggingMixin
 from cstar.base.utils import deep_merge
 from cstar.execution.file_system import JobFileSystemManager, local_copy
 from cstar.orchestration.models import (
-    Application,
     Blueprint,
+    DeferredBlueprintRef,
     KeyValueStore,
     Workplan,
 )
@@ -472,23 +472,37 @@ class WorkplanTransformer(LoggingMixin):
 
             live_steps = [filled for step in live_steps for filled in fill(step)]
 
-        # apply user blueprint_overrides and ensure consistent output targets;
-        # must happen before time-splitting so the splitter reads correct blueprint values
-        steps = [apply_automatic_overrides(step) for step in live_steps]
-
         transformed_steps: list[LiveStep] = []
         named_dep_map: dict[str, str] = {}
 
-        app_names = {step.application for step in steps}
+        app_names = {step.application for step in live_steps}
         app_transforms: dict[str, Sequence[type[Transform[LiveStep]]]] = {
             app_name: get_application(app_name).applicable_transforms
             for app_name in app_names
         }
         override_transform = OverrideTransform()
 
-        for step in steps:
-            if transforms := app_transforms[step.application]:
-                for trx_klass in transforms:
+        for step in live_steps:
+            active_transforms = [
+                trx for trx in app_transforms[step.application] if trx.is_active()
+            ]
+
+            if step.is_deferred and active_transforms:
+                active_names = [trx.__name__ for trx in active_transforms]
+                msg = (
+                    f"Application transform(s) {', '.join(active_names)} cannot be "
+                    f"applied to step {step.name!r} because its blueprint is "
+                    "deferred and does not exist at schedule time"
+                )
+                raise CstarExpectationFailed(msg)
+
+            if active_transforms:
+                # Schedule-time application transforms operate on a
+                # materialized, merged blueprint written to disk (a
+                # feature-flagged path); system overrides are baked in first.
+                # Do not restructure this pipeline.
+                step = apply_automatic_overrides(step)
+                for trx_klass in active_transforms:
                     trx = trx_klass()
                     transform_result = trx(step)
 
@@ -501,9 +515,19 @@ class WorkplanTransformer(LoggingMixin):
                     final_step_name = overridden_steps[-1].name
                     if final_step_name != step.name:
                         named_dep_map[step.name] = final_step_name
-                    transformed_steps.extend(overridden_steps)
+                    # children have materialized blueprints (overrides already
+                    # baked in); record their cpu requirement directly
+                    transformed_steps.extend(
+                        _inject_cpus(child, child.blueprint.cpus_needed)
+                        for child in overridden_steps
+                    )
             else:
-                transformed_steps.append(next(iter(override_transform(step))))
+                # Common path: no blueprint file is rewritten; the step
+                # keeps its original blueprint path and carries an
+                # apply-overrides directive to be resolved at runtime.
+                transformed_steps.append(
+                    package_runtime_overrides(preflight_overrides(step))
+                )
 
         # remap dependency references to point to the last child of each split parent
         for trx_step in transformed_steps:
@@ -513,6 +537,20 @@ class WorkplanTransformer(LoggingMixin):
                 depends_on.difference_update(to_update)
                 trx_step.depends_on.clear()
                 trx_step.depends_on.extend(depends_on)
+
+        # deferred blueprint references must point at steps that still exist;
+        # a split producer writes its outputs into child-step directories
+        for trx_step in transformed_steps:
+            if trx_step.is_deferred:
+                ref = t.cast("DeferredBlueprintRef", trx_step.blueprint_path)
+                if ref.from_step in named_dep_map:
+                    msg = (
+                        f"Step {trx_step.name!r} defers its blueprint to step "
+                        f"{ref.from_step!r}, which was split "
+                        "into sub-steps by an application transform; step "
+                        "references are not yet remapped across split steps"
+                    )
+                    raise CstarExpectationFailed(msg)
 
         self._transformed = self.original.model_copy(
             update={
@@ -602,7 +640,10 @@ class OverrideTransform(Transform[LiveStep]):
         blueprint: Blueprint = deserialize(bp_path, bp_type)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
-        update: dict[str, t.Any] = {"blueprint_overrides": {}}
+        update: dict[str, t.Any] = {
+            "blueprint_overrides": {},
+            "working_dir": updated_bp.working_dir,
+        }
 
         live_step = LiveStep.from_step(step, update=update)
 
@@ -637,8 +678,13 @@ def get_system_overrides(step: LiveStep) -> dict[str, t.Any]:
 
 
 def apply_automatic_overrides(step: LiveStep) -> LiveStep:
-    """Automatically override the output directory specified in a blueprint
-    to write to the C-Star home directories.
+    """Materialize system overrides for the schedule-time transform pipeline.
+
+    Automatically overrides the output directory specified in a blueprint
+    to write to the C-Star home directories, baking the result into a
+    rewritten blueprint file. Only steps entering the materialized
+    application-transform pipeline need this; every other step persists its
+    overrides via `package_runtime_overrides` instead.
 
     See `cstar.execution.file_system.JobFileSystemManager` for more detail
     on the available set of home directories.
@@ -656,6 +702,150 @@ def apply_automatic_overrides(step: LiveStep) -> LiveStep:
     overridden_step_result = override_transform(step)
 
     return overridden_step_result[0]
+
+
+def preflight_overrides(step: LiveStep) -> LiveStep:
+    """Validate a step's overrides and enrich its CPU requirement.
+
+    For a step whose blueprint already exists at schedule time, builds the
+    merged blueprint in memory (without persisting it): constructing the
+    merged blueprint validates it, preserving schedule-time fail-fast
+    behavior for bad overrides. A deferred step's blueprint is not available
+    at schedule time, so it is returned unchanged; its overrides are
+    validated only when the runtime `apply-overrides` directive resolves and
+    applies them.
+
+    Because a deferred (or otherwise unavailable) blueprint cannot be
+    inspected at submit time, the scheduler reads the persisted
+    `compute_overrides` instead of the blueprint to determine CPU
+    requirements. When the step's `compute_overrides` does not already
+    declare `["slurm"]["num_cpus"]`, this injects it from the merged
+    blueprint's `cpus_needed`, so the transformed workplan records the
+    requirement regardless of whether the blueprint can be read later.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to preflight.
+
+    Returns
+    -------
+    LiveStep
+        The step unchanged (deferred, or CPU count already declared), or
+        with `compute_overrides` enriched with the CPU requirement.
+    """
+    if step.is_deferred:
+        return step
+
+    merged = OverrideTransform(sys_overrides=get_system_overrides(step)).apply(
+        step.blueprint, dict(step.blueprint_overrides)
+    )
+
+    return _inject_cpus(step, merged.cpus_needed)
+
+
+def _inject_cpus(step: LiveStep, cpus: int) -> LiveStep:
+    """Record a step's cpu requirement in its `compute_overrides`.
+
+    Declared values win; the requirement is injected only when
+    `["slurm"]["num_cpus"]` is absent.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to enrich.
+    cpus : int
+        The cpu requirement read from the step's blueprint.
+
+    Returns
+    -------
+    LiveStep
+        The step with `compute_overrides` recording the cpu requirement.
+
+    Raises
+    ------
+    CstarExpectationFailed
+        If the step declares a non-mapping `slurm` compute override.
+    """
+    declared = step.compute_overrides.get("slurm", {})
+    if not isinstance(declared, Mapping):
+        msg = (
+            f"Step {step.name!r} declares a non-mapping `slurm` compute "
+            f"override: {declared!r}"
+        )
+        raise CstarExpectationFailed(msg)
+
+    new_overrides = deep_merge(
+        {"slurm": {"num_cpus": cpus}},
+        dict(step.compute_overrides),
+    )
+    return LiveStep.from_step(step, update={"compute_overrides": new_overrides})
+
+
+def effective_blueprint(step: LiveStep) -> Blueprint:
+    """Load a step's blueprint with its packaged runtime overrides applied.
+
+    A transformed step carries its overrides in an `apply-overrides`
+    directive rather than a rewritten blueprint file, so code inspecting
+    the step's configuration (e.g. another step reading its outputs layout)
+    must merge that pending payload to see what will actually run.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step whose blueprint content is requested.
+
+    Returns
+    -------
+    Blueprint
+        The blueprint with any packaged runtime overrides merged in memory.
+
+    Raises
+    ------
+    BlueprintDeferredError
+        If the step's blueprint is deferred and does not exist yet.
+    """
+    blueprint = step.blueprint
+
+    config = step.directives.get(ApplyOverridesDirective.key(), {})
+    if isinstance(config, Mapping):
+        overrides = config.get(ApplyOverridesDirective.KEY_OVERRIDES)
+        if isinstance(overrides, Mapping):
+            blueprint = OverrideTransform().apply(blueprint, dict(overrides))
+
+    return blueprint
+
+
+def package_runtime_overrides(step: LiveStep) -> LiveStep:
+    """Package schedule-time overrides into a runtime `apply-overrides` directive.
+
+    This is the override-persistence path for every step outside the
+    feature-flagged schedule-time application-transform pipeline, deferred or
+    not: rather than baking overrides into a rewritten blueprint file at
+    schedule time, the user-supplied `blueprint_overrides` and the system
+    overrides are merged and stored on the step's directives, to be applied
+    by an `apply-overrides` directive on the compute node instead.
+
+    Returns
+    -------
+    LiveStep
+        The transformed step.
+    """
+    sys_overrides = {
+        key: value.as_posix() if isinstance(value, Path) else value
+        for key, value in get_system_overrides(step).items()
+    }
+    overrides = deep_merge(dict(step.blueprint_overrides), sys_overrides)
+
+    directives = {
+        **step.directives,
+        ApplyOverridesDirective.key(): {
+            ApplyOverridesDirective.KEY_OVERRIDES: overrides,
+            ApplyOverridesDirective.KEY_APPLICATION: step.application,
+        },
+    }
+    update: dict[str, t.Any] = {"blueprint_overrides": {}, "directives": directives}
+    return LiveStep.from_step(step, update=update)
 
 
 class Directive(Transform[LiveStep], t.Protocol):
@@ -714,6 +904,116 @@ class Directive(Transform[LiveStep], t.Protocol):
         raise CstarError("Directive did not receive workplan")
 
 
+class OverrideDirective(Directive, OverrideTransform):
+    """Base class for directives that generate blueprint overrides from
+    their configuration and apply them as an `OverrideTransform`.
+    """
+
+    _overrides: dict[str, t.Any]
+
+    def __init__(
+        self,
+        config: dict[str, t.Any],
+        *,
+        workplan: LiveWorkplan | None = None,
+    ) -> None:
+        """Initialize the instance.
+
+        Parameters
+        ----------
+        config : dict[str, t.Any] | None
+            A dictionary containing configuration for the directive.
+        workplan : LiveWorkplan | None
+            The workplan instance containing contextual information for the directive.
+        """
+        Directive.__init__(self, config, workplan=workplan)
+        OverrideTransform.__init__(self, self._generate_overrides())
+
+    def _generate_overrides(self) -> dict[str, t.Any]:
+        """Generate any system overrides required by the directive.
+
+        Returns
+        -------
+        dict[str, t.Any]
+        """
+        return {}
+
+
+class ApplyOverridesDirective(OverrideDirective):
+    """A directive that applies schedule-time overrides to a blueprint that
+    only exists at runtime.
+
+    Steps with deferred blueprints cannot have their `blueprint_overrides` or
+    system overrides baked into the blueprint when the workplan is scheduled;
+    this directive applies them on the compute node instead.
+    """
+
+    KEY_OVERRIDES: t.Final[str] = "overrides"
+    """Key containing the overrides to apply to the blueprint."""
+    KEY_APPLICATION: t.Final[str] = "application"
+    """Key containing the application declared by the step."""
+
+    @classmethod
+    def key(cls) -> str:
+        return "apply-overrides"
+
+    def _generate_overrides(self) -> dict[str, t.Any]:
+        """Return the overrides packaged into the directive configuration.
+
+        Returns
+        -------
+        dict[str, t.Any]
+
+        Raises
+        ------
+        ValueError
+            If the configuration does not contain an overrides mapping.
+        """
+        overrides = self._config.get(self.KEY_OVERRIDES)
+        if not isinstance(overrides, Mapping):
+            msg = (
+                f"Directive {self.key()!r} requires a mapping under "
+                f"key {self.KEY_OVERRIDES!r}"
+            )
+            raise ValueError(msg)
+        return dict(overrides)
+
+    def apply(
+        self,
+        bp: Blueprint,
+        overrides: dict[str, t.Any] | None = None,
+    ) -> Blueprint:
+        """Apply overrides after verifying the blueprint matches the
+        application declared by the step.
+
+        Parameters
+        ----------
+        bp : Blueprint
+            The blueprint to apply overrides to
+        overrides : dict[str, t.Any] | None
+            A dictionary containing overrides for attributes of a blueprint.
+
+        Returns
+        -------
+        Blueprint
+            The blueprint with all overrides applied.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            If the blueprint's application differs from the one declared
+            by the step.
+        """
+        expected = self._config.get(self.KEY_APPLICATION)
+        if expected and bp.application != expected:
+            msg = (
+                f"Blueprint declares application {bp.application!r} but the "
+                f"step declared {expected!r}"
+            )
+            raise CstarExpectationFailed(msg)
+        return super().apply(bp, overrides)
+
+
 class DirectiveConfig(BaseModel):
     directive_map: t.ClassVar[dict[str, type[Directive]]] = {}
     """Lookup for all registered directives."""
@@ -756,23 +1056,23 @@ class DirectiveConfig(BaseModel):
             if os.getenv(ENV_CSTAR_RUNID, None):
                 workplan = DirectiveConfig.load_workplan()
 
-            app = get_app_for_blueprint(local_bp)
+            app = get_app_for_blueprint(Path(local_bp))
             blueprint = t.cast("Blueprint", deserialize(local_bp, app.blueprint))
 
             step = LiveStep(
                 name="directive-step",
-                application=Application.ROMS_MARBL,
+                application=app.name,
                 blueprint=local_bp,
                 working_dir=blueprint.working_dir,
             )
 
-            transforms = {
+            transforms = [
                 directive_map[key](
                     config=t.cast("dict[str, dict[str, t.Any]]", config),
                     workplan=workplan,
                 )
                 for key, config in directives.items()
-            }
+            ]
             for transform in transforms:
                 step = transform(step)[0]
 
@@ -818,3 +1118,69 @@ class DirectiveConfig(BaseModel):
     @classmethod
     def register(cls, key: str, directive: type[Directive]) -> None:
         DirectiveConfig.directive_map[key] = directive
+
+
+def resolve_deferred_blueprint(ref: DeferredBlueprintRef) -> Path:
+    """Locate the blueprint generated by the producing step of a deferred
+    blueprint reference.
+
+    Requires workplan context (`ENV_CSTAR_RUNID`), so this can only run once
+    the workplan has been scheduled.
+
+    Parameters
+    ----------
+    ref : DeferredBlueprintRef
+        The deferred reference naming the producing step.
+
+    Returns
+    -------
+    Path
+        The path to the generated blueprint.
+
+    Raises
+    ------
+    CstarError
+        If the producing step cannot be found in the workplan, or a unique
+        blueprint file cannot be located in its output directory.
+    """
+    workplan = DirectiveConfig.load_workplan()
+    if ref.from_step not in workplan:
+        msg = (
+            f"Deferred blueprint references step {ref.from_step!r}, which "
+            "does not exist in the workplan"
+        )
+        raise CstarError(msg)
+
+    output_dir = workplan[ref.from_step].fsm.output_dir
+
+    if ref.filename:
+        candidate = output_dir / ref.filename
+        if not candidate.is_file():
+            msg = (
+                f"Step {ref.from_step!r} did not produce the expected "
+                f"blueprint: {candidate}"
+            )
+            raise CstarError(msg)
+        return candidate
+
+    candidates = sorted(
+        path
+        for pattern in ("*.yml", "*.yaml", "*.json")
+        for path in output_dir.glob(pattern)
+    )
+    if not candidates:
+        msg = f"Step {ref.from_step!r} did not produce a blueprint in: {output_dir}"
+        raise CstarError(msg)
+    if len(candidates) > 1:
+        names = ", ".join(path.name for path in candidates)
+        msg = (
+            f"Multiple candidate blueprints found in the output of step "
+            f"{ref.from_step!r} ({names}); specify `filename` in the "
+            "deferred blueprint reference"
+        )
+        raise CstarError(msg)
+
+    return candidates[0]
+
+
+DirectiveConfig.register(ApplyOverridesDirective.key(), ApplyOverridesDirective)

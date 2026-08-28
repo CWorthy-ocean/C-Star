@@ -15,6 +15,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     get_env_item,
 )
+from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     MigrationRequest,
@@ -38,8 +39,9 @@ from cstar.entrypoint.utils import (
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
+from cstar.orchestration.models import DeferredBlueprintRef
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
-from cstar.orchestration.transforms import DirectiveConfig
+from cstar.orchestration.transforms import DirectiveConfig, resolve_deferred_blueprint
 from cstar.system.migration import CStarMigrationNotRegisteredError
 
 if t.TYPE_CHECKING:
@@ -76,23 +78,12 @@ def path_callback(
     str
         The path to the blueprint (or the newly migrated blueprint file).
     """
+    if DeferredBlueprintRef.matches(path):
+        # the blueprint does not exist yet; it is resolved (and migrated) at runtime
+        return path
+
     try:
-        with local_copy(path) as local_path:
-            bp_path = local_path
-
-            request = MigrationRequest(path=local_path)
-            try:
-                persist_result = execute_migration(request)
-
-                if persist_result.migration_result.error:
-                    print(persist_result.migration_result.error)
-                    raise typer.Exit(1)
-
-                bp_path = Path(persist_result.target)
-            except CStarMigrationNotRegisteredError:
-                log.debug("Skipping schema migration; no registered adapters")
-            return str(bp_path)
-
+        return _localize_and_migrate(path)
     except FileNotFoundError as ex:
         msg = f"Blueprint file not found: {ex.filename}"
         raise typer.BadParameter(msg) from ex
@@ -101,7 +92,35 @@ def path_callback(
         msg = f"Blueprint {path!r} is invalid. Details: {errors}"
         raise typer.BadParameter(msg) from ex
 
-    return path
+
+def _localize_and_migrate(path: str) -> str:
+    """Copy the blueprint locally and auto-migrate its schema if necessary.
+
+    Parameters
+    ----------
+    path : str
+        The path to the blueprint.
+
+    Returns
+    -------
+    str
+        The path to the local blueprint (or the newly migrated blueprint file).
+    """
+    with local_copy(path) as local_path:
+        bp_path = local_path
+
+        request = MigrationRequest(path=local_path)
+        try:
+            persist_result = execute_migration(request)
+
+            if persist_result.migration_result.error:
+                print(persist_result.migration_result.error)
+                raise typer.Exit(1)
+
+            bp_path = Path(persist_result.target)
+        except CStarMigrationNotRegisteredError:
+            log.debug("Skipping schema migration; no registered adapters")
+        return str(bp_path)
 
 
 def directives_callback(path: str | None) -> str | None:
@@ -187,6 +206,20 @@ def run(
     ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
+    if DeferredBlueprintRef.matches(uri):
+        ref = DeferredBlueprintRef.from_uri(uri)
+        try:
+            uri = str(resolve_deferred_blueprint(ref))
+        except (CstarError, RuntimeError) as ex:
+            print(f"Unable to resolve deferred blueprint: {ex}")
+            raise typer.Exit(code=1) from ex
+
+        msg = f"Resolved deferred blueprint from step {ref.from_step!r} to {uri!r}"
+        log.info(msg)
+
+        # deferred blueprints skip path_callback's handling; apply it now
+        uri = _localize_and_migrate(uri)
+
     bp_path = Path(uri)
     app_config = get_app_for_blueprint(bp_path)
 

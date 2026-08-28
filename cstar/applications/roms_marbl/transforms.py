@@ -15,6 +15,7 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.exceptions import BlueprintDeferredError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
@@ -27,13 +28,13 @@ from cstar.base.utils import (
     slugify,
 )
 from cstar.execution.file_system import RomsFileSystemManager
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
+from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
-    Directive,
     DirectiveConfig,
-    OverrideTransform,
+    OverrideDirective,
     SplitFrequency,
+    effective_blueprint,
     get_time_slices,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
@@ -51,6 +52,16 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         """Initialize the transform instance."""
         freq_config = os.getenv(ENV_CSTAR_ORCH_TRX_FREQ, frequency)
         self.frequency = freq_config.lower()
+
+    @classmethod
+    def is_active(cls) -> bool:
+        """Return `True` when time splitting is enabled via feature flag.
+
+        Returns
+        -------
+        bool
+        """
+        return is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT)
 
     def get_subtask_name(
         self,
@@ -90,9 +101,6 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         Sequence[LiveStep]
             Steps for each subtask resulting from the split.
         """
-        if not is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
-            return [step]
-
         blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
@@ -617,37 +625,6 @@ class BoundaryFileTrxAdapter:
         }
 
 
-class OverrideDirective(Directive, OverrideTransform):
-    _overrides: dict[str, t.Any]
-
-    def __init__(
-        self,
-        config: dict[str, t.Any],
-        *,
-        workplan: LiveWorkplan | None = None,
-    ) -> None:
-        """Initialize the instance.
-
-        Parameters
-        ----------
-        config : dict[str, t.Any] | None
-            A dictionary containing configuration for the directive.
-        workplan : LiveWorkplan | None
-            The workplan instance containing contextual information for the directive.
-        """
-        Directive.__init__(self, config, workplan=workplan)
-        OverrideTransform.__init__(self, self._generate_overrides())
-
-    def _generate_overrides(self) -> dict[str, t.Any]:
-        """Generate any system overrides required by the directive.
-
-        Returns
-        -------
-        dict[str, t.Any]
-        """
-        return {}
-
-
 class ContinuanceDirective(OverrideDirective):
     """A transform that locates a restart file with an unknown path at the
     time the task was scheduled.
@@ -703,7 +680,14 @@ class ContinuanceDirective(OverrideDirective):
 
                 # With ParallelIO there are no partitioned restart files to
                 # reuse; the joined restart files live in `joined_output`.
-                blueprint = step.blueprint
+                try:
+                    # merge the step's packaged runtime overrides so values
+                    # set via blueprint_overrides (e.g. use_pio) are visible
+                    blueprint = effective_blueprint(step)
+                except BlueprintDeferredError:
+                    # Backstop: deferred+split is prohibited upstream, so treat as non-PIO.
+                    blueprint = None
+
                 if (
                     isinstance(blueprint, RomsMarblBlueprint)
                     and blueprint.partitioning.use_pio

@@ -43,7 +43,7 @@ log = get_logger(__name__)
 
 
 class SlurmComputeSpec(BaseModel):
-    num_cpus: int = 0
+    num_cpus: int = Field(default=1)
     """Total number of CPUs required by the job."""
     num_nodes: int | None = None
     """The number of nodes to request."""
@@ -104,21 +104,22 @@ class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec
             msg = "Compute overrides were not supplied to the SlurmComputeAdapter"
             raise CstarExpectationFailed(msg)
 
-        if overrides_ := t.cast("dict[str, str | int]", model.get("slurm", {})):
-            try:
-                compute = SlurmComputeSpec.model_validate(overrides_)
+        overrides_ = t.cast("dict[str, str | int]", model.get("slurm", {}))
+        if not overrides_:
+            msg = "No SLURM overrides were supplied to the SlurmComputeAdapter"
+            raise CstarExpectationFailed(msg)
 
-                if not compute.model_dump(exclude_defaults=True):
-                    msg = "Non-default SLURM compute overrides were not specified."
-                    log.debug(msg)
+        try:
+            compute = SlurmComputeSpec.model_validate(overrides_)
 
-                return compute
-            except ValidationError:
-                msg = "Invalid compute overrides were specified"
-                log.error(msg)
+            if not compute.model_dump(exclude_defaults=True):
+                msg = "Non-default SLURM compute overrides were not specified."
+                log.debug(msg)
 
-        msg = f"Unable to adapt model {model!r} into SlurmComputeSpec"
-        raise CstarAdaptationError(msg)
+            return compute
+        except ValidationError as ex:
+            msg = f"Unable to adapt model {model!r} into SlurmComputeSpec"
+            raise CstarAdaptationError(msg) from ex
 
 
 class SlurmHandle(ProcessHandle):
@@ -182,12 +183,25 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     def _get_default_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
         """Create the default compute spec for SLURM.
 
+        `num_cpus` here is only a floor: the workplan transformer records
+        each step's actual cpu requirement into
+        `compute_overrides["slurm"]["num_cpus"]` at schedule time (read from
+        the blueprint where it can be), and `_get_compute_spec` overlays
+        those `compute_overrides` on top of this default. The launcher
+        itself never inspects blueprint content, so this stays correct for
+        both ordinary and deferred steps.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step being scheduled. Reserved for parity with the rest of
+            the compute-spec API; not consulted for `num_cpus`.
+
         Returns
         -------
         SlurmComputeSpec
         """
         return SlurmComputeSpec(
-            num_cpus=step.blueprint.cpus_needed,
             max_walltime=SlurmLauncher.configured_walltime(),
             queue_name=SlurmLauncher.configured_queue(),
             account_name=SlurmLauncher.configured_account(),
@@ -216,9 +230,15 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 compute = default_compute.model_copy(
                     update=overrides.model_dump(exclude_defaults=True)
                 )
-            except CstarAdaptationError:
+            except CstarExpectationFailed:
+                # overrides carry nothing for this launcher; keep the default
+                msg = f"No SLURM overrides for step {step.name!r}; using defaults"
+                log.debug(msg)
+            except CstarAdaptationError as ex:
+                # the default spec is only a 1-cpu floor; submitting with it
+                # in place of the declared resources must fail, not warn
                 msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
-                log.warning(msg, exc_info=True)
+                raise CstarError(msg) from ex
         return compute
 
     @staticmethod
@@ -274,10 +294,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        if not step.blueprint:
-            msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
-            raise CstarError(msg)
-
         step.script_path.parent.mkdir(parents=True, exist_ok=True)
         step.log_path.parent.mkdir(parents=True, exist_ok=True)
 
