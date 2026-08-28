@@ -524,10 +524,9 @@ async def test_prepare_workplan_persists_clobber_overrides(
     """
     wp_path = wp_templates_dir / "workplan.yaml"
     output_dir = tmp_path / "output"
-    run_id = "clobber-persist-run"
 
     _, prepared_path = await prepare_workplan(
-        wp_path, output_dir, run_id, clobber_steps=["Prepare"]
+        wp_path, output_dir, clobber_steps=["Prepare"]
     )
 
     persisted = deserialize(prepared_path, LiveWorkplan)

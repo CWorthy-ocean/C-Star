@@ -323,7 +323,6 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
 async def prepare_workplan(
     wp_path: Path,
     output_dir: Path,
-    run_id: str,
     user_variables: Mapping[str, str] | None = None,
     clobber_steps: "Sequence[str] | None" = None,
 ) -> tuple[Workplan, Path]:
@@ -334,9 +333,7 @@ async def prepare_workplan(
     wp_path : Path
         The path to the workplan to load.
     output_dir : Path
-        The directory where workplan outputs will be written.
-    run_id : str
-        The unique ID for the current run.
+        The run-specific directory where workplan artifacts will be written.
     user_variables : Mapping | None
         User-defined variables specified at runtime
     clobber_steps : Sequence[str] | None
@@ -354,7 +351,6 @@ async def prepare_workplan(
         If the expected and provided user variables are not in agreement.
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
-    run_root_dir = output_dir / run_id
 
     fill_transform: TemplateFillTransform | None = None
     file_io_extras: list[Awaitable[int]] = []
@@ -371,7 +367,7 @@ async def prepare_workplan(
         )
 
         persist_vars = WorkplanTransformer.derived_path(
-            wp_path, run_root_dir, suffix="", extension=".vars"
+            wp_path, output_dir, suffix="", extension=".vars"
         )
         file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
     else:
@@ -387,9 +383,9 @@ async def prepare_workplan(
 
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = WorkplanTransformer.derived_path(
-        wp_path, run_root_dir, "_original", ".bak"
+        wp_path, output_dir, "_original", ".bak"
     )
-    persist_as = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_transformed")
+    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
 
     file_io: list[Awaitable[int]] = [
         asyncio.to_thread(serialize, persist_orig, wp_orig),
@@ -708,7 +704,7 @@ async def build_dag(
 
     check_environment()
     wp, prepared_wp_path = await prepare_workplan(
-        wp_path, output_dir, run_id, user_variables, clobber_steps
+        wp_path, output_dir, user_variables, clobber_steps
     )
     planner = Planner(workplan=wp)
 

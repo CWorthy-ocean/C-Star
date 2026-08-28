@@ -298,7 +298,7 @@ async def test_prepare_composed_dag(
         run_id = get_run_id()
         working_dir = DirectoryManager.data_home()
         check_environment()
-        wp, wp_path = await prepare_workplan(generated_wp_path, working_dir, run_id)
+        wp, wp_path = await prepare_workplan(generated_wp_path, working_dir / run_id)
 
     wp = deserialize(wp_path, LiveWorkplan)
     steps = list(wp.steps)
