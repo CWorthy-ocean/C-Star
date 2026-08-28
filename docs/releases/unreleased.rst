@@ -17,6 +17,7 @@ Breaking Changes
 - ``time_step`` is removed from ``Discretization``/``ROMSDiscretization``; previously serialized ``ROMSSimulation.to_dict()`` payloads carrying ``discretization.time_step`` no longer load. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - ``roms_runtime_settings`` derives ``ntimes`` from the effective (post-override) ``dt`` and now also writes ``param_settings.np_xi``/``np_eta`` from the partitioning, so the runtime namelist always matches the scheduled cores. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Prefect removed from dependencies (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Transformed workplans no longer reference rewritten ``.ovrd.yaml`` blueprint files; they keep the original blueprint paths and record overrides as ``apply-overrides`` directives. The merged blueprint is written at runtime into each step's own run directory. Re-preparing a run is now idempotent (no more compounded ``.ovrd.ovrd.yaml`` files). (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -28,6 +29,10 @@ New features
 - Automatic blueprint schema migration during ``cstar blueprint run`` is now the default, and ``cstar blueprint migrate`` is always mounted (feature flags ``CSTAR_FF_CLI_BP_MIGRATE_AUTO``/``CSTAR_FF_CLI_BP_MIGRATE_SHOW`` removed). (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - New ``CSTAR_DISABLE_MIGRATION=1`` escape hatch: guarantees a blueprint is never modified — commands fail early if the blueprint is not at the current schema version. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - ROMS namelists now support the ``&PIO_SETTINGS`` group (``pio_stride``) added in ucla-roms 0.6.0. (`#650 <https://github.com/CWorthy-ocean/C-Star/pull/650>`_)
+- Deferred blueprint references in workplan steps: ``blueprint: {from_step: <name>, filename: <optional>}``. The producer must be listed in ``depends_on``; when ``filename`` is omitted, exactly one blueprint file must be present in the producer's output directory. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- ``cstar blueprint run`` accepts ``step://<step>[/<filename>]`` URIs, resolving them against the current run at runtime (including automatic schema migration of the resolved blueprint, when enabled). (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- Each step's CPU requirement is recorded in the transformed workplan (``compute_overrides.slurm.num_cpus``, read from the blueprint when available); a declared value always wins, and a deferred step with no declaration is scheduled at 1 CPU. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- Unsupported combinations fail loudly at schedule time (e.g. deferring a step whose application uses schedule-time transforms, such as ROMS-MARBL time splitting). (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -47,6 +52,11 @@ Bug Fixes
 
   - developer note: ``prepare_workplan`` no longer takes a ``run_id`` parameter; its ``output_dir`` argument is now the run-specific root directory where artifacts are written.
 
+- Workplans using external applications (e.g. cstar-forge) crashed during preparation when the application's blueprint model used its own enums. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- Values set via ``blueprint_overrides`` (e.g. ``use_pio``) were invisible to downstream steps inspecting a producer's configuration, sending restart-file searches to the wrong directory. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- The local launcher logged an adaptation-failure traceback for steps whose compute overrides carried only scheduler (slurm) keys. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- A SLURM submission whose declared ``compute_overrides`` fail validation now aborts with an error instead of submitting with default resources and a warning. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+
 
 Improvements
 ~~~~~~~~~~~~
@@ -64,3 +74,4 @@ Miscellaneous
 - New versioned template ``blueprint.3.0.0.yaml`` and generated ``roms_marbl_schema.3.0.0.json``; ``docs/schemas/index.rst``, ``docs/blueprints.rst``, and the tutorial blueprints/notebook updated to the 3.0.0 shape; stale ``ModelParameterSet`` API listing removed. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Test fixtures (``blueprint_complete.yaml``, ``blueprint_template.yaml``, unit-test conftest data) migrated to 3.0.0. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Made a migrate-CLI test assertion robust to console line-wrapping, which could split the expected error message at an arbitrary point depending on the tmp-path length (flaky in CI). (`#650 <https://github.com/CWorthy-ocean/C-Star/pull/650>`_)
+- Workplan documentation gains a Deferred Blueprints example; the workplan JSON schema accepts the new ``blueprint`` mapping form. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
