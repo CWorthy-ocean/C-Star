@@ -249,7 +249,7 @@ class TestSystemLayoutRegistry:
 
         assert source_data == tmp_path / "cstar-forge-data" / "source-data"
         assert input_data == tmp_path / "cstar-forge-data" / "input-data"
-        assert scratch == tmp_path / "cstar-forge-run"
+        assert scratch == tmp_path / "cstar" / "_forge_bp_runs"
 
     def test_unknown_layout(self, tmp_path):
         """Test unknown layout function."""
@@ -258,7 +258,7 @@ class TestSystemLayoutRegistry:
 
         assert source_data == tmp_path / "cstar-forge-data" / "source-data"
         assert input_data == tmp_path / "cstar-forge-data" / "input-data"
-        assert scratch == tmp_path / "cstar-forge-run"
+        assert scratch == tmp_path / "cstar" / "_forge_bp_runs"
 
     def test_anvil_layout(self, tmp_path):
         """Test RCAC Anvil layout function."""
@@ -272,7 +272,7 @@ class TestSystemLayoutRegistry:
         assert (
             input_data == tmp_path / "work" / "cstar-forge-data" / USER / "input-data"
         )
-        assert scratch == tmp_path / "scratch" / "cstar-forge-run"
+        assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
 
     def test_perlmutter_layout(self, tmp_path):
         """Test NERSC Perlmutter layout function."""
@@ -287,7 +287,7 @@ class TestSystemLayoutRegistry:
             input_data
             == tmp_path / "scratch" / "cstar-forge-data" / USER / "input-data"
         )
-        assert scratch == tmp_path / "scratch" / "cstar-forge-run"
+        assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
 
 
 class TestRelocateWorkingDir:
@@ -299,12 +299,12 @@ class TestRelocateWorkingDir:
         home = tmp_path / "home"
         env = {"SCRATCH": str(tmp_path / "scratch")}
         wd = relocate_working_dir(
-            home / "cstar-forge-run" / "my-run",
+            home / "cstar" / "_forge_bp_runs" / "my-run",
             system_tag="NERSC_perlmutter",
             env=env,
             home=home,
         )
-        assert wd == tmp_path / "scratch" / "cstar-forge-run" / "my-run"
+        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
     def test_default_path_rebases_to_scratch_on_anvil(self, tmp_path):
         from cstar_forge.config import relocate_working_dir
@@ -312,12 +312,12 @@ class TestRelocateWorkingDir:
         home = tmp_path / "home"
         env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
         wd = relocate_working_dir(
-            home / "cstar-forge-run" / "my-run",
+            home / "cstar" / "_forge_bp_runs" / "my-run",
             system_tag="RCAC_anvil",
             env=env,
             home=home,
         )
-        assert wd == tmp_path / "scratch" / "cstar-forge-run" / "my-run"
+        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
     def test_anvil_falls_back_to_work_scratch(self, tmp_path):
         from cstar_forge.config import relocate_working_dir
@@ -325,12 +325,30 @@ class TestRelocateWorkingDir:
         home = tmp_path / "home"
         env = {"WORK": str(tmp_path / "work")}
         wd = relocate_working_dir(
-            home / "cstar-forge-run" / "my-run",
+            home / "cstar" / "_forge_bp_runs" / "my-run",
             system_tag="RCAC_anvil",
             env=env,
             home=home,
         )
-        assert wd == tmp_path / "work" / "scratch" / "cstar-forge-run" / "my-run"
+        assert (
+            wd == tmp_path / "work" / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
+        )
+
+    def test_legacy_cstar_forge_run_root_rebases_to_scratch(self, tmp_path):
+        """The legacy sentinel (``~/cstar-forge-run``, the default before this
+        rename) rebases onto the *current* scratch working root, so old
+        blueprints no longer write into the old sibling location on HPC.
+        """
+        from cstar_forge.config import relocate_working_dir
+
+        home = tmp_path / "home"
+        wd = relocate_working_dir(
+            home / "cstar-forge-run" / "my-run",
+            system_tag="NERSC_perlmutter",
+            env={"SCRATCH": str(tmp_path / "scratch")},
+            home=home,
+        )
+        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
     def test_non_hpc_leaves_path_alone(self, tmp_path):
         from cstar_forge.config import relocate_working_dir
@@ -371,7 +389,7 @@ class TestRelocateWorkingDir:
             env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
-        assert wd == tmp_path / "scratch" / "cstar-forge-run" / "my-run"
+        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
     def test_bare_cstar_forge_data_path_passes_through(self, tmp_path):
         """The legacy match is deliberately narrow: only the nested
@@ -435,12 +453,12 @@ class TestRelocateWorkingDir:
         home = tmp_path / "home"
         monkeypatch.setenv("HOME", str(home))
         wd = relocate_working_dir(
-            "~/cstar-forge-run/my-run",
+            "~/cstar/_forge_bp_runs/my-run",
             system_tag="NERSC_perlmutter",
             env={"SCRATCH": str(tmp_path / "scratch")},
             home=home,
         )
-        assert wd == tmp_path / "scratch" / "cstar-forge-run" / "my-run"
+        assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
 
 class TestGetDataPaths:

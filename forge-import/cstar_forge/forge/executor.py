@@ -669,15 +669,28 @@ class ForgeExecutor(BaseModel):
     def roms_blueprint_working_dir(self) -> Path:
         """Working dir for the emitted ROMS blueprint.
 
-        Mirrors ``run_output_dir`` but under a ``cstar-roms-run`` root instead of
-        the forge run's ``cstar-forge-run`` root, so the two stages don't share a dir.
+        Mirrors ``run_output_dir`` but under a ``_roms_bp_runs`` root instead of
+        the forge run's ``_forge_bp_runs`` root, so the two stages don't share a dir.
         """
-        forge_seg = Path(DEFAULT_WORKING_ROOT).name  # "cstar-forge-run"
+        forge_parent = Path(DEFAULT_WORKING_ROOT).parent.name  # "cstar"
+        forge_seg = Path(DEFAULT_WORKING_ROOT).name  # "_forge_bp_runs"
         blueprint_seg = ROMS_RUN_SEGMENT
         run_dir = self.run_output_dir
-        if forge_seg in run_dir.parts:
+        parts = run_dir.parts
+        # Anchor on the full two-segment default root ("cstar/_forge_bp_runs"),
+        # matching config.relocate_working_dir -- a lone "_forge_bp_runs" segment
+        # elsewhere in a custom path is not the default root.
+        for i in range(1, len(parts)):
+            if parts[i] == forge_seg and parts[i - 1] == forge_parent:
+                return Path(*parts[:i], blueprint_seg, *parts[i + 1 :])
+        # Legacy sibling swap for explicit old-form paths (pre-rename default) on
+        # non-HPC hosts, where relocate_working_dir leaves them untouched.
+        if "cstar-forge-run" in run_dir.parts:
             return Path(
-                *(blueprint_seg if p == forge_seg else p for p in run_dir.parts)
+                *(
+                    "cstar-roms-run" if p == "cstar-forge-run" else p
+                    for p in run_dir.parts
+                )
             )
         return run_dir / blueprint_seg
 

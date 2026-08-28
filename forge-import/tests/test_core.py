@@ -1554,9 +1554,45 @@ class TestForgeExecutorDefaultRuntimeParams:
 class TestForgeExecutorRomsBlueprintWorkingDir:
     """Tests for roms_blueprint_working_dir property."""
 
-    def test_swaps_cstar_forge_run_segment(self, minimal_cstar_spec_builder_args):
-        """When run_output_dir has the known cstar-forge-run root, the blueprint
-        working dir is the sibling cstar-roms-run root, name preserved.
+    def test_swaps_forge_bp_runs_segment(self, minimal_cstar_spec_builder_args):
+        """When run_output_dir has the known _forge_bp_runs root, the blueprint
+        working dir is the sibling _roms_bp_runs root, name preserved.
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        run_dir = Path("/home/user/cstar/_forge_bp_runs/my_run_name")
+        builder.host = HostPaths(
+            working_dir=run_dir,
+            source_data_cache=builder.host.source_data_cache,
+            system="test",
+        )
+
+        assert builder.roms_blueprint_working_dir == Path(
+            "/home/user/cstar/_roms_bp_runs/my_run_name"
+        )
+
+    def test_unanchored_forge_bp_runs_segment_is_not_swapped(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """A ``_forge_bp_runs`` segment NOT under ``cstar/`` is a coincidence in a
+        custom path, not the default root -- it falls through to the fallback
+        instead of being rewritten (mirrors relocate_working_dir's anchored match).
+        """
+        builder = _make_builder(minimal_cstar_spec_builder_args)
+        run_dir = Path("/custom/_forge_bp_runs/my_run_name")
+        builder.host = HostPaths(
+            working_dir=run_dir,
+            source_data_cache=builder.host.source_data_cache,
+            system="test",
+        )
+
+        assert builder.roms_blueprint_working_dir == run_dir / "_roms_bp_runs"
+
+    def test_swaps_legacy_cstar_forge_run_segment(
+        self, minimal_cstar_spec_builder_args
+    ):
+        """When run_output_dir has the old (pre-rename) cstar-forge-run root, the
+        blueprint working dir is the sibling legacy cstar-roms-run root, name
+        preserved -- this keeps explicit old-form paths on non-HPC hosts working.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
         run_dir = Path("/home/user/cstar-forge-run/my_run_name")
@@ -1573,8 +1609,9 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
     def test_falls_back_to_subdir_when_unrecognized(
         self, minimal_cstar_spec_builder_args
     ):
-        """When run_output_dir doesn't contain the known cstar-forge-run segment,
-        fall back to a cstar-roms-run subdirectory under it.
+        """When run_output_dir doesn't contain the known _forge_bp_runs segment
+        (nor the legacy cstar-forge-run one), fall back to a _roms_bp_runs
+        subdirectory under it.
         """
         builder = _make_builder(minimal_cstar_spec_builder_args)
         run_dir = Path("/custom/spot")
@@ -1584,7 +1621,7 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
             system="test",
         )
 
-        assert builder.roms_blueprint_working_dir == Path("/custom/spot/cstar-roms-run")
+        assert builder.roms_blueprint_working_dir == Path("/custom/spot/_roms_bp_runs")
 
     def test_forge_and_roms_roots_are_siblings_with_matching_name(
         self, minimal_cstar_spec_builder_args

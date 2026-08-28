@@ -1,10 +1,10 @@
-description: Generated blueprint (ucla-roms 0.6.0, adds &PIO_SETTINGS support)
+description: Generated blueprint (ucla-roms 0.6.1, adds &PIO_SETTINGS support)
 bgc_mode: marbl
 use_pio: true
 code:
   roms:
     location: https://github.com/CWorthy-ocean/ucla-roms.git
-    commit: 0.6.0
+    commit: 0.6.1
   marbl:
     location: https://github.com/CWorthy-ocean/MARBL.git
     commit: marbl0.45.0-max-it-10

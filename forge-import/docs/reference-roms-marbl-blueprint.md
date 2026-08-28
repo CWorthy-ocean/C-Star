@@ -32,7 +32,7 @@ the result:
 
 ```bash
 cstar forge run docs/forge-blueprint-example.wio-toy.yaml
-# emits ~/cstar-forge-run/cson_roms-marbl_v0.1_wio-toy_10procs/B_*.yaml
+# emits ~/cstar/_forge_bp_runs/cson_roms-marbl_v0.1_wio-toy_10procs/B_*.yaml
 ```
 
 (Blueprints under `legacy/blueprints/` predate the namelist refactor — they

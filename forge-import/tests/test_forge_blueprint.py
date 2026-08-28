@@ -4140,7 +4140,7 @@ class TestForgeBlueprintEngine:
         # working_dir is the injected per-run artifact root; source_data_cache is the
         # shared host download cache. Both resolved from config, not the spec file.
         # The spec default carries a per-run subdirectory: <root>/<name>.
-        assert "cstar-forge-run" in str(h.working_dir)
+        assert "_forge_bp_runs" in str(h.working_dir)
         assert str(h.working_dir).endswith(cfg.name)
         assert h.source_data_cache is not None
 

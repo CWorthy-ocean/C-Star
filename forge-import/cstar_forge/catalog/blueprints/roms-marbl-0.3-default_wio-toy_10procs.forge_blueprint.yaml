@@ -4,7 +4,7 @@ description: Generated blueprint
 application: forge
 state: notset
 schema_version: 1.0.0
-working_dir: ~/cstar-forge-run/roms-marbl-0.3-default_wio-toy_10procs
+working_dir: ~/cstar/_forge_bp_runs/roms-marbl-0.3-default_wio-toy_10procs
 forge_blueprint_version: 4
 run:
   start_date: '2012-01-01T00:00:00'

@@ -84,11 +84,11 @@ This fetches the source data (GLORYS, ERA5 — expect the first run to spend
 most of its time downloading), generates all ROMS input
 files, renders the model settings, and emits a **ROMS-MARBL blueprint** under
 the blueprint's `working_dir` (for wio-toy:
-`~/cstar-forge-run/cson_roms-marbl_v0.1_wio-toy_10procs/`). The final line of
+`~/cstar/_forge_bp_runs/cson_roms-marbl_v0.1_wio-toy_10procs/`). The final line of
 output tells you exactly what to do next:
 
 ```text
-Blueprint: ~/cstar-forge-run/.../roms_marbl_blueprint.yaml
+Blueprint: ~/cstar/_forge_bp_runs/.../roms_marbl_blueprint.yaml
 Run it with:  cstar blueprint run <path>
 ```
 

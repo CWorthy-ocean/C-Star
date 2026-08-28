@@ -4,7 +4,12 @@
 
 ### New Features
 
-* `namelist.nml` now emits a `&PIO_SETTINGS` group with `pio_stride` (default 1) for ucla-roms >= 0.6.0, matching ucla-roms PR #346 (the release that introduces the `PARALLEL_IO`-required group). This is version-gated, not always-emitted: the new `RunTimeSettingsV0_6_0`/`RomsNamelistV0_6_0` schema tier adds the section on top of the 0.5.0 schema, while the legacy and 0.5.0 namelist schemas continue to reject it (`extra="forbid"`), so it's only written when `code.roms.commit`/`branch` resolves to 0.6.0 or later. Added a new `roms-marbl-0.6-default` ModelSpec (pins ucla-roms `0.6.0`) that carries the `pio_settings` block; `pio-dev` (pins ucla-roms `main`) also picks it up via the existing latest-schema fallback. Existing ModelSpecs (`cson_roms-marbl_v0.1`, `roms-marbl-0.3-default`, `roms-marbl-0.4-default`, `roms-marbl-0.5-default`) are unchanged -- their pins predate the group and it is never emitted for them.
+* `namelist.nml` now emits a `&PIO_SETTINGS` group with `pio_stride` (default 1) for ucla-roms >= 0.6.0, matching ucla-roms PR #346 (the release that introduces the `PARALLEL_IO`-required group). This is version-gated, not always-emitted: the new `RunTimeSettingsV0_6_0`/`RomsNamelistV0_6_0` schema tier adds the section on top of the 0.5.0 schema, while the legacy and 0.5.0 namelist schemas continue to reject it (`extra="forbid"`), so it's only written when `code.roms.commit`/`branch` resolves to 0.6.0 or later. Added a new `roms-marbl-0.6-default` ModelSpec (pins ucla-roms `0.6.1`) that carries the `pio_settings` block; `pio-dev` (pins ucla-roms `main`) also picks it up via the existing latest-schema fallback. Existing ModelSpecs (`cson_roms-marbl_v0.1`, `roms-marbl-0.3-default`, `roms-marbl-0.4-default`, `roms-marbl-0.5-default`) are unchanged -- their pins predate the group and it is never emitted for them.
+
+### Improvements
+
+* The output from forge blueprints now defaults to `<root-path>/cstar/_forge_bp_runs` (instead of `<root-path>/cstar-forge-run`)
+* The output from roms blueprints now defaults to `<root-path>/cstar/_roms_bp_runs` (instead of `<root-path>/cstar-roms-run`)
 
 ## 0.5.0
 

@@ -139,7 +139,7 @@ def _layout_mac(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
-    scratch = home / "cstar-forge-run"
+    scratch = home / "cstar" / "_forge_bp_runs"
     return source_data, input_data, scratch
 
 
@@ -151,7 +151,7 @@ def _layout_RCAC_anvil(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = work / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / USER / "input-data"
-    scratch = scratch_root / "cstar-forge-run"
+    scratch = scratch_root / "cstar" / "_forge_bp_runs"
     return source_data, input_data, scratch
 
 
@@ -162,7 +162,7 @@ def _layout_NERSC_perlmutter(home: Path, env: dict) -> tuple[Path, Path, Path]:
 
     source_data = base / "source-data"
     input_data = base / USER / "input-data"
-    scratch = scratch_root / "cstar-forge-run"
+    scratch = scratch_root / "cstar" / "_forge_bp_runs"
     return source_data, input_data, scratch
 
 
@@ -171,7 +171,7 @@ def _layout_unknown(home: Path, env: dict) -> tuple[Path, Path, Path]:
     base = home / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / "input-data"
-    scratch = home / "cstar-forge-run"
+    scratch = home / "cstar" / "_forge_bp_runs"
     return source_data, input_data, scratch
 
 
@@ -480,18 +480,20 @@ def _hpc_scratch_root(system_tag: str, env: dict, home: Path) -> Path | None:
 
 
 # Home-relative default working roots a stored ``working_dir`` may carry, all
-# rebased onto ``$SCRATCH/cstar-forge-run/<relative part>`` on HPC. The current
-# default (``~/cstar-forge-run``) plus the legacy sentinel from blueprints authored
-# before commit 3826bbee (``~/cstar-forge-data/cstar-forge-run``), which the current
+# rebased onto ``$SCRATCH/cstar/_forge_bp_runs/<relative part>`` on HPC. The current
+# default (``~/cstar/_forge_bp_runs``) plus the two legacy sentinels from blueprints
+# authored before this rename (``~/cstar-forge-run``, current since commit 3826bbee)
+# and before that one (``~/cstar-forge-data/cstar-forge-run``), which the current
 # prefix would otherwise miss -- leaving those runs writing into home. The roots are
 # disjoint, so match order is irrelevant. Kept intentionally narrow: a bare
 # ``~/cstar-forge-data`` match would also rebase the mac/unknown source_data and
 # input_data caches, which live under that same base.
 _DEFAULT_WORKING_ROOTS: tuple[str, ...] = (
+    "cstar/_forge_bp_runs",
     "cstar-forge-run",
     "cstar-forge-data/cstar-forge-run",
 )
-_SCRATCH_WORKING_ROOT = "cstar-forge-run"
+_SCRATCH_WORKING_ROOT = "cstar/_forge_bp_runs"
 
 
 def relocate_working_dir(
@@ -504,11 +506,12 @@ def relocate_working_dir(
     """Rebase a default-form ``working_dir`` onto the host's scratch data root.
 
     The ForgeBlueprint stores ``working_dir`` with a home-rooted default
-    (``~/cstar-forge-run/<name>``, or the legacy ``~/cstar-forge-data/cstar-forge-run``
-    from older blueprints). On HPC systems that path belongs on scratch, so any path
-    under one of those default roots is rebased to
-    ``$SCRATCH/cstar-forge-run/<same relative part>``. Paths outside the default
-    roots are a deliberate user choice and pass through untouched (expanded only).
+    (``~/cstar/_forge_bp_runs/<name>``, or a legacy root -- ``~/cstar-forge-run`` or
+    ``~/cstar-forge-data/cstar-forge-run`` -- from older blueprints). On HPC systems
+    that path belongs on scratch, so any path under one of those default roots is
+    rebased to ``$SCRATCH/cstar/_forge_bp_runs/<same relative part>``. Paths outside
+    the default roots are a deliberate user choice and pass through untouched
+    (expanded only).
 
     This is a stand-in for C-Star's eventual runtime override of the spec's
     ``working_dir``; keyword args exist for tests and default to the live host.
@@ -548,8 +551,8 @@ def resolve_host(working_dir):
 
     ``working_dir`` is the per-run artifact root (typically the spec's ``working_dir``,
     expanded, or a host override); everything the executor produces lands under it.
-    Default-form paths (under ``~/cstar-forge-run``) are rebased onto host scratch on
-    HPC systems via :func:`relocate_working_dir`.
+    Default-form paths (under ``~/cstar/_forge_bp_runs``) are rebased onto host
+    scratch on HPC systems via :func:`relocate_working_dir`.
 
     This is Forge's **disposable** host provider: it auto-detects the machine (NERSC /
     RCAC / local) for the source-data cache + machine identity. When the forge
