@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, Final, Literal
 from cstar.base.log import LoggingMixin
 
 if TYPE_CHECKING:
+    from signal import _HANDLER
     from types import FrameType
 
     from cstar.entrypoint.config import ServiceConfiguration
@@ -46,6 +47,7 @@ class Service(ABC, LoggingMixin):
         """
         self._config = config
         self._stop_event = Event()
+        self._prior_signal_handlers: dict[int, _HANDLER] = {}
         self._register_signal_handlers()
 
     @property
@@ -140,9 +142,13 @@ class Service(ABC, LoggingMixin):
         Called on initial entry into Service lifecycle before the main service logic
         begins execution. Allows for subclasses to perform any required initialization
         logic.
+
+        The stop event must not be cleared here: signal handlers are installed in
+        `__init__`, so a termination signal delivered before startup completes has
+        already set the event, and clearing it would silently drop that shutdown
+        request (the event is created fresh in `__init__`).
         """
         self.log.trace(f"Starting {self._service_type}")
-        self._stop_event.clear()
 
     def _on_shutdown(self) -> None:
         """Empty hook method for use by subclasses.
@@ -325,6 +331,8 @@ class Service(ABC, LoggingMixin):
         except Exception:
             self.log.debug("Service shutdown may not have completed.")
             raise
+        finally:
+            self._restore_signal_handlers()
 
     def _cancel(self) -> None:
         """Handle a request to cancel the service.
@@ -417,7 +425,30 @@ class Service(ABC, LoggingMixin):
     def _register_signal_handlers(self) -> None:
         """Register termination signal handlers for the service.
 
-        Attempts to shutdown the simulation cleanly when interrupted.
+        Attempts to shutdown the simulation cleanly when interrupted. The
+        handlers being replaced are recorded so `_shutdown` can reinstall
+        them; without that, a host process that creates a service (e.g. a
+        test runner) is left with handlers that swallow SIGINT/SIGTERM.
         """
         for sig_num in [signal.SIGINT, signal.SIGTERM]:
-            signal.signal(sig_num, self._handle_signal)
+            self._prior_signal_handlers[sig_num] = signal.signal(
+                sig_num, self._handle_signal
+            )
+
+    def _restore_signal_handlers(self) -> None:
+        """Reinstall the signal handlers replaced by `_register_signal_handlers`.
+
+        Handlers registered by someone else after this service's were installed
+        are left in place.
+        """
+        while self._prior_signal_handlers:
+            sig_num, prior_handler = self._prior_signal_handlers.popitem()
+            try:
+                if signal.getsignal(sig_num) == self._handle_signal:
+                    signal.signal(sig_num, prior_handler)
+            except ValueError:
+                # signal.signal is only allowed in the main thread
+                self.log.debug(
+                    "Unable to restore handler for signal %s off the main thread.",
+                    sig_num,
+                )

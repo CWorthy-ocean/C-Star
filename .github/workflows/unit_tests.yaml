@@ -12,6 +12,9 @@ jobs:
   test:
     name: unit-${{ matrix.os }}-${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    # the suite runs in ~2 minutes; don't let a teardown hang hold a runner
+    # for the default 6 hours
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

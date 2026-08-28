@@ -1,6 +1,7 @@
 import functools
 import logging
 import os
+import signal
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager
@@ -2218,3 +2219,24 @@ def mock_local_delay() -> float:
     delay = 0.1
     os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
     return delay
+
+
+@pytest.fixture(autouse=True)
+def restore_signal_handlers() -> Generator[None, None, None]:
+    """Restore SIGINT/SIGTERM handlers replaced during a test.
+
+    Constructing a `Service` installs `Service._handle_signal` — which swallows
+    the signal without exiting — on the *current* process. A test that leaks
+    that handler leaves the pytest process unkillable by SIGINT/SIGTERM (CI
+    cancellation then needs SIGKILL and produces no traceback).
+    """
+    prior = {
+        sig_num: signal.getsignal(sig_num)
+        for sig_num in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    yield
+
+    for sig_num, prior_handler in prior.items():
+        if signal.getsignal(sig_num) != prior_handler:
+            signal.signal(sig_num, prior_handler)

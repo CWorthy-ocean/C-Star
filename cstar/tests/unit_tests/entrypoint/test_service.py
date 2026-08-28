@@ -1,11 +1,11 @@
 import asyncio
 import logging
 import multiprocessing as mp
-import queue
+import multiprocessing.synchronize as mp_sync
 import time
 import types
 import typing as t
-from collections import defaultdict
+from collections import defaultdict, deque
 from math import ceil
 from unittest import mock
 
@@ -47,7 +47,12 @@ class PrintingService(Service):
         self.max_iter = abs(max_iterations)
         self.max_duration = abs(max_duration)
         self.start_time = 0.0
-        self.test_queue: mp.Queue[str] = mp.Queue()
+        # a deque, not a queue: deque.append/popleft are atomic and lock-free,
+        # so the signal handler (which reaches _on_shutdown) can never
+        # self-deadlock by re-entering a lock the interrupted main thread
+        # already holds. The service runs in a single process, so nothing
+        # cross-process is needed here.
+        self.test_queue: deque[str] = deque()
         self.metrics: dict[str, int] = defaultdict(lambda: 0)
 
     @property
@@ -63,7 +68,7 @@ class PrintingService(Service):
     def _on_delay(self) -> None:
         super()._on_delay()
         self.log.trace("Running PrintingService._on_delay")
-        self.test_queue.put_nowait("_on_delay")
+        self.test_queue.append("_on_delay")
 
     @property
     def n_on_delay(self) -> int:
@@ -73,13 +78,13 @@ class PrintingService(Service):
     async def _on_iteration(self) -> None:
         await super()._on_iteration()
         self.log.trace("Running PrintingService._on_iteration")
-        self.test_queue.put_nowait("_on_iteration")
+        self.test_queue.append("_on_iteration")
         self.summarize()  # update each loop; don't let queues grow too large
 
     def _on_iteration_complete(self) -> None:
         super()._on_iteration_complete()
         self.log.trace("Running PrintingService._on_iteration_complete")
-        self.test_queue.put_nowait("_on_iteration_complete")
+        self.test_queue.append("_on_iteration_complete")
         self.summarize()
 
     @property
@@ -90,7 +95,7 @@ class PrintingService(Service):
     def _on_health_check(self) -> None:
         super()._on_health_check()
         self.log.trace("Running PrintingService._on_health_check")
-        self.test_queue.put_nowait("_on_health_check")
+        self.test_queue.append("_on_health_check")
 
     @property
     def n_can_shutdown(self) -> int:
@@ -100,7 +105,7 @@ class PrintingService(Service):
     def _can_shutdown(self) -> bool:
         super()._can_shutdown()  # type: ignore[safe-super]
         self.log.trace("Running PrintingService._can_shutdown")
-        self.test_queue.put_nowait("_can_shutdown")
+        self.test_queue.append("_can_shutdown")
 
         if self._do_shutdown:
             return self._do_shutdown
@@ -117,7 +122,7 @@ class PrintingService(Service):
     def _on_shutdown(self) -> None:
         super()._on_shutdown()
         self.log.trace("Running PrintingService._on_shutdown")
-        self.test_queue.put_nowait("_on_shutdown")
+        self.test_queue.append("_on_shutdown")
         self.summarize()
 
     def summarize(
@@ -129,21 +134,17 @@ class PrintingService(Service):
         Utility for checking invocation counts where mock.call_count can't be used due
         to a second thread executing the service methods.
         """
-        if not self.test_queue.empty() and finalize:
-            while not self.test_queue.empty():
-                if msg := self.test_queue.get_nowait():
-                    self.metrics[msg] += 1
+        get_another = None if finalize else 10
 
-        elif not self.test_queue.empty():
-            get_another = 10
-            while get_another > 0 and not self.test_queue.empty():
-                try:
-                    msg = self.test_queue.get_nowait()
-                    get_another -= 1
-                except queue.Empty:  # noqa: PERF203
-                    get_another = 0
-                else:
-                    self.metrics[msg] += 1
+        while get_another is None or get_another > 0:
+            try:
+                msg = self.test_queue.popleft()
+            except IndexError:
+                break
+
+            self.metrics[msg] += 1
+            if get_another is not None:
+                get_another -= 1
 
         return self.metrics
 
@@ -166,28 +167,59 @@ class PrintingService(Service):
         self._shutdown()
 
 
-async def run_a_printer() -> None:
+class _SignallingPrinter(PrintingService):
+    """A PrintingService that sets an event once its main loop has started.
+
+    The event must not be set before `_on_start` has run: a SIGTERM arriving
+    between construction and startup is handled (the handlers are installed in
+    `__init__`), and the test must only terminate a service that is running.
+    """
+
+    def __init__(self, started: "mp_sync.Event", **kwargs: t.Any) -> None:
+        self._started_evt = started
+        super().__init__(**kwargs)
+
+    def _on_start(self) -> None:
+        super()._on_start()
+        self._started_evt.set()
+
+
+async def _serve_printer(
+    started: "mp_sync.Event",
+    *,
+    fail_on_shutdown: bool,
+) -> None:
+    """Run a PrintingService until signalled, setting `started` once its
+    main loop is running.
+    """
+    service = _SignallingPrinter(started, as_service=True, hc_freq=1.0, max_duration=10)
+
+    if fail_on_shutdown:
+        patcher = mock.patch.object(
+            service,
+            "_on_shutdown",
+            side_effect=RuntimeError("Kaboom!"),
+        )
+        patcher.start()
+
+    await service.execute()
+
+
+def run_a_printer(started: "mp_sync.Event") -> None:
     """Run a PrintingService instance in a separate process.
 
     Utility method for testing signal handling or shutdown behavior.
     """
-    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=10)
-    await service.execute()
+    asyncio.run(_serve_printer(started, fail_on_shutdown=False))
 
 
-async def run_a_fail_on_shutdown_printer() -> None:
+def run_a_fail_on_shutdown_printer(started: "mp_sync.Event") -> None:
     """Run a PrintingService instance in a separate process.
 
     Utility method for testing signal handling or shutdown behavior. This service will
     raise an exception on shutdown.
     """
-    service = PrintingService(as_service=True, hc_freq=1.0, max_duration=10)
-    mock.patch.object(
-        service,
-        "_on_shutdown",
-        side_effect=RuntimeError("Kaboom!"),
-    )
-    await service.execute()
+    asyncio.run(_serve_printer(started, fail_on_shutdown=True))
 
 
 @pytest.mark.asyncio
@@ -433,32 +465,46 @@ async def test_signal_handling(fail_on_shutdown: bool) -> None:  # noqa: FBT001
 
     If the service is configured to fail on shutdown, the signal handler must gracefully
     handle the failure without crashing.
+
+    The child is started with the "spawn" method: forking the multi-threaded
+    pytest process can deadlock the child (and has hung CI teardown on Linux,
+    where fork is the default start method).
     """
-    process: mp.Process | None = None
+    ctx = mp.get_context("spawn")
+    started = ctx.Event()
+
+    printer_fn = run_a_fail_on_shutdown_printer
+    if not fail_on_shutdown:
+        # If not failing on shutdown, use the regular printer
+        printer_fn = run_a_printer
+
+    # The service is configured to run for 10 seconds so a signal will
+    # clearly cause it to exit early.
+    process = ctx.Process(target=printer_fn, args=(started,))
 
     try:
-        printer_fn = run_a_fail_on_shutdown_printer
-        if not fail_on_shutdown:
-            # If not failing on shutdown, use the regular printer
-            printer_fn = run_a_printer
-
-        # Configure the test service to run for 90 seconds so a signal will
-        # clearly cause it to exit early.
-        process = mp.Process(target=printer_fn)
         process.start()
-        await asyncio.sleep(0.1)
 
-        term_at = time.time()
+        # spawn boots a fresh interpreter, so wait until the service's main
+        # loop is running before terminating it.
+        assert started.wait(timeout=30), "service process did not start"
+
         process.terminate()  # Send a signal to terminate the service
-        time_complete = time.time()
 
-        expected_time_to_terminate = 2.0
-        elapsed = time_complete - term_at
-        assert elapsed < expected_time_to_terminate
+        expected_time_to_terminate = 5.0
+        process.join(timeout=expected_time_to_terminate)
+
+        assert process.exitcode is not None, "service did not exit after SIGTERM"
+        # a clean shutdown exits 0; the fail-on-shutdown service re-raises on
+        # the main thread and exits nonzero, but must still exit promptly.
+        expected_exitcode = 1 if fail_on_shutdown else 0
+        assert process.exitcode == expected_exitcode
 
     finally:
-        if process and process.is_alive():
+        if process.is_alive():
             process.kill()
+        process.join(timeout=5)
+        process.close()
 
 
 @pytest.mark.skip(
