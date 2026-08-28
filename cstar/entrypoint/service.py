@@ -142,9 +142,13 @@ class Service(ABC, LoggingMixin):
         Called on initial entry into Service lifecycle before the main service logic
         begins execution. Allows for subclasses to perform any required initialization
         logic.
+
+        The stop event must not be cleared here: signal handlers are installed in
+        `__init__`, so a termination signal delivered before startup completes has
+        already set the event, and clearing it would silently drop that shutdown
+        request (the event is created fresh in `__init__`).
         """
         self.log.trace(f"Starting {self._service_type}")
-        self._stop_event.clear()
 
     def _on_shutdown(self) -> None:
         """Empty hook method for use by subclasses.
