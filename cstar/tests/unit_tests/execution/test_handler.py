@@ -114,7 +114,9 @@ class TestExecutionHandlerUpdates:
         Mocks
         -----
         MockExecutionHandler.status
-            Mocked to return `ExecutionStatus.RUNNING`, simulating a running job.
+            Starts as `ExecutionStatus.RUNNING` and is flipped to `COMPLETED` by the
+            writer thread once all output is written, so `updates()` drains the tail
+            and returns on its own rather than racing a wall-clock budget.
 
         Fixtures
         --------
@@ -148,13 +150,16 @@ class TestExecutionHandlerUpdates:
                     time.sleep(0.01)  # Ensure `updates()` is actively reading
                     f.write(line)
                     f.flush()  # Immediately write to disk
+            # finish the job; `updates()` exits via the terminal-tail path, so
+            # `seconds` is only an upper bound and no line can outrun the clock
+            handler._status = ExecutionStatus.COMPLETED
 
         # Start the live update simulation in a background thread
         updater_thread = threading.Thread(target=append_live_updates, daemon=True)
         updater_thread.start()
 
         # Run the `updates` method
-        await handler.updates(seconds=0.25)
+        await handler.updates(seconds=5)
 
         # Ensure both initial and live update lines are printed
         captured = caplog.text
