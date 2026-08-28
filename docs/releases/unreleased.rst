@@ -56,6 +56,10 @@ Bug Fixes
 - Values set via ``blueprint_overrides`` (e.g. ``use_pio``) were invisible to downstream steps inspecting a producer's configuration, sending restart-file searches to the wrong directory. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
 - The local launcher logged an adaptation-failure traceback for steps whose compute overrides carried only scheduler (slurm) keys. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
 - A SLURM submission whose declared ``compute_overrides`` fail validation now aborts with an error instead of submitting with default resources and a warning. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- Fixed an intermittent deadlock that hung the ubuntu-3.13 unit-test job for 6 hours after all tests had passed: ``test_signal_handling`` now starts its child process with the spawn method instead of forking the multi-threaded test runner. (`#652 <https://github.com/CWorthy-ocean/C-Star/pull/652>`_)
+- ``Service`` now restores the SIGINT/SIGTERM handlers it replaced once it shuts down; previously any process that constructed a ``Service`` was permanently left with handlers that swallow both signals (this is why hung CI jobs could not be cancelled cleanly and had to be SIGKILLed with no traceback). (`#652 <https://github.com/CWorthy-ocean/C-Star/pull/652>`_)
+- A termination signal delivered to a ``Service`` between construction and startup was silently dropped: handlers are installed in ``__init__``, but ``_on_start`` cleared the stop event the handler had already set, so the service ran to its configured duration instead of shutting down. The clear is removed (the event is created fresh in ``__init__``). (`#652 <https://github.com/CWorthy-ocean/C-Star/pull/652>`_)
+- ``test_signal_handling`` was passing vacuously: its ``async def`` targets were handed directly to ``mp.Process``, so the child only created an un-awaited coroutine and exited immediately, and the fail-on-shutdown variant never started its ``mock.patch``. The child now actually runs the service via ``asyncio.run``, the test synchronizes on a ``started`` event instead of a fixed sleep, and it verifies the child's exit code for both the clean and fail-on-shutdown paths. (`#652 <https://github.com/CWorthy-ocean/C-Star/pull/652>`_)
 
 
 Improvements
@@ -67,6 +71,7 @@ Improvements
 - Auto-migration of an already-current blueprint is a no-op: nothing is persisted to the state directory and the original file is used as-is. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Fixed reliance on an implicit dependency installed by pydantic (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
 - ``build_and_run_dag`` split into ``build_dag`` and ``run_dag`` to support proper plan reloading (`#642 <https://github.com/CWorthy-ocean/C-Star/pull/642>`_)
+- Added an autouse fixture to the unit-test conftest that restores SIGINT/SIGTERM handlers after every test, so no test can leak signal handlers into the rest of the suite. (`#652 <https://github.com/CWorthy-ocean/C-Star/pull/652>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
@@ -75,3 +80,4 @@ Miscellaneous
 - Test fixtures (``blueprint_complete.yaml``, ``blueprint_template.yaml``, unit-test conftest data) migrated to 3.0.0. (`#643 <https://github.com/CWorthy-ocean/C-Star/pull/643>`_)
 - Made a migrate-CLI test assertion robust to console line-wrapping, which could split the expected error message at an arbitrary point depending on the tmp-path length (flaky in CI). (`#650 <https://github.com/CWorthy-ocean/C-Star/pull/650>`_)
 - Workplan documentation gains a Deferred Blueprints example; the workplan JSON schema accepts the new ``blueprint`` mapping form. (`#646 <https://github.com/CWorthy-ocean/C-Star/pull/646>`_)
+- The unit-test CI job now has ``timeout-minutes: 30``, so any future hang fails within minutes (with logs flushed immediately) instead of holding a runner for 6 hours. (`#652 <https://github.com/CWorthy-ocean/C-Star/pull/652>`_)
