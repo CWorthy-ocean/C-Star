@@ -1,10 +1,13 @@
 import asyncio
 import typing as t
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import typer
 from pydantic import ValidationError
 
+import cstar
 from cstar.applications.core import (
     RunnerRequest,
     get_app_for_blueprint,
@@ -53,6 +56,21 @@ CMD_HELP: t.Final[str] = "Execute a blueprint in a local worker service."
 
 app = typer.Typer()
 log = get_logger(__name__)
+
+
+def _log_startup_versions() -> None:
+    """Best-effort startup log line recording installed CWorthy library versions,
+    so a run's own log records what generated it.
+    """
+    # TODO: warn when installed versions are known-incompatible with each other
+    # (e.g. roms-tools vs cstar-ocean) -- deferred as a follow-up; this only
+    # records what's installed.
+    versions = [f"cstar-ocean=={cstar.__version__}"]
+    try:
+        versions.append(f"roms-tools=={_pkg_version('roms-tools')}")
+    except PackageNotFoundError:
+        pass
+    log.info("Versions: %s", ", ".join(versions))
 
 
 def path_callback(
@@ -206,6 +224,8 @@ def run(
     ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
+    _log_startup_versions()
+
     if DeferredBlueprintRef.matches(uri):
         ref = DeferredBlueprintRef.from_uri(uri)
         try:
