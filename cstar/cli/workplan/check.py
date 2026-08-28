@@ -3,6 +3,7 @@ import typing as t
 import typer
 
 from cstar.orchestration.models import Workplan
+from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import validate_serialized_entity
 
 app = typer.Typer()
@@ -23,7 +24,16 @@ def check(
         `True` if valid
     """
     result = validate_serialized_entity(path, Workplan)
-    if result.item is None:
-        raise typer.BadParameter(result.error_msg)
+    if result.item:
+        print(f"The workplan `{result.item.name}` is valid")
+        raise typer.Exit(0)
 
-    print(f"The workplan `{result.item.name}` is valid")
+    # stash original error in case it's a live workplan
+    error = result.error_msg
+
+    result = validate_serialized_entity(path, LiveWorkplan)
+    if result.item:
+        print(f"The workplan `{result.item.name}` is valid")
+        raise typer.Exit(0)
+
+    raise typer.BadParameter(error)
