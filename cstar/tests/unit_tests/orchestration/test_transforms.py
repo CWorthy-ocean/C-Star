@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
@@ -38,6 +39,7 @@ from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
     apply_automatic_overrides,
+    effective_blueprint,
     get_fsm_resolver,
     get_system_overrides,
     get_transforms,
@@ -525,8 +527,9 @@ def test_workplan_transformer_applies_working_dir_overrides(
     test_working_dir: Path,
     test_working_dir_override: Path,
 ) -> None:
-    """Verify that the workplan transformer applies a transform to override
-    the output directory for all steps.
+    """Verify that the workplan transformer packages the working-dir override
+    for a step without an active app transform, rather than rewriting its
+    blueprint file.
 
     Parameters
     ----------
@@ -565,21 +568,27 @@ def test_workplan_transformer_applies_working_dir_overrides(
     assert dir_orig == test_working_dir
     assert original_override == str(test_working_dir_override)
 
-    # confirm no override remains on the step
-    assert "runtime_params" not in step_trx.blueprint_overrides
+    # the step keeps its original blueprint path; nothing is rewritten to disk
+    assert str(step_trx.blueprint_path) == str(original_bp_path)
 
-    # confirm the transformed step includes an updated blueprint path.
-    trx_bp_path = step_trx.blueprint_path
-    assert str(trx_bp_path) != str(original_bp_path)
+    # user overrides moved out of the step and into the runtime directive
+    assert not step_trx.blueprint_overrides
 
-    # confirm the original and updated blueprint have different output directories
-    blueprint = deserialize(trx_bp_path, RomsMarblBlueprint)
-    assert blueprint.working_dir != dir_orig
+    directives = t.cast("dict[str, dict[str, t.Any]]", step_trx.directives)
+    assert ApplyOverridesDirective.key() in directives
 
-    # confirm the workplan override took precedence over user-supplied overrides
-    assert blueprint.working_dir == sys_working_dir_override  # exp_dir
-    assert blueprint.working_dir != dir_orig
-    assert blueprint.working_dir != original_override
+    config = directives[ApplyOverridesDirective.key()]
+    overrides = config[ApplyOverridesDirective.KEY_OVERRIDES]
+
+    # user-supplied override keys are carried into the directive payload
+    assert "runtime_params" in overrides
+
+    # the system-level override took precedence over the user-supplied value
+    assert overrides["working_dir"] == sys_working_dir_override.as_posix()
+    assert overrides["working_dir"] != dir_orig
+    assert overrides["working_dir"] != original_override
+
+    assert config[ApplyOverridesDirective.KEY_APPLICATION] == step_orig.application
 
 
 @pytest.fixture
@@ -1348,22 +1357,32 @@ def test_workplan_transformer_deferred_step(deferred_workplan: Workplan) -> None
 def test_workplan_transformer_deferred_untouched_by_producer_transform(
     deferred_workplan: Workplan,
 ) -> None:
-    """Verify the producer step is transformed normally while the deferred
-    consumer is left for runtime resolution.
+    """Verify the producer step is transformed via the common (no-rewrite)
+    path while the deferred consumer is left for runtime resolution.
 
     Parameters
     ----------
     deferred_workplan : Workplan
         A workplan whose second step defers its blueprint to the first.
     """
+    original_producer = next(s for s in deferred_workplan.steps if s.name == "producer")
+    original_bp_path = Path(original_producer.blueprint_path)
+
     transformer = WorkplanTransformer(deferred_workplan)
     transformed = transformer.apply()
 
-    producer = next(s for s in transformed.steps if s.name == "producer")
+    producer = t.cast(
+        "LiveStep",
+        next(s for s in transformed.steps if s.name == "producer"),
+    )
 
-    # the producer blueprint was baked into an override copy as usual
-    assert OverrideTransform.suffix() in str(producer.blueprint_path)
+    # the producer keeps its original blueprint path; nothing is rewritten to disk
+    assert str(producer.blueprint_path) == str(original_bp_path)
     assert Path(producer.blueprint_path).exists()
+
+    # the producer's (empty) overrides were still packaged into a runtime directive
+    directives = t.cast("dict[str, dict[str, t.Any]]", producer.directives)
+    assert ApplyOverridesDirective.key() in directives
 
 
 def test_workplan_transformer_deferred_active_transform_raises(
@@ -1447,6 +1466,180 @@ def test_workplan_transformer_deferred_inactive_transform_ok(
 
     consumer_trx = next(s for s in transformed.steps if s.name == "consumer")
     assert consumer_trx.is_deferred
+
+
+def test_workplan_transformer_bad_overrides_fail_at_transform_time(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify overrides invalid for a readable blueprint fail fast at
+    schedule (transform) time rather than being deferred to runtime.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        blueprint_overrides={"not_a_real_field": "oops"},
+    )
+    wp = Workplan(
+        name="bad-overrides-workplan",
+        description="A workplan whose step declares an unknown override key.",
+        steps=[step],
+    )
+
+    with pytest.raises(ValidationError):
+        _ = WorkplanTransformer(wp).apply()
+
+
+def test_preflight_overrides_injects_cpus_needed(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step without a declared cpu count has its `compute_overrides`
+    enriched with the merged blueprint's `cpus_needed`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+    )
+    wp = Workplan(
+        name="cpus-injection-workplan",
+        description="A workplan whose step declares no compute overrides.",
+        steps=[step],
+    )
+    expected_cpus = deserialize(hello_world_bp_path, HelloWorldBlueprint).cpus_needed
+
+    transformed = WorkplanTransformer(wp).apply()
+    trx_step = t.cast("LiveStep", transformed.steps[0])
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", trx_step.compute_overrides
+    )
+
+    assert compute_overrides["slurm"]["num_cpus"] == expected_cpus
+
+
+def test_preflight_overrides_respects_declared_cpus(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a step that already declares `num_cpus` keeps its declared
+    value rather than having it replaced by the blueprint's `cpus_needed`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        compute_overrides={"slurm": {"num_cpus": 7}},
+    )
+    wp = Workplan(
+        name="cpus-declared-workplan",
+        description="A workplan whose step already declares num_cpus.",
+        steps=[step],
+    )
+
+    transformed = WorkplanTransformer(wp).apply()
+    trx_step = t.cast("LiveStep", transformed.steps[0])
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", trx_step.compute_overrides
+    )
+
+    assert compute_overrides["slurm"]["num_cpus"] == 7
+
+
+def test_preflight_overrides_deferred_step_skips_cpu_injection(
+    deferred_workplan: Workplan,
+) -> None:
+    """Verify a deferred step's `compute_overrides` are left untouched: its
+    blueprint is not available at schedule time, so no `cpus_needed` can be
+    read to inject.
+
+    Parameters
+    ----------
+    deferred_workplan : Workplan
+        A workplan whose second step defers its blueprint to the first.
+    """
+    transformed = WorkplanTransformer(deferred_workplan).apply()
+
+    consumer = t.cast(
+        "LiveStep",
+        next(s for s in transformed.steps if s.name == "consumer"),
+    )
+
+    assert consumer.is_deferred
+    assert "slurm" not in consumer.compute_overrides
+
+
+def test_preflight_overrides_rejects_non_mapping_slurm(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a non-mapping `slurm` compute override fails loudly at
+    transform time rather than crashing with an opaque internal error.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        compute_overrides={"slurm": "oops"},
+    )
+    wp = Workplan(
+        name="bad-compute-overrides",
+        description="A workplan whose step declares a non-mapping slurm override.",
+        steps=[step],
+    )
+
+    with pytest.raises(CstarExpectationFailed, match="non-mapping"):
+        _ = WorkplanTransformer(wp).apply()
+
+
+def test_effective_blueprint_merges_packaged_overrides(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `effective_blueprint` reflects a transformed step's packaged
+    runtime overrides without persisting anything.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        blueprint_overrides={"target": "overridden-at-runtime"},
+    )
+    wp = Workplan(
+        name="effective-blueprint",
+        description="A workplan exercising effective_blueprint.",
+        steps=[step],
+    )
+    transformed = WorkplanTransformer(wp).apply()
+    step_trx = t.cast("LiveStep", transformed.steps[0])
+
+    blueprint = effective_blueprint(step_trx)
+
+    # the merged content is visible even though the file on disk is unchanged
+    assert blueprint.target == "overridden-at-runtime"  # type: ignore[attr-defined]
+    original = deserialize(step_trx.blueprint_path, type(blueprint))
+    assert original.target != "overridden-at-runtime"  # type: ignore[attr-defined]
 
 
 def test_apply_overrides_directive(

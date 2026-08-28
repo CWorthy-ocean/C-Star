@@ -257,11 +257,12 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         enricher: ModelEnricher[RunRequest] | None = None
 
-        if step.compute_overrides:
+        # overrides for other launchers (e.g. the slurm cpu requirement the
+        # workplan transformer records) are not this launcher's concern
+        if step.compute_overrides.get("local"):
             try:
-                if step.compute_overrides:
-                    compute = LocalComputeAdapter().adapt(step.compute_overrides)
-                    enricher = TimeConstrainedRunRequestEnricher(compute)
+                compute = LocalComputeAdapter().adapt(step.compute_overrides)
+                enricher = TimeConstrainedRunRequestEnricher(compute)
             except CstarAdaptationError:
                 msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
                 log.warning(msg, exc_info=True)

@@ -116,6 +116,10 @@ def test_proxy_script_propagates_dependency_outcome(
     [
         pytest.param({"local": {}}, id="empty local overrides"),
         pytest.param({}, id="no overrides"),
+        pytest.param(
+            {"slurm": {"num_cpus": 4}},
+            id="foreign launcher overrides ignored",
+        ),
     ],
 )
 def test_locallauncher_adapt_step_formatter_selection(

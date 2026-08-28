@@ -15,7 +15,7 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.base.exceptions import CstarError
+from cstar.base.exceptions import BlueprintDeferredError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
@@ -28,13 +28,13 @@ from cstar.base.utils import (
     slugify,
 )
 from cstar.execution.file_system import RomsFileSystemManager
-from cstar.orchestration.models import DeferredBlueprintRef
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
     DirectiveConfig,
     OverrideDirective,
     SplitFrequency,
+    effective_blueprint,
     get_time_slices,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
@@ -101,16 +101,6 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
         Sequence[LiveStep]
             Steps for each subtask resulting from the split.
         """
-        if not is_feature_enabled(ENV_FF_ORCH_TRX_TIMESPLIT):
-            return [step]
-
-        if isinstance(step.blueprint_path, DeferredBlueprintRef):
-            msg = (
-                f"Cannot split step {step.name!r}: its deferred blueprint "
-                "does not exist at schedule time"
-            )
-            raise CstarError(msg)
-
         blueprint = t.cast("RomsMarblBlueprint", step.blueprint)
         start_date = blueprint.runtime_params.start_date
         end_date = blueprint.runtime_params.end_date
@@ -690,7 +680,14 @@ class ContinuanceDirective(OverrideDirective):
 
                 # With ParallelIO there are no partitioned restart files to
                 # reuse; the joined restart files live in `joined_output`.
-                blueprint = step.blueprint
+                try:
+                    # merge the step's packaged runtime overrides so values
+                    # set via blueprint_overrides (e.g. use_pio) are visible
+                    blueprint = effective_blueprint(step)
+                except BlueprintDeferredError:
+                    # Backstop: deferred+split is prohibited upstream, so treat as non-PIO.
+                    blueprint = None
+
                 if (
                     isinstance(blueprint, RomsMarblBlueprint)
                     and blueprint.partitioning.use_pio

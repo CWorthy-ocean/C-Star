@@ -10,7 +10,7 @@ from cstar.base.env import (
     ENV_CSTAR_SLURM_POST_SUBMIT_DELAY,
     get_env_item,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, _run_cmd
 from cstar.execution.handler import ExecutionStatus
@@ -182,16 +182,26 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     def _get_default_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
         """Create the default compute spec for SLURM.
 
-        A deferred step has no blueprint to read `cpus_needed` from and
-        defaults to 1 cpu; the workplan author predicts a deferred step's
-        needs via `compute_overrides`.
+        `num_cpus` here is only a floor: the workplan transformer records
+        each step's actual cpu requirement into
+        `compute_overrides["slurm"]["num_cpus"]` at schedule time (read from
+        the blueprint where it can be), and `_get_compute_spec` overlays
+        those `compute_overrides` on top of this default. The launcher
+        itself never inspects blueprint content, so this stays correct for
+        both ordinary and deferred steps.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step being scheduled. Reserved for parity with the rest of
+            the compute-spec API; not consulted for `num_cpus`.
 
         Returns
         -------
         SlurmComputeSpec
         """
         return SlurmComputeSpec(
-            num_cpus=step.blueprint.cpus_needed if step.blueprint else 1,
+            num_cpus=1,
             max_walltime=SlurmLauncher.configured_walltime(),
             queue_name=SlurmLauncher.configured_queue(),
             account_name=SlurmLauncher.configured_account(),
@@ -220,9 +230,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 compute = default_compute.model_copy(
                     update=overrides.model_dump(exclude_defaults=True)
                 )
-            except CstarAdaptationError:
+            except CstarAdaptationError as ex:
+                # the default spec is only a 1-cpu floor; submitting with it
+                # in place of the declared resources must fail, not warn
                 msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
-                log.warning(msg, exc_info=True)
+                raise CstarError(msg) from ex
         return compute
 
     @staticmethod
