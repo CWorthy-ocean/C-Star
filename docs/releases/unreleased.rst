@@ -16,6 +16,9 @@ New features
 
 
 - Add support for the Bouchet HPC (`#628 <https://github.com/CWorthy-ocean/C-Star/pull/628>`_)
+- New ``cstar.roms.precheck.check_output_streams_divide_rst(settings, cppdefs)`` reproduces ucla-roms >= 0.5.0's startup check (``precheck.F90::check_output_divides_rst``) across all output streams: it raises when an enabled stream's file-rollover frequency (``nrpf * output_period``) is not positive or does not evenly divide ``output_period_rst``. It operates on the canonical namelist vocabulary (a ``RomsNamelistBase.model_dump()``), with compile-time-gated streams (diagnostics and the MARBL/BGC-diagnostics groups) governed by a caller-supplied set of active cppdefs. (`#655 <https://github.com/CWorthy-ocean/C-Star/pull/655>`_)
+- ``ROMSSimulation`` now runs this check when assembling run-time settings (after ``namelist_overrides`` are applied), for ucla-roms >= 0.5.0 namelist schemas — a non-conforming override fails fast with a clear message instead of aborting mid-run. Active cppdefs are read from the staged ``cppdefs.opt`` when available; when compile-time code isn't staged yet, cppdef-gated streams are skipped (ucla-roms still enforces them at startup). (`#655 <https://github.com/CWorthy-ocean/C-Star/pull/655>`_)
+- ``cstar blueprint run`` now logs the installed cstar-ocean version (plus cstar-forge and roms-tools when installed) at the start of a run, so a run's own log records what produced it. (`#655 <https://github.com/CWorthy-ocean/C-Star/pull/655>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -23,6 +26,8 @@ Bug Fixes
 
 - Fix bug loading workplan affecting ``cstar workplan log`` (`#628 <https://github.com/CWorthy-ocean/C-Star/pull/628>`_)
 - Fix bug loading workplan affecting ``cstar workplan check`` (`#628 <https://github.com/CWorthy-ocean/C-Star/pull/628>`_)
+- ``test_blueprint_run_apply_directive_dne`` failed on environments where typer/rich render usage errors as a wrapped panel — the box borders and width-dependent wrapping split the (correct) "file not found" message mid-phrase; the assertion now matches independent of panel decoration. (`#655 <https://github.com/CWorthy-ocean/C-Star/pull/655>`_)
+- The orchestration transformer tests littered a ``work/`` directory (``*.ovrd.yaml``/``*.cfrom.yaml`` artifacts) into the repository checkout: their in-memory ``Step``s have no working directory, so the job file-system root fell back to the CWD; ``test_transforms.py`` now runs from ``tmp_path``. (`#655 <https://github.com/CWorthy-ocean/C-Star/pull/655>`_)
 
 Improvements
 ~~~~~~~~~~~~
