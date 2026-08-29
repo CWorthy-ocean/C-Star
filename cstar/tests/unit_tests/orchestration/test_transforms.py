@@ -48,6 +48,20 @@ from cstar.orchestration.transforms import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _run_in_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run every test in this module from ``tmp_path``.
+
+    Several tests build in-memory ``Step``/``Workplan`` objects with no working
+    directory, so the job file-system root resolves relative to the CWD and the
+    transformer's derived artifacts (``*.ovrd.yaml``, ``*.cfrom.yaml``) land in
+    ``<cwd>/work/`` -- littering the repository checkout when pytest runs from
+    the repo root. All fixture paths used here are absolute (``tmp_path`` or
+    ``__file__``-anchored templates), so changing the CWD is safe.
+    """
+    monkeypatch.chdir(tmp_path)
+
+
 @pytest.fixture
 def test_wp_path(tmp_path: Path) -> Path:
     """Default path for writing a workplan into the test output directory."""

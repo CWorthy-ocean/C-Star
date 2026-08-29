@@ -362,7 +362,11 @@ def test_blueprint_run_apply_directive_dne(directive_path: str) -> None:
             color=False,
         )
 
-    assert "file not found" in result.stderr
+    # Depending on the installed typer/rich versions, usage errors render as a
+    # rich panel whose box borders and width-dependent wrapping can split the
+    # phrase across lines -- collapse the decoration before matching.
+    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    assert "file not found" in stderr_flat
     mock_exec.assert_not_called()
 
 
