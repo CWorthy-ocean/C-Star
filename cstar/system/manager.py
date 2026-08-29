@@ -29,51 +29,6 @@ from cstar.system.scheduler import (
 log = get_logger(__name__)
 
 
-class AnvilEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Anvil* system.
-
-    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
-    hostname matching test in `is_match`.
-    """
-
-    HOST_IDENTIFIER: ClassVar[str] = "anvil"
-    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
-    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
-    """The hostname of the machine.
-
-    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
-    """
-
-
-class EljaEnvSettings(SlurmSettingsBase):
-    """Environment variables required to execute a simulation on the *Elja* system.
-
-    NOTE: Elja does not support SLURM account names.
-    """
-
-    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
-    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
-    CLUSTER_IDENTIFIER: ClassVar[str] = "elja"
-    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
-
-    HOSTNAME: str = Field(default="", alias="HOSTNAME")
-    """The hostname of the machine.
-
-    Used to identify the system as Elja by matching value: `elja-irhpc`
-    """
-    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
-    """The SLURM account name.
-
-    Overridden from SlurmSettingsBase to allow empty account.
-    """
-    SLURM_QUEUE: str = Field(default="")
-    """The SLURM queue name."""
-    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
-    """The number of threads to be used by OpenMPI"""
-    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
-    """The number of threads used by MKL"""
-
-
 class HostNameEvaluator:
     """Container of host-specific names used to determine the system name that will be
     used by C-Star.
@@ -240,34 +195,20 @@ def get_registered_sys_contexts() -> Sequence[type[SystemContext]]:
     return list(CTX_REGISTRY.values())
 
 
-@register_sys_context
-@dataclass(frozen=True)
-class PerlmutterSystemContext(SystemContext):
-    """The contextual dependencies for the Perlmutter system."""
+class AnvilEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Anvil* system.
 
-    name: ClassVar[str] = "perlmutter"
-    """The unique name identifying the Perlmutter system."""
-    compiler: ClassVar[str] = "gnu"
-    """The compiler used on Perlmutter."""
-    mpi_prefix: ClassVar[str] = "srun --kill-on-bad-exit=1"
-    """The MPI prefix used on Perlmutter."""
-    docs: ClassVar[str] = "https://docs.nersc.gov/systems/perlmutter/architecture/"
-    """URI for documentation of the Perlmutter system."""
+    `AnvilEnvSettings` overrides behaviors of `SlurmSettingsBase` by implementing a unique
+    hostname matching test in `is_match`.
+    """
 
-    @classmethod
-    def create_scheduler(cls) -> Scheduler | None:
-        per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
-        per_shared_q = SlurmQOS(name="shared")
-        per_debug_q = SlurmQOS(name="debug")
+    HOST_IDENTIFIER: ClassVar[str] = "anvil"
+    """Constant value in `RCAC_CLUSTER` env var on *Anvil* that uniquely identifies the system."""
+    RCAC_CLUSTER: str = Field(default="", alias="RCAC_CLUSTER")
+    """The hostname of the machine.
 
-        return SlurmScheduler(
-            queues=[per_regular_q, per_shared_q, per_debug_q],
-            primary_queue_name="regular",
-            other_scheduler_directives={"-C": "cpu"},
-            requires_task_distribution=False,
-            documentation=cls.docs,
-            max_cpus_per_node=128,
-        )
+    Used to identify the system as `Anvil` by matching value: `RCAC_CLUSTER=anvil`
+    """
 
 
 @register_sys_context
@@ -326,6 +267,97 @@ class AnvilSystemContext(SystemContext):
         return os.getenv("RCAC_CLUSTER", "") == AnvilEnvSettings.HOST_IDENTIFIER
 
 
+class BouchetEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Bouchet* system."""
+
+    HOST_IDENTIFIER: ClassVar[str] = "bouchet"
+    """Fixed value in HOSTNAME env var on Bouchet that uniquely identifies the system."""
+    CLUSTER_IDENTIFIER: ClassVar[str] = "bouchet"
+    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
+
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
+    """The hostname of the machine.
+
+    May be used to identify the system as Bouchet by matching value: `???`
+    """
+
+
+@register_sys_context
+@dataclass(frozen=True)
+class BouchetSystemContext(SystemContext):
+    """The contextual dependencies for the Anvil system."""
+
+    name: ClassVar[str] = "bouchet"
+    """The unique name identifying the Anvil system."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on Anvil."""
+    mpi_prefix: ClassVar[str] = "srun"
+    """The MPI prefix used on Anvil."""
+    docs: ClassVar[str] = "https://docs.ycrc.yale.edu/clusters/bouchet"
+    """URI for documentation of the Anvil system."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        day_queue = SlurmPartition(
+            name="day",
+            query_name="day",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Partition with 24 hour max walltime (1-00:00:00)."""
+        week_queue = SlurmPartition(
+            name="week",
+            query_name="week",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Partition with 7 day max walltime (7-00:00:00)."""
+        gpu_queue = SlurmPartition(
+            name="gpu",
+            query_name="gpu",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Partition with 2 day max walltime (2-00:00:00) and GPU nodes."""
+        bigmem_queue = SlurmPartition(
+            name="bigmem",
+            query_name="bigmem",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Partition with 1 day max walltime (1-00:00:00) and 8000G memory limit."""
+        mpi_queue = SlurmPartition(
+            name="mpi",
+            query_name="mpi",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Partition with 2 day max walltime (2-00:00:00) and tuned for parallel MPI jobs."""
+
+        return SlurmScheduler(
+            queues=[day_queue, week_queue, gpu_queue, bigmem_queue, mpi_queue],
+            primary_queue_name="day",
+            other_scheduler_directives={},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
+
+    @override
+    @classmethod
+    def settings_klass(cls) -> type[SlurmSettingsBase] | None:
+        """Return the type used to load settings required by the target system."""
+        return BouchetEnvSettings
+
+    @override
+    @classmethod
+    def is_match(cls) -> bool:
+        """Return `True` if the current system is identified as *Bouchet* by matching
+        values contained in environment variables.
+        """
+        if os.getenv("CLUSTER", "") == BouchetEnvSettings.HOST_IDENTIFIER:
+            return True
+
+        return (
+            os.getenv("SLURM_CLUSTER_NAME", "") == BouchetEnvSettings.CLUSTER_IDENTIFIER
+        )
+
+
 @register_sys_context
 @dataclass(frozen=True)
 class DerechoSystemContext(SystemContext):
@@ -355,6 +387,35 @@ class DerechoSystemContext(SystemContext):
             requires_task_distribution=True,
             documentation=cls.docs,
         )
+
+
+class EljaEnvSettings(SlurmSettingsBase):
+    """Environment variables required to execute a simulation on the *Elja* system.
+
+    NOTE: Elja does not support SLURM account names.
+    """
+
+    HOST_IDENTIFIER: ClassVar[str] = "elja-irhpc"
+    """Fixed value in HOSTNAME env var on Elja that uniquely identifies the system."""
+    CLUSTER_IDENTIFIER: ClassVar[str] = "elja"
+    """Fixed value in SLURM_CLUSTER_NAME on compute nodes that identifies the system."""
+
+    HOSTNAME: str = Field(default="", alias="HOSTNAME")
+    """The hostname of the machine.
+
+    Used to identify the system as Elja by matching value: `elja-irhpc`
+    """
+    SLURM_ACCOUNT: str = Field(default="", frozen=True, min_length=0)
+    """The SLURM account name.
+
+    Overridden from SlurmSettingsBase to allow empty account.
+    """
+    SLURM_QUEUE: str = Field(default="")
+    """The SLURM queue name."""
+    OMP_NUM_THREADS: str = Field(default="", alias="OMP_NUM_THREADS")
+    """The number of threads to be used by OpenMPI"""
+    MKL_NUM_THREADS: str = Field(default="", alias="MKL_NUM_THREADS")
+    """The number of threads used by MKL"""
 
 
 @register_sys_context
@@ -455,6 +516,22 @@ class ExpanseSystemContext(SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
+class LinuxARM64SystemContext(SystemContext):
+    name: ClassVar[str] = "linux_aarch64"
+    """The unique name identifying the Linux system on an ARM64 platform."""
+    compiler: ClassVar[str] = "gnu"
+    """The compiler used on ARM64 Linux."""
+    mpi_prefix: ClassVar[str] = "mpirun"
+    """The MPI prefix used on Linux."""
+
+    @classmethod
+    def create_scheduler(cls) -> Scheduler | None:
+        """Return None - a scheduler on the Linux system is not supported."""
+        return None
+
+
+@register_sys_context
+@dataclass(frozen=True)
 class LinuxSystemContext(SystemContext):
     """The contextual dependencies for the Linux system on the x86_64 platform."""
 
@@ -489,18 +566,32 @@ class MacOSSystemContext(SystemContext):
 
 @register_sys_context
 @dataclass(frozen=True)
-class LinuxARM64SystemContext(SystemContext):
-    name: ClassVar[str] = "linux_aarch64"
-    """The unique name identifying the Linux system on an ARM64 platform."""
+class PerlmutterSystemContext(SystemContext):
+    """The contextual dependencies for the Perlmutter system."""
+
+    name: ClassVar[str] = "perlmutter"
+    """The unique name identifying the Perlmutter system."""
     compiler: ClassVar[str] = "gnu"
-    """The compiler used on ARM64 Linux."""
-    mpi_prefix: ClassVar[str] = "mpirun"
-    """The MPI prefix used on Linux."""
+    """The compiler used on Perlmutter."""
+    mpi_prefix: ClassVar[str] = "srun --kill-on-bad-exit=1"
+    """The MPI prefix used on Perlmutter."""
+    docs: ClassVar[str] = "https://docs.nersc.gov/systems/perlmutter/architecture/"
+    """URI for documentation of the Perlmutter system."""
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
-        """Return None - a scheduler on the Linux system is not supported."""
-        return None
+        per_regular_q = SlurmQOS(name="regular", query_name="regular_1")
+        per_shared_q = SlurmQOS(name="shared")
+        per_debug_q = SlurmQOS(name="debug")
+
+        return SlurmScheduler(
+            queues=[per_regular_q, per_shared_q, per_debug_q],
+            primary_queue_name="regular",
+            other_scheduler_directives={"-C": "cpu"},
+            requires_task_distribution=False,
+            documentation=cls.docs,
+            max_cpus_per_node=128,
+        )
 
 
 class CStarSystemManager:
