@@ -21,7 +21,11 @@ from datetime import datetime
 from pathlib import Path
 
 from cstar_forge import config
-from cstar_forge.forge.forge_blueprint import ForgeBlueprint
+from cstar_forge.forge.forge_blueprint import (
+    ForgeBlueprint,
+    _forge_version,
+    _installed_version,
+)
 from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
 
 # Loggers whose level gets lowered while capturing, so the file actually receives
@@ -76,8 +80,52 @@ class _Tee:
         return getattr(self._stream, name)
 
 
+def _version_banner_lines(cfg=None) -> list[str]:
+    """Best-effort CWorthy library/version lines for the run-log startup banner.
+
+    ``cstar-forge``/``cstar-ocean``/``roms-tools`` come from installed-package
+    metadata (see ``_forge_version``/``_installed_version``); ``ucla-roms`` and
+    MARBL have no pip package, so their pinned git ref is read off ``cfg.code``
+    instead, if a blueprint was supplied. Entries with no available value are
+    skipped. Never raises -- this is logging, not a dependency check.
+    """
+    # TODO(punchlist follow-up): warn when installed/pinned versions are known
+    # incompatible with each other -- deferred, this only records what's present.
+    lines = []
+    forge_version = _forge_version()
+    if forge_version:
+        # _forge_version() returns either a bare `git describe` or an already
+        # labeled `cstar-forge==x` fallback -- label the former so every line
+        # names its library.
+        lines.append(
+            f"  {forge_version}"
+            if forge_version.startswith("cstar-forge")
+            else f"  cstar-forge: {forge_version}"
+        )
+    for value in (
+        _installed_version("cstar-ocean"),
+        _installed_version("roms-tools"),
+    ):
+        if value:
+            lines.append(f"  {value}")
+
+    code = getattr(cfg, "code", None)
+    for label, repo in (
+        ("ucla-roms", getattr(code, "roms", None)),
+        ("marbl", getattr(code, "marbl", None)),
+    ):
+        commit = getattr(repo, "commit", None)
+        branch = getattr(repo, "branch", None)
+        if commit:
+            lines.append(f"  {label}@commit:{commit}")
+        elif branch:
+            lines.append(f"  {label}@branch:{branch}")
+
+    return lines
+
+
 @contextlib.contextmanager
-def _capture_output(working_dir, *, verbose=False):
+def _capture_output(working_dir, *, verbose=False, cfg=None):
     """Tee screen output (print + logging) into
     ``<working_dir>/logs/forge_<timestamp>.log`` for the duration of the block, in
     addition to the existing screen output.
@@ -86,7 +134,9 @@ def _capture_output(working_dir, *, verbose=False):
     Logging is routed to the file via a dedicated handler on the root logger rather
     than through the stdout/stderr tee, so log lines aren't double-written when a
     pre-existing ``basicConfig`` handler (the CLI's ``--verbose`` setup) also writes
-    to the original stderr.
+    to the original stderr. ``cfg`` (the resolved ``ForgeBlueprint``, if available) is
+    used only to add pinned ucla-roms/marbl git refs to the version banner printed
+    at the start of the block (see ``_version_banner_lines``).
     """
     log_dir = Path(working_dir) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -114,6 +164,11 @@ def _capture_output(working_dir, *, verbose=False):
             logging.getLogger(name).setLevel(level)
 
         try:
+            # print (not fh.write): sys.stdout is now the tee, so these lines
+            # reach the screen, this log file, AND any subprocess-stdout capture
+            # a caller (e.g. a C-Star step) sets up around this process.
+            for line in _version_banner_lines(cfg):
+                print(line)
             print(f"Forge log: {log_path}")
             yield log_path
         except BaseException:
@@ -147,7 +202,9 @@ def process(spec, *, working_dir=None, **kwargs):
     wd = working_dir if working_dir is not None else cfg.working_dir
     config.ensure_data_dirs()
     host = config.resolve_host(wd)
-    with _capture_output(host.working_dir, verbose=kwargs.get("verbose", False)):
+    with _capture_output(
+        host.working_dir, verbose=kwargs.get("verbose", False), cfg=cfg
+    ):
         return process_forge_blueprint(cfg, host=host, **kwargs)
 
 
@@ -274,7 +331,7 @@ def main(argv: list | None = None, *, prog: str = "python -m cstar_forge.run") -
     config.ensure_data_dirs()
     host = config.resolve_host(wd)
 
-    with _capture_output(host.working_dir, verbose=args.verbose):
+    with _capture_output(host.working_dir, verbose=args.verbose, cfg=cfg):
         print(host.summary(casename=cfg.casename))
         if args.host_only:
             return 0

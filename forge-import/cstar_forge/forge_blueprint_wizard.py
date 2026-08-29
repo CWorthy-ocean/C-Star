@@ -2225,6 +2225,11 @@ class ForgeBlueprintWizard:
             accept=".yml,.yaml", multiple=False, description="…or upload"
         )
         self.load_status = W.HTML("")
+        # True only while load_status holds a load *failure* (an exception from
+        # _on_load_path/_load_bytes) -- distinguishes that from a load *success*
+        # message (_set_load_status, which may itself carry an amber "N invalid
+        # settings value(s)" warning that must NOT be swept away by _rebuild).
+        self._load_status_is_error = False
 
         # --- spec selectors ---
         self.model_dd = W.Dropdown(
@@ -3895,6 +3900,7 @@ class ForgeBlueprintWizard:
             self.load_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
+            self._load_status_is_error = True
             return
         self._set_load_status(cfg, self._populate_from(cfg))
 
@@ -3915,6 +3921,7 @@ class ForgeBlueprintWizard:
             self.load_status.value = (
                 f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
             )
+            self._load_status_is_error = True
             return
         self._set_load_status(cfg, self._populate_from(cfg))
 
@@ -3926,6 +3933,7 @@ class ForgeBlueprintWizard:
                 "settings value(s) in the file</span>"
             )
         self.load_status.value = msg
+        self._load_status_is_error = False
 
     # ---- CDR forcing upload ----------------------------------------------------
     def _on_cdr_upload(self, change):
@@ -4380,7 +4388,16 @@ class ForgeBlueprintWizard:
     def _rebuild(self, *_):
         if getattr(self, "_suspended", False):
             return
+        # Captured before self.config is reassigned below -- used to detect a
+        # real rename (vs. an unrelated edit re-running _rebuild) for the
+        # save_path filename re-sync further down.
+        prev_name = self.config.name if self.config is not None else None
         self.preview.clear_output(wait=True)
+        # self.validation reflects the *last successful* resolve; every early
+        # return below (missing dates, a build/validation exception) leaves a
+        # stale ✓/⚠ message sitting under self.derived's fresh error otherwise
+        # -- clear it once up front so only the success path below re-sets it.
+        self.validation.value = ""
         if self.start.value is None or self.end.value is None:
             self.config = None
             self.derived.value = "<i>Set start and end dates…</i>"
@@ -4499,6 +4516,16 @@ class ForgeBlueprintWizard:
         cfg = cfg.model_copy(update={"model_settings": effective, "composition": comp})
 
         self.config = cfg
+        # A validly-resolving config means whatever state (fixed dropdowns, a
+        # corrected field, ...) got us here has superseded any earlier failed
+        # Load -- don't leave that stale red error sitting around forever. But
+        # load_status also carries a load *success* message (_set_load_status,
+        # possibly with an amber "N invalid settings value(s)" warning found
+        # nowhere else in the UI) -- only clear it when it's currently holding
+        # an error, never a success message.
+        if self._load_status_is_error:
+            self.load_status.value = ""
+            self._load_status_is_error = False
         # Backfill the Export name/save-path fields with the current derived default
         # until the user edits either -- their edit "locks in" that field (see
         # _on_name_change/_on_save_path_change). Under _suspend() so these
@@ -4509,6 +4536,27 @@ class ForgeBlueprintWizard:
                     self.name.value = cfg.name
                 if not self._save_path_touched:
                     self.save_path.value = self._default_blueprint_path(cfg.name)
+        # Independent of the backfill above (and of _name_touched): the derived
+        # name can also change from a grid/procs/model edit with Name left on
+        # auto-derive but Save-to customized to a specific directory -- that
+        # combination skips the backfill (save_path IS touched) entirely, so
+        # without this the filename would never re-sync. Re-sync only on a
+        # genuine rename, and only when the current filename still exactly
+        # tracks the *previous* derived name (i.e. the user hasn't customized
+        # the filename itself) -- preserves the user's directory and any
+        # deliberately-custom filename. Under _suspend() so this doesn't
+        # itself flip _save_path_touched or recurse.
+        if (
+            self._save_path_touched
+            and prev_name is not None
+            and cfg.name != prev_name
+            and Path(self.save_path.value).name == f"{prev_name}.forge_blueprint.yaml"
+        ):
+            with self._suspend():
+                self.save_path.value = str(
+                    Path(self.save_path.value).parent
+                    / f"{cfg.name}.forge_blueprint.yaml"
+                )
         self.download_link.value = self._download_html(cfg)
         # Surface (never silently ship) provisional open-boundary defaults: the
         # checkboxes currently reflect whatever's live, but that's only a real

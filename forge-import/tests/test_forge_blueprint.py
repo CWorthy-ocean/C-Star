@@ -19,6 +19,7 @@ import pytest
 import yaml
 
 import cstar_forge
+import cstar_forge.forge.namelist_model as _nm
 from cstar_forge.domain_catalog import default_catalog as _CATALOG
 from cstar_forge.forge.forge_blueprint import ForgeBlueprint
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
@@ -1974,6 +1975,65 @@ def test_resolver_extract_check_gated_off_for_legacy_roms():
         metadata_child={"period": 5000.0},
     )
     assert cfg.model_settings["extract_data"]["extract_period"] == 5000.0
+
+
+def _standard_output_settings_with_bad_frc():
+    """A copy of the 'standard' OutputSpec with `frc` enabled and set to a
+    period that doesn't evenly divide `ocean_vars.output_period_rst`
+    (86400 s): 4 (nrpf) * 5000 s = 20000 s, and 86400 % 20000 != 0.
+    """
+    settings = {
+        k: (dict(v) if isinstance(v, dict) else v)
+        for k, v in _CATALOG.output_data("standard").items()
+    }
+    settings["frc_output"] = {
+        **settings["frc_output"],
+        "wrt_frc": True,
+        "output_period": 5000.0,
+    }
+    return settings
+
+
+@pytest.mark.skipif(
+    _nm._check_output_streams_divide_rst is None,
+    reason="cstar.roms.precheck not available in this cstar release; check is guarded off",
+)
+def test_resolver_rejects_non_extract_stream_not_dividing_rst_for_roms050():
+    """The general C-Star `check_output_streams_divide_rst` check (which covers
+    every ucla-roms >= 0.5.0 precheck stream, not just `extract`) also fires at
+    resolve time -- here for `frc`.
+    """
+    with pytest.raises(ValueError, match="evenly divide"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS050,
+            output_settings=_standard_output_settings_with_bad_frc(),
+        )
+
+
+def test_resolver_non_extract_stream_check_gated_off_for_legacy_roms():
+    """The same nonconforming `frc` config resolves fine for a pre-0.5.0 model
+    -- older ucla-roms has no such precheck, so authoring isn't blocked.
+    """
+    cfg = _build(  # default _MODEL_DIR pins roms 0.2.0 (legacy schema)
+        output_settings=_standard_output_settings_with_bad_frc(),
+    )
+    assert cfg.model_settings["frc_output"]["wrt_frc"] is True
+
+
+def test_resolver_skips_output_stream_check_when_cstar_precheck_absent(monkeypatch):
+    """Forge installed against a cstar release predating ``cstar.roms.precheck``
+    degrades gracefully: the guarded shim no-ops, so a would-be-violating >= 0.5.0
+    config still resolves at authoring time (ROMS still enforces it at run start).
+    """
+    from cstar_forge.forge import namelist_model
+
+    # Simulate the older-cstar import fallback (`_check... = None`).
+    monkeypatch.setattr(namelist_model, "_check_output_streams_divide_rst", None)
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS050,
+        output_settings=_standard_output_settings_with_bad_frc(),
+    )
+    assert cfg.model_settings["frc_output"]["wrt_frc"] is True
 
 
 def test_resolver_output_settings_override():

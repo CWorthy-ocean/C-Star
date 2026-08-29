@@ -106,8 +106,11 @@ DEFAULT_TEMPLATE_REPO = CodeRepo(
 try:  # pragma: no cover - exercised both ways
     from cstar_forge.forge.namelist_model import (
         RunTimeSettings,
+        canonical_output_sections_for_precheck,
         check_extract_divides_rst,
+        check_output_streams_divide_rst,
         check_rst_period_divisible,
+        cppdefs_for_precheck,
         ensure_cdr_output_marbl_diagnostics,
         run_time_settings_for_ref,
     )
@@ -842,6 +845,30 @@ def build_forge_blueprint(
     if settings_cls is not RunTimeSettings:
         check_extract_divides_rst(
             settings.get("ocean_vars", {}), settings.get("extract_data", {})
+        )
+        # check_output_streams_divide_rst's general table (C-Star,
+        # cstar.roms.precheck) mirrors the *complete* do_precheck call list,
+        # which includes `extract` -- but check_extract_divides_rst above
+        # already covers that stream with a more actionable message (it names
+        # the child DomainSpec 'period' knob the author actually edits).
+        # include_extract=False drops `extract_data` from the canonical dump
+        # below so `extract` isn't double-checked (and double-raised on) here.
+        #
+        # The checker is keyed on C-Star's canonical namelist vocabulary
+        # (RomsNamelistBase group field names / real Fortran keys), not
+        # forge's settings-dict vocabulary -- canonical_output_sections_for_
+        # precheck() translates just the output-relevant sections via each
+        # forge Cfg class's own serialization_alias (the single source of
+        # truth for that renaming). A full build_namelist()/RunTimeSettings.
+        # model_validate() round-trip isn't possible here: `settings` is still
+        # missing the processing-filled sections (title/grid/initial/forcing/
+        # s_coord/reference_date_settings, populated later at generate_inputs()/
+        # executor time) -- none of which affect any output-stream field.
+        check_output_streams_divide_rst(
+            canonical_output_sections_for_precheck(settings, include_extract=False),
+            cppdefs_for_precheck(
+                settings.get("cppdefs", {}), settings.get("upscale_output", {})
+            ),
         )
 
     # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
