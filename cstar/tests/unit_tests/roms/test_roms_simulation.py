@@ -636,6 +636,31 @@ class TestROMSSimulationInitialization:
         )
         return sim
 
+    def _prepare_sim_for_runtime_settings_v0_5_0(
+        self,
+        sim,
+        stageddatacollection_remote_files,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+    ):
+        """Same as `_prepare_sim_for_runtime_settings`, but reads a genuine
+        `RomsNamelistV0_5_0` from the 0.5.0 fixture instead of the legacy
+        `RomsNamelist` -- needed to exercise `roms_runtime_settings`'
+        output-stream precheck, which is version-gated to run only for
+        ucla-roms >= 0.5.0 schemas (the legacy `RomsNamelist` skips it).
+        """
+        sim.runtime_code._working_copy = stageddatacollection_remote_files()
+        mock_grid_path.return_value = [Path("grid.nc")]
+        mock_ini_path.return_value = [Path("fake_ini.nc")]
+        mock_forcing_paths.return_value = [Path("forcing1.nc"), Path("forcing2.nc")]
+        mock_schema_for_ref.return_value.__name__ = "RomsNamelistV0_5_0"
+        mock_schema_for_ref.return_value.read.side_effect = lambda _: (
+            _REAL_NAMELIST_READ_V0_5_0(EXAMPLE_NAMELIST_V0_5_0)
+        )
+        return sim
+
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
     @mock.patch.object(
@@ -804,6 +829,84 @@ class TestROMSSimulationInitialization:
 
         with pytest.raises(ValueError, match="must be positive"):
             _ = sim.roms_runtime_settings
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_non_dividing_output_stream_raises(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """An override that enables an output stream whose file-rollover
+        frequency doesn't evenly divide the restart period is rejected --
+        ucla-roms >= 0.5.0's `check_output_divides_rst` (`precheck.F90`) would
+        abort the run at startup otherwise. Uses `frc` (not cppdef-gated), so
+        it fires with no staged `cppdefs.opt` (`compile_time_code` unset on
+        `stub_romssimulation` -> `_active_cppdefs_for_precheck` returns `{}`).
+        """
+        sim = self._prepare_sim_for_runtime_settings_v0_5_0(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        # basic_output_settings.output_period_rst is 86400 s in the fixture;
+        # 3 * 1000 = 3000 s does not evenly divide it.
+        sim.namelist_overrides = {
+            "frc_output_settings": {
+                "wrt_frc": True,
+                "output_period_frc": 1000.0,
+                "nrpf_frc": 3,
+            }
+        }
+
+        with pytest.raises(ValueError, match="evenly divide"):
+            _ = sim.roms_runtime_settings
+
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_namelist_overrides_dividing_output_stream_passes(
+        self,
+        mock_grid_path,
+        mock_ini_path,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """Companion to the non-dividing case: enabling `frc` with the
+        fixture's own (conforming) `nrpf_frc`/`output_period_frc` does not
+        raise.
+        """
+        sim = self._prepare_sim_for_runtime_settings_v0_5_0(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        # Fixture values: nrpf_frc=4, output_period_frc=3600.0 -> 14400 s,
+        # which evenly divides output_period_rst=86400 s -- only enable it.
+        sim.namelist_overrides = {"frc_output_settings": {"wrt_frc": True}}
+
+        result = sim.roms_runtime_settings
+
+        assert result.frc_output_settings.wrt_frc is True
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)

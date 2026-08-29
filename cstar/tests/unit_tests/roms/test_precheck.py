@@ -2,9 +2,14 @@
 
 Mirrors ucla-roms' `src/precheck.F90::do_precheck`/`check_output_divides_rst`:
 for every *enabled* output stream, `nrpf * output_period` must be positive and
-must evenly divide `ocean_vars.output_period_rst`, when restarts are on
-(`wrt_file_rst`). Four stream groups are additionally gated on a compile-time
-cppdef.
+must evenly divide `basic_output_settings.output_period_rst`, when restarts
+are on (`wrt_file_rst`). Four stream groups are additionally gated on a
+compile-time cppdef.
+
+Operates on C-Star's canonical namelist vocabulary (RomsNamelistBase group
+field names + real Fortran namelist keys), NOT forge's settings-dict
+vocabulary -- every settings dict built here uses e.g.
+`frc_output_settings.output_period_frc`, not forge's `frc_output.output_period`.
 """
 
 import pytest
@@ -18,7 +23,7 @@ def _base_settings(**overrides):
     test overrides.
     """
     settings = {
-        "ocean_vars": {
+        "basic_output_settings": {
             "wrt_file_rst": True,
             "output_period_rst": 86400,
             "wrt_file_his": False,
@@ -28,27 +33,39 @@ def _base_settings(**overrides):
             "output_period_avg": 86400,
             "nrpf_avg": 1,
         },
-        "frc_output": {"wrt_frc": False, "output_period": 3600, "nrpf": 4},
-        "extract_data": {"do_extract": False, "extract_period": 3600, "nrpf": 24},
-        "cdr_output": {"do_cdr_output": False, "output_period": 3600, "nrpf": 24},
-        "upscale_output": {
+        "frc_output_settings": {
+            "wrt_frc": False,
+            "output_period_frc": 3600,
+            "nrpf_frc": 4,
+        },
+        "extract_data_settings": {
+            "do_extract": False,
+            "output_period_extract": 3600,
+            "nrpf_extract": 24,
+        },
+        "cdr_output_settings": {
+            "do_cdr_output": False,
+            "output_period_cdr": 3600,
+            "nrpf_cdr": 24,
+        },
+        "upscale_settings": {
             "do_upscale": False,
             "output_period_uscl": 3600,
             "nrpf_uscl": 24,
         },
-        "bgc": {
-            "wrt_his": False,
-            "output_period_his": 86400,
-            "nrpf_his": 1,
-            "wrt_avg": False,
-            "output_period_avg": 86400,
-            "nrpf_avg": 1,
-            "wrt_his_dia": False,
-            "output_period_his_dia": 86400,
-            "nrpf_his_dia": 1,
-            "wrt_avg_dia": False,
-            "output_period_avg_dia": 86400,
-            "nrpf_avg_dia": 1,
+        "bgc_settings": {
+            "wrt_bgc_his": False,
+            "output_period_bgc_his": 86400,
+            "nrpf_bgc_his": 1,
+            "wrt_bgc_avg": False,
+            "output_period_bgc_avg": 86400,
+            "nrpf_bgc_avg": 1,
+            "wrt_bgc_dia_his": False,
+            "output_period_bgc_his_dia": 86400,
+            "nrpf_bgc_his_dia": 1,
+            "wrt_bgc_dia_avg": False,
+            "output_period_bgc_avg_dia": 86400,
+            "nrpf_bgc_avg_dia": 1,
         },
     }
     settings.update(overrides)
@@ -60,7 +77,11 @@ def test_conforming_config_passes():
     raises nothing.
     """
     settings = _base_settings()
-    settings["frc_output"] = {"wrt_frc": True, "output_period": 3600, "nrpf": 4}
+    settings["frc_output_settings"] = {
+        "wrt_frc": True,
+        "output_period_frc": 3600,
+        "nrpf_frc": 4,
+    }
     # 4 * 3600 = 14400 s; 86400 / 14400 = 6 -> evenly divides.
     check_output_streams_divide_rst(settings, cppdefs={})
 
@@ -73,7 +94,11 @@ def test_cppdef_inactive_skips_even_when_it_would_fail():
     settings = _base_settings()
     # 24 * 3600 = 86400 s doesn't matter here -- pick a genuinely non-dividing
     # combination to prove it's really skipped, not accidentally conforming.
-    settings["cdr_output"] = {"do_cdr_output": True, "output_period": 1000, "nrpf": 3}
+    settings["cdr_output_settings"] = {
+        "do_cdr_output": True,
+        "output_period_cdr": 1000,
+        "nrpf_cdr": 3,
+    }
     # cppdefs omits "cdr_forcing" (and "marbl_diags") -> guard unsatisfied.
     check_output_streams_divide_rst(settings, cppdefs={"marbl": True})
 
@@ -83,8 +108,12 @@ def test_enabled_cppdef_active_non_dividing_raises():
     the restart period raises.
     """
     settings = _base_settings()
-    settings["cdr_output"] = {"do_cdr_output": True, "output_period": 1000, "nrpf": 3}
-    with pytest.raises(ValueError, match="cdr_output"):
+    settings["cdr_output_settings"] = {
+        "do_cdr_output": True,
+        "output_period_cdr": 1000,
+        "nrpf_cdr": 3,
+    }
+    with pytest.raises(ValueError, match="cdr_output_settings"):
         check_output_streams_divide_rst(
             settings,
             cppdefs={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
@@ -97,8 +126,12 @@ def test_non_positive_newfile_freq_raises():
     (a stream that never rolls a file at all).
     """
     settings = _base_settings()
-    settings["frc_output"] = {"wrt_frc": True, "output_period": 3600, "nrpf": 0}
-    with pytest.raises(ValueError, match="frc_output"):
+    settings["frc_output_settings"] = {
+        "wrt_frc": True,
+        "output_period_frc": 3600,
+        "nrpf_frc": 0,
+    }
+    with pytest.raises(ValueError, match="frc_output_settings"):
         check_output_streams_divide_rst(settings, cppdefs={})
 
 
@@ -107,8 +140,12 @@ def test_wrt_file_rst_false_never_raises():
     matter how badly a stream would otherwise violate the rule.
     """
     settings = _base_settings()
-    settings["ocean_vars"]["wrt_file_rst"] = False
-    settings["frc_output"] = {"wrt_frc": True, "output_period": 1000, "nrpf": 3}
+    settings["basic_output_settings"]["wrt_file_rst"] = False
+    settings["frc_output_settings"] = {
+        "wrt_frc": True,
+        "output_period_frc": 1000,
+        "nrpf_frc": 3,
+    }
     check_output_streams_divide_rst(settings, cppdefs={})
 
 
@@ -117,8 +154,12 @@ def test_output_period_rst_zero_passes_trivially():
     trivially for every stream, since `mod(0, x) == 0`.
     """
     settings = _base_settings()
-    settings["ocean_vars"]["output_period_rst"] = 0
-    settings["frc_output"] = {"wrt_frc": True, "output_period": 1000, "nrpf": 3}
+    settings["basic_output_settings"]["output_period_rst"] = 0
+    settings["frc_output_settings"] = {
+        "wrt_frc": True,
+        "output_period_frc": 1000,
+        "nrpf_frc": 3,
+    }
     check_output_streams_divide_rst(settings, cppdefs={})
 
 
@@ -127,13 +168,13 @@ def test_bgc_stream_gated_on_marbl_or_bec2():
     `marbl_diags` (unlike `cdr`/`upscale`).
     """
     settings = _base_settings()
-    settings["bgc"]["wrt_his"] = True
-    settings["bgc"]["output_period_his"] = 1000
-    settings["bgc"]["nrpf_his"] = 3
+    settings["bgc_settings"]["wrt_bgc_his"] = True
+    settings["bgc_settings"]["output_period_bgc_his"] = 1000
+    settings["bgc_settings"]["nrpf_bgc_his"] = 3
     # Not active under either MARBL or BIOLOGY_BEC2 -> skipped.
     check_output_streams_divide_rst(settings, cppdefs={})
     # Active under BIOLOGY_BEC2 alone -> now checked, and it violates.
-    with pytest.raises(ValueError, match="bgc"):
+    with pytest.raises(ValueError, match="bgc_settings"):
         check_output_streams_divide_rst(settings, cppdefs={"biology_bec2": True})
 
 
@@ -143,7 +184,7 @@ def test_missing_section_is_skipped_not_an_error():
     field/section presence is owned by schema validation upstream.
     """
     settings = {
-        "ocean_vars": {
+        "basic_output_settings": {
             "wrt_file_rst": True,
             "output_period_rst": 86400,
         }
@@ -158,11 +199,15 @@ def test_sflx_or_gate_fires_when_only_one_field_present():
     treated as enabled (a missing field reads as False, not "unknown").
     """
     settings = {
-        "ocean_vars": {"wrt_file_rst": True, "output_period_rst": 86400},
-        "surf_flux": {"wrt_smflx": True, "output_period": 1000, "nrpf": 3},
+        "basic_output_settings": {"wrt_file_rst": True, "output_period_rst": 86400},
+        "surf_flx_output_settings": {
+            "wrt_smflx": True,
+            "output_period_sflx": 1000,
+            "nrpf_sflx": 3,
+        },
     }
     # 3 * 1000 = 3000 s; 86400 % 3000 = 2400 != 0 -> non-dividing.
-    with pytest.raises(ValueError, match="surf_flux"):
+    with pytest.raises(ValueError, match="surf_flx_output_settings"):
         check_output_streams_divide_rst(settings, cppdefs={})
 
 
@@ -171,10 +216,14 @@ def test_diagnostics_or_gate_fires_when_only_one_field_present():
     diag_trc`) -- also confirms the `diagnostics` cppdef guard is satisfiable.
     """
     settings = {
-        "ocean_vars": {"wrt_file_rst": True, "output_period_rst": 86400},
-        "diagnostics": {"diag_trc": True, "output_period": 1000, "nrpf": 3},
+        "basic_output_settings": {"wrt_file_rst": True, "output_period_rst": 86400},
+        "diagnostics_settings": {
+            "diag_trc": True,
+            "output_period_diag": 1000,
+            "nrpf_diag": 3,
+        },
     }
-    with pytest.raises(ValueError, match="diagnostics"):
+    with pytest.raises(ValueError, match="diagnostics_settings"):
         check_output_streams_divide_rst(settings, cppdefs={"diagnostics": True})
 
 
@@ -196,7 +245,12 @@ def _settings_for_row(row, *, nrpf, period):
     """Minimal settings dict enabling exactly `row`'s stream, with its
     section holding every gate field True plus the given nrpf/period.
     """
-    settings = {"ocean_vars": {"wrt_file_rst": True, "output_period_rst": _RST_PERIOD}}
+    settings = {
+        "basic_output_settings": {
+            "wrt_file_rst": True,
+            "output_period_rst": _RST_PERIOD,
+        }
+    }
     section = settings.setdefault(row.section, {})
     for field in row.gate_fields:
         section[field] = True

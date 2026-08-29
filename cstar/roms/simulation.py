@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
 
 import yaml
 from pydantic import ValidationError
@@ -78,7 +78,8 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.namelist import RomsNamelistBase, namelist_schema_for_ref
+from cstar.roms.namelist import RomsNamelist, RomsNamelistBase, namelist_schema_for_ref
+from cstar.roms.precheck import check_output_streams_divide_rst
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr
 
@@ -889,6 +890,22 @@ class ROMSSimulation(Simulation):
             run_length_seconds = int((self.end_date - self.start_date).total_seconds())
             nml.time_stepping.ntimes = int(run_length_seconds // dt)
 
+        # Output-stream / restart-rollover consistency check (ucla-roms >=
+        # 0.5.0's check_output_divides_rst, precheck.F90): a user overriding
+        # output/restart periods via namelist_overrides (or a hand-edited
+        # namelist file) can produce a config ucla-roms rejects at startup;
+        # catch it here so the failure surfaces with the override still in
+        # hand, mirroring the `dt <= 0` check above. Version-gated: the
+        # precheck landed in ucla-roms 0.5.0, so it's skipped for the legacy
+        # (< 0.5.0) `RomsNamelist` schema (`RomsNamelistV0_5_0`/`V0_6_0` are
+        # separate `RomsNamelistBase` subclasses, not subclasses of
+        # `RomsNamelist` -- this isinstance check is exactly the >= 0.5.0
+        # gate).
+        if not isinstance(nml, RomsNamelist):
+            check_output_streams_divide_rst(
+                nml.model_dump(), self._active_cppdefs_for_precheck()
+            )
+
         return nml
 
     @property
@@ -1572,6 +1589,45 @@ class ROMSSimulation(Simulation):
 
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
+
+    # Fortran cppdef macro -> the lowercase key
+    # `cstar.roms.precheck.check_output_streams_divide_rst` expects (its
+    # `_STREAM_CHECKS` cppdef_guard names).
+    _PRECHECK_CPPDEF_MACROS: ClassVar[dict[str, str]] = {
+        "MARBL": "marbl",
+        "MARBL_DIAGS": "marbl_diags",
+        "CDR_FORCING": "cdr_forcing",
+        "UPSCALING": "upscaling",
+        "DIAGNOSTICS": "diagnostics",
+        "BIOLOGY_BEC2": "biology_bec2",
+    }
+
+    def _active_cppdefs_for_precheck(self) -> dict[str, bool]:
+        """Parse the staged `cppdefs.opt` (defensively) into the cppdefs
+        mapping `check_output_streams_divide_rst` expects, mirroring
+        `_validate_cppdef_flag`'s per-line `#define` detection.
+
+        Returns an EMPTY mapping -- every cppdef-gated stream then skipped,
+        exactly as an un-compiled cppdef would be -- if `compile_time_code`
+        (or its working copy) isn't staged yet, or `cppdefs.opt` is missing.
+        `roms_runtime_settings` can be accessed before `build()` stages the
+        compile-time code (and in tests); a real run still enforces the same
+        rule at startup once the actual build's `cppdefs.opt` is in place.
+        Never raises out of this method.
+        """
+        try:
+            build_dir = self.compile_time_code.working_copy.common_parent  # type: ignore[union-attr]
+            cppdefs_text = (build_dir / "cppdefs.opt").read_text()
+        except (AttributeError, FileNotFoundError, OSError):
+            return {}
+
+        return {
+            key: any(
+                re.search(rf"^[^!]*#\s*define\s+{macro}\b", line)
+                for line in cppdefs_text.splitlines()
+            )
+            for macro, key in self._PRECHECK_CPPDEF_MACROS.items()
+        }
 
     def _validate_cppdef_flag(
         self,

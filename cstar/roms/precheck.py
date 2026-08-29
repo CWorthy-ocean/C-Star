@@ -5,17 +5,30 @@ ucla-roms >= 0.5.0 aborts at startup (``check_output_divides_rst``) if any
 *enabled* output stream's file-rollover frequency (``nrpf * output_period``)
 is not positive, or does not evenly divide ``output_period_rst`` -- writing a
 restart mid-file would otherwise leave a partial output file. The whole check
-is gated on ``ocean_vars.wrt_file_rst``; four of the per-stream groups are
-further gated on a ucla-roms compile-time cppdef (``DIAGNOSTICS``, and the
-three MARBL/BGC-diagnostics groups).
+is gated on ``basic_output_settings.wrt_file_rst``; four of the per-stream
+groups are further gated on a ucla-roms compile-time cppdef (``DIAGNOSTICS``,
+and the three MARBL/BGC-diagnostics groups).
 
 :func:`check_output_streams_divide_rst` reproduces this in Python so C-Star
-Forge (and any other consumer building ucla-roms run-time settings) can fail
-fast at blueprint-authoring time instead of waiting for the run to abort.
-It is a plain function, not a Pydantic ``model_validator`` -- it must not run
-on every model construction (old blueprints/tests would break) and it needs
-an explicit, caller-supplied set of active cppdefs to know which cppdef-gated
-groups actually apply.
+(and consumers building ucla-roms run-time settings, e.g. C-Star Forge) can
+fail fast -- at blueprint-authoring time, or when a user overrides run-time
+settings directly on a `ROMSSimulation` -- instead of waiting for the run to
+abort. It is a plain function, not a Pydantic ``model_validator`` -- it must
+not run on every model construction (old blueprints/tests would break) and it
+needs an explicit, caller-supplied set of active cppdefs to know which
+cppdef-gated groups actually apply.
+
+Operates on C-Star's CANONICAL namelist vocabulary: a mapping of
+``RomsNamelistBase`` group field name (the ``&<group>`` header in
+``namelist.nml``, e.g. ``"frc_output_settings"``) to that group's real Fortran
+namelist keys (e.g. ``"output_period_frc"``, ``"nrpf_frc"``) -- exactly the
+shape of ``RomsNamelistBase.model_dump()`` (or an individual group's
+``model_dump(by_alias=True)``, dict-assembled). This is deliberately NOT forge's
+settings-dict vocabulary (which renames several of these via
+``serialization_alias``, e.g. forge's ``frc_output.output_period`` ->
+``output_period_frc``) -- a consumer with a forge-shaped dict must first
+convert it (see ``cstar_forge.forge.namelist_model.build_namelist`` /
+``canonical_output_sections_for_precheck``).
 """
 
 from __future__ import annotations
@@ -26,9 +39,10 @@ from typing import Any
 
 
 def _get(section: Any, key: str) -> Any:
-    """Read ``key`` off ``section``, which is either a plain dict (the
-    resolver's world) or a typed pydantic section model (the validator's
-    world) -- mirrors ``cstar_forge.forge.namelist_model.check_extract_divides_rst``.
+    """Read ``key`` off ``section``, which is either a plain dict (e.g. a
+    ``RomsNamelistBase.model_dump()`` value) or a typed pydantic section model
+    (e.g. a live ``RomsNamelistBase`` group instance) -- mirrors
+    ``cstar_forge.forge.namelist_model.check_extract_divides_rst``.
     """
     if section is None:
         return None
@@ -48,16 +62,19 @@ class _StreamCheck:
     label
         Stream name, matches the Fortran ``label`` argument.
     section
-        Name of the settings section the stream's fields live in.
+        ``RomsNamelistBase`` group field name (the ``&<group>`` header in
+        ``namelist.nml``) the stream's fields live in.
     gate_fields
-        Field name(s), read off ``section``, that gate whether ucla-roms
-        writes this stream at all. Combined with ``.or.`` when there is more
-        than one (``sflx``: ``wrt_smflx .or. wrt_stflx``; ``diagnostics``:
-        ``diag_uv .or. diag_trc``).
+        Real Fortran namelist key(s), read off ``section``, that gate whether
+        ucla-roms writes this stream at all. Combined with ``.or.`` when
+        there is more than one (``sflx``: ``wrt_smflx .or. wrt_stflx``;
+        ``diagnostics``: ``diag_uv .or. diag_trc``).
     period_field
-        Field name (on ``section``) holding the stream's output period.
+        Real Fortran namelist key (on ``section``) holding the stream's
+        output period.
     nrpf_field
-        Field name (on ``section``) holding the stream's records-per-file.
+        Real Fortran namelist key (on ``section``) holding the stream's
+        records-per-file.
     cppdef_guard
         Cppdef name(s) that must all be active (looked up in the ``cppdefs``
         mapping) for ucla-roms to even compile this stream's write calls.
@@ -72,46 +89,92 @@ class _StreamCheck:
     cppdef_guard: tuple[str, ...] = ()
 
 
-# The complete `do_precheck` call list (ucla-roms `src/precheck.F90`).
-# Field names below are C-Star Forge's settings-dict vocabulary (the same
-# vocabulary `check_extract_divides_rst` already uses for `extract_data`),
-# not the raw Fortran namelist keys -- e.g. `frc_output.nrpf` is the
-# `NRPF_FRC` namelist key under `serialization_alias`.
+# The complete `do_precheck` call list (ucla-roms `src/precheck.F90`), keyed
+# on C-Star's canonical namelist vocabulary: `section` is the RomsNamelistBase
+# group field name (the `&<group>` header in namelist.nml), and
+# `gate_fields`/`period_field`/`nrpf_field` are the real Fortran namelist keys
+# within that group. Verified against `cstar/roms/namelist.py` (the group
+# classes) and `cstar/tests/unit_tests/roms/fixtures/example_namelist_v0_6_0.nml`
+# (the `&<group>` headers).
 _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
-    _StreamCheck("extract", "extract_data", ("do_extract",), "extract_period", "nrpf"),
     _StreamCheck(
-        "his", "ocean_vars", ("wrt_file_his",), "output_period_his", "nrpf_his"
+        "extract",
+        "extract_data_settings",
+        ("do_extract",),
+        "output_period_extract",
+        "nrpf_extract",
     ),
     _StreamCheck(
-        "avg", "ocean_vars", ("wrt_file_avg",), "output_period_avg", "nrpf_avg"
+        "his",
+        "basic_output_settings",
+        ("wrt_file_his",),
+        "output_period_his",
+        "nrpf_his",
     ),
-    _StreamCheck("frc", "frc_output", ("wrt_frc",), "output_period", "nrpf"),
-    _StreamCheck("random", "random_output", ("do_random",), "output_period", "nrpf"),
-    _StreamCheck("zslice", "zslice", ("do_zslice",), "output_period", "nrpf"),
     _StreamCheck(
-        "sflx", "surf_flux", ("wrt_smflx", "wrt_stflx"), "output_period", "nrpf"
+        "avg",
+        "basic_output_settings",
+        ("wrt_file_avg",),
+        "output_period_avg",
+        "nrpf_avg",
     ),
-    _StreamCheck("particles", "particles", ("floats",), "output_period", "nrpf"),
-    _StreamCheck("sponge", "sponge_tune", ("wrt_sponge",), "output_period", "nrpf"),
+    _StreamCheck(
+        "frc", "frc_output_settings", ("wrt_frc",), "output_period_frc", "nrpf_frc"
+    ),
+    _StreamCheck(
+        "random",
+        "random_output_settings",
+        ("do_random",),
+        "output_period_random",
+        "nrpf_random",
+    ),
+    _StreamCheck(
+        "zslice",
+        "zslice_settings",
+        ("do_zslice",),
+        "output_period_zslice",
+        "nrpf_zslice",
+    ),
+    _StreamCheck(
+        "sflx",
+        "surf_flx_output_settings",
+        ("wrt_smflx", "wrt_stflx"),
+        "output_period_sflx",
+        "nrpf_sflx",
+    ),
+    _StreamCheck(
+        "particles",
+        "particles_settings",
+        ("floats",),
+        "output_period_particles",
+        "nrpf_particles",
+    ),
+    _StreamCheck(
+        "sponge",
+        "sponge_tune_settings",
+        ("wrt_sponge",),
+        "output_period_sponge",
+        "nrpf_sponge",
+    ),
     _StreamCheck(
         "diagnostics",
-        "diagnostics",
+        "diagnostics_settings",
         ("diag_uv", "diag_trc"),
-        "output_period",
-        "nrpf",
+        "output_period_diag",
+        "nrpf_diag",
         cppdef_guard=("diagnostics",),
     ),
     _StreamCheck(
         "cdr",
-        "cdr_output",
+        "cdr_output_settings",
         ("do_cdr_output",),
-        "output_period",
-        "nrpf",
+        "output_period_cdr",
+        "nrpf_cdr",
         cppdef_guard=("marbl", "marbl_diags", "cdr_forcing"),
     ),
     _StreamCheck(
         "upscale",
-        "upscale_output",
+        "upscale_settings",
         ("do_upscale",),
         "output_period_uscl",
         "nrpf_uscl",
@@ -119,34 +182,34 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
     ),
     _StreamCheck(
         "bgc_his",
-        "bgc",
-        ("wrt_his",),
-        "output_period_his",
-        "nrpf_his",
+        "bgc_settings",
+        ("wrt_bgc_his",),
+        "output_period_bgc_his",
+        "nrpf_bgc_his",
         cppdef_guard=("marbl_or_bec2",),
     ),
     _StreamCheck(
         "bgc_avg",
-        "bgc",
-        ("wrt_avg",),
-        "output_period_avg",
-        "nrpf_avg",
+        "bgc_settings",
+        ("wrt_bgc_avg",),
+        "output_period_bgc_avg",
+        "nrpf_bgc_avg",
         cppdef_guard=("marbl_or_bec2",),
     ),
     _StreamCheck(
         "bgc_his_dia",
-        "bgc",
-        ("wrt_his_dia",),
-        "output_period_his_dia",
-        "nrpf_his_dia",
+        "bgc_settings",
+        ("wrt_bgc_dia_his",),
+        "output_period_bgc_his_dia",
+        "nrpf_bgc_his_dia",
         cppdef_guard=("marbl_or_bec2",),
     ),
     _StreamCheck(
         "bgc_avg_dia",
-        "bgc",
-        ("wrt_avg_dia",),
-        "output_period_avg_dia",
-        "nrpf_avg_dia",
+        "bgc_settings",
+        ("wrt_bgc_dia_avg",),
+        "output_period_bgc_avg_dia",
+        "nrpf_bgc_avg_dia",
         cppdef_guard=("marbl_or_bec2",),
     ),
 )
@@ -181,10 +244,14 @@ def check_output_streams_divide_rst(
     Parameters
     ----------
     settings
-        Mapping of section name -> section, where each section is either a
-        plain dict or a typed pydantic settings model (both forms support the
-        same field lookups via :func:`_get`). Must include ``ocean_vars``;
-        every other section is read only if that stream applies.
+        A canonical namelist dump: mapping of ``RomsNamelistBase`` group field
+        name (e.g. ``"basic_output_settings"``, ``"frc_output_settings"``) to
+        that group, itself either a plain dict of its real Fortran namelist
+        keys (e.g. ``RomsNamelistBase.model_dump()``, or a partial dict
+        assembled the same way) or a live typed group instance (both forms
+        support the same field lookups via :func:`_get`). Must include
+        ``basic_output_settings``; every other group is read only if that
+        stream applies.
     cppdefs
         Mapping of cppdef name -> whether it is active in this build (e.g.
         ``{"marbl": True, "cdr_forcing": True}``). Governs the four
@@ -198,8 +265,8 @@ def check_output_streams_divide_rst(
 
     Notes
     -----
-    - Global gate: if ``ocean_vars.wrt_file_rst`` is false/missing, this
-      function returns immediately without checking anything (mirrors
+    - Global gate: if ``basic_output_settings.wrt_file_rst`` is false/missing,
+      this function returns immediately without checking anything (mirrors
       ``if (.not. wrt_file_rst) return`` in the Fortran).
     - Each stream is additionally skipped if: its cppdef guard (if any) is
       not fully satisfied; its own enable gate reads as false (a missing gate
@@ -214,10 +281,12 @@ def check_output_streams_divide_rst(
       order), matching :func:`cstar_forge.forge.namelist_model.check_extract_divides_rst`'s
       fail-fast contract -- it does not aggregate every violation.
     """
-    ocean_vars = settings.get("ocean_vars") if isinstance(settings, Mapping) else None
-    if not _get(ocean_vars, "wrt_file_rst"):
+    basic_output = (
+        settings.get("basic_output_settings") if isinstance(settings, Mapping) else None
+    )
+    if not _get(basic_output, "wrt_file_rst"):
         return
-    output_period_rst = _get(ocean_vars, "output_period_rst")
+    output_period_rst = _get(basic_output, "output_period_rst")
     if output_period_rst is None:
         return
 
@@ -254,7 +323,7 @@ def check_output_streams_divide_rst(
                 f"{check.section}.{check.nrpf_field} ({nrpf}) * "
                 f"{check.section}.{check.period_field} ({period} s) = "
                 f"{newfile_freq} s must be positive and evenly divide "
-                f"ocean_vars.output_period_rst ({output_period_rst} s): "
+                f"basic_output_settings.output_period_rst ({output_period_rst} s): "
                 f"ucla-roms >= 0.5.0 aborts at startup otherwise "
                 f"(check_output_divides_rst, stream '{check.label}', "
                 f"partial-file prevention). Adjust {check.section}."

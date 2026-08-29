@@ -66,10 +66,13 @@ def _log_startup_versions() -> None:
     # (e.g. roms-tools vs cstar-ocean) -- deferred as a follow-up; this only
     # records what's installed.
     versions = [f"cstar-ocean=={cstar.__version__}"]
-    try:
-        versions.append(f"roms-tools=={_pkg_version('roms-tools')}")
-    except PackageNotFoundError:
-        pass
+    # cstar-forge / roms-tools are optional in a given environment -- log each
+    # only if installed (the blueprint may have been produced by cstar-forge).
+    for pkg in ("cstar-forge", "roms-tools"):
+        try:
+            versions.append(f"{pkg}=={_pkg_version(pkg)}")
+        except PackageNotFoundError:
+            pass
     log.info("Versions: %s", ", ".join(versions))
 
 
