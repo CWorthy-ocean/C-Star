@@ -1056,13 +1056,12 @@ def to_cached_fileset(
 
         @functools.wraps(func)
         def _inner(*args: P.args, **kwargs: P.kwargs) -> Sequence[Path]:
-            cache = cache_factory()
-            run_id = os.getenv(ENV_CSTAR_RUNID, "")
-
             if not is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_ENABLED):
                 msg = f"Caching flag {ENV_CSTAR_ARTIFACT_CACHE_ENABLED!r} is disabled."
                 log.debug(msg)
                 return func(*args, **kwargs)
+
+            run_id = os.getenv(ENV_CSTAR_RUNID, "")
 
             if not run_id:
                 msg = "Caching requires an active run-id. Cache disabled."
@@ -1120,6 +1119,7 @@ def to_cached_fileset(
                 members = tuple(f"{stem}{member}" for member in members)
                 root_path = root_path.parent
 
+            cache = cache_factory()
             fileset = FileSet(root=root_path, members=members)
             datasource_key = generator_for(type(entity)).key_for(entity, root_path)
             key = fileset_key(fileset, name=datasource_key)
