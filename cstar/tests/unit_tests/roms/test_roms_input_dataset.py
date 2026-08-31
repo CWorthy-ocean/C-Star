@@ -296,7 +296,6 @@ class TestROMSInputDatasetPartition:
             for i in range(1, num_partitions + 1)
         ]
 
-        # # Mock the resolve method
         with mock.patch.object(
             Path,
             "resolve",
