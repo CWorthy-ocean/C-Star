@@ -12,8 +12,9 @@ from cstar.applications.core import (
     RunnerRequest,
     get_application,
 )
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
-from cstar.cli.common import set_ctxmap
+from cstar.cli.common import cb_pipeline, normalize_runid, set_ctxmap, set_env
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import (
@@ -384,3 +385,15 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     set_ctxmap(context, "workplan", wp)
 
     return run_id
+
+
+RunIdArgument = t.Annotated[
+    str,
+    typer.Argument(
+        help="The unique identifier of a specific workplan execution.",
+        autocompletion=list_runs,
+        callback=cb_pipeline(normalize_runid, set_env(ENV_CSTAR_RUNID), preload_run),
+    ),
+]
+"""Shared run-id argument: normalize the value, export it to the environment,
+and preload the `WorkplanRun` and transformed workplan into the context map."""

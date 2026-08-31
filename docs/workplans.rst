@@ -301,3 +301,16 @@ Checking Workplan Status
     .. code-block:: console
 
         cstar workplan status --run-id <my-unique-id>
+
+
+Gathering Workplan Outputs
+--------------------------
+
+Use the ``gather`` command from the ``cstar`` CLI to consolidate every step's
+``joined_output`` files into a single run-level ``joined_output`` directory of
+symlinks. It is safe to re-run while a workplan is still in progress, and it
+fails if two steps produce a file with the same name.
+
+.. code-block:: console
+
+    cstar workplan gather <my-unique-id>

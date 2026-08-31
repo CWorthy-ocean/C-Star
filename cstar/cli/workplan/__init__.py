@@ -7,6 +7,7 @@ from cstar.base.feature import (
     is_feature_enabled,
 )
 from cstar.cli.workplan.check import app as app_check
+from cstar.cli.workplan.gather import app as app_gather
 from cstar.cli.workplan.log import app as app_log
 from cstar.cli.workplan.run import app as app_run
 from cstar.cli.workplan.status import app as app_status
@@ -17,6 +18,7 @@ app = typer.Typer(
 )
 
 app.add_typer(app_check)
+app.add_typer(app_gather)
 app.add_typer(app_log)
 
 if is_feature_enabled(ENV_FF_CLI_WORKPLAN_GEN):
