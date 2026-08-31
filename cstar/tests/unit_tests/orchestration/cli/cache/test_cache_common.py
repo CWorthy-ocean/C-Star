@@ -131,6 +131,7 @@ def test_cli_cache_common_not_found_wording(
     assert expected in capsys.readouterr().out
 
 
+@pytest.mark.usefixtures("cache")
 def test_cli_cache_common_not_found_says_nothing_without_a_key(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -146,7 +147,7 @@ def test_cli_cache_common_not_found_says_nothing_without_a_key(
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_cache_common_lists_runs_for_completion(tmp_path: Path) -> None:
     """Shell completion offers the runs that actually have entries.
 

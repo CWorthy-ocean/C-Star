@@ -50,7 +50,7 @@ def _store(*args: str) -> t.Any:
     return CliRunner().invoke(app, list(args), color=False)
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_cache_store_adds_an_artifact(source: Path, cache: ArtifactCache) -> None:
     """A file named by the caller is copied into the run's cache.
 
@@ -69,7 +69,7 @@ def test_cli_cache_store_adds_an_artifact(source: Path, cache: ArtifactCache) ->
     assert location.path.read_text() == source.read_text()
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_cache_store_leaves_the_source_in_place(source: Path) -> None:
     """Storing copies by default, so the caller keeps its own file.
 
@@ -83,7 +83,7 @@ def test_cli_cache_store_leaves_the_source_in_place(source: Path) -> None:
     assert source.is_file()
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_cache_store_refuses_to_replace_without_consent(
     source: Path, cache: ArtifactCache
 ) -> None:
@@ -135,7 +135,6 @@ def test_cli_cache_store_replaces_when_confirmed(
 
 
 @pytest.mark.usefixtures("cache")
-@pytest.mark.usefixtures("mock_artifact_cache_env")
 def test_cli_cache_store_yes_skips_the_prompt(source: Path) -> None:
     """``--yes`` is for unattended use, so it must not stop to ask.
 
@@ -155,7 +154,6 @@ def test_cli_cache_store_yes_skips_the_prompt(source: Path) -> None:
 
 
 @pytest.mark.usefixtures("cache")
-@pytest.mark.usefixtures("mock_artifact_cache_env")
 def test_cli_cache_store_reports_the_path_when_verbose(source: Path) -> None:
     """Verbose output names where the artifact landed.
 
@@ -170,7 +168,6 @@ def test_cli_cache_store_reports_the_path_when_verbose(source: Path) -> None:
     assert RUN_ID in result.stdout
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
 def test_cli_cache_store_move_takes_the_source(
     source: Path, cache: ArtifactCache
 ) -> None:
@@ -190,7 +187,7 @@ def test_cli_cache_store_move_takes_the_source(
     assert not source.exists(), "--move must relocate rather than copy"
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_cache_store_missing_source_is_reported(tmp_path: Path) -> None:
     """Storing a file that is not there fails rather than caching nothing.
 
@@ -206,7 +203,7 @@ def test_cli_cache_store_missing_source_is_reported(tmp_path: Path) -> None:
     assert result.exit_code != 0
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_cache_store_two_keys_are_two_artifacts(
     source: Path, cache: ArtifactCache
 ) -> None:

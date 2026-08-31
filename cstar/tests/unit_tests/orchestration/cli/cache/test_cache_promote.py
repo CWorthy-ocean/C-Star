@@ -253,7 +253,7 @@ def test_cli_admin_promote_conflict_accepted_replaces_it(
     assert shared.path.read_text() == "different content"
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_admin_promote_yes_replaces_without_asking(
     tmp_path: Path, cache: ArtifactCache
 ) -> None:
@@ -284,7 +284,7 @@ def test_cli_admin_promote_yes_replaces_without_asking(
     assert "promoted to the group cache" in result.stdout
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
+@pytest.mark.usefixtures("cache")
 def test_cli_admin_promote_verbose_names_the_location(tmp_path: Path) -> None:
     """Verbose output identifies where the artifact was published.
 
