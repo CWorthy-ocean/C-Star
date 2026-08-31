@@ -1,8 +1,10 @@
 import functools
+import getpass
 import os
 import platform as platform
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, Final, Protocol, override
 
 from pydantic import Field
@@ -139,6 +141,24 @@ class SystemContext(Protocol):
     def is_match(cls) -> bool:
         """Return `True` if the context identifies the current system as a match."""
         return False
+
+    @classmethod
+    def scratch_directory(cls) -> Path | None:
+        """Locate a machine-specific scratch filesystem for systems that expose no
+        scratch env var.
+
+        Some HPC systems provide no `SCRATCH`-style environment variable (see
+        `CSTAR_SCRATCH_DIRS`) and instead require a machine-specific heuristic to
+        locate the scratch filesystem. Override this classmethod to implement such
+        a heuristic.
+
+        Returns
+        -------
+        Path | None
+            The located scratch directory, or `None` when no machine-specific
+            heuristic applies (i.e. the system's scratch env vars are sufficient).
+        """
+        return None
 
 
 CTX_REGISTRY: dict[str, type[SystemContext]] = {}
@@ -356,6 +376,34 @@ class BouchetSystemContext(SystemContext):
         return (
             os.getenv("SLURM_CLUSTER_NAME", "") == BouchetEnvSettings.CLUSTER_IDENTIFIER
         )
+
+    @override
+    @classmethod
+    def scratch_directory(cls) -> Path | None:
+        """Locate the user's scratch directory on Bouchet.
+
+        Bouchet exports no `$SCRATCH`-style environment variable. Instead, each
+        user's home directory contains one or more per-project symlinks named
+        `scratch_pi_<pi-netid>` (the `<pi-netid>` suffix is not predictable), each
+        pointing at a shared project scratch filesystem. Within each of those,
+        the user has a subdirectory named after their own username.
+
+        This heuristic globs `scratch_pi_*` entries under the home directory,
+        keeps only directories (symlinks are followed), sorts the matches for
+        determinism, and takes the first one, appending the current username.
+
+        Returns
+        -------
+        Path | None
+            `<first scratch_pi_* directory>/<username>`, or `None` if no
+            `scratch_pi_*` directory is found under the home directory.
+        """
+        candidates = sorted(p for p in Path.home().glob("scratch_pi_*") if p.is_dir())
+        if not candidates:
+            return None
+
+        username = os.environ.get("USER") or getpass.getuser()
+        return candidates[0] / username
 
 
 @register_sys_context

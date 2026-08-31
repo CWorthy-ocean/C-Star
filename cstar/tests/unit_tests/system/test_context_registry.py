@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import ClassVar
 from unittest.mock import PropertyMock, patch
 
@@ -130,3 +131,47 @@ def test_unknown_context_name() -> None:
         ),
     ):
         _ = get_system_context()
+
+
+def test_bouchet_scratch_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify that `BouchetSystemContext.scratch_directory` locates the first
+    sorted `scratch_pi_*` directory under the home directory and appends the
+    username, skipping non-directory entries.
+    """
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    (fake_home / "scratch_pi_zz").mkdir()
+    (fake_home / "scratch_pi_aa").mkdir()
+    (fake_home / "scratch_pi_file").write_text("not a directory")
+
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    monkeypatch.setenv("USER", "mock_user")
+
+    result = BouchetSystemContext.scratch_directory()
+
+    assert result == fake_home / "scratch_pi_aa" / "mock_user"
+
+
+def test_bouchet_scratch_directory_no_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify that `BouchetSystemContext.scratch_directory` returns `None` when no
+    `scratch_pi_*` directory exists under the home directory.
+    """
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    monkeypatch.setenv("USER", "mock_user")
+
+    assert BouchetSystemContext.scratch_directory() is None
+
+
+@pytest.mark.parametrize("wrapped_class", [PerlmutterSystemContext, MacOSSystemContext])
+def test_default_scratch_directory_is_none(wrapped_class: type[SystemContext]) -> None:
+    """Verify that contexts without an overridden `scratch_directory` fall back to
+    the `SystemContext` protocol default, which returns `None`.
+    """
+    assert wrapped_class.scratch_directory() is None

@@ -9,6 +9,8 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 
+from cstar.base.exceptions import CstarError
+
 if t.TYPE_CHECKING:
     from types import ModuleType
 
@@ -128,6 +130,11 @@ def get_env_item(var_name: str) -> EnvItem:
 def hpc_data_directory() -> str | None:
     """A path-locator function that looks for standard scratch file-systems.
 
+    First checks the environment variables named in `CSTAR_SCRATCH_DIRS`, in
+    order. If none are set, falls back to the active system context's
+    machine-specific `scratch_directory()` heuristic (for systems, such as
+    Bouchet, that expose no scratch env var).
+
     Returns
     -------
     Path | None
@@ -139,7 +146,20 @@ def hpc_data_directory() -> str | None:
         if scratch_path := os.getenv(env_var, ""):
             return Path(scratch_path).as_posix()
 
-    return None
+    from cstar.system.manager import get_system_context  # local: avoid import cycle
+
+    try:
+        context = get_system_context()
+        scratch_dir = context.scratch_directory()
+    except (CstarError, OSError, RuntimeError):
+        # OSError: unidentifiable host or filesystem errors while scanning;
+        # RuntimeError: Path.home() cannot resolve a home directory.
+        return None
+
+    if scratch_dir is None:
+        return None
+
+    return scratch_dir.as_posix()
 
 
 def nprocs_factory() -> str:
