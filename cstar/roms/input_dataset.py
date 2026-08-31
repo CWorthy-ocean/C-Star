@@ -226,13 +226,11 @@ class ROMSInputDataset(InputDataset, ABC):
         member_source="members",
         root_source="idfile",
     )
-    def partition_item(self, idfile: Path) -> list[Path]:
+    def partition_item(self, idfile: Path, np_xi: int, np_eta: int) -> list[Path]:
         """Helper function that wraps the actual roms_tools.partition_netcdf
         call.
         """
         include_coarse_dims = True
-        np_xi = self.discretization.n_procs_x  # type: ignore
-        np_eta = self.discretization.n_procs_y  # type: ignore
 
         msg = f"Partitioning {str(idfile)!r} into ({np_xi},{np_eta})"
         self.log.info(msg)
@@ -355,7 +353,7 @@ class ROMSInputDataset(InputDataset, ABC):
             """Helper function that wraps the actual roms_tools.partition_netcdf
             call.
             """
-            filesets = [self.partition_item(f) for f in files]
+            filesets = [self.partition_item(f, np_xi, np_eta) for f in files]
             return list(itertools.chain.from_iterable(filesets))
 
         def backup_existing_partitioned_files(files: list[Path]):
