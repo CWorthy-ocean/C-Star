@@ -684,6 +684,9 @@ async def build_dag(
         The run-id to be used by the orchestrator.
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
+    dry_run : bool
+        If set to `true`, the execution plan will be built and persisted to disk
+        but not executed.
     clobber_steps : Sequence[str] | None
         Names or safe_names of steps whose prior state should be cleared and
         re-executed, or `all` to target every step, as supplied via
@@ -691,9 +694,8 @@ async def build_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    WorkplanRun
+        The persisted record describing the run.
     """
     if run_id:
         run_id = slugify(run_id)

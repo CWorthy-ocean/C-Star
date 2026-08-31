@@ -390,7 +390,7 @@ async def test_run_composed_dag(
 
     paths: set[Path] = set()
     for step in steps:
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        bp = deserialize(wp_path, RomsMarblBlueprint)
         paths.add(bp.working_dir)
 
         assert bp.working_dir.exists()
