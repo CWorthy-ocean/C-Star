@@ -37,23 +37,6 @@ def _reset_calls() -> None:
 
 
 @pytest.fixture
-def cache(tmp_path: Path) -> ArtifactCache:
-    """Return a cache wired to isolated temporary roots.
-
-    Parameters
-    ----------
-    tmp_path : Path
-        Pytest-provided temporary directory.
-
-    Returns
-    -------
-    ArtifactCache
-        Cache under test.
-    """
-    return ArtifactCache(tmp_path / "user", tmp_path / "shared")
-
-
-@pytest.fixture
 def workspace(tmp_path: Path) -> Path:
     """Return a scratch directory standing in for the caller's workspace.
 
