@@ -142,6 +142,8 @@ def _partition(
     CALLS.append("partition")
     shutil.rmtree(destination, ignore_errors=True)
     destination.mkdir(parents=True)
+    assert geometry.n_procs_x
+    assert geometry.n_procs_y
     for rank in range(geometry.n_procs_x * geometry.n_procs_y):
         (destination / f"rank{rank:03d}.nc").write_bytes(f"rank {rank}".encode())
 

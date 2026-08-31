@@ -1,11 +1,30 @@
 """
 Pydantic model of the ROMS Fortran ``namelist.nml``.
 
-:class:`RomsNamelist` mirrors the namelist's ``&group`` structure (one nested
-model per group, exact ROMS key names). It round-trips through ``f90nml``:
-:meth:`RomsNamelist.read` parses a ``namelist.nml`` into a validated model,
-edits are type-checked (``validate_assignment``), and :meth:`RomsNamelist.write`
-serializes it back. ``ROMSSimulation.roms_runtime_settings`` uses it to read the
+The namelist schema is **versioned**: ucla-roms occasionally makes breaking
+namelist changes, and C-Star must validate against the schema matching the
+pinned ucla-roms ref rather than a single fixed model.
+
+``RomsNamelistBase`` mirrors the namelist's ``&group`` structure (one nested
+model per group, exact ROMS key names) and holds the shared f90nml round-trip
+machinery (:meth:`RomsNamelistBase.read` / :meth:`RomsNamelistBase.write`
+etc.). It is not meant to be instantiated directly — use one of its versioned
+subclasses:
+
+- :class:`RomsNamelist` — the schema for ucla-roms **< 0.5.0**. Kept
+  unversioned (no suffix) for backward compatibility: this is the name
+  historically imported by C-Star Forge and other consumers.
+- :class:`RomsNamelistV0_5_0` — the schema for ucla-roms **>= 0.5.0, < 0.6.0**.
+- :class:`RomsNamelistV0_6_0` — the schema for ucla-roms **>= 0.6.0**. Adds
+  the ``&PIO_SETTINGS`` group (ucla-roms PR #346) on top of 0.5.0.
+
+Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
+subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
+:data:`NAMELIST_SCHEMA_REGISTRY` maps ``[lower, upper)`` ucla-roms version
+ranges to the schema class that applies, and
+:func:`namelist_schema_for_ref` selects the right class given a
+``checkout_target`` (e.g. from :class:`~cstar.io.source_data.SourceData`).
+``ROMSSimulation.roms_runtime_settings`` uses this selection to read the
 runtime namelist, apply simulation overrides, and write the run-time copy.
 
 Every group of a forge-produced namelist (which mirrors the pinned ucla-roms
@@ -24,11 +43,14 @@ that this model reads back.)
 
 from __future__ import annotations
 
+import re
 import warnings
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Self, cast
 
 import f90nml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from cstar.base.gitutils import _describe_nearest_tag
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -148,6 +170,13 @@ class ParamSettings(_NmlGroup):
     """Number of BGC tracers"""
 
 
+class PioSettings(_NmlGroup):
+    """Parallel-IO (PIO) library run-time settings (ucla-roms `&PIO_SETTINGS`)."""
+
+    pio_stride: int = Field(default=1, ge=1)
+    """Stride between MPI ranks assigned as PIO I/O tasks (requires PARALLEL_IO)"""
+
+
 class InitialConditions(_NmlGroup):
     inifile: str
     """Initial conditions (IC) file path"""
@@ -193,7 +222,7 @@ class TidalFrcSettings(_NmlGroup):
     """Number of tidal constituents"""
 
 
-class BasicOutputSettings(_NmlGroup):
+class _BasicOutputSettingsCommon(_NmlGroup):
     wrt_file_his: bool
     """Write instantaneous ocean physical state to output"""
     output_period_his: float
@@ -264,8 +293,21 @@ class BasicOutputSettings(_NmlGroup):
     """Write restart files at start of calendar month"""
     output_period_rst: float
     """Write restart files at regular frequency (s)"""
+
+
+class BasicOutputSettings(_BasicOutputSettingsCommon):
+    """``&BASIC_OUTPUT_SETTINGS`` for ucla-roms < 0.5.0."""
+
     nrpf_rst: int
     """Number of time records in restart files"""
+
+
+class BasicOutputSettingsV0_5_0(_BasicOutputSettingsCommon):
+    """``&BASIC_OUTPUT_SETTINGS`` for ucla-roms >= 0.5.0.
+
+    ``nrpf_rst`` was removed in ucla-roms 0.5.0 (PR #336): the restart
+    record count is now hardcoded in Fortran rather than namelist-configurable.
+    """
 
 
 class TsOutputSettings(_NmlGroup):
@@ -606,7 +648,7 @@ class PipeFrcSettings(_NmlGroup):
     """Number of pipe inputs"""
 
 
-class ParticlesSettings(_NmlGroup):
+class _ParticlesSettingsCommon(_NmlGroup):
     floats: bool
     """Release Lagrangian particles (T) or not (F)"""
     np: int
@@ -619,25 +661,74 @@ class ParticlesSettings(_NmlGroup):
     """Maximum number of particles for transfer in E-W"""
     exchange_facc: float
     """Maximum number of particles for transfer in corners"""
-    output_period: float
-    """Frequency of outputs"""
-    nrpf: int
-    """Number of records per file"""
     ppm3: float
     """Target particles per cubic meter"""
     pmin: int
     """Minimum of allocated space for particle array"""
 
 
-class RomsNamelist(BaseModel):
-    """A complete ROMS ``namelist.nml``, round-trippable via ``f90nml``.
+class ParticlesSettings(_ParticlesSettingsCommon):
+    """``&PARTICLES_SETTINGS`` for ucla-roms < 0.5.0.
+
+    ``output_period``/``nrpf`` are appended after the common fields, which
+    moves them to the end of the written ``&PARTICLES_SETTINGS`` group
+    relative to the original field order. This is a cosmetic-only change:
+    Fortran namelist reads are key-order-independent.
+    """
+
+    output_period: float
+    """Frequency of outputs"""
+    nrpf: int
+    """Number of records per file"""
+
+
+class ParticlesSettingsV0_5_0(_ParticlesSettingsCommon):
+    """``&PARTICLES_SETTINGS`` for ucla-roms >= 0.5.0.
+
+    ucla-roms 0.5.0 (PR #336) renamed ``output_period`` to
+    ``output_period_particles`` and ``nrpf`` to ``nrpf_particles``.
+    """
+
+    output_period_particles: float
+    """Frequency of outputs"""
+    nrpf_particles: int
+    """Number of records per file"""
+
+
+class RomsNamelistBase(BaseModel):
+    """Base model for a complete ROMS ``namelist.nml``, round-trippable via ``f90nml``.
 
     Group order matches ``write_roms_namelist`` / the reference namelist.
+
+    Not meant to be instantiated directly: use a versioned subclass
+    (:class:`RomsNamelist` for ucla-roms < 0.5.0, :class:`RomsNamelistV0_5_0`
+    for ucla-roms >= 0.5.0, < 0.6.0, or :class:`RomsNamelistV0_6_0` for
+    ucla-roms >= 0.6.0, which adds ``&PIO_SETTINGS``) or select one
+    automatically with :func:`namelist_schema_for_ref`.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
         extra="forbid", validate_assignment=True, use_attribute_docstrings=True
     )
+
+    _NOT_A_USABLE_SCHEMA_MSG: ClassVar[str] = (
+        "RomsNamelistBase is not a usable schema; use a versioned "
+        "subclass (e.g. RomsNamelist, RomsNamelistV0_5_0) or select "
+        "one with namelist_schema_for_ref()."
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_direct_use(cls, data: Any) -> Any:
+        """Reject validation against the base class itself.
+
+        The base's version-varying groups are typed as the loose ``_*Common``
+        models, so validating against it directly would silently accept a
+        namelist that no actual ucla-roms version reads.
+        """
+        if cls is RomsNamelistBase:
+            raise TypeError(cls._NOT_A_USABLE_SCHEMA_MSG)
+        return data
 
     simulation_name_settings: SimulationNameSettings
     time_stepping: TimeStepping
@@ -652,7 +743,7 @@ class RomsNamelist(BaseModel):
     surf_frc_settings: SurfFrcSettings
     river_frc_settings: RiverFrcSettings
     tidal_frc_settings: TidalFrcSettings
-    basic_output_settings: BasicOutputSettings
+    basic_output_settings: _BasicOutputSettingsCommon
     ts_output_settings: TsOutputSettings
     frc_output_settings: FrcOutputSettings
     extract_data_settings: ExtractDataSettings
@@ -681,11 +772,48 @@ class RomsNamelist(BaseModel):
     random_output_settings: RandomOutputSettings
     surf_flx_output_settings: SurfFlxOutputSettings
     pipe_frc_settings: PipeFrcSettings
-    particles_settings: ParticlesSettings
+    particles_settings: _ParticlesSettingsCommon
+
+    @classmethod
+    def unknown_override_keys(cls, overrides: dict[str, dict[str, Any]]) -> list[str]:
+        """List override entries whose names do not exist in this schema.
+
+        Checks group and key *names* only — values are not validated here; the
+        authoritative validation happens when overrides are merged onto a real
+        namelist and re-validated against the full schema.
+
+        Parameters
+        ----------
+        overrides : dict[str, dict[str, Any]]
+            Mapping of namelist group name to key/value overrides.
+
+        Returns
+        -------
+        list[str]
+            One human-readable violation per unknown group or key; empty when
+            every name exists in the schema.
+        """
+        if cls is RomsNamelistBase:
+            raise TypeError(cls._NOT_A_USABLE_SCHEMA_MSG)
+
+        violations: list[str] = []
+        for group, entries in overrides.items():
+            field = cls.model_fields.get(group)
+            annotation = field.annotation if field is not None else None
+            if not (isinstance(annotation, type) and issubclass(annotation, BaseModel)):
+                violations.append(f"unknown namelist group {group!r}")
+                continue
+            group_model = cast("type[BaseModel]", annotation)
+            violations.extend(
+                f"unknown key {key!r} in namelist group {group!r}"
+                for key in entries
+                if key not in group_model.model_fields
+            )
+        return violations
 
     # ---- f90nml round-trip ----
     @classmethod
-    def from_f90nml(cls, nml: f90nml.Namelist) -> RomsNamelist:
+    def from_f90nml(cls, nml: f90nml.Namelist) -> Self:
         """Build a validated model from a parsed ``f90nml.Namelist``.
 
         Each ``&group`` in the namelist becomes a nested model; group and key
@@ -699,13 +827,13 @@ class RomsNamelist(BaseModel):
 
         Returns
         -------
-        RomsNamelist
+        Self
             The validated model.
         """
         return cls.model_validate({k: dict(v) for k, v in nml.items()})
 
     @classmethod
-    def read(cls, path: str | Path) -> RomsNamelist:
+    def read(cls, path: str | Path) -> Self:
         """Read and validate a ``namelist.nml`` file from disk.
 
         Parameters
@@ -715,7 +843,7 @@ class RomsNamelist(BaseModel):
 
         Returns
         -------
-        RomsNamelist
+        Self
             The validated model parsed from the file.
         """
         return cls.from_f90nml(f90nml.read(str(path)))
@@ -747,3 +875,161 @@ class RomsNamelist(BaseModel):
             Destination path for the written namelist.
         """
         f90nml.Namelist(self.to_f90nml_dict()).write(str(path), force=True)
+
+
+class RomsNamelist(RomsNamelistBase):
+    """The ROMS namelist schema for ucla-roms < 0.5.0.
+
+    Kept unversioned (no suffix) for backward compatibility: this is the name
+    historically imported by C-Star Forge and other consumers.
+    """
+
+    basic_output_settings: BasicOutputSettings
+    particles_settings: ParticlesSettings
+
+
+class RomsNamelistV0_5_0(RomsNamelistBase):
+    """The ROMS namelist schema for ucla-roms >= 0.5.0, < 0.6.0 (PR #336)."""
+
+    basic_output_settings: BasicOutputSettingsV0_5_0
+    particles_settings: ParticlesSettingsV0_5_0
+
+
+class RomsNamelistV0_6_0(RomsNamelistV0_5_0):
+    """The ROMS namelist schema for ucla-roms >= 0.6.0.
+
+    Adds `&PIO_SETTINGS` (ucla-roms PR #346) on top of the 0.5.0 schema;
+    otherwise unchanged.
+    """
+
+    pio_settings: PioSettings = Field(default_factory=PioSettings)
+
+
+# ---- Schema version selection ----
+
+# ucla-roms releases with breaking namelist changes, as comparable version
+# tuples (named so registry entries read as versions, not bare tuples).
+UCLA_ROMS_0_5_0: Final[tuple[int, int, int]] = (0, 5, 0)
+UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
+
+# Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
+# class that applies; `None` bounds are unbounded. Ranges must be contiguous
+# and non-overlapping, ordered oldest-first; the last entry's upper bound
+# must be `None` (it covers "latest known release and beyond").
+#
+# Recipe for the next breaking namelist release (e.g. 0.8.0):
+#   1. Add the release constant:
+#        UCLA_ROMS_0_8_0: Final[tuple[int, int, int]] = (0, 8, 0)
+#   2. Cap the current last entry's upper bound at the new version:
+#        (UCLA_ROMS_0_6_0, UCLA_ROMS_0_8_0, RomsNamelistV0_6_0),
+#   3. Append a new open-ended entry for the new schema:
+#        (UCLA_ROMS_0_8_0, None, RomsNamelistV0_8_0),
+NAMELIST_SCHEMA_REGISTRY: tuple[
+    tuple[
+        tuple[int, int, int] | None, tuple[int, int, int] | None, type[RomsNamelistBase]
+    ],
+    ...,
+] = (
+    (None, UCLA_ROMS_0_5_0, RomsNamelist),
+    (UCLA_ROMS_0_5_0, UCLA_ROMS_0_6_0, RomsNamelistV0_5_0),
+    (UCLA_ROMS_0_6_0, None, RomsNamelistV0_6_0),
+)
+
+
+def _parse_semver(ref: str) -> tuple[int, int, int] | None:
+    r"""Parse a strict ``major.minor.patch`` version out of a git ref.
+
+    Parameters
+    ----------
+    ref : str
+        A git ref/tag string, e.g. ``"v0.5.0"`` or ``"0.5.0"``.
+
+    Returns
+    -------
+    tuple[int, int, int] or None
+        The parsed ``(major, minor, patch)`` tuple, or `None` if `ref` is not
+        strictly of the form ``\d+\.\d+\.\d+`` (with at most one leading
+        ``v`` stripped).
+    """
+    stripped = ref.removeprefix("v")
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", stripped)
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+
+
+_COMMIT_HASH_RE = re.compile(r"[0-9a-fA-F]{7,40}")
+"""A plausible (possibly abbreviated) git commit hash — used to decide whether
+an unparseable ref is worth resolving to a release tag via the local clone."""
+
+
+def namelist_schema_for_ref(
+    checkout_target: str | None, repo_path: str | Path | None = None
+) -> type[RomsNamelistBase]:
+    """Select the ``RomsNamelistBase`` subclass matching a ucla-roms ref.
+
+    Parameters
+    ----------
+    checkout_target : str or None
+        The ucla-roms git ref (tag, branch, or commit hash) C-Star is pinned
+        to, e.g. from ``ExternalCodeBase.source.checkout_target``.
+    repo_path : str or Path, optional
+        Path to a local clone of ucla-roms. When given and `checkout_target`
+        looks like a commit hash, the hash is resolved to its nearest
+        ancestor release tag (``git describe --tags``) and that release's
+        schema is selected — a commit hash pins the ucla-roms source exactly,
+        so its namelist layout is the one of the release it descends from. A
+        `UserWarning` is emitted if the commit is ahead of the tag (it could
+        contain unreleased namelist changes).
+
+    Returns
+    -------
+    type[RomsNamelistBase]
+        The namelist schema class whose ucla-roms version range contains
+        `checkout_target`, if it parses as a strict ``major.minor.patch``
+        semantic version (an optional leading ``v`` is stripped first) or is
+        a commit hash resolvable to a release tag via `repo_path`. Otherwise
+        (`None`, a branch name, an unresolvable hash, or an unparsable
+        string), a `UserWarning` is emitted and the last (most recent)
+        registry entry's class is returned.
+    """
+    version = _parse_semver(checkout_target) if checkout_target is not None else None
+
+    if (
+        version is None
+        and checkout_target is not None
+        and repo_path is not None
+        and _COMMIT_HASH_RE.fullmatch(checkout_target)
+    ):
+        described = _describe_nearest_tag(repo_path, checkout_target)
+        if described is not None:
+            tag, commits_ahead = described
+            version = _parse_semver(tag)
+            if version is not None and commits_ahead:
+                warnings.warn(
+                    f"ucla-roms commit {checkout_target!r} is {commits_ahead} "
+                    f"commit(s) after release {tag}; using that release's "
+                    f"namelist schema. If the commit contains unreleased "
+                    f"breaking namelist changes, C-Star may not match them.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+    last_cls = NAMELIST_SCHEMA_REGISTRY[-1][2]
+    if version is None:
+        warnings.warn(
+            f"ucla-roms ref {checkout_target!r} is not a release tag; using the "
+            f"latest known namelist schema ({last_cls.__name__}). If this ref "
+            f"contains unreleased breaking namelist changes, C-Star may not "
+            f"match them — use at your own risk. Pin a ucla-roms release tag "
+            f"(e.g. 'v0.5.0') to get version-matched validation.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return last_cls
+    for lower, upper, cls in NAMELIST_SCHEMA_REGISTRY:
+        if (lower is None or version >= lower) and (upper is None or version < upper):
+            return cls
+    # Unreachable given a well-formed, contiguous registry with an
+    # open-ended last entry, but keeps mypy happy about the return type.
+    return last_cls

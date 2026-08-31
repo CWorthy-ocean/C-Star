@@ -12,6 +12,9 @@ jobs:
   test:
     name: unit-${{ matrix.os }}-${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
+    # the suite runs in ~2 minutes; don't let a teardown hang hold a runner
+    # for the default 6 hours
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -46,10 +49,7 @@ jobs:
         shell: micromamba-shell {0}        
         run: |
            python -V
-           prefect server start --port 4200 --no-ui --analytics-off --background
-           export PREFECT_API_URL=http://127.0.0.1:4200/api
            coverage run --rcfile=coverage.toml -m pytest -s --verbose cstar/tests/unit_tests/*
-           prefect server stop
            
       - name: Get coverage report
         shell: micromamba-shell {0}                

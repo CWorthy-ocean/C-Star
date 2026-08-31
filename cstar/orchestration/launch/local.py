@@ -8,7 +8,7 @@ from subprocess import run as sprun
 
 from psutil import NoSuchProcess
 from psutil import Process as PsProcess
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
 from cstar.base.adapter import (
     ConfiguredModelAdapter,
@@ -17,7 +17,6 @@ from cstar.base.adapter import (
 )
 from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_item
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import ENV_FF_ENABLE_LOCAL_PROXY, is_feature_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, additional_files_dir
 from cstar.orchestration.adapter import StepToRunRequestAdapter
@@ -28,7 +27,6 @@ from cstar.orchestration.orchestration import (
     LiveStep,
     ProcessHandle,
     RunRequest,
-    RunRequestScriptFormatter,
     Status,
     Task,
 )
@@ -161,20 +159,24 @@ class LocalComputeAdapter(ConfiguredModelAdapter[KeyValueStore, LocalComputeSpec
             msg = "Compute overrides were not supplied to the LocalComputeAdapter"
             raise CstarExpectationFailed(msg)
 
-        if overrides_ := model.get("local", {}):
+        overrides_ = model.get("local", {})
+        if not overrides_:
+            if self.allow_unmodified:
+                return LocalComputeSpec()
+            msg = "No local overrides were supplied to the LocalComputeAdapter"
+            raise CstarExpectationFailed(msg)
+
+        try:
             compute = LocalComputeSpec.model_validate(overrides_)
+        except ValidationError as ex:
+            msg = f"Unable to adapt model {model!r} into LocalComputeSpec"
+            raise CstarAdaptationError(msg) from ex
 
-            if not compute.model_dump(exclude_defaults=True):
-                msg = "Non-default local compute overrides were not specified."
-                log.debug(msg)
+        if not compute.model_dump(exclude_defaults=True):
+            msg = "Non-default local compute overrides were not specified."
+            log.debug(msg)
 
-            return compute
-
-        if self.allow_unmodified:
-            return LocalComputeSpec()
-
-        msg = f"Unable to adapt model {model!r} into LocalComputeSpec"
-        raise CstarAdaptationError(msg)
+        return compute
 
 
 class TimeConstrainedRunRequestEnricher(ModelEnricher[RunRequest]):
@@ -236,8 +238,6 @@ class LocalLauncher(Launcher[LocalHandle]):
 
     tasks: t.ClassVar[dict[str, str]] = {}
     """Mapping of task name to process ID."""
-    use_proxy: t.ClassVar[bool] = is_feature_enabled(ENV_FF_ENABLE_LOCAL_PROXY)
-    """Set flag to `True` to use a proxy script to enable asynchronous scheduling."""
 
     @classmethod
     def check_preconditions(cls) -> None:
@@ -255,17 +255,21 @@ class LocalLauncher(Launcher[LocalHandle]):
         -------
         str
         """
-        formatter: ModelFormatter[RunRequest] = RunRequestScriptFormatter()
-        if LocalLauncher.use_proxy:
-            formatter = ProxiedRunRequestFormatter(step, dependencies)
+        formatter: ModelFormatter[RunRequest] = ProxiedRunRequestFormatter(
+            step, dependencies
+        )
 
         enricher: ModelEnricher[RunRequest] | None = None
 
         if step.compute_overrides:
             try:
-                if step.compute_overrides:
-                    compute = LocalComputeAdapter().adapt(step.compute_overrides)
-                    enricher = TimeConstrainedRunRequestEnricher(compute)
+                compute = LocalComputeAdapter().adapt(step.compute_overrides)
+                enricher = TimeConstrainedRunRequestEnricher(compute)
+            except CstarExpectationFailed:
+                # overrides carry nothing for this launcher (e.g. the slurm
+                # cpu requirement the workplan transformer records)
+                msg = f"No local overrides for step {step.name!r}"
+                log.debug(msg)
             except CstarAdaptationError:
                 msg = f"Local overrides did not result in valid compute spec: {step.compute_overrides}"
                 log.warning(msg, exc_info=True)
@@ -367,7 +371,10 @@ class LocalLauncher(Launcher[LocalHandle]):
                 return "RUNNING"
             return "COMPLETED"
 
-        rc = handle.process.returncode
+        # poll() reaps the child and records its exit code; reading
+        # `returncode` alone never observes an exit the process made on
+        # its own, leaving the task RUNNING forever.
+        rc = handle.process.poll()
 
         if rc is None:
             status = "RUNNING"
@@ -405,20 +412,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
         statuses = await asyncio.gather(*tasks)
 
+        # in-progress dependencies are awaited by the submitted proxy script
         failure_found = any(map(Status.is_failure, statuses))
-
-        if not LocalLauncher.use_proxy:
-            # without the proxy, the launcher must sit and wait for processes to end.
-            active_found = any(map(Status.is_in_progress, statuses))
-
-            # wait for the dependencies to complete before launching
-            while active_found and not failure_found:
-                await asyncio.sleep(1)
-
-                tasks = [asyncio.Task(cls.query_status(h)) for h in dependencies]
-                statuses = await asyncio.gather(*tasks)
-                active_found = any(map(Status.is_in_progress, statuses))
-                failure_found = any(map(Status.is_failure, statuses))
 
         if failure_found:
             msg = f"Dependency of step {step.name} failed. Unable to continue."
@@ -553,8 +548,15 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
         str
         """
         pids = " "
+        dep_sentinels = " "
         if self.dependencies:
             pids = " ".join([f'"{h.pid}"' for h in self.dependencies])
+            dep_sentinels = " ".join(
+                [
+                    f'"{StateRepository.sentinel_path(h.name)}"'
+                    for h in self.dependencies
+                ]
+            )
 
         delay = get_env_item(ENV_CSTAR_ORCH_LOCAL_DELAY).value
         declarations = [f"export {k}='{v}'\n" for k, v in value.environment.items()]
@@ -564,6 +566,7 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
             "sentinel_path": str(StateRepository.sentinel_path(self.step.name)),
             "blueprint_path": str(self.step.blueprint_path),
             "pids": pids,
+            "dep_sentinels": dep_sentinels,
             "running": str(Status.Running.value),
             "done": str(Status.Done.value),
             "failed": str(Status.Failed.value),

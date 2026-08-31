@@ -262,6 +262,18 @@ ENV_CSTAR_DISABLE_BUILD_VERIFICATION: t.Annotated[
 ] = "CSTAR_DISABLE_BUILD_VERIFICATION"
 """Set to `1` to skip the pre- and post-build toolchain consistency checks performed when compiling ROMS."""
 
+ENV_CSTAR_DISABLE_MIGRATION: t.Annotated[
+    t.Literal["CSTAR_DISABLE_MIGRATION"],
+    EnvVar(
+        "Set to `1` to disable automatic blueprint schema migration. Commands "
+        "fail early instead of migrating when a blueprint is not at the current "
+        "schema version, guaranteeing the blueprint is never modified.",
+        GROUP_SIM,
+        default=FLAG_OFF,
+    ),
+] = "CSTAR_DISABLE_MIGRATION"
+"""Set to `1` to disable automatic blueprint schema migration; commands fail early on out-of-date blueprints."""
+
 ENV_CSTAR_FRESH_CODEBASES: t.Annotated[
     t.Literal["CSTAR_FRESH_CODEBASES"],
     EnvVar(
@@ -357,7 +369,7 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
     EnvVar(
         "Environment variable used to override the home directory for C-Star dataset storage.",
         GROUP_FS,
-        "~/.local/share/cstar",
+        "~/cstar",
         indirect_var="XDG_DATA_HOME",
         default_factory=lambda x: (
             hpc_scratch_directory() or indirect_default_factory(x)
@@ -462,3 +474,19 @@ def env_var_groups() -> dict[str, list[EnvItem]]:
         groups[item.group].append(item)
 
     return groups
+
+
+def unset(key: str) -> str | None:
+    """Unset an environment variable.
+
+    Parameters
+    ----------
+    key : str
+        The key to unset
+
+    Returns
+    -------
+    str
+        The value that was previously stored for the key
+    """
+    return os.environ.pop(key, None)

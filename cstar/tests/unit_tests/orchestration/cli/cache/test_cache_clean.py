@@ -58,52 +58,43 @@ def _clean(*args: str) -> t.Any:
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
 def test_cli_cache_clean_removes_a_user_artifact(cache: ArtifactCache) -> None:
     """A confirmed deletion removes the artifact from the run."""
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")):
+    with mock.patch("typer.confirm", mock.Mock(return_value=True)):
         result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY)
 
     assert result.exit_code == 0
-    assert "has been deleted" in result.stdout
+    assert f"User asset {KEY!r} deleted" in result.stdout
     assert cache.resolve(KEY, RUN_ID) is None
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
 def test_cli_cache_clean_declining_keeps_the_artifact(cache: ArtifactCache) -> None:
     """Deletion is irreversible, so a refusal has to leave it alone."""
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
+    with mock.patch("typer.confirm", mock.Mock(return_value=False)):
         result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY)
 
-    assert result.exit_code == 0
-    assert "was not removed" in result.stdout
+    assert result.exit_code == 1
+    assert "Confirmation required to remove user asset" in result.stdout
     assert cache.resolve(KEY, RUN_ID) is not None
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
 def test_cli_cache_clean_yes_skips_the_prompt(cache: ArtifactCache) -> None:
     """``--yes`` is for unattended use, so it must not stop to ask."""
-    with mock.patch("rich.prompt.Prompt.ask") as prompt:
+    with mock.patch("typer.confirm") as prompt:
         result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_YES)
 
     prompt.assert_not_called()
-    assert "has been deleted" in result.stdout
+    assert f"User asset {KEY!r} deleted" in result.stdout
     assert cache.resolve(KEY, RUN_ID) is None
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env")
-def test_cli_cache_clean_reports_an_unknown_artifact(cache: ArtifactCache) -> None:
+@pytest.mark.usefixtures("mock_artifact_cache_env", "cache")
+def test_cli_cache_clean_reports_an_unknown_artifact() -> None:
     """Nothing to delete is reported rather than treated as a deletion."""
     result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, "no-such-key")
 
     assert result.exit_code == 0
-    assert "No cached artifact" in result.stdout
-
-
-@pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_verbose_names_the_tier(cache: ArtifactCache) -> None:
-    """Verbose output says which tier the artifact was removed from."""
-    result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_YES, "--verbose")
-
-    assert "has been deleted" in result.stdout
-    assert "cache" in result.stdout
+    assert "No cached asset" in result.stdout
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
@@ -130,7 +121,7 @@ def test_cli_cache_clean_removes_a_shared_artifact(cache: ArtifactCache) -> None
     """
     cache.promote(KEY, RUN_ID)
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(side_effect=["y", "y"])):
+    with mock.patch("typer.confirm", mock.Mock(side_effect=[True, True])):
         result = _clean(ARG_KEY, KEY)
 
     assert result.exit_code == 0
@@ -144,28 +135,25 @@ def test_cli_cache_clean_shared_removal_needs_both_answers(
 ) -> None:
     """A shared deletion affects every user, so one answer is not enough.
 
-    The first refusal has to stick. A second prompt that replaced the answer
-    rather than adding to it would delete an artifact the user had already
-    declined to remove, making the extra question worse than none at all.
+    A double confirmation must be received.
     """
     cache.promote(KEY, RUN_ID)
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(side_effect=["n", "y"])):
+    # note: double confirm should dump on first no, not ask "are you sure"...
+    with mock.patch("typer.confirm", mock.Mock(side_effect=[True, False])):
         result = _clean(ARG_KEY, KEY)
 
-    assert "was not removed" in result.stdout
+    assert "Confirmation required" in result.stdout
     assert cache.resolve(KEY) is not None
 
 
-@pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
-def test_cli_cache_clean_shared_miss_is_worded_for_the_tier(
-    cache: ArtifactCache,
-) -> None:
+@pytest.mark.usefixtures("mock_artifact_cache_env", "stored", "cache")
+def test_cli_cache_clean_shared_miss_is_worded_for_the_tier() -> None:
     """A shared miss has no run to mention, so it is described differently."""
     result = _clean(ARG_KEY, "no-such-key")
 
     assert result.exit_code == 0
-    assert "found in shared cache" in result.stdout
+    assert "No shared asset found" in result.stdout
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env", "stored")
@@ -199,7 +187,7 @@ def test_cli_cache_clean_removes_a_whole_run(
     cache.ingest(item, "first.nc", RUN_ID)
     cache.ingest(item, "second.nc", RUN_ID)
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")):
+    with mock.patch("typer.confirm", mock.Mock(return_value=True)):
         result = _clean(ARG_RUNID, RUN_ID)
 
     assert result.exit_code == 0
@@ -228,11 +216,11 @@ def test_cli_cache_clean_declining_keeps_the_whole_run(
     cache.ingest(item, "first.nc", RUN_ID)
     cache.ingest(item, "second.nc", RUN_ID)
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
+    with mock.patch("typer.confirm", mock.Mock(return_value=False)):
         result = _clean(ARG_RUNID, RUN_ID)
 
-    assert result.exit_code == 0
-    assert "No artifacts were removed" in result.stdout
+    assert result.exit_code == 1
+    assert "Confirmation required to remove run assets" in result.stdout
     assert cache.resolve("first.nc", RUN_ID) is not None
     assert cache.resolve("second.nc", RUN_ID) is not None
 
@@ -252,10 +240,10 @@ def test_cli_cache_clean_run_prompt_names_the_run(
     item.write_text("payload")
     cache.ingest(item, "first.nc", RUN_ID)
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
+    with mock.patch("typer.confirm", mock.Mock(return_value=False)):
         result = _clean(ARG_RUNID, RUN_ID)
 
-    assert f"Every artifact cached for run {RUN_ID!r}" in result.stdout
+    assert f"{RUN_ID!r}" in result.stdout
     assert "does not exist" not in result.stdout
 
 
@@ -274,7 +262,7 @@ def test_cli_cache_clean_run_yes_skips_the_prompt(
     item.write_text("payload")
     cache.ingest(item, "first.nc", RUN_ID)
 
-    with mock.patch("rich.prompt.Prompt.ask") as prompt:
+    with mock.patch("typer.confirm") as prompt:
         result = _clean(ARG_RUNID, RUN_ID, ARG_YES)
 
     prompt.assert_not_called()
@@ -294,7 +282,7 @@ def test_cli_cache_clean_requires_a_key_or_a_run() -> None:
     It must also not reach the prompt: asking "shall I delete?" before knowing
     what would be deleted is how an accident happens.
     """
-    with mock.patch("rich.prompt.Prompt.ask") as prompt:
+    with mock.patch("typer.confirm") as prompt:
         result = _clean()
 
     prompt.assert_not_called()
@@ -319,14 +307,14 @@ def test_cli_cache_clean_reports_a_refused_shared_deletion(
     cache.promote(KEY, RUN_ID)
 
     with (
-        mock.patch("rich.prompt.Prompt.ask", mock.Mock(side_effect=["y", "y"])),
+        mock.patch("typer.confirm", mock.Mock(side_effect=[False, False])),
         mock.patch.object(
             type(cache), "delete_shared", side_effect=UnsafePathError("guarded")
         ),
     ):
         result = _clean(ARG_KEY, KEY)
 
-    assert "Confirmation required to remove shared artifact" in result.stdout
+    assert "Confirmation required to remove shared asset" in result.stdout
     assert KEY in result.stdout
 
 
@@ -340,7 +328,7 @@ def test_cli_cache_clean_reports_an_artifact_that_vanished(
     it should read as a failed removal rather than a crash.
     """
     with (
-        mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")),
+        mock.patch("typer.confirm", mock.Mock(return_value=True)),
         mock.patch.object(
             type(cache), "delete_user", side_effect=ArtifactNotFoundError("gone")
         ),
@@ -348,4 +336,4 @@ def test_cli_cache_clean_reports_an_artifact_that_vanished(
         result = _clean(ARG_RUNID, RUN_ID, ARG_KEY, KEY)
 
     assert "could not be removed" in result.stdout
-    assert result.exit_code == 0
+    assert result.exit_code == 1

@@ -20,7 +20,7 @@ from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
     ENV_CSTAR_RUNID,
 )
-from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.exceptions import BlueprintDeferredError, CstarExpectationFailed
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import lazy_import, slugify
 from cstar.execution.file_system import (
@@ -28,7 +28,13 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.formatting import ModelFormatter
-from cstar.orchestration.models import Blueprint, ConfiguredBaseModel, Step, Workplan
+from cstar.orchestration.models import (
+    Blueprint,
+    ConfiguredBaseModel,
+    DeferredBlueprintRef,
+    Step,
+    Workplan,
+)
 from cstar.orchestration.serialization import (
     deserialize,
     intenum_representer,
@@ -246,7 +252,25 @@ class LiveStep(Step):
 
     @property
     def blueprint(self) -> Blueprint:
-        """Load and return the blueprint associated with this step."""
+        """Load and return the blueprint associated with this step.
+
+        Returns
+        -------
+        Blueprint
+
+        Raises
+        ------
+        BlueprintDeferredError
+            If the step's blueprint is deferred to runtime and does not
+            exist until its producing step has run.
+        """
+        if isinstance(self.blueprint_path, DeferredBlueprintRef):
+            raise BlueprintDeferredError(
+                f"Step {self.name!r} has a blueprint deferred to runtime, "
+                f"produced by step {self.blueprint_path.from_step!r}; "
+                "it does not exist yet."
+            )
+
         path = Path(self.blueprint_path)
         app = get_app_for_blueprint(path)
 
@@ -986,19 +1010,6 @@ class RunRequestCommandFormatter(ModelFormatter[RunRequest]):
         cmd = " ".join(value.command)
 
         return f"{variables} {cmd}".strip()
-
-
-class RunRequestScriptFormatter(ModelFormatter[RunRequest]):
-    """Format a `RunRequest` as script content."""
-
-    def _to_string(self, value: RunRequest) -> str:
-        command = " ".join(value.command)
-        exports = ";".join(f"export {k}='{v}'" for k, v in value.environment.items())
-
-        if exports:
-            return f"{exports}; {command};"
-
-        return f"{command};"
 
 
 def check_environment() -> None:

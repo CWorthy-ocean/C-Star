@@ -11,8 +11,7 @@ from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, FLAG_OFF
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
-from cstar.roms import ROMSPartitioning
-from cstar.roms.input_dataset import DatasetLinker, ROMSInputDataset
+from cstar.roms.input_dataset import DatasetLinker, ROMSInputDataset, ROMSPartitioning
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeROMSInputDataset
 
 

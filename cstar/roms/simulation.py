@@ -1,14 +1,17 @@
+import copy
 import logging
 import os
 import re
 import shutil
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Optional, TypeVar, cast
 
 import yaml
+from pydantic import ValidationError
 
 from cstar.applications.roms_marbl.adapter import (
     AddtlCodeAdapter,
@@ -31,16 +34,20 @@ from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_NPROCS_POST,
-    FLAG_OFF,
     FLAG_ON,
     get_env_item,
 )
 from cstar.base.exceptions import CstarExpectationFailed
-from cstar.base.feature import ENV_FF_DEBUG_BUILD_MODE, is_feature_enabled
+from cstar.base.feature import (
+    ENV_FF_DEBUG_BUILD_MODE,
+    is_feature_enabled,
+    is_flag_enabled,
+)
 from cstar.base.utils import (
     _dict_to_tree,
     _get_sha256_hash,
     _run_cmd,
+    deep_merge,
     slugify,
 )
 from cstar.execution.file_system import RomsFileSystemManager, remove_files
@@ -71,7 +78,8 @@ from cstar.roms.input_dataset import (
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
-from cstar.roms.namelist import RomsNamelist
+from cstar.roms.namelist import RomsNamelist, RomsNamelistBase, namelist_schema_for_ref
+from cstar.roms.precheck import check_output_streams_divide_rst
 from cstar.simulation import Simulation
 from cstar.system.manager import get_sysmgr
 
@@ -183,9 +191,15 @@ class ROMSSimulation(Simulation):
         Whether ROMS uses the ParallelIO library for input/output.
     pio_codebase : PIOExternalCodeBase
         The repository containing the source code for the ParallelIO library (if use_pio is True).
+    auto_tiling : bool
+        Whether the tiling layout is determined automatically rather than from
+        `discretization.n_procs_x`/`n_procs_y`. NOTE: this feature is in development.
+    namelist_overrides : dict[str, dict[str, Any]]
+        Mapping of ROMS namelist group to key/value overrides, layered onto the
+        runtime namelist last, after C-Star's own derived settings.
     runtime_code : AdditionalCode
         Additional code needed by ROMS at runtime (e.g. a `.nml` Fortran namelist)
-    roms_runtime_settings : RomsNamelist
+    roms_runtime_settings : RomsNamelistBase
         A validated namelist read from the runtime_code, with key parameters overridden
         from the simulation configuration.
     compile_time_code : AdditionalCode
@@ -261,6 +275,8 @@ class ROMSSimulation(Simulation):
         forcing_corrections: list["ROMSForcingCorrections"] | None = None,
         use_pio: bool = False,
         pio_codebase: Optional["PIOExternalCodeBase"] = None,
+        auto_tiling: bool = False,
+        namelist_overrides: dict[str, dict[str, Any]] | None = None,
     ):
         """Initializes a `ROMSSimulation` instance.
 
@@ -317,6 +333,15 @@ class ROMSSimulation(Simulation):
             External codebase for the ParallelIO library. Only valid alongside
             `use_pio=True`; if `use_pio` is True and no codebase is provided, a
             default ParallelIO codebase is used.
+        auto_tiling : bool, optional
+            If True, the tiling layout is determined automatically rather than
+            from `discretization.n_procs_x`/`n_procs_y`. Requires `use_pio=True`.
+            NOTE: this feature is in development.
+        namelist_overrides : dict[str, dict[str, Any]], optional
+            Mapping of ROMS namelist group to key/value overrides. These are
+            layered onto the runtime namelist last, after C-Star's own derived
+            settings, so they take precedence over anything C-Star would
+            otherwise compute; list values replace the existing list wholesale.
 
         Raises
         ------
@@ -326,6 +351,7 @@ class ROMSSimulation(Simulation):
             If `forcing_corrections` is not a list of `ROMSForcingCorrections` instances.
         ValueError
             If `pio_codebase` is provided but `use_pio` is False.
+            If `auto_tiling` is True but `use_pio` is False.
         """
         if discretization is None:
             raise ValueError(
@@ -397,6 +423,14 @@ class ROMSSimulation(Simulation):
             )
         self.use_pio = use_pio
         self.pio_codebase = pio_codebase or PIOExternalCodeBase() if use_pio else None
+
+        if auto_tiling and not use_pio:
+            raise ValueError(
+                "'auto_tiling' is True but 'use_pio' is False. "
+                "Set use_pio=True to use auto_tiling."
+            )
+        self.auto_tiling = auto_tiling
+        self.namelist_overrides = namelist_overrides or {}
 
         self._find_namelist_file()
         # roms-specific
@@ -610,8 +644,7 @@ class ROMSSimulation(Simulation):
         return cast("RomsFileSystemManager", self._fs_manager)
 
     def _conditionally_clear_root(self):
-        env_item = get_env_item(ENV_CSTAR_CLOBBER_WORKING_DIR)
-        if env_item.value != FLAG_OFF:
+        if is_flag_enabled(ENV_CSTAR_CLOBBER_WORKING_DIR):
             self.fs_manager.clear()
 
     @property
@@ -699,49 +732,49 @@ class ROMSSimulation(Simulation):
         return forcing_paths
 
     @property
-    def _n_time_steps(self) -> int:
-        """Calculate the total number of time steps for the simulation.
+    def roms_runtime_settings(self) -> "RomsNamelistBase":
+        """Generate and return a :class:`RomsNamelistBase` for the simulation.
 
-        This internal property determines the number of time steps based on the
-        start and end dates of the simulation and the time step size specified in
-        `discretization`.
+        Reads the Fortran namelist from the `runtime_code`, validates it into
+        the :class:`~cstar.roms.namelist.RomsNamelistBase` subclass selected
+        by :func:`~cstar.roms.namelist.namelist_schema_for_ref` for this
+        simulation's ucla-roms `checkout_target`, and applies settings in two
+        stages:
 
-        Returns
-        -------
-        int
-            The total number of model time steps between `start_date` and `end_date`.
-
-        Raises
-        ------
-        AttributeError
-            If `start_date`, `end_date`, or `discretization.time_step` is not set.
-        """
-        run_length_seconds = int((self.end_date - self.start_date).total_seconds())
-        return run_length_seconds // self.discretization.time_step
-
-    @property
-    def roms_runtime_settings(self) -> "RomsNamelist":
-        """Generate and return a :class:`RomsNamelist` for the simulation.
-
-        Reads the Fortran namelist from the `runtime_code`, validates it into a
-        :class:`~cstar.roms.namelist.RomsNamelist`, and overrides key parameters
-        based on the current simulation configuration: time step, number of time
-        steps, grid path, initial conditions, forcing datasets, MARBL/CDR/nesting
-        files, output root, and extract root.
+        1. Derived settings, computed from the current simulation
+           configuration: grid path, initial conditions, forcing datasets,
+           MARBL/CDR/nesting files, output root, and extract root.
+        2. `namelist_overrides`, layered on top of the derived settings so
+           that user overrides win. The processor grid (`np_xi`/`np_eta`) is
+           then set from `discretization`, which is authoritative for it (an
+           override of either is superseded, with a warning), and the number
+           of time steps (`ntimes`) is derived from the run length and the
+           *effective* `dt` (i.e. after any override), unless the user has
+           explicitly overridden `time_stepping.ntimes`, in which case their
+           value stands.
 
         Returns
         -------
-        RomsNamelist
+        RomsNamelistBase
             A validated namelist with simulation-specific parameters applied.
 
         Raises
         ------
         ValueError
             If the runtime namelist has not been retrieved locally via `setup()` or
-            `runtime_code.get()`.
+            `runtime_code.get()`, or if it fails validation against the schema
+            selected for this simulation's ucla-roms `checkout_target` (the
+            original `pydantic.ValidationError` is chained as `__cause__`) —
+            this can happen if the namelist file targets a different ucla-roms
+            version than the one this simulation pins.
+            If `namelist_overrides` fails validation against the selected
+            schema (e.g. an unknown group or key), the original
+            `pydantic.ValidationError` is chained as `__cause__`.
+            If the effective `time_stepping.dt` (after overrides) is not
+            positive.
         pydantic.ValidationError
-            If the runtime namelist is missing a required group/key or contains an
-            invalid value (RomsNamelist is a strict, fully-typed schema).
+            If a simulation-derived override value is invalid for its namelist
+            field (the namelist models re-validate on assignment).
         """
         if self.runtime_code.working_copy is None:
             raise ValueError(
@@ -750,12 +783,24 @@ class ROMSSimulation(Simulation):
                 + "ROMSSimulation.runtime_code.get() and try again."
             )
 
-        nml = RomsNamelist.read(
+        checkout_target = self.codebase.source.checkout_target
+        codebase_copy = self.codebase.working_copy
+        schema = namelist_schema_for_ref(
+            checkout_target,
+            repo_path=codebase_copy.path if codebase_copy is not None else None,
+        )
+        namelist_path = (
             self.runtime_code.working_copy.common_parent / self._namelist_file
         )
-
-        nml.time_stepping.dt = self.discretization.time_step
-        nml.time_stepping.ntimes = self._n_time_steps
+        try:
+            nml = schema.read(namelist_path)
+        except ValidationError as err:
+            raise ValueError(
+                f"namelist at {namelist_path} failed validation against "
+                f"{schema.__name__} (selected for ucla-roms ref "
+                f"{checkout_target!r}). The namelist file may target a "
+                f"different ucla-roms version than the one this simulation pins."
+            ) from err
 
         if self.initial_conditions:
             nml.initial_conditions.inifile = str(
@@ -797,6 +842,69 @@ class ROMSSimulation(Simulation):
         # non-PIO builds name extraction files from output_root_name (already
         # pointing at the output directory).
         nml.extract_data_settings.extract_root_name = "../output/child"
+
+        # User overrides are layered on last, so they take precedence over
+        # any of the derived settings above.
+        overrides = self.namelist_overrides
+        if overrides:
+            try:
+                nml = type(nml).model_validate(
+                    deep_merge(nml.model_dump(), overrides, replace_lists=True)
+                )
+            except ValidationError as err:
+                raise ValueError(
+                    f"namelist_overrides failed validation against {schema.__name__} "
+                    f"(selected for ucla-roms ref {checkout_target!r}); check group and "
+                    "key names against that schema."
+                ) from err
+
+        # The discretization is authoritative for the processor grid: applied
+        # after the override merge so np_xi/np_eta cannot drift from the
+        # scheduled cores. Blueprint validation already rejects conflicting
+        # overrides; this warning covers the direct-API path, where a
+        # simulation is built without going through a blueprint.
+        param_overrides = overrides.get("param_settings", {})
+        for key, n_procs in (
+            ("np_xi", self.discretization.n_procs_x),
+            ("np_eta", self.discretization.n_procs_y),
+        ):
+            if n_procs is None:
+                continue
+            if (value := param_overrides.get(key)) is not None and value != n_procs:
+                warnings.warn(
+                    f"namelist override {key!r} ({value!r}) is superseded by the "
+                    f"partitioning value ({n_procs!r}); the discretization is "
+                    "authoritative for the processor grid.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            setattr(nml.param_settings, key, n_procs)
+
+        dt = nml.time_stepping.dt
+        if dt <= 0:
+            raise ValueError(f"time_stepping.dt must be positive, got {dt}")
+
+        # ntimes is derived from the run length and the effective dt, unless
+        # the user explicitly overrode ntimes themselves.
+        if "ntimes" not in overrides.get("time_stepping", {}):
+            run_length_seconds = int((self.end_date - self.start_date).total_seconds())
+            nml.time_stepping.ntimes = int(run_length_seconds // dt)
+
+        # Output-stream / restart-rollover consistency check (ucla-roms >=
+        # 0.5.0's check_output_divides_rst, precheck.F90): a user overriding
+        # output/restart periods via namelist_overrides (or a hand-edited
+        # namelist file) can produce a config ucla-roms rejects at startup;
+        # catch it here so the failure surfaces with the override still in
+        # hand, mirroring the `dt <= 0` check above. Version-gated: the
+        # precheck landed in ucla-roms 0.5.0, so it's skipped for the legacy
+        # (< 0.5.0) `RomsNamelist` schema (`RomsNamelistV0_5_0`/`V0_6_0` are
+        # separate `RomsNamelistBase` subclasses, not subclasses of
+        # `RomsNamelist` -- this isinstance check is exactly the >= 0.5.0
+        # gate).
+        if not isinstance(nml, RomsNamelist):
+            check_output_streams_divide_rst(
+                nml.model_dump(), self._active_cppdefs_for_precheck()
+            )
 
         return nml
 
@@ -902,6 +1010,11 @@ class ROMSSimulation(Simulation):
             simulation_kwargs["pio_codebase"] = PIOExternalCodeBase(
                 **pio_codebase_kwargs
             )
+
+        simulation_kwargs["auto_tiling"] = simulation_dict.get("auto_tiling", False)
+        simulation_kwargs["namelist_overrides"] = simulation_dict.get(
+            "namelist_overrides"
+        )
 
         # Construct the Discretization instance
         discretization_kwargs = simulation_dict.get("discretization")
@@ -1035,6 +1148,12 @@ class ROMSSimulation(Simulation):
             simulation_dict["use_pio"] = True
         if self.pio_codebase:
             simulation_dict["pio_codebase"] = self.pio_codebase.to_dict()
+        if self.auto_tiling:
+            simulation_dict["auto_tiling"] = True
+        if self.namelist_overrides:
+            simulation_dict["namelist_overrides"] = copy.deepcopy(
+                self.namelist_overrides
+            )
 
         # InputDatasets:
         if self.model_grid is not None:
@@ -1112,8 +1231,10 @@ class ROMSSimulation(Simulation):
             valid_start_date=bp.valid_start_date,
             valid_end_date=bp.valid_end_date,
             marbl_codebase=(MARBLAdapter(bp).adapt() if bp.code.marbl else None),
-            use_pio=bp.model_params.use_pio,
-            pio_codebase=(PIOAdapter(bp).adapt() if bp.model_params.use_pio else None),
+            use_pio=bp.partitioning.use_pio,
+            pio_codebase=(PIOAdapter(bp).adapt() if bp.partitioning.use_pio else None),
+            auto_tiling=bp.partitioning.auto_tiling,
+            namelist_overrides=bp.namelist_overrides,
             model_grid=GridAdapter(bp).adapt(),
             initial_conditions=InitialConditionAdapter(bp).adapt(),
             tidal_forcing=TidalForcingAdapter(bp).adapt(),
@@ -1321,18 +1442,13 @@ class ROMSSimulation(Simulation):
             if not (inp.exists_locally):
                 # If it can't be found locally, check whether it should by matching dataset dates with simulation dates:
                 # If no start or end date, it should be found locally:
-                if (not isinstance(inp.start_date, datetime)) or (
-                    not isinstance(inp.end_date, datetime)
-                ):
-                    return False
-                # If no start or end date for case, all files should be found locally:
-                elif (not isinstance(self.start_date, datetime)) or (
-                    not isinstance(self.end_date, datetime)
-                ):
-                    return False
-                # If inp and case start and end dates overlap, should be found locally:
-                elif (inp.start_date <= self.end_date) and (
-                    inp.end_date >= self.start_date
+                if (
+                    (not isinstance(inp.start_date, datetime))
+                    or (not isinstance(inp.end_date, datetime))
+                    or (not isinstance(self.start_date, datetime))
+                    or (not isinstance(self.end_date, datetime))
+                    or (inp.start_date <= self.end_date)
+                    and (inp.end_date >= self.start_date)
                 ):
                     return False
         return True
@@ -1389,8 +1505,36 @@ class ROMSSimulation(Simulation):
             )
 
         build_dir = self.compile_time_code.working_copy.common_parent
+        cppdefs = build_dir / "cppdefs.opt"
 
-        self._validate_pio_cppdefs(build_dir)
+        self._validate_cppdef_flag(
+            build_dir,
+            define="PARALLEL_IO",
+            enabled=self.use_pio,
+            error_if_missing=(
+                "use_pio is True but 'PARALLEL_IO' is not defined in "
+                f"{cppdefs}. ROMS would run without ParallelIO and produce "
+                "partitioned outputs that post_run will not join. Either add "
+                "'#define PARALLEL_IO' to cppdefs.opt or set "
+                "partitioning.use_pio to false."
+            ),
+            error_if_defined_but_disabled=(
+                f"'PARALLEL_IO' is defined in {cppdefs} but use_pio is False, "
+                "so the ParallelIO library has not been built. Either set "
+                "partitioning.use_pio to true or remove '#define PARALLEL_IO' "
+                "from cppdefs.opt."
+            ),
+        )
+        self._validate_cppdef_flag(
+            build_dir,
+            define="MPI_MASKING",
+            enabled=self.auto_tiling,
+            error_if_missing=(
+                f"auto_tiling is True but 'MPI_MASKING' is not defined in "
+                f"{cppdefs}. Either add '#define MPI_MASKING' to cppdefs.opt or "
+                "set partitioning.auto_tiling to false."
+            ),
+        )
 
         exe_path = build_dir / "roms"
         if (
@@ -1446,23 +1590,85 @@ class ROMSSimulation(Simulation):
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
 
-    def _validate_pio_cppdefs(self, build_dir: Path) -> None:
-        """Ensure `use_pio` agrees with the compile-time `cppdefs.opt`.
+    # Fortran cppdef macro -> the lowercase key
+    # `cstar.roms.precheck.check_output_streams_divide_rst` expects (its
+    # `_STREAM_CHECKS` cppdef_guard names).
+    _PRECHECK_CPPDEF_MACROS: ClassVar[dict[str, str]] = {
+        "MARBL": "marbl",
+        "MARBL_DIAGS": "marbl_diags",
+        "CDR_FORCING": "cdr_forcing",
+        "UPSCALING": "upscaling",
+        "DIAGNOSTICS": "diagnostics",
+        "BIOLOGY_BEC2": "biology_bec2",
+    }
 
-        The ROMS Makedefs.inc enables ParallelIO by detecting `#define PARALLEL_IO`
-        in `cppdefs.opt` (this method uses the same per-line detection), so a
-        mismatch with `use_pio` would either produce partitioned outputs that
-        `post_run` will not join, or fail to compile against an unbuilt library.
+    def _active_cppdefs_for_precheck(self) -> dict[str, bool]:
+        """Parse the staged `cppdefs.opt` (defensively) into the cppdefs
+        mapping `check_output_streams_divide_rst` expects, mirroring
+        `_validate_cppdef_flag`'s per-line `#define` detection.
+
+        Returns an EMPTY mapping -- every cppdef-gated stream then skipped,
+        exactly as an un-compiled cppdef would be -- if `compile_time_code`
+        (or its working copy) isn't staged yet, or `cppdefs.opt` is missing.
+        `roms_runtime_settings` can be accessed before `build()` stages the
+        compile-time code (and in tests); a real run still enforces the same
+        rule at startup once the actual build's `cppdefs.opt` is in place.
+        Never raises out of this method.
+        """
+        try:
+            build_dir = self.compile_time_code.working_copy.common_parent  # type: ignore[union-attr]
+            cppdefs_text = (build_dir / "cppdefs.opt").read_text()
+        except (AttributeError, FileNotFoundError, OSError):
+            return {}
+
+        return {
+            key: any(
+                re.search(rf"^[^!]*#\s*define\s+{macro}\b", line)
+                for line in cppdefs_text.splitlines()
+            )
+            for macro, key in self._PRECHECK_CPPDEF_MACROS.items()
+        }
+
+    def _validate_cppdef_flag(
+        self,
+        build_dir: Path,
+        *,
+        define: str,
+        enabled: bool,
+        error_if_missing: str,
+        error_if_defined_but_disabled: str | None = None,
+    ) -> None:
+        """Ensure a boolean simulation flag agrees with a compile-time `#define`.
+
+        The ROMS Makedefs.inc enables features (e.g. ParallelIO, MPI-based
+        tiling) by detecting a `#define <FLAG>` in `cppdefs.opt` (this method
+        uses the same per-line detection), so a mismatch between a
+        C-Star-level flag and the compile-time define would either compile
+        against a feature ROMS was not told to use, or use a feature that was
+        never built.
 
         Parameters
         ----------
         build_dir : Path
             Location of the staged compile-time code, containing `cppdefs.opt`.
+        define : str
+            The CPP macro name to look for (e.g. `"PARALLEL_IO"`).
+        enabled : bool
+            The simulation-level flag `define` is expected to agree with.
+        error_if_missing : str
+            Error message to raise if `enabled` is True but `define` is not
+            defined in `cppdefs.opt`.
+        error_if_defined_but_disabled : str, optional
+            Error message to raise if `define` is defined in `cppdefs.opt` but
+            `enabled` is False. If not provided, this direction is not checked
+            (some flags are one-directional: the define may be harmless on its
+            own).
 
         Raises
         ------
         ValueError
-            If `use_pio` and the presence of `#define PARALLEL_IO` disagree.
+            If `enabled` and the presence of `#define {define}` disagree, per
+            `error_if_missing`/`error_if_defined_but_disabled` above.
         """
         cppdefs = build_dir / "cppdefs.opt"
         try:
@@ -1470,26 +1676,15 @@ class ROMSSimulation(Simulation):
         except FileNotFoundError:
             return
 
-        parallel_io_defined = any(
-            re.search(r"^[^!]*#\s*define\s+PARALLEL_IO\b", line)
+        define_present = any(
+            re.search(rf"^[^!]*#\s*define\s+{define}\b", line)
             for line in cppdefs_text.splitlines()
         )
 
-        if self.use_pio and not parallel_io_defined:
-            raise ValueError(
-                "use_pio is True but 'PARALLEL_IO' is not defined in "
-                f"{cppdefs}. ROMS would run without ParallelIO and produce "
-                "partitioned outputs that post_run will not join. Either add "
-                "'#define PARALLEL_IO' to cppdefs.opt or set "
-                "model_params.use_pio to false."
-            )
-        if parallel_io_defined and not self.use_pio:
-            raise ValueError(
-                f"'PARALLEL_IO' is defined in {cppdefs} but use_pio is False, "
-                "so the ParallelIO library has not been built. Either set "
-                "model_params.use_pio to true or remove '#define PARALLEL_IO' "
-                "from cppdefs.opt."
-            )
+        if enabled and not define_present:
+            raise ValueError(error_if_missing)
+        if define_present and not enabled and error_if_defined_but_disabled is not None:
+            raise ValueError(error_if_defined_but_disabled)
 
     def _ensure_makefile(self, build_dir: Path):
         """If a Makefile was not supplied, copy the correct one from the ROMS repo.
@@ -1546,13 +1741,24 @@ class ROMSSimulation(Simulation):
             )
             return
 
+        n_procs_x, n_procs_y = (
+            self.discretization.n_procs_x,
+            self.discretization.n_procs_y,
+        )
+        if n_procs_x is None or n_procs_y is None:
+            raise ValueError(
+                "Cannot partition input datasets: discretization.n_procs_x and "
+                "n_procs_y must both be set (e.g. auto_tiling is not yet "
+                "supported outside of use_pio)."
+            )
+
         datasets_to_partition = [
             d for d in self.input_datasets if d.exists_locally and d.partitionable
         ]
         for f in datasets_to_partition:
             f.partition(
-                np_xi=self.discretization.n_procs_x,
-                np_eta=self.discretization.n_procs_y,
+                np_xi=n_procs_x,
+                np_eta=n_procs_y,
                 overwrite_existing_files=overwrite_existing_files,
             )
 

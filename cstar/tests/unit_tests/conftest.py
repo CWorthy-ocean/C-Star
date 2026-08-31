@@ -1,13 +1,12 @@
 import functools
 import logging
 import os
-import random
+import signal
 import uuid
 from collections.abc import Awaitable, Callable, Generator, Iterable, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import datetime
 from pathlib import Path
-from subprocess import Popen
 from typing import Any, Protocol, cast
 from unittest import mock
 
@@ -41,7 +40,6 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize
@@ -895,7 +893,7 @@ def stub_simulation(
         codebase=fakeexternalcodebase_with_mock_get,
         runtime_code=additionalcode_local(),
         compile_time_code=additionalcode_local(),
-        discretization=Discretization(time_step=60),
+        discretization=Discretization(),
         start_date="2025-01-01",
         end_date="2025-12-31",
         valid_start_date="2024-01-01",
@@ -1006,11 +1004,8 @@ def custom_system_env(
 ## tests should remain general (e.g. using a generic 'Simulation' subclass) rather than
 ## using ROMS-specific fixtures (e.g. 'ROMSSimulation')
 ################################################################################
-from cstar.roms import (  # noqa: E402
-    ROMSDiscretization,
-    ROMSExternalCodeBase,
-    ROMSSimulation,
-)
+from cstar.roms.discretization import ROMSDiscretization  # noqa: E402
+from cstar.roms.external_codebase import ROMSExternalCodeBase  # noqa: E402
 from cstar.roms.input_dataset import (  # noqa: E402
     ROMSBoundaryForcing,
     ROMSCdrForcing,
@@ -1023,6 +1018,7 @@ from cstar.roms.input_dataset import (  # noqa: E402
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
+from cstar.roms.simulation import ROMSSimulation  # noqa: E402
 from cstar.tests.unit_tests.fake_abc_subclasses import (  # noqa: E402
     FakeROMSInputDataset,
 )
@@ -1613,7 +1609,7 @@ def stub_romssimulation(
     sim = ROMSSimulation(
         name="ROMSTest",
         directory=directory,
-        discretization=ROMSDiscretization(time_step=60, n_procs_x=2, n_procs_y=3),
+        discretization=ROMSDiscretization(n_procs_x=2, n_procs_y=3),
         codebase=romsexternalcodebase,
         runtime_code=roms_runtime_code,
         compile_time_code=roms_compile_time_code,
@@ -1667,9 +1663,9 @@ def stub_romssimulation_dict(stub_romssimulation: ROMSSimulation) -> dict[str, A
             "checkout_target": sim.codebase.source.checkout_target,
         },
         "discretization": {
-            "time_step": sim.discretization.time_step,
             "n_procs_x": sim.discretization.n_procs_x,
             "n_procs_y": sim.discretization.n_procs_y,
+            "n_cores": sim.discretization.n_cores,
         },
         "runtime_code": sim.runtime_code._constructor_args,  # type: ignore
         "compile_time_code": sim.compile_time_code._constructor_args,  # type: ignore
@@ -1905,49 +1901,6 @@ def mock_placeholder_delay() -> Generator[None, None, None]:
         return_value=0.01,
     ):
         yield
-
-
-@pytest.fixture(scope="session")
-def prefect_server() -> Generator[str, None, None]:
-    """Starts a Prefect server and stops it when the tests are done."""
-    if "PREFECT_API_URL" in os.environ:
-        # use a running local prefect server if one exists
-        yield os.environ["PREFECT_API_URL"]
-        return
-
-    process: Popen[str] | None = None
-    for _ in range(3):
-        try:
-            prefect_port = random.randint(9000, 20000)
-            process = Popen(
-                [
-                    "prefect",
-                    "server",
-                    "start",
-                    "--port",
-                    str(prefect_port),
-                ],
-                text=True,
-                encoding="utf-8",
-            )
-            if process.returncode:
-                continue
-
-            api_url = f"http://127.0.0.1:{prefect_port}/api"
-            yield api_url
-            break
-        except Exception as ex:
-            print(f"Failed to start Prefect server: {ex}")
-        finally:
-            if process and process.returncode is None:
-                process.terminate()
-
-
-@pytest.fixture
-def prefect_server_url(prefect_server: str) -> Generator[str, None, None]:
-    """Configure the Prefect API URL for the duration of the tests."""
-    os.environ["PREFECT_API_URL"] = prefect_server
-    yield prefect_server
 
 
 @pytest.fixture
@@ -2263,8 +2216,27 @@ def mock_local_delay() -> float:
 
     NOTE: Allowing a "normal" delay may result in unit tests taking an excessive amount of time.
     """
-    LocalLauncher.use_proxy = False
-
     delay = 0.1
     os.environ[ENV_CSTAR_ORCH_LOCAL_DELAY] = str(delay)
     return delay
+
+
+@pytest.fixture(autouse=True)
+def restore_signal_handlers() -> Generator[None, None, None]:
+    """Restore SIGINT/SIGTERM handlers replaced during a test.
+
+    Constructing a `Service` installs `Service._handle_signal` — which swallows
+    the signal without exiting — on the *current* process. A test that leaks
+    that handler leaves the pytest process unkillable by SIGINT/SIGTERM (CI
+    cancellation then needs SIGKILL and produces no traceback).
+    """
+    prior = {
+        sig_num: signal.getsignal(sig_num)
+        for sig_num in (signal.SIGINT, signal.SIGTERM)
+    }
+
+    yield
+
+    for sig_num, prior_handler in prior.items():
+        if signal.getsignal(sig_num) != prior_handler:
+            signal.signal(sig_num, prior_handler)

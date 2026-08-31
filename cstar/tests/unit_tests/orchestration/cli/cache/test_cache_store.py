@@ -103,7 +103,7 @@ def test_cli_cache_store_refuses_to_replace_without_consent(
     with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
         result = _store(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_PATH, str(source))
 
-    assert "already exists" in result.stdout
+    assert "will be overwritten" in result.stdout
 
     location = cache.resolve(KEY, RUN_ID)
     assert location is not None
@@ -124,7 +124,7 @@ def test_cli_cache_store_replaces_when_confirmed(
     _store(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_PATH, str(source))
     source.write_text("replacement content")
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")):
+    with mock.patch("typer.confirm", mock.Mock(return_value="y")):
         result = _store(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_PATH, str(source))
 
     assert "has been updated" in result.stdout
@@ -147,11 +147,11 @@ def test_cli_cache_store_yes_skips_the_prompt(source: Path) -> None:
     _store(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_PATH, str(source))
     source.write_text("replacement content")
 
-    with mock.patch("rich.prompt.Prompt.ask") as prompt:
+    with mock.patch("typer.confirm") as prompt:
         result = _store(ARG_RUNID, RUN_ID, ARG_KEY, KEY, ARG_PATH, str(source), ARG_YES)
 
     prompt.assert_not_called()
-    assert "has been updated" in result.stdout
+    assert "has been overwritten" in result.stdout
 
 
 @pytest.mark.usefixtures("cache")

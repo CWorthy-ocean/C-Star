@@ -1,11 +1,7 @@
 import asyncio
 import os
 import typing as t
-from collections.abc import Mapping
 
-from prefect import State, task
-from prefect import Task as PrefectTask
-from prefect.client.schemas import TaskRun
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
@@ -25,7 +21,7 @@ from cstar.execution.scheduler_job import (
     get_slurm_batches,
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
-from cstar.orchestration.models import KeyValueStore
+from cstar.orchestration.models import KEY_CLOBBER, KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -33,10 +29,7 @@ from cstar.orchestration.orchestration import (
     Status,
     Task,
 )
-from cstar.orchestration.state import (
-    StateRepository,
-    load_sentinels,
-)
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.utils import (
     ENV_CSTAR_SLURM_ACCOUNT,
     ENV_CSTAR_SLURM_MAX_WALLTIME,
@@ -44,50 +37,13 @@ from cstar.orchestration.utils import (
 )
 
 if t.TYPE_CHECKING:
-    from prefect.context import TaskRunContext
-
     from cstar.orchestration.orchestration import LiveStep
 
 log = get_logger(__name__)
 
 
-async def on_submit_complete(
-    task: PrefectTask[["LiveStep", list["SlurmHandle"]], "SlurmHandle"],
-    task_run: TaskRun,
-    state: State["SlurmHandle"],
-) -> None:
-    """Perform actions required when a job submission completes
-    successfully.
-    """
-    if state.is_completed() and state.name == "Cached":
-        handle = await state.aresult()
-        log.debug(f"Re-using result from cached SLURM job: {handle}")
-
-
-def cache_key_func(context: "TaskRunContext", params: dict[str, t.Any]) -> str:
-    """Cache on a combination of the task name and user-assigned run id.
-
-    Parameters
-    ----------
-    context : TaskRunContext
-        The prefect context object for the currently running task
-    params : dict[str, t.Any]
-        A dictionary containing all thee input values to the task
-
-    Returns
-    -------
-    str
-        The cache key for the current context.
-    """
-    run_id = os.getenv(ENV_CSTAR_RUNID)
-    cache_key = f"{run_id}_{params['step'].name}_{context.task.name}"
-
-    log.trace("Cache check: %s", cache_key)
-    return cache_key
-
-
 class SlurmComputeSpec(BaseModel):
-    num_cpus: int = 0
+    num_cpus: int = Field(default=1)
     """Total number of CPUs required by the job."""
     num_nodes: int | None = None
     """The number of nodes to request."""
@@ -148,21 +104,22 @@ class SlurmComputeAdapter(ConfiguredModelAdapter[KeyValueStore, SlurmComputeSpec
             msg = "Compute overrides were not supplied to the SlurmComputeAdapter"
             raise CstarExpectationFailed(msg)
 
-        if overrides_ := t.cast("dict[str, str | int]", model.get("slurm", {})):
-            try:
-                compute = SlurmComputeSpec.model_validate(overrides_)
+        overrides_ = t.cast("dict[str, str | int]", model.get("slurm", {}))
+        if not overrides_:
+            msg = "No SLURM overrides were supplied to the SlurmComputeAdapter"
+            raise CstarExpectationFailed(msg)
 
-                if not compute.model_dump(exclude_defaults=True):
-                    msg = "Non-default SLURM compute overrides were not specified."
-                    log.debug(msg)
+        try:
+            compute = SlurmComputeSpec.model_validate(overrides_)
 
-                return compute
-            except ValidationError:
-                msg = "Invalid compute overrides were specified"
-                log.error(msg)
+            if not compute.model_dump(exclude_defaults=True):
+                msg = "Non-default SLURM compute overrides were not specified."
+                log.debug(msg)
 
-        msg = f"Unable to adapt model {model!r} into SlurmComputeSpec"
-        raise CstarAdaptationError(msg)
+            return compute
+        except ValidationError as ex:
+            msg = f"Unable to adapt model {model!r} into SlurmComputeSpec"
+            raise CstarAdaptationError(msg) from ex
 
 
 class SlurmHandle(ProcessHandle):
@@ -226,12 +183,25 @@ class SlurmLauncher(Launcher[SlurmHandle]):
     def _get_default_compute_spec(step: "LiveStep") -> SlurmComputeSpec:
         """Create the default compute spec for SLURM.
 
+        `num_cpus` here is only a floor: the workplan transformer records
+        each step's actual cpu requirement into
+        `compute_overrides["slurm"]["num_cpus"]` at schedule time (read from
+        the blueprint where it can be), and `_get_compute_spec` overlays
+        those `compute_overrides` on top of this default. The launcher
+        itself never inspects blueprint content, so this stays correct for
+        both ordinary and deferred steps.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step being scheduled. Reserved for parity with the rest of
+            the compute-spec API; not consulted for `num_cpus`.
+
         Returns
         -------
         SlurmComputeSpec
         """
         return SlurmComputeSpec(
-            num_cpus=step.blueprint.cpus_needed,
             max_walltime=SlurmLauncher.configured_walltime(),
             queue_name=SlurmLauncher.configured_queue(),
             account_name=SlurmLauncher.configured_account(),
@@ -260,9 +230,15 @@ class SlurmLauncher(Launcher[SlurmHandle]):
                 compute = default_compute.model_copy(
                     update=overrides.model_dump(exclude_defaults=True)
                 )
-            except CstarAdaptationError:
+            except CstarExpectationFailed:
+                # overrides carry nothing for this launcher; keep the default
+                msg = f"No SLURM overrides for step {step.name!r}; using defaults"
+                log.debug(msg)
+            except CstarAdaptationError as ex:
+                # the default spec is only a 1-cpu floor; submitting with it
+                # in place of the declared resources must fail, not warn
                 msg = f"SLURM overrides did not result in valid compute spec: {step.compute_overrides}"
-                log.warning(msg, exc_info=True)
+                raise CstarError(msg) from ex
         return compute
 
     @staticmethod
@@ -302,11 +278,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             depends_on=job_dep_ids,
         )
 
-    @task(
-        persist_result=True,
-        cache_key_fn=cache_key_func,
-        on_completion=[on_submit_complete],
-    )
     @staticmethod
     async def _submit(step: "LiveStep", dependencies: list[SlurmHandle]) -> SlurmHandle:
         """Submit a step to SLURM as a new batch allocation.
@@ -323,10 +294,6 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         SlurmHandle
             A ProcessHandle identifying the newly submitted job.
         """
-        if not step.blueprint:
-            msg = f"Step cannot resolve blueprint from: {step.blueprint_path}"
-            raise CstarError(msg)
-
         step.script_path.parent.mkdir(parents=True, exist_ok=True)
         step.log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -355,34 +322,44 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
-    async def _get_status(job_id: str) -> ExecutionStatus:
-        """Retrieve the status of a step running in SLURM.
+    async def _prune_completed_dependencies(
+        dependencies: list[SlurmHandle],
+    ) -> list[SlurmHandle]:
+        """Remove dependencies whose SLURM jobs have already completed successfully.
+
+        SLURM cannot use dependencies on previously completed jobs: submitting
+        with `--dependency=afterok:<jobid>` referencing a job that already
+        finished (e.g. a step satisfied by a prior run and not resubmitted)
+        causes the submission to fail or the job to be killed for an invalid
+        dependency. Such dependencies are already satisfied and can be dropped.
 
         Parameters
         ----------
-        job_id : str
-            The slurm job ID to retrieve status for.
+        dependencies : list[SlurmHandle]
+            The dependency handles for a step about to be submitted.
 
         Returns
         -------
-        ExecutionStatus
-            The current status of the step.
+        list[SlurmHandle]
+            The dependencies whose jobs have not yet completed.
         """
-        batch = await get_slurm_batch(job_id)
-        return batch.status
+        if not dependencies:
+            return dependencies
 
-    @staticmethod
-    async def _locate_priors() -> Mapping[str, SlurmHandle]:
-        """Retrieve all task sentinels discovered in the output path.
+        batch_map = await get_slurm_batches([d.pid for d in dependencies])
+        successes = {
+            k for k, v in batch_map.items() if v.status == ExecutionStatus.COMPLETED
+        }
 
+        if not successes:
+            return dependencies
 
-        Returns
-        -------
-        Mapping[str, Task[SlurmHandle]]
-            Mapping of all previously run PIDs to their sentinel content.
-        """
-        sentinels = await load_sentinels(SlurmHandle)
-        return {h.pid: h for h in sentinels}
+        satisfied = {d.pid for d in dependencies}.intersection(successes)
+        msg = f"Dependencies previously satisfied: {', '.join(sorted(satisfied))}"
+        log.info(msg)
+
+        # only keep dependencies that are not already satisfied
+        return [d for d in dependencies if d.pid not in successes]
 
     @classmethod
     async def launch(
@@ -408,35 +385,34 @@ class SlurmLauncher(Launcher[SlurmHandle]):
 
         prior_handle = await state_repo.get_sentinel(step.name, SlurmHandle)
         submit_fn = SlurmLauncher._submit
+        last_status: Status = Status.Unsubmitted
+        reuse_prior: bool = False
 
         if prior_handle:
             # use persisted task as sentinel only; query SLURM for up-to-date status
             last_status = await SlurmLauncher.query_status(prior_handle)
+            name = prior_handle.name
 
             if Status.is_failure(last_status):
-                # force cache refresh for any tasks that didn't succeed
-                step.fsm.clear_prior()
-                submit_fn = SlurmLauncher._submit.with_options(refresh_cache=True)
+                # clear prior state and re-run any tasks that didn't succeed
+                log.debug(f"Prior run of {name!r} in fail state. Re-running.")
+                step.workflow_overrides[KEY_CLOBBER] = True
+            elif Status.is_terminal(last_status) or Status.is_in_progress(last_status):
+                # re-use the result from a run that terminated successfully, or
+                # adopt a job that is still queued/running instead of submitting
+                # a duplicate, unless the step is configured to be clobbered
+                reuse_prior = not step.clobber
+                log.debug(
+                    f"Prior run of {name!r} in {last_status.name!r} state. "
+                    f"Re-use: {reuse_prior}"
+                )
 
-                # SLURM cannot use dependencies on previously completed jobs
-                pid_to_task = await cls._locate_priors()
-                batch_map = await get_slurm_batches(pid_to_task.keys())
-                successes = {
-                    k
-                    for k, v in batch_map.items()
-                    if v.status == ExecutionStatus.COMPLETED
-                }
-                if dependencies and successes:
-                    reusable = set(x.pid for x in dependencies).intersection(successes)
-                    msg = f"Dependencies previously satisfied: {', '.join(reusable)}"
-                    log.info(msg)
-
-                    # only keep dependencies that are not re-usable
-                    active = set(x.pid for x in dependencies).difference(successes)
-                    dependencies = list(filter(lambda x: x.pid in active, dependencies))
-
-        handle = await submit_fn(step, dependencies)
-        await SlurmLauncher.update_status(handle)
+        if not reuse_prior or not prior_handle:
+            dependencies = await cls._prune_completed_dependencies(dependencies)
+            handle = await submit_fn(step, dependencies)
+        else:
+            handle = prior_handle
+            handle.status = last_status
 
         return Task(
             step=step,
@@ -491,7 +467,8 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             The current status of the item.
         """
         handle = item.handle if isinstance(item, Task) else item
-        exec_status = await SlurmLauncher._get_status(handle.pid)
+        batch = await get_slurm_batch(handle.pid)
+        exec_status = batch.status
 
         msg = f"Retrieved status `{exec_status}` for SLURM job `{handle.pid}`"
         log.trace(msg)

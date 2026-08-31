@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from cstar.base.env import (
     ENV_CSTAR_ARTIFACT_CACHE_BYPASS,
     ENV_CSTAR_CLI_DRY_RUN,
-    ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
     ENV_CSTAR_RUNID,
 )
@@ -33,23 +32,28 @@ from cstar.cli.workplan.shared import (
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
-    ARG_CLOBBER_HELP,
+    ARG_CLOBBER_WORKPLAN_HELP,
     ARG_DRY_RUN,
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
     ARG_NO_CACHE,
     ARG_NO_CACHE_HELP,
+    OPT_CLOBBER_ALL,
 )
 from cstar.execution.file_system import local_copy
 from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
+    apply_clobber_overrides,
     build_and_run_dag,
+    check_clobber_targets,
+    run_dag,
 )
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.orchestration import ProcessHandle
+from cstar.orchestration.orchestration import LiveWorkplan, Planner, ProcessHandle
 from cstar.orchestration.serialization import (
+    deserialize,
     try_deserialize,
     validate_serialized_entity,
 )
@@ -235,6 +239,76 @@ def preprocess_runid(ctx: typer.Context, run_id: str) -> str:
     return run_id
 
 
+def preprocess_clobber_steps(
+    ctx: typer.Context,
+    values: list[str],
+) -> list[str]:
+    """Perform validation and formatting of the `--clobber` option.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        A context object containing state for the typer app.
+    values : list[str]
+        The user-supplied step names, safe_names, or the literal token
+        `all`, one per `--clobber` use.
+
+    Returns
+    -------
+    list[str]
+        The cleaned step names or safe_names, stripped of whitespace with any
+        empty entries dropped.
+    """
+    return [x for value in values if (x := value.strip())]
+
+
+def resolve_clobber_selection(wp_path: Path, clobber_steps: list[str]) -> list[str]:
+    """Resolve the raw `--clobber` selections against the workplan.
+
+    Expands the CLI-only token `all` into every step's safe_name and fails
+    fast -- before any run machinery starts -- when a selection matches no
+    step, so the user gets immediate feedback instead of a mid-run error.
+
+    Parameters
+    ----------
+    wp_path : Path
+        Local path to the workplan file (an original workplan, or the
+        transformed workplan persisted by a prior run when re-running).
+    clobber_steps : list[str]
+        The cleaned `--clobber` values.
+
+    Returns
+    -------
+    list[str]
+        Concrete step selections to pass to `build_and_run_dag`.
+
+    Raises
+    ------
+    typer.BadParameter
+        If `all` is combined with step names, or a selection matches no
+        step's `name` or `safe_name`.
+    """
+    if not clobber_steps:
+        return clobber_steps
+
+    wp = try_deserialize(wp_path, Workplan) or try_deserialize(wp_path, LiveWorkplan)
+    if wp is None:
+        return clobber_steps
+
+    if OPT_CLOBBER_ALL in clobber_steps:
+        if len(clobber_steps) > 1:
+            msg = f"{OPT_CLOBBER_ALL!r} cannot be combined with step names"
+            raise typer.BadParameter(msg, param_hint=ARG_CLOBBER)
+        return [step.safe_name for step in wp.steps]
+
+    if unknown := check_clobber_targets(wp, clobber_steps):
+        valid_names = sorted(step.name for step in wp.steps)
+        msg = f"Unknown step(s) {unknown}. Valid steps: {valid_names}"
+        raise typer.BadParameter(msg, param_hint=ARG_CLOBBER)
+
+    return clobber_steps
+
+
 def preprocess_path(workplan_path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
@@ -269,7 +343,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
     return workplan_path
 
 
-def handle_run_reloading(run_id: str) -> str:
+async def handle_run_reloading(run_id: str) -> str:
     """Locate a prior run for the run ID and update the `RunCmdContext` with
     the correct `Workplan`.
 
@@ -279,7 +353,7 @@ def handle_run_reloading(run_id: str) -> str:
         The run-id to reload
     """
     repo = TrackingRepository()
-    wp_run = asyncio.run(repo.get_workplan_run(run_id))
+    wp_run = await repo.get_workplan_run(run_id)
     if wp_run is None:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
@@ -363,14 +437,13 @@ def run(
         ),
     ] = LogLevelChoices.INFO,
     clobber: t.Annotated[
-        bool,
+        list[str],
         typer.Option(
             ARG_CLOBBER,
-            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
-            help=ARG_CLOBBER_HELP,
-            envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+            help=ARG_CLOBBER_WORKPLAN_HELP,
+            callback=preprocess_clobber_steps,
         ),
-    ] = False,
+    ] = [],
     _disable_cache: t.Annotated[
         bool,
         typer.Option(
@@ -389,20 +462,44 @@ def run(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
+    reload = False
     if not path:
-        path = handle_run_reloading(run_id)
+        reload = True
+        path = asyncio.run(handle_run_reloading(run_id))
 
     try:
         with local_copy(path) as wp_path:
-            summary = asyncio.run(
-                build_and_run_dag(
-                    wp_path,
-                    run_id,
-                    user_variables=t.cast("Mapping[str, str]", ctx.obj),
-                    dry_run=dry_run,
-                ),
-            )
+            clobber = resolve_clobber_selection(wp_path, clobber)
+            user_vars = t.cast("Mapping[str, str]", ctx.obj)
+
+            if not reload:
+                wp_run = asyncio.run(
+                    build_and_run_dag(
+                        wp_path,
+                        run_id,
+                        user_variables=user_vars,
+                        dry_run=dry_run,
+                        clobber_steps=clobber,
+                    ),
+                )
+            else:
+                wp = deserialize(wp_path, LiveWorkplan)
+                apply_clobber_overrides(wp, clobber)
+                planner = Planner(wp)
+                wp_run = asyncio.run(
+                    run_dag(
+                        wp_path,
+                        run_id,
+                        planner,
+                        user_variables=user_vars,
+                        dry_run=dry_run,
+                    ),
+                )
+
+            summary = asyncio.run(ExecutiveRunSummary.from_run(wp_run))
             console.print(get_run_summary_display(summary))
+    except typer.BadParameter:
+        raise
     except CstarExpectationFailed as ex:
         msg = f"An invalid request was made: {ex}"
         log.exception(msg)

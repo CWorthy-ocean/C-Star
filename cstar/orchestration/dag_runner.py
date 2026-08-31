@@ -2,22 +2,27 @@ import asyncio
 import os
 import typing as t
 from collections import OrderedDict
-from collections.abc import Awaitable, Generator, Iterable, Mapping
+from collections.abc import Awaitable, Generator, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from itertools import cycle
 from pathlib import Path
 
-from prefect import flow
 from pydantic import BaseModel, Field, computed_field
 
-from cstar.base.env import ENV_CSTAR_CLI_DRY_RUN, capture_environment
+from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
+    ENV_CSTAR_CLOBBER_WORKING_DIR,
+    FLAG_OFF,
+    capture_environment,
+    unset,
+)
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
-from cstar.orchestration.models import Step, UserDefinedVariables, Workplan
+from cstar.orchestration.models import KEY_CLOBBER, Step, UserDefinedVariables, Workplan
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -187,6 +192,16 @@ def get_launcher() -> Launcher[t.Any]:
     return launcher
 
 
+def get_orchestrator(planner: Planner) -> Orchestrator:
+    launcher = get_launcher()
+
+    orchestrator = Orchestrator(planner, launcher)
+    orchestrator.set_callback("status_changed", on_status_changed)
+    orchestrator.set_callback("launched", on_status_changed)
+
+    return orchestrator
+
+
 def incremental_delays() -> Generator[float, None, None]:
     """Return a value from an infinite cycle of incremental delays.
 
@@ -258,8 +273,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     configure_environment(None, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
-    launcher = get_launcher()
-    orchestrator = Orchestrator(planner, launcher)
+    orchestrator = get_orchestrator(planner)
 
     return await process_plan(orchestrator, RunMode.Monitor)
 
@@ -309,8 +323,8 @@ async def process_plan(orchestrator: Orchestrator, mode: RunMode) -> DagStatus:
 async def prepare_workplan(
     wp_path: Path,
     output_dir: Path,
-    run_id: str,
     user_variables: Mapping[str, str] | None = None,
+    clobber_steps: "Sequence[str] | None" = None,
 ) -> tuple[Workplan, Path]:
     """Load the workplan and apply any applicable transforms.
 
@@ -319,11 +333,12 @@ async def prepare_workplan(
     wp_path : Path
         The path to the workplan to load.
     output_dir : Path
-        The directory where workplan outputs will be written.
-    run_id : str
-        The unique ID for the current run.
+        The run-specific directory where workplan artifacts will be written.
     user_variables : Mapping | None
         User-defined variables specified at runtime
+    clobber_steps : Sequence[str] | None
+        Names or safe_names of steps whose prior state should be cleared and
+        re-executed, or `all` to target every step.
 
     Returns
     -------
@@ -336,7 +351,6 @@ async def prepare_workplan(
         If the expected and provided user variables are not in agreement.
     """
     wp_orig = await asyncio.to_thread(deserialize, wp_path, Workplan)
-    run_root_dir = output_dir / run_id
 
     fill_transform: TemplateFillTransform | None = None
     file_io_extras: list[Awaitable[int]] = []
@@ -353,7 +367,7 @@ async def prepare_workplan(
         )
 
         persist_vars = WorkplanTransformer.derived_path(
-            wp_path, run_root_dir, suffix="", extension=".vars"
+            wp_path, output_dir, suffix="", extension=".vars"
         )
         file_io_extras.append(asyncio.to_thread(serialize, persist_vars, named_config))
     else:
@@ -365,11 +379,13 @@ async def prepare_workplan(
     )
     wp = transformer.apply()
 
+    apply_clobber_overrides(wp, clobber_steps)
+
     # make a copy of the original and modified blueprint in the output directory
     persist_orig = WorkplanTransformer.derived_path(
-        wp_path, run_root_dir, "_original", ".bak"
+        wp_path, output_dir, "_original", ".bak"
     )
-    persist_as = WorkplanTransformer.derived_path(wp_path, run_root_dir, "_transformed")
+    persist_as = WorkplanTransformer.derived_path(wp_path, output_dir, "_transformed")
 
     file_io: list[Awaitable[int]] = [
         asyncio.to_thread(serialize, persist_orig, wp_orig),
@@ -519,24 +535,245 @@ class ExecutiveRunSummary(BaseModel):
         )
 
 
+def _ignore_ambient_clobber_env() -> None:
+    """Drop ``CSTAR_CLOBBER_WORKING_DIR`` from the workplan process environment.
+
+    The variable remains a blueprint-level control (``cstar blueprint run
+    --clobber`` sets it for a single simulation), but workplan runs select
+    steps to clobber with ``--clobber <step|all>``. An exported value would be
+    inherited by every step subprocess and silently clobber all of them,
+    bypassing that selection -- and it also carries a different meaning for
+    blueprint migration, so it is scrubbed from the whole run deliberately.
+    Called before the environment is configured and captured into the run
+    record; warns when the value would have had an effect.
+    """
+    value = unset(ENV_CSTAR_CLOBBER_WORKING_DIR)
+    if value is not None and value != FLAG_OFF:
+        msg = (
+            f"{ENV_CSTAR_CLOBBER_WORKING_DIR} is set but is ignored by workplan "
+            "runs; select the steps to clear and re-run explicitly instead "
+            "(`--clobber <step-name|all>` on the command line)."
+        )
+        log.warning(msg)
+
+
+def check_clobber_targets(wp: Workplan, clobber_steps: "Sequence[str]") -> list[str]:
+    """Return the clobber selections that match no step in the workplan.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan the selections are resolved against.
+    clobber_steps : Sequence[str]
+        Step names or safe_names selected for clobber.
+
+    Returns
+    -------
+    list[str]
+        The selections (sorted) that match neither a step's `name` nor its
+        `safe_name`; empty when every selection is valid.
+    """
+    known = {key for step in wp.steps for key in (step.name, step.safe_name)}
+    return sorted({token for token in clobber_steps if token not in known})
+
+
+def check_clobber_dependents(wp: Workplan, clobber_steps: "Sequence[str]") -> list[str]:
+    """Return the untargeted steps that depend on a step selected for clobber.
+
+    Such steps will not be re-run and may consume stale outputs derived from
+    their re-executed dependencies.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan the selections are resolved against.
+    clobber_steps : Sequence[str]
+        Step names or safe_names selected for clobber.
+
+    Returns
+    -------
+    list[str]
+        The names (sorted) of steps at risk of consuming stale outputs; empty
+        when every dependent is itself selected.
+    """
+    by_token = {key: step for step in wp.steps for key in (step.name, step.safe_name)}
+    targeted = {by_token[token].name for token in clobber_steps if token in by_token}
+    if not targeted:
+        return []
+    return sorted(
+        step.name
+        for step in wp.steps
+        if step.name not in targeted and targeted.intersection(step.depends_on)
+    )
+
+
+def apply_clobber_overrides(
+    wp: Workplan, clobber_steps: "Sequence[str] | None"
+) -> None:
+    """Validate the clobber selection and record it on the workplan.
+
+    Resolves each selection against `wp.steps` (matching on either `name` or
+    `safe_name`), then mutates the matched steps' `workflow_overrides` in
+    place so the selection is persisted with the workplan. Emits a single
+    warning listing any untargeted steps that depend on a targeted one, since
+    they will not be re-run and may consume stale outputs.
+
+    Selections must be concrete step identifiers; the CLI-only token `all` is
+    expanded to every step's safe_name before it reaches this layer.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan whose steps should be marked for per-step clobber.
+    clobber_steps : Sequence[str] | None
+        The step names or safe_names selected for clobber.
+
+    Raises
+    ------
+    ValueError
+        If any selection does not match a step's `name` or `safe_name`.
+    """
+    tokens = [x for token in clobber_steps or [] if (x := token.strip())]
+    if not tokens:
+        return
+
+    if unknown := check_clobber_targets(wp, tokens):
+        valid_names = sorted(step.name for step in wp.steps)
+        msg = f"Unknown clobber step selection(s) {unknown}. Valid steps: {valid_names}"
+        raise ValueError(msg)
+
+    by_token = {key: step for step in wp.steps for key in (step.name, step.safe_name)}
+    for token in tokens:
+        by_token[token].workflow_overrides[KEY_CLOBBER] = True
+
+    if stale := check_clobber_dependents(wp, tokens):
+        msg = (
+            "Some steps depend on clobbered steps but were not selected for "
+            "clobber themselves; they will not be re-run and may consume "
+            f"stale outputs. Review the following steps: {', '.join(stale)}"
+        )
+        log.warning(msg)
+
+
 async def on_status_changed(handle: ProcessHandle) -> None:
     """Persist updates to process handles."""
     state_repo = StateRepository()
     run_repo = TrackingRepository()
 
-    if path := await state_repo.put_sentinel(handle):
-        if run := await run_repo.get_workplan_run(handle.run_id):
-            run.sentinels.add(path)
-            await run_repo.put_workplan_run(run)
+    path = await state_repo.put_sentinel(handle)
+    run = await run_repo.get_workplan_run(handle.run_id)
+
+    if path and run:
+        run.sentinels.add(path)
+        await run_repo.put_workplan_run(run)
 
 
-@flow(log_prints=True)
+async def build_dag(
+    wp_path: Path,
+    run_id: str = "",
+    user_variables: Mapping[str, str] | None = None,
+    clobber_steps: "Sequence[str] | None" = None,
+) -> tuple[Planner, Path]:
+    """Execute the steps in the workplan.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The path to the blueprint to execute
+    run_id : str | None
+        The run-id to be used by the orchestrator.
+    user_variables : NamedConfiguration | None
+        User-provided key-value pairs for use during templating.
+    clobber_steps : Sequence[str] | None
+        Names or safe_names of steps whose prior state should be cleared and
+        re-executed, or `all` to target every step, as supplied via
+        `--clobber`.
+
+    Returns
+    -------
+    Path
+        The path to the workplan that was executed after any tranformations
+        were applied.
+    """
+    if run_id:
+        run_id = slugify(run_id)
+
+    _ignore_ambient_clobber_env()
+    output_dir = StateDirectoryManager.data_dir(run_id)
+    configure_environment(run_id=run_id)
+
+    check_environment()
+    wp, prepared_wp_path = await prepare_workplan(
+        wp_path, output_dir, user_variables, clobber_steps
+    )
+    planner = Planner(workplan=wp)
+
+    return planner, prepared_wp_path
+
+
+async def run_dag(
+    wp_path: Path,
+    run_id: str,
+    planner: Planner,
+    user_variables: Mapping[str, str] | None = None,
+    dry_run: bool = False,
+) -> WorkplanRun:
+    """Execute the steps in the workplan.
+
+    Parameters
+    ----------
+    wp_path : Path
+        The path to the blueprint to execute
+    run_id : str
+        The run-id to be used by the orchestrator.
+    planner : Planner
+        The planner to execute
+    user_variables : NamedConfiguration | None
+        User-provided key-value pairs for use during templating.
+    dry_run : bool
+        If set to `true`, the execution plan will be built and persisted to disk
+        but not executed.
+
+    Returns
+    -------
+    WorkplanRun
+        The persisted record describing the run.
+    """
+    steps = t.cast("list[LiveStep]", planner.flatten())
+    output_dir = StateDirectoryManager.data_dir(run_id)
+
+    wp_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=wp_path,
+        output_path=output_dir,
+        run_id=run_id,
+        environment=capture_environment(),
+        user_variables=user_variables or {},
+        sentinels={StateRepository.sentinel_path(s) for s in steps},
+    )
+
+    if not dry_run:
+        _ = await TrackingRepository().put_workplan_run(wp_run)
+
+    orchestrator = get_orchestrator(planner)
+
+    if dry_run:
+        msg = f"Dry run complete. Prepared workplan location: {wp_path}"
+        log.debug(msg)
+        return wp_run
+
+    # schedule the tasks without waiting for completion
+    await process_plan(orchestrator, RunMode.Schedule)
+    return wp_run
+
+
 async def build_and_run_dag(
     wp_path: Path,
     run_id: str = "",
     user_variables: Mapping[str, str] | None = None,
     dry_run: bool = False,
-) -> ExecutiveRunSummary:
+    clobber_steps: "Sequence[str] | None" = None,
+) -> WorkplanRun:
     """Execute the steps in the workplan.
 
     Parameters
@@ -550,52 +787,26 @@ async def build_and_run_dag(
     dry_run : bool
         If set to `true`, the execution plan will be built and persisted to disk
         but not executed.
+    clobber_steps : Sequence[str] | None
+        Names or safe_names of steps whose prior state should be cleared and
+        re-executed, or `all` to target every step, as supplied via
+        `--clobber`.
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    WorkplanRun
+        The persisted record describing the run.
     """
-    if run_id:
-        run_id = slugify(run_id)
-
-    output_dir = StateDirectoryManager.data_dir(run_id or None)
-    output_dir = output_dir.expanduser().resolve()
-    configure_environment(output_dir, run_id)
-
-    launcher = get_launcher()
-
-    check_environment()
-    wp, prepared_wp_path = await prepare_workplan(
-        wp_path, output_dir, run_id, user_variables
+    planner, prepared_wp_path = await build_dag(
+        wp_path,
+        run_id,
+        user_variables=user_variables,
+        clobber_steps=clobber_steps,
     )
-
-    planner = Planner(workplan=wp)
-    steps = t.cast("list[LiveStep]", planner.flatten())
-
-    wp_run = WorkplanRun(
-        workplan_path=wp_path,
-        trx_workplan_path=prepared_wp_path,
-        output_path=output_dir,
-        run_id=run_id,
-        environment=capture_environment(),
-        user_variables=user_variables or {},
-        sentinels={StateRepository.sentinel_path(s) for s in steps},
+    return await run_dag(
+        prepared_wp_path,
+        run_id,
+        planner,
+        user_variables=user_variables,
+        dry_run=dry_run,
     )
-
-    orchestrator = Orchestrator(planner, launcher)
-    orchestrator.set_callback("status_changed", on_status_changed)
-    orchestrator.set_callback("launched", on_status_changed)
-
-    if dry_run:
-        msg = f"Dry run complete. Prepared workplan location: {prepared_wp_path}"
-        log.debug(msg)
-        return await ExecutiveRunSummary.from_run(wp_run)
-
-    run_repo = TrackingRepository()
-    await run_repo.put_workplan_run(wp_run)
-
-    # schedule the tasks without waiting for completion
-    await process_plan(orchestrator, RunMode.Schedule)
-    return await ExecutiveRunSummary.from_run(wp_run)

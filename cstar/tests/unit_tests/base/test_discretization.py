@@ -1,30 +1,9 @@
-import logging
-
-import pytest
-
 from cstar.base.discretization import Discretization
 
 
-@pytest.fixture
-def discretization():
-    """Create a Discretization instance with fixed parameters for testing."""
-    return Discretization(time_step=3)
-
-
-def test_init(discretization, log: logging.Logger):
-    """Test the attributes were set correctly."""
-    assert discretization.time_step == 3
-
-
-def test_str(discretization):
-    """Test the string representation is correct."""
-    expected_str = """Discretization
---------------
-time_step: 3s"""
-    assert str(discretization) == expected_str
-
-
-def test_repr(discretization):
-    """Test the repr representation is correct."""
-    expected_repr = "Discretization(time_step = 3)"
-    assert repr(discretization) == expected_repr
+def test_is_instantiable_marker_with_no_attributes():
+    """Discretization is a minimal marker ABC: it can be instantiated directly
+    (no abstract methods) and carries no attributes of its own.
+    """
+    discretization = Discretization()
+    assert discretization.__dict__ == {}

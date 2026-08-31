@@ -220,6 +220,18 @@ def set_representer(
     return dumper.represent_list(list(data))
 
 
+def enum_representer(
+    dumper: yaml.Dumper,
+    data: enum.Enum,
+) -> yaml.Node:
+    """Create a representer converting any Enum to its underlying value.
+
+    Fallback for enums without a registered class-specific representer, e.g.
+    those declared by external applications.
+    """
+    return dumper.represent_data(data.value)
+
+
 _RT = t.TypeVar("_RT", enum.IntEnum, enum.StrEnum, PosixPath)
 
 
@@ -252,9 +264,17 @@ def model_to_yaml(model: SerializableModel) -> str:
     if hasattr(model, "application"):
         dumped["application"] = str(getattr(model, "application"))  # noqa: B009
 
+    # 'schema_version' records which schema wrote the document; always include
+    # it (even at the current default) so persisted artifacts self-describe.
+    if hasattr(model, "schema_version"):
+        dumped["schema_version"] = str(getattr(model, "schema_version"))  # noqa: B009
+
     dumper = yaml.Dumper
     dumper.ignore_aliases = lambda *_args: True  # type: ignore[method-assign]
     dumper.add_representer(set, set_representer)
+    # class-specific representers registered above take precedence; this
+    # catches enums declared by external applications
+    dumper.add_multi_representer(enum.Enum, enum_representer)
 
     register_representer(PosixPath, path_representer)
 

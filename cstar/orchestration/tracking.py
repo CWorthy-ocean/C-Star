@@ -1,4 +1,5 @@
 import asyncio
+import fcntl
 import os
 import typing as t
 from collections.abc import Mapping, Sequence
@@ -60,7 +61,11 @@ class WorkplanRun(BaseModel):
         with local_copy(uri) as local_path:
             wp = deserialize(local_path, Workplan)
 
-        return slugify(wp.name)
+        try:
+            return slugify(wp.name)
+        except ValueError as ex:
+            msg = f"Unable to generate a default run-id from workplan at: {uri}"
+            raise ValueError(msg) from ex
 
     @property
     def state_dir(self) -> Path:
@@ -100,7 +105,7 @@ class TrackingRepository(LoggingMixin):
         """
         target_path = self._root / self._LATEST_DIR
         if not target_path.exists():
-            target_path.mkdir(parents=True)
+            target_path.mkdir(parents=True, exist_ok=True)
         return target_path
 
     @property
@@ -113,7 +118,7 @@ class TrackingRepository(LoggingMixin):
         """
         target_path = self._root / self._HISTORY_DIR
         if not target_path.exists():
-            target_path.mkdir(parents=True)
+            target_path.mkdir(parents=True, exist_ok=True)
         return target_path
 
     @classmethod
@@ -254,58 +259,28 @@ class TrackingRepository(LoggingMixin):
         run_paths: list[Path] = []
 
         latest = self.latest_path(run_id)
-        if latest.exists():
-            run_paths.append(latest)
+        lock_path = latest.with_suffix(".lock")
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
 
-        search_dir = self.run_history_dir(run_id=run_id)
-        all_runs = search_dir.iterdir() if search_dir.exists() else list[Path]()
+            if latest.exists():
+                run_paths.append(latest)
 
-        if all_history:
-            run_paths.extend(all_runs)
-        else:
-            if ordered_runs := sorted(
-                all_runs,
-                key=lambda p: os.path.getctime(p),
-                reverse=True,
-            ):
-                run_paths.append(ordered_runs[0])
+            search_dir = self.run_history_dir(run_id=run_id)
+            all_runs = search_dir.iterdir() if search_dir.exists() else list[Path]()
 
-        return tuple(filter(lambda p: p.exists(), run_paths))
+            if all_history:
+                run_paths.extend(all_runs)
+            else:
+                if ordered_runs := sorted(
+                    all_runs,
+                    key=lambda p: os.path.getctime(p),
+                    reverse=True,
+                ):
+                    run_paths.append(ordered_runs[0])
 
-    async def get_workplan_run(
-        self, run_id: str, run_date: datetime | None = None
-    ) -> WorkplanRun | None:
-        """Locate a WorkplanRun record.
-
-        Parameters
-        ----------
-        run_id : str
-            The run_id of the WorkplanRun
-        run_date : datetime | None
-            The datetime the run was executed or `None`.
-
-        Returns
-        -------
-        WorkplanRun | None
-            The record when it can be located in history or latest runs, otherwise `None`.
-        """
-        run_id = run_id.strip()
-
-        if not run_id:
-            msg = "A valid run-id was not provided; unable to retrieve run"
-            raise ValueError(msg)
-
-        run_id = slugify(run_id)
-
-        run_path = self._find_run_path(run_id, run_date)
-
-        if not run_path.exists():
-            rd_out = run_date or "latest"
-            msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-            self.log.debug(msg)
-            return None
-
-        return deserialize(run_path, WorkplanRun)
+        items = tuple(filter(lambda p: p.exists(), run_paths))
+        return tuple(sorted(list({p.resolve() for p in items})))
 
     def get_workplan_run_sync(
         self, run_id: str, run_date: datetime | None = None
@@ -324,21 +299,85 @@ class TrackingRepository(LoggingMixin):
         WorkplanRun | None
             The record when it can be located in history or latest runs, otherwise `None`.
         """
-        if not run_id:
+        try:
+            run_id = slugify(run_id)
+        except ValueError as ex:
             msg = "A valid run-id was not provided; unable to retrieve run"
-            raise ValueError(msg)
+            raise ValueError(msg) from ex
 
-        run_id = slugify(run_id)
-
+        latest_path = self.latest_path(run_id)
         run_path = self._find_run_path(run_id, run_date)
 
-        if not run_path.exists():
-            rd_out = run_date or "latest"
-            msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
-            self.log.warning(msg)
-            return None
+        lock_path = latest_path.with_suffix(".lock")
+        if not lock_path.parent.exists():
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
 
-        return deserialize(run_path, WorkplanRun)
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            if not run_path.exists():
+                rd_out = run_date or "latest"
+                msg = f"No run file for `{run_id}` on `{rd_out}` found in {run_path}`"
+                self.log.warning(msg)
+                return None
+
+            return deserialize(run_path, WorkplanRun)
+
+    async def get_workplan_run(
+        self, run_id: str, run_date: datetime | None = None
+    ) -> WorkplanRun | None:
+        """Locate a WorkplanRun record.
+
+        Parameters
+        ----------
+        run_id : str
+            The run_id of the WorkplanRun
+        run_date : datetime | None
+            The datetime the run was executed or `None`.
+
+        Returns
+        -------
+        WorkplanRun | None
+            The record when it can be located in history or latest runs, otherwise `None`.
+        """
+        return await asyncio.to_thread(self.get_workplan_run_sync, run_id, run_date)
+
+    def put_workplan_run_sync(self, run: WorkplanRun) -> Path:
+        """Persist a run record to disk.
+
+        Inserts a new history record and updates the "latest" record for the run-id.
+
+        Parameters
+        ----------
+        run : WorkplanRun
+            The run to persist
+
+        Returns
+        -------
+        Path
+            The path to the persisted history record
+        """
+        run_path = self.history_path(run.run_id, run.start_at)
+        latest_path = self.latest_path(run.run_id)
+
+        # use the latest path (e.g. /tmp/<run-id>.yaml) as a lock in case
+        # multiple runs occur simultaneously.
+        lock_path = latest_path.with_suffix(".lock")
+        if not lock_path.parent.exists():
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with lock_path.open("w") as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+            if not serialize(run_path, run):
+                self.log.warning("Run could not be persisted")
+
+            latest_path.unlink(missing_ok=True)
+            latest_path.symlink_to(run_path)
+
+        msg = f"Run persisted to: {run_path}"
+        self.log.debug(msg)
+        return run_path
 
     async def put_workplan_run(self, run: WorkplanRun) -> Path:
         """Persist a run record to disk.
@@ -355,21 +394,7 @@ class TrackingRepository(LoggingMixin):
         Path
             The path to the persisted history record
         """
-        run_path = self.history_path(run.run_id, run.start_at)
-        latest_path = self.latest_path(run.run_id)
-
-        if not serialize(run_path, run):
-            self.log.warning("Run could not be persisted")
-
-        if not latest_path.parent.exists():
-            latest_path.parent.mkdir(parents=True)
-
-        latest_path.unlink(missing_ok=True)
-        latest_path.symlink_to(run_path)
-
-        msg = f"Run persisted to: {run_path}"
-        self.log.debug(msg)
-        return run_path
+        return await asyncio.to_thread(self.put_workplan_run_sync, run)
 
     async def list_latest_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.

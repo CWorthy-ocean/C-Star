@@ -1,6 +1,5 @@
 import pytest
 
-from cstar.base.adapter import CstarAdaptationError
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.orchestration.launch.local import LocalComputeAdapter
 from cstar.orchestration.models import KeyValueStore
@@ -39,10 +38,12 @@ def test_localcomputeadapter_adapt_null(
 def test_localcomputeadapter_adapt_empty_overrides(
     compute_overrides: KeyValueStore,
 ) -> None:
-    """Verify that the adapter returns `None` if no local compute overrides can be located."""
+    """Verify the adapter signals it cannot attempt adaptation when no local
+    compute overrides can be located.
+    """
     adapter = LocalComputeAdapter()
 
-    with pytest.raises(CstarAdaptationError, match="Unable to adapt model"):
+    with pytest.raises(CstarExpectationFailed, match="overrides were supplied"):
         _ = adapter.adapt(compute_overrides)
 
 

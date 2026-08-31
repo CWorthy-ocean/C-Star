@@ -1,4 +1,5 @@
 import typing as t
+from collections.abc import Sequence
 
 import typer
 from rich.console import Console
@@ -47,6 +48,8 @@ def print_not_found(run_id: str, key: str) -> None:
 def runid_callback(context: typer.Context, value: str) -> str:
     """Clean and validate the run-id format.
 
+    Run-id is optional when performing actions on the shared cache.
+
     Parameters
     ----------
     run_id : str
@@ -56,10 +59,14 @@ def runid_callback(context: typer.Context, value: str) -> str:
     -------
     str
     """
-    if value and not value.strip():
-        console.print("A non-empty run-id must be specified.")
-        raise typer.Exit(1)
-    return value.strip()
+    if value:
+        value = value.strip()
+
+        if not value:
+            console.print("A non-empty run-id must be specified.")
+            raise typer.Exit(1)
+
+    return value
 
 
 def key_callback(context: typer.Context, value: str) -> str:
@@ -99,6 +106,7 @@ class Prompter:
     mode: t.Literal["single", "double"] = "single"
     primary: str = call_to_action
     secondary: str = f"Are you sure? {call_to_action}"
+    _responses: list[bool]
 
     def __init__(
         self,
@@ -115,6 +123,7 @@ class Prompter:
             self.primary = primary
         if secondary is not None:
             self.secondary = secondary
+        self._responses = []
 
     def confirm(
         self,
@@ -122,9 +131,19 @@ class Prompter:
         secondary: str | None = None,
         mode: t.Literal["single", "double"] | None = None,
     ) -> bool:
+        if not self.interactive:
+            return True
+
         confirmation = typer.confirm(primary or self.primary)
+        self._responses.append(confirmation)
 
         if (mode or self.mode) == "double":
             confirmation = typer.confirm(secondary or self.secondary)
+            self._responses.append(confirmation)
 
         return confirmation
+
+    @property
+    def responses(self) -> Sequence[bool]:
+        """Return the results of any user confirmations that have been completed."""
+        return tuple(self._responses)

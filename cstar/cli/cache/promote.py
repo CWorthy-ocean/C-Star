@@ -91,19 +91,20 @@ def promote(
         on_conflict = OnConflict.ERROR if not overwrite else OnConflict.OVERWRITE
         location = cache.promote(key, run_id, on_conflict=on_conflict)
     except ArtifactNotFoundError:
-        console.print(f"No cache artifact found for run-id {run_id!r} with key {key!r}")
+        console.print(f"No cache asset found for run-id {run_id!r} with key {key!r}")
     except ArtifactExistsError:
-        prompt = f"An existing asset will be overwritten. {call_to_action}"
+        console.print("Shared asset already exists and content does not match.")
+        prompt = f"The existing asset will be overwritten. {call_to_action}"
 
         if not overwrite and not Prompter(primary=prompt, mode="double").confirm():
             msg = "Overwrite permission denied by user for shared asset. Aborting."
             log.info(msg)
-            raise typer.Exit()
+            raise typer.Exit(1)
         else:
             location = cache.promote(key, run_id, on_conflict=OnConflict.OVERWRITE)
 
     if location:
-        msg = f"Cached artifact {key!r} promoted to the group cache"
+        msg = f"Cached asset {key!r} promoted to the group cache"
         if is_flag_enabled(ENV_CSTAR_CLI_VERBOSE):
             msg = f"{msg} at {location!r}"
         console.print(msg)

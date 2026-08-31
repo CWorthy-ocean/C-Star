@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+from cstar.base.exceptions import BlueprintDeferredError, CstarError
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.orchestration import LiveStep, Workplan
 from cstar.orchestration.serialization import deserialize
@@ -89,7 +90,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-account",
             "alt-q",
             "42:00:00",
-            128,
+            1,
             None,
             None,
             id="queue-name",
@@ -109,7 +110,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-account",
             "default-q",
             "42:00:00",
-            128,
+            1,
             99,
             None,
             id="num-nodes",
@@ -119,7 +120,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-account",
             "default-q",
             "01:00:00",
-            128,
+            1,
             None,
             None,
             id="walltime",
@@ -129,7 +130,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-account",
             "default-q",
             "42:00:00",
-            128,
+            1,
             None,
             32,
             id="cpus-per-node",
@@ -139,7 +140,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "alt-account",
             "default-q",
             "42:00:00",
-            128,
+            1,
             None,
             None,
             id="account-name",
@@ -179,7 +180,12 @@ def test_slurmlauncher_adapt_step_with_overrides(
     """Verify that the `SlurmLauncher` correctly converts a step into a `SchedulerJob`
     that includes any provided per-step compute overrides.
 
-    NOTE: num_cpus is populated from the template bp, resulting in 128: `return xi * eta`
+    NOTE: the launcher no longer reads the blueprint to determine `num_cpus`;
+    the default compute spec's `num_cpus` is a literal floor of 1. The
+    workplan transformer is responsible for injecting the real cpu
+    requirement into `compute_overrides["slurm"]["num_cpus"]` at schedule
+    time, so cases below that do not declare `num_cpus` in their overrides
+    fall back to that floor of 1.
     """
     wp_path = wp_templates_dir / "single_step.yaml"
     workplan = deserialize(wp_path, Workplan)
@@ -219,7 +225,7 @@ def test_slurmlauncher_adapt_step_with_overrides(
     assert minimum_spec.account_name == "default-account"
     assert minimum_spec.cpus_per_node is None
     assert minimum_spec.max_walltime == "42:00:00"
-    assert minimum_spec.num_cpus == 128
+    assert minimum_spec.num_cpus == 1
     assert minimum_spec.num_nodes is None
     assert minimum_spec.queue_name == "default-q"
 
@@ -240,3 +246,84 @@ def test_slurmlauncher_adapt_step_with_overrides(
 
     if exp_walltime != minimum_spec.max_walltime:
         assert f"{ENV_CSTAR_SLURM_MAX_WALLTIME}={exp_walltime!r}" in job.commands
+
+
+@pytest.fixture
+def deferred_live_step(tmp_path: Path) -> LiveStep:
+    """Create a LiveStep whose blueprint is deferred to an upstream step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+
+    Returns
+    -------
+    LiveStep
+    """
+    return LiveStep.model_validate(
+        {
+            "name": "consumer",
+            "application": "hello_world",
+            "blueprint": {"from_step": "producer"},
+            "depends_on": ["producer"],
+            "working_dir": tmp_path / "consumer",
+        },
+    )
+
+
+def test_default_compute_spec_is_a_floor_for_deferred_steps(
+    deferred_live_step: LiveStep,
+) -> None:
+    """Verify the default compute spec is a literal floor, independent of the
+    blueprint, since a deferred step's blueprint cannot be read at schedule time.
+
+    Parameters
+    ----------
+    deferred_live_step : LiveStep
+        A step whose blueprint is deferred to an upstream step.
+    """
+    with pytest.raises(BlueprintDeferredError):
+        _ = deferred_live_step.blueprint
+
+    spec = SlurmLauncher._get_default_compute_spec(deferred_live_step)  # type: ignore
+
+    assert spec.num_cpus == 1
+
+
+def test_compute_spec_invalid_overrides_fail_loudly(
+    deferred_live_step: LiveStep,
+) -> None:
+    """Verify invalid compute overrides abort submission instead of silently
+    falling back to the 1-cpu default spec.
+
+    Parameters
+    ----------
+    deferred_live_step : LiveStep
+        A step whose blueprint is deferred to an upstream step.
+    """
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={"compute_overrides": {"slurm": {"max_walltime": "not-a-walltime"}}},
+    )
+
+    with pytest.raises(CstarError):
+        _ = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+
+def test_compute_spec_deferred_with_overrides(deferred_live_step: LiveStep) -> None:
+    """Verify compute_overrides predict the cpu needs of a deferred step.
+
+    Parameters
+    ----------
+    deferred_live_step : LiveStep
+        A step whose blueprint is deferred to an upstream step.
+    """
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={"compute_overrides": {"slurm": {"num_cpus": 8}}},
+    )
+
+    spec = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+    assert spec.num_cpus == 8

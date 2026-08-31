@@ -978,6 +978,10 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH {key} {value}"
 
         scheduler_script += "\n\nset -e"
+        # Fortran automatic arrays overflow the default 8 MB stack at larger tile
+        # sizes; srun propagates the limits in effect where it is invoked, so this
+        # must precede the commands.
+        scheduler_script += "\nulimit -s unlimited"
         # Add roms command to scheduler script
         scheduler_script += f"\n{self.commands}"
         return scheduler_script

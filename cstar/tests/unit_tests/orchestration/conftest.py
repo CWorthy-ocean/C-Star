@@ -369,10 +369,6 @@ def fill_blueprint_template(
               locked: false
               n_procs_x: 16
               n_procs_y: 8
-            model_params:
-              documentation: http://mockdoc.com/model-params
-              hash: null
-              locked: false
             runtime_params:
               documentation: http://mockdoc.com/runtime-params
               hash: null
@@ -387,8 +383,9 @@ def fill_blueprint_template(
             initial_conditions:
               data:
                 location: http://mockdoc.com/grid
-            model_params:
-              time_step: 1
+            namelist_overrides:
+              time_stepping:
+                dt: 1
             """,
         )
 

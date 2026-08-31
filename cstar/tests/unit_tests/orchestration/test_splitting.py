@@ -8,7 +8,7 @@ from unittest import mock
 import pytest
 
 from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
-from cstar.base.env import ENV_CSTAR_DATA_HOME, ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.base.utils import DEFAULT_OUTPUT_ROOT_NAME
 from cstar.orchestration.models import Application, Step, Workplan
@@ -85,12 +85,10 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
     original_step = LiveStep.from_step(single_step_workplan.steps[0])
 
     # mock data home to ensure test works on HPC if scratch directories are identified
-    data_home = tmp_path / "data"
     with mock.patch.dict(
         os.environ,
         {
             ENV_CSTAR_RUNID: "12345",
-            ENV_CSTAR_DATA_HOME: data_home.as_posix(),
             ENV_FF_ORCH_TRX_TIMESPLIT: "1",
             ENV_CSTAR_ORCH_TRX_FREQ: SplitFrequency.Monthly.value,
         },

@@ -13,7 +13,10 @@ from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
-from cstar.orchestration.dag_runner import build_and_run_dag, prepare_workplan
+from cstar.orchestration.dag_runner import (
+    build_and_run_dag,
+    prepare_workplan,
+)
 from cstar.orchestration.models import Application, Workplan
 from cstar.orchestration.orchestration import (
     LiveWorkplan,
@@ -152,7 +155,6 @@ async def test_compose_host_run_parameter(
         mock_run.assert_not_called()
 
 
-@pytest.mark.usefixtures("prefect_server_url")
 @pytest.mark.parametrize(
     ("drop_var", "key", "settings_klass"),
     [
@@ -295,7 +297,7 @@ async def test_prepare_composed_dag(
         run_id = get_run_id()
         working_dir = DirectoryManager.data_home()
         check_environment()
-        wp, wp_path = await prepare_workplan(generated_wp_path, working_dir, run_id)
+        wp, wp_path = await prepare_workplan(generated_wp_path, working_dir / run_id)
 
     wp = deserialize(wp_path, LiveWorkplan)
     steps = list(wp.steps)
@@ -380,8 +382,8 @@ async def test_run_composed_dag(
         )
         serialize(tweak_path, wp)
 
-        summary = await build_and_run_dag(tweak_path, run_id)
-        wp_path = summary.final_workplan
+        wp_run = await build_and_run_dag(tweak_path, run_id)
+        wp_path = wp_run.trx_workplan_path
 
     wp = deserialize(wp_path, Workplan)
     steps = list(wp.steps)

@@ -10,7 +10,7 @@ from cstar.applications.plotter import APP_NAME as APP_PLOTTER
 from cstar.applications.plotter import PlotterSchemaAdapterV1V2
 from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
 from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
-from cstar.base.env import ENV_CSTAR_STATE_HOME
+from cstar.base.env import ENV_CSTAR_DISABLE_MIGRATION, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.cli.blueprint.migrate import app
 from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
 from cstar.system.migration import KEY_APP, identify_bounds
@@ -59,8 +59,11 @@ def test_blueprint_migrate_file_dne(tmp_path: Path) -> None:
         color=False,
     )
 
-    assert "Invalid value for 'PATH'" in result.stderr
-    assert "was not found" in result.stderr
+    # Normalize away the rich error panel's hard wrapping, which can split
+    # the message at any point depending on the tmp path length.
+    plain_stderr = " ".join(result.stderr.replace("│", " ").split())
+    assert "Invalid value for 'PATH'" in plain_stderr
+    assert "was not found" in plain_stderr
 
 
 def test_blueprint_migrate_remote_blueprint_dne() -> None:
@@ -107,6 +110,28 @@ def test_blueprint_migrate_persist_to_default(
     content = expected_output_path.read_text()
     assert KEY_APP in content
     assert app_name in content
+
+
+def test_blueprint_migrate_disabled(
+    plotter_v1_0_0_bp: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that `CSTAR_DISABLE_MIGRATION` blocks migration of an
+    out-of-date blueprint with an early error.
+    """
+    monkeypatch.setenv(ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [plotter_v1_0_0_bp.as_posix()],
+        color=False,
+    )
+
+    assert result.exit_code != 0
+    # rich wraps the message at the terminal width, so a line break may land
+    # inside the phrase; normalize whitespace before matching.
+    assert "migration is disabled" in " ".join(result.stdout.split())
 
 
 def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:

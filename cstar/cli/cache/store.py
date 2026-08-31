@@ -31,7 +31,7 @@ from cstar.cli.common import (
 )
 from cstar.entrypoint.utils import ARG_VERBOSE, ARG_VERBOSE_HELP
 from cstar.io.utils import get_artifact_cache
-from cstar.orchestration.artifact_cache import ArtifactExistsError
+from cstar.orchestration.artifact_cache import ArtifactExistsError, Tier
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -114,15 +114,21 @@ def store(
     action = "added to"
     path = path.expanduser().resolve()
 
-    if location := cache.resolve(key, run_id, prefer_local=True) and not overwrite:
+    if location := cache.resolve(key, run_id, prefer_local=True):
+        mode: t.Literal["single", "double"] = (
+            "single" if location.tier == Tier.USER else "double"
+        )
         prompt = f"An existing asset will be overwritten. {call_to_action}"
-
-        if not overwrite and not Prompter(primary=prompt).confirm():
+        prompter = Prompter(primary=prompt, mode=mode)
+        if overwrite:
+            action = "overwritten in"
+        elif prompter.confirm():
+            overwrite = True
+            action = "updated in"
+        else:
             msg = "Overwrite permission denied by user. Aborting."
             log.info(msg)
             raise typer.Exit()
-        else:
-            action = "updated in"
 
     try:
         user_meta = t.cast("dict[str, str] | None", context.obj)

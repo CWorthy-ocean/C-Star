@@ -132,7 +132,7 @@ def test_cli_admin_promote_entry_not_found(
     ]
     result = runner.invoke(app, args, color=False)
 
-    assert "No cache artifact found" in result.stdout
+    assert "No cache asset found" in result.stdout
 
 
 @pytest.mark.usefixtures("mock_artifact_cache_env")
@@ -206,7 +206,7 @@ def test_cli_admin_promote_conflict_declined_keeps_the_shared_copy(
     divergent.write_text("different content")
     cache.ingest(divergent, key, "run-b")
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="n")):
+    with mock.patch("typer.confirm", mock.Mock(return_value=False)):
         result = CliRunner().invoke(
             app, [ARG_RUNID, "run-b", ARG_KEY, key], color=False
         )
@@ -241,7 +241,7 @@ def test_cli_admin_promote_conflict_accepted_replaces_it(
     divergent.write_text("different content")
     cache.ingest(divergent, key, "run-b")
 
-    with mock.patch("rich.prompt.Prompt.ask", mock.Mock(return_value="y")):
+    with mock.patch("typer.confirm", mock.Mock(return_value=True)):
         result = CliRunner().invoke(
             app, [ARG_RUNID, "run-b", ARG_KEY, key], color=False
         )
@@ -275,7 +275,7 @@ def test_cli_admin_promote_yes_replaces_without_asking(
     divergent.write_text("different content")
     cache.ingest(divergent, key, "run-b")
 
-    with mock.patch("rich.prompt.Prompt.ask") as prompt:
+    with mock.patch("typer.confirm") as prompt:
         result = CliRunner().invoke(
             app, [ARG_RUNID, "run-b", ARG_KEY, key, "--yes"], color=False
         )

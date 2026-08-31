@@ -321,13 +321,19 @@ def slugify(source: str) -> str:
     str
         The slugified version of the source string.
     """
-    if not source:
-        raise ValueError
+    value = source.strip().casefold()
+    if not value:
+        raise ValueError("Source collapses to empty string when slugified")
 
-    return re.sub(r"\W+", "-", source.strip().casefold()).strip("-")
+    return re.sub(r"\W+", "-", value).strip("-")
 
 
-def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
+def deep_merge(
+    d1: dict[str, t.Any],
+    d2: dict[str, t.Any],
+    *,
+    replace_lists: bool = False,
+) -> dict[str, t.Any]:
     """Deep merge two dictionaries.
 
     Iterate recursively through keys in dictionary `d2`, replacing
@@ -342,6 +348,10 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
         The dictionary that must be updated.
     d2 : dict[str, t.Any]
         The dictionary containing values to be merged.
+    replace_lists : bool, optional
+        If True, a list in `d2` replaces the corresponding `d1` list wholesale.
+        By default, lists are merged element-wise, so a `d2` list shorter than
+        its `d1` counterpart leaves the trailing `d1` items in place.
 
     Returns
     -------
@@ -354,9 +364,11 @@ def deep_merge(d1: dict[str, t.Any], d2: dict[str, t.Any]) -> dict[str, t.Any]:
         source = result.get(k)
 
         if isinstance(source, dict) and isinstance(target, dict):
-            result[k] = deep_merge(source, target)
+            result[k] = deep_merge(source, target, replace_lists=replace_lists)
         elif isinstance(target, dict):
             result[k] = {**target}
+        elif isinstance(source, list) and isinstance(target, list) and replace_lists:
+            result[k] = copy.deepcopy(target)
         elif isinstance(source, list) and isinstance(target, list):
             items = []
             for x0, x1 in zip_longest(source, target, fillvalue=None):

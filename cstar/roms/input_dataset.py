@@ -135,6 +135,12 @@ class ROMSInputDataset(InputDataset, ABC):
 
     partitionable: bool = True
     """Set to False if the input dataset should not be partitioned."""
+    # source_np_xi: int | None = None
+    # source_np_eta: int | None = None
+    # partitioning: ROMSPartitioning | None = None
+    # linker: DatasetLinker | None = None
+    # discretization: ROMSDiscretization | None = None
+    # partitioned_source: SourceDataCollection | None = None
 
     def __init__(
         self,
@@ -198,12 +204,14 @@ class ROMSInputDataset(InputDataset, ABC):
             input_dataset_dict["source_np_eta"] = self.source_np_eta
         return input_dataset_dict
 
-    # def members(self, xi: int = 0, eta: int = 0) -> list[Path]:
     @property
     def members(self) -> list[Path]:
         if d := cast(
             "ROMSDiscretization | None", getattr(self, "discretization", None)
         ):
+            if d.n_procs_x is None or d.n_procs_y is None:
+                msg = "ROMSDiscretization requires positive x/y configuration"
+                raise ValueError(msg)
             xi = d.n_procs_x
             eta = d.n_procs_y
             file_suffixes = ROMSPartitioning.suffixes(xi * eta)

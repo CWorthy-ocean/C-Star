@@ -1,10 +1,13 @@
 import asyncio
 import typing as t
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import typer
 from pydantic import ValidationError
 
+import cstar
 from cstar.applications.core import (
     RunnerRequest,
     get_app_for_blueprint,
@@ -15,7 +18,7 @@ from cstar.base.env import (
     ENV_CSTAR_LOG_LEVEL,
     get_env_item,
 )
-from cstar.base.feature import ENV_FF_CLI_BP_MIGRATE_AUTO, is_feature_enabled
+from cstar.base.exceptions import CstarError
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     MigrationRequest,
@@ -39,8 +42,9 @@ from cstar.entrypoint.utils import (
     ARG_VERBOSE_HELP,
 )
 from cstar.execution.file_system import local_copy
+from cstar.orchestration.models import DeferredBlueprintRef
 from cstar.orchestration.serialization import deserialize, validate_serialized_entity
-from cstar.orchestration.transforms import DirectiveConfig
+from cstar.orchestration.transforms import DirectiveConfig, resolve_deferred_blueprint
 from cstar.system.migration import CStarMigrationNotRegisteredError
 
 if t.TYPE_CHECKING:
@@ -54,6 +58,24 @@ app = typer.Typer()
 log = get_logger(__name__)
 
 
+def _log_startup_versions() -> None:
+    """Best-effort startup log line recording installed CWorthy library versions,
+    so a run's own log records what generated it.
+    """
+    # TODO: warn when installed versions are known-incompatible with each other
+    # (e.g. roms-tools vs cstar-ocean) -- deferred as a follow-up; this only
+    # records what's installed.
+    versions = [f"cstar-ocean=={cstar.__version__}"]
+    # cstar-forge / roms-tools are optional in a given environment -- log each
+    # only if installed (the blueprint may have been produced by cstar-forge).
+    for pkg in ("cstar-forge", "roms-tools"):
+        try:
+            versions.append(f"{pkg}=={_pkg_version(pkg)}")
+        except PackageNotFoundError:
+            pass
+    log.info("Versions: %s", ", ".join(versions))
+
+
 def path_callback(
     ctx: typer.Context,
     path: str,
@@ -61,7 +83,9 @@ def path_callback(
     """Validate the blueprint content after typer has parsed the path.
 
     Additionally, loads the blueprint, performs automatic schema migration
-    if necessary, and stores the updated blueprint in the context for later use.
+    if necessary, and stores the updated blueprint in the context for later
+    use. An up-to-date blueprint is used as-is; set `CSTAR_DISABLE_MIGRATION`
+    to fail instead of migrating when the blueprint is not current.
 
     Parameters
     ----------
@@ -75,24 +99,12 @@ def path_callback(
     str
         The path to the blueprint (or the newly migrated blueprint file).
     """
+    if DeferredBlueprintRef.matches(path):
+        # the blueprint does not exist yet; it is resolved (and migrated) at runtime
+        return path
+
     try:
-        with local_copy(path) as local_path:
-            bp_path = local_path
-
-            if is_feature_enabled(ENV_FF_CLI_BP_MIGRATE_AUTO):
-                request = MigrationRequest(path=local_path)
-                try:
-                    persist_result = execute_migration(request)
-
-                    if persist_result.migration_result.error:
-                        print(persist_result.migration_result.error)
-                        raise typer.Exit(1)
-
-                    bp_path = Path(persist_result.target)
-                except CStarMigrationNotRegisteredError:
-                    log.info("Skipping schema migration; no registered adapters")
-            return str(bp_path)
-
+        return _localize_and_migrate(path)
     except FileNotFoundError as ex:
         msg = f"Blueprint file not found: {ex.filename}"
         raise typer.BadParameter(msg) from ex
@@ -101,7 +113,35 @@ def path_callback(
         msg = f"Blueprint {path!r} is invalid. Details: {errors}"
         raise typer.BadParameter(msg) from ex
 
-    return path
+
+def _localize_and_migrate(path: str) -> str:
+    """Copy the blueprint locally and auto-migrate its schema if necessary.
+
+    Parameters
+    ----------
+    path : str
+        The path to the blueprint.
+
+    Returns
+    -------
+    str
+        The path to the local blueprint (or the newly migrated blueprint file).
+    """
+    with local_copy(path) as local_path:
+        bp_path = local_path
+
+        request = MigrationRequest(path=local_path)
+        try:
+            persist_result = execute_migration(request)
+
+            if persist_result.migration_result.error:
+                print(persist_result.migration_result.error)
+                raise typer.Exit(1)
+
+            bp_path = Path(persist_result.target)
+        except CStarMigrationNotRegisteredError:
+            log.debug("Skipping schema migration; no registered adapters")
+        return str(bp_path)
 
 
 def directives_callback(path: str | None) -> str | None:
@@ -187,6 +227,22 @@ def run(
     ] = False,
 ) -> None:
     """Execute a blueprint in a local worker service."""
+    _log_startup_versions()
+
+    if DeferredBlueprintRef.matches(uri):
+        ref = DeferredBlueprintRef.from_uri(uri)
+        try:
+            uri = str(resolve_deferred_blueprint(ref))
+        except (CstarError, RuntimeError) as ex:
+            print(f"Unable to resolve deferred blueprint: {ex}")
+            raise typer.Exit(code=1) from ex
+
+        msg = f"Resolved deferred blueprint from step {ref.from_step!r} to {uri!r}"
+        log.info(msg)
+
+        # deferred blueprints skip path_callback's handling; apply it now
+        uri = _localize_and_migrate(uri)
+
     bp_path = Path(uri)
     app_config = get_app_for_blueprint(bp_path)
 
@@ -200,7 +256,7 @@ def run(
     result = validate_serialized_entity(bp_path, app_config.blueprint)
     if not result.is_valid:
         print(result.error_msg)
-        return
+        raise typer.Exit(code=1)
 
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)

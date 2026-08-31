@@ -7,6 +7,7 @@ from cstar.base.exceptions import CstarError
 from cstar.system.manager import (
     CTX_REGISTRY,
     AnvilSystemContext,
+    BouchetSystemContext,
     DerechoSystemContext,
     EljaSystemContext,
     ExpanseSystemContext,
@@ -27,14 +28,15 @@ DEFAULT_MOCK_HOST_NAME = "mock_system"
 def test_unique_context_names() -> None:
     """Verify that known contexts have a unique key."""
     context_types = (
-        PerlmutterSystemContext,
-        MacOSSystemContext,
+        AnvilSystemContext,
+        BouchetSystemContext,
         DerechoSystemContext,
+        EljaSystemContext,
         ExpanseSystemContext,
         LinuxARM64SystemContext,
         LinuxSystemContext,
-        AnvilSystemContext,
-        EljaSystemContext,
+        MacOSSystemContext,
+        PerlmutterSystemContext,
     )
 
     registered_names = set(CTX_REGISTRY.keys())
@@ -45,13 +47,15 @@ def test_unique_context_names() -> None:
 @pytest.mark.parametrize(
     "wrapped_class",
     [
-        PerlmutterSystemContext,
-        MacOSSystemContext,
+        AnvilSystemContext,
+        BouchetSystemContext,
         DerechoSystemContext,
         EljaSystemContext,
         ExpanseSystemContext,
-        LinuxSystemContext,
         LinuxARM64SystemContext,
+        LinuxSystemContext,
+        MacOSSystemContext,
+        PerlmutterSystemContext,
     ],
 )
 def test_context_registry(wrapped_class: type[SystemContext]) -> None:

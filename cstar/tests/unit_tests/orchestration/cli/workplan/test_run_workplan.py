@@ -1,5 +1,6 @@
 import os
 import typing as t
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -18,10 +19,32 @@ from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app
 from cstar.entrypoint.utils import ARG_NO_CACHE
 from cstar.orchestration.dag_runner import get_launcher
-from cstar.orchestration.models import UserDefinedVariables
+from cstar.orchestration.launch.local import LocalHandle
+from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
+from cstar.orchestration.models import UserDefinedVariables, Workplan
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
+from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.utils import ENV_CSTAR_SLURM_ACCOUNT, ENV_CSTAR_SLURM_QUEUE
 from cstar.system.environment import EnvSettingsBase, SlurmSettingsBase
+
+
+async def fake_build_and_run_dag(
+    wp_path: Path,
+    run_id: str,
+    user_variables: dict[str, str] | None = None,
+    dry_run: bool = False,
+    clobber_steps: list[str] | None = None,
+) -> WorkplanRun:
+    return WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=wp_path,
+        output_path=wp_path.parent,
+        run_id=run_id,
+        environment={},
+        user_variables={},
+    )
 
 
 def test_workplan_run_file_dne(
@@ -129,19 +152,180 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
     wp_uri : str
         A working URL referencing a valid workplan
     """
-    mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="12345",
-            state_dir="/tmp/state",
+    arg_runid = "12345"
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", arg_runid, wp_uri],
+            color=False,
         )
-    )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_called_once()
+
+    # confirm the URL is copied local and a file exists
+    wp_path = mock_build_and_run_dag.call_args.args[0]
+    assert isinstance(wp_path, Path)
+    assert wp_path.exists()
+    # confirm the run ID passed from CLI args is used
+    assert mock_build_and_run_dag.call_args.args[1] == arg_runid
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_reaches_build_and_run_dag() -> None:
+    """Verify repeated `--clobber` options are forwarded to
+    `build_and_run_dag`'s `clobber_steps` keyword argument.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
 
     with mock.patch(
         "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ) as mock_exec:
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "--run-id",
+                "12345",
+                "--clobber",
+                "Prepare",
+                "--clobber",
+                "Ensemble X",
+                wp_uri,
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.await_args is not None
+    assert mock_build_and_run_dag.await_args.kwargs["clobber_steps"] == [
+        "Prepare",
+        "Ensemble X",
+    ]
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_all_reaches_build_and_run_dag() -> None:
+    """Verify `--clobber all` is expanded by the CLI into every step's
+    safe_name before reaching `build_and_run_dag`.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "--run-id",
+                "12345",
+                "--clobber",
+                "all",
+                wp_uri,
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.await_args is not None
+    assert mock_build_and_run_dag.await_args.kwargs["clobber_steps"] == [
+        "prepare",
+        "ensemble-x",
+        "ensemble-y",
+        "aggregate-results",
+    ]
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_unknown_step_fails_fast() -> None:
+    """Verify an unresolvable `--clobber` selection exits with a usage error
+    before `build_and_run_dag` is invoked.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", "--clobber", "does-not-exist", wp_uri],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "Unknown step(s)" in result.output
+    assert "does-not-exist" in result.output
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_all_with_step_name_fails_fast() -> None:
+    """Verify combining `all` with a step name exits with a usage error
+    before `build_and_run_dag` is invoked.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", "--clobber", "all", "--clobber", "Prepare", wp_uri],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_bare_clobber_fails_fast() -> None:
+    """Verify a bare `--clobber` with no value (as the last argv token) exits
+    non-zero due to typer's missing-argument error, rather than clobbering
+    every step implicitly.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "--run-id",
+            "12345",
+            wp_uri,
+            "--clobber",
+        ],
+        color=False,
+    )
+
+    assert result.exit_code == 2
+    assert "requires an argument" in result.stderr
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_clobber_step_defaults_to_empty_list() -> None:
+    """Verify `clobber_steps` defaults to an empty list when `--clobber`
+    is not supplied.
+    """
+    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
         runner = CliRunner()
         result = runner.invoke(
             app,
@@ -150,10 +334,12 @@ def test_workplan_run_remote_workplan(wp_uri: str) -> None:
         )
 
     assert result.exit_code == 0
-    mock_exec.assert_called_once()
+    mock_build_and_run_dag.assert_awaited_once()
+    assert mock_build_and_run_dag.await_args is not None
+    assert mock_build_and_run_dag.await_args.kwargs["clobber_steps"] == []
 
 
-@pytest.mark.usefixtures("prefect_server_url", "read_yaml_intercept")
+@pytest.mark.usefixtures("read_yaml_intercept")
 def test_workplan_run_variable_unknown(
     wp_templates_dir: Path,
 ) -> None:
@@ -592,24 +778,23 @@ def test_workplan_run_default_run_id(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    state_dir = tmp_path / "state"
     wp_path = wp_templates_dir / "workplan.yaml"
+    exp_default_run_id = "sample-workplan"
 
     runner = CliRunner()
 
     mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="12345",
-            state_dir="/tmp/state",
+        return_value=WorkplanRun(
+            workplan_path=wp_path,
+            trx_workplan_path=wp_path,
+            output_path=wp_path.parent,
+            run_id=exp_default_run_id,
+            environment={},
+            user_variables={},
         )
     )
 
-    with (
-        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
-        mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag),
-    ):
+    with mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag):
         result = runner.invoke(
             app,
             ["--dry-run", wp_path.as_posix()],
@@ -662,12 +847,18 @@ def test_workplan_run_invalid_file_content(
     mock_build_and_run_dag.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_workplan_run_reload_prior_run(
+@pytest.mark.parametrize("status", [Status.Unsubmitted, Status.Submitted, Status.Done])
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_reload_prior_run(
     tmp_path: Path,
     wp_templates_dir: Path,
+    mock_run_id: str,
+    status: Status,
 ) -> None:
     """Verify that passing a valid run-id and no path causes the prior run to be loaded.
+
+    Ensure that a prior run with successfully completed steps doesn't repeat the step and
+    when the sentinels don't reflect "real state" they are updated.
 
     Parameters
     ----------
@@ -676,48 +867,274 @@ async def test_workplan_run_reload_prior_run(
     wp_templates_dir : Path
         Fixture providing the path to a directory containing template workplans
     """
-    state_dir = tmp_path / "state"
+    run_id = mock_run_id
     wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    lwp_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
+
+    sentinel_paths = set[Path]()
+    for i, s in enumerate(lwp.steps):
+        n = -len(lwp.steps) + i
+        h = LocalHandle(
+            pid=str(1000 + n),
+            name=s.safe_name,
+            run_id=run_id,
+            status=status,
+            start_at=datetime.now() + timedelta(days=n),
+        )
+        p = StateRepository.sentinel_path(h)
+        assert serialize(p, h), "serializing the mock handles failed in test"
+        sentinel_paths.add(p)
 
     fake_run = WorkplanRun(
         workplan_path=wp_path,
-        trx_workplan_path=wp_path,
-        output_path=wp_path.parent,
-        run_id="12345",
+        trx_workplan_path=lwp_path,
+        output_path=lwp_path.parent,
+        run_id=run_id,
         environment={"CSTAR_LOG_LEVEL": "TRACE"},
+        sentinels=sentinel_paths,
     )
 
     repo = TrackingRepository()
-    await repo.put_workplan_run(fake_run)
+    repo.put_workplan_run_sync(fake_run)
 
     def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
-        raise typer.Exit(0)
-
-    mock_get_wp = mock.Mock(return_value=fake_run)
+        raise typer.Exit(1)
 
     runner = CliRunner()
     with (
-        mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}),
         mock.patch(
-            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
-            mock_get_wp,
+            "cstar.orchestration.dag_runner.get_launcher",
+            SlurmLauncher,
         ),
-        mock.patch("cstar.cli.workplan.run.asyncio.run", side_effect=typer_exit),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
+            mock.AsyncMock(return_value=Status.Done),
+        ) as mock_query_status,
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher._submit",
+            side_effect=typer_exit,
+        ) as mock_submit,
     ):
         result = runner.invoke(
             app,
-            ["--run-id", "12345"],
+            ["--run-id", mock_run_id],
             color=False,
         )
 
+    # RC would be 1 if submit was called for any task due to side_effect
     assert result.exit_code == 0
 
     # confirm the attempt to load the old record was made
-    mock_get_wp.assert_called()
+    assert mock_query_status.call_count == 4  # always query status for each step
+    assert not mock_submit.called
+
+    # confirm the status-change handler fires to update the persisted record
+    statuses = {deserialize(p, SlurmHandle).status for p in sentinel_paths}
+    assert statuses == {Status.Done}
+
+
+@pytest.mark.parametrize("status", [Status.Submitted, Status.Running, Status.Ending])
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_reload_prior_run_in_progress(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    status: Status,
+) -> None:
+    """Verify that reloading a run whose jobs are still queued or running
+    adopts the in-flight jobs instead of submitting duplicates.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    lwp_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
+
+    sentinel_paths = set[Path]()
+    for i, s in enumerate(lwp.steps):
+        n = -len(lwp.steps) + i
+        h = LocalHandle(
+            pid=str(1000 + n),
+            name=s.safe_name,
+            run_id=run_id,
+            status=Status.Submitted,
+            start_at=datetime.now() + timedelta(days=n),
+        )
+        p = StateRepository.sentinel_path(h)
+        assert serialize(p, h), "serializing the mock handles failed in test"
+        sentinel_paths.add(p)
+
+    fake_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=lwp_path,
+        output_path=lwp_path.parent,
+        run_id=run_id,
+        environment={"CSTAR_LOG_LEVEL": "TRACE"},
+        sentinels=sentinel_paths,
+    )
+
+    repo = TrackingRepository()
+    repo.put_workplan_run_sync(fake_run)
+
+    def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
+        raise typer.Exit(1)
+
+    runner = CliRunner()
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            SlurmLauncher,
+        ),
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher.query_status",
+            mock.AsyncMock(return_value=status),
+        ) as mock_query_status,
+        mock.patch(
+            "cstar.orchestration.launch.slurm.SlurmLauncher._submit",
+            side_effect=typer_exit,
+        ) as mock_submit,
+    ):
+        result = runner.invoke(
+            app,
+            ["--run-id", mock_run_id],
+            color=False,
+        )
+
+    # RC would be 1 if submit was called for any task due to side_effect
+    assert result.exit_code == 0
+
+    # confirm the attempt to load the old record was made
+    assert mock_query_status.call_count == 4  # always query status for each step
+    assert not mock_submit.called  # in-flight jobs are adopted, not re-submitted
+
+    # confirm the status-change handler fires to update the persisted record
+    statuses = {deserialize(p, SlurmHandle).status for p in sentinel_paths}
+    assert statuses == {status}
+
+
+@pytest.mark.parametrize("status", [Status.Cancelled, Status.Failed])
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_reload_prior_run_repeat_failures(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+    status: Status,
+) -> None:
+    """Verify that passing a valid run-id and no path causes the prior run to be loaded.
+
+    Ensure that a prior run with _failed_ steps re-runs the failed steps and updates
+    the sentinels to reflect the newly submitted status.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    lwp_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(lwp_path, lwp), "serializing live workplan failed in test"
+
+    sentinel_paths = set[Path]()
+    for i, s in enumerate(lwp.steps):
+        n = -len(lwp.steps) + i
+        h = LocalHandle(
+            pid=str(1000 + n),
+            name=s.safe_name,
+            run_id=run_id,
+            status=Status.Submitted,
+            start_at=datetime.now() + timedelta(days=n),
+        )
+        p = StateRepository.sentinel_path(h)
+        assert serialize(p, h), "serializing the mock handles failed in test"
+        sentinel_paths.add(p)
+
+    fake_run = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=lwp_path,
+        output_path=lwp_path.parent,
+        run_id=run_id,
+        environment={"CSTAR_LOG_LEVEL": "TRACE"},
+        sentinels=sentinel_paths,
+    )
+
+    repo = TrackingRepository()
+    repo.put_workplan_run_sync(fake_run)
+
+    submission_results = (
+        SlurmHandle(
+            pid=str(9996 + i),
+            name=s.name,
+            run_id=run_id,
+            status=Status.Submitted,
+        )
+        for i, s in enumerate(lwp.steps)
+    )
+    runner = CliRunner()
+
+    with (
+        mock.patch.object(
+            SlurmLauncher,
+            "query_status",
+            mock.AsyncMock(return_value=status),
+        ) as mock_query_status,
+        mock.patch.object(
+            SlurmLauncher,
+            "_prune_completed_dependencies",
+            mock.AsyncMock(return_value=[]),
+        ),
+        mock.patch.object(
+            SlurmLauncher,
+            "_submit",
+            mock.AsyncMock(side_effect=submission_results),
+        ) as mock_submit,
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_launcher",
+            SlurmLauncher,
+        ),
+    ):
+        result = runner.invoke(
+            app,
+            ["--run-id", mock_run_id],
+            color=False,
+        )
+
+    # RC would be 1 if submit was called for any task due to side_effect
+    assert result.exit_code == 0
+
+    # confirm the attempt to load the old record was made
+    assert mock_query_status.call_count == 4  # always query status for each step
+    assert mock_submit.called  # for fail states, expect a new task submission
+
+    # confirm the status-change handler fires to update the persisted record
+    statuses = {deserialize(p, SlurmHandle).status for p in sentinel_paths}
+    # ... and the old fail states from the sentinel records are replaced
+    assert statuses == {Status.Submitted}
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
-def test_cli_workplan_run_normalizes_mixed_case_runid() -> None:
+def test_cli_workplan_run_normalizes_mixed_case_runid(
+    wp_templates_dir: Path,
+    tmp_path: Path,
+) -> None:
     """Verify a user-supplied run-id is slugified (lowercased) by the run-id
     callback pipeline before it reaches the environment or the dag runner.
 
@@ -726,31 +1143,34 @@ def test_cli_workplan_run_normalizes_mixed_case_runid() -> None:
     variable was slugified while directories and tracking records used the
     raw value.
     """
-    wp_uri = "https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/cstar/additional_files/templates/wp/workplan.yaml"
+    wp_path = wp_templates_dir / "workplan.yaml"
 
     mock_build_and_run_dag = mock.AsyncMock(
-        return_value=mock.MagicMock(
-            dry_run=True,
-            name="sample-workplan",
-            run_id="myrun_01",
-            state_dir="/tmp/state",
+        return_value=WorkplanRun(
+            workplan_path=wp_path,
+            trx_workplan_path=wp_path,
+            output_path=tmp_path,
+            run_id="not-used",
+            environment={},
+            user_variables={},
         )
     )
 
-    with mock.patch(
-        "cstar.cli.workplan.run.build_and_run_dag",
-        mock_build_and_run_dag,
-    ) as mock_exec:
+    args: list[str] = ["--run-id", "  MyRun_01  ", str(wp_path)]
+
+    with (
+        mock.patch("cstar.cli.workplan.run.build_and_run_dag", mock_build_and_run_dag),
+    ):
         runner = CliRunner()
         result = runner.invoke(
             app,
-            ["--run-id", "  MyRun_01  ", wp_uri],
+            args,
             color=False,
         )
 
     assert result.exit_code == 0
     assert os.environ[ENV_CSTAR_RUNID] == "myrun_01"
-    assert mock_exec.call_args.args[1] == "myrun_01"
+    assert mock_build_and_run_dag.call_args.args[1] == "myrun_01"
 
 
 @pytest.mark.parametrize(
