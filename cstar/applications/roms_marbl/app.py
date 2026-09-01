@@ -96,6 +96,7 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
         self._handler = self.simulation.run(
             account_key=self._job_cfg.account_id,
             walltime=self._job_cfg.walltime,
+            queue_name=self._job_cfg.priority,
             job_name=self._job_cfg.job_name,
         )
 
