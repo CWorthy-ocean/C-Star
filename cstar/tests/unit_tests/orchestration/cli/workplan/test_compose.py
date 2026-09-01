@@ -14,7 +14,6 @@ from cstar.cli.workplan.compose import WorkplanTemplate, compose
 from cstar.execution.file_system import DirectoryManager
 from cstar.orchestration.adapter import StepToPlaceholderAdapter
 from cstar.orchestration.dag_runner import (
-    ExecutiveRunSummary,
     build_and_run_dag,
     prepare_workplan,
 )
@@ -384,15 +383,14 @@ async def test_run_composed_dag(
         serialize(tweak_path, wp)
 
         wp_run = await build_and_run_dag(tweak_path, run_id)
-        summary = await ExecutiveRunSummary.from_run(wp_run)
-        wp_path = summary.final_workplan
+        wp_path = wp_run.trx_workplan_path
 
     wp = deserialize(wp_path, Workplan)
     steps = list(wp.steps)
 
     paths: set[Path] = set()
     for step in steps:
-        bp = deserialize(step.blueprint_path, RomsMarblBlueprint)
+        bp = deserialize(wp_path, RomsMarblBlueprint)
         paths.add(bp.working_dir)
 
         assert bp.working_dir.exists()

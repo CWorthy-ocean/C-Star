@@ -16,14 +16,19 @@ OPT_CLOBBER_ALL: t.Final[str] = "all"
 shadows any step literally named `all`, which can therefore never be targeted
 individually by name."""
 
-ARG_DRY_RUN: t.Final[str] = "--dry-run"
-
 ARG_DIRECTIVES_URI_LONG: t.Final[str] = "--directives"
 ARG_DIRECTIVES_URI_SHORT: t.Final[str] = "-d"
+
+ARG_DRY_RUN: t.Final[str] = "--dry-run"
 
 ARG_LOGLEVEL_LONG: t.Final[str] = "--log-level"
 ARG_LOGLEVEL_SHORT: t.Final[str] = "-l"
 ARG_LOGLEVEL_HELP: t.Final[str] = "Set the logging level for C-Star."
+
+ARG_NO_CACHE: t.Final[str] = "--no-cache"
+ARG_NO_CACHE_HELP: t.Final[str] = (
+    "Set this flag to force C-Star to acquire and replace any cached assets (e.g. datasets)"
+)
 
 ARG_OUTPUT_LONG: t.Final[str] = "--output"
 ARG_OUTPUT_SHORT: t.Final[str] = "-o"

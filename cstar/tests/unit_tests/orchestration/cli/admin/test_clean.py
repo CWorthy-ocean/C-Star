@@ -240,6 +240,7 @@ def test_cli_admin_clean_default_cleanup(dry_run: bool) -> None:
     asset_idx = 0
     for action in actions:
         for path in action.asset_paths:
+            path.mkdir(exist_ok=True)
             asset_path = path / f"{asset_idx}.mock"
             asset_path.touch()
             asset_idx += 1

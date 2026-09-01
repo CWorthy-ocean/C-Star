@@ -1,4 +1,5 @@
 import os
+import typing as t
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -7,10 +8,16 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME
+from cstar.base.env import (
+    ENV_CSTAR_ARTIFACT_CACHE_BYPASS,
+    ENV_CSTAR_RUNID,
+    ENV_CSTAR_STATE_HOME,
+)
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.feature import is_flag_enabled
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app
+from cstar.entrypoint.utils import ARG_NO_CACHE
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
@@ -63,6 +70,46 @@ def test_workplan_run_file_dne(
     )
 
     assert "not found" in result.stderr
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_no_cache(wp_templates_dir: Path) -> None:
+    """Verify that passing the `--no-cache` CLI option to `cstar workplan run`
+    results in the correct environment variable being set.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+
+    disabled_msg = "Cache is disabled"
+
+    def print_cache_status(*args: t.Any, **kwargs: t.Any) -> None:
+        if is_flag_enabled(ENV_CSTAR_ARTIFACT_CACHE_BYPASS):
+            print(disabled_msg)
+        else:
+            print("Cache is enabled")
+
+    mock_build_and_run_dag = mock.AsyncMock(
+        return_value=mock.MagicMock(
+            dry_run=True,
+            name="sample-workplan",
+            run_id="12345",
+            state_dir="/tmp/state",
+        ),
+        side_effect=print_cache_status,
+    )
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        mock_build_and_run_dag,
+    ) as mock_exec:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", str(wp_path), ARG_NO_CACHE],
+            color=False,
+        )
+
+    assert disabled_msg in result.stdout
+    mock_exec.assert_called_once()
 
 
 def test_workplan_run_remote_workplan_dne() -> None:

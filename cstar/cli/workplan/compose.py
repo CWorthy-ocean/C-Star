@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from cstar.base.env import ENV_CSTAR_STATE_HOME, get_env_item
+from cstar.base.env import ENV_CSTAR_DATA_HOME, get_env_item
 from cstar.base.utils import additional_files_dir
 from cstar.orchestration.dag_runner import build_and_run_dag
 
@@ -67,7 +67,7 @@ def create_host_workplan(
     return wp_path
 
 
-def _run(wp_path: Path, working_dir: Path, run_id: str) -> None:
+def _run(wp_path: Path, _working_dir: Path, run_id: str) -> None:
     """Execute the DAG synchronously."""
     try:
         asyncio.run(build_and_run_dag(wp_path, run_id))
@@ -91,7 +91,7 @@ def compose(
         typer.Option(
             help="Override the output in the blueprint file(s) with this path."
         ),
-    ] = get_env_item(ENV_CSTAR_STATE_HOME).value,
+    ] = get_env_item(ENV_CSTAR_DATA_HOME).value,
     run_id: t.Annotated[
         str,
         typer.Option(help="The unique identifier for an execution of the workplan."),

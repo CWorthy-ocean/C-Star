@@ -26,6 +26,11 @@ from pydantic import (
 )
 
 from cstar.base.utils import generate_schema_ref, slugify
+from cstar.orchestration.cache_keys import (
+    hash_identity,
+    location_identity,
+    register_identity,
+)
 from cstar.orchestration.serialization import register_representer, strenum_representer
 
 RequiredString: t.TypeAlias = t.Annotated[
@@ -82,6 +87,9 @@ class Resource(ConfiguredBaseModel):
     """Flag indicating whether the resource is pre-partitioned."""
 
 
+register_identity(Resource, "location", location_identity)
+
+
 class VersionedResource(Resource):
     """A physical asset that is used as an input or configuration and
     has an associated hash used to identify a specific version.
@@ -89,6 +97,9 @@ class VersionedResource(Resource):
 
     hash: RequiredString
     """Expected hash of the file."""
+
+
+register_identity(VersionedResource, "hash", hash_identity)
 
 
 class DocLocMixin(ConfiguredBaseModel):

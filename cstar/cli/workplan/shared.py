@@ -1,7 +1,6 @@
 import asyncio
 import typing as t
-from collections import Counter, OrderedDict
-from collections.abc import Mapping
+from collections import OrderedDict
 
 import typer
 from rich.console import Console
@@ -223,88 +222,6 @@ def display_summary(
         )
 
     console.print(table)
-
-
-def check_and_capture_kvp(entry: str) -> tuple[str, str]:
-    """Perform validation on user-supplied configuration value supplied
-    as a key-value pair with the expected format `<key>=<value>`.
-
-    Parameters
-    ----------
-    entry : str
-        A string containing a key-value pair to be parsed.
-
-    Returns
-    -------
-    tuple[str, str]
-        The whitespace-stripped key-value pair
-
-    Raises
-    ------
-    typer.BadParameter
-        - If key and value are missing (e.g. `entry=="="`)
-        - If no key is found (e.g. `entry=="=value"`)
-        - If no value is found (e.g. `entry=="key="`)
-    """
-    splits = entry.split("=", 1)
-    kvp_size: t.Final[int] = 2
-
-    if len(splits) != kvp_size:
-        msg = f"Variable `{entry}` not in expected format `<key>=<value>`"
-        raise typer.BadParameter(msg)
-
-    k, v = splits[0].strip(), splits[1].strip()
-
-    if not k and not v:
-        msg = "Found incomplete variable missing key and value"
-        raise typer.BadParameter(msg)
-
-    if not k:
-        msg = f"Found orphaned variable value without key: {entry}"
-        raise typer.BadParameter(msg)
-
-    if not v:
-        msg = f"Found variable with empty value for key: {entry}"
-        raise typer.BadParameter(msg)
-
-    return k, v
-
-
-def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str] | None:
-    """Capture all unique keyj-value pairs from user-supplied configuration
-    supplied as a list of key-value pairs in the format ["key1=value", "key2=value"]
-
-    Parameters
-    ----------
-    entries : list[str]
-        A list of strings, each containing a key-value pair to be parsed.
-
-    Returns
-    -------
-    Mapping[str, str]
-        The key-value pairs from the list converted into a mapping containing
-        all unique key-value pairs
-
-    Raises
-    ------
-    typer.BadParameter
-        - If a <key>=<value> entry is malformed
-        - If a key is provided more than once
-    """
-    if not entries:
-        return {}
-
-    captured_kvps = [check_and_capture_kvp(entry) for entry in entries]
-
-    variables = dict(captured_kvps)
-
-    if len(variables) < len(captured_kvps):
-        counter = Counter(k for k, _ in captured_kvps)
-        k, _ = counter.most_common(1)[0]
-        msg = f"Found variable with multiple values: {k}"
-        raise typer.BadParameter(msg)
-
-    return variables
 
 
 def create_xrunner(

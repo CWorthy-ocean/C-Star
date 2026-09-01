@@ -1,4 +1,5 @@
 import logging
+import os
 from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
@@ -6,6 +7,7 @@ from unittest import mock
 import pytest
 import roms_tools  # noqa: F401, pre-load to avoid the lazy loader
 
+from cstar.base.env import ENV_CSTAR_ARTIFACT_CACHE_ENABLED, FLAG_OFF
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.io.source_data import SourceDataCollection
 from cstar.io.staged_data import StagedDataCollection, StagedFile
@@ -260,6 +262,7 @@ class TestROMSInputDatasetPartition:
         assert test_dict["source_np_xi"] == 4
         assert test_dict["source_np_eta"] == 3
 
+    @mock.patch.dict(os.environ, {ENV_CSTAR_ARTIFACT_CACHE_ENABLED: FLAG_OFF})
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
@@ -293,7 +296,6 @@ class TestROMSInputDatasetPartition:
             for i in range(1, num_partitions + 1)
         ]
 
-        # # Mock the resolve method
         with mock.patch.object(
             Path,
             "resolve",
@@ -313,6 +315,7 @@ class TestROMSInputDatasetPartition:
 
             assert dataset.partitioning.files == expected_partitioned_files
 
+    @mock.patch.dict(os.environ, {ENV_CSTAR_ARTIFACT_CACHE_ENABLED: FLAG_OFF})
     @mock.patch("cstar.roms.input_dataset.roms_tools.partition_netcdf")
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",
@@ -447,6 +450,7 @@ class TestROMSInputDatasetPartition:
 
         mock_partition_netcdf.assert_not_called
 
+    @mock.patch.dict(os.environ, {ENV_CSTAR_ARTIFACT_CACHE_ENABLED: FLAG_OFF})
     @mock.patch("cstar.roms.input_dataset.shutil.move")
     @mock.patch(
         "cstar.base.input_dataset.InputDataset.exists_locally",

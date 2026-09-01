@@ -95,7 +95,6 @@ def test_splitter(single_step_workplan: Workplan, tmp_path: Path) -> None:
         clear=True,
     ):
         transform = RomsMarblTimeSplitter()
-
         transformed_steps = list(transform(original_step))
 
         # one step transforms into 12 monthly steps

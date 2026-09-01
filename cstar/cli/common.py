@@ -1,7 +1,8 @@
 import functools
 import os
 import typing as t
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import typer
@@ -182,9 +183,9 @@ def set_env(
     def _callback(ctx: typer.Context, value: str) -> str:
         """Callback that sets the specified environment variable to the specified value."""
         value = value.strip()
-        os.environ[key] = value
         if extra:
             value = extra(ctx, value)
+        os.environ[key] = value
         return value
 
     return _callback
@@ -469,3 +470,166 @@ def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
         print(f"Value in context map using key {key!r} will be overwritten")
 
     context_map[key] = value
+
+
+def check_and_capture_kvp(entry: str) -> tuple[str, str]:
+    """Perform validation on user-supplied configuration value supplied
+    as a key-value pair with the expected format `<key>=<value>`.
+
+    Parameters
+    ----------
+    entry : str
+        A string containing a key-value pair to be parsed.
+
+    Returns
+    -------
+    tuple[str, str]
+        The whitespace-stripped key-value pair
+
+    Raises
+    ------
+    typer.BadParameter
+        - If key and value are missing (e.g. `entry=="="`)
+        - If no key is found (e.g. `entry=="=value"`)
+        - If no value is found (e.g. `entry=="key="`)
+    """
+    splits = entry.split("=", 1)
+    kvp_size: t.Final[int] = 2
+
+    if len(splits) != kvp_size:
+        msg = f"Variable `{entry}` not in expected format `<key>=<value>`"
+        raise typer.BadParameter(msg)
+
+    k, v = splits[0].strip(), splits[1].strip()
+
+    if not k and not v:
+        msg = "Found incomplete variable missing key and value"
+        raise typer.BadParameter(msg)
+
+    if not k:
+        msg = f"Found orphaned variable value without key: {entry}"
+        raise typer.BadParameter(msg)
+
+    if not v:
+        msg = f"Found variable with empty value for key: {entry}"
+        raise typer.BadParameter(msg)
+
+    return k, v
+
+
+def check_and_capture_kvps(entries: list[str]) -> Mapping[str, str]:
+    """Capture all unique keyj-value pairs from user-supplied configuration
+    supplied as a list of key-value pairs in the format ["key1=value", "key2=value"]
+
+    Parameters
+    ----------
+    entries : list[str]
+        A list of strings, each containing a key-value pair to be parsed.
+
+    Returns
+    -------
+    Mapping[str, str]
+        The key-value pairs from the list converted into a mapping containing
+        all unique key-value pairs
+
+    Raises
+    ------
+    typer.BadParameter
+        - If a <key>=<value> entry is malformed
+        - If a key is provided more than once
+    """
+    if not entries:
+        return {}
+
+    captured_kvps = [check_and_capture_kvp(entry) for entry in entries]
+
+    variables = dict(captured_kvps)
+
+    if len(variables) < len(captured_kvps):
+        counter = Counter(k for k, _ in captured_kvps)
+        k, _ = counter.most_common(1)[0]
+        msg = f"Found variable with multiple values: {k}"
+        raise typer.BadParameter(msg)
+
+    return variables
+
+
+KEY_KVPS: t.Final[str] = "kvps"
+
+
+def preprocess_kvps(
+    ctx: typer.Context,
+    values: list[str],
+) -> list[str] | None:
+    """Perform validation and formatting on user-supplied key-value pairs.
+
+    Places the processed variables into the user data slot of the typer context object.
+    - retrieve ctx[
+
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        A context object containing state for the typer app
+    user_variables : list[str]
+        A list of key-value pairs supplied by a user.
+
+    Returns
+    -------
+    list[str] | None
+        The original input with leading/trailing whitespace stripped from the keys
+        and values.
+
+    Raises
+    ------
+    typer.BadParameter
+        - If the key-value pair does not meet `key=value` convention
+    """
+    if not values:
+        return None
+
+    ctx.obj = check_and_capture_kvps(values)
+
+    return values
+
+
+def preprocess_kvpfile(
+    ctx: typer.Context,
+    kvp_file_path: Path | None,
+) -> Path | None:
+    """Perform validation and formatting on user-supplied variables
+    supplied through a path to a variables file.
+
+    Places the processed variables into the user data slot of the typer context object.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        A context object containing state for the typer app.
+    kvp_file_path : Path | None
+        A path to a file containing the variable configuration.
+
+    Returns
+    -------
+    Path | None
+
+    Raises
+    ------
+    typer.BadParameter
+        - If the source file does not exist
+        - If any individual key-value pair is malformed
+    """
+    if kvp_file_path is None:
+        return None
+
+    with kvp_file_path.open("r") as fp:
+        lines = [x.strip() for x in fp.readlines() if x.strip()]
+
+    ctx.obj = check_and_capture_kvps(lines)
+    # set_ctxmap(ctx, KEY_KVPS, captured)
+
+    return kvp_file_path
+
+
+def colored(msg: str, color: str = "cyan") -> str:
+    return f"[{color}]{msg}[/{color}]"

@@ -270,7 +270,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     msg = f"Reloading workplan run: {wp.name}"
     log.debug(msg)
 
-    configure_environment(wp_run.output_path, wp_run.run_id, wp_run.environment)
+    configure_environment(None, wp_run.run_id, wp_run.environment)
 
     planner = Planner(workplan=wp)
     orchestrator = get_orchestrator(planner)
@@ -684,6 +684,9 @@ async def build_dag(
         The run-id to be used by the orchestrator.
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
+    dry_run : bool
+        If set to `true`, the execution plan will be built and persisted to disk
+        but not executed.
     clobber_steps : Sequence[str] | None
         Names or safe_names of steps whose prior state should be cleared and
         re-executed, or `all` to target every step, as supplied via
@@ -691,9 +694,8 @@ async def build_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    WorkplanRun
+        The persisted record describing the run.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -782,8 +784,6 @@ async def build_and_run_dag(
         The path to the blueprint to execute
     run_id : str | None
         The run-id to be used by the orchestrator.
-    output_dir : Path | None
-        The path to the output directory.
     user_variables : NamedConfiguration | None
         User-provided key-value pairs for use during templating.
     dry_run : bool
