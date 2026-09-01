@@ -5,7 +5,7 @@ application: forge
 state: notset
 schema_version: 1.0.0
 working_dir: ~/cstar/_forge_bp_runs/wio-toy-simple
-forge_blueprint_version: 5
+forge_blueprint_version: 7
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -119,7 +119,6 @@ forcing:
     options: {}
   tidal: []
   river: []
-  cdr_forcing: null
   resolved_datasets:
     GLORYS:
       dataset_key: GLORYS_REGIONAL
@@ -141,6 +140,10 @@ forcing:
       dataset_id: null
       url: null
       streamable: false
+cdr:
+  mode: none
+  cdr_forcing: null
+  cdr_forcing_file: null
 datasets:
 - ERA5
 - ETOPO5
@@ -471,5 +474,5 @@ provenance:
   cstar_version: cstar-ocean==0.10.0
   roms_tools_version: roms-tools==4.0.2.dev5+g8b6cd6c7c
   override_files_applied: []
-  content_hash: 0c25df95f29d1b100885f86cbdb7a6c3c3d9458a55fe3628c51865f5ed8201f4
+  content_hash: 70cd05db5c440d5d2855c4c6b0ec6cc4f6d0550da248eb4f965bae207dd3b3b9
   notes: null

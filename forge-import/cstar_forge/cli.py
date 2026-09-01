@@ -54,6 +54,14 @@ def wizard(
     Extra arguments are passed through to voila.
     """
     notebook = files("cstar_forge.ui") / "_voila_app.ipynb"
+    # Steer MPI's libfabric away from the default "sockets" provider before
+    # exec'ing voila (the kernel inherits our environment): the first xESMF
+    # regrid in a wizard kernel initializes ESMF/MPI, and the sockets
+    # provider's progress threads busy-poll at ~100% CPU each (macOS) for the
+    # life of the kernel; the tcp provider services the same single-process
+    # MPI without spinning. setdefault so an explicit user choice wins; batch
+    # ROMS runs launched outside this command keep their own default.
+    os.environ.setdefault("FI_PROVIDER", "tcp")
     argv = [
         "voila",
         str(notebook),

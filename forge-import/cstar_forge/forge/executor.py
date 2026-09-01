@@ -34,10 +34,12 @@ from pydantic import (
 
 from cstar_forge.forge import input_data, source_data
 from cstar_forge.forge.forge_blueprint import (
+    CDR_MODES,
     DEFAULT_WORKING_ROOT,
     ROMS_RUN_SEGMENT,
     OpenBoundaries,
     UserProvidedFile,
+    infer_cdr_mode,
     vert_kwargs_from_grid_kwargs,
 )
 from cstar_forge.forge.host import HostPaths
@@ -211,6 +213,24 @@ class ForgeExecutor(BaseModel):
     partitioning: cstar_models.PartitioningParameterSet
     start_date: datetime = Field(alias="start_time")
     end_date: datetime = Field(alias="end_time")
+    cdr_mode: str = Field(
+        default="none",
+        description=(
+            "Which of the five CDR modes drives CDR forcing/output for this run "
+            "(from ForgeBlueprint ``cdr.mode`` -- see ``CdrSpec.mode``'s "
+            "docstring): 'none' / 'simple' / 'yaml' / 'netcdf' / 'upscaled'. "
+            "'upscaled' means CDR tracers are supplied by C-Star's runtime "
+            "orchestrator, not generated here: no generation step runs (neither "
+            "cdr_forcing nor cdr_forcing_file is populated for this mode), and "
+            "RomsMarblInputData emits a placeholder Resource instead -- see "
+            "input_data.UPSCALED_CDR_PLACEHOLDER_LOCATION. Backward-compat: a "
+            "caller constructing the executor directly with cdr_forcing/"
+            "cdr_forcing_file set but cdr_mode left at its default 'none' gets "
+            "the mode inferred ('yaml' for cdr_forcing, 'netcdf' for "
+            "cdr_forcing_file -- see ``_resolve_cdr_mode``), so pre-CdrSpec "
+            "callers keep working unchanged."
+        ),
+    )
     cdr_forcing: dict | None = Field(
         default=None,
         alias="CDR_forcing",
@@ -221,7 +241,7 @@ class ForgeExecutor(BaseModel):
         validate_default=False,
         description=(
             "A user-supplied pre-made CDR-forcing netCDF (from ForgeBlueprint "
-            "``forcing.cdr_forcing_file``), used in place of building one via "
+            "``cdr.cdr_forcing_file``), used in place of building one via "
             "``rt.CDRForcing`` from ``cdr_forcing``. Mutually exclusive with "
             "``cdr_forcing`` (the ForgeBlueprint schema already forbids the "
             "combination); verified and staged directly in "
@@ -336,6 +356,25 @@ class ForgeExecutor(BaseModel):
         """Validate that start_date precedes end_date."""
         if self.end_date <= self.start_date:
             raise ValueError("end_date must be after start_date")
+        return self
+
+    @model_validator(mode="after")
+    def _resolve_cdr_mode(self) -> ForgeExecutor:
+        """Validate ``cdr_mode`` and, for backward compat, infer it when a caller
+        constructs the executor directly (bypassing ``from_forge_blueprint``/
+        ``CdrSpec``) with ``cdr_forcing``/``cdr_forcing_file`` set but ``cdr_mode``
+        left at its default ``"none"``. Never overrides an explicitly-set mode
+        (including an explicit ``"none"`` alongside a set field, which the
+        existing generated/custom-file branches would already accept).
+        """
+        if self.cdr_mode not in CDR_MODES:
+            raise ValueError(
+                f"cdr_mode must be one of {CDR_MODES}, got {self.cdr_mode!r}"
+            )
+        if self.cdr_mode == "none":
+            # Shared with the v6->v7 migration and the resolver's convenience
+            # kwargs -- the three entry points can't drift apart.
+            self.cdr_mode = infer_cdr_mode(self.cdr_forcing, self.cdr_forcing_file)
         return self
 
     def _require_host(self) -> HostPaths:
@@ -596,6 +635,10 @@ class ForgeExecutor(BaseModel):
 
                 _add_nc(category)
 
+        # "upscaled" mode plans no local CDR netCDF: CdrSpec's validator keeps
+        # cdr_forcing/cdr_forcing_file unset for that mode (no generation step
+        # runs -- see RomsMarblInputData's cdr_mode handling), so this condition
+        # is already False for it without a separate cdr_mode check.
         if self.cdr_forcing or self.cdr_forcing_file:
             _add_nc(input_data.CDR_FORCING_NETCDF_STEM)
 
@@ -1533,6 +1576,7 @@ class ForgeExecutor(BaseModel):
             model_reference_date=self.model_reference_date,
             roms_marbl_blueprint_dir=self.roms_marbl_blueprint_dir,
             partitioning=self.partitioning,
+            cdr_mode=self.cdr_mode,
             cdr_forcing=self.cdr_forcing,
             cdr_forcing_file=self.cdr_forcing_file,
             use_dask=use_dask,
@@ -1891,8 +1935,10 @@ class ForgeExecutor(BaseModel):
         # stored blueprints reach configure_build without re-resolving, and wizard
         # accordion overrides apply after the resolver, so this is the enforcement
         # point of record. A generated CDR forcing (or a user-supplied
-        # cdr_forcing_file) implies CDR output regardless of the stored snapshot.
-        if self.cdr_forcing or self.cdr_forcing_file:
+        # cdr_forcing_file) implies CDR output regardless of the stored snapshot --
+        # as does "upscaled" mode, even though neither field is populated for it:
+        # real CDR tracers exist at runtime under that mode too.
+        if self.cdr_forcing or self.cdr_forcing_file or self.cdr_mode == "upscaled":
             self._settings_run_time.setdefault("cdr_output", {})["do_cdr_output"] = True
         # do_cdr_output requires MARBL plus the CDR_FORCING cppdef (both gate
         # compiling ucla-roms' cdr_output.F90), and the MARBL diagnostics ucla-roms

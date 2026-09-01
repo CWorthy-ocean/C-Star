@@ -115,7 +115,7 @@ def test_register_output_refuses_collision(isolated_catalog):
         isolated_catalog.register_output("standard", out)
 
 
-def test_register_forcing_writes_cdr_block(isolated_catalog):
+def test_register_forcing_writes_and_rescans(isolated_catalog):
     from cstar_forge.domain_catalog import default_catalog as _cat
 
     fdata = _cat.forcing_data("glorys-era5-unified")
@@ -123,16 +123,16 @@ def test_register_forcing_writes_cdr_block(isolated_catalog):
         "initial_conditions": fdata["initial_conditions"],
         "forcing": fdata["forcing"],
     }
-    isolated_catalog.register_forcing(
-        "my-forcing", fi, cdr_forcing={"foo": "bar"}, description="test forcing"
-    )
+    isolated_catalog.register_forcing("my-forcing", fi, description="test forcing")
     assert "my-forcing" in isolated_catalog.forcing_names
     reloaded = isolated_catalog.forcing_data("my-forcing")
-    assert reloaded["cdr_forcing"] == {"foo": "bar"}
     assert reloaded["initial_conditions"] == fi["initial_conditions"]
 
 
-def test_register_forcing_omits_cdr_block_when_absent(isolated_catalog):
+def test_register_forcing_no_longer_accepts_cdr_forcing(isolated_catalog):
+    """CDR configuration moved out of ForcingSpec into its own CdrSpec entry
+    type -- register_forcing must no longer accept a cdr_forcing kwarg.
+    """
     from cstar_forge.domain_catalog import default_catalog as _cat
 
     fdata = _cat.forcing_data("glorys-era5-unified")
@@ -140,8 +140,87 @@ def test_register_forcing_omits_cdr_block_when_absent(isolated_catalog):
         "initial_conditions": fdata["initial_conditions"],
         "forcing": fdata["forcing"],
     }
-    isolated_catalog.register_forcing("no-cdr-forcing", fi)
-    assert "cdr_forcing" not in isolated_catalog.forcing_data("no-cdr-forcing")
+    with pytest.raises(TypeError):
+        isolated_catalog.register_forcing(
+            "no-cdr-forcing", fi, cdr_forcing={"foo": "bar"}
+        )
+
+
+# ---------------------------------------------------------------------------
+# register_cdr / cdr_names / cdr_data -- the new CdrSpec catalog entry type
+# ---------------------------------------------------------------------------
+
+
+def test_register_cdr_yaml_mode_round_trip(isolated_catalog):
+    isolated_catalog.register_cdr(
+        "my-cdr-yaml",
+        description="test cdr",
+        mode="yaml",
+        cdr_forcing={"foo": "bar"},
+    )
+    assert "my-cdr-yaml" in isolated_catalog.cdr_names
+    reloaded = isolated_catalog.cdr_data("my-cdr-yaml")
+    assert reloaded["mode"] == "yaml"
+    assert reloaded["cdr_forcing"] == {"foo": "bar"}
+    assert reloaded["cdr_forcing_file"] is None
+    assert reloaded["description"] == "test cdr"
+
+
+def test_register_cdr_netcdf_mode_round_trip(isolated_catalog):
+    file_ref = {"location": "/some/path/cdr.nc", "content_hash": "abc123"}
+    isolated_catalog.register_cdr(
+        "my-cdr-netcdf",
+        mode="netcdf",
+        cdr_forcing_file=file_ref,
+    )
+    assert "my-cdr-netcdf" in isolated_catalog.cdr_names
+    reloaded = isolated_catalog.cdr_data("my-cdr-netcdf")
+    assert reloaded["mode"] == "netcdf"
+    assert reloaded["cdr_forcing_file"] == file_ref
+    assert reloaded["cdr_forcing"] is None
+
+
+def test_register_cdr_none_and_upscaled_modes(isolated_catalog):
+    isolated_catalog.register_cdr("my-cdr-none", mode="none")
+    isolated_catalog.register_cdr("my-cdr-upscaled", mode="upscaled")
+    assert isolated_catalog.cdr_data("my-cdr-none")["cdr_forcing"] is None
+    assert isolated_catalog.cdr_data("my-cdr-upscaled")["cdr_forcing_file"] is None
+
+
+def test_register_cdr_invalid_mode_raises(isolated_catalog):
+    with pytest.raises(ValueError, match="mode must be one of"):
+        isolated_catalog.register_cdr("bad-mode", mode="bogus")
+
+
+@pytest.mark.parametrize(
+    "mode,kwargs",
+    [
+        ("none", {"cdr_forcing": {"foo": "bar"}}),
+        ("none", {"cdr_forcing_file": {"location": "x", "content_hash": "y"}}),
+        ("upscaled", {"cdr_forcing": {"foo": "bar"}}),
+        ("simple", {}),
+        ("yaml", {"cdr_forcing_file": {"location": "x", "content_hash": "y"}}),
+        ("netcdf", {}),
+        (
+            "netcdf",
+            {
+                "cdr_forcing": {"foo": "bar"},
+                "cdr_forcing_file": {"location": "x", "content_hash": "y"},
+            },
+        ),
+    ],
+)
+def test_register_cdr_incoherent_mode_field_combo_raises(
+    isolated_catalog, mode, kwargs
+):
+    with pytest.raises(ValueError):
+        isolated_catalog.register_cdr(f"incoherent-{mode}", mode=mode, **kwargs)
+
+
+def test_register_cdr_refuses_collision(isolated_catalog):
+    isolated_catalog.register_cdr("dup-cdr", mode="none")
+    with pytest.raises(FileExistsError):
+        isolated_catalog.register_cdr("dup-cdr", mode="none")
 
 
 def test_register_domain_from_dict_round_trips(isolated_catalog):
@@ -341,6 +420,83 @@ class TestLayeredCatalog:
         with pytest.raises(FileExistsError, match="bundled"):
             layered.register_domain_from_dict(existing_domain, {"grid_name": "x"})
 
+    def test_register_cdr_writes_into_top_store(self, tmp_path):
+        top_root = tmp_path / "top"
+        bottom_root = tmp_path / "bottom"
+        top_root.mkdir()
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, bottom_root)
+
+        top = DomainCatalog(
+            catalog_root=top_root, suppress_validation=True, label="top"
+        )
+        bottom = DomainCatalog(
+            catalog_root=bottom_root, read_only=True, label="bundled"
+        )
+        layered = LayeredCatalog([top, bottom])
+
+        layered.register_cdr("brand-new-cdr", mode="none")
+        assert "brand-new-cdr" in layered.cdr_names
+        assert "brand-new-cdr" in top.cdr_names
+        assert "brand-new-cdr" not in bottom.cdr_names
+        assert (top_root / "CdrSpec" / "brand-new-cdr" / "Cdr.yaml").exists()
+        assert layered.cdr_data("brand-new-cdr")["mode"] == "none"
+
+    def test_register_cdr_collision_with_bottom_layer_raises_and_names_store(
+        self, tmp_path
+    ):
+        top_root = tmp_path / "top"
+        bottom_root = tmp_path / "bottom"
+        top_root.mkdir()
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, bottom_root)
+        (bottom_root / "CdrSpec" / "shared-cdr").mkdir(parents=True)
+        with (bottom_root / "CdrSpec" / "shared-cdr" / "Cdr.yaml").open("w") as f:
+            yaml.safe_dump({"mode": "none"}, f)
+
+        top = DomainCatalog(
+            catalog_root=top_root, suppress_validation=True, label="top"
+        )
+        bottom = DomainCatalog(
+            catalog_root=bottom_root, read_only=True, label="bundled"
+        )
+        layered = LayeredCatalog([top, bottom])
+
+        with pytest.raises(FileExistsError, match="bundled"):
+            layered.register_cdr("shared-cdr", mode="none")
+
+    def test_cdr_union_read_top_first_precedence(self, tmp_path):
+        top_root = tmp_path / "top"
+        bottom_root = tmp_path / "bottom"
+        top_root.mkdir()
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, bottom_root)
+        # Hand-write a bottom-layer-only CdrSpec entry (mirrors _write_domain's
+        # bypass-the-writer approach for a store not yet writable).
+        (bottom_root / "CdrSpec" / "from-bundled").mkdir(parents=True)
+        with (bottom_root / "CdrSpec" / "from-bundled" / "Cdr.yaml").open("w") as f:
+            yaml.safe_dump(
+                {
+                    "description": "",
+                    "mode": "none",
+                    "cdr_forcing": None,
+                    "cdr_forcing_file": None,
+                },
+                f,
+            )
+
+        top = DomainCatalog(
+            catalog_root=top_root, suppress_validation=True, label="top"
+        )
+        bottom = DomainCatalog(
+            catalog_root=bottom_root, read_only=True, label="bundled"
+        )
+        layered = LayeredCatalog([top, bottom])
+        layered.register_cdr("top-only-cdr", mode="upscaled")
+
+        assert layered.cdr_names == ["from-bundled", "top-only-cdr"]
+        # Union read resolves a bottom-layer-only entry through to its store.
+        assert layered.cdr_data("from-bundled")["mode"] == "none"
+        assert layered.entry_source("cdr", "from-bundled") == "bundled"
+        assert layered.entry_source("cdr", "top-only-cdr") == "top"
+
     # -- read-only / non-local stores ---------------------------------------
 
     def test_read_only_store_mutators_raise_permission_error(self, tmp_path):
@@ -349,6 +505,8 @@ class TestLayeredCatalog:
         cat = DomainCatalog(catalog_root=root, read_only=True)
         with pytest.raises(PermissionError):
             cat.register_output("my-output", {})
+        with pytest.raises(PermissionError):
+            cat.register_cdr("my-cdr", mode="none")
 
     def test_non_local_store_is_always_read_only(self):
         # Constructing a GitHub-backed store never hits the network here: fsspec's

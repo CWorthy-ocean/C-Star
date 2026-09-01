@@ -1314,6 +1314,101 @@ class TestForgeExecutorBuildAndRun:
         assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
         assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
 
+    def test_configure_build_does_not_clobber_upscaled_cdr_frc_statics(
+        self, sample_grid_kwargs, sample_open_boundaries, sample_partitioning
+    ):
+        """The "upscaled" CDR mode: the resolver's static ``cdr_frc`` values (no
+        generation step runs to derive them for this mode -- see
+        ``build_forge_blueprint``'s upscaled handling) must survive
+        ``configure_build``'s overlay unchanged, exactly like the generated-river/
+        real-tidal-count values in
+        ``test_configure_build_does_not_clobber_generated_river_and_tidal_settings``
+        above. Also asserts the CDR-output consistency net fires for "upscaled"
+        even though neither ``cdr_forcing`` nor ``cdr_forcing_file`` is set.
+        """
+        cfg, host = self._cdr_cfg_and_builder(
+            sample_grid_kwargs,
+            sample_open_boundaries,
+            sample_partitioning,
+            cdr={"mode": "upscaled"},
+        )
+        assert cfg.cdr.mode == "upscaled"
+        assert cfg.cdr.cdr_forcing is None
+        assert cfg.cdr.cdr_forcing_file is None
+        # Resolver-set statics (see forge_blueprint_resolve.build_forge_blueprint's
+        # upscaled handling), already present before configure_build ever runs.
+        cdr_frc = cfg.model_settings["cdr_frc"]
+        assert cdr_frc["cdr_source"] is True
+        assert cdr_frc["cdr_file"] == "cdr.nc"
+        assert cdr_frc["forcing_depth_profiles"] is True
+        assert cdr_frc["forcing_parameterized"] is False
+        assert cdr_frc["cdr_volume"] is False
+        assert cdr_frc["relocate_to_wet_pts"] is False
+        assert cfg.model_settings["cdr_output"]["do_cdr_output"] is True
+        assert cfg.model_settings["cppdefs"]["cdr_forcing"] is True
+
+        builder = self._run_configure_build(cfg, host)
+
+        assert builder.cdr_mode == "upscaled"
+        # No generation step ran (no rt.CDRForcing call, no custom-file staging)
+        # -- these leaves are NOT in GENERATION_DERIVED_LEAF_KEYS for a reason:
+        # resolved_settings IS the base the overlay applies, so the statics must
+        # come through byte-identical.
+        run_cdr_frc = builder._settings_run_time["cdr_frc"]
+        assert run_cdr_frc["cdr_source"] is True
+        assert run_cdr_frc["cdr_file"] == "cdr.nc"
+        assert run_cdr_frc["forcing_depth_profiles"] is True
+        assert run_cdr_frc["forcing_parameterized"] is False
+        assert run_cdr_frc["cdr_volume"] is False
+        assert run_cdr_frc["relocate_to_wet_pts"] is False
+        # The consistency net (executor.py) fires for "upscaled" even without
+        # cdr_forcing/cdr_forcing_file being set.
+        assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
+        assert builder._settings_compile_time["cppdefs"]["cdr_forcing"] is True
+
+    def test_upscaled_cdr_mode_emits_placeholder_resource(self, tmp_path):
+        """The "upscaled" CDR mode schedules no CDR generation step at all (unlike
+        "simple"/"yaml"/"netcdf", where ``cdr_forcing``/``cdr_forcing_file`` puts
+        "cdr_forcing" into ``input_list``) -- ``RomsMarblInputData.__post_init__``
+        must instead emit a placeholder ``Resource`` directly onto
+        ``roms_marbl_blueprint_elements.cdr_forcing``, mirroring the child-IC
+        placeholder pattern (``CHILD_IC_PLACEHOLDER_LOCATION``).
+
+        Constructs ``RomsMarblInputData`` directly (bypassing the executor/grid/
+        source-data machinery entirely) -- ``__post_init__`` only needs the
+        constructor-time attributes, not a real grid or dataset.
+        """
+        from cstar_forge.forge.input_data import (
+            UPSCALED_CDR_PLACEHOLDER_LOCATION,
+            RomsMarblInputData,
+        )
+
+        obj = RomsMarblInputData(
+            domain_name="upscaled-test",
+            start_date=datetime(2012, 1, 1),
+            end_date=datetime(2012, 1, 2),
+            input_data_dir=tmp_path,
+            grid=MagicMock(),
+            boundaries=forge_models.OpenBoundaries(),
+            source_data=MagicMock(),
+            roms_marbl_blueprint_dir=tmp_path,
+            partitioning=cstar_models.PartitioningParameterSet(
+                n_procs_x=1, n_procs_y=1
+            ),
+            cdr_mode="upscaled",
+            forcing_override={
+                "initial_conditions": {
+                    "source": {"name": "GLORYS", "climatology": False}
+                }
+            },
+        )
+
+        assert not any(key == "cdr_forcing" for key, _ in obj.input_list)
+        cdr_elem = obj.roms_marbl_blueprint_elements.cdr_forcing
+        assert cdr_elem is not None
+        assert len(cdr_elem.data) == 1
+        assert cdr_elem.data[0].location == UPSCALED_CDR_PLACEHOLDER_LOCATION
+
     @pytest.mark.real_template_staging
     def test_template_repo_args_map_from_code_spec(
         self, minimal_cstar_spec_builder_args

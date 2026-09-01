@@ -25,7 +25,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cstar_forge.forge.forge_blueprint import (
+    CDR_MODES,
     BoundaryForcingItem,
+    CdrSpec,
     CodeRepo,
     RiverForcingItem,
     SourceSpec,
@@ -42,7 +44,9 @@ from cstar_forge.forge.forge_blueprint import (
 )
 
 __all__ = [
+    "CDR_MODES",
     "BoundaryForcingItem",
+    "CdrSpec",
     "InitialConditionsInput",
     "ModelCode",
     "ModelSpec",

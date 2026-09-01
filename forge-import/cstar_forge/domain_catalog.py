@@ -240,6 +240,7 @@ class DomainCatalog:
         self._domains: dict[str, Path] = {}  # domain_name -> DomainSpec/<name>/ dir
         self._forcing: dict[str, Path] = {}  # forcing_name -> ForcingSpec/<name>/ dir
         self._output: dict[str, Path] = {}  # output_name -> OutputSpec/<name>/ dir
+        self._cdr: dict[str, Path] = {}  # cdr_name -> CdrSpec/<name>/ dir
         self._roms_marbl_blueprints: dict[
             str, Path
         ] = {}  # roms_marbl_blueprint_name -> blueprints/<machine>/<name>/ dir
@@ -253,6 +254,7 @@ class DomainCatalog:
         self._scan_domains()
         self._scan_forcing()
         self._scan_output()
+        self._scan_cdr()
 
         # Validate non-default catalogs that weren't just initialized.
         if (
@@ -451,6 +453,17 @@ class DomainCatalog:
         except Exception as exc:
             logger.warning("Failed to scan output: %s", exc)
 
+    def _scan_cdr(self) -> None:
+        """Scan CdrSpec/ for directories containing Cdr.yaml (or legacy Cdr.yml)."""
+        self._cdr = {}
+        cdr_spec_dir = self.catalog_root / "CdrSpec"
+        try:
+            for cdr_yaml in sorted(self._fs_glob_dual(cdr_spec_dir, "*/Cdr")):
+                cdr_dir = cdr_yaml.parent
+                self._cdr[cdr_dir.name] = cdr_dir
+        except Exception as exc:
+            logger.warning("Failed to scan cdr: %s", exc)
+
     # ------------------------------------------------------------------
     # Initialization helpers
     # ------------------------------------------------------------------
@@ -486,6 +499,7 @@ class DomainCatalog:
             "DomainSpec",
             "ForcingSpec",
             "OutputSpec",
+            "CdrSpec",
         ):
             src_sub = src_root / subdir
             if not src_sub.exists():
@@ -552,6 +566,11 @@ class DomainCatalog:
     def output_names(self) -> list[str]:
         """Return a sorted list of available output-spec names."""
         return sorted(self._output.keys())
+
+    @property
+    def cdr_names(self) -> list[str]:
+        """Return a sorted list of available CDR-spec names."""
+        return sorted(self._cdr.keys())
 
     @property
     def roms_marbl_blueprint_names(self) -> list[str]:
@@ -695,6 +714,17 @@ class DomainCatalog:
             data = yaml.safe_load(f) or {}
         data.pop("description", None)
         return data
+
+    def cdr_data(self, cdr_name: str) -> dict:
+        """Return the raw YAML data dict for a named CDR spec (reads Cdr.yaml)."""
+        if cdr_name not in self._cdr:
+            raise KeyError(
+                f"CdrSpec '{cdr_name}' not found in catalog at {self.catalog_root}. "
+                f"Available: {self.cdr_names}"
+            )
+        path = self._resolve_stem_file(self._cdr[cdr_name], "Cdr")
+        with self._fs_open(path) as f:
+            return yaml.safe_load(f) or {}
 
     # ------------------------------------------------------------------
     # Sketch-compatible accessor methods (name or index)
@@ -943,16 +973,13 @@ class DomainCatalog:
         self,
         name: str,
         forcing_inputs: dict[str, Any],
-        cdr_forcing: dict[str, Any] | None = None,
         description: str = "",
     ) -> None:
         """Create a new ForcingSpec entry (``ForcingSpec/<name>/Forcing.yaml``).
 
         ``forcing_inputs`` is the ``{initial_conditions, forcing}`` shape returned
-        by the wizard's forcing editor ``gather()``. ``cdr_forcing``, if given, is
-        embedded under an optional ``cdr_forcing:`` block (not part of the
-        original ForcingSpec schema, added so a domain using CDR forcing can still
-        save/reload its ForcingSpec). Refuses to overwrite an existing entry.
+        by the wizard's forcing editor ``gather()``. Refuses to overwrite an
+        existing entry.
         """
         self._check_writable()
         forcing_dir = self.catalog_root / "ForcingSpec" / name
@@ -962,13 +989,66 @@ class DomainCatalog:
             )
         forcing_dir.mkdir(parents=True)
         data = {"description": description, **forcing_inputs}
-        if cdr_forcing:
-            data["cdr_forcing"] = cdr_forcing
         with (forcing_dir / "Forcing.yaml").open("w") as f:
             yaml.safe_dump(
                 data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
             )
         self._scan_forcing()
+
+    def register_cdr(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        mode: str,
+        cdr_forcing: dict[str, Any] | None = None,
+        cdr_forcing_file: dict[str, Any] | None = None,
+    ) -> None:
+        """Create a new CdrSpec entry (``CdrSpec/<name>/Cdr.yaml``).
+
+        ``mode`` selects how CDR forcing is configured for a domain that picks
+        this spec:
+          - ``"none"`` / ``"upscaled"``: no CDR-forcing configuration is stored
+            (``upscaled`` reads CDR forcing supplied at runtime from a parent
+            domain); neither ``cdr_forcing`` nor ``cdr_forcing_file`` may be given.
+          - ``"simple"`` / ``"yaml"``: a roms-tools ``CDRForcing`` built from
+            ``cdr_forcing`` kwargs (wizard-entered, or imported from a
+            roms-tools YAML); ``cdr_forcing`` is required and
+            ``cdr_forcing_file`` must be omitted.
+          - ``"netcdf"``: a user-provided CDR-forcing NetCDF file, recorded as
+            ``cdr_forcing_file`` (``{location, content_hash}``);
+            ``cdr_forcing_file`` is required and ``cdr_forcing`` must be omitted.
+
+        Refuses to overwrite an existing entry.
+        """
+        self._check_writable()
+        # Deferred import, mirroring load_models_yaml below -- keeps the catalog
+        # module import-light for callers that never register.
+        from cstar_forge.models import CDR_MODES, CdrSpec
+
+        if mode not in CDR_MODES:
+            raise ValueError(f"mode must be one of {sorted(CDR_MODES)}, got {mode!r}")
+        # Field/mode coherence is validated through CdrSpec itself (the single
+        # source of those rules -- pydantic's ValidationError is a ValueError),
+        # so a Cdr.yaml written here can never fail to load later via
+        # cdr_data() -> CdrSpec.
+        CdrSpec(mode=mode, cdr_forcing=cdr_forcing, cdr_forcing_file=cdr_forcing_file)
+
+        cdr_dir = self.catalog_root / "CdrSpec" / name
+        if cdr_dir.exists():
+            raise FileExistsError(f"CdrSpec '{name}' already exists at {cdr_dir}")
+        cdr_dir.mkdir(parents=True)
+        data: dict[str, Any] = {
+            "description": description,
+            "mode": mode,
+            "cdr_forcing": cdr_forcing,
+            "cdr_forcing_file": cdr_forcing_file,
+        }
+        with (cdr_dir / "Cdr.yaml").open("w") as f:
+            yaml.safe_dump(
+                data, f, default_flow_style=False, sort_keys=False, allow_unicode=True
+            )
+        self._scan_cdr()
 
     def register_model_from_settings(
         self,
@@ -1268,6 +1348,7 @@ class LayeredCatalog:
         "domain": "_domains",
         "forcing": "_forcing",
         "output": "_output",
+        "cdr": "_cdr",
         "roms_marbl_blueprint": "_roms_marbl_blueprints",
         "forge_blueprint": "_forge_blueprints",
     }
@@ -1276,6 +1357,7 @@ class LayeredCatalog:
         "domain": "DomainSpec",
         "forcing": "ForcingSpec",
         "output": "OutputSpec",
+        "cdr": "CdrSpec",
         "roms_marbl_blueprint": "Blueprint",
         "forge_blueprint": "ForgeBlueprint",
     }
@@ -1348,6 +1430,10 @@ class LayeredCatalog:
     @property
     def output_names(self) -> list[str]:
         return sorted({n for store in self.stores for n in store.output_names})
+
+    @property
+    def cdr_names(self) -> list[str]:
+        return sorted({n for store in self.stores for n in store.cdr_names})
 
     @property
     def roms_marbl_blueprint_names(self) -> list[str]:
@@ -1432,6 +1518,9 @@ class LayeredCatalog:
     def output_data(self, output_name: str) -> dict:
         return self._store_for("output", output_name).output_data(output_name)
 
+    def cdr_data(self, cdr_name: str) -> dict:
+        return self._store_for("cdr", cdr_name).cdr_data(cdr_name)
+
     def load_model_spec(self, model_name: str) -> Any:
         return self._store_for("model", model_name).load_model_spec(model_name)
 
@@ -1478,12 +1567,27 @@ class LayeredCatalog:
         self,
         name: str,
         forcing_inputs: dict[str, Any],
-        cdr_forcing: dict[str, Any] | None = None,
         description: str = "",
     ) -> None:
         self._check_unique("forcing", name)
-        self.top.register_forcing(
-            name, forcing_inputs, cdr_forcing=cdr_forcing, description=description
+        self.top.register_forcing(name, forcing_inputs, description=description)
+
+    def register_cdr(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        mode: str,
+        cdr_forcing: dict[str, Any] | None = None,
+        cdr_forcing_file: dict[str, Any] | None = None,
+    ) -> None:
+        self._check_unique("cdr", name)
+        self.top.register_cdr(
+            name,
+            description=description,
+            mode=mode,
+            cdr_forcing=cdr_forcing,
+            cdr_forcing_file=cdr_forcing_file,
         )
 
     def register_model_from_settings(

@@ -5,7 +5,7 @@ application: forge
 state: notset
 schema_version: 1.0.0
 working_dir: ~/cstar/_forge_bp_runs/cson_roms-marbl_v0.1_wio-toy_10procs
-forge_blueprint_version: 5
+forge_blueprint_version: 7
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -175,7 +175,6 @@ forcing:
     coast_snap_buffer_km: null
     domain_edge_buffer: 20
     options: {}
-  cdr_forcing: null
   resolved_datasets:
     GLORYS:
       dataset_key: GLORYS_REGIONAL
@@ -217,6 +216,10 @@ forcing:
       dataset_id: null
       url: null
       streamable: false
+cdr:
+  mode: none
+  cdr_forcing: null
+  cdr_forcing_file: null
 datasets:
 - DAI
 - ERA5
@@ -547,5 +550,5 @@ provenance:
   forge_version: null
   roms_tools_version: null
   override_files_applied: []
-  content_hash: f27e8a245c91cf00a841ee22d3b2eb3f1924b65473f2ec4d4c9685720682af4a
+  content_hash: b9e37056215426ffc9d91f0af3f72d0c79f623310eae3cf9d5cb6bf047da38d4
   notes: null

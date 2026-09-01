@@ -62,7 +62,7 @@ from enum import Enum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 import yaml
 from cstar.orchestration.models import Blueprint
@@ -339,7 +339,14 @@ _HASH_EXCLUDE = {
 # ``forcing.cdr_forcing_file`` -- let a user supply a pre-made netCDF instead of
 # having Forge generate it. All additive (default ``None``); no migration beyond
 # the version bump is needed for existing v5 files.
-FORGE_BLUEPRINT_VERSION = 6
+# v7 (2026-08): CDR overhaul. All CDR-forcing config moves out of ``forcing``
+# into a new top-level ``cdr`` section (``CdrSpec``, with 5 modes -- see its
+# docstring); ``forcing.cdr_forcing``/``forcing.cdr_forcing_file`` are gone.
+# ``composition.cdr`` (a ``SpecRef``) records CDR's own catalog provenance,
+# independent of ``composition.forcing``. Migration moves the two old
+# ``forcing`` leaves onto ``cdr``, inferring ``mode`` from which one (if
+# either) was populated.
+FORGE_BLUEPRINT_VERSION = 7
 
 # Identifies the C-Star application that CONSUMES this blueprint — i.e. the "forge"
 # application (this processing engine), whose blueprint IS the ForgeBlueprint. Do not confuse
@@ -404,6 +411,14 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
     ``forcing.cdr_forcing_file``) are purely additive and default to ``None``, so
     a v5 file already validates against the v6 schema unchanged.
 
+    **v6 -> v7**: ``forcing.cdr_forcing``/``forcing.cdr_forcing_file`` (if
+    present) are popped and moved onto a new top-level ``cdr`` dict, with
+    ``mode`` inferred from which one (if either) was populated: a non-null
+    ``cdr_forcing`` dict -> ``"yaml"``; else a non-null ``cdr_forcing_file`` ->
+    ``"netcdf"``; else -> ``"none"``. A no-op when ``cdr`` is already present
+    (e.g. direct keyword construction passing ``cdr=`` explicitly -- never
+    overwrite an explicit value with an inferred one).
+
     Idempotent and a no-op on already-current data (e.g. direct keyword
     construction, ``ForgeBlueprint(name=..., ...)``) -- called automatically from a
     ``model_validator(mode="before")`` so it fires on every entry point
@@ -462,6 +477,26 @@ def migrate_forge_blueprint_data(data: dict[str, Any] | None) -> dict[str, Any]:
             ):
                 cdr_output["do_cdr_output"] = cdr_output.pop("do_cdr")
 
+    if (version is None or version < 7) and "cdr" not in data:
+        forcing = data.get("forcing")
+        if isinstance(forcing, dict):
+            old_cdr_forcing = forcing.pop("cdr_forcing", None)
+            old_cdr_forcing_file = forcing.pop("cdr_forcing_file", None)
+            # Mode inference shared with the resolver's convenience kwargs and
+            # ForgeExecutor's direct-construction back-compat (defined below,
+            # next to CdrSpec) -- the three entry points can't drift apart.
+            data["cdr"] = {
+                "mode": infer_cdr_mode(old_cdr_forcing, old_cdr_forcing_file)
+            }
+            if old_cdr_forcing is not None:
+                data["cdr"]["cdr_forcing"] = old_cdr_forcing
+            elif old_cdr_forcing_file is not None:
+                data["cdr"]["cdr_forcing_file"] = old_cdr_forcing_file
+        # else: ``forcing`` isn't a plain dict (e.g. an already-built ``Forcing``
+        # instance passed via direct keyword construction) -- nothing to migrate
+        # off of it; ``cdr`` stays absent so the field default (mode="none")
+        # applies.
+
     data["forge_blueprint_version"] = FORGE_BLUEPRINT_VERSION
     return data
 
@@ -475,7 +510,7 @@ class UserProvidedFile(_Section):
     """A user-supplied, pre-made netCDF used in place of one Forge would
     otherwise generate (grid / river forcing / CDR forcing -- see
     ``Domain.grid_file``, ``RiverForcingItem.custom_file``,
-    ``Forcing.cdr_forcing_file``).
+    ``CdrSpec.cdr_forcing_file``).
 
     ``location`` is a path on the machine that will run the executor -- it must
     exist there at processing time (a hard error if not: see
@@ -866,11 +901,14 @@ class ResolvedDataset(_Section):
 
 
 class Forcing(_Section):
-    """All forcing inputs: initial conditions, surface / boundary / tidal / river
-    forcing items, optional CDR, and the resolved dataset registry snapshot.
+    """All forcing inputs: initial conditions and surface / boundary / tidal /
+    river forcing items, plus the resolved dataset registry snapshot.
 
     The former ``Sources`` / inner ``Forcing`` two-level nesting is gone — the
-    items are flat here under a single ``forcing:`` key in the YAML.
+    items are flat here under a single ``forcing:`` key in the YAML. CDR forcing
+    is NOT part of this section -- see the top-level ``cdr`` section
+    (:class:`CdrSpec`) on ``ForgeBlueprint``, which carries CDR's own composable
+    selection independently of the rest of forcing.
     """
 
     initial_conditions: InitialConditions | None = None
@@ -881,27 +919,118 @@ class Forcing(_Section):
     boundary: list[BoundaryForcingItem] = Field(default_factory=list)
     tidal: list[TidalForcingItem] = Field(default_factory=list)
     river: list[RiverForcingItem] = Field(default_factory=list)
-    cdr_forcing: dict[str, Any] | None = None
-    cdr_forcing_file: UserProvidedFile | None = None
-    """A user-supplied pre-made CDR-forcing netCDF, used in place of building CDR
-    forcing from ``cdr_forcing``. Mutually exclusive with ``cdr_forcing`` (see
-    ``_cdr_forcing_file_excludes_cdr_forcing``)."""
     # logical-name -> resolved registry entry (snapshot of source_data.py tables)
     resolved_datasets: dict[str, ResolvedDataset] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _cdr_forcing_file_excludes_cdr_forcing(self) -> Forcing:
-        if self.cdr_forcing_file is not None and self.cdr_forcing is not None:
-            raise ValueError(
-                "forcing.cdr_forcing_file and forcing.cdr_forcing are mutually "
-                "exclusive; supply either a generated-CDR config or a pre-made "
-                "CDR-forcing file, not both"
-            )
-        return self
 
 
 # Back-compat alias: code that imported Sources can import Forcing instead.
 Sources = Forcing
+
+
+# ===========================================================================
+# B2. CDR (carbon dioxide removal) forcing -- a top-level, independently
+#     composable section (its own catalog spec + Composition.cdr SpecRef),
+#     NOT nested under Forcing. See CdrSpec.mode's docstring for the five modes.
+# ===========================================================================
+# The single source of truth for the CDR mode vocabulary: CdrSpec.mode's
+# annotation below. CDR_MODES is derived from it for membership checks
+# elsewhere (ForgeExecutor.cdr_mode validation, catalog register_cdr) so a
+# future sixth mode is added in exactly one place.
+CdrMode = Literal["none", "simple", "yaml", "netcdf", "upscaled"]
+CDR_MODES: tuple[str, ...] = get_args(CdrMode)
+
+
+def infer_cdr_mode(cdr_forcing: dict[str, Any] | None, cdr_forcing_file: Any) -> str:
+    """Infer a CdrSpec mode from which (if either) CDR payload is populated.
+
+    The shared pre-CdrSpec compatibility rule -- a bare ``cdr_forcing`` dict has
+    "yaml" provenance (the only way one used to exist), a bare file is
+    "netcdf", neither is "none". Used by the v6->v7 blueprint migration, the
+    resolver's convenience-kwarg path, and ``ForgeExecutor``'s direct-construction
+    backward compat, so the three entry points can never drift apart. "simple"
+    is deliberately NOT inferable: a compiled dict's shape doesn't distinguish
+    it from "yaml" (see ``CdrSpec.mode``'s docstring) -- it must be stated.
+    """
+    if cdr_forcing is not None:
+        return "yaml"
+    if cdr_forcing_file is not None:
+        return "netcdf"
+    return "none"
+
+
+class CdrSpec(_Section):
+    """The CDR-forcing selection: which of five mutually-exclusive modes drives
+    ``model_settings["cdr_frc"]`` / the ``CDR_FORCING`` cppdef / the emitted
+    roms_marbl blueprint's ``cdr_forcing`` dataset, and (for two of the modes)
+    the CDR-forcing config itself.
+
+    ``mode`` values:
+
+    * ``"none"`` -- no CDR forcing at all. ``cdr_forcing``/``cdr_forcing_file``
+      must both be unset.
+    * ``"simple"`` -- a compiled roms-tools ``CDRForcing`` kwargs dict authored
+      directly (e.g. hand-built or from a simpler UI form), carried in
+      ``cdr_forcing``. ``cdr_forcing_file`` must be unset.
+    * ``"yaml"`` -- the same compiled kwargs dict, but sourced from an uploaded
+      roms-tools ``CDRForcing.to_yaml(...)`` dump (see
+      ``forge_blueprint_resolve.read_cdr_forcing_yaml``). Carried in the same
+      ``cdr_forcing`` field as ``"simple"`` -- the distinction is provenance
+      (how the dict was authored), not shape; both are generated at processing
+      time via ``rt.CDRForcing(**cdr_forcing)``. ``cdr_forcing_file`` must be
+      unset.
+    * ``"netcdf"`` -- a user-supplied, pre-made CDR-forcing netCDF used in place
+      of generating one, carried in ``cdr_forcing_file``. ``cdr_forcing`` must
+      be unset.
+    * ``"upscaled"`` -- CDR tracers are supplied by C-Star's runtime orchestrator
+      from an upscaled (e.g. multi-domain/ensemble) run, not generated by Forge
+      at all. Both ``cdr_forcing``/``cdr_forcing_file`` must be unset; the
+      resolver instead sets static ``model_settings["cdr_frc"]`` values (no
+      generation step runs to derive them) and the engine emits a placeholder
+      ``Resource`` into the roms_marbl blueprint's ``cdr_forcing`` dataset for
+      C-Star's orchestrator to later replace with the real runtime path. Real
+      CDR tracers exist at runtime under this mode, so it participates in the
+      CDR-output consistency block (do_cdr_output/MARBL diagnostics/marbl
+      requirement) exactly like ``"simple"``/``"yaml"``/``"netcdf"``.
+    """
+
+    mode: CdrMode = "none"
+    cdr_forcing: dict[str, Any] | None = None
+    """Compiled roms-tools ``CDRForcing`` constructor kwargs -- required (and the
+    only populated field) for ``mode in ("simple", "yaml")``."""
+    cdr_forcing_file: UserProvidedFile | None = None
+    """A user-supplied pre-made CDR-forcing netCDF -- required (and the only
+    populated field) for ``mode == "netcdf"``."""
+
+    @model_validator(mode="after")
+    def _fields_match_mode(self) -> CdrSpec:
+        if self.mode in ("none", "upscaled"):
+            if self.cdr_forcing is not None or self.cdr_forcing_file is not None:
+                raise ValueError(
+                    f"cdr.mode={self.mode!r} requires both cdr_forcing and "
+                    "cdr_forcing_file to be unset (this mode carries no CDR "
+                    "config of its own)."
+                )
+        elif self.mode in ("simple", "yaml"):
+            if self.cdr_forcing is None:
+                raise ValueError(
+                    f"cdr.mode={self.mode!r} requires cdr_forcing to be set."
+                )
+            if self.cdr_forcing_file is not None:
+                raise ValueError(
+                    f"cdr.mode={self.mode!r} requires cdr_forcing_file to be unset "
+                    "(mutually exclusive with cdr_forcing)."
+                )
+        elif self.mode == "netcdf":
+            if self.cdr_forcing_file is None:
+                raise ValueError(
+                    "cdr.mode='netcdf' requires cdr_forcing_file to be set."
+                )
+            if self.cdr_forcing is not None:
+                raise ValueError(
+                    "cdr.mode='netcdf' requires cdr_forcing to be unset "
+                    "(mutually exclusive with cdr_forcing_file)."
+                )
+        return self
 
 
 # ===========================================================================
@@ -951,13 +1080,16 @@ class Composition(_Section):
     """The composable specs selected to build this config. The resolved data lives
     in the sections above; this records provenance for review/UI.
 
-    ``forcing`` corresponds to the ``sources`` section (initial conditions + surface/
-    boundary/tidal/river + CDR).
+    ``forcing`` corresponds to the ``sources`` section (initial conditions +
+    surface/boundary/tidal/river). ``cdr`` corresponds to the top-level ``cdr``
+    section (:class:`CdrSpec`) -- CDR is its own independently composable spec,
+    not part of ``forcing``.
     """
 
     model: SpecRef = Field(default_factory=SpecRef)
     domain: SpecRef = Field(default_factory=SpecRef)
     forcing: SpecRef = Field(default_factory=SpecRef)
+    cdr: SpecRef = Field(default_factory=SpecRef)  # CDR spec (CdrSpec)
     output: SpecRef = Field(
         default_factory=SpecRef
     )  # output-settings spec (OutputSpec)
@@ -1043,6 +1175,7 @@ class ForgeBlueprint(Blueprint):
     run: RunWindow
     domain: Domain
     forcing: Forcing
+    cdr: CdrSpec = Field(default_factory=CdrSpec)
     # Resolved list of host-independent source-dataset keys the executor must prepare
     # (forcing/IC sources + topography), e.g. ["GLORYS_REGIONAL", "UNIFIED_BGC", "ETOPO5"].
     # Cache paths resolve at processing from the injected source_data_cache. Results-affecting
@@ -1207,11 +1340,13 @@ class ForgeBlueprint(Blueprint):
             grid_file = domain.get("grid_file")
             if grid_file:
                 grid_file.pop("location", None)
-        forcing = data.get("forcing")
-        if forcing:
-            cdr_forcing_file = forcing.get("cdr_forcing_file")
+        cdr = data.get("cdr")
+        if cdr:
+            cdr_forcing_file = cdr.get("cdr_forcing_file")
             if cdr_forcing_file:
                 cdr_forcing_file.pop("location", None)
+        forcing = data.get("forcing")
+        if forcing:
             for river in forcing.get("river") or []:
                 custom_file = river.get("custom_file")
                 if custom_file:

@@ -39,6 +39,7 @@ import yaml
 try:  # pragma: no cover - exercised both ways
     from cstar_forge.forge.forge_blueprint import (
         BoundaryForcingItem,
+        CdrSpec,
         Code,
         CodeRepo,
         Composition,
@@ -59,12 +60,14 @@ try:  # pragma: no cover - exercised both ways
         TidalForcingItem,
         TopographySource,
         UserProvidedFile,
+        infer_cdr_mode,
         sanitize_name,
         vert_kwargs_from_grid_kwargs,
     )
 except ImportError:  # pragma: no cover
     from forge_blueprint import (  # type: ignore
         BoundaryForcingItem,
+        CdrSpec,
         Code,
         CodeRepo,
         Composition,
@@ -84,6 +87,7 @@ except ImportError:  # pragma: no cover
         TemplateRepo,
         TidalForcingItem,
         TopographySource,
+        infer_cdr_mode,
         sanitize_name,
     )
 
@@ -393,6 +397,7 @@ def build_forge_blueprint(
     model_reference_date: datetime | None = None,
     name: str | None = None,
     description: str = "Generated blueprint",
+    cdr: dict[str, Any] | CdrSpec | None = None,
     cdr_forcing: dict[str, Any] | None = None,
     cdr_forcing_yaml: str | Path | None = None,
     forcing_inputs: dict[str, Any] | None = None,
@@ -464,10 +469,25 @@ def build_forge_blueprint(
     ``n_procs_x``/``n_procs_y`` are required only when ``auto_tiling`` is off, and
     ``n_cores`` is rejected when it is off.
 
+    ``cdr`` is the full CDR-forcing selection (a :class:`CdrSpec` or an
+    equivalent dict, e.g. a catalog CDR-spec entry's data), covering all five
+    modes ("none"/"simple"/"yaml"/"netcdf"/"upscaled" -- see ``CdrSpec.mode``'s
+    docstring). ``cdr_forcing``/``cdr_forcing_yaml``/``cdr_forcing_file`` remain
+    as documented conveniences for the two-mode subset they've always covered
+    (generated-from-dict/yaml -> "yaml", or a pre-made file -> "netcdf"); passing
+    ``cdr`` together with any of the three raises ``ValueError`` (supply one or
+    the other, not both). A ``cdr`` dict's own ``cdr_forcing``/``cdr_forcing_file``
+    sub-values get the same treatment the convenience kwargs get below (
+    ``_tracer_metadata`` stripped from ``cdr_forcing``; ``cdr_forcing_file``
+    normalized via :func:`_normalize_user_file`) before validating as a
+    :class:`CdrSpec`; a ``CdrSpec`` instance is used as-is.
+
     ``cdr_forcing_yaml``, if given, takes precedence over ``cdr_forcing``: it is a
     path to (or the raw text of) a roms-tools ``CDRForcing.to_yaml(...)`` dump, read
     via :func:`read_cdr_forcing_yaml`. This is the wizard's upload path made
     resolver-native; a caller may pass either kwarg, not both meaningfully at once.
+    Both funnel into ``CdrSpec(mode="yaml", ...)`` -- "simple" mode (an authored,
+    not-uploaded, kwargs dict) is reachable only via ``cdr=``.
 
     ``name`` is the blueprint's canonical name (``ForgeBlueprint.name``, a top-level
     field); if omitted, this computes and sanitizes the default
@@ -517,31 +537,71 @@ def build_forge_blueprint(
     as ``grid_file`` (see :func:`_normalize_user_file`) -- a ``str``/``Path`` is
     hashed here (must exist at authoring time), a dict/``UserProvidedFile`` is
     trusted as-is. Mutually exclusive with ``cdr_forcing``/``cdr_forcing_yaml``
-    (raised here, before the ``Forcing`` model validator would, so the caller gets
+    (raised here, before ``CdrSpec``'s own validator would, so the caller gets
     a resolver-level message); like a set ``cdr_forcing``, it forces
     ``do_cdr_output=True``, requires ``bgc_mode == "marbl"``, sets
     ``cppdefs.cdr_forcing = True``, and ensures the CDR-output MARBL diagnostics.
     """
-    if cdr_forcing_file is not None and (
-        cdr_forcing is not None or cdr_forcing_yaml is not None
+    if cdr is not None and (
+        cdr_forcing is not None
+        or cdr_forcing_yaml is not None
+        or cdr_forcing_file is not None
     ):
         raise ValueError(
-            "cdr_forcing_file and cdr_forcing/cdr_forcing_yaml are mutually "
-            "exclusive; supply either a generated-CDR config or a pre-made "
-            "CDR-forcing file, not both."
+            "cdr and cdr_forcing/cdr_forcing_yaml/cdr_forcing_file are mutually "
+            "exclusive; supply either a full cdr= selection or the individual "
+            "convenience kwargs, not both."
         )
 
-    if cdr_forcing_yaml is not None:
-        cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
-    elif cdr_forcing is not None:
+    def _strip_tracer_metadata(d: dict[str, Any]) -> dict[str, Any]:
         # defensive strip -- a caller may hand us a dict copied straight from a
         # to_yaml() dump (which still carries the human-readable metadata block).
-        cdr_forcing = {k: v for k, v in cdr_forcing.items() if k != "_tracer_metadata"}
+        return {k: v for k, v in d.items() if k != "_tracer_metadata"}
 
-    cdr_forcing_file_obj: UserProvidedFile | None = None
-    if cdr_forcing_file is not None:
-        cdr_forcing_file_obj = _normalize_user_file(
-            cdr_forcing_file, label="cdr_forcing_file"
+    if cdr is not None:
+        if isinstance(cdr, CdrSpec):
+            cdr_spec = cdr
+        else:
+            cdr_kwargs = dict(cdr)
+            # A catalog CDR-spec entry (catalog.cdr_data(name)) carries a
+            # `description` provenance key that isn't part of CdrSpec (which is
+            # extra="forbid") -- drop it so cdr= accepts the dict verbatim.
+            cdr_kwargs.pop("description", None)
+            raw_cdr_forcing = cdr_kwargs.get("cdr_forcing")
+            if raw_cdr_forcing is not None:
+                cdr_kwargs["cdr_forcing"] = _strip_tracer_metadata(raw_cdr_forcing)
+            raw_cdr_forcing_file = cdr_kwargs.get("cdr_forcing_file")
+            if raw_cdr_forcing_file is not None:
+                cdr_kwargs["cdr_forcing_file"] = _normalize_user_file(
+                    raw_cdr_forcing_file, label="cdr.cdr_forcing_file"
+                )
+            cdr_spec = CdrSpec(**cdr_kwargs)
+    else:
+        if cdr_forcing_file is not None and (
+            cdr_forcing is not None or cdr_forcing_yaml is not None
+        ):
+            raise ValueError(
+                "cdr_forcing_file and cdr_forcing/cdr_forcing_yaml are mutually "
+                "exclusive; supply either a generated-CDR config or a pre-made "
+                "CDR-forcing file, not both."
+            )
+
+        if cdr_forcing_yaml is not None:
+            cdr_forcing = read_cdr_forcing_yaml(cdr_forcing_yaml)
+        elif cdr_forcing is not None:
+            cdr_forcing = _strip_tracer_metadata(cdr_forcing)
+
+        cdr_forcing_file_obj = (
+            _normalize_user_file(cdr_forcing_file, label="cdr_forcing_file")
+            if cdr_forcing_file is not None
+            else None
+        )
+        # Mode inference shared with the v6->v7 migration and ForgeExecutor's
+        # direct-construction back-compat (infer_cdr_mode lives next to CdrSpec).
+        cdr_spec = CdrSpec(
+            mode=infer_cdr_mode(cdr_forcing, cdr_forcing_file_obj),
+            cdr_forcing=cdr_forcing,
+            cdr_forcing_file=cdr_forcing_file_obj,
         )
 
     spec = load_model_spec_data(model_dir)
@@ -667,6 +727,28 @@ def build_forge_blueprint(
     settings["cdr_frc"] = _deep_merge(
         copy.deepcopy(_CDR_FRC_DEFAULT), inputs.get("cdr_frc") or {}
     )
+    if cdr_spec.mode == "upscaled":
+        # Upscaled CDR tracers come from C-Star's runtime orchestrator, not from
+        # anything Forge generates -- no generation step runs to derive these
+        # values (unlike "simple"/"yaml"/"netcdf", where _generate_cdr_forcing/
+        # _generate_cdr_forcing_from_custom_file overwrite the presence/count
+        # leaves for real -- see GENERATION_DERIVED_LEAF_KEYS in
+        # forge_blueprint_engine.py). This resolver call is therefore the SINGLE
+        # source of these statics. C-Star's orchestrator symlinks the real,
+        # run-specific CDR forcing file to the fixed "cdr.nc" name at run time
+        # (the same filename a generated/custom-file CDR run also opens -- see
+        # CDR_FORCING_NETCDF_STEM in input_data.py), so ROMS always opens "cdr.nc"
+        # regardless of which CDR mode produced it.
+        settings["cdr_frc"].update(
+            {
+                "cdr_source": True,
+                "cdr_file": "cdr.nc",
+                "forcing_depth_profiles": True,
+                "forcing_parameterized": False,
+                "cdr_volume": False,
+                "relocate_to_wet_pts": False,
+            }
+        )
     # extract_data (child-grid nesting) is Domain-owned when active (the nesting
     # block below overwrites it from grid_kwargs_child/metadata_child); seed the
     # disabled baseline here so it's always present when not nesting.
@@ -694,7 +776,7 @@ def build_forge_blueprint(
     cppdefs["obc_east"] = bool(open_boundaries.get("east", False))
     cppdefs["obc_north"] = bool(open_boundaries.get("north", False))
     cppdefs["obc_south"] = bool(open_boundaries.get("south", False))
-    cppdefs["cdr_forcing"] = cdr_forcing is not None or cdr_forcing_file_obj is not None
+    cppdefs["cdr_forcing"] = cdr_spec.mode != "none"
     cppdefs["use_pio"] = bool(use_pio)
     cppdefs["auto_tiling"] = bool(auto_tiling)
     cppdefs["marbl"] = bgc_mode == "marbl"
@@ -795,16 +877,16 @@ def build_forge_blueprint(
 
     # ----- CDR output consistency --------------------------------------------
     # CDR output is valid without CDR forcing (cdr_frc.cdr_source stays false;
-    # ROMS opens no CDR file), and CDR forcing (generated OR a user-supplied
-    # cdr_forcing_file) implies CDR output. Either way the CDR_FORCING cppdef
-    # must be on (it gates compiling ucla-roms' cdr_output.F90) and the MARBL
-    # diagnostics ucla-roms looks up by name, unchecked, must be in the write list.
+    # ROMS opens no CDR file), and any active CDR mode (generated -- "simple"/
+    # "yaml", a user-supplied file -- "netcdf", or runtime-supplied -- "upscaled")
+    # implies CDR output. "upscaled" is included here even though Forge never
+    # generates its CDR data: real CDR tracers exist at runtime under that mode
+    # too, so the same MARBL/diagnostics requirements apply. Either way the
+    # CDR_FORCING cppdef must be on (it gates compiling ucla-roms' cdr_output.F90)
+    # and the MARBL diagnostics ucla-roms looks up by name, unchecked, must be in
+    # the write list.
     cdr_out = settings.setdefault("cdr_output", {})
-    do_cdr_output = (
-        bool(cdr_out.get("do_cdr_output"))
-        or cdr_forcing is not None
-        or cdr_forcing_file_obj is not None
-    )
+    do_cdr_output = bool(cdr_out.get("do_cdr_output")) or cdr_spec.mode != "none"
     cdr_out["do_cdr_output"] = do_cdr_output
     if do_cdr_output:
         if bgc_mode != "marbl":
@@ -871,7 +953,7 @@ def build_forge_blueprint(
             ),
         )
 
-    # ----- forcing (initial conditions + surface/boundary/tidal/river + CDR) --
+    # ----- forcing (initial conditions + surface/boundary/tidal/river) --------
     # A child grid (has a parent) receives its boundary values from the parent's
     # nesting.nc extraction, not from reanalysis boundary forcing -- the executor
     # already skips boundary-forcing generation for a child (grid_parent is not
@@ -879,16 +961,16 @@ def build_forge_blueprint(
     # here too (defense-in-depth, the wizard also clears this at the UI layer) --
     # done inside _build_forcing (not by zeroing sources.boundary afterward) so a
     # boundary-only source is never noted into resolved_datasets/datasets either.
+    # CDR is no longer part of Forcing -- it lives on the blueprint's own top-level
+    # `cdr` field (cdr_spec, built above), so _build_forcing takes no CDR params.
     sources = _build_forcing(
         inputs,
-        cdr_forcing,
         # A user-provided grid file has its topography baked in -- the executor
         # skips topography staging entirely, so don't note the configured source
         # into resolved_datasets/datasets (a user-staged source like EMOD would
         # otherwise hard-fail ensure_source_data over a file that is never used).
         None if grid_file_obj is not None else topography_source,
         is_child=grid_kwargs_parent is not None,
-        cdr_forcing_file=cdr_forcing_file_obj,
     )  # kept as `sources` locally for brevity
 
     # ----- bgc_mode consistency check ----------------------------------------
@@ -981,6 +1063,7 @@ def build_forge_blueprint(
             grid_file=grid_file_obj,
         ),
         forcing=sources,
+        cdr=cdr_spec,
         # Host-independent source-dataset keys to prepare (forcing/IC sources + topography),
         # derived from the resolved sources so the executor never reads model_spec.datasets.
         datasets=sorted(
@@ -1001,6 +1084,7 @@ def build_forge_blueprint(
             # catalog/custom provenance (e.g. direct/test callers -- the wizard
             # builds its own Composition via _composition()) gets "custom".
             forcing=SpecRef(name=None, origin="custom"),
+            cdr=SpecRef(name=None, origin="custom"),
             output=SpecRef(name=None, origin="custom"),
         ),
         provenance=Provenance(
@@ -1015,16 +1099,16 @@ def build_forge_blueprint(
 
 def _build_forcing(
     inputs: dict[str, Any],
-    cdr_forcing: dict[str, Any] | None,
     topography_source: str | TopographySource | None = None,
     is_child: bool = False,
-    cdr_forcing_file: UserProvidedFile | None = None,
 ) -> Forcing:
-    """Build the flat ``Forcing`` object from model inputs + CDR config.
+    """Build the flat ``Forcing`` object from model inputs.
 
     The former ``Sources / inner Forcing`` two-level nesting is flattened here:
     initial_conditions and surface/boundary/tidal/river items all live directly on
-    ``Forcing``.
+    ``Forcing``. CDR is NOT part of this -- it lives on the blueprint's own
+    top-level ``cdr`` section (:class:`CdrSpec`), built independently in
+    :func:`build_forge_blueprint`.
 
     ``is_child`` (this domain has a parent grid) skips boundary items entirely --
     not just clears them afterward -- so a boundary-only source is never noted
@@ -1032,12 +1116,6 @@ def _build_forcing(
     initial_conditions when no source is given: it resolves to ``None`` for a
     child domain (state comes from the parent's nesting extraction) instead of
     the hard error a non-child domain gets.
-
-    ``cdr_forcing_file``, if given, is already a normalized :class:`UserProvidedFile`
-    (see ``build_forge_blueprint``'s ``_normalize_user_file`` call) -- passed straight
-    through onto ``Forcing.cdr_forcing_file``; mutual exclusion with ``cdr_forcing``
-    is enforced both by the caller (a clearer, resolver-level message) and by
-    ``Forcing``'s own validator (defense in depth).
     """
     ic_block = inputs.get("initial_conditions", {}) or {}
     forcing_block = inputs.get("forcing", {}) or {}
@@ -1181,8 +1259,6 @@ def _build_forcing(
         boundary=boundary,
         tidal=tidal,
         river=river,
-        cdr_forcing=cdr_forcing,
-        cdr_forcing_file=cdr_forcing_file,
         resolved_datasets=resolved,
     )
 

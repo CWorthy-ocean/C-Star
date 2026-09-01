@@ -76,6 +76,7 @@ cstar-forge/
 │       ├── ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
 │       ├── DomainSpec/{grid}/Domain.yaml   # Grid definitions
 │       ├── ForcingSpec/{name}/Forcing.yaml # Forcing source configurations
+│       ├── CdrSpec/{name}/Cdr.yaml         # CDR-forcing configurations (mode + config)
 │       ├── OutputSpec/{name}/Output.yaml   # Output configurations
 │       └── blueprints/                     # Example blueprints (bundled, read-only layer;
 │                                            # user saves go to the user catalog layer instead)
@@ -102,13 +103,16 @@ so it remains lightweight (no ROMS/MARBL build, no roms-tools); `cstar-ocean` is
 a required pip dependency of this package regardless (see `pyproject.toml`).
 
 Top-level shape: `forge_blueprint_version` (int, bump only on breaking change;
-currently 4) · `application` (=`"forge"`, C-Star app discriminator, required by the
+currently 7) · `application` (=`"forge"`, C-Star app discriminator, required by the
 `Blueprint` base) · `name`/`description` (required top-level fields on the `Blueprint`
 base; `name` is the single user-editable canonical name — `casename`/`working_dir`/
 `B_{name}.yaml`/netCDF stems all derive from it) · `run` (start/end date,
 model_reference_date) · `domain` (`grid_name`, grid_kwargs, topography_source,
 open_boundaries, partitioning, nesting) · `forcing` (flat: initial_conditions,
-surface/boundary/tidal/river lists, cdr_forcing, resolved_datasets) · `datasets`
+surface/boundary/tidal/river lists, resolved_datasets) · `cdr` (`CdrSpec`: a 5-mode
+CDR-forcing selection — none/simple/yaml/netcdf/upscaled — carrying the compiled
+roms-tools `CDRForcing` kwargs or a user-provided netCDF ref; its own composable
+catalog spec, independent of `forcing`) · `datasets`
 (host-independent list of resolved dataset keys) · `model_settings` (flat dict: cppdefs +
 ~35 namelist sections) · `code` (roms/marbl repos + `templates_compile_time`/`_run_time`
 repo refs) · `composition` (which catalog specs produced this + overrides layer) ·
@@ -119,8 +123,10 @@ out on load).
 
 Older blueprint files load transparently: a `model_validator(mode="before")`
 (`migrate_forge_blueprint_data`) migrates v2/v3 layouts (removed `identity`
-sub-model, removed `ensemble_id`) to the current shape, reproducing derived
-names bit-for-bit. `model_name`/`grid_name` live in
+sub-model, removed `ensemble_id`), the v4→v5 `do_cdr`→`do_cdr_output` rename,
+and the v6→v7 CDR move (`forcing.cdr_forcing`/`cdr_forcing_file` → the
+top-level `cdr` section, mode inferred) to the current shape, reproducing
+derived names bit-for-bit. `model_name`/`grid_name` live in
 `composition.model.name`/`domain.grid_name`; `grid_name` is results-affecting —
 `SourceData` keys cache filenames off it.
 
