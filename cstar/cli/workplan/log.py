@@ -3,13 +3,11 @@ import typing as t
 
 import typer
 
-from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, get_from_ctxmap, normalize_runid, set_env
+from cstar.cli.common import get_from_ctxmap
 from cstar.cli.workplan.shared import (
+    RunIdArgument,
     autocomplete_step_list,
-    list_runs,
-    preload_run,
     set_ctxmap,
 )
 from cstar.orchestration.models import Workplan
@@ -78,16 +76,7 @@ def preload_step(context: typer.Context, step_name: str) -> str:
 @app.command(name="log", help=HELP_LONG, short_help=HELP_SHORT)
 def workplan_log(
     context: typer.Context,
-    run_id: t.Annotated[
-        str,
-        typer.Argument(
-            help="The unique identifier of a specific workplan execution.",
-            autocompletion=list_runs,
-            callback=cb_pipeline(
-                normalize_runid, set_env(ENV_CSTAR_RUNID), preload_run
-            ),
-        ),
-    ],
+    run_id: RunIdArgument,
     step_name: t.Annotated[
         str,
         typer.Argument(
