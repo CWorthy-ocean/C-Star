@@ -208,6 +208,20 @@ class Blueprint(ConfiguredBaseModel, ABC):
         """
         return 1
 
+    @property
+    def single_node(self) -> bool:
+        """Whether this blueprint's work is confined to a single node.
+
+        `True` marks an application that runs as one process (threads, or a
+        local dask scheduler) rather than an MPI job, so its CPU requirement
+        cannot usefully span nodes. The scheduler launcher then pins the job
+        to one node and clamps `cpus_needed` to the target queue's CPUs per
+        node instead of requesting additional nodes it could never use.
+
+        Defaults to `False`. Can be overridden by subclasses.
+        """
+        return False
+
     @field_validator("working_dir", mode="after")
     @classmethod
     def _resolve_out_dir(

@@ -518,7 +518,11 @@ class WorkplanTransformer(LoggingMixin):
                     # children have materialized blueprints (overrides already
                     # baked in); record their cpu requirement directly
                     transformed_steps.extend(
-                        _inject_cpus(child, child.blueprint.cpus_needed)
+                        _inject_cpus(
+                            child,
+                            child.blueprint.cpus_needed,
+                            single_node=child.blueprint.single_node,
+                        )
                         for child in overridden_steps
                     )
             else:
@@ -741,14 +745,17 @@ def preflight_overrides(step: LiveStep) -> LiveStep:
         step.blueprint, dict(step.blueprint_overrides)
     )
 
-    return _inject_cpus(step, merged.cpus_needed)
+    return _inject_cpus(step, merged.cpus_needed, single_node=merged.single_node)
 
 
-def _inject_cpus(step: LiveStep, cpus: int) -> LiveStep:
+def _inject_cpus(step: LiveStep, cpus: int, single_node: bool = False) -> LiveStep:
     """Record a step's cpu requirement in its `compute_overrides`.
 
     Declared values win; the requirement is injected only when
-    `["slurm"]["num_cpus"]` is absent.
+    `["slurm"]["num_cpus"]` is absent. When the blueprint declares itself
+    `single_node`, that is recorded alongside as `["slurm"]["single_node"]`
+    so the launcher can clamp the cpu count to one node's capacity without
+    reading the blueprint.
 
     Parameters
     ----------
@@ -756,6 +763,10 @@ def _inject_cpus(step: LiveStep, cpus: int) -> LiveStep:
         The step to enrich.
     cpus : int
         The cpu requirement read from the step's blueprint.
+    single_node : bool, optional
+        Whether the blueprint confines its work to one node. Only recorded
+        when `True`; a `False` value leaves the overrides untouched so that
+        an explicitly declared `single_node` is never overwritten.
 
     Returns
     -------
@@ -775,8 +786,12 @@ def _inject_cpus(step: LiveStep, cpus: int) -> LiveStep:
         )
         raise CstarExpectationFailed(msg)
 
+    injected: dict[str, t.Any] = {"num_cpus": cpus}
+    if single_node:
+        injected["single_node"] = True
+
     new_overrides = deep_merge(
-        {"slurm": {"num_cpus": cpus}},
+        {"slurm": injected},
         dict(step.compute_overrides),
     )
     return LiveStep.from_step(step, update={"compute_overrides": new_overrides})

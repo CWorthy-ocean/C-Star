@@ -350,6 +350,7 @@ def create_scheduler_job(
     cpus: int,
     nodes: int | None = None,
     cpus_per_node: int | None = None,
+    single_node: bool = False,
     script_path: str | Path | None = None,
     run_path: str | Path | None = None,
     job_name: str | None = None,
@@ -381,6 +382,10 @@ def create_scheduler_job(
         On systems that do not require an explicit distribution, this value is
         used as the assumed per-node CPU capacity when calculating the minimum
         node count (e.g. to target a partition's larger node types).
+    single_node : bool, optional
+        Whether the job is confined to one node. When `True`, `nodes` is pinned
+        to 1 and `cpus` is clamped to the per-node capacity (`cpus_per_node`,
+        else the queue's CPUs per node, else the system maximum). Defaults to False.
     script_path : str or Path, optional
         The file path to save the job script. Defaults to the current directory with
         an auto-generated name.
@@ -426,6 +431,7 @@ def create_scheduler_job(
         cpus=cpus,
         nodes=nodes,
         cpus_per_node=cpus_per_node,
+        single_node=single_node,
         account_key=account_key,
         script_path=script_path,
         run_path=run_path,
@@ -502,6 +508,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         cpus: int,
         nodes: int | None = None,
         cpus_per_node: int | None = None,
+        single_node: bool = False,
         script_path: str | Path | None = None,
         run_path: str | Path | None = None,
         job_name: str | None = None,
@@ -531,6 +538,11 @@ class SchedulerJob(ExecutionHandler, ABC):
             The number of CPUs per node to request. If not provided and a specific nodes x CPUs
             distribution is required, C-Star will attempt to calculate an appropriate
             number of CPUs per node.
+        single_node : bool, optional
+            Whether the job is confined to one node (a single-process application
+            rather than an MPI job). When `True`, the node count is pinned to 1 and
+            `cpus` is clamped to the per-node capacity: `cpus_per_node` if given,
+            else the queue's CPUs per node, else the system maximum. Defaults to False.
         script_path : str or Path, optional
             The file path to save the job script. Defaults to the current directory with
             an auto-generated name.
@@ -556,7 +568,8 @@ class SchedulerJob(ExecutionHandler, ABC):
         ------
         ValueError
             If no walltime is provided and the queue's maximum walltime is unavailable, or
-            if the provided walltime exceeds the queue's maximum allowed walltime.
+            if the provided walltime exceeds the queue's maximum allowed walltime, or if
+            `single_node` is set alongside a `nodes` count other than 1.
         EnvironmentError
             If neither `nodes` nor `cpus_per_node` are provided and the scheduler cannot
             determine the system's CPUs per node automatically.
@@ -623,7 +636,44 @@ class SchedulerJob(ExecutionHandler, ABC):
         self._cpus_per_node: int | None
         self._nodes: int | None
 
-        if (
+        if single_node:
+            # A single-process application (threads / local dask) can only use
+            # one node's worth of CPUs: pin the node count and clamp the
+            # request to the per-node capacity instead of spilling onto nodes
+            # the job would never touch. A user-supplied `cpus_per_node` is
+            # the capacity of record (e.g. to target a heterogeneous
+            # partition's larger node types).
+            if nodes is not None and nodes != 1:
+                raise ValueError(
+                    f"Cannot create scheduler job: 'single_node' is set but "
+                    f"nodes={nodes} was requested. A single-node job must use "
+                    "nodes=1 (or leave 'nodes' unset)."
+                )
+            capacity = (
+                cpus_per_node
+                or self.queue.max_cpus_per_node
+                or scheduler.global_max_cpus_per_node
+            )
+            if capacity is None:
+                self.log.warning(
+                    f"C-Star cannot determine the CPUs per node for queue "
+                    f"{self._queue_name!r} and no 'cpus_per_node' was provided; "
+                    f"submitting the single-node job with all {cpus} requested "
+                    "CPUs on one node. The scheduler will reject the job if "
+                    "that exceeds a node's capacity."
+                )
+            elif cpus > capacity:
+                self.log.warning(
+                    f"Single-node job requested {cpus} CPUs but queue "
+                    f"{self._queue_name!r} provides {capacity} CPUs per node; "
+                    f"clamping the request to {capacity}."
+                )
+                self._cpus = capacity
+            self._nodes = 1
+            # a per-node ceiling equal to the total keeps every task on the
+            # one node (and is required where a distribution is mandatory)
+            self._cpus_per_node = self._cpus
+        elif (
             (nodes is None)
             and (cpus_per_node is not None)
             and (scheduler.requires_task_distribution)

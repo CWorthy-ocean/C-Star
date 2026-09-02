@@ -87,6 +87,48 @@ def test_slurmlauncher_adapt_step_no_overrides(
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
+def test_slurmlauncher_adapt_step_single_node_clamps_cpus(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """A `single_node` compute override (recorded by the workplan transformer from
+    the blueprint) reaches the job: it is pinned to one node and its cpu request
+    is clamped to the per-node capacity instead of spilling onto a second node.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"compute_overrides": {"slurm": {"num_cpus": 300, "single_node": True}}},
+    )
+
+    mock_mgr = mock.Mock()
+    mock_mgr.environment.package_root = tmp_path
+    mock_mgr.scheduler = SlurmScheduler(
+        queues=[fake_get_queue("default-q")],
+        primary_queue_name="default-q",
+        other_scheduler_directives={},
+        requires_task_distribution=False,
+        documentation="fake slurm scheduduler",
+        max_cpus_per_node=128,
+    )
+    mock_getsysmgr = mock.Mock(return_value=mock_mgr)
+
+    with (
+        mock.patch("cstar.execution.scheduler_job.get_sysmgr", mock_getsysmgr),
+        mock.patch.object(mock_mgr.scheduler, "get_queue", fake_get_queue),
+    ):
+        spec = SlurmLauncher._get_compute_spec(live_step)  # type: ignore
+        job = SlurmLauncher.adapt_step(live_step, [])
+
+    assert spec.single_node is True
+    assert spec.num_cpus == 300
+    assert job.nodes == 1
+    assert job.cpus == 128
+    assert job.cpus_per_node == 128
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
     (
         "overrides",

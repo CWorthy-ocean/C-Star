@@ -384,6 +384,130 @@ class TestSchedulerJobBase:
             in caplog.text
         )
 
+    @pytest.mark.parametrize("requires_distribution", [True, False])
+    def test_init_single_node_clamps_cpus_to_capacity(
+        self, caplog, requires_distribution
+    ):
+        """A `single_node` job is pinned to one node and its cpu request is clamped
+        to the per-node capacity (here the scheduler-wide 64), whether or not the
+        scheduler requires an explicit task distribution.
+        """
+        params = self.common_job_params.copy()
+        scheduler = MockScheduler()
+        scheduler.requires_task_distribution = requires_distribution
+        params.update(
+            {
+                "scheduler": scheduler,
+                "nodes": None,
+                "cpus_per_node": None,
+                "cpus": 128,
+                "single_node": True,
+            }
+        )
+        job = MockSchedulerJob(**params)
+        caplog.set_level(logging.INFO, logger=job.log.name)
+
+        assert job.nodes == 1
+        assert job.cpus == 64
+        assert job.cpus_per_node == 64
+        assert "clamping the request to 64" in caplog.text
+
+    def test_init_single_node_within_capacity_keeps_cpus(self):
+        """A `single_node` request that already fits on one node is pinned to one
+        node and otherwise passed through unchanged.
+        """
+        params = self.common_job_params | {
+            "nodes": None,
+            "cpus_per_node": None,
+            "cpus": 40,
+            "single_node": True,
+        }
+        job = MockSchedulerJob(**params)
+
+        assert job.nodes == 1
+        assert job.cpus == 40
+        assert job.cpus_per_node == 40
+
+    def test_init_single_node_prefers_queue_capacity(self):
+        """The queue's own CPUs per node wins over the scheduler-wide value when
+        clamping a `single_node` request.
+        """
+        params = self.common_job_params.copy()
+        scheduler = MockScheduler()
+        scheduler.get_queue = lambda name=None: MagicMock(
+            name=name, max_walltime="02:00:00", max_cpus_per_node=48
+        )
+        params.update(
+            {
+                "scheduler": scheduler,
+                "nodes": None,
+                "cpus_per_node": None,
+                "cpus": 128,
+                "single_node": True,
+            }
+        )
+        job = MockSchedulerJob(**params)
+
+        assert job.nodes == 1
+        assert job.cpus == 48
+
+    def test_init_single_node_explicit_cpus_per_node_is_capacity(self):
+        """A user-supplied `cpus_per_node` is the capacity of record for a
+        `single_node` job, overriding the queried values.
+        """
+        params = self.common_job_params | {
+            "nodes": None,
+            "cpus_per_node": 96,
+            "cpus": 128,
+            "single_node": True,
+        }
+        job = MockSchedulerJob(**params)
+
+        assert job.nodes == 1
+        assert job.cpus == 96
+        assert job.cpus_per_node == 96
+
+    def test_init_single_node_unknown_capacity_warns(self, caplog):
+        """When no per-node capacity can be determined, a `single_node` job is still
+        pinned to one node with its full request, and a warning is logged.
+        """
+        params = self.common_job_params.copy()
+        scheduler = MockScheduler()
+        with patch.object(
+            type(scheduler),
+            "global_max_cpus_per_node",
+            new_callable=PropertyMock,
+            return_value=None,
+        ):
+            params.update(
+                {
+                    "scheduler": scheduler,
+                    "nodes": None,
+                    "cpus_per_node": None,
+                    "cpus": 128,
+                    "single_node": True,
+                }
+            )
+            job = MockSchedulerJob(**params)
+            caplog.set_level(logging.INFO, logger=job.log.name)
+
+        assert job.nodes == 1
+        assert job.cpus == 128
+        assert "cannot determine the CPUs per node" in caplog.text
+
+    def test_init_single_node_rejects_multiple_nodes(self):
+        """Requesting more than one node for a `single_node` job is a contradiction
+        and fails loudly.
+        """
+        params = self.common_job_params | {
+            "nodes": 2,
+            "cpus_per_node": None,
+            "cpus": 128,
+            "single_node": True,
+        }
+        with pytest.raises(ValueError, match="'single_node' is set but nodes=2"):
+            MockSchedulerJob(**params)
+
     @pytest.mark.parametrize(
         "nodes, cpus_per_node, expected_nodes, expected_cpus_per_node",
         [

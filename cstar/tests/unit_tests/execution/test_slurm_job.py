@@ -164,6 +164,32 @@ class TestSlurmJob:
             f"The SBATCH script is missing required content: {missing_content}"
         )
 
+    def test_script_single_node_clamps_to_queue_capacity(self):
+        """A `single_node` job that asks for more CPUs than the queue's nodes have
+        is pinned to one node with its request clamped to that capacity.
+        """
+        with patch.object(
+            type(self.mock_partition),
+            "max_cpus_per_node",
+            new_callable=PropertyMock,
+            return_value=8,
+        ):
+            self.scheduler.queues = [self.mock_partition]
+            job = SlurmJob(**self.common_job_params | {"cpus": 16, "single_node": True})
+
+        required_content = {
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=8",
+            "#SBATCH --ntasks=8",
+        }
+        actual_content = set(job.script.strip().split("\n"))
+        missing_content = ", ".join(list(required_content.difference(actual_content)))
+
+        assert not missing_content, (
+            f"The SBATCH script is missing required content: {missing_content}"
+        )
+        assert "#SBATCH --ntasks=16" not in job.script
+
     def test_script_task_distribution_not_required_queue_capacity(self):
         """Verifies the node count is derived from the queue's own CPUs per node when
         available, in preference to the scheduler-wide value.

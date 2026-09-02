@@ -1539,6 +1539,48 @@ def test_preflight_overrides_injects_cpus_needed(
     )
 
     assert compute_overrides["slurm"]["num_cpus"] == expected_cpus
+    # a blueprint that does not confine itself to one node records nothing
+    assert "single_node" not in compute_overrides["slurm"]
+
+
+def test_preflight_overrides_records_single_node(
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a blueprint declaring `single_node` has that recorded in its
+    step's `compute_overrides` alongside `num_cpus`, so the launcher can clamp
+    the request to one node without re-reading the blueprint.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = Step(
+        name="producer",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+    )
+    wp = Workplan(
+        name="single-node-workplan",
+        description="A workplan whose blueprint is confined to one node.",
+        steps=[step],
+    )
+
+    with mock.patch.object(
+        HelloWorldBlueprint,
+        "single_node",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    ):
+        transformed = WorkplanTransformer(wp).apply()
+
+    trx_step = t.cast("LiveStep", transformed.steps[0])
+    compute_overrides = t.cast(
+        "dict[str, dict[str, t.Any]]", trx_step.compute_overrides
+    )
+
+    assert compute_overrides["slurm"]["single_node"] is True
+    assert compute_overrides["slurm"]["num_cpus"] == 1
 
 
 def test_preflight_overrides_respects_declared_cpus(

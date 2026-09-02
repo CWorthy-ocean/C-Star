@@ -57,6 +57,13 @@ class SlurmComputeSpec(BaseModel):
     Also used as the assumed per-node capacity when deriving the node count,
     e.g. to target a partition's larger node types instead of its smallest.
     """
+    single_node: bool = False
+    """Whether the job is confined to a single node.
+
+    Set from the blueprint's `single_node` at schedule time. The job is pinned
+    to one node and `num_cpus` is clamped to the queue's CPUs per node rather
+    than spilling onto nodes a single-process application cannot use.
+    """
     max_walltime: str = Field(default="", pattern=WALLTIME_RE)
     """The maximum walltime for the job in the format `HH:MM:SS`."""
     queue_name: str = ""
@@ -277,6 +284,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             cpus=compute.num_cpus,
             nodes=compute.num_nodes,
             cpus_per_node=compute.cpus_per_node,
+            single_node=compute.single_node,
             script_path=step.script_path,
             run_path=step.script_path.parent,
             job_name=step.safe_name,

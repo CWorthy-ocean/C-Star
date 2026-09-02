@@ -46,6 +46,7 @@ async def test_hello_world_blueprint_serialization(
     assert bp.description == "This blueprint says hello to a very nice guy"
     assert bp.state == "draft"
     assert bp.cpus_needed == 1  # until it's moved, cpus_needed is hardcoded
+    assert bp.single_node is False  # the Blueprint default; apps opt in
 
     persist_to = tmp_path / "hwserialized.yaml"
     assert serialize(persist_to, bp), "Failed to serialize blueprint"
