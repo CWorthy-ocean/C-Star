@@ -576,13 +576,17 @@ def estimate_forge_cpus(nx: int, ny: int, n_levels: int) -> int:
     """Ballpark CPU count for a forge run (input generation) on a grid this size.
 
     Deliberately imprecise -- roughly one CPU per 150k grid cells
-    (``nx * ny * N``), clamped to [16, 128]. 128 is a strict cap. Calibration
-    anchors: a toy domain (20x20x10) gets the 16 floor; hvalfjordur-0
-    (512x384x100, ~2.0e7 cells) saturates the cap; an exceptionally large
-    domain (1856x960x100, ~1.8e8 cells) is far past it.
+    (``nx * ny * N``), with a floor of 16 and no upper cap here. The forge run is
+    a single process (``ForgeBlueprint.single_node``), so the real ceiling is one
+    node's worth of CPUs on the target partition -- which only the launcher
+    knows (C-Star clamps the request to the queue's CPUs per node at submit
+    time). Calibration anchors: a toy domain (20x20x10) gets the 16 floor;
+    hvalfjordur-0 (512x384x100, ~2.0e7 cells) lands near a 128-core node; an
+    exceptionally large domain (1856x960x100, ~1.8e8 cells) asks for far more
+    than any node has and is clamped to a full node.
     """
     cells = nx * ny * n_levels
-    return max(16, min(128, math.ceil(cells / 150_000)))
+    return max(16, math.ceil(cells / 150_000))
 
 
 class OpenBoundaries(_Section):
@@ -1263,7 +1267,9 @@ class ForgeBlueprint(Blueprint):
         itself: roms-tools input generation), overriding the ``Blueprint`` base
         default of 1. Deliberately NOT ``n_procs`` -- that is the ROMS
         partitioning the downstream simulation uses, not what generating the
-        inputs needs. See :func:`estimate_forge_cpus`.
+        inputs needs. See :func:`estimate_forge_cpus`. Uncapped above its floor:
+        because the run is :attr:`single_node`, the launcher clamps this to the
+        target partition's CPUs per node.
 
         When ``domain.grid_file`` is set, ``grid_kwargs`` carries no ``nx``/``ny``/
         ``N`` (a user-supplied grid has no generation-geometry keys -- see
@@ -1277,6 +1283,17 @@ class ForgeBlueprint(Blueprint):
         ny = gk.get("ny", param.get("mmm", 0))
         nvert = gk.get("N", param.get("n", 0))
         return estimate_forge_cpus(int(nx or 0), int(ny or 0), int(nvert or 0))
+
+    @property
+    def single_node(self) -> bool:
+        """The forge run is one Python process (roms-tools on dask's threaded
+        scheduler), not an MPI job: it can never use more than one node. Marking
+        it so lets C-Star's launcher pin the forge step to ``--nodes=1`` and clamp
+        :attr:`cpus_needed` to the target partition's CPUs per node, instead of
+        requesting extra nodes the run would leave idle. Overrides the
+        ``Blueprint`` base default of ``False``.
+        """
+        return True
 
     @property
     def n_tracers(self) -> int:

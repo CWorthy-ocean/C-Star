@@ -307,18 +307,30 @@ def test_working_dir_accepts_path_from_scheduler_override():
     assert ForgeBlueprint(**data).working_dir == "/scratch/run-id/step-root"
 
 
-def test_estimate_forge_cpus_anchors_and_strict_cap():
+def test_estimate_forge_cpus_anchors_floor_and_no_cap():
+    """The estimate has a 16 floor and no upper cap: the forge run is single-node,
+    so the launcher clamps the request to the target partition's CPUs per node
+    (which forge cannot know when authoring the blueprint).
+    """
     from cstar_forge.forge.forge_blueprint import estimate_forge_cpus
 
     # toy domain (wio-toy) hits the 16 floor
     assert estimate_forge_cpus(20, 20, 10) == 16
-    # hvalfjordur-0 (~2.0e7 cells) saturates the cap
-    assert estimate_forge_cpus(512, 384, 100) == 128
-    # an exceptionally large domain is far past the strict 128 cap
-    assert estimate_forge_cpus(1856, 960, 100) == 128
-    assert estimate_forge_cpus(10_000, 10_000, 1_000) == 128
-    # mid-size domains scale between the bounds
+    # hvalfjordur-0 (~2.0e7 cells) lands around a 128-core node
+    assert estimate_forge_cpus(512, 384, 100) == 132
+    # an exceptionally large domain asks for far more than any node has; the
+    # old 128 ceiling is gone and the launcher-side clamp is the real cap
+    assert estimate_forge_cpus(1856, 960, 100) > 1000
+    # mid-size domains scale with cell count
     assert 16 < estimate_forge_cpus(350, 350, 100) < 128
+
+
+def test_forge_blueprint_is_single_node():
+    """ForgeBlueprint declares itself single-node so C-Star pins the forge step
+    to one node and clamps cpus_needed to the queue's CPUs per node.
+    """
+    cfg = _build()
+    assert cfg.single_node is True
 
 
 def test_cpus_needed_is_grid_sized_forge_estimate():

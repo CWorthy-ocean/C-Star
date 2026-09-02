@@ -6111,7 +6111,9 @@ class ForgeBlueprintWizard:
 
         cfg = self.config
         # No cpus override for the forge step: the scheduler falls back to
-        # ForgeBlueprint.cpus_needed, which is the grid-sized estimate.
+        # ForgeBlueprint.cpus_needed (the grid-sized estimate), and because
+        # ForgeBlueprint.single_node is True, C-Star pins the step to one node
+        # and clamps that estimate to the partition's CPUs per node.
         forge_step = Step(
             name="forge",
             application="forge",
