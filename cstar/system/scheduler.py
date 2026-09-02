@@ -3,8 +3,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Final
 
-from cstar.base.log import LoggingMixin
+from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import _run_cmd
+
+log = get_logger(__name__)
+
+UNLIMITED_WALLTIMES: Final = frozenset({"infinite", "unlimited", "n/a"})
+"""Values SLURM reports for a queue with no walltime limit."""
 
 
 def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
@@ -22,8 +27,13 @@ def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
     Returns
     -------
     tuple[int, int, int]
+
+    Raises
+    ------
+    ValueError
+        If the walltime string is not in a recognized format.
     """
-    mw_h, mw_m, mw_s = 0, 0, 0
+    walltime_str = walltime_str.strip()
     if walltime_str.count("-") == 1:  # D-HH:MM:SS
         mw_d = int(walltime_str.split("-")[0])
         mw_hms = walltime_str.split("-")[1]
@@ -35,10 +45,12 @@ def parse_walltime(walltime_str: str) -> tuple[int, int, int]:
         mw_m, mw_s = map(int, mw_hms.split(":"))
     elif mw_hms.count(":") == 2:  # HH:MM:SS
         mw_h, mw_m, mw_s = map(int, mw_hms.split(":"))
+    else:
+        raise ValueError(f"Unrecognized walltime format: {walltime_str!r}")
     return mw_d * 24 + mw_h, mw_m, mw_s
 
 
-def format_walltime(walltime_str: str) -> str:
+def format_walltime(walltime_str: str) -> str | None:
     """Parse and format a SLURM walltime string into the format "HH:MM:SS".
 
     Parameters
@@ -48,13 +60,27 @@ def format_walltime(walltime_str: str) -> str:
         - "D-HH:MM:SS" (days, hours, minutes, seconds)
         - "HH:MM:SS" (hours, minutes, seconds)
         - "MM:SS" (minutes, seconds)
+        - "infinite"/"UNLIMITED"/"N/A" (no walltime limit)
 
     Returns
     -------
-    str
-        The formatted walltime string in the "HH:MM:SS" format.
+    str or None
+        The formatted walltime string in the "HH:MM:SS" format, or `None` when
+        SLURM reports the queue has no walltime limit or the reported value
+        cannot be parsed (treated as unlimited; the scheduler enforces the
+        real limit at submission).
     """
-    mw_h, mw_m, mw_s = parse_walltime(walltime_str)
+    if walltime_str.strip().casefold() in UNLIMITED_WALLTIMES:
+        return None
+    try:
+        mw_h, mw_m, mw_s = parse_walltime(walltime_str)
+    except ValueError:
+        log.warning(
+            f"Cannot parse queue walltime {walltime_str!r}; treating the maximum "
+            "walltime as unlimited. If the requested walltime exceeds the queue's "
+            "actual limit, the job may be rejected by the scheduler."
+        )
+        return None
     return f"{mw_h:02}:{mw_m:02}:{mw_s:02}"
 
 

@@ -285,16 +285,16 @@ class BouchetEnvSettings(SlurmSettingsBase):
 @register_sys_context
 @dataclass(frozen=True)
 class BouchetSystemContext(SystemContext):
-    """The contextual dependencies for the Anvil system."""
+    """The contextual dependencies for the Bouchet system."""
 
     name: ClassVar[str] = "bouchet"
-    """The unique name identifying the Anvil system."""
+    """The unique name identifying the Bouchet system."""
     compiler: ClassVar[str] = "gnu"
-    """The compiler used on Anvil."""
+    """The compiler used on Bouchet."""
     mpi_prefix: ClassVar[str] = "srun"
-    """The MPI prefix used on Anvil."""
+    """The MPI prefix used on Bouchet."""
     docs: ClassVar[str] = "https://docs.ycrc.yale.edu/clusters/bouchet"
-    """URI for documentation of the Anvil system."""
+    """URI for documentation of the Bouchet system."""
 
     @classmethod
     def create_scheduler(cls) -> Scheduler | None:
@@ -328,9 +328,50 @@ class BouchetSystemContext(SystemContext):
             max_walltime_method=query_max_walltime_via_sinfo,
         )
         """Partition with 2 day max walltime (2-00:00:00) and tuned for parallel MPI jobs."""
+        devel_queue = SlurmPartition(
+            name="devel",
+            query_name="devel",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Partition with 6 hour max walltime (06:00:00) for interactive/development work."""
+        scavenge_queue = SlurmPartition(
+            name="scavenge",
+            query_name="scavenge",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Preemptable partition with 1 day max walltime (1-00:00:00)."""
+        priority_queue = SlurmPartition(
+            name="priority",
+            query_name="priority",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Priority-tier counterpart of `day` (7 day max walltime); requires a `prio_*` SLURM account."""
+        priority_gpu_queue = SlurmPartition(
+            name="priority_gpu",
+            query_name="priority_gpu",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Priority-tier counterpart of `gpu` (7 day max walltime); requires a `prio_*` SLURM account."""
+        priority_mpi_queue = SlurmPartition(
+            name="priority_mpi",
+            query_name="priority_mpi",
+            max_walltime_method=query_max_walltime_via_sinfo,
+        )
+        """Priority-tier counterpart of `mpi` (7 day max walltime); requires a `prio_*` SLURM account."""
 
         return SlurmScheduler(
-            queues=[day_queue, week_queue, gpu_queue, bigmem_queue, mpi_queue],
+            queues=[
+                day_queue,
+                week_queue,
+                gpu_queue,
+                bigmem_queue,
+                mpi_queue,
+                devel_queue,
+                scavenge_queue,
+                priority_queue,
+                priority_gpu_queue,
+                priority_mpi_queue,
+            ],
             primary_queue_name="day",
             other_scheduler_directives={},
             requires_task_distribution=False,

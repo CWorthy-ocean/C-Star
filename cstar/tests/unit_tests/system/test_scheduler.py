@@ -502,17 +502,45 @@ class TestStrAndRepr:
         pytest.param("00:00", "00:00:00", id="mm:ss to hh:mm:ss w/no time"),
         pytest.param("42:00", "00:42:00", id="mm:ss to hh:mm:ss"),
         pytest.param("99:00", "00:99:00", id="mm:ss to hh:mm:ss w/overflow"),
+        pytest.param(" 1-00:00:00 ", "24:00:00", id="surrounding whitespace"),
+        pytest.param("infinite", None, id="sinfo unlimited"),
+        pytest.param("UNLIMITED", None, id="sacctmgr unlimited"),
+        pytest.param("n/a", None, id="not applicable"),
     ],
 )
-def test_parse_walltime(value: str, expected: str) -> None:
+def test_parse_walltime(value: str, expected: str | None) -> None:
     """Verify `_parse_walltime` correctly parses all three available formats:
     - hh:mm:ss
     - N-hh:mm:ss
     - mm:ss
+
+    and returns `None` for SLURM's unlimited-walltime values.
     """
     actual = format_walltime(value)
 
     assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("garbage", id="not a walltime"),
+        pytest.param("1-00:00:00\n1-00:00:00", id="multi-line sinfo output"),
+        pytest.param("12", id="no colons"),
+        pytest.param("aa:bb:cc", id="non-numeric fields"),
+    ],
+)
+def test_parse_walltime_unrecognized(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Verify unrecognized walltime strings fall back to None (unlimited) with a
+    warning instead of silently parsing to zero.
+    """
+    with caplog.at_level(logging.WARNING):
+        result = format_walltime(value)
+
+    assert result is None
+    assert any("Cannot parse queue walltime" in msg for msg in caplog.messages)
 
 
 def test_query_max_walltime_via_sinfo() -> None:
@@ -534,6 +562,21 @@ def test_query_max_walltime_via_sinfo_partition_not_valid() -> None:
     """
     with patch(
         "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
+    ) as mock_sinfo:
+        result = query_max_walltime_via_sinfo("mock-partition-name")
+
+        assert result is None
+        mock_sinfo.assert_called_once()
+
+
+def test_query_max_walltime_via_sinfo_unlimited() -> None:
+    """Verify a null max walltime is returned when the partition has no limit.
+
+    e.g. Bouchet's `mpi` partition, where sinfo reports `infinite` and the
+    actual limit is enforced via QOS.
+    """
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="infinite")
     ) as mock_sinfo:
         result = query_max_walltime_via_sinfo("mock-partition-name")
 
