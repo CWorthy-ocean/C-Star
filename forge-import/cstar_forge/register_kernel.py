@@ -52,6 +52,10 @@ micromamba activate "{env_prefix}"
 export PYTHONNOUSERSITE=1
 # Spin-free libfabric provider for in-kernel ESMF/MPI (see register_kernel.py).
 export FI_PROVIDER="${{FI_PROVIDER:-tcp}}"
+# Drop any PYTHONPATH inherited from the hosting Jupyter server: HPC portals
+# (e.g. OnDemand) export their own jupyter/pyzmq module trees, built for a
+# different Python, and PYTHONPATH outranks the env's site-packages.
+unset PYTHONPATH
 exec python -m ipykernel_launcher "$@"
 """
 
@@ -67,6 +71,10 @@ conda activate "{env_prefix}"
 export PYTHONNOUSERSITE=1
 # Spin-free libfabric provider for in-kernel ESMF/MPI (see register_kernel.py).
 export FI_PROVIDER="${{FI_PROVIDER:-tcp}}"
+# Drop any PYTHONPATH inherited from the hosting Jupyter server: HPC portals
+# (e.g. OnDemand) export their own jupyter/pyzmq module trees, built for a
+# different Python, and PYTHONPATH outranks the env's site-packages.
+unset PYTHONPATH
 exec python -m ipykernel_launcher "$@"
 """
 

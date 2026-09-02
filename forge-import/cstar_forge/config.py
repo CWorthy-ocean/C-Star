@@ -77,6 +77,35 @@ def _get_hostname() -> str:
     ).lower()
 
 
+def _bouchet_scratch_root(home: Path) -> Path | None:
+    """Best-effort per-user scratch root on Yale's Bouchet cluster.
+
+    Bouchet exposes no ``$SCRATCH`` env var. Instead, each user's home carries
+    per-project symlinks named ``scratch_pi_<pi-netid>`` (the suffix is
+    unpredictable), and inside each of those the user has a subdirectory named
+    after their own username. We glob ``home/scratch_pi_*``, keep only
+    directories (``is_dir()`` follows symlinks, so the per-project symlinks
+    themselves qualify), sort for determinism, and take the first match,
+    appending the current username. Returns ``None`` if no such directory is
+    found or the scan fails (e.g. a stale/permission-restricted mount behind
+    one of the symlinks) -- this runs at module import via ``get_data_paths``,
+    so it must never raise. Cross-reference: C-Star's
+    ``BouchetSystemContext.scratch_directory`` implements the same heuristic.
+    """
+    try:
+        candidates = sorted(p for p in home.glob("scratch_pi_*") if p.is_dir())
+    except OSError:
+        logger.warning(
+            "Failed to scan %s for scratch_pi_* directories; falling back to a "
+            "home-anchored layout. Set $SCRATCH to override.",
+            home,
+        )
+        return None
+    if not candidates:
+        return None
+    return candidates[0] / USER
+
+
 def _detect_system() -> str:
     """
     Return a tag for the current compute environment.
@@ -85,6 +114,7 @@ def _detect_system() -> str:
         - "MacOS"
         - "RCAC_anvil"
         - "NERSC_perlmutter"
+        - "YCRC_bouchet"
         - "unknown"
 
     Extendable via SYSTEM_LAYOUT_REGISTRY.
@@ -100,6 +130,15 @@ def _detect_system() -> str:
     # Check NERSC_HOST environment variable for Perlmutter
     if os.environ.get("NERSC_HOST", "").lower() == "perlmutter":
         return "NERSC_perlmutter"
+
+    # Bouchet exports no distinguishing hostname substring; mirror C-Star's
+    # BouchetSystemContext.is_match, which matches CLUSTER or SLURM_CLUSTER_NAME
+    # exactly (no case folding -- both tools must agree on the detected system).
+    if (
+        os.environ.get("CLUSTER", "") == "bouchet"
+        or os.environ.get("SLURM_CLUSTER_NAME", "") == "bouchet"
+    ):
+        return "YCRC_bouchet"
 
     return "unknown"
 
@@ -143,12 +182,18 @@ def _layout_mac(home: Path, env: dict) -> tuple[Path, Path, Path]:
     return source_data, input_data, scratch
 
 
+# $PROJECT is the standard cross-machine env var naming the (usually
+# group-shared) project directory the data base lives under: when set, the
+# data base is $PROJECT/cstar-forge-data on every HPC layout below. Anvil
+# exports it natively (as the same directory as $WORK, which is deliberately
+# NOT consulted: a user-overridden $PROJECT must move everything with it);
+# elsewhere users set it.
 @register_system("RCAC_anvil")
 def _layout_RCAC_anvil(home: Path, env: dict) -> tuple[Path, Path, Path]:
-    work = Path(env.get("WORK", home / "work"))
-    scratch_root = Path(env.get("SCRATCH", work / "scratch"))
+    project = Path(env.get("PROJECT", home / "work"))
+    scratch_root = Path(env.get("SCRATCH", project / "scratch"))
 
-    base = work / "cstar-forge-data"
+    base = project / "cstar-forge-data"
     source_data = base / "source-data"
     input_data = base / USER / "input-data"
     scratch = scratch_root / "cstar" / "_forge_bp_runs"
@@ -158,10 +203,56 @@ def _layout_RCAC_anvil(home: Path, env: dict) -> tuple[Path, Path, Path]:
 @register_system("NERSC_perlmutter")
 def _layout_NERSC_perlmutter(home: Path, env: dict) -> tuple[Path, Path, Path]:
     scratch_root = Path(env.get("SCRATCH", home / "scratch"))
-    base = scratch_root / "cstar-forge-data"
+    if "PROJECT" in env:
+        base = Path(env["PROJECT"]) / "cstar-forge-data"
+    else:
+        base = scratch_root / "cstar-forge-data"
 
     source_data = base / "source-data"
     input_data = base / USER / "input-data"
+    scratch = scratch_root / "cstar" / "_forge_bp_runs"
+    return source_data, input_data, scratch
+
+
+@register_system("YCRC_bouchet")
+def _layout_YCRC_bouchet(home: Path, env: dict) -> tuple[Path, Path, Path]:
+    """Path layout for Yale's Bouchet cluster.
+
+    Bouchet has no ``$SCRATCH`` env var, so the scratch root is discovered via
+    :func:`_bouchet_scratch_root`'s ``scratch_pi_*`` glob heuristic unless an
+    explicit ``$SCRATCH`` override is set (consistent with the other HPC
+    layouts above). ``$PROJECT``, when set, moves the data base (not the run
+    scratch) to ``$PROJECT/cstar-forge-data``, like the other layouts. Falls
+    back to the home-anchored layout -- ignoring ``$PROJECT`` -- if no scratch
+    root can be found.
+    """
+    if "SCRATCH" in env:
+        scratch_root = Path(env["SCRATCH"])
+    else:
+        scratch_root = _bouchet_scratch_root(home)
+
+    if scratch_root is None:
+        logger.warning(
+            "No scratch_pi_* directory found under %s on Bouchet; falling back "
+            "to a home-anchored layout. Set $SCRATCH to override.",
+            home,
+        )
+        return _layout_unknown(home, env)
+
+    if "PROJECT" in env:
+        # Shared project dir: source-data is group-shared, so input-data
+        # needs the per-user layer the other HPC layouts carry.
+        base = Path(env["PROJECT"]) / "cstar-forge-data"
+        input_data = base / USER / "input-data"
+    else:
+        # Per-user scratch: the root discovered by _bouchet_scratch_root
+        # already ends in the username, so no extra USER layer is added. That
+        # also means source_data is per-user in this mode (not project-shared
+        # as on Anvil) -- set $PROJECT to share it.
+        base = scratch_root / "cstar-forge-data"
+        input_data = base / "input-data"
+
+    source_data = base / "source-data"
     scratch = scratch_root / "cstar" / "_forge_bp_runs"
     return source_data, input_data, scratch
 
@@ -283,7 +374,7 @@ def _default_cluster_type(system_tag: str) -> str:
     """
     if system_tag in ["MacOS", "unknown"]:
         return ClusterType.LOCAL
-    elif system_tag in ["RCAC_anvil", "NERSC_perlmutter"]:
+    elif system_tag in ["RCAC_anvil", "NERSC_perlmutter", "YCRC_bouchet"]:
         return ClusterType.SLURM
     else:
         raise NotImplementedError(
@@ -468,14 +559,20 @@ def _hpc_scratch_root(system_tag: str, env: dict, home: Path) -> Path | None:
     """Bare scratch root for HPC systems, ``None`` elsewhere.
 
     Mirrors the env-var conventions of the system layouts above ($SCRATCH on
-    Perlmutter; $SCRATCH falling back to $WORK/scratch on Anvil). $SCRATCH is
-    per-user on both machines, so no extra username layer is inserted.
+    Perlmutter; $SCRATCH falling back to $PROJECT/scratch on Anvil; $SCRATCH
+    falling back to a globbed ``scratch_pi_*/<user>`` root on Bouchet, which
+    exports no $SCRATCH at all). $SCRATCH is per-user on all of these
+    machines, so no extra username layer is inserted.
     """
     if system_tag == "NERSC_perlmutter":
         return Path(env.get("SCRATCH", home / "scratch"))
     if system_tag == "RCAC_anvil":
-        work = Path(env.get("WORK", home / "work"))
-        return Path(env.get("SCRATCH", work / "scratch"))
+        project = Path(env.get("PROJECT", home / "work"))
+        return Path(env.get("SCRATCH", project / "scratch"))
+    if system_tag == "YCRC_bouchet":
+        if "SCRATCH" in env:
+            return Path(env["SCRATCH"])
+        return _bouchet_scratch_root(home)
     return None
 
 

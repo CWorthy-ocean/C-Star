@@ -56,6 +56,7 @@ class TestBuildWrapperContent:
         assert 'micromamba activate "/envs/my-env"' in content
         assert "export PYTHONNOUSERSITE=1" in content
         assert 'export FI_PROVIDER="${FI_PROVIDER:-tcp}"' in content
+        assert "unset PYTHONPATH" in content
         assert 'exec python -m ipykernel_launcher "$@"' in content
 
     def test_micromamba_bin_falls_back_to_given_name_off_path(self):
@@ -73,6 +74,7 @@ class TestBuildWrapperContent:
         assert 'conda activate "/envs/my-env"' in content
         assert "export PYTHONNOUSERSITE=1" in content
         assert 'export FI_PROVIDER="${FI_PROVIDER:-tcp}"' in content
+        assert "unset PYTHONPATH" in content
         assert 'exec python -m ipykernel_launcher "$@"' in content
 
 

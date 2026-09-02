@@ -172,6 +172,38 @@ class TestSystemDetection:
         result = _detect_system()
         assert result == "unknown"
 
+    @patch("cstar_forge.config.platform.system")
+    @patch("cstar_forge.config._get_hostname")
+    @patch.dict(os.environ, {"CLUSTER": "bouchet"}, clear=True)
+    def test_detect_system_bouchet_via_cluster_env(self, mock_hostname, mock_system):
+        """Test system detection for Bouchet via the CLUSTER env var."""
+        mock_system.return_value = "Linux"
+        mock_hostname.return_value = "bouchet-login01"
+        result = _detect_system()
+        assert result == "YCRC_bouchet"
+
+    @patch("cstar_forge.config.platform.system")
+    @patch("cstar_forge.config._get_hostname")
+    @patch.dict(os.environ, {"SLURM_CLUSTER_NAME": "bouchet"}, clear=True)
+    def test_detect_system_bouchet_via_slurm_cluster_name(
+        self, mock_hostname, mock_system
+    ):
+        """Test system detection for Bouchet via the SLURM_CLUSTER_NAME env var."""
+        mock_system.return_value = "Linux"
+        mock_hostname.return_value = "unknown-host"
+        result = _detect_system()
+        assert result == "YCRC_bouchet"
+
+    @patch("cstar_forge.config.platform.system")
+    @patch("cstar_forge.config._get_hostname")
+    @patch.dict(os.environ, {"CLUSTER": "BOUCHET"}, clear=True)
+    def test_detect_system_bouchet_exact_match_only(self, mock_hostname, mock_system):
+        """Bouchet detection matches exactly, mirroring C-Star's is_match (no case folding)."""
+        mock_system.return_value = "Linux"
+        mock_hostname.return_value = "unknown-host"
+        result = _detect_system()
+        assert result == "unknown"
+
     @patch.dict(os.environ, {"HOSTNAME": "test-host"})
     @patch("cstar_forge.config.socket.gethostname", return_value="")
     @patch("cstar_forge.config.platform.node", return_value="")
@@ -222,6 +254,7 @@ class TestSystemLayoutRegistry:
         assert "MacOS" in SYSTEM_LAYOUT_REGISTRY
         assert "RCAC_anvil" in SYSTEM_LAYOUT_REGISTRY
         assert "NERSC_perlmutter" in SYSTEM_LAYOUT_REGISTRY
+        assert "YCRC_bouchet" in SYSTEM_LAYOUT_REGISTRY
         assert "unknown" in SYSTEM_LAYOUT_REGISTRY
 
     def test_register_system_decorator(self):
@@ -265,12 +298,12 @@ class TestSystemLayoutRegistry:
         from cstar_forge.config import USER
 
         layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
-        env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
+        env = {"PROJECT": str(tmp_path / "proj"), "SCRATCH": str(tmp_path / "scratch")}
         source_data, input_data, scratch = layout_fn(tmp_path, env)
 
-        assert source_data == tmp_path / "work" / "cstar-forge-data" / "source-data"
+        assert source_data == tmp_path / "proj" / "cstar-forge-data" / "source-data"
         assert (
-            input_data == tmp_path / "work" / "cstar-forge-data" / USER / "input-data"
+            input_data == tmp_path / "proj" / "cstar-forge-data" / USER / "input-data"
         )
         assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
 
@@ -288,6 +321,159 @@ class TestSystemLayoutRegistry:
             == tmp_path / "scratch" / "cstar-forge-data" / USER / "input-data"
         )
         assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
+
+    def test_bouchet_layout(self, tmp_path, monkeypatch):
+        """Test YCRC Bouchet layout function using the discovered scratch_pi_* dir."""
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
+
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
+        source_data, input_data, scratch = layout_fn(tmp_path, {})
+
+        scratch_root = tmp_path / "scratch_pi_abc" / "testuser"
+        assert source_data == scratch_root / "cstar-forge-data" / "source-data"
+        assert input_data == scratch_root / "cstar-forge-data" / "input-data"
+        assert scratch == scratch_root / "cstar" / "_forge_bp_runs"
+
+    def test_bouchet_layout_scratch_env_override_wins(self, tmp_path, monkeypatch):
+        """An explicit $SCRATCH override wins over the scratch_pi_* glob."""
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
+
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
+        env = {"SCRATCH": str(tmp_path / "explicit-scratch")}
+        source_data, input_data, scratch = layout_fn(tmp_path, env)
+
+        scratch_root = tmp_path / "explicit-scratch"
+        assert source_data == scratch_root / "cstar-forge-data" / "source-data"
+        assert input_data == scratch_root / "cstar-forge-data" / "input-data"
+        assert scratch == scratch_root / "cstar" / "_forge_bp_runs"
+
+    def test_bouchet_layout_falls_back_to_unknown_without_scratch_pi(
+        self, tmp_path, monkeypatch
+    ):
+        """No scratch_pi_* dir and no $SCRATCH falls back to the unknown layout."""
+        monkeypatch.setattr(config_module, "USER", "testuser")
+
+        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
+        unknown_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
+        assert bouchet_fn(tmp_path, {}) == unknown_fn(tmp_path, {})
+
+    # ---- $PROJECT: standard env var for the (shared) data-base parent dir ----
+
+    def test_anvil_project_drives_everything_work_ignored(self, tmp_path):
+        """$PROJECT drives the data base AND the scratch fallback; $WORK is never
+        consulted, so a user-overridden $PROJECT moves everything with it.
+        """
+        from cstar_forge.config import USER
+
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
+        env = {"PROJECT": str(tmp_path / "proj"), "WORK": str(tmp_path / "work")}
+        source_data, input_data, scratch = layout_fn(tmp_path, env)
+
+        base = tmp_path / "proj" / "cstar-forge-data"
+        assert source_data == base / "source-data"
+        assert input_data == base / USER / "input-data"
+        # No $SCRATCH: the scratch fallback derives from $PROJECT, not $WORK.
+        assert scratch == tmp_path / "proj" / "scratch" / "cstar" / "_forge_bp_runs"
+
+    def test_anvil_without_project_uses_home_even_if_work_set(self, tmp_path):
+        """No $PROJECT falls back to home/work; a lone $WORK is ignored."""
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["RCAC_anvil"]
+        env = {"WORK": str(tmp_path / "elsewhere")}
+        source_data, _, _ = layout_fn(tmp_path, env)
+        assert source_data == tmp_path / "work" / "cstar-forge-data" / "source-data"
+
+    def test_perlmutter_project_moves_data_base_not_run_scratch(self, tmp_path):
+        """$PROJECT relocates the data base only; run scratch stays on $SCRATCH."""
+        from cstar_forge.config import USER
+
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["NERSC_perlmutter"]
+        env = {"PROJECT": str(tmp_path / "proj"), "SCRATCH": str(tmp_path / "scratch")}
+        source_data, input_data, scratch = layout_fn(tmp_path, env)
+
+        base = tmp_path / "proj" / "cstar-forge-data"
+        assert source_data == base / "source-data"
+        assert input_data == base / USER / "input-data"
+        assert scratch == tmp_path / "scratch" / "cstar" / "_forge_bp_runs"
+
+    def test_bouchet_project_moves_data_base_and_adds_user_layer(
+        self, tmp_path, monkeypatch
+    ):
+        """$PROJECT relocates the data base and restores the per-user input-data
+        layer (the shared project dir, unlike the discovered scratch root, does
+        not end in the username); run scratch stays on the discovered root.
+        """
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        (tmp_path / "scratch_pi_abc" / "testuser").mkdir(parents=True)
+
+        layout_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
+        env = {"PROJECT": str(tmp_path / "proj")}
+        source_data, input_data, scratch = layout_fn(tmp_path, env)
+
+        base = tmp_path / "proj" / "cstar-forge-data"
+        assert source_data == base / "source-data"
+        assert input_data == base / "testuser" / "input-data"
+        scratch_root = tmp_path / "scratch_pi_abc" / "testuser"
+        assert scratch == scratch_root / "cstar" / "_forge_bp_runs"
+
+    def test_bouchet_project_ignored_without_scratch_root(self, tmp_path, monkeypatch):
+        """Documented edge: with no discoverable scratch root, the home-anchored
+        fallback ignores $PROJECT entirely.
+        """
+        monkeypatch.setattr(config_module, "USER", "testuser")
+
+        bouchet_fn = SYSTEM_LAYOUT_REGISTRY["YCRC_bouchet"]
+        unknown_fn = SYSTEM_LAYOUT_REGISTRY["unknown"]
+        env = {"PROJECT": str(tmp_path / "proj")}
+        assert bouchet_fn(tmp_path, env) == unknown_fn(tmp_path, {})
+
+
+class TestBouchetScratchRoot:
+    """Tests for _bouchet_scratch_root (the scratch_pi_* glob heuristic)."""
+
+    def test_picks_sorted_first_scratch_pi_dir(self, tmp_path, monkeypatch):
+        from cstar_forge.config import _bouchet_scratch_root
+
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        (tmp_path / "scratch_pi_zeta").mkdir()
+        (tmp_path / "scratch_pi_alpha").mkdir()
+        (tmp_path / "scratch_pi_mid").mkdir()
+
+        result = _bouchet_scratch_root(tmp_path)
+        assert result == tmp_path / "scratch_pi_alpha" / "testuser"
+
+    def test_skips_non_directory_matches(self, tmp_path, monkeypatch):
+        from cstar_forge.config import _bouchet_scratch_root
+
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        (tmp_path / "scratch_pi_notadir").write_text("not a directory")
+        (tmp_path / "scratch_pi_real").mkdir()
+
+        result = _bouchet_scratch_root(tmp_path)
+        assert result == tmp_path / "scratch_pi_real" / "testuser"
+
+    def test_returns_none_when_no_matches(self, tmp_path, monkeypatch):
+        from cstar_forge.config import _bouchet_scratch_root
+
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        result = _bouchet_scratch_root(tmp_path)
+        assert result is None
+
+    def test_returns_none_on_oserror(self, tmp_path, monkeypatch, caplog):
+        """A failed scan (e.g. stale mount) degrades to None instead of raising."""
+        from cstar_forge.config import _bouchet_scratch_root
+
+        monkeypatch.setattr(config_module, "USER", "testuser")
+
+        def _boom(self, pattern):
+            raise OSError("stale NFS handle")
+
+        monkeypatch.setattr(Path, "glob", _boom)
+        with caplog.at_level("WARNING", logger="cstar_forge.config"):
+            result = _bouchet_scratch_root(tmp_path)
+        assert result is None
+        assert "scratch_pi_*" in caplog.text
 
 
 class TestRelocateWorkingDir:
@@ -310,7 +496,7 @@ class TestRelocateWorkingDir:
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
-        env = {"WORK": str(tmp_path / "work"), "SCRATCH": str(tmp_path / "scratch")}
+        env = {"PROJECT": str(tmp_path / "proj"), "SCRATCH": str(tmp_path / "scratch")}
         wd = relocate_working_dir(
             home / "cstar" / "_forge_bp_runs" / "my-run",
             system_tag="RCAC_anvil",
@@ -319,11 +505,12 @@ class TestRelocateWorkingDir:
         )
         assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
-    def test_anvil_falls_back_to_work_scratch(self, tmp_path):
+    def test_anvil_falls_back_to_project_scratch(self, tmp_path):
+        """No $SCRATCH: the fallback derives from $PROJECT; $WORK is ignored."""
         from cstar_forge.config import relocate_working_dir
 
         home = tmp_path / "home"
-        env = {"WORK": str(tmp_path / "work")}
+        env = {"PROJECT": str(tmp_path / "proj"), "WORK": str(tmp_path / "work")}
         wd = relocate_working_dir(
             home / "cstar" / "_forge_bp_runs" / "my-run",
             system_tag="RCAC_anvil",
@@ -331,7 +518,7 @@ class TestRelocateWorkingDir:
             home=home,
         )
         assert (
-            wd == tmp_path / "work" / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
+            wd == tmp_path / "proj" / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
         )
 
     def test_legacy_cstar_forge_run_root_rebases_to_scratch(self, tmp_path):
@@ -446,6 +633,48 @@ class TestRelocateWorkingDir:
             )
         assert wd == custom
         assert caplog.text == ""
+
+    def test_default_path_rebases_to_scratch_on_bouchet(self, tmp_path, monkeypatch):
+        from cstar_forge.config import relocate_working_dir
+
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        home = tmp_path / "home"
+        (home / "scratch_pi_abc" / "testuser").mkdir(parents=True)
+        wd = relocate_working_dir(
+            home / "cstar" / "_forge_bp_runs" / "my-run",
+            system_tag="YCRC_bouchet",
+            env={},
+            home=home,
+        )
+        assert (
+            wd
+            == home
+            / "scratch_pi_abc"
+            / "testuser"
+            / "cstar"
+            / "_forge_bp_runs"
+            / "my-run"
+        )
+
+    def test_bouchet_without_scratch_pi_leaves_path_alone(self, tmp_path, monkeypatch):
+        """With no scratch_pi_* dir discoverable, _hpc_scratch_root returns None,
+        so relocate_working_dir returns the path unchanged (same as any other
+        HPC system with no resolvable scratch root -- no warning in this branch,
+        since the function returns before the home-rooted-warning check).
+        """
+        from cstar_forge.config import relocate_working_dir
+
+        monkeypatch.setattr(config_module, "USER", "testuser")
+        home = tmp_path / "home"
+        home.mkdir(parents=True)
+        custom = home / "cstar" / "_forge_bp_runs" / "my-run"
+        wd = relocate_working_dir(
+            custom,
+            system_tag="YCRC_bouchet",
+            env={},
+            home=home,
+        )
+        assert wd == custom
 
     def test_tilde_default_expands_then_rebases(self, tmp_path, monkeypatch):
         from cstar_forge.config import relocate_working_dir
@@ -649,6 +878,11 @@ class TestClusterType:
     def test_default_cluster_type_perlmutter(self):
         """Test default cluster type for NERSC Perlmutter."""
         result = _default_cluster_type("NERSC_perlmutter")
+        assert result == config_module.ClusterType.SLURM
+
+    def test_default_cluster_type_bouchet(self):
+        """Test default cluster type for YCRC Bouchet."""
+        result = _default_cluster_type("YCRC_bouchet")
         assert result == config_module.ClusterType.SLURM
 
     def test_default_cluster_type_unsupported(self):
