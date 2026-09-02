@@ -80,6 +80,7 @@ class TestSlurmJob:
             primary_queue_name="test_queue",
             other_scheduler_directives={"-mock_directive": "mock_value"},
             requires_task_distribution=False,
+            max_cpus_per_node=64,
         )
 
         # Define common job parameters
@@ -107,6 +108,9 @@ class TestSlurmJob:
     def test_script_task_distribution_not_required(self):
         """Verifies that the correct script is generated when the node x cpu breakdown
         is not required.
+
+        The node count is still pinned (derived from the system's CPUs per node) so
+        that jobs which fit on a single node are not scattered across several.
         """
         # Initialize the job
         job = SlurmJob(
@@ -118,6 +122,7 @@ class TestSlurmJob:
             "#SBATCH --job-name=test_job",
             "#SBATCH --output=/test/output.log",
             "#SBATCH --qos=test_queue",
+            "#SBATCH --nodes=1",
             "#SBATCH --ntasks=4",
             "#SBATCH --account=test_account",
             "#SBATCH --export=ALL",
@@ -134,6 +139,74 @@ class TestSlurmJob:
         assert not missing_content, (
             f"The SBATCH script is missing required content: {missing_content}"
         )
+        assert "#SBATCH --ntasks-per-node" not in job.script
+
+    def test_script_task_distribution_not_required_with_cpus_per_node(self):
+        """Verifies that a user-supplied `cpus_per_node` acts as the per-node capacity
+        when the node x cpu breakdown is not required.
+
+        This lets a user target a heterogeneous partition's larger node types: the
+        node count is derived from their value instead of the queue's smallest node,
+        and a matching per-node task ceiling is emitted.
+        """
+        params = self.common_job_params | {"cpus": 96, "cpus_per_node": 96}
+        job = SlurmJob(**params)
+
+        required_content = {
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=96",
+            "#SBATCH --ntasks=96",
+        }
+        actual_content = set(job.script.strip().split("\n"))
+        missing_content = ", ".join(list(required_content.difference(actual_content)))
+
+        assert not missing_content, (
+            f"The SBATCH script is missing required content: {missing_content}"
+        )
+
+    def test_script_single_node_clamps_to_queue_capacity(self):
+        """A `single_node` job that asks for more CPUs than the queue's nodes have
+        is pinned to one node with its request clamped to that capacity.
+        """
+        with patch.object(
+            type(self.mock_partition),
+            "max_cpus_per_node",
+            new_callable=PropertyMock,
+            return_value=8,
+        ):
+            self.scheduler.queues = [self.mock_partition]
+            job = SlurmJob(**self.common_job_params | {"cpus": 16, "single_node": True})
+
+        required_content = {
+            "#SBATCH --nodes=1",
+            "#SBATCH --ntasks-per-node=8",
+            "#SBATCH --ntasks=8",
+        }
+        actual_content = set(job.script.strip().split("\n"))
+        missing_content = ", ".join(list(required_content.difference(actual_content)))
+
+        assert not missing_content, (
+            f"The SBATCH script is missing required content: {missing_content}"
+        )
+        assert "#SBATCH --ntasks=16" not in job.script
+
+    def test_script_task_distribution_not_required_queue_capacity(self):
+        """Verifies the node count is derived from the queue's own CPUs per node when
+        available, in preference to the scheduler-wide value.
+        """
+        with patch.object(
+            type(self.mock_partition),
+            "max_cpus_per_node",
+            new_callable=PropertyMock,
+            return_value=8,
+        ):
+            self.scheduler.queues = [self.mock_partition]
+            job = SlurmJob(**self.common_job_params | {"cpus": 16})
+
+        # queue capacity (8) wins over the scheduler-wide 64
+        assert job.nodes == 2
+        assert "#SBATCH --nodes=2" in job.script
+        assert "#SBATCH --ntasks=16" in job.script
 
     @pytest.mark.filterwarnings(
         r"ignore:.* Attempting to create scheduler job.*:UserWarning"

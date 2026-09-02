@@ -1,3 +1,4 @@
+import functools
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -105,6 +106,58 @@ def query_max_walltime_via_sinfo(name: str) -> str | None:
     return format_walltime(mw) if mw else None
 
 
+@functools.cache
+def _cpus_per_node_via_sinfo(name: str) -> int:
+    """Query sinfo for the partition's CPUs per node (smallest node type).
+
+    Cached per partition name: the value is static hardware information and
+    every scheduler job would otherwise re-run the query. Only successful
+    lookups are cached -- `functools.cache` does not memoize exceptions, so a
+    transient failure is retried on the next call rather than pinned.
+
+    Raises
+    ------
+    LookupError
+        If sinfo returns nothing or its output cannot be parsed.
+    """
+    sp_cmd = f"sinfo --noheader --format='%c' --partition={name}"
+    stdout = _run_cmd(sp_cmd)
+    if not stdout:
+        raise LookupError(f"sinfo reported no CPUs per node for partition {name!r}")
+    try:
+        return min(
+            int(line.strip().rstrip("+"))
+            for line in stdout.splitlines()
+            if line.strip()
+        )
+    except ValueError as ex:
+        log.warning(
+            f"Cannot parse CPUs per node {stdout!r} for partition {name!r}; "
+            "treating the value as unknown."
+        )
+        raise LookupError(f"unparseable CPUs per node for partition {name!r}") from ex
+
+
+def query_max_cpus_per_node_via_sinfo(name: str) -> int | None:
+    """Retrieve the CPUs per node for the SLURM partition via sinfo.
+
+    A heterogeneous partition reports one value per node type; the smallest is
+    returned so node counts derived from it are always satisfiable. Successful
+    lookups are cached for the life of the process (see
+    `_cpus_per_node_via_sinfo`); unknown results are not.
+
+    Returns
+    -------
+    int or None
+        The number of CPUs per node on the partition's smallest node type, or
+        `None` if the value cannot be determined.
+    """
+    try:
+        return _cpus_per_node_via_sinfo(name)
+    except LookupError:
+        return None
+
+
 def query_max_walltime_via_sacctmgr(name: str) -> str | None:
     """Retrieve the maximum walltime using sacctmgr.
 
@@ -180,6 +233,11 @@ class Queue(ABC):
         fn = self._max_walltime_method or self._default_max_walltime_method
         return fn(self.query_name)
 
+    @property
+    def max_cpus_per_node(self) -> int | None:
+        """Return the number of CPUs available per node on the queue, when known."""
+        return None
+
 
 class SlurmQueue(Queue, ABC):
     """Abstract base class for SLURM queues.
@@ -254,6 +312,11 @@ class SlurmPartition(SlurmQueue):
     @property
     def _default_max_walltime_method(self) -> Callable[[str], str | None]:
         return query_max_walltime_via_sinfo
+
+    @property
+    def max_cpus_per_node(self) -> int | None:
+        """CPUs per node on this partition's smallest node type, from sinfo."""
+        return query_max_cpus_per_node_via_sinfo(self.query_name)
 
 
 class PBSQueue(Queue):

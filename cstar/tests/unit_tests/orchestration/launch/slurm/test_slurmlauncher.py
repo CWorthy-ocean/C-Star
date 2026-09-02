@@ -4,9 +4,10 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.base.exceptions import BlueprintDeferredError, CstarError
-from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.launch.slurm import SlurmComputeSpec, SlurmLauncher
 from cstar.orchestration.orchestration import LiveStep, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
@@ -17,8 +18,18 @@ from cstar.orchestration.utils import (
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
 
 
+class FakePartition(SlurmPartition):
+    """A partition that cannot be queried; per-node CPU capacity falls back to the
+    scheduler-wide value.
+    """
+
+    @property
+    def max_cpus_per_node(self) -> int | None:
+        return None
+
+
 def fake_get_queue(name: str = "fake-queue") -> t.Any:
-    return SlurmPartition(name, "cannot-query", lambda x: "48:00:00")
+    return FakePartition(name, "cannot-query", lambda x: "48:00:00")
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -68,9 +79,54 @@ def test_slurmlauncher_adapt_step_no_overrides(
     assert minimum_spec.queue_name == job.queue_name
     assert minimum_spec.max_walltime == job.walltime
 
-    # confirm default behaviors of `create_scheduler_job` for unspecified spec attributes
-    assert minimum_spec.num_nodes == job.nodes
+    # confirm default behaviors of `create_scheduler_job` for unspecified spec
+    # attributes: the node count is derived (1 cpu fits on one node), while
+    # cpus_per_node stays unset
+    assert minimum_spec.num_nodes is None
+    assert job.nodes == 1
     assert minimum_spec.cpus_per_node == job.cpus_per_node
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_slurmlauncher_adapt_step_single_node_clamps_cpus(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """A `single_node` compute override (recorded by the workplan transformer from
+    the blueprint) reaches the job: it is pinned to one node and its cpu request
+    is clamped to the per-node capacity instead of spilling onto a second node.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"compute_overrides": {"slurm": {"num_cpus": 300, "single_node": True}}},
+    )
+
+    mock_mgr = mock.Mock()
+    mock_mgr.environment.package_root = tmp_path
+    mock_mgr.scheduler = SlurmScheduler(
+        queues=[fake_get_queue("default-q")],
+        primary_queue_name="default-q",
+        other_scheduler_directives={},
+        requires_task_distribution=False,
+        documentation="fake slurm scheduduler",
+        max_cpus_per_node=128,
+    )
+    mock_getsysmgr = mock.Mock(return_value=mock_mgr)
+
+    with (
+        mock.patch("cstar.execution.scheduler_job.get_sysmgr", mock_getsysmgr),
+        mock.patch.object(mock_mgr.scheduler, "get_queue", fake_get_queue),
+    ):
+        spec = SlurmLauncher._get_compute_spec(live_step)  # type: ignore
+        job = SlurmLauncher.adapt_step(live_step, [])
+
+    assert spec.single_node is True
+    assert spec.num_cpus == 300
+    assert job.nodes == 1
+    assert job.cpus == 128
+    assert job.cpus_per_node == 128
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -91,7 +147,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "alt-q",
             "42:00:00",
             1,
-            None,
+            1,
             None,
             id="queue-name",
         ),
@@ -101,7 +157,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "42:00:00",
             42,
-            None,
+            1,
             None,
             id="num-cpus",
         ),
@@ -121,7 +177,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "01:00:00",
             1,
-            None,
+            1,
             None,
             id="walltime",
         ),
@@ -131,7 +187,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "42:00:00",
             1,
-            None,
+            1,
             32,
             id="cpus-per-node",
         ),
@@ -141,7 +197,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "42:00:00",
             1,
-            None,
+            1,
             None,
             id="account-name",
         ),
@@ -305,6 +361,37 @@ def test_compute_spec_invalid_overrides_fail_loudly(
     step = LiveStep.from_step(
         deferred_live_step,
         update={"compute_overrides": {"slurm": {"max_walltime": "not-a-walltime"}}},
+    )
+
+    with pytest.raises(CstarError):
+        _ = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+
+def test_compute_spec_single_node_rejects_multiple_nodes() -> None:
+    """A `single_node` spec that also asks for more than one node is contradictory
+    and is rejected by the spec itself, before any job is built.
+    """
+    with pytest.raises(ValidationError, match="single_node is set but num_nodes=2"):
+        SlurmComputeSpec(num_cpus=64, num_nodes=2, single_node=True)
+
+    # one node, or an unset node count, is consistent
+    assert SlurmComputeSpec(num_cpus=64, num_nodes=1, single_node=True).num_nodes == 1
+    assert SlurmComputeSpec(num_cpus=64, single_node=True).num_nodes is None
+
+
+def test_compute_spec_single_node_multiple_nodes_fails_loudly(
+    deferred_live_step: LiveStep,
+) -> None:
+    """The contradiction surfaces through the launcher's compute-spec adaptation as
+    a `CstarError`, aborting submission rather than falling back to defaults.
+    """
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={
+            "compute_overrides": {
+                "slurm": {"num_cpus": 64, "num_nodes": 2, "single_node": True}
+            }
+        },
     )
 
     with pytest.raises(CstarError):

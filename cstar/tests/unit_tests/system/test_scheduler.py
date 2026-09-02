@@ -11,6 +11,7 @@ from cstar.system.scheduler import (
     SlurmQOS,
     SlurmScheduler,
     format_walltime,
+    query_max_cpus_per_node_via_sinfo,
     query_max_walltime_via_sacctmgr,
     query_max_walltime_via_sinfo,
 )
@@ -582,6 +583,73 @@ def test_query_max_walltime_via_sinfo_unlimited() -> None:
 
         assert result is None
         mock_sinfo.assert_called_once()
+
+
+@pytest.fixture
+def clear_cpus_per_node_cache() -> None:
+    """Reset the per-partition CPUs-per-node cache so parametrized cases that reuse
+    a partition name do not see each other's answers.
+    """
+    from cstar.system.scheduler import _cpus_per_node_via_sinfo
+
+    _cpus_per_node_via_sinfo.cache_clear()
+
+
+@pytest.mark.usefixtures("clear_cpus_per_node_cache")
+@pytest.mark.parametrize(
+    ("sinfo_output", "expected"),
+    [
+        pytest.param("64", 64, id="single node type"),
+        pytest.param("48\n128\n64", 48, id="heterogeneous partition returns min"),
+        pytest.param("64+", 64, id="grouped row suffix"),
+        pytest.param("", None, id="no output"),
+        pytest.param("garbage", None, id="unparseable output"),
+    ],
+)
+def test_query_max_cpus_per_node_via_sinfo(
+    sinfo_output: str, expected: int | None
+) -> None:
+    """Verify CPUs per node are parsed from sinfo output, taking the smallest node
+    type on a heterogeneous partition, and fall back to None when unavailable.
+    """
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value=sinfo_output)
+    ) as mock_sinfo:
+        result = query_max_cpus_per_node_via_sinfo("mock-partition-name")
+
+        assert result == expected
+        mock_sinfo.assert_called_once()
+
+
+@pytest.mark.usefixtures("clear_cpus_per_node_cache")
+def test_query_max_cpus_per_node_via_sinfo_caches_successes_only() -> None:
+    """A successful lookup is cached per partition (sinfo runs once for repeated
+    queries), while an unknown result is retried on the next call rather than
+    pinned for the life of the process.
+    """
+    # a transient failure is not cached: the next call queries sinfo again
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="")
+    ) as mock_sinfo:
+        assert query_max_cpus_per_node_via_sinfo("flaky-partition") is None
+        assert query_max_cpus_per_node_via_sinfo("flaky-partition") is None
+        assert mock_sinfo.call_count == 2
+
+    # a successful lookup is cached: repeated queries do not re-run sinfo
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="64")
+    ) as mock_sinfo:
+        assert query_max_cpus_per_node_via_sinfo("flaky-partition") == 64
+        assert query_max_cpus_per_node_via_sinfo("flaky-partition") == 64
+        assert mock_sinfo.call_count == 1
+
+    # the cache is keyed by partition name
+    with patch(
+        "cstar.system.scheduler._run_cmd", MagicMock(return_value="128")
+    ) as mock_sinfo:
+        assert query_max_cpus_per_node_via_sinfo("other-partition") == 128
+        assert query_max_cpus_per_node_via_sinfo("flaky-partition") == 64
+        assert mock_sinfo.call_count == 1
 
 
 def test_query_max_walltime_via_sacctmgr() -> None:

@@ -350,6 +350,7 @@ def create_scheduler_job(
     cpus: int,
     nodes: int | None = None,
     cpus_per_node: int | None = None,
+    single_node: bool = False,
     script_path: str | Path | None = None,
     run_path: str | Path | None = None,
     job_name: str | None = None,
@@ -378,6 +379,13 @@ def create_scheduler_job(
         The number of CPUs per node to request. Defaults to None.
         If not provided and a specific nodes x cpus distribution is required,
         C-Star will attempt to calculate an appropriate number of nodes.
+        On systems that do not require an explicit distribution, this value is
+        used as the assumed per-node CPU capacity when calculating the minimum
+        node count (e.g. to target a partition's larger node types).
+    single_node : bool, optional
+        Whether the job is confined to one node. When `True`, `nodes` is pinned
+        to 1 and `cpus` is clamped to the per-node capacity (`cpus_per_node`,
+        else the queue's CPUs per node, else the system maximum). Defaults to False.
     script_path : str or Path, optional
         The file path to save the job script. Defaults to the current directory with
         an auto-generated name.
@@ -423,6 +431,7 @@ def create_scheduler_job(
         cpus=cpus,
         nodes=nodes,
         cpus_per_node=cpus_per_node,
+        single_node=single_node,
         account_key=account_key,
         script_path=script_path,
         run_path=run_path,
@@ -499,6 +508,7 @@ class SchedulerJob(ExecutionHandler, ABC):
         cpus: int,
         nodes: int | None = None,
         cpus_per_node: int | None = None,
+        single_node: bool = False,
         script_path: str | Path | None = None,
         run_path: str | Path | None = None,
         job_name: str | None = None,
@@ -528,6 +538,11 @@ class SchedulerJob(ExecutionHandler, ABC):
             The number of CPUs per node to request. If not provided and a specific nodes x CPUs
             distribution is required, C-Star will attempt to calculate an appropriate
             number of CPUs per node.
+        single_node : bool, optional
+            Whether the job is confined to one node (a single-process application
+            rather than an MPI job). When `True`, the node count is pinned to 1 and
+            `cpus` is clamped to the per-node capacity: `cpus_per_node` if given,
+            else the queue's CPUs per node, else the system maximum. Defaults to False.
         script_path : str or Path, optional
             The file path to save the job script. Defaults to the current directory with
             an auto-generated name.
@@ -553,7 +568,8 @@ class SchedulerJob(ExecutionHandler, ABC):
         ------
         ValueError
             If no walltime is provided and the queue's maximum walltime is unavailable, or
-            if the provided walltime exceeds the queue's maximum allowed walltime.
+            if the provided walltime exceeds the queue's maximum allowed walltime, or if
+            `single_node` is set alongside a `nodes` count other than 1.
         EnvironmentError
             If neither `nodes` nor `cpus_per_node` are provided and the scheduler cannot
             determine the system's CPUs per node automatically.
@@ -616,56 +632,9 @@ class SchedulerJob(ExecutionHandler, ABC):
                     + f"{self.queue.max_walltime}"
                 )
 
-        # Explicitly typing to avoid mypy confusion in conditional pathways below
-        self._cpus_per_node: int | None
-        self._nodes: int | None
-
-        if (
-            (nodes is None)
-            and (cpus_per_node is not None)
-            and (scheduler.requires_task_distribution)
-        ):
-            self._nodes = ceil(cpus / cpus_per_node)
-            self._cpus_per_node = cpus_per_node
-        elif (
-            (nodes is not None)
-            and (cpus_per_node is None)
-            and (scheduler.requires_task_distribution)
-        ):
-            self._nodes = nodes
-            self._cpus_per_node = int(cpus / nodes)
-        elif (
-            (nodes is None)
-            and (cpus_per_node is None)
-            and (scheduler.requires_task_distribution)
-        ):
-            if scheduler.global_max_cpus_per_node is None:
-                raise OSError(
-                    "You attempted to create a scheduler job without 'nodes', and "
-                    + "'cpus_per_node' parameters, but your scheduler explicitly "
-                    + "requires a task distribution. C-Star is unable to determine "
-                    + "your system's CPUs per node automatically and cannot continue"
-                )
-
-            nnodes, ncpus = self._calculate_node_distribution(
-                cpus, scheduler.global_max_cpus_per_node
-            )
-            self.log.warning(
-                (
-                    "Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
-                    + "parameters, but your system requires an explicitly specified task distribution."
-                    + "\n C-Star will attempt "
-                    + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
-                    + "\nbased on your system maximum of "
-                    + f"{scheduler.global_max_cpus_per_node} CPUS per node "
-                    + f"\nand your job requirement of {cpus} CPUS."
-                ),
-            )
-            self._cpus_per_node = ncpus
-            self._nodes = nnodes
-        else:
-            self._cpus_per_node = cpus_per_node
-            self._nodes = nodes
+        self._cpus, self._nodes, self._cpus_per_node = self._resolve_distribution(
+            cpus, nodes, cpus_per_node, single_node
+        )
 
         self._account_key = account_key
         self._id: int | None = None
@@ -814,6 +783,138 @@ class SchedulerJob(ExecutionHandler, ABC):
         """
         pass
 
+    def _per_node_capacity(self, cpus_per_node: int | None) -> int | None:
+        """The CPUs per node to plan against: a user-supplied `cpus_per_node`
+        (e.g. to target a heterogeneous partition's larger node types), else the
+        queue's own value, else the scheduler-wide maximum. `None` when unknown.
+        """
+        return (
+            cpus_per_node
+            or self.queue.max_cpus_per_node
+            or self._scheduler.global_max_cpus_per_node
+            or None
+        )
+
+    def _resolve_distribution(
+        self,
+        cpus: int,
+        nodes: int | None,
+        cpus_per_node: int | None,
+        single_node: bool,
+    ) -> tuple[int, int | None, int | None]:
+        """Settle the job's (cpus, nodes, cpus_per_node) request.
+
+        Three regimes, in order of precedence:
+
+        1. `single_node`: pin to one node and clamp `cpus` to the per-node capacity.
+        2. An explicit `nodes` count is honored as-is; where the scheduler requires
+           a task distribution and `cpus_per_node` is missing, it is derived.
+        3. No `nodes` count: derive the minimum node count from the per-node
+           capacity so jobs that fit on one node stay on one node.
+
+        Returns
+        -------
+        tuple[int, int | None, int | None]
+            The (possibly clamped) cpus, node count, and cpus per node to request.
+        """
+        if single_node:
+            return self._single_node_distribution(cpus, nodes, cpus_per_node)
+
+        if nodes is not None:
+            if cpus_per_node is None and self._scheduler.requires_task_distribution:
+                cpus_per_node = int(cpus / nodes)
+            return cpus, nodes, cpus_per_node
+
+        if self._scheduler.requires_task_distribution:
+            if cpus_per_node is not None:
+                return cpus, ceil(cpus / cpus_per_node), cpus_per_node
+            return self._mandatory_distribution(cpus)
+
+        # Without a node count the scheduler is free to scatter tasks across
+        # nodes, which strands non-MPI (single-process) steps on a fraction
+        # of their CPUs; pin the minimum node count whenever capacity is known.
+        capacity = self._per_node_capacity(cpus_per_node)
+        if capacity is None:
+            self.log.warning(
+                f"C-Star cannot determine the CPUs per node for queue "
+                f"{self._queue_name!r} and no 'cpus_per_node' was provided; "
+                "submitting without a node count. The scheduler may spread "
+                "this job's tasks across multiple nodes."
+            )
+            return cpus, None, cpus_per_node
+        return cpus, ceil(cpus / capacity), cpus_per_node
+
+    def _single_node_distribution(
+        self, cpus: int, nodes: int | None, cpus_per_node: int | None
+    ) -> tuple[int, int, int]:
+        """Distribution for a single-process application (threads / local dask):
+        one node, with the cpu request clamped to that node's capacity instead
+        of spilling onto nodes the job would never touch.
+
+        Raises
+        ------
+        ValueError
+            If a node count other than 1 was requested.
+        """
+        if nodes is not None and nodes != 1:
+            raise ValueError(
+                f"Cannot create scheduler job: 'single_node' is set but "
+                f"nodes={nodes} was requested. A single-node job must use "
+                "nodes=1 (or leave 'nodes' unset)."
+            )
+        capacity = self._per_node_capacity(cpus_per_node)
+        if capacity is None:
+            self.log.warning(
+                f"C-Star cannot determine the CPUs per node for queue "
+                f"{self._queue_name!r} and no 'cpus_per_node' was provided; "
+                f"submitting the single-node job with all {cpus} requested "
+                "CPUs on one node. The scheduler will reject the job if "
+                "that exceeds a node's capacity."
+            )
+        elif cpus > capacity:
+            self.log.warning(
+                f"Single-node job requested {cpus} CPUs but queue "
+                f"{self._queue_name!r} provides {capacity} CPUs per node; "
+                f"clamping the request to {capacity}."
+            )
+            cpus = capacity
+        # a per-node ceiling equal to the total keeps every task on the one
+        # node (and is required where a distribution is mandatory)
+        return cpus, 1, cpus
+
+    def _mandatory_distribution(self, cpus: int) -> tuple[int, int, int]:
+        """Distribution when the scheduler requires an explicit nodes x cpus
+        layout but neither was supplied: spread `cpus` evenly over the fewest
+        nodes the system maximum allows.
+
+        Raises
+        ------
+        EnvironmentError
+            If the system's CPUs per node cannot be determined.
+        """
+        max_cpus = self._scheduler.global_max_cpus_per_node
+        if max_cpus is None:
+            raise OSError(
+                "You attempted to create a scheduler job without 'nodes', and "
+                + "'cpus_per_node' parameters, but your scheduler explicitly "
+                + "requires a task distribution. C-Star is unable to determine "
+                + "your system's CPUs per node automatically and cannot continue"
+            )
+
+        nnodes, ncpus = self._calculate_node_distribution(cpus, max_cpus)
+        self.log.warning(
+            (
+                "Attempting to create scheduler job without 'nodes' and 'cpus_per_node' "
+                + "parameters, but your system requires an explicitly specified task distribution."
+                + "\n C-Star will attempt "
+                + f"\nto use a distribution of {nnodes} nodes with {ncpus} CPUs each, "
+                + "\nbased on your system maximum of "
+                + f"{max_cpus} CPUS per node "
+                + f"\nand your job requirement of {cpus} CPUS."
+            ),
+        )
+        return cpus, nnodes, ncpus
+
     def _calculate_node_distribution(
         self, n_cores_required: int, tot_cores_per_node: int
     ) -> tuple[int, int]:
@@ -960,6 +1061,13 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         else:
+            # a bare --ntasks lets SLURM scatter tasks across nodes; pin the
+            # node count whenever it is known (combined with --ntasks,
+            # --ntasks-per-node acts as a per-node ceiling)
+            if self.nodes is not None:
+                scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
+            if self.cpus_per_node is not None:
+                scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
         if self.account_key:
             scheduler_script += f"\n#SBATCH --account={self.account_key}"

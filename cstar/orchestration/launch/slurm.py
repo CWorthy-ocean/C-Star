@@ -2,7 +2,7 @@ import asyncio
 import os
 import typing as t
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
 from cstar.base.env import (
@@ -46,9 +46,24 @@ class SlurmComputeSpec(BaseModel):
     num_cpus: int = Field(default=1)
     """Total number of CPUs required by the job."""
     num_nodes: int | None = None
-    """The number of nodes to request."""
+    """The number of nodes to request.
+
+    When unset, C-Star derives the minimum node count from the queue's CPUs
+    per node so jobs that fit on one node stay on one node.
+    """
     cpus_per_node: int | None = None
-    """The number of CPUs to request per node."""
+    """The number of CPUs to request per node.
+
+    Also used as the assumed per-node capacity when deriving the node count,
+    e.g. to target a partition's larger node types instead of its smallest.
+    """
+    single_node: bool = False
+    """Whether the job is confined to a single node.
+
+    Set from the blueprint's `single_node` at schedule time. The job is pinned
+    to one node and `num_cpus` is clamped to the queue's CPUs per node rather
+    than spilling onto nodes a single-process application cannot use.
+    """
     max_walltime: str = Field(default="", pattern=WALLTIME_RE)
     """The maximum walltime for the job in the format `HH:MM:SS`."""
     queue_name: str = ""
@@ -58,6 +73,20 @@ class SlurmComputeSpec(BaseModel):
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure model to ignore empty strings."""
+
+    @model_validator(mode="after")
+    def _single_node_needs_one_node(self) -> "SlurmComputeSpec":
+        """Reject a `single_node` spec that also asks for more than one node, so
+        the contradiction surfaces when the workplan is checked rather than at
+        submission.
+        """
+        if self.single_node and self.num_nodes is not None and self.num_nodes != 1:
+            msg = (
+                f"single_node is set but num_nodes={self.num_nodes}; a single-node "
+                "job must use num_nodes=1 (or leave num_nodes unset)"
+            )
+            raise ValueError(msg)
+        return self
 
     @property
     def environment(self) -> dict[str, str]:
@@ -269,6 +298,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
             cpus=compute.num_cpus,
             nodes=compute.num_nodes,
             cpus_per_node=compute.cpus_per_node,
+            single_node=compute.single_node,
             script_path=step.script_path,
             run_path=step.script_path.parent,
             job_name=step.safe_name,
