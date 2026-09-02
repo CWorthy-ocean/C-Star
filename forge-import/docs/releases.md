@@ -1,5 +1,15 @@
 # Release notes
 
+## 0.7.1
+
+### New Features
+
+* `ForgeBlueprint.single_node` is `True`: the forge run (roms-tools input generation on dask's threaded scheduler) is a single process, and C-Star's SLURM launcher now pins it to `--nodes=1` and clamps its CPU request to the partition's CPUs per node. ([#156](https://github.com/CWorthy-ocean/cstar-forge/pull/156))
+
+### Improvements
+
+* The forge-step CPU estimate (`estimate_forge_cpus`, roughly one CPU per 150k grid cells) no longer caps at 128. Large domains ask for a full node on whatever partition they land on instead of a fixed 128 that overshoots smaller nodes and undershoots larger ones. The dask worker cap (8) is unchanged; the CPU request also governs the job's memory allocation. ([#156](https://github.com/CWorthy-ocean/cstar-forge/pull/156))
+
 ## 0.7.0
 
 ### Breaking Changes
