@@ -6,6 +6,7 @@ packages are installed the commands appear as::
 
     cstar forge run <forge_blueprint.yaml> [executor options...]
     cstar forge wizard [--port 8866] [voila options...]
+    cstar forge copy-notebook [--dest ...] [--force]
     cstar forge register-kernel [--clean] [--name ...]
 
 ``forge run`` is a deliberate passthrough to the executor's own argparse CLI
@@ -17,7 +18,8 @@ blueprint through the C-Star application framework with defaults.
 
 import os
 import shutil
-from importlib.resources import files
+from importlib.resources import as_file, files
+from pathlib import Path
 
 import typer
 
@@ -70,6 +72,50 @@ def wizard(
         *ctx.args,
     ]
     _exec_voila(argv)
+
+
+@app.command()
+def copy_notebook(
+    dest: Path = typer.Option(
+        Path("~/cstar/forge-blueprint-wizard.ipynb"),
+        help="where to place the copy (~ is expanded)",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="overwrite an existing file at --dest"
+    ),
+) -> None:
+    """Copy the bundled wizard notebook (Jupyter alternative to the web app).
+
+    For installs without a source checkout (e.g. conda/pip): places a runnable
+    copy of ``forge-blueprint-wizard.ipynb`` outside the installed package so
+    it can be opened in Jupyter. A copy rather than a symlink on purpose --
+    Jupyter autosaves executed output back into the file, which must never
+    land in site-packages. Re-run with --force after upgrading cstar-forge to
+    refresh the copy.
+    """
+    with as_file(files("cstar_forge") / "forge-blueprint-wizard.ipynb") as src:
+        payload = src.read_bytes()
+    target = dest.expanduser()
+    if target.is_dir():
+        typer.echo(f"Error: {target} is a directory.", err=True)
+        raise typer.Exit(1)
+    if (target.is_symlink() or target.exists()) and not force:
+        if not target.is_symlink() and target.read_bytes() == payload:
+            typer.echo(f"Already up to date: {target}")
+            return
+        kind = "is a symlink" if target.is_symlink() else "already exists"
+        typer.echo(
+            f"Error: {target} {kind}; re-run with --force to replace it "
+            "with a fresh copy of the packaged notebook.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink():
+        target.unlink()  # write_bytes would otherwise write through the link
+    target.write_bytes(payload)
+    typer.echo(f"Wizard notebook copied to: {target}")
+    typer.echo(f"Open it in Jupyter, e.g.: jupyter lab {target}")
 
 
 @app.command()

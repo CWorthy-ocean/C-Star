@@ -60,6 +60,76 @@ class TestWizard:
         assert "voila is not installed" in result.output
 
 
+class TestCopyNotebook:
+    @staticmethod
+    def _packaged() -> bytes:
+        from importlib.resources import files
+
+        return (files("cstar_forge") / "forge-blueprint-wizard.ipynb").read_bytes()
+
+    def test_copies_packaged_notebook_to_dest(self, tmp_path):
+        dest = tmp_path / "nested" / "wizard.ipynb"
+        result = runner.invoke(cli.app, ["copy-notebook", "--dest", str(dest)])
+        assert result.exit_code == 0
+        assert dest.read_bytes() == self._packaged()
+        assert not dest.is_symlink()
+        assert str(dest) in result.output
+
+    def test_identical_existing_copy_is_a_noop(self, tmp_path):
+        dest = tmp_path / "wizard.ipynb"
+        dest.write_bytes(self._packaged())
+        result = runner.invoke(cli.app, ["copy-notebook", "--dest", str(dest)])
+        assert result.exit_code == 0
+        assert "Already up to date" in result.output
+
+    def test_modified_existing_copy_requires_force(self, tmp_path):
+        dest = tmp_path / "wizard.ipynb"
+        dest.write_bytes(b"user edits")
+        result = runner.invoke(cli.app, ["copy-notebook", "--dest", str(dest)])
+        assert result.exit_code == 1
+        assert "--force" in result.output
+        assert dest.read_bytes() == b"user edits"  # untouched
+
+    def test_force_overwrites_modified_copy(self, tmp_path):
+        dest = tmp_path / "wizard.ipynb"
+        dest.write_bytes(b"user edits")
+        result = runner.invoke(
+            cli.app, ["copy-notebook", "--dest", str(dest), "--force"]
+        )
+        assert result.exit_code == 0
+        assert dest.read_bytes() == self._packaged()
+
+    def test_symlink_dest_is_replaced_by_real_copy_only_with_force(self, tmp_path):
+        # A pre-existing symlink (e.g. someone's manual shortcut into
+        # site-packages) must never be written through — that would push
+        # bytes into the installed package.
+        link_target = tmp_path / "target.ipynb"
+        link_target.write_bytes(b"original target bytes")
+        dest = tmp_path / "wizard.ipynb"
+        dest.symlink_to(link_target)
+
+        result = runner.invoke(cli.app, ["copy-notebook", "--dest", str(dest)])
+        assert result.exit_code == 1
+        assert "symlink" in result.output
+
+        result = runner.invoke(
+            cli.app, ["copy-notebook", "--dest", str(dest), "--force"]
+        )
+        assert result.exit_code == 0
+        assert not dest.is_symlink()
+        assert dest.read_bytes() == self._packaged()
+        assert link_target.read_bytes() == b"original target bytes"
+
+    def test_dest_directory_errors(self, tmp_path):
+        result = runner.invoke(cli.app, ["copy-notebook", "--dest", str(tmp_path)])
+        assert result.exit_code == 1
+        assert "directory" in result.output
+
+    def test_default_dest_is_under_home_cstar(self):
+        result = runner.invoke(cli.app, ["copy-notebook", "--help"])
+        assert "~/cstar/forge-blueprint-wizard.ipynb" in result.output
+
+
 class TestRegisterKernel:
     def test_options_map_to_register_kernel_kwargs(self):
         with patch("cstar_forge.register_kernel.register_kernel") as mock_register:

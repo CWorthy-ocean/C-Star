@@ -81,8 +81,11 @@ ssh -N -L 8866:localhost:8866 <user>@<login-node>
 # then open http://localhost:8866 locally
 ```
 
-If your HPC provides a Jupyter interface, it may be more convenient to clone the repo (see next section) and use the
+If your HPC provides a Jupyter interface, it may be more convenient to use the
 [forge-blueprint-wizard.ipynb](../cstar_forge/forge-blueprint-wizard.ipynb) notebook instead of the Voila web app.
+Run `cstar forge copy-notebook` to place a runnable copy at
+`~/cstar/forge-blueprint-wizard.ipynb` (use `--dest` to choose another spot, and re-run
+with `--force` after upgrading cstar-forge to refresh it).
 
 Alternatively, C-Star Forge is designed so that you can build your Forge blueprints on one machine and process the data on another; feel free to run the wizard from your laptop, upload your blueprint to your HPC, and process it there from the command line.
 
