@@ -2,7 +2,7 @@ import asyncio
 import os
 import typing as t
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cstar.base.adapter import ConfiguredModelAdapter, CstarAdaptationError
 from cstar.base.env import (
@@ -73,6 +73,20 @@ class SlurmComputeSpec(BaseModel):
 
     model_config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Configure model to ignore empty strings."""
+
+    @model_validator(mode="after")
+    def _single_node_needs_one_node(self) -> "SlurmComputeSpec":
+        """Reject a `single_node` spec that also asks for more than one node, so
+        the contradiction surfaces when the workplan is checked rather than at
+        submission.
+        """
+        if self.single_node and self.num_nodes is not None and self.num_nodes != 1:
+            msg = (
+                f"single_node is set but num_nodes={self.num_nodes}; a single-node "
+                "job must use num_nodes=1 (or leave num_nodes unset)"
+            )
+            raise ValueError(msg)
+        return self
 
     @property
     def environment(self) -> dict[str, str]:

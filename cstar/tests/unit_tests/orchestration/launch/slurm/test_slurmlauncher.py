@@ -4,9 +4,10 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.base.exceptions import BlueprintDeferredError, CstarError
-from cstar.orchestration.launch.slurm import SlurmLauncher
+from cstar.orchestration.launch.slurm import SlurmComputeSpec, SlurmLauncher
 from cstar.orchestration.orchestration import LiveStep, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.utils import (
@@ -360,6 +361,37 @@ def test_compute_spec_invalid_overrides_fail_loudly(
     step = LiveStep.from_step(
         deferred_live_step,
         update={"compute_overrides": {"slurm": {"max_walltime": "not-a-walltime"}}},
+    )
+
+    with pytest.raises(CstarError):
+        _ = SlurmLauncher._get_compute_spec(step)  # type: ignore
+
+
+def test_compute_spec_single_node_rejects_multiple_nodes() -> None:
+    """A `single_node` spec that also asks for more than one node is contradictory
+    and is rejected by the spec itself, before any job is built.
+    """
+    with pytest.raises(ValidationError, match="single_node is set but num_nodes=2"):
+        SlurmComputeSpec(num_cpus=64, num_nodes=2, single_node=True)
+
+    # one node, or an unset node count, is consistent
+    assert SlurmComputeSpec(num_cpus=64, num_nodes=1, single_node=True).num_nodes == 1
+    assert SlurmComputeSpec(num_cpus=64, single_node=True).num_nodes is None
+
+
+def test_compute_spec_single_node_multiple_nodes_fails_loudly(
+    deferred_live_step: LiveStep,
+) -> None:
+    """The contradiction surfaces through the launcher's compute-spec adaptation as
+    a `CstarError`, aborting submission rather than falling back to defaults.
+    """
+    step = LiveStep.from_step(
+        deferred_live_step,
+        update={
+            "compute_overrides": {
+                "slurm": {"num_cpus": 64, "num_nodes": 2, "single_node": True}
+            }
+        },
     )
 
     with pytest.raises(CstarError):
