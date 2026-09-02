@@ -1,0 +1,35 @@
+.. _unreleased:
+
+Unreleased
+----------
+
+.. note::
+    This release is currently in development
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- N/A
+
+New features
+~~~~~~~~~~~~
+
+- N/A
+
+Bug Fixes
+~~~~~~~~~
+
+
+- Jobs submitted to a queue whose SLURM time limit is reported as ``infinite``/``UNLIMITED`` (e.g. Bouchet's ``mpi`` partition, where the real limit is enforced via QOS) were rejected with a spurious "exceeds maximum walltime 00:00:00" error; such queues are now correctly treated as having no partition-level walltime limit, and the job is submitted with the user's requested walltime. (`#662 <https://github.com/CWorthy-ocean/C-Star/pull/662>`_)
+- A queue walltime string C-Star cannot parse no longer silently becomes a zero walltime limit; it is logged as a warning and the queue is treated as having no known limit, leaving enforcement to the scheduler. (`#662 <https://github.com/CWorthy-ocean/C-Star/pull/662>`_)
+
+Improvements
+~~~~~~~~~~~~
+
+
+- Added the ``devel`` and ``scavenge`` partitions and the priority-tier partitions ``priority``, ``priority_gpu``, and ``priority_mpi`` to the supported queues on Bouchet. (`#662 <https://github.com/CWorthy-ocean/C-Star/pull/662>`_)
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+- N/A
