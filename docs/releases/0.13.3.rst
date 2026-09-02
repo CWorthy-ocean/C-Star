@@ -1,15 +1,8 @@
-.. _unreleased:
+.. _0.13.3:
 
-Unreleased
+0.13.3
 ----------
 
-.. note::
-    This release is currently in development
-
-Breaking Changes
-~~~~~~~~~~~~~~~~
-
-- N/A
 
 New features
 ~~~~~~~~~~~~
@@ -32,8 +25,3 @@ Improvements
 
 
 - ``cpus_per_node`` on non-task-distribution systems now doubles as the assumed per-node capacity when deriving the node count, so a user can target a heterogeneous partition's larger node types. (`#664 <https://github.com/CWorthy-ocean/C-Star/pull/664>`_)
-
-Miscellaneous
-~~~~~~~~~~~~~
-
-- N/A
