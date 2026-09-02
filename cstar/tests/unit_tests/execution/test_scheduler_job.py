@@ -83,7 +83,7 @@ class MockScheduler(Scheduler):
 
     def get_queue(self, name: str | None):
         # Return a mocked queue with default properties
-        return MagicMock(name=name, max_walltime="02:00:00")
+        return MagicMock(name=name, max_walltime="02:00:00", max_cpus_per_node=None)
 
     @property
     def global_max_cpus_per_node(self) -> int | None:
@@ -388,25 +388,21 @@ class TestSchedulerJobBase:
         "nodes, cpus_per_node, expected_nodes, expected_cpus_per_node",
         [
             (3, 8, 3, 8),  # Both provided as integers
-            (None, 8, None, 8),  # Only cpus_per_node provided
+            (None, 8, 1, 8),  # Only cpus_per_node provided: acts as capacity
             (3, None, 3, None),  # Only nodes provided
-            (None, None, None, None),  # Neither provided
+            (None, None, 1, None),  # Neither provided: capacity from scheduler (64)
         ],
     )
     def test_init_cpus_without_distribution_requirement(
         self, nodes, cpus_per_node, expected_nodes, expected_cpus_per_node
     ):
-        """Confirms that task distribution is skipped when the scheduler does not
-        require explicit task distribution.
+        """Confirms node derivation when the scheduler does not require an explicit
+        task distribution.
 
-        This test uses a parameterization to evaluate different combinations of
-        `nodes` and `cpus_per_node`, ensuring that these attributes are assigned
-        directly without calculations when `requires_task_distribution` is `False`.
-
-        For example, if `requires_task_distribution` is True and the user provides
-        cpus=16 and cpus_per_node=4, C-Star will set `nodes=4` automatically. If
-        `requires_task_distribution` is False, nodes will be set to `None`, and only
-        `cpus` will be submitted to the Scheduler.
+        Even when a distribution is not required, C-Star pins the minimum node
+        count (so jobs that fit on one node are not scattered across several),
+        deriving it from a user-supplied `cpus_per_node` or the system's CPUs
+        per node. Explicitly provided values are assigned directly.
 
         Mocks
         -----
@@ -415,8 +411,8 @@ class TestSchedulerJobBase:
 
         Asserts
         -------
-        - That the `nodes` attribute matches the provided or expected value.
-        - That the `cpus_per_node` attribute matches the provided or expected value.
+        - That the `nodes` attribute matches the provided or derived value.
+        - That the `cpus_per_node` attribute matches the provided value.
         """
         params = self.common_job_params.copy()
         scheduler = MockScheduler()
@@ -434,6 +430,29 @@ class TestSchedulerJobBase:
         # Ensure nodes and cpus_per_node are correctly assigned
         assert job.nodes == expected_nodes
         assert job.cpus_per_node == expected_cpus_per_node
+
+    def test_init_without_distribution_requirement_unknown_capacity(self, caplog):
+        """Confirms the job is created without a node count, with a warning, when the
+        scheduler does not require a task distribution and the CPUs per node cannot
+        be determined from any source.
+        """
+        params = self.common_job_params.copy()
+        scheduler = MockScheduler()
+        scheduler.requires_task_distribution = False
+        params.update({"scheduler": scheduler, "nodes": None})
+
+        with patch.object(
+            MockScheduler,
+            "global_max_cpus_per_node",
+            new_callable=PropertyMock,
+            return_value=None,
+        ):
+            job = MockSchedulerJob(**params)
+
+        caplog.set_level(logging.INFO, logger=job.log.name)
+        assert job.nodes is None
+        assert job.cpus_per_node is None
+        assert "C-Star cannot determine the CPUs per node" in caplog.text
 
 
 ##

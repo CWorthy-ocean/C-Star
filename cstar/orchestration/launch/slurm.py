@@ -46,9 +46,17 @@ class SlurmComputeSpec(BaseModel):
     num_cpus: int = Field(default=1)
     """Total number of CPUs required by the job."""
     num_nodes: int | None = None
-    """The number of nodes to request."""
+    """The number of nodes to request.
+
+    When unset, C-Star derives the minimum node count from the queue's CPUs
+    per node so jobs that fit on one node stay on one node.
+    """
     cpus_per_node: int | None = None
-    """The number of CPUs to request per node."""
+    """The number of CPUs to request per node.
+
+    Also used as the assumed per-node capacity when deriving the node count,
+    e.g. to target a partition's larger node types instead of its smallest.
+    """
     max_walltime: str = Field(default="", pattern=WALLTIME_RE)
     """The maximum walltime for the job in the format `HH:MM:SS`."""
     queue_name: str = ""

@@ -17,8 +17,18 @@ from cstar.orchestration.utils import (
 from cstar.system.scheduler import SlurmPartition, SlurmScheduler
 
 
+class FakePartition(SlurmPartition):
+    """A partition that cannot be queried; per-node CPU capacity falls back to the
+    scheduler-wide value.
+    """
+
+    @property
+    def max_cpus_per_node(self) -> int | None:
+        return None
+
+
 def fake_get_queue(name: str = "fake-queue") -> t.Any:
-    return SlurmPartition(name, "cannot-query", lambda x: "48:00:00")
+    return FakePartition(name, "cannot-query", lambda x: "48:00:00")
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -68,8 +78,11 @@ def test_slurmlauncher_adapt_step_no_overrides(
     assert minimum_spec.queue_name == job.queue_name
     assert minimum_spec.max_walltime == job.walltime
 
-    # confirm default behaviors of `create_scheduler_job` for unspecified spec attributes
-    assert minimum_spec.num_nodes == job.nodes
+    # confirm default behaviors of `create_scheduler_job` for unspecified spec
+    # attributes: the node count is derived (1 cpu fits on one node), while
+    # cpus_per_node stays unset
+    assert minimum_spec.num_nodes is None
+    assert job.nodes == 1
     assert minimum_spec.cpus_per_node == job.cpus_per_node
 
 
@@ -91,7 +104,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "alt-q",
             "42:00:00",
             1,
-            None,
+            1,
             None,
             id="queue-name",
         ),
@@ -101,7 +114,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "42:00:00",
             42,
-            None,
+            1,
             None,
             id="num-cpus",
         ),
@@ -121,7 +134,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "01:00:00",
             1,
-            None,
+            1,
             None,
             id="walltime",
         ),
@@ -131,7 +144,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "42:00:00",
             1,
-            None,
+            1,
             32,
             id="cpus-per-node",
         ),
@@ -141,7 +154,7 @@ def test_slurmlauncher_adapt_step_no_overrides(
             "default-q",
             "42:00:00",
             1,
-            None,
+            1,
             None,
             id="account-name",
         ),

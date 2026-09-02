@@ -378,6 +378,9 @@ def create_scheduler_job(
         The number of CPUs per node to request. Defaults to None.
         If not provided and a specific nodes x cpus distribution is required,
         C-Star will attempt to calculate an appropriate number of nodes.
+        On systems that do not require an explicit distribution, this value is
+        used as the assumed per-node CPU capacity when calculating the minimum
+        node count (e.g. to target a partition's larger node types).
     script_path : str or Path, optional
         The file path to save the job script. Defaults to the current directory with
         an auto-generated name.
@@ -663,6 +666,29 @@ class SchedulerJob(ExecutionHandler, ABC):
             )
             self._cpus_per_node = ncpus
             self._nodes = nnodes
+        elif nodes is None:  # scheduler does not require a task distribution
+            # Without a node count the scheduler is free to scatter tasks across
+            # nodes, which strands non-MPI (single-process) steps on a fraction
+            # of their CPUs; pin the minimum node count so jobs that fit on one
+            # node stay on one node. A user-supplied `cpus_per_node` overrides
+            # the queried per-node capacity (e.g. to target a partition's
+            # larger node types).
+            capacity = (
+                cpus_per_node
+                or self.queue.max_cpus_per_node
+                or scheduler.global_max_cpus_per_node
+            )
+            self._cpus_per_node = cpus_per_node
+            if capacity:
+                self._nodes = ceil(cpus / capacity)
+            else:
+                self._nodes = None
+                self.log.warning(
+                    f"C-Star cannot determine the CPUs per node for queue "
+                    f"{self._queue_name!r} and no 'cpus_per_node' was provided; "
+                    "submitting without a node count. The scheduler may spread "
+                    "this job's tasks across multiple nodes."
+                )
         else:
             self._cpus_per_node = cpus_per_node
             self._nodes = nodes
@@ -960,6 +986,13 @@ class SlurmJob(SchedulerJob):
             scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
             scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
         else:
+            # a bare --ntasks lets SLURM scatter tasks across nodes; pin the
+            # node count whenever it is known (combined with --ntasks,
+            # --ntasks-per-node acts as a per-node ceiling)
+            if self.nodes is not None:
+                scheduler_script += f"\n#SBATCH --nodes={self.nodes}"
+            if self.cpus_per_node is not None:
+                scheduler_script += f"\n#SBATCH --ntasks-per-node={self.cpus_per_node}"
             scheduler_script += f"\n#SBATCH --ntasks={self.cpus}"
         if self.account_key:
             scheduler_script += f"\n#SBATCH --account={self.account_key}"
