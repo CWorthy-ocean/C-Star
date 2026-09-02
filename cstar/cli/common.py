@@ -1,7 +1,10 @@
 import functools
 import os
+import sys
 import typing as t
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 import typer
@@ -36,7 +39,10 @@ from cstar.system.migration import (
 app = typer.Typer()
 log = get_logger(__name__)
 
-HELP_SHORT = "Print the current version of the C-Star package and exit."
+HELP_SHORT = (
+    "Print the cstar executable location, the C-Star version, and the versions "
+    "of installed companion packages, then exit."
+)
 
 
 BoolCallback: t.TypeAlias = Callable[[typer.Context, bool], bool]
@@ -44,9 +50,17 @@ StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
 
 
 def version_callback(value: bool) -> bool:
-    """Print the version of C-Star and exit."""
+    """Print the executable location and installed package versions, then exit."""
     if value:
-        typer.echo(cstar.__version__)
+        typer.echo(f"cstar executable location: {Path(sys.argv[0]).resolve()}")
+        typer.echo(f"C-Star version: {cstar.__version__}")
+        # cstar-forge / roms-tools are optional in a given environment -- show
+        # each only if installed.
+        for pkg in ("cstar-forge", "roms-tools"):
+            try:
+                typer.echo(f"{pkg} version: {_pkg_version(pkg)}")
+            except PackageNotFoundError:
+                pass
         raise typer.Exit(0)
 
     return value
