@@ -1,20 +1,8 @@
-.. _unreleased:
+.. _0.13.2:
 
-Unreleased
+0.13.2
 ----------
 
-.. note::
-    This release is currently in development
-
-Breaking Changes
-~~~~~~~~~~~~~~~~
-
-- N/A
-
-New features
-~~~~~~~~~~~~
-
-- N/A
 
 Bug Fixes
 ~~~~~~~~~
@@ -28,8 +16,3 @@ Improvements
 
 
 - Added the ``devel`` and ``scavenge`` partitions and the priority-tier partitions ``priority``, ``priority_gpu``, and ``priority_mpi`` to the supported queues on Bouchet. (`#662 <https://github.com/CWorthy-ocean/C-Star/pull/662>`_)
-
-Miscellaneous
-~~~~~~~~~~~~~
-
-- N/A
