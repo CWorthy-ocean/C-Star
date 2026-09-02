@@ -26,7 +26,8 @@ Bug Fixes
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- ``cstar --version`` now additionally displays the executable location and the versions of cstar-forge (if installed) and roms-tools (`#660 <https://github.com/CWorthy-ocean/C-Star/pull/660>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
