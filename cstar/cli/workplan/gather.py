@@ -1,4 +1,5 @@
 import os
+import shutil
 from collections import defaultdict
 from pathlib import Path
 
@@ -89,12 +90,12 @@ def report_conflicts(conflicts: dict[str, list[Path]]) -> None:
 
 
 def relink(dest: Path, links: dict[str, Path]) -> None:
-    """Replace the symlinks in a consolidated joined-output directory.
+    """Replace a consolidated joined-output directory with a fresh set of symlinks.
 
-    Any existing symlinks in `dest` are removed before new ones are created.
-    If `dest` contains any entries that are not symlinks, nothing is
-    modified and a `typer.Exit` is raised, since gather must never delete
-    real files from the consolidated directory.
+    The existing directory is removed and recreated. If `dest` contains any
+    entries that are not symlinks, nothing is modified and a `typer.Exit` is
+    raised, since gather must never delete real files from the consolidated
+    directory.
 
     Parameters
     ----------
@@ -129,10 +130,9 @@ def relink(dest: Path, links: dict[str, Path]) -> None:
             )
             raise typer.Exit(1)
 
-        for p in dest.iterdir():
-            p.unlink()
+        shutil.rmtree(dest)
 
-    dest.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True)
 
     for name, target in links.items():
         (dest / name).symlink_to(Path(os.path.relpath(target, dest)))
