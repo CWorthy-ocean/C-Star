@@ -1625,11 +1625,12 @@ def test_build_workplan_two_steps_with_deferred_blueprint(tmp_path):
     assert ref.from_step == "forge"
     assert ref.filename == f"B_{wiz.config.name}.yaml"
     # a deferred blueprint can't be inspected at submit time (SLURM would default
-    # to 1 CPU) -- the step must carry the partitioning size explicitly
-    assert roms_step.compute_overrides["cpus"] == wiz.config.n_procs
+    # to 1 CPU) -- the step must carry the partitioning size explicitly, nested
+    # under the launcher namespace C-Star's SLURM adapter reads
+    assert roms_step.compute_overrides["slurm"]["num_cpus"] == wiz.config.n_procs
     # the forge step carries no cpus override: the scheduler falls back to
     # ForgeBlueprint.cpus_needed, the grid-sized forge estimate
-    assert "cpus" not in forge_step.compute_overrides
+    assert "slurm" not in forge_step.compute_overrides
     assert wiz.config.cpus_needed >= 16
 
 

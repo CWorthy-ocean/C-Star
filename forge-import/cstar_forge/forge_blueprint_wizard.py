@@ -6129,8 +6129,9 @@ class ForgeBlueprintWizard:
             ),
             # A deferred blueprint cannot be inspected at submit time, so the
             # scheduler defaults the step to 1 CPU -- size it from the
-            # partitioning explicitly.
-            compute_overrides={"cpus": cfg.n_procs},
+            # partitioning explicitly, nested under the launcher namespace
+            # C-Star's SLURM adapter reads.
+            compute_overrides={"slurm": {"num_cpus": cfg.n_procs}},
         )
         return Workplan(
             name=cfg.name,
