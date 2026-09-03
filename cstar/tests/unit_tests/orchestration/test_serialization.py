@@ -181,8 +181,11 @@ def test_serialization_workplan_happy_path(
     assert workplan.steps[0].application == Application.SLEEP
     assert workplan.steps[0].blueprint_overrides == {}
     assert workplan.steps[0].workflow_overrides["segment_length"] in {16, 16.0}
-    assert workplan.steps[0].compute_overrides["walltime"] == "00:10:00"
-    assert workplan.steps[0].compute_overrides["num_nodes"] == 4
+    slurm_overrides = t.cast(
+        "dict[str, t.Any]", workplan.steps[0].compute_overrides["slurm"]
+    )
+    assert slurm_overrides["max_walltime"] == "00:10:00"
+    assert slurm_overrides["num_nodes"] == 4
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
