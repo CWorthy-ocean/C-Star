@@ -2332,6 +2332,20 @@ class ForgeBlueprintWizard:
         domains = list(self.catalog.domain_names)
 
         # --- load / import an existing forge_blueprint.yaml ---
+        # Pick a forge blueprint straight from the catalog (sits above the
+        # free-text path box below); reuses the same load path once selected.
+        _fb_names = self.catalog.forge_blueprint_names
+        self.load_catalog_dd = W.Dropdown(
+            options=self._dd_options(_fb_names, "forge_blueprint"),
+            description="From catalog:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+        )
+        self.load_catalog_btn = W.Button(
+            description="Load selected",
+            icon="upload",
+            disabled=not _fb_names,
+        )
         self.load_path = W.Text(
             value="",
             placeholder="path to forge_blueprint.yaml",
@@ -3190,6 +3204,7 @@ class ForgeBlueprintWizard:
         self.run_btn.on_click(self._on_run)
         self.workplan_btn.on_click(self._on_save_workplan)
         self.load_btn.on_click(self._on_load_path)
+        self.load_catalog_btn.on_click(self._on_load_from_catalog)
         self.upload.observe(self._on_upload, names="value")
         self.cdr_dd.observe(self._on_cdr_spec, names="value")
         self.cdr_mode_dd.observe(self._on_cdr_mode_change, names="value")
@@ -4266,6 +4281,27 @@ class ForgeBlueprintWizard:
             self._load_status_is_error = True
             return
         self._set_load_status(cfg, self._populate_from(cfg))
+
+    def _on_load_from_catalog(self, _):
+        name = self.load_catalog_dd.value
+        if not name:
+            self.load_status.value = (
+                "<span style='color:#b00'>No catalog blueprint selected.</span>"
+            )
+            self._load_status_is_error = True
+            return
+        try:
+            path = self.catalog.forge_blueprint_path(name)
+        except Exception as exc:
+            self.load_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            self._load_status_is_error = True
+            return
+        # Surface the resolved path, then reuse the free-text load path so
+        # parsing, error handling, and state update stay identical.
+        self.load_path.value = str(path)
+        self._on_load_path(None)
 
     def _on_upload(self, _change):
         files = self.upload.value
@@ -6284,6 +6320,7 @@ class ForgeBlueprintWizard:
                 ),
                 section(
                     "Load existing (optional)",
+                    W.HBox([self.load_catalog_dd, self.load_catalog_btn]),
                     W.HBox([self.load_path, self.load_btn]),
                     self.upload,
                     self.load_status,

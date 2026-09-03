@@ -291,6 +291,48 @@ def test_wizard_smoke_assembles_widget():
     assert grid_i < obc_i < nest_i
 
 
+def test_load_catalog_dropdown_populated_from_catalog():
+    """The 'From catalog' picker offers the bundled forge blueprints and is enabled."""
+    wiz = ForgeBlueprintWizard()
+    values = wiz._dd_values(wiz.load_catalog_dd)
+    assert "wio-toy-simple" in values
+    # bundled catalog is non-empty, so the load button is not greyed out
+    assert wiz.load_catalog_btn.disabled is False
+
+
+def test_load_from_catalog_resolves_path_and_delegates(monkeypatch):
+    """Selecting a catalog blueprint resolves its path into ``load_path`` and reuses
+    the existing ``_on_load_path`` load path (identical parse/state handling).
+    """
+    wiz = ForgeBlueprintWizard()
+    called = []
+    monkeypatch.setattr(wiz, "_on_load_path", lambda _=None: called.append(True))
+
+    wiz.load_catalog_dd.value = "wio-toy-simple"
+    wiz._on_load_from_catalog(None)
+
+    assert called == [True]
+    assert wiz.load_path.value.endswith("wio-toy-simple.forge_blueprint.yaml")
+
+
+def test_load_from_catalog_no_selection_surfaces_error(monkeypatch):
+    """Defensive guard: if the dropdown ever holds no selection (e.g. an empty
+    catalog, where the button is also disabled), the handler reports an error and
+    does not load. On a populated catalog the dropdown auto-selects the first
+    name, so this state is not normally reachable by the user.
+    """
+    wiz = ForgeBlueprintWizard()
+    called = []
+    monkeypatch.setattr(wiz, "_on_load_path", lambda _=None: called.append(True))
+
+    wiz.load_catalog_dd.value = None
+    wiz._on_load_from_catalog(None)
+
+    assert called == []
+    assert wiz._load_status_is_error is True
+    assert "No catalog blueprint selected" in wiz.load_status.value
+
+
 def test_specs_section_has_forcing_and_output_dropdowns():
     """Item 5: Forcing/Output selectors live in the first 'Specs' box."""
     wiz = ForgeBlueprintWizard()
