@@ -1,20 +1,8 @@
-.. _unreleased:
+.. _0.13.4:
 
-Unreleased
+0.13.4
 ----------
 
-.. note::
-    This release is currently in development
-
-Breaking Changes
-~~~~~~~~~~~~~~~~
-
-- N/A
-
-New features
-~~~~~~~~~~~~
-
-- N/A
 
 Bug Fixes
 ~~~~~~~~~
@@ -27,8 +15,3 @@ Improvements
 
 
 - Added CMake to the modules loaded on Bouchet. (`#666 <https://github.com/CWorthy-ocean/C-Star/pull/666>`_)
-
-Miscellaneous
-~~~~~~~~~~~~~
-
-- N/A
