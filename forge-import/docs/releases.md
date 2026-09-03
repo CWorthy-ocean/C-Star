@@ -1,5 +1,25 @@
 # Release notes
 
+## 0.7.3
+
+### New Features
+
+* `cstar forge show-paths [--json]` prints the detected compute system, hostname and configured data paths. `python -m cstar_forge.config show-paths` still works and produces identical output. ([#160](https://github.com/CWorthy-ocean/cstar-forge/pull/160))
+* Wizard: a "From catalog" dropdown and "Load selected" button let you load any forge blueprint in the catalog without knowing its file path. ([#161](https://github.com/CWorthy-ocean/cstar-forge/pull/161))
+
+### Bug Fixes
+
+* Every `cstar` command, including `cstar --version` and `cstar --help`, no longer spends several seconds importing the scientific stack before doing anything. Startup drops from roughly 4 to 6 seconds to about 0.25 seconds. ([#160](https://github.com/CWorthy-ocean/cstar-forge/pull/160))
+
+### Improvements
+
+* `import cstar_forge` is now cheap. Public names (`source_data`, `settings`, `diagnostics`, `ForgeExecutor`, the catalog helpers, and so on) are resolved on first use via PEP 562 `__getattr__`, and existing `from cstar_forge import ...` usage is unchanged. ([#160](https://github.com/CWorthy-ocean/cstar-forge/pull/160))
+* The `show-paths` rendering is shared between the new CLI command and the legacy module entry point, so the two cannot drift. ([#160](https://github.com/CWorthy-ocean/cstar-forge/pull/160))
+
+### Miscellaneous
+
+* A regression test asserts that importing the forge CLI plugin does not load roms-tools, xarray, dask, copernicusmarine or the executor. It runs in a subprocess so already-imported modules in the test process cannot mask a regression, and it fails against the previous `__init__`. ([#160](https://github.com/CWorthy-ocean/cstar-forge/pull/160))
+
 ## 0.7.2
 
 ### Bug Fixes
