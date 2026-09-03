@@ -495,6 +495,34 @@ def _paths_to_dict(dp: DataPaths) -> dict:
     return {k: str(v) for k, v in dp.__dict__.items()}
 
 
+def format_paths(*, as_json: bool = False) -> str:
+    """Render the detected system and configured data paths as a string.
+
+    Backs both the ``show-paths`` subcommand of :func:`main` and the
+    ``cstar forge show-paths`` CLI command (``cstar_forge/cli.py``).
+    """
+    system_tag = _detect_system()
+    hostname = _get_hostname()
+    dp = paths
+
+    if as_json:
+        payload = {
+            "system": system_tag,
+            "hostname": hostname,
+            "paths": _paths_to_dict(dp),
+        }
+        return json.dumps(payload, indent=2)
+
+    lines = [
+        f"System tag : {system_tag}",
+        f"Hostname   : {hostname}",
+        "",
+        "Paths:",
+    ]
+    lines.extend(f"  {key:12s} -> {value}" for key, value in _paths_to_dict(dp).items())
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI for inspecting detected compute environment and configured paths."""
     if argv is None:
@@ -523,25 +551,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "show-paths":
-        system_tag = _detect_system()
-        hostname = _get_hostname()
-        dp = paths
-
-        if args.json:
-            payload = {
-                "system": system_tag,
-                "hostname": hostname,
-                "paths": _paths_to_dict(dp),
-            }
-            print(json.dumps(payload, indent=2))
-        else:
-            print(f"System tag : {system_tag}")
-            print(f"Hostname   : {hostname}")
-            print()
-            print("Paths:")
-            for key, value in _paths_to_dict(dp).items():
-                print(f"  {key:12s} -> {value}")
-
+        print(format_paths(as_json=args.json))
         return 0
 
     parser.print_help()

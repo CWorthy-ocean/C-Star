@@ -73,10 +73,10 @@ cluster_type = config.cluster_type  # "LocalCluster" or "SLURMCluster"
 
 ### Inspecting Configuration
 
-You can inspect the detected system and configured paths using the `config` module CLI:
+You can inspect the detected system and configured paths using the `cstar forge show-paths` command:
 
 ```bash
-python -m cstar_forge.config show-paths
+cstar forge show-paths
 ```
 
 This will display:
@@ -87,7 +87,7 @@ This will display:
 To output the paths in JSON format:
 
 ```bash
-python -m cstar_forge.config show-paths --json
+cstar forge show-paths --json
 ```
 
 ## Cluster Types

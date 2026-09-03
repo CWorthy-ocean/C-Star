@@ -175,6 +175,58 @@ class TestRegisterKernel:
         assert "not inside a conda env" in result.output
 
 
+class TestShowPaths:
+    def test_human_readable_output(self):
+        result = runner.invoke(cli.app, ["show-paths"])
+        assert result.exit_code == 0
+        assert "System tag :" in result.output
+        assert "Paths:" in result.output
+
+    def test_json_flag_emits_parseable_json(self):
+        import json
+
+        result = runner.invoke(cli.app, ["show-paths", "--json"])
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert {"system", "hostname", "paths"} <= payload.keys()
+        assert isinstance(payload["paths"], dict)
+
+    def test_delegates_to_config_format_paths(self):
+        with patch(
+            "cstar_forge.config.format_paths", return_value="SENTINEL"
+        ) as mock_fmt:
+            result = runner.invoke(cli.app, ["show-paths"])
+        assert result.exit_code == 0
+        assert "SENTINEL" in result.output
+        mock_fmt.assert_called_once_with(as_json=False)
+
+
+class TestImportCost:
+    def test_plugin_import_does_not_load_scientific_stack(self):
+        # C-Star ``ep.load()``s the ``cstar.cli`` plugin on *every* ``cstar``
+        # invocation, so importing ``cstar_forge.cli`` (and hence the package
+        # ``__init__``) must stay cheap: no roms-tools / xarray / dask. Those are
+        # resolved lazily via PEP 562 ``__getattr__`` in ``cstar_forge/__init__``.
+        # Run in a subprocess so this process's already-imported modules don't
+        # mask a regression.
+        import subprocess
+        import sys
+
+        code = (
+            "import sys, cstar_forge.cli; "
+            "heavy = sorted(m for m in ('roms_tools', 'xarray', 'dask', "
+            "'copernicusmarine', 'cstar_forge.forge.source_data', "
+            "'cstar_forge.forge.executor') if m in sys.modules); "
+            "print(','.join(heavy))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+        )
+        assert result.stdout.strip() == "", (
+            f"importing cstar_forge.cli pulled in: {result.stdout.strip()}"
+        )
+
+
 class TestEntryPointRegistration:
     def test_pyproject_registers_cstar_cli_entry_point(self):
         # The metadata contract with C-Star's discovery hook: group cstar.cli,

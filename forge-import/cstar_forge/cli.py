@@ -8,6 +8,7 @@ packages are installed the commands appear as::
     cstar forge wizard [--port 8866] [voila options...]
     cstar forge copy-notebook [--dest ...] [--force]
     cstar forge register-kernel [--clean] [--name ...]
+    cstar forge show-paths [--json]
 
 ``forge run`` is a deliberate passthrough to the executor's own argparse CLI
 (`cstar_forge.run.main`) — the full option set (stage selection, dask tuning,
@@ -158,6 +159,23 @@ def register_kernel(
     except RegisterKernelError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1) from exc
+
+
+@app.command()
+def show_paths(
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Output paths as JSON instead of human-readable text.",
+    ),
+) -> None:
+    """Show the detected compute system and configured data paths.
+
+    A warning-free replacement for ``python -m cstar_forge.config show-paths``.
+    """
+    from cstar_forge.config import format_paths
+
+    typer.echo(format_paths(as_json=json_output))
 
 
 def _exec_voila(argv: list[str]) -> None:

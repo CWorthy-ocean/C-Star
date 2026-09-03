@@ -171,7 +171,7 @@ pixi install -e dev-laptop          # dev + local build toolchain (compilers, MP
 conda activate cstar-forge-env   # or: micromamba activate cstar-forge-env
 python -c "import cstar_forge; print('✓ cstar_forge works')"
 jupyter kernelspec list | grep cstar-forge-env   # if you registered the kernel
-python -m cstar_forge.config show-paths          # detected system + data paths
+cstar forge show-paths                           # detected system + data paths
 ```
 
 `show-paths` output looks like:

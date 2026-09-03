@@ -46,8 +46,8 @@ fetching, so Forge cannot download it for you.
    <source_data>/TPXO/TPXO10.v2a/u_tpxo10.v2a.nc
    ```
 
-Find your `source_data` directory with `python -m cstar_forge.config
-show-paths`. If anything is missing at processing time, Forge fails with a
+Find your `source_data` directory with `cstar forge show-paths`. If anything
+is missing at processing time, Forge fails with a
 message listing the exact expected paths.
 
 ## Other user-staged datasets
