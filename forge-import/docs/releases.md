@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.7.2
+
+### Bug Fixes
+
+* Workplans exported by the blueprint wizard submitted the ROMS-MARBL step with 1 CPU instead of the partitioning's core count: the step's CPU requirement is now recorded as `compute_overrides: {slurm: {num_cpus: N}}`, the nested launcher-namespace shape C-Star's SLURM launcher consumes. ([#158](https://github.com/CWorthy-ocean/cstar-forge/pull/158))
+
 ## 0.7.1
 
 ### New Features
