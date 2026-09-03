@@ -1,0 +1,34 @@
+.. _unreleased:
+
+Unreleased
+----------
+
+.. note::
+    This release is currently in development
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+- N/A
+
+New features
+~~~~~~~~~~~~
+
+- N/A
+
+Bug Fixes
+~~~~~~~~~
+
+
+- Workplan steps' ``compute_overrides`` are now validated: any top-level key outside the launcher namespaces (``slurm``, ``local``) is rejected at workplan validation (e.g. ``cstar workplan check`` or scheduling) with all offending keys reported in one error. Existing workplans with stray flat keys (e.g. ``cpus: 10``) will now fail loudly instead of silently running under-provisioned. (`#666 <https://github.com/CWorthy-ocean/C-Star/pull/666>`_)
+
+Improvements
+~~~~~~~~~~~~
+
+
+- Added CMake to the modules loaded on Bouchet. (`#666 <https://github.com/CWorthy-ocean/C-Star/pull/666>`_)
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+- N/A
