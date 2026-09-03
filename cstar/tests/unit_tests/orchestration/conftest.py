@@ -207,8 +207,9 @@ def fill_workplan_template(
                   workflow_overrides:
                       segment_length: 16
                   compute_overrides:
-                      walltime: 00:10:00
-                      num_nodes: 4
+                      slurm:
+                          max_walltime: 00:10:00
+                          num_nodes: 4
                 - name: Test Another Step
                   application: sleep
                   depends_on: []
@@ -217,8 +218,9 @@ def fill_workplan_template(
                   workflow_overrides:
                       segment_length: 16
                   compute_overrides:
-                      walltime: 00:05:00
-                      num_nodes: 2
+                      slurm:
+                          max_walltime: 00:05:00
+                          num_nodes: 2
             """,
         )
 

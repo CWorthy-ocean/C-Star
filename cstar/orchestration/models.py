@@ -52,6 +52,13 @@ KEY_CLOBBER: t.Final[str] = "clobber"
 """The `workflow_overrides` key indicating a step's prior state should be
 cleared and re-executed."""
 
+COMPUTE_OVERRIDE_NAMESPACES: t.Final[frozenset[str]] = frozenset({"local", "slurm"})
+"""Launcher namespaces recognized as top-level `Step.compute_overrides` keys.
+
+Compute overrides are nested under the launcher that consumes them, e.g.
+`{"slurm": {"num_cpus": 16}}`; a top-level key outside this set would be
+silently ignored at submission and is rejected as a misconfiguration."""
+
 TargetDirectoryPath = t.Annotated[
     Path,
     PlainSerializer(str, return_type=str),
@@ -406,6 +413,19 @@ class Step(ConfiguredBaseModel):
         polymorphic_serialization=True,
     )
     """Configures the behavior of the pydantic model."""
+
+    @field_validator("compute_overrides", mode="after")
+    @classmethod
+    def _known_compute_namespaces(cls, value: KeyValueStore) -> KeyValueStore:
+        """Reject compute overrides that no launcher would consume."""
+        if unknown := sorted(set(value) - COMPUTE_OVERRIDE_NAMESPACES):
+            raise ValueError(
+                f"unknown compute_overrides key(s) {unknown}: compute overrides "
+                "must be nested under a launcher namespace "
+                f"({', '.join(sorted(COMPUTE_OVERRIDE_NAMESPACES))}), "
+                'e.g. {"slurm": {"num_cpus": 16}}'
+            )
+        return value
 
     @property
     def safe_name(self) -> str:

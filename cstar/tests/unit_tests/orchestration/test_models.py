@@ -330,9 +330,9 @@ def test_step_blueprint_overrides(
     "overrides",
     [
         {},
-        {"key1": "value1"},
-        {"key1": "value1", "key2": "value2"},
-        {"key1": "value1", "key2": 1},
+        {"slurm": {"num_cpus": 16}},
+        {"local": {"max_walltime": "00:10:00"}},
+        {"slurm": {"num_cpus": 16}, "local": {"max_walltime": "00:10:00"}},
     ],
 )
 def test_step_compute_overrides(
@@ -358,6 +358,38 @@ def test_step_compute_overrides(
     assert step.compute_overrides == overrides
 
 
+@pytest.mark.parametrize(
+    ("overrides", "bad_keys"),
+    [
+        pytest.param({"cpus": 10}, "['cpus']", id="unnested key"),
+        pytest.param({"walltime": "00:10:00"}, "['walltime']", id="stale flat key"),
+        pytest.param(
+            {"slurm": {"num_cpus": 16}, "cpus": 10, "sluurm": {}},
+            "['cpus', 'sluurm']",
+            id="all bad keys reported",
+        ),
+    ],
+)
+def test_step_compute_overrides_unknown_namespace(
+    fake_blueprint_path: Path,
+    overrides: KeyValueStore,
+    bad_keys: str,
+) -> None:
+    """Verify that compute overrides not nested under a known launcher namespace are
+    rejected (they would otherwise be silently ignored at submission), and that all
+    offending keys are reported in one error.
+    """
+    with pytest.raises(ValidationError) as error:
+        Step(
+            name="test-step",
+            application="test-app",
+            blueprint=fake_blueprint_path,
+            compute_overrides=overrides,
+        )
+
+    assert f"unknown compute_overrides key(s) {bad_keys}" in str(error.value)
+
+
 def test_step_compute_overrides_set(
     fake_blueprint_path: pathlib.Path,
 ) -> None:
@@ -369,7 +401,7 @@ def test_step_compute_overrides_set(
         A path to a file that meets minimum expectations (it exists).
 
     """
-    overrides: dict[str, int | str] = {"a": 1, "b": 2, "c": "xyz"}
+    overrides: KeyValueStore = {"slurm": {"a": 1, "b": 2, "c": "xyz"}}
 
     step_name = f"test-step-{uuid.uuid4()}"
     app_name = f"test-app-{uuid.uuid4()}"
@@ -377,7 +409,7 @@ def test_step_compute_overrides_set(
         name=step_name,
         application=app_name,
         blueprint=fake_blueprint_path,
-        compute_overrides=overrides,  # type: ignore[arg-type]
+        compute_overrides=overrides,
     )
 
     new_values: KeyValueStore = {"CSTAR_XYZ": 42, "CSTAR_PQR": "xxx"}
@@ -474,7 +506,12 @@ def test_step_all_overrides_copy(
         The name of the attribute on the Step object that should be tested.
 
     """
-    overrides: dict[str, str | int] = {"a": 1, "b": 2, "c": "xyz"}
+    # compute_overrides only permits launcher-namespace keys
+    overrides: dict[str, t.Any] = (
+        {"slurm": {"a": 1, "b": 2, "c": "xyz"}}
+        if dict_prop == "compute_overrides"
+        else {"a": 1, "b": 2, "c": "xyz"}
+    )
 
     step_name = f"test-step-{uuid.uuid4()}"
     app_name = f"test-app-{uuid.uuid4()}"
