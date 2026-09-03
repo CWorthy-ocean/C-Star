@@ -13,9 +13,13 @@ from cstar.applications.core import (
     RunnerState,
     _registry,
     get_application,
+    load_blueprint,
 )
+from cstar.applications.roms_marbl.models import APP_NAME as APP_ROMS
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
+from cstar.base.env import ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON
 from cstar.execution.handler import ExecutionStatus
+from cstar.system.migration import CstarMigrationError
 
 
 def _external_app_module_source(app_name: str) -> str:
@@ -612,3 +616,113 @@ def test_runnerresult_state_add_errors(
 
     # confirm error results
     assert len(result.errors) == exp_num_errors
+
+
+def _write_roms_blueprint(
+    dest: Path,
+    bp_templates_dir: Path,
+    version_file: str,
+) -> Path:
+    """Copy a versioned roms_marbl template to *dest*, retargeting its
+    ``application`` field to the registered ``roms_marbl`` app.
+
+    The shared templates declare ``application: sleep``, which is not a
+    registered application; retargeting lets `load_blueprint` resolve the
+    real roms_marbl migration chain.
+    """
+    content = (bp_templates_dir / APP_ROMS / version_file).read_text()
+    content = content.replace("application: sleep", f"application: {APP_ROMS}")
+    dest.write_text(content)
+    return dest
+
+
+def test_load_blueprint_migrates_stale_schema(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> None:
+    """A pre-current-schema blueprint is migrated in memory and validated
+    against the current schema rather than raising a ValidationError.
+
+    This reproduces the `cstar workplan run` preflight failure on a stale
+    (schema 2.1.0) blueprint carrying a `model_params` block.
+    """
+    bp_path = _write_roms_blueprint(
+        tmp_path / "stale.yaml", bp_templates_dir, "blueprint.2.1.0.yaml"
+    )
+
+    blueprint = load_blueprint(bp_path)
+
+    assert isinstance(blueprint, RomsMarblBlueprint)
+    assert blueprint.schema_version == "3.0.0"
+    assert not hasattr(blueprint, "model_params")
+    # model_params sub-fields are relocated by the 2.1.0 -> 3.0.0 adapter
+    assert blueprint.partitioning.use_pio is True
+    assert blueprint.namelist_overrides == {"time_stepping": {"dt": 1}}
+
+
+def test_load_blueprint_current_schema_is_noop(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> None:
+    """A current-schema blueprint loads unchanged (migration is a no-op)."""
+    bp_path = _write_roms_blueprint(
+        tmp_path / "current.yaml", bp_templates_dir, "blueprint.3.0.0.yaml"
+    )
+
+    blueprint = load_blueprint(bp_path)
+
+    assert isinstance(blueprint, RomsMarblBlueprint)
+    assert blueprint.schema_version == "3.0.0"
+
+
+def test_load_blueprint_migration_disabled_raises(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When migration is required but disabled, a clear typed error names the
+    source/target versions instead of raising a raw ValidationError.
+    """
+    bp_path = _write_roms_blueprint(
+        tmp_path / "stale.yaml", bp_templates_dir, "blueprint.2.1.0.yaml"
+    )
+    monkeypatch.setenv(ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON)
+
+    with pytest.raises(CstarMigrationError, match="requires schema migration"):
+        load_blueprint(bp_path)
+
+
+def test_load_blueprint_no_migration_path_raises(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> None:
+    """A blueprint whose schema version has no adapter path to the current
+    schema raises a clear migration error, not a raw ValidationError.
+    """
+    content = (bp_templates_dir / APP_ROMS / "blueprint.2.1.0.yaml").read_text()
+    content = content.replace("application: sleep", f"application: {APP_ROMS}")
+    content = content.replace("schema_version: 2.1.0", "schema_version: 0.9.0")
+    bp_path = tmp_path / "unreachable.yaml"
+    bp_path.write_text(content)
+
+    with pytest.raises(CstarMigrationError, match="Unable to migrate blueprint"):
+        load_blueprint(bp_path)
+
+
+def test_load_blueprint_unplannable_migration_falls_through(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+) -> None:
+    """When an app's adapters don't cover the blueprint's application (e.g. the
+    `sleep` app inherits roms_marbl adapters that declare a different
+    application), planning fails; a current-schema blueprint must still load
+    via strict validation rather than raising a migration error.
+    """
+    content = (bp_templates_dir / APP_ROMS / "blueprint.3.0.0.yaml").read_text()
+    bp_path = tmp_path / "sleep.yaml"
+    bp_path.write_text(content)  # keeps `application: sleep`
+
+    blueprint = load_blueprint(bp_path)
+
+    assert blueprint.application == "sleep"
+    assert blueprint.schema_version == "3.0.0"
