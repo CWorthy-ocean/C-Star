@@ -14,10 +14,9 @@ from pydantic import (
 )
 
 from cstar.applications.core import (
-    ApplicationDefinition,
     Transform,
-    get_app_for_blueprint,
     get_application,
+    load_blueprint,
 )
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
@@ -33,9 +32,6 @@ from cstar.orchestration.models import (
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
-
-if t.TYPE_CHECKING:
-    from cstar.entrypoint.runner import BlueprintRunner
 
 TRANSFORMS: dict[str, list[Transform[LiveStep]]] = defaultdict(list)
 """Storage for transform registrations."""
@@ -636,12 +632,7 @@ class OverrideTransform(Transform[LiveStep]):
         """
         bp_path = Path(step.blueprint_path)
 
-        app: ApplicationDefinition[Blueprint, BlueprintRunner[Blueprint]] = (
-            get_application(step.application)
-        )
-        bp_type = app.blueprint
-
-        blueprint: Blueprint = deserialize(bp_path, bp_type)
+        blueprint: Blueprint = load_blueprint(bp_path)
 
         updated_bp = self.apply(blueprint, step.blueprint_overrides)
         update: dict[str, t.Any] = {
@@ -1071,12 +1062,11 @@ class DirectiveConfig(BaseModel):
             if os.getenv(ENV_CSTAR_RUNID, None):
                 workplan = DirectiveConfig.load_workplan()
 
-            app = get_app_for_blueprint(Path(local_bp))
-            blueprint = t.cast("Blueprint", deserialize(local_bp, app.blueprint))
+            blueprint = load_blueprint(Path(local_bp))
 
             step = LiveStep(
                 name="directive-step",
-                application=app.name,
+                application=blueprint.application,
                 blueprint=local_bp,
                 working_dir=blueprint.working_dir,
             )

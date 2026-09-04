@@ -14,7 +14,7 @@ from pydantic import (
 )
 
 from cstar.applications.core import (
-    get_app_for_blueprint,
+    load_blueprint,
 )
 from cstar.base.env import (
     ENV_CSTAR_DATA_HOME,
@@ -36,7 +36,6 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.serialization import (
-    deserialize,
     intenum_representer,
     register_representer,
 )
@@ -271,10 +270,7 @@ class LiveStep(Step):
                 "it does not exist yet."
             )
 
-        path = Path(self.blueprint_path)
-        app = get_app_for_blueprint(path)
-
-        return deserialize(path, app.blueprint)
+        return load_blueprint(Path(self.blueprint_path))
 
     @property
     def script_path(self) -> Path:
