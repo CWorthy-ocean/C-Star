@@ -22,10 +22,9 @@ from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
 from cstar.execution.file_system import DirectoryManager, is_remote_resource, local_copy
-from cstar.orchestration.models import BlueprintCore, Step, Workplan
+from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     PersistenceMode,
-    deserialize,
     serialize,
     validate_serialized_entity,
 )
@@ -512,26 +511,3 @@ def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
         print(f"Value in context map using key {key!r} will be overwritten")
 
     context_map[key] = value
-
-
-def auto_compose(path: str) -> str:
-    """Automatically wrap a blueprint in a workplan when passed."""
-    try:
-        bp = deserialize(path, BlueprintCore)
-        wp = Workplan(
-            name=f"{bp.name} Host",
-            description="Automated Workplan wrapping the execution of a single blueprint.",
-            steps=[
-                Step(
-                    name=f"Execute {bp.name}",
-                    application=bp.application,
-                    blueprint=path,
-                )
-            ],
-        )
-        wp_path = Path(path).with_name(f"{slugify(bp.name)}-host-workplan")
-        serialize(wp_path, wp)
-        return str(wp_path)
-    except Exception:
-        # path isn't a blueprint. leave it alone.
-        return path
