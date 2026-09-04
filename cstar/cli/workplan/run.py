@@ -14,8 +14,8 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.utils import slugify
 from cstar.cli.common import (
-    auto_compose,
     cb_pipeline,
     normalize_runid,
     set_env,
@@ -47,10 +47,11 @@ from cstar.orchestration.dag_runner import (
     check_clobber_targets,
     run_dag,
 )
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import BlueprintCore, Step, Workplan
 from cstar.orchestration.orchestration import LiveWorkplan, Planner, ProcessHandle
 from cstar.orchestration.serialization import (
     deserialize,
+    serialize,
     try_deserialize,
     validate_serialized_entity,
 )
@@ -375,6 +376,29 @@ def resolve_clobber_selection(wp_path: Path, clobber_steps: list[str]) -> list[s
         raise typer.BadParameter(msg, param_hint=ARG_CLOBBER)
 
     return clobber_steps
+
+
+def auto_compose(path: str) -> str:
+    """Automatically wrap a blueprint in a workplan when passed."""
+    try:
+        bp = deserialize(path, BlueprintCore)
+        wp = Workplan(
+            name=f"{bp.name} Host",
+            description="Automated Workplan wrapping the execution of a single blueprint.",
+            steps=[
+                Step(
+                    name=f"Execute {bp.name}",
+                    application=bp.application,
+                    blueprint=path,
+                )
+            ],
+        )
+        wp_path = Path(path).with_name(f"{slugify(bp.name)}-host-workplan")
+        serialize(wp_path, wp)
+        return str(wp_path)
+    except Exception:
+        # path isn't a blueprint. leave it alone.
+        return path
 
 
 def preprocess_path(workplan_path: str | None) -> str | None:
