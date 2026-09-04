@@ -436,8 +436,6 @@ def localize_and_migrate(path: str) -> Path:
         The path to the local blueprint (or the newly migrated blueprint file).
     """
     with local_copy(path) as local_path:
-        bp_path = local_path
-
         request = MigrationRequest(path=local_path)
         try:
             persist_result = execute_migration(request)
@@ -446,10 +444,10 @@ def localize_and_migrate(path: str) -> Path:
                 print(persist_result.migration_result.error)
                 raise typer.Exit(1)
 
-            bp_path = Path(persist_result.target)
+            local_path = Path(persist_result.target)
         except CStarMigrationNotRegisteredError:
             log.debug("Skipping schema migration; no registered adapters")
-        return bp_path
+        return local_path
 
 
 def format_validation_errors(ex: ValidationError) -> str:
