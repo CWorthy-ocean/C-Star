@@ -17,6 +17,7 @@ from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.cli.common import (
     cb_pipeline,
+    localize_and_migrate,
     normalize_runid,
     set_env,
     set_flag,
@@ -433,12 +434,21 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                 local_path = Path(auto_compose(str(local_path)))
 
                 validation_result = validate_serialized_entity(local_path, Workplan)
-                if not validation_result.item:
+                wp = validation_result.item
+                if not wp:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
+                for step in wp.steps:
+                    if isinstance(step.blueprint_path, (Path, str)):
+                        step.blueprint_path = localize_and_migrate(
+                            str(step.blueprint_path)
+                        )
+
+                serialize(local_path, wp)
                 return str(local_path)
+
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {workplan_path}"
             raise typer.BadParameter(msg) from ex
