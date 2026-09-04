@@ -1,21 +1,14 @@
-.. _unreleased:
+.. _0.13.5:
 
-Unreleased
+0.13.5
 ----------
 
-.. note::
-    This release is currently in development
 
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
 
 - Directive-generated overrides (e.g. the initial/boundary conditions set by ``continue-from`` / ``nest-from``) now apply after user ``blueprint_overrides``, so on overlapping keys the directive wins (previously the user override won). (`#676 <https://github.com/CWorthy-ocean/C-Star/pull/676>`_)
-
-New features
-~~~~~~~~~~~~
-
-- N/A
 
 Bug Fixes
 ~~~~~~~~~
@@ -28,8 +21,3 @@ Improvements
 
 
 - Directive execution order is enforced at runtime as well as at scheduling time, so directive files persisted by earlier C-Star versions (or resumed runs) are executed safely without regeneration. (`#676 <https://github.com/CWorthy-ocean/C-Star/pull/676>`_)
-
-Miscellaneous
-~~~~~~~~~~~~~
-
-- N/A
