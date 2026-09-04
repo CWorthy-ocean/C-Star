@@ -612,7 +612,7 @@ def live_step_with_templates(tmp_path: Path) -> LiveStep:
     bp.touch()
     step = Step(
         name="fill-step",
-        application="sleep",
+        application="roms_marbl",
         blueprint=bp.as_posix(),
         blueprint_overrides={
             "input_dir": "{{base_dir}}/input",

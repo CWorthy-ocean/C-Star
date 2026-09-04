@@ -14,7 +14,7 @@ class SleepApplication(RomsMarblApplication):
     can use the RomsMarblBlueprint
     """
 
-    name = "sleep"
+    name = "roms_marbl"
 
 
 @pytest.fixture(scope="session")

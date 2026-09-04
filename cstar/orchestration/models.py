@@ -156,8 +156,6 @@ class Application(StrEnum):
 
     ROMS_MARBL = "roms_marbl"
     """A UCLA-ROMS simulation coupled with a MARBL biogeochemical component."""
-    SLEEP = "sleep"
-    """A call to the hostname executable to simplify testing."""
     HELLO_WORLD = "hello_world"
     """Sample custom application."""
     PLOTTER = "plotter"

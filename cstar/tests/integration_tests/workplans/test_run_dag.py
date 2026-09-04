@@ -1,4 +1,3 @@
-import os
 import subprocess
 from pathlib import Path
 
@@ -63,12 +62,12 @@ def test_dep_keys(tmp_path: Path) -> None:
             steps=[
                 Step(
                     name="Good Step",
-                    application="sleep",
+                    application="roms_marbl",
                     blueprint=bp_path.as_posix(),
                 ),
                 Step(
                     name="Bad Step",
-                    application="sleep",
+                    application="roms_marbl",
                     blueprint=bp_path.as_posix(),
                     depends_on=["Non-existent Step"],
                 ),
@@ -101,9 +100,6 @@ async def test_build_and_run_local(
     wp_templates_dir : Path
         Fixture returning the path to the directory containing workplan template files
     """
-    # avoid running sims during tests
-    os.environ["CSTAR_CMD_CONVERTER_OVERRIDE"] = "sleep"
-
     template_file = f"{workplan_name}.yaml"
     wp_path = wp_templates_dir / template_file
 
@@ -142,9 +138,6 @@ async def test_build_and_run(
     default_blueprint_path : str
         Fixture returning the default blueprint path contained in template workplans
     """
-    # avoid running sims during tests
-    os.environ["CSTAR_CMD_CONVERTER_OVERRIDE"] = "sleep"
-
     template_file = f"{workplan_name}.yaml"
     wp_path = wp_templates_dir / template_file
 
