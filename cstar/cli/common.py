@@ -21,7 +21,7 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
-from cstar.execution.file_system import DirectoryManager, is_remote_resource
+from cstar.execution.file_system import DirectoryManager, is_remote_resource, local_copy
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     PersistenceMode,
@@ -420,6 +420,34 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     persisted_to = persist_migration(request, migration_result)
 
     return PersistedMigrateResult(migration_result, persisted_to)
+
+
+def localize_and_migrate(path: str) -> Path:
+    """Copy the blueprint locally and auto-migrate its schema if necessary.
+
+    Parameters
+    ----------
+    path : str
+        The path to the blueprint.
+
+    Returns
+    -------
+    str
+        The path to the local blueprint (or the newly migrated blueprint file).
+    """
+    with local_copy(path) as local_path:
+        request = MigrationRequest(path=local_path)
+        try:
+            persist_result = execute_migration(request)
+
+            if persist_result.migration_result.error:
+                print(persist_result.migration_result.error)
+                raise typer.Exit(1)
+
+            local_path = Path(persist_result.target)
+        except CStarMigrationNotRegisteredError:
+            log.debug("Skipping schema migration; no registered adapters")
+        return local_path
 
 
 def format_validation_errors(ex: ValidationError) -> str:
