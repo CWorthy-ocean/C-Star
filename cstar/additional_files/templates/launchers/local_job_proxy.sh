@@ -10,11 +10,7 @@ DONE={done}
 FAILED={failed}
 
 update_status() {
-    if [ "$(uname)" = "Darwin" ]; then
-        sed -i '' "s/^status:.*$/status: $1/" "$2"
-    else
-        sed -i "s/^status:.*$/status: $1/" "$2"
-    fi
+    sed "s/^status:.*$/status: $1/" "$2" > "$2.tmp" && mv "$2.tmp" "$2"
 }
 
 # wait for each dependency to complete, then verify that it succeeded --
