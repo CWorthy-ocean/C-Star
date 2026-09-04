@@ -1,9 +1,18 @@
-from pathlib import Path
+import enum
+from pathlib import Path, PosixPath
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from cstar.cli.workplan.check import app
+from cstar.orchestration.models import Workplan
+from cstar.orchestration.serialization import (
+    deserialize,
+    enum_representer,
+    path_representer,
+    register_representer,
+)
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -199,25 +208,19 @@ def test_workplan_incomplete_input(
 
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.parametrize(
-    ("start_removal", "end_removal"),
+    ("field_name", "expect_failure"),
     [
-        ("state:", None),
-        ("compute_environment:", "runtime_vars:"),
-        ("num_nodes:", None),
-        ("num_cpus_per_process:", None),
-        ("runtime_vars:", None),
-        ("Aggregate", None),
-        ("workflow_overrides:", "compute_overrides:"),
-        ("compute_overrides:", "name:"),
-        ("walltime", None),
-        ("          num_nodes:", None),
-        ("blueprint_overrides:", "workflow_overrides"),
-        ("depends_on:", "blueprint"),
+        ("name", True),
+        ("description", True),
+        ("steps", True),
+        ("state", False),
+        ("compute_environment", False),
+        ("runtime_vars", False),
     ],
 )
 def test_workplan_optional_input(
-    start_removal: str,
-    end_removal: str | None,
+    field_name: str,
+    expect_failure: bool,
     tmp_path: Path,
     wp_templates_dir: Path,
 ) -> None:
@@ -227,45 +230,38 @@ def test_workplan_optional_input(
 
     Parameters
     ----------
-    start_removal : Path
-        A string that will trigger content skipping to begin when building a test workplan
-    end_removal : Path
-       A string that will trigger content skipping to end when building a test workplan
+    field_name : Path
+        The field from the Workplan that will be removed.
+    expect_failure : bool
+        If the field missing will cause a deserialization failure.
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
-    package_path : Path
-        Absolute path to the c-star package on disk
-    default_blueprint_path : str
-        The default bp path in template workplans; used to replace with a valid value.
+    wp_templates_dir : str
+        Directory containing workplan templates
     """
     wp_template = wp_templates_dir / "workplan.yaml"
-    content = wp_template.read_text().splitlines()
 
-    remaining_content: list[str] = []
-    cutting = False
-    cut_once = False
+    wp = deserialize(wp_template, Workplan)
+    dumped = wp.model_dump(exclude_defaults=True, by_alias=True)
 
-    for line in content:
-        if start_removal in line and not cut_once:
-            cutting = True
-            cut_once = True
-        elif end_removal and end_removal in line:
-            cutting = False
-
-        if not cutting:
-            remaining_content.append(line)
-
-        if end_removal is None or end_removal in line:
-            cutting = False
+    # remove the attribute that should cause deserialization to fail
+    del dumped[field_name]
 
     wp_path = tmp_path / "wp.yaml"
-    wp_path.write_text("\n".join(remaining_content))
+
+    dumper = yaml.Dumper
+    dumper.add_multi_representer(enum.Enum, enum_representer)
+    register_representer(PosixPath, path_representer)
+
+    with wp_path.open("w") as fp:
+        yaml.dump(dumped, fp, sort_keys=False)
 
     runner = CliRunner()
     result = runner.invoke(app, [wp_path.as_posix()], color=False)
 
     err_msg = f"{wp_path} should not pass validation"
-    assert "is valid" in result.stdout, err_msg
+    is_invalid = "is valid" not in result.stdout
+    assert is_invalid == expect_failure, err_msg
 
 
 def test_workplan_check_remote_workplan_dne() -> None:
