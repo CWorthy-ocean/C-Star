@@ -98,8 +98,15 @@ def path_callback(
         The path to the blueprint (or the newly migrated blueprint file).
     """
     if DeferredBlueprintRef.matches(path):
-        # the blueprint does not exist yet; it is resolved (and migrated) at runtime
-        return path
+        ref = DeferredBlueprintRef.from_uri(path)
+        try:
+            path = str(resolve_deferred_blueprint(ref))
+        except (CstarError, RuntimeError) as ex:
+            print(f"Unable to resolve deferred blueprint: {ex}")
+            raise typer.Exit(code=1) from ex
+
+        msg = f"Resolved deferred blueprint from step {ref.from_step!r} to {path!r}"
+        log.info(msg)
 
     try:
         return str(localize_and_migrate(path))
@@ -197,22 +204,7 @@ def run(
     """Execute a blueprint in a local worker service."""
     _log_startup_versions()
 
-    if DeferredBlueprintRef.matches(uri):
-        ref = DeferredBlueprintRef.from_uri(uri)
-        try:
-            uri = str(resolve_deferred_blueprint(ref))
-        except (CstarError, RuntimeError) as ex:
-            print(f"Unable to resolve deferred blueprint: {ex}")
-            raise typer.Exit(code=1) from ex
-
-        msg = f"Resolved deferred blueprint from step {ref.from_step!r} to {uri!r}"
-        log.info(msg)
-
-        # deferred blueprints skip path_callback's handling; apply it now
-        bp_path = localize_and_migrate(uri)
-    else:
-        bp_path = Path(uri)
-
+    bp_path = Path(uri)
     app_config = get_app_for_blueprint(bp_path)
 
     name = f"{app_config.name}_runner"
