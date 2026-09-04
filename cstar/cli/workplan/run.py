@@ -382,6 +382,10 @@ def auto_compose(path: str) -> str:
     """Automatically wrap a blueprint in a workplan when passed."""
     try:
         bp = deserialize(path, BlueprintCore)
+    except Exception:
+        # path isn't a blueprint. leave it alone.
+        return path
+    else:
         wp = Workplan(
             name=f"{bp.name} Host",
             description="Automated Workplan wrapping the execution of a single blueprint.",
@@ -396,9 +400,6 @@ def auto_compose(path: str) -> str:
         wp_path = Path(path).with_name(f"{slugify(bp.name)}-host-workplan")
         serialize(wp_path, wp)
         return str(wp_path)
-    except Exception:
-        # path isn't a blueprint. leave it alone.
-        return path
 
 
 def preprocess_path(workplan_path: str | None) -> str | None:
