@@ -466,7 +466,7 @@ class BPTestAdapterV0(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "roms_marbl"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
@@ -489,7 +489,7 @@ class BPTestAdapterV1(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "roms_marbl"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
@@ -512,7 +512,7 @@ class BPTestAdapterV2(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "roms_marbl"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
@@ -535,7 +535,7 @@ class BPTestAdapterV3(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "roms_marbl"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
