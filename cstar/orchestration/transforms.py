@@ -852,11 +852,19 @@ def package_runtime_overrides(step: LiveStep) -> LiveStep:
     }
     overrides = deep_merge(dict(step.blueprint_overrides), sys_overrides)
 
+    # apply-overrides must precede every other directive: directives run in
+    # mapping order, and until the working_dir override is applied, a content
+    # directive (e.g. continue-from) would persist its intermediate blueprint
+    # into the raw blueprint's working_dir, which may not be writable.
     directives = {
-        **step.directives,
         ApplyOverridesDirective.key(): {
             ApplyOverridesDirective.KEY_OVERRIDES: overrides,
             ApplyOverridesDirective.KEY_APPLICATION: step.application,
+        },
+        **{
+            key: value
+            for key, value in step.directives.items()
+            if key != ApplyOverridesDirective.key()
         },
     }
     update: dict[str, t.Any] = {"blueprint_overrides": {}, "directives": directives}
@@ -1081,12 +1089,20 @@ class DirectiveConfig(BaseModel):
                 working_dir=blueprint.working_dir,
             )
 
+            # apply-overrides must run before any content directive so the
+            # working_dir override lands before an intermediate blueprint is
+            # persisted; enforce it here since directive files may predate
+            # the ordering guaranteed by `package_runtime_overrides`.
+            ordered = sorted(
+                directives.items(),
+                key=lambda item: item[0] != ApplyOverridesDirective.key(),
+            )
             transforms = [
                 directive_map[key](
                     config=t.cast("dict[str, dict[str, t.Any]]", config),
                     workplan=workplan,
                 )
-                for key, config in directives.items()
+                for key, config in ordered
             ]
             for transform in transforms:
                 step = transform(step)[0]

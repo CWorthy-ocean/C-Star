@@ -2,7 +2,7 @@
 import os
 import typing as t
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -18,7 +18,7 @@ from cstar.applications.roms_marbl.transforms import (
     RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
 )
-from cstar.base.env import FLAG_OFF
+from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
 from cstar.execution.file_system import RomsFileSystemManager
@@ -35,6 +35,8 @@ from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     ApplyOverridesDirective,
+    DirectiveConfig,
+    OverrideDirective,
     OverrideTransform,
     TemplateFillTransform,
     WorkplanTransformer,
@@ -44,6 +46,7 @@ from cstar.orchestration.transforms import (
     get_system_overrides,
     get_transforms,
     mustache,
+    package_runtime_overrides,
     resolve_deferred_blueprint,
 )
 
@@ -603,6 +606,110 @@ def test_workplan_transformer_applies_working_dir_overrides(
     assert overrides["working_dir"] != original_override
 
     assert config[ApplyOverridesDirective.KEY_APPLICATION] == step_orig.application
+
+
+def test_package_runtime_overrides_orders_apply_overrides_first(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify apply-overrides is packaged ahead of the step's own directives.
+
+    Directives run in mapping order at runtime; a content directive running
+    before apply-overrides would persist its intermediate blueprint into the
+    raw blueprint's working_dir.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="ordering-step",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "step-root",
+        directives={ContinuanceDirective.key(): {"path": "prior/run"}},
+    )
+
+    packaged = package_runtime_overrides(step)
+
+    assert list(packaged.directives) == [
+        ApplyOverridesDirective.key(),
+        ContinuanceDirective.key(),
+    ]
+
+
+def test_apply_directives_applies_overrides_before_content_directives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify apply-overrides runs before other directives even when the
+    directive file lists it last (files written before the packaging order
+    change do), so no directive writes into the raw blueprint's working_dir.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to clear the run-id environment variable.
+    """
+    raw_dir = tmp_path / "raw-working-dir"
+    override_dir = tmp_path / "overridden-working-dir"
+
+    bp_path = tmp_path / "ordering_bp.yaml"
+    bp_path.write_text(
+        f"""\
+name: ordering
+description: directive ordering test
+application: hello_world
+state: draft
+target: 'world'
+schema_version: '1.0.0'
+working_dir: {raw_dir.as_posix()}
+"""
+    )
+
+    seen_working_dirs: list[Path] = []
+
+    class RecordingDirective(OverrideDirective):
+        """Content directive recording the step working_dir it runs with."""
+
+        @classmethod
+        def key(cls) -> str:
+            return "record-working-dir"
+
+        def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
+            seen_working_dirs.append(step.working_dir)
+            return super().__call__(step)
+
+    directive_path = tmp_path / "directives.yaml"
+    directive_path.write_text(
+        f"""\
+directives:
+  {RecordingDirective.key()}:
+    enabled: true
+  {ApplyOverridesDirective.key()}:
+    overrides:
+      working_dir: {override_dir.as_posix()}
+    application: hello_world
+"""
+    )
+
+    monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+    DirectiveConfig.register(RecordingDirective.key(), RecordingDirective)
+    try:
+        result = DirectiveConfig.apply_directives(str(directive_path), str(bp_path))
+    finally:
+        DirectiveConfig.directive_map.pop(RecordingDirective.key(), None)
+
+    # the content directive ran with the overridden working_dir...
+    assert seen_working_dirs == [override_dir.resolve()]
+    # ...its intermediate blueprint landed there, and the raw dir was untouched
+    assert Path(result).is_relative_to(override_dir.resolve())
+    assert not raw_dir.exists()
 
 
 @pytest.fixture
