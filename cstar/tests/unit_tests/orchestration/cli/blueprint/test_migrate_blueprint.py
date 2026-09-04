@@ -35,7 +35,6 @@ def blueprint_1_0_0(
 @pytest.fixture
 def blueprint_1_0_0_sleep(blueprint_1_0_0: Path) -> Path:
     content = blueprint_1_0_0.read_text()
-    # content = content.replace("application: sleep", f"application: {APP_ROMS}")
 
     bp_path = blueprint_1_0_0.with_stem(f"{blueprint_1_0_0.stem}_sleep")
     bp_path.write_text(content)

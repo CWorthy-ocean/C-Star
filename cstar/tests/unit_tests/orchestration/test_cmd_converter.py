@@ -23,7 +23,6 @@ from cstar.orchestration.serialization import deserialize
     ("target_application"),
     [
         Application.ROMS_MARBL,
-        Application.SLEEP,
         Application.HELLO_WORLD,
     ],
 )
@@ -59,7 +58,6 @@ def test_converter_defaults(
     ("target_application"),
     [
         Application.ROMS_MARBL,
-        Application.SLEEP,
         Application.HELLO_WORLD,
     ],
 )

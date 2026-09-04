@@ -3,18 +3,18 @@ name: Fan-out Workplan
 description: A workplan that uses dependencies to gate execution of parallel steps.
 steps:
 - name: Step A
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 - name: Step B_1
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on: ["Step A"]
 - name: Step B_2
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on: ["Step A"]
 - name: Step B_3
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on: ["Step A"]
 state: draft

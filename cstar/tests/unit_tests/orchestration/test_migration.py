@@ -36,7 +36,7 @@ from cstar.system.migration import (
     SchemaBounds,
 )
 
-APP_SLEEP: t.Final[str] = "sleep"
+APP_NAME: t.Final[str] = "roms_marbl"
 
 
 @pytest.mark.parametrize(
@@ -366,7 +366,7 @@ def test_migration_with_unregistered_application() -> None:
     src_version_exp = BPTestAdapterV0.source()
     tgt_version_exp = BPTestAdapterV3.target()
 
-    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_NAME}
 
     converters: list[type[SchemaAdapter]] = [
         BPTestAdapterV0,
@@ -402,7 +402,7 @@ def test_migration_to_unknown_target() -> None:
     src_version_exp = BPTestAdapterV0.source()
     tgt_version_exp = "1.0.42"
 
-    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_NAME}
 
     converters: list[type[SchemaAdapter]] = [
         BPTestAdapterV0,
@@ -411,7 +411,7 @@ def test_migration_to_unknown_target() -> None:
         BPTestAdapterV3,
     ]
     bounds: dict[str, SchemaBounds] = {
-        APP_SLEEP: {
+        APP_NAME: {
             "min": BPTestAdapterV0.source(),
             "max": BPTestAdapterV3.target(),
         },
@@ -437,7 +437,7 @@ def test_migration_from_unknown_source() -> None:
     """Verify that no migration path found raises an exception."""
     src_version_exp = "1.0.UNK"
 
-    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_NAME}
     converters: list[type[SchemaAdapter]] = [
         BPTestAdapterV0,
         BPTestAdapterV1,
@@ -445,7 +445,7 @@ def test_migration_from_unknown_source() -> None:
         BPTestAdapterV3,
     ]
     bounds: dict[str, SchemaBounds] = {
-        APP_SLEEP: {
+        APP_NAME: {
             "min": BPTestAdapterV0.source(),
             "max": BPTestAdapterV3.target(),
         },
@@ -466,7 +466,7 @@ class BPTestAdapterV0(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "sleep"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
@@ -489,7 +489,7 @@ class BPTestAdapterV1(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "sleep"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
@@ -512,7 +512,7 @@ class BPTestAdapterV2(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "sleep"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
@@ -535,7 +535,7 @@ class BPTestAdapterV3(SchemaAdapter):
     @classmethod
     def application(cls) -> str:
         """The supported version of the input model."""
-        return "sleep"
+        return APP_NAME
 
     @classmethod
     def source(cls) -> str:
@@ -576,7 +576,7 @@ def test_migration_intermediate_multistep(
     """
     tgt_version_exp = "test.4"
 
-    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_SLEEP}
+    bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_NAME}
 
     # pass in the converters instead of relying on the default
     converters: list[type[SchemaAdapter]] = [
@@ -586,7 +586,7 @@ def test_migration_intermediate_multistep(
         BPTestAdapterV3,
     ]
     bounds: dict[str, SchemaBounds] = {
-        APP_SLEEP: {
+        APP_NAME: {
             "min": BPTestAdapterV0.source(),
             "max": BPTestAdapterV3.target(),
         },

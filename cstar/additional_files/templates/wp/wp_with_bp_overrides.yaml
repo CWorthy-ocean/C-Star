@@ -9,7 +9,7 @@ compute_environment:
 runtime_vars: [var1, var2]
 steps:
   - name: Run Simulation With Overrides
-    application: sleep
+    application: roms_marbl
     blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
     blueprint_overrides:
       working_dir: /other_dir

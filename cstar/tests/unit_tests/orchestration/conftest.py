@@ -200,7 +200,7 @@ def fill_workplan_template(
             f"""\
             steps:
                 - name: Test Step
-                  application: sleep
+                  application: roms_marbl
                   depends_on: []
                   blueprint: {__file__}
                   blueprint_overrides: {{}}
@@ -211,7 +211,7 @@ def fill_workplan_template(
                           max_walltime: 00:10:00
                           num_nodes: 4
                 - name: Test Another Step
-                  application: sleep
+                  application: roms_marbl
                   depends_on: []
                   blueprint: {__file__}
                   blueprint_overrides: {{}}
@@ -312,7 +312,7 @@ def fill_blueprint_template(
             # yaml-language-server: $schema={blueprint_schema_path.as_posix()}
             name: {fill_vals["name"]}
             description: This is the description of my test blueprint
-            application: sleep
+            application: roms_marbl
             state: draft
             valid_start_date: 2020-01-01 00:00:00
             valid_end_date: 2020-02-01 00:00:00
@@ -433,7 +433,6 @@ def single_step_workplan(
     bp_path = tmp_path / "blueprint.yaml"
     bp_content = bp_tpl_path.read_text()
     bp_content = bp_content.replace(default_working_dir, f"working_dir: {tmp_path}")
-    bp_content.replace(Application.SLEEP, Application.ROMS_MARBL)
     bp_path.write_text(bp_content)
 
     return Workplan(
@@ -442,7 +441,7 @@ def single_step_workplan(
         steps=[
             Step(
                 name="s-00",
-                application=Application.SLEEP,
+                application=Application.ROMS_MARBL,
                 blueprint=bp_path,
             ),
         ],

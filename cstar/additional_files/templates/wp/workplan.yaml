@@ -8,7 +8,7 @@ compute_environment:
 runtime_vars: [var1, var2]
 steps:
     - name: Prepare
-      application: sleep
+      application: roms_marbl
       depends_on: []
       blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
       blueprint_overrides: {}
@@ -19,7 +19,7 @@ steps:
               max_walltime: 00:10:00
               num_nodes: 4
     - name: Ensemble X
-      application: sleep
+      application: roms_marbl
       depends_on: ["Prepare"]
       blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
       blueprint_overrides: {}
@@ -30,7 +30,7 @@ steps:
               max_walltime: 00:10:00
               num_nodes: 4
     - name: Ensemble Y
-      application: sleep
+      application: roms_marbl
       depends_on: ["Prepare"]
       blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
       blueprint_overrides: {}
@@ -41,7 +41,7 @@ steps:
               max_walltime: 00:10:00
               num_nodes: 4
     - name: Aggregate Results
-      application: sleep
+      application: roms_marbl
       depends_on: ["Ensemble X", "Ensemble Y"]
       blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
       blueprint_overrides: {}

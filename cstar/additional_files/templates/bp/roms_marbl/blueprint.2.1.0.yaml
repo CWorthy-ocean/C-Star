@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/CWorthy-ocean/C-Star/refs/heads/main/docs/schemas/bp/roms_marbl/roms_marbl_schema.2.1.0.json
 name: Test Blueprint
 description: This is the description of my test blueprint
-application: sleep
+application: roms_marbl
 state: draft
 valid_start_date: 2000-01-01 00:00:00
 valid_end_date: 2025-01-01 00:00:00

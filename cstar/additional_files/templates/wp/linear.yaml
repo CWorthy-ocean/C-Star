@@ -3,21 +3,21 @@ name: Linear Workplan
 description: A workplan that usees dependencies to ensure that all tasks execute in a series.
 steps:
 - name: Step L1
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on:
   - Step L2
 - name: Step L2
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on:
   - Step L3
 - name: Step L3
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
   depends_on:
   - Step L4
 - name: Step L4
-  application: sleep
+  application: roms_marbl
   blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 state: draft

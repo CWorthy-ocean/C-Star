@@ -32,6 +32,8 @@ from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 if t.TYPE_CHECKING:
     from collections.abc import Iterable
 
+APP_NAME: t.Final[str] = "roms_marbl"
+
 
 @pytest.fixture
 def diamond_graph(tmp_path: Path) -> nx.DiGraph:
@@ -42,7 +44,9 @@ def diamond_graph(tmp_path: Path) -> nx.DiGraph:
     initial_stats = {
         key: {
             KEY_STEP: Step(
-                name=f"s-{i:02d}", application="sleep", blueprint=bp_path.as_posix()
+                name=f"s-{i:02d}",
+                application=APP_NAME,
+                blueprint=bp_path.as_posix(),
             ),
             KEY_STATUS: Status.Unsubmitted,
         }
@@ -74,7 +78,11 @@ def tree_graph(tmp_path: Path) -> nx.DiGraph:
     g = nx.DiGraph(data)
     initial_stats: dict[str, dict[str, Step | Status]] = {
         key: {
-            KEY_STEP: Step(name=key, application="sleep", blueprint=bp_path.as_posix()),
+            KEY_STEP: Step(
+                name=key,
+                application=APP_NAME,
+                blueprint=bp_path.as_posix(),
+            ),
             KEY_STATUS: Status.Unsubmitted,
         }
         for key in g.nodes
@@ -115,25 +123,25 @@ def diamond_workplan(
         steps=[
             Step(
                 name="d-00",
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-01",
                 depends_on=["d-00"],
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-02",
                 depends_on=["d-00"],
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-03",
                 depends_on=["d-01", "d-02"],
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
         ],
@@ -172,36 +180,36 @@ def multi_entrypoint_workplan(
         steps=[
             Step(
                 name="d-00-a",
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-00-b",
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-01",
                 depends_on=["d-00-a"],
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-02",
                 depends_on=["d-00-a"],
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-03",
                 depends_on=["d-00-b"],
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
             Step(
                 name="d-04",
                 depends_on=["d-01", "d-02", "d-00-b"],
-                application="sleep",
+                application=APP_NAME,
                 blueprint=bp_path.as_posix(),
             ),
         ],
@@ -296,12 +304,12 @@ def test_dep_keys(tmp_path: Path) -> None:
             steps=[
                 Step(
                     name="Good Step",
-                    application="sleep",
+                    application=APP_NAME,
                     blueprint=bp_path.as_posix(),
                 ),
                 Step(
                     name="Bad Step",
-                    application="sleep",
+                    application=APP_NAME,
                     blueprint=bp_path.as_posix(),
                     depends_on=["Non-existent Step"],
                 ),

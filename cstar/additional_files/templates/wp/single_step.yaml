@@ -3,6 +3,6 @@ name: Single Step Workplan
 description: Workplan containing a single step
 steps:
   - name: The Step
-    application: sleep
+    application: roms_marbl
     blueprint: ~/code/cstar/cstar/additional_files/templates/blueprint.yaml
 state: draft
