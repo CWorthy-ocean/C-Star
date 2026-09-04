@@ -16,6 +16,7 @@ from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    localize_and_migrate,
     normalize_runid,
     set_env,
     set_flag,
@@ -50,6 +51,7 @@ from cstar.orchestration.models import Workplan
 from cstar.orchestration.orchestration import LiveWorkplan, Planner, ProcessHandle
 from cstar.orchestration.serialization import (
     deserialize,
+    serialize,
     try_deserialize,
     validate_serialized_entity,
 )
@@ -398,10 +400,20 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     raise typer.BadParameter(msg)
 
                 validation_result = validate_serialized_entity(local_path, Workplan)
-                if not validation_result.item:
+                wp = validation_result.item
+                if not wp:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
+
+                for step in wp.steps:
+                    if isinstance(step.blueprint_path, (Path, str)):
+                        step.blueprint_path = localize_and_migrate(
+                            str(step.blueprint_path)
+                        )
+
+                serialize(local_path, wp)
+                return str(local_path)
 
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {workplan_path}"
