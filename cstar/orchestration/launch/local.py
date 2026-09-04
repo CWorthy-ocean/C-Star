@@ -563,19 +563,21 @@ class ProxiedRunRequestFormatter(ModelFormatter[RunRequest]):
         env_vars = " ".join(declarations)
 
         proxyscript_model = {
-            "sentinel_path": str(StateRepository.sentinel_path(self.step.name)),
-            "blueprint_path": str(self.step.blueprint_path),
-            "pids": pids,
-            "dep_sentinels": dep_sentinels,
-            "running": str(Status.Running.value),
-            "done": str(Status.Done.value),
-            "failed": str(Status.Failed.value),
-            "delay": delay,
-            "command": " ".join(value.command),
-            "env_vars": env_vars,
+            "{sentinel_path}": str(StateRepository.sentinel_path(self.step.name)),
+            "{blueprint_path}": str(self.step.blueprint_path),
+            "{pids}": pids,
+            "{dep_sentinels}": dep_sentinels,
+            "{running}": str(Status.Running.value),
+            "{done}": str(Status.Done.value),
+            "{failed}": str(Status.Failed.value),
+            "{delay}": delay,
+            "{command}": " ".join(value.command),
+            "{env_vars}": env_vars,
         }
         files_dir = additional_files_dir()
         proxy_tpl_path = files_dir / "templates/launchers/local_job_proxy.sh"
+        content = proxy_tpl_path.read_text()
+        for k, v in proxyscript_model.items():
+            content = content.replace(k, v)
 
-        tpl = proxy_tpl_path.read_text()
-        return tpl.format(**proxyscript_model)
+        return content

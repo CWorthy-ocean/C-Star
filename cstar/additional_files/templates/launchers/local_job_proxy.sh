@@ -9,13 +9,13 @@ RUNNING={running}
 DONE={done}
 FAILED={failed}
 
-update_status() {{
+update_status() {
     if [ "$(uname)" = "Darwin" ]; then
         sed -i '' "s/^status:.*$/status: $1/" "$2"
     else
         sed -i "s/^status:.*$/status: $1/" "$2"
     fi
-}}
+}
 
 # wait for each dependency to complete, then verify that it succeeded --
 # a dependency that exited without reaching `Done` must abort this step.
