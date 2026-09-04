@@ -9,7 +9,8 @@ Unreleased
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+
+- Directive-generated overrides (e.g. the initial/boundary conditions set by ``continue-from`` / ``nest-from``) now apply after user ``blueprint_overrides``, so on overlapping keys the directive wins (previously the user override won). (`#676 <https://github.com/CWorthy-ocean/C-Star/pull/676>`_)
 
 New features
 ~~~~~~~~~~~~
@@ -19,12 +20,14 @@ New features
 Bug Fixes
 ~~~~~~~~~
 
-- N/A
+
+- Workplan steps with a ``continue-from`` or ``nest-from`` directive wrote intermediate blueprint files into the blueprint's original ``working_dir`` before the workplan's ``working_dir`` override was applied, failing with a permission error when that directory was not writable by the submitting user. (`#676 <https://github.com/CWorthy-ocean/C-Star/pull/676>`_)
 
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- Directive execution order is enforced at runtime as well as at scheduling time, so directive files persisted by earlier C-Star versions (or resumed runs) are executed safely without regeneration. (`#676 <https://github.com/CWorthy-ocean/C-Star/pull/676>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
