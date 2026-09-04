@@ -15,6 +15,7 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
+    auto_compose,
     cb_pipeline,
     normalize_runid,
     set_env,
@@ -396,6 +397,8 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                 if not local_path.exists():
                     msg = f"Workplan not found at path: {workplan_path}"
                     raise typer.BadParameter(msg)
+
+                local_path = Path(auto_compose(str(local_path)))
 
                 validation_result = validate_serialized_entity(local_path, Workplan)
                 if not validation_result.item:
