@@ -391,11 +391,11 @@ def auto_compose(path: str) -> str:
         wp_path = bp_path.with_name(wp_name)
 
         wp = Workplan(
-            name=f"{bp.name} Host",
+            name=f"{bp.name!r} Host",
             description="Automated Workplan wrapping the execution of a single blueprint.",
             steps=[
                 Step(
-                    name=f"Execute {bp.name}",
+                    name=f"Execute {bp.name!r}",
                     application=bp.application,
                     blueprint=path,
                 )
