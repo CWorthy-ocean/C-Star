@@ -1,3 +1,6 @@
-GCC/11.2.0
-openmpi4/4.1.6
-netCDF-Fortran/4.6.1
+GCC/12.3.0  # gompi-2023a toolchain compiler (netCDF-Fortran swaps out older GCC versions)
+netCDF-Fortran/4.6.1  # keystone: pulls gnu12, openmpi4, HDF5, and netCDF implicitly
+openmpi4/4.1.6  # (implicit dependency)
+HDF5/.1.14.0  # (implicit dependency, hidden module)
+netCDF/.4.9.2  # (implicit dependency, hidden module)
+CMake/3.26.3
