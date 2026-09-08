@@ -14,7 +14,8 @@ Breaking Changes
 New features
 ~~~~~~~~~~~~
 
-- N/A
+
+- Blueprints passed to ``cstar workplan run ...`` will be executed in the context of a workplan. (`#675 <https://github.com/CWorthy-ocean/C-Star/pull/675>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -25,7 +26,8 @@ Bug Fixes
 Improvements
 ~~~~~~~~~~~~
 
-- N/A
+
+- Fix parameter typo and include capability to re-attach in main help text. (`#675 <https://github.com/CWorthy-ocean/C-Star/pull/675>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
