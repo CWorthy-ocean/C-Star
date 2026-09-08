@@ -1,4 +1,7 @@
-gcc/11.2.0
-openmpi/4.0.6
-netcdf-fortran/4.5.3
+gcc/11.2.0  # (system default)
+openmpi/4.0.6  # (system default)
+hdf5/1.10.7  # (system default)
+netcdf-c/4.7.4  # (system default)
+netcdf-fortran/4.5.3  # (system default)
 parallel-netcdf/1.11.2
+cmake/3.20.0
