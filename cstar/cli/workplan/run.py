@@ -397,7 +397,7 @@ def auto_compose(path: str) -> str:
                 Step(
                     name=f"Execute {bp.name!r}",
                     application=bp.application,
-                    blueprint=path,
+                    blueprint=bp_path,
                 )
             ],
         )
