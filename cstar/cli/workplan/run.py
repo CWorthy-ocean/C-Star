@@ -436,6 +436,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
+                return str(local_path)
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {workplan_path}"
             raise typer.BadParameter(msg) from ex
