@@ -1,3 +1,7 @@
-netCDF-Fortran/4.6.0-gompi-2022b
-PnetCDF/1.12.3-gompi-2022b
+GCC/13.3.0
+OpenMPI/5.0.3-GCC-13.3.0
+HDF5/1.14.5-gompi-2024a
+netCDF/4.9.2-gompi-2024a
+netCDF-Fortran/4.6.1-gompi-2024a
+PnetCDF/1.14.0-gompi-2024a
 CMake/3.31.8-GCCcore-13.3.0
