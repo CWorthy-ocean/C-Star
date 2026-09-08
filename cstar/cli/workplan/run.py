@@ -516,6 +516,7 @@ def run(
         typer.Argument(
             help="Path to a workplan file.",
             callback=preprocess_path,
+            is_eager=True,
         ),
     ] = "",
     dry_run: t.Annotated[
