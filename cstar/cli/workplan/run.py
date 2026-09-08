@@ -69,7 +69,9 @@ HELP_SHORT = "Execute a workplan."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
-Specify a previously used `run_id` to re-start a prior run.
+Specify a previously used `run_id` to re-start (or reattach) to a prior run.
+
+If a path to a blueprint is supplied, it will be executed as a single-step workplan.
 """
 
 CATEGORY_HEADER_COLOR: t.Final[str] = "white"
@@ -500,7 +502,7 @@ def run(
             "--varfile",
             "-f",
             help=(
-                "Specify the path to a file containing one replacements per line "
+                "Specify the path to a file containing one replacement per line "
                 "as key-value pairs in the form `key=value`."
             ),
             callback=preprocess_varfile,
@@ -514,7 +516,7 @@ def run(
     path: t.Annotated[
         str,
         typer.Argument(
-            help="Path to a workplan file.",
+            help="Path to a workplan or blueprint file.",
             callback=preprocess_path,
             is_eager=True,
         ),
