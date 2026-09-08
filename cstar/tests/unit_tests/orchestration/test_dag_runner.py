@@ -21,6 +21,7 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import (
+    ExecutiveRunSummary,
     _ignore_ambient_clobber_env,
     apply_clobber_overrides,
     check_clobber_dependents,
@@ -534,3 +535,53 @@ async def test_prepare_workplan_persists_clobber_overrides(
 
     assert by_name["Prepare"].workflow_overrides[KEY_CLOBBER] is True
     assert not by_name["Ensemble X"].workflow_overrides.get(KEY_CLOBBER, False)
+
+
+@pytest.mark.asyncio
+async def test_executive_run_summary_pairs_each_step_with_its_own_sentinel(
+    layered_workplan: tuple[Workplan, dict[str, LocalHandle]],
+    mock_run_id: str,
+) -> None:
+    """Verify the run summary reports each step's own status and task id.
+
+    `WorkplanRun.sentinels` is an unordered set, so the summary must match
+    sentinels to steps by name rather than by iteration position.
+    """
+    workplan, handles = layered_workplan
+    state_repo = StateRepository()
+    run_repo = TrackingRepository()
+
+    done_names = {"Step 0", "Step 2", "Step 4"}
+    unlaunched_name = "Step 5"
+    expected: dict[str, Status] = {}
+
+    wp_run = await run_repo.get_workplan_run(mock_run_id)
+    assert wp_run is not None
+
+    for handle in handles.values():
+        handle.status = Status.Done if handle.name in done_names else Status.Running
+        path = await state_repo.put_sentinel(handle)
+        assert path is not None
+
+        if handle.name == unlaunched_name:
+            # a step that was never launched has no sentinel on disk or on the run
+            path.unlink()
+            expected[handle.name] = Status.Unsubmitted
+            continue
+
+        wp_run.sentinels.add(path)
+        expected[handle.name] = handle.status
+
+    summary = await ExecutiveRunSummary.from_run(wp_run)
+
+    assert [s.name for s in summary.steps] == [s.name for s in workplan.steps]
+    for step_summary in summary.steps:
+        assert step_summary.status == expected[step_summary.name].name
+        handle = handles[step_summary.name]
+        if step_summary.name == unlaunched_name:
+            assert step_summary.task_id == ""
+        else:
+            assert step_summary.task_id == handle.pid
+        assert step_summary.sentinel_path.name == StateRepository.sentinel_name(
+            handle.safe_name
+        )
