@@ -501,18 +501,26 @@ class ExecutiveRunSummary(BaseModel):
         steps = [LiveStep.from_step(s) for s in workplan.steps]
         step_summaries: list[ExecutiveStepSummary] = []
 
+        # `run.sentinels` is an unordered set, so pair each step with its own
+        # sentinel by file name rather than by position. Steps that were never
+        # launched have no recorded sentinel and fall back to the canonical path.
+        recorded = {path.name: path for path in run.sentinels}
+        sentinel_paths = [
+            recorded.get(
+                StateRepository.sentinel_name(step.safe_name),
+                StateRepository.sentinel_path(step.safe_name, run_id=run.run_id),
+            )
+            for step in steps
+        ]
+
         sentinels = await asyncio.gather(
             *[
                 asyncio.to_thread(try_deserialize, path, ProcessHandle)
-                for path in run.sentinels
+                for path in sentinel_paths
             ]
         )
 
-        for step, sentinel_path, handle in zip(
-            steps,
-            run.sentinels,
-            sentinels,
-        ):
+        for step, sentinel_path, handle in zip(steps, sentinel_paths, sentinels):
             summary = ExecutiveStepSummary(
                 name=step.name,
                 log_path=str(step.log_path),
