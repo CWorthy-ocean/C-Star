@@ -386,6 +386,7 @@ def auto_compose(path: str) -> str:
         # path isn't a blueprint. leave it alone.
         return path
     else:
+        log.debug(f"The blueprint at {path!r} must be converted into a workplan")
         bp_path = Path(path)
         wp_name = f"{slugify(bp.name)}-host-workplan{bp_path.suffix}"
         wp_path = bp_path.with_name(wp_name)
@@ -402,6 +403,7 @@ def auto_compose(path: str) -> str:
             ],
         )
         serialize(wp_path, wp)
+        log.info(f"Created a host workplan for blueprint in: {wp_path}")
         return str(wp_path)
 
 
