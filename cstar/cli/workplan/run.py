@@ -387,7 +387,7 @@ def auto_compose(path: str) -> str:
         return path
     else:
         bp_path = Path(path)
-        wp_name = f"{slugify(bp.name)}-host-workplan.{bp_path.suffix}"
+        wp_name = f"{slugify(bp.name)}-host-workplan{bp_path.suffix}"
         wp_path = bp_path.with_name(wp_name)
 
         wp = Workplan(
