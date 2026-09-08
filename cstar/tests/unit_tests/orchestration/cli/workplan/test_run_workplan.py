@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from cstar.base.env import ENV_CSTAR_RUNID, ENV_CSTAR_STATE_HOME
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
-from cstar.cli.workplan.run import app
+from cstar.cli.workplan.run import app, auto_compose
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
@@ -1124,6 +1124,151 @@ def test_cli_workplan_run_normalizes_mixed_case_runid(
     assert result.exit_code == 0
     assert os.environ[ENV_CSTAR_RUNID] == "myrun_01"
     assert mock_build_and_run_dag.call_args.args[1] == "myrun_01"
+
+
+@pytest.mark.parametrize("suffix", [".yaml", ".yml"])
+def test_auto_compose_wraps_blueprint(
+    tmp_path: Path,
+    hello_world_bp_content: str,
+    suffix: str,
+) -> None:
+    """Verify a blueprint path is wrapped in a generated host workplan that
+    is written next to the blueprint, preserving the blueprint's suffix.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    hello_world_bp_content : str
+        Fixture providing the content of a minimal hello-world blueprint
+    suffix : str
+        The file extension of the blueprint being wrapped
+    """
+    bp_path = tmp_path / f"helloworld{suffix}"
+    bp_path.write_text(hello_world_bp_content)
+
+    result = auto_compose(bp_path.as_posix())
+
+    wp_path = Path(result)
+    assert wp_path != bp_path
+    assert wp_path.parent == bp_path.parent
+    assert wp_path.name == f"say-hello-to-my-little-friend-host-workplan{suffix}"
+    assert wp_path.exists()
+
+    # the generated host workplan must contain a single step executing the blueprint
+    wp = deserialize(wp_path, Workplan)
+    assert wp.name == "Say hello to my little friend! Host"
+    assert len(wp.steps) == 1
+
+    step = wp.steps[0]
+    assert step.application == "hello_world"
+    assert Path(step.blueprint_path).resolve() == bp_path.resolve()
+    assert "Say hello to my little friend!" in step.name
+
+
+def test_auto_compose_ignores_workplan(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+) -> None:
+    """Verify a workplan path passes through `auto_compose` unchanged and no
+    host workplan file is generated.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    wp_templates_dir : Path
+        Fixture providing the path to a directory containing template workplans
+    """
+    wp_template = wp_templates_dir / "workplan.yaml"
+    wp_path = tmp_path / "workplan.yaml"
+    wp_path.write_text(wp_template.read_text())
+
+    files_before = set(tmp_path.iterdir())
+
+    assert auto_compose(wp_path.as_posix()) == wp_path.as_posix()
+    assert set(tmp_path.iterdir()) == files_before
+
+
+def test_auto_compose_ignores_non_blueprint_content(tmp_path: Path) -> None:
+    """Verify a file that is neither a blueprint nor a workplan passes
+    through `auto_compose` unchanged and no host workplan file is generated.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    """
+    path = tmp_path / "not-a-blueprint.yaml"
+    path.write_text("some: [unrelated, content]\n")
+
+    files_before = set(tmp_path.iterdir())
+
+    assert auto_compose(path.as_posix()) == path.as_posix()
+    assert set(tmp_path.iterdir()) == files_before
+
+
+def test_workplan_run_blueprint_auto_composes(hello_world_bp_path: Path) -> None:
+    """Verify submitting a blueprint to `cstar workplan run` generates a host
+    workplan and passes the generated workplan (not the blueprint) on to
+    `build_and_run_dag`.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", hello_world_bp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_awaited_once()
+
+    # confirm the composed host workplan is what continues through the run
+    wp_path = mock_build_and_run_dag.call_args.args[0]
+    assert isinstance(wp_path, Path)
+    assert wp_path.name.endswith("-host-workplan.yaml")
+    assert wp_path.exists()
+
+    # confirm the host workplan step executes the submitted blueprint
+    wp = deserialize(wp_path, Workplan)
+    assert [Path(s.blueprint_path).resolve() for s in wp.steps] == [
+        hello_world_bp_path.resolve()
+    ]
+
+
+def test_workplan_run_blueprint_default_run_id(hello_world_bp_path: Path) -> None:
+    """Verify that omitting the run-id when submitting a blueprint derives
+    the default run-id from the generated host workplan rather than failing
+    to parse the blueprint.
+
+    Parameters
+    ----------
+    hello_world_bp_path : Path
+        Fixture providing the path to a minimal hello-world blueprint
+    """
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [hello_world_bp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_build_and_run_dag.assert_awaited_once()
+    assert (
+        mock_build_and_run_dag.call_args.args[1] == "say-hello-to-my-little-friend-host"
+    )
 
 
 @pytest.mark.parametrize(

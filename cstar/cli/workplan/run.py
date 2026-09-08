@@ -14,6 +14,7 @@ from cstar.base.env import (
 )
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import LogLevelChoices, get_logger
+from cstar.base.utils import slugify
 from cstar.cli.common import (
     cb_pipeline,
     normalize_runid,
@@ -46,10 +47,11 @@ from cstar.orchestration.dag_runner import (
     check_clobber_targets,
     run_dag,
 )
-from cstar.orchestration.models import Workplan
+from cstar.orchestration.models import BlueprintCore, Step, Workplan
 from cstar.orchestration.orchestration import LiveWorkplan, Planner, ProcessHandle
 from cstar.orchestration.serialization import (
     deserialize,
+    serialize,
     try_deserialize,
     validate_serialized_entity,
 )
@@ -67,7 +69,9 @@ HELP_SHORT = "Execute a workplan."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
-Specify a previously used `run_id` to re-start a prior run.
+Specify a previously used `run_id` to re-start (or reattach) to a prior run.
+
+If a path to a blueprint is supplied, it will be executed as a single-step workplan.
 """
 
 CATEGORY_HEADER_COLOR: t.Final[str] = "white"
@@ -376,6 +380,35 @@ def resolve_clobber_selection(wp_path: Path, clobber_steps: list[str]) -> list[s
     return clobber_steps
 
 
+def auto_compose(path: str) -> str:
+    """Automatically wrap a blueprint in a workplan when passed."""
+    try:
+        bp = deserialize(path, BlueprintCore)
+    except Exception:
+        # path isn't a blueprint. leave it alone.
+        return path
+    else:
+        log.debug(f"The blueprint at {path!r} must be converted into a workplan")
+        bp_path = Path(path)
+        wp_name = f"{slugify(bp.name)}-host-workplan{bp_path.suffix}"
+        wp_path = bp_path.with_name(wp_name)
+
+        wp = Workplan(
+            name=f"{bp.name} Host",
+            description="Automated Workplan wrapping the execution of a single blueprint.",
+            steps=[
+                Step(
+                    name=f"Execute {bp.name!r}",
+                    application=bp.application,
+                    blueprint=bp_path,
+                )
+            ],
+        )
+        serialize(wp_path, wp)
+        log.info(f"Created a host workplan for blueprint in: {wp_path}")
+        return str(wp_path)
+
+
 def preprocess_path(workplan_path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
@@ -397,12 +430,15 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     msg = f"Workplan not found at path: {workplan_path}"
                     raise typer.BadParameter(msg)
 
+                local_path = Path(auto_compose(str(local_path)))
+
                 validation_result = validate_serialized_entity(local_path, Workplan)
                 if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
+                return str(local_path)
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {workplan_path}"
             raise typer.BadParameter(msg) from ex
@@ -466,7 +502,7 @@ def run(
             "--varfile",
             "-f",
             help=(
-                "Specify the path to a file containing one replacements per line "
+                "Specify the path to a file containing one replacement per line "
                 "as key-value pairs in the form `key=value`."
             ),
             callback=preprocess_varfile,
@@ -480,8 +516,9 @@ def run(
     path: t.Annotated[
         str,
         typer.Argument(
-            help="Path to a workplan file.",
+            help="Path to a workplan or blueprint file.",
             callback=preprocess_path,
+            is_eager=True,
         ),
     ] = "",
     dry_run: t.Annotated[
