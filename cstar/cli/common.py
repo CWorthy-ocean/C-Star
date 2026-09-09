@@ -387,8 +387,10 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     )
 
     if request.dry_run():
-        migrator.plan(dumped)
-        raise typer.Exit(0)
+        return PersistedMigrateResult(
+            MigrateResult(dumped, dumped, plan=migrator.plan(dumped)),
+            request.source,
+        )
 
     migration_result = migrator.plan_and_migrate(dumped)
     if migration_result.error:
