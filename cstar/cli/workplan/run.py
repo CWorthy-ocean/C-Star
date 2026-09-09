@@ -410,6 +410,32 @@ def auto_compose(path: str) -> str:
         return str(wp_path)
 
 
+def migrate_steps(path: Path, workplan: Workplan):
+    """Perform automatic migration of the blueprints referenced by a workplan.
+
+    Parameters
+    ----------
+    path : Path
+        The path where the updated workplan will be persisted.
+    workplan : Workplan
+        The workplan to perform migrations on.
+    """
+    is_updated = False
+    for step in workplan.steps:
+        if not isinstance(step.blueprint_path, (Path, str)):
+            continue
+
+        step.blueprint_path, modified = localize_and_migrate(
+            str(step.blueprint_path),
+        )
+        if modified:
+            is_updated = True
+
+    if is_updated:
+        log.info("Updating workplan with migrated blueprints")
+        serialize(path, workplan)
+
+
 def preprocess_path(workplan_path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
@@ -440,13 +466,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
-                for step in wp.steps:
-                    if isinstance(step.blueprint_path, (Path, str)):
-                        step.blueprint_path = localize_and_migrate(
-                            str(step.blueprint_path)
-                        )
-
-                serialize(local_path, wp)
+                migrate_steps(local_path, wp)
                 return str(local_path)
 
         except FileNotFoundError as ex:
