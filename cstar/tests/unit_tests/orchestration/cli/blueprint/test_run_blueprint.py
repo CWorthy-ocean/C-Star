@@ -1,3 +1,5 @@
+import json
+import typing as t
 from pathlib import Path
 from unittest import mock
 
@@ -32,7 +34,7 @@ from cstar.roms.simulation import ROMSSimulation
 
 def test_blueprint_run_file_dne(tmp_path: Path) -> None:
     """Verify that a path to a non-existent blueprint fails to be started due
-    to validation.
+    to validation and the error identifies the missing file.
 
     Parameters
     ----------
@@ -49,6 +51,49 @@ def test_blueprint_run_file_dne(tmp_path: Path) -> None:
     )
 
     assert "not found" in result.stderr
+    # the message must name the missing blueprint; rich wraps long paths at
+    # arbitrary points, so strip all whitespace and decoration before matching
+    stderr_squashed = "".join(result.stderr.replace("│", "").split())
+    assert bp_path.name in stderr_squashed
+
+
+def test_blueprint_run_migrated_blueprint_invalid(
+    tmp_path: Path,
+    plotter_v1_0_0_model: dict[str, t.Any],
+) -> None:
+    """Verify a blueprint whose migrated content fails model validation is
+    rejected with a usage error naming the blueprint, instead of a raw
+    traceback.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_v1_0_0_model : dict[str, t.Any]
+        Fixture providing the raw content of a plotter blueprint at schema 1.0.0
+    """
+    # drop fields the migrated model requires so post-migration validation fails
+    model = {
+        k: v
+        for k, v in plotter_v1_0_0_model.items()
+        if k not in ("input_dir", "grid_file_path")
+    }
+    bp_path = tmp_path / "plotter_incomplete_1.0.0.json"
+    bp_path.write_text(json.dumps(model))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [bp_path.as_posix()],
+        color=False,
+    )
+
+    assert result.exit_code == 2
+    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    assert "is invalid" in stderr_flat
+    assert "Details:" in stderr_flat
+    stderr_squashed = "".join(stderr_flat.split())
+    assert bp_path.name in stderr_squashed
 
 
 def test_blueprint_run_remote_blueprint_dne() -> None:

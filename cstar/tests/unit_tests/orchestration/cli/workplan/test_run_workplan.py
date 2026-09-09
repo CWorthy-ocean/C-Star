@@ -1700,3 +1700,88 @@ def test_workplan_run_migration_skips_deferred_blueprint(
     assert deferred_step.is_deferred
     assert isinstance(deferred_step.blueprint_path, DeferredBlueprintRef)
     assert deferred_step.blueprint_path.from_step == "Plot"
+
+
+def test_workplan_run_step_blueprint_missing_reports_blueprint(
+    tmp_path: Path,
+) -> None:
+    """Verify a workplan step referencing a non-existent blueprint fails with
+    an error naming the missing blueprint -- not the workplan, which exists.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    """
+    missing_bp = tmp_path / "gone.yaml"
+    step = Step(name="Plot", application="plotter", blueprint=missing_bp.as_posix())
+    wp_path = _write_workplan(tmp_path / "missing-bp-workplan.yaml", [step])
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    mock_build_and_run_dag.assert_not_awaited()
+
+    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    assert "Blueprint not found" in stderr_flat
+    assert "Workplan not found" not in stderr_flat
+    # the message must name the missing blueprint; rich wraps long paths at
+    # arbitrary points, so strip all whitespace and decoration before matching
+    assert missing_bp.name in "".join(stderr_flat.split())
+
+
+def test_workplan_run_step_blueprint_migration_invalid(
+    tmp_path: Path,
+    plotter_v1_0_0_model: dict[str, t.Any],
+) -> None:
+    """Verify a workplan step whose blueprint migrates to content that fails
+    model validation is rejected with a usage error naming the blueprint,
+    instead of a raw traceback.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_v1_0_0_model : dict[str, t.Any]
+        Fixture providing the raw content of a plotter blueprint at schema 1.0.0
+    """
+    # drop fields the migrated model requires so post-migration validation fails
+    model = {
+        k: v
+        for k, v in plotter_v1_0_0_model.items()
+        if k not in ("input_dir", "grid_file_path")
+    }
+    bp_path = tmp_path / "plotter_incomplete_1.0.0.json"
+    bp_path.write_text(json.dumps(model))
+
+    step = Step(name="Plot", application="plotter", blueprint=bp_path)
+    wp_path = _write_workplan(tmp_path / "invalid-migration-workplan.yaml", [step])
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    mock_build_and_run_dag.assert_not_awaited()
+
+    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    assert "is invalid" in stderr_flat
+    assert "Details:" in stderr_flat
+    # the failing blueprint (not the workplan) is named in the message
+    stderr_squashed = "".join(stderr_flat.split())
+    assert bp_path.name in stderr_squashed
+    assert wp_path.name not in stderr_squashed
