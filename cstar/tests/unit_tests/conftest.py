@@ -40,9 +40,9 @@ from cstar.io.staged_data import (
 )
 from cstar.io.stager import Stager
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
-from cstar.orchestration.models import Step
+from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 from cstar.pio.external_codebase import PIOExternalCodeBase
 from cstar.tests.unit_tests.fake_abc_subclasses import (
@@ -2169,22 +2169,18 @@ def preprocessable_workplan_path(
         Used to identify a directory containing mocked restart files
     wp_templates_dir : Path
         Used to load a workplan template that can be modified to include directives
+    read_yaml_intercept : None
+        Intercept and overwrite sample paths with valid values during deserialization.
     """
     wp_template = wp_templates_dir / "workplan.yaml"
-
-    # add directives to the last step in the workplan file
     _, continue_from_dir, _ = mocked_simulation_outputs
-    content = wp_template.read_text()
-    base_indent = 6  # indentation of the "directives" element
-    directives = ["directives:", "continue-from:", f"path: {continue_from_dir}"]
-    for i in range(len(directives)):
-        line_indent_sz = base_indent + (i * 4)
-        indent = " " * line_indent_sz
-        directives[i] = f"{indent}{directives[i]}"
-    content += "\n".join(directives)
+
+    wp = deserialize(wp_template, Workplan)
+    wp.steps[-1].directives["continue-from"] = {"path": str(continue_from_dir)}
+
     write_to = tmp_path / "wp_with_directives.yaml"
-    nbytes = write_to.write_text(content)
-    assert nbytes
+    nbytes = serialize(write_to, wp)
+    assert nbytes, "Serialization of test workplan with directives failed"
 
     return write_to
 
