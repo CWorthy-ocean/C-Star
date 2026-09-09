@@ -422,7 +422,7 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     return PersistedMigrateResult(migration_result, persisted_to)
 
 
-def localize_and_migrate(path: str) -> Path:
+def localize_and_migrate(path: str) -> tuple[Path, bool]:
     """Copy the blueprint locally and auto-migrate its schema if necessary.
 
     Parameters
@@ -432,11 +432,15 @@ def localize_and_migrate(path: str) -> Path:
 
     Returns
     -------
-    str
-        The path to the local blueprint (or the newly migrated blueprint file).
+    tuple[Path, str]
+        Tuple containing:
+        - Path to the localized blueprint
+        - Boolean indicating if a migration was performed
     """
     with local_copy(path) as local_path:
         request = MigrationRequest(path=local_path)
+        is_migrated = False
+
         try:
             persist_result = execute_migration(request)
 
@@ -445,9 +449,10 @@ def localize_and_migrate(path: str) -> Path:
                 raise typer.Exit(1)
 
             local_path = Path(persist_result.target)
+            is_migrated = bool(persist_result.migration_result.plan)
         except CStarMigrationNotRegisteredError:
             log.debug("Skipping schema migration; no registered adapters")
-        return local_path
+        return local_path, is_migrated
 
 
 def format_validation_errors(ex: ValidationError) -> str:
