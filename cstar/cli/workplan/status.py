@@ -35,16 +35,20 @@ def status(
 ) -> None:
     """Retrieve the current status of a workplan."""
     repo = TrackingRepository()
-    workplan_run = asyncio.run(repo.get_workplan_run(run_id))
+    run = asyncio.run(repo.get_workplan_run(run_id))
 
-    if workplan_run is None:
+    if run is None:
         print("An unknown run-id was supplied.")
         return
 
     launcher = get_launcher()
+    wp_path = run.trx_workplan_path
+    if not wp_path:
+        msg = f"No live workplan for run-id `{run.run_id}` could be found."
+        raise RuntimeError(msg)
 
     try:
-        workplan = deserialize(workplan_run.trx_workplan_path, LiveWorkplan)
+        workplan = deserialize(wp_path, LiveWorkplan)
 
         planner = Planner(workplan)
         status = asyncio.run(load_run_state(run_id, launcher))

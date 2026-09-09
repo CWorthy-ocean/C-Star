@@ -35,7 +35,7 @@ if t.TYPE_CHECKING:
     from cstar.orchestration.tracking import WorkplanRun
 
 
-def list_runs(incomplete: str) -> list[tuple[str, str]]:
+def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
     """Retrieve a list of all recorded run-ids.
 
     Parameters
@@ -85,15 +85,25 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
     wp_run: WorkplanRun | None = None
     try:
         repo = TrackingRepository()
+        wp_run = await repo.get_workplan_run(run_id)
 
-        if wp_run := await repo.get_workplan_run(run_id):
-            wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
-            step_names = [str(s.name) for s in wp.steps]
+        if not wp_run:
+            msg = f"No run for run-id `{run_id}` could be found."
+            raise RuntimeError(msg)
 
-            if incomplete:
-                step_names = [s for s in step_names if s.lower().startswith(incomplete)]
+        wp_path = wp_run.trx_workplan_path
 
-            return step_names
+        if not wp_path:
+            msg = f"No live workplan for run-id `{run_id}` could be found."
+            raise RuntimeError(msg)
+
+        wp = deserialize(wp_path, LiveWorkplan)
+        step_names = [str(s.name) for s in wp.steps]
+
+        if incomplete:
+            step_names = [s for s in step_names if s.lower().startswith(incomplete)]
+
+        return step_names
     except FileNotFoundError:
         if wp_run:
             msg = f"Workplan run contains a dead path: {wp_run.trx_workplan_path} was not found"
@@ -366,16 +376,21 @@ def preload_run(context: typer.Context, run_id: str) -> str:
         raise typer.BadParameter(msg, param_hint="run_id")
 
     repo = TrackingRepository()
-    wp_run = asyncio.run(repo.get_workplan_run(run_id))
-    if not wp_run:
+    run = asyncio.run(repo.get_workplan_run(run_id))
+    if not run:
         raise typer.BadParameter(
             f"Unable to locate run with unknown run-id: {run_id}",
             param_hint="run_id",
         )
-    set_ctxmap(context, "run", wp_run)
+    set_ctxmap(context, "run", run)
 
-    wp_path = wp_run.trx_workplan_path
+    wp_path = run.trx_workplan_path
+    if not wp_path:
+        msg = f"No live workplan for run-id {run.run_id!r} could be found."
+        raise RuntimeError(msg)
+
     wp = try_deserialize(wp_path, LiveWorkplan)
+
     if not wp:
         msg = f"Unable to deserialize workplan for run {run_id!r} from {str(wp_path)!r}"
         raise typer.BadParameter(

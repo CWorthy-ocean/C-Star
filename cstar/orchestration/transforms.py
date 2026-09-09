@@ -1140,8 +1140,9 @@ class DirectiveConfig(BaseModel):
 
         wp_path = run.trx_workplan_path
 
-        if wp := deserialize(run.trx_workplan_path, LiveWorkplan):
-            return wp
+        if not run.trx_workplan_path:
+            msg = f"No live workplan for run-id `{run_id}` could be found."
+            raise RuntimeError(msg)
 
         msg = f"Unable to load workplan for run-id {run_id!r} from {wp_path}"
         raise RuntimeError(msg)

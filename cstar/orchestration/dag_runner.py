@@ -266,7 +266,12 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     -------
     DagStatus
     """
-    wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
+    wp_path = wp_run.trx_workplan_path
+    if not wp_path:
+        msg = f"No live workplan for run-id {wp_run.run_id!r} could be found."
+        raise RuntimeError(msg)
+
+    wp = deserialize(wp_path, LiveWorkplan)
     msg = f"Reloading workplan run: {wp.name}"
     log.debug(msg)
 
@@ -497,7 +502,12 @@ class ExecutiveRunSummary(BaseModel):
         cls,
         run: WorkplanRun,
     ) -> "ExecutiveRunSummary":
-        workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
+        wp_path = run.trx_workplan_path
+        if not wp_path:
+            msg = f"No live workplan for run-id `{run.run_id}` could be found."
+            raise RuntimeError(msg)
+
+        workplan = deserialize(wp_path, LiveWorkplan)
         steps = [LiveStep.from_step(s) for s in workplan.steps]
         step_summaries: list[ExecutiveStepSummary] = []
 
@@ -752,7 +762,7 @@ async def run_dag(
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,
-        trx_workplan_path=wp_path,
+        trx_workplan_path=None,
         output_path=output_dir,
         run_id=run_id,
         environment=capture_environment(),

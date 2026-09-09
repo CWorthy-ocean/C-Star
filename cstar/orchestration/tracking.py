@@ -24,7 +24,7 @@ class WorkplanRun(BaseModel):
     workplan_path: Path
     """The path to the original workplan."""
 
-    trx_workplan_path: Path
+    trx_workplan_path: Path | None
     """The path to the transformed workplan."""
 
     output_path: Path
@@ -396,7 +396,7 @@ class TrackingRepository(LoggingMixin):
         """
         return await asyncio.to_thread(self.put_workplan_run_sync, run)
 
-    async def list_latest_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
+    async def list_latest_runs(self, run_id_filter: str = "") -> Sequence[WorkplanRun]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
 
         run_id_filter : str

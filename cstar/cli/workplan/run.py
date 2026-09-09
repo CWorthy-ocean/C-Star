@@ -461,6 +461,10 @@ async def handle_run_reloading(run_id: str) -> str:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
 
+    if not wp_run.trx_workplan_path:
+        msg = f"No live workplan for run-id `{run_id}` could be found."
+        raise typer.BadParameter(msg)
+
     # ensure the environment matches the prior run
     os.environ.update(wp_run.environment)
 
