@@ -2168,8 +2168,6 @@ def preprocessable_workplan_path(
         Used to identify a directory containing mocked restart files
     wp_templates_dir : Path
         Used to load a workplan template that can be modified to include directives
-    read_yaml_intercept : None
-        Intercept and overwrite sample paths with valid values during deserialization.
     """
     wp_template = wp_templates_dir / "workplan.yaml"
     _, continue_from_dir, _ = mocked_simulation_outputs
