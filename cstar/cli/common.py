@@ -451,7 +451,7 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
                 raise typer.Exit(1)
 
             local_path = Path(persist_result.target)
-            is_migrated = bool(persist_result.migration_result.plan)
+            is_migrated = bool(persist_result.migration_result.error)
         except CStarMigrationNotRegisteredError:
             log.debug("Skipping schema migration; no registered adapters")
         return local_path, is_migrated
