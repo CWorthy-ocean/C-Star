@@ -468,7 +468,6 @@ def preprocess_path(workplan_path: str | None) -> str | None:
 
                 migrate_steps(local_path, wp)
                 return str(local_path)
-
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {workplan_path}"
             raise typer.BadParameter(msg) from ex
