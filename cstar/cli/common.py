@@ -30,7 +30,9 @@ from cstar.orchestration.serialization import (
 )
 from cstar.system.migration import (
     BlueprintMigration,
+    CstarMigrationError,
     CStarMigrationNotRegisteredError,
+    CstarUnsupportedMigrationError,
     MigrateResult,
     MigrationPlan,
     MigrationRequest,
@@ -434,10 +436,13 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
 
     Returns
     -------
-    tuple[Path, str]
+    tuple[Path, bool]
         Tuple containing:
-        - Path to the localized blueprint
-        - Boolean indicating if a migration was performed
+        - Path to the localized blueprint (the migrated copy when one was created)
+        - True if the blueprint was migrated and persisted to a new location,
+          meaning references to the original path must be updated. False when
+          the blueprint was left untouched (already up-to-date, dry-run, or no
+          adapters registered for its application).
     """
     with local_copy(path) as local_path:
         request = MigrationRequest(path=local_path)
@@ -450,10 +455,20 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
                 print(persist_result.migration_result.error)
                 raise typer.Exit(1)
 
+            # a migration occurred only when the blueprint was persisted to a
+            # new location; up-to-date and dry-run requests return the source
+            is_migrated = Path(persist_result.target) != local_path
             local_path = Path(persist_result.target)
-            is_migrated = bool(persist_result.migration_result.error)
         except CStarMigrationNotRegisteredError:
             log.debug("Skipping schema migration; no registered adapters")
+        except CstarUnsupportedMigrationError as ex:
+            msg = f"Unable to migrate blueprint: {str(path)!r}"
+            log.exception(msg)
+            raise typer.Exit(1) from ex
+        except CstarMigrationError as ex:
+            msg = f"Migration failed for {path!r}"
+            log.exception(msg)
+            raise typer.BadParameter(msg) from ex
         return local_path, is_migrated
 
 
