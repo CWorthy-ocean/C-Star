@@ -517,7 +517,8 @@ def local_copy(uri: str) -> Generator[Path, None, None]:
     else:
         bp_path = Path(uri).expanduser().resolve()
         if not bp_path.exists():
-            raise FileNotFoundError(f"File not found at path: {bp_path}")
+            msg = f"File not found at path: {bp_path}"
+            raise FileNotFoundError(errno.ENOENT, msg, bp_path)
         yield bp_path
 
 
