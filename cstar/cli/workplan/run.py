@@ -460,13 +460,12 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                 local_path = Path(auto_compose(str(local_path)))
 
                 validation_result = validate_serialized_entity(local_path, Workplan)
-                wp = validation_result.item
-                if not wp:
+                if not validation_result.item:
                     log.error(validation_result.error_msg)
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
-                migrate_steps(local_path, wp)
+                migrate_steps(local_path, validation_result.item)
                 return str(local_path)
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {workplan_path}"
