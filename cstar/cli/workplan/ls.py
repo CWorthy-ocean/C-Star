@@ -221,7 +221,7 @@ def ls_runs(
             "--reverse",
             help="Set flag to sort in ascending order.",
         ),
-    ] = True,
+    ] = False,
     format: t.Annotated[
         FORMATS,
         typer.Option("--format", help="Pass the desired output format."),
