@@ -1605,6 +1605,48 @@ def test_workplan_run_migration_dry_run_plans_all_steps_without_persisting(
     assert wp_path.read_text() == wp_content_before
 
 
+def test_workplan_run_dry_run_unsupported_schema_fails(
+    tmp_path: Path,
+    plotter_v1_0_0_model: dict[str, t.Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify dry-run planning exits non-zero when a step's blueprint declares
+    a schema version with no registered migration path, instead of continuing
+    with a blueprint that cannot be executed.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    plotter_v1_0_0_model : dict[str, t.Any]
+        Fixture providing the raw content of a plotter blueprint at schema 1.0.0
+    monkeypatch : pytest.MonkeyPatch
+        Used to enable dry-run mode before the eager path callback runs
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
+
+    # no adapter migrates from 0.5.0, so planning the upgrade path must fail
+    model = {**plotter_v1_0_0_model, "schema_version": "0.5.0"}
+    bp_path = tmp_path / "plotter_unsupported_0.5.0.json"
+    bp_path.write_text(json.dumps(model))
+
+    step = Step(name="Plot", application="plotter", blueprint=bp_path)
+    wp_path = _write_workplan(tmp_path / "unsupported-schema-workplan.yaml", [step])
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag", wraps=fake_build_and_run_dag
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", "--dry-run", wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 1
+    mock_build_and_run_dag.assert_not_awaited()
+
+
 def test_workplan_run_migration_not_registered_leaves_workplan_untouched(
     tmp_path: Path,
     hello_world_bp_path: Path,
