@@ -16,7 +16,6 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.base.exceptions import BlueprintDeferredError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
@@ -38,16 +37,19 @@ from cstar.orchestration.transforms import (
     DirectiveConfig,
     OverrideDirective,
     SplitFrequency,
-    effective_blueprint,
     get_time_slices,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 if t.TYPE_CHECKING:
+    from collections.abc import Callable
+
     from cstar.base.log import TraceLogger
     from cstar.orchestration.orchestration import LiveWorkplan
 
 log = get_logger(__name__)
+
+T = t.TypeVar("T")
 
 
 class RomsMarblTimeSplitter(Transform[LiveStep]):
@@ -690,52 +692,53 @@ class BoundaryFileTrxAdapter:
         }
 
 
-def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
-    """Locate the output directory holding a completed step's model outputs.
+def find_in_step_outputs(
+    workplan: "LiveWorkplan", name: str, find: "Callable[[Path], T | None]"
+) -> T:
+    """Search a completed step's output directories for model outputs.
 
-    Resolves to `joined_output` when the named step is a ROMS-MARBL run with
-    ParallelIO enabled (partitioned restart/boundary files are not written in
-    that mode), otherwise to `output`.
+    Probes `joined_output` first and falls back to `output`, returning the
+    first result `find` produces. Which directory holds usable files depends on
+    how the step ran (ParallelIO writes joined files, a non-PIO run is joined
+    after the fact, the nest_ic app writes straight to `output`), so the
+    directories are probed rather than inferred from the step's blueprint.
 
     Parameters
     ----------
     workplan : LiveWorkplan
         The workplan containing the named step.
     name : str
-        The name of the step whose output directory is requested.
+        The name of the step whose outputs are requested.
+    find : Callable[[Path], T | None]
+        A search function returning `None` when a directory holds nothing
+        usable (e.g. `RestartFile.find` or `BoundaryFile.find`).
 
     Returns
     -------
-    Path
+    T
+        The first non-`None` result of `find`.
 
     Raises
     ------
     KeyError
         If `workplan` does not contain a step named `name`.
+    ValueError
+        If no candidate directory holds a usable result.
     """
     if name not in workplan:
         msg = f"Unable to locate step {name!r} in workplan"
         raise KeyError(msg)
 
-    step = workplan[name]
-    fsm = RomsFileSystemManager(step.fsm.root_dir)
+    fsm = RomsFileSystemManager(workplan[name].fsm.root_dir)
+    candidates = (fsm.joined_output_dir, fsm.output_dir)
 
-    output_dir = fsm.output_dir
+    for search_path in candidates:
+        if search_path.is_dir() and (found := find(search_path)) is not None:
+            return found
 
-    # With ParallelIO there are no partitioned restart/boundary files to
-    # reuse; the joined files live in `joined_output`.
-    try:
-        # merge the step's packaged runtime overrides so values
-        # set via blueprint_overrides (e.g. use_pio) are visible
-        blueprint = effective_blueprint(step)
-    except BlueprintDeferredError:
-        # Backstop: deferred+split is prohibited upstream, so treat as non-PIO.
-        blueprint = None
-
-    if isinstance(blueprint, RomsMarblBlueprint) and blueprint.partitioning.use_pio:
-        output_dir = fsm.joined_output_dir
-
-    return output_dir
+    searched = ", ".join(str(p) for p in candidates)
+    msg = f"No usable outputs located for step {name!r}; searched: {searched}"
+    raise ValueError(msg)
 
 
 def _rst_path_continue_from_conflict_message(step_name: str | None) -> str:
@@ -858,7 +861,8 @@ class ContinuanceDirective(OverrideDirective):
             search_path = Path(target_path)
 
         if name := self._config.get(self.KEY_STEP, None):
-            search_path = resolve_step_output_dir(self.workplan, name)
+            step_restart = find_in_step_outputs(self.workplan, name, RestartFile.find)
+            return RestartFileTrxAdapter.adapt(step_restart)
 
         if search_path and (
             restart_file := RestartFile.find(search_path, notfound_ok=False)
@@ -1029,9 +1033,11 @@ class NestingDirective(OverrideDirective):
             search_path = Path(target_path)
 
         if name := self._config.get(self.KEY_STEP):
-            search_path = resolve_step_output_dir(self.workplan, name)
-
-        if search_path and (
+            step_boundaries = find_in_step_outputs(
+                self.workplan, name, BoundaryFile.find
+            )
+            overrides = BoundaryFileTrxAdapter.adapt(step_boundaries)
+        elif search_path and (
             boundary_files := BoundaryFile.find(search_path, notfound_ok=False)
         ):
             overrides = BoundaryFileTrxAdapter.adapt(boundary_files)

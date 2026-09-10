@@ -295,18 +295,24 @@ def test_override_transform_system_precedence(
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("use_pio", "expected_dir_attr", "expected_name"),
+    ("joined_available", "expected_dir_attr", "expected_name"),
     [
         pytest.param(
-            False, "output_dir", "output_rst.20120201000000.000.nc", id="no_pio"
+            True,
+            "joined_output_dir",
+            "output_rst.20120201000000.nc",
+            id="joined_preferred",
         ),
         pytest.param(
-            True, "joined_output_dir", "output_rst.20120201000000.nc", id="pio"
+            False,
+            "output_dir",
+            "output_rst.20120201000000.000.nc",
+            id="output_fallback",
         ),
     ],
 )
 async def test_continuance_directive_step_resolution(
-    use_pio: bool,
+    joined_available: bool,
     expected_dir_attr: str,
     expected_name: str,
     tmp_path: Path,
@@ -318,14 +324,15 @@ async def test_continuance_directive_step_resolution(
     """Verify that a continuance directive uses context information to identify
     the search path when a step name is provided.
 
-    When `use_pio` is enabled the prior step writes joined (unpartitioned)
-    restart files to `joined_output`, so the directive must search there
-    instead of `output`.
+    The directive probes `joined_output` first and falls back to `output`, so
+    a step whose outputs were joined resolves to the joined restart and one
+    that was never joined resolves to the partitioned restart in `output`.
 
     Parameters
     ----------
-    use_pio : bool
-        Whether the prior step ran with ParallelIO enabled.
+    joined_available : bool
+        Whether the prior step's `joined_output` holds files (preferred) or
+        only `output` does (fallback).
     tmp_path : Path
         Temporary directory for test outputs
     bp_templates_dir: Path
@@ -365,10 +372,12 @@ async def test_continuance_directive_step_resolution(
 
     await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
 
-    # inject `use_pio` here to ensure it survives into the directive's blueprint read.
-    bp = deserialize(local_bp, RomsMarblBlueprint)
-    bp.partitioning.use_pio = use_pio
-    assert serialize(local_bp, bp)
+    if not joined_available:
+        # a step whose outputs were never joined: only `output` holds files
+        for live_step in t.cast("list[LiveStep]", live_plan.steps):
+            joined_dir = RomsFileSystemManager(live_step.fsm.root_dir).joined_output_dir
+            for joined_file in joined_dir.glob("*.nc"):
+                joined_file.unlink()
 
     for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):
         if i > 0:
@@ -746,24 +755,24 @@ def test_nesting_directive_path_only_sets_boundary_only(
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("use_pio", "expected_dir_attr", "expected_name"),
+    ("joined_available", "expected_dir_attr", "expected_name"),
     [
-        pytest.param(
-            False,
-            "output_dir",
-            "parent_bry.20230201003000.000.nc",
-            id="no_pio",
-        ),
         pytest.param(
             True,
             "joined_output_dir",
             "parent_bry.20230201003000.nc",
-            id="pio",
+            id="joined_preferred",
+        ),
+        pytest.param(
+            False,
+            "output_dir",
+            "parent_bry.20230201003000.000.nc",
+            id="output_fallback",
         ),
     ],
 )
 async def test_nesting_directive_step_resolution(
-    use_pio: bool,
+    joined_available: bool,
     expected_dir_attr: str,
     expected_name: str,
     tmp_path: Path,
@@ -773,13 +782,14 @@ async def test_nesting_directive_step_resolution(
     mock_run_id: str,
 ) -> None:
     """Verify a `nest-from` `step` config resolves the boundary search path
-    the same way `continue-from` resolves its restart search path: joined
-    output when the referenced step ran with ParallelIO, output otherwise.
+    the same way `continue-from` resolves its restart search path:
+    `joined_output` when it holds boundary files, `output` otherwise.
 
     Parameters
     ----------
-    use_pio : bool
-        Whether the prior step ran with ParallelIO enabled.
+    joined_available : bool
+        Whether the prior step's `joined_output` holds files (preferred) or
+        only `output` does (fallback).
     expected_dir_attr : str
         The `RomsFileSystemManager` attribute expected to hold the boundary file.
     expected_name : str
@@ -822,10 +832,12 @@ async def test_nesting_directive_step_resolution(
 
     await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
 
-    # inject `use_pio` here to ensure it survives into the directive's blueprint read.
-    bp = deserialize(local_bp, RomsMarblBlueprint)
-    bp.partitioning.use_pio = use_pio
-    assert serialize(local_bp, bp)
+    if not joined_available:
+        # a step whose outputs were never joined: only `output` holds files
+        for live_step in t.cast("list[LiveStep]", live_plan.steps):
+            joined_dir = RomsFileSystemManager(live_step.fsm.root_dir).joined_output_dir
+            for joined_file in joined_dir.glob("*.nc"):
+                joined_file.unlink()
 
     prior_step = t.cast("LiveStep", live_plan.steps[0])
     prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
