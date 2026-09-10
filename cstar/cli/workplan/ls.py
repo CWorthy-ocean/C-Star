@@ -67,10 +67,17 @@ def adapt_runs_to_views(
             console.print(f"Workplan not found at {str(wp_path)!r}. Skipping")
             continue
 
-        wp = plan_cache.get(wp_path, deserialize(wp_path, LiveWorkplan))
+        try:
+            wp = plan_cache.get(wp_path, deserialize(wp_path, LiveWorkplan))
+            name = wp.name
+        except Exception:
+            log.warning(f"The workplan path {str(wp_path)!r} is invalid")
+        else:
+            name = "unkown"
+
         yield ItemView(
             run_id=run.run_id,
-            name=wp.name,
+            name=name,
             raw_size=int(run.metadata["size"]),
             raw_start=run.start_at,
         )
@@ -120,7 +127,13 @@ def json_formatter(data: Iterable[ItemView]) -> None:
 async def disk_usage(path: Path) -> str:
     """Return the size of all assets stored in a directory."""
     result = await asyncio.to_thread(_run_cmd, f"du -sm {str(path)}")
-    return result.split()[0]
+
+    value = result.split()[0]
+    try:
+        _ = int(value)
+        return value
+    except Exception:
+        return "0"
 
 
 async def get_run_disk_usage(
