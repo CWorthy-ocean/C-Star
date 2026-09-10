@@ -18,22 +18,23 @@ HELP_SHORT = "List runs started by a user."
 ALL_COLUMNS: t.TypeAlias = t.Literal[
     "run-id",
     "name",
-    "workplan-path",
+    "time",
 ]
 
 
 def display_runs(runs: Sequence[WorkplanRun]) -> None:
     """Display a table containing all known run IDs for a user."""
     table = Table(
-        Column("run-id", justify="center"),
-        Column("name", justify="center"),
-        Column("workplan_path", justify="center"),
+        Column("run-id", justify="right", style="yellow"),
+        Column("workplan", justify="left", style="white"),
+        Column("start time", justify="center", style="cyan"),
+        row_styles=["", "dim"],
     )
 
     for run in runs:
-        wp_path = run.trx_workplan_path or ""
+        wp_path = run.workplan_path or ""
         wp = deserialize(wp_path, LiveWorkplan)
-        table.add_row(run.run_id, wp.name, str(wp_path))
+        table.add_row(run.run_id, wp.name, run.start_at.strftime("%Y-%m-%d %H:%M"))
 
     console.print(table)
 
@@ -52,7 +53,7 @@ def ls_runs(
             "--descending",
             help="Set flag to reverse the sorting order to descending order.",
         ),
-    ] = False,
+    ] = True,
 ) -> None:
     """List all runs started by a user."""
     tracking = TrackingRepository()
@@ -60,11 +61,13 @@ def ls_runs(
 
     if sort == "run-id":
         runs = sorted(runs, key=lambda x: x.run_id, reverse=desc)
-    elif sort == "workplan-path":
+    elif sort == "workplan":
         runs = sorted(runs, key=lambda x: x.workplan_path, reverse=desc)
+    elif sort == "name":
+        runs = sorted(runs, key=lambda x: x.start_at, reverse=desc)
     else:
         # default to sorting by run-id
-        runs = sorted(runs, key=lambda x: x.run_id, reverse=desc)
+        runs = sorted(runs, key=lambda x: x.start_at, reverse=desc)
 
     display_runs(runs)
 
