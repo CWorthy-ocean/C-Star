@@ -88,13 +88,13 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
         wp_run = await repo.get_workplan_run(run_id)
 
         if not wp_run:
-            msg = f"No run for run-id `{run_id}` could be found."
+            msg = f"No run for run-id {run_id!r} could be found."
             raise RuntimeError(msg)
 
         wp_path = wp_run.trx_workplan_path
 
         if not wp_path:
-            msg = f"No live workplan for run-id `{run_id}` could be found."
+            msg = f"No live workplan for run-id {run_id!r} could be found."
             raise RuntimeError(msg)
 
         wp = deserialize(wp_path, LiveWorkplan)
@@ -390,7 +390,6 @@ def preload_run(context: typer.Context, run_id: str) -> str:
         raise RuntimeError(msg)
 
     wp = try_deserialize(wp_path, LiveWorkplan)
-
     if not wp:
         msg = f"Unable to deserialize workplan for run {run_id!r} from {str(wp_path)!r}"
         raise typer.BadParameter(
