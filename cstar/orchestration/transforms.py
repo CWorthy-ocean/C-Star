@@ -1140,11 +1140,10 @@ class DirectiveConfig(BaseModel):
 
         wp_path = run.trx_workplan_path
 
-        if not run.trx_workplan_path:
-            msg = f"No live workplan for run-id `{run_id}` could be found."
-            raise RuntimeError(msg)
+        if wp_path and (wp := deserialize(wp_path, LiveWorkplan)):  # pyright: ignore[reportArgumentType]
+            return wp
 
-        msg = f"Unable to load workplan for run-id {run_id!r} from {wp_path}"
+        msg = f"No live workplan for run-id {run_id!r} found at {str(wp_path)!r}"
         raise RuntimeError(msg)
 
     @classmethod
