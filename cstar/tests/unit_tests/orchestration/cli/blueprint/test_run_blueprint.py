@@ -397,8 +397,17 @@ def test_blueprint_run_invalid_blueprint_exits_nonzero(
         "https://www.google.com/directive-dne.json",
     ],
 )
-def test_blueprint_run_apply_directive_dne(directive_path: str) -> None:
-    """Verify that an exception is raised if a path to a non-existent directive file is passed."""
+def test_blueprint_run_apply_directive_dne(
+    directive_path: str,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify that an exception is raised if a path to a non-existent directive file is passed.
+
+    Parameters
+    ----------
+    flatten_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for phrase matching
+    """
     bp_path = "https://raw.githubusercontent.com/CWorthy-ocean/cstar_blueprint_roms_marbl_example/refs/heads/main/wales-toy-domain/wales_toy_blueprint.yaml"
 
     with mock.patch(
@@ -422,7 +431,7 @@ def test_blueprint_run_apply_directive_dne(directive_path: str) -> None:
     # Depending on the installed typer/rich versions, usage errors render as a
     # rich panel whose box borders and width-dependent wrapping can split the
     # phrase across lines -- collapse the decoration before matching.
-    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    stderr_flat = flatten_cli_output(result.stderr)
     assert "file not found" in stderr_flat
     mock_exec.assert_not_called()
 
