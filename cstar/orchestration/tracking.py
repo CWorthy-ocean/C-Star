@@ -2,6 +2,7 @@ import asyncio
 import fcntl
 import os
 import typing as t
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +45,8 @@ class WorkplanRun(BaseModel):
 
     sentinels: set[Path] = Field(default_factory=set[Path])
     """State files expected to be created during execution of the run."""
+
+    metadata: dict[str, str] = Field(default_factory=lambda: defaultdict(lambda: "0"))
 
     @staticmethod
     def get_default_run_id(uri: str) -> str:
