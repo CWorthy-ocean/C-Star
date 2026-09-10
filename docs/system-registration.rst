@@ -110,7 +110,7 @@ Copy an existing file from ``cstar/additional_files/env_files/`` to
    with the netCDF ``lib`` directory.
 #. Set ``GIT_DISCOVERY_ACROSS_FILESYSTEM="1"`` so git works on distributed
    filesystems such as Lustre.
-#. Comment out any variables copied from the template that do not apply.
+#. Remove any variables copied from the template that do not apply.
 
 Example (``perlmutter.env``)::
 
