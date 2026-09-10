@@ -1,6 +1,7 @@
 import json
 import os
 import typing as t
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -1704,6 +1705,8 @@ def test_workplan_run_migration_skips_deferred_blueprint(
 
 def test_workplan_run_step_blueprint_missing_reports_blueprint(
     tmp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+    squash_cli_output: Callable[[str], str],
 ) -> None:
     """Verify a workplan step referencing a non-existent blueprint fails with
     an error naming the missing blueprint -- not the workplan, which exists.
@@ -1712,6 +1715,10 @@ def test_workplan_run_step_blueprint_missing_reports_blueprint(
     ----------
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
+    flatten_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for phrase matching
+    squash_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for path matching
     """
     missing_bp = tmp_path / "gone.yaml"
     step = Step(name="Plot", application="plotter", blueprint=missing_bp.as_posix())
@@ -1730,17 +1737,18 @@ def test_workplan_run_step_blueprint_missing_reports_blueprint(
     assert result.exit_code == 2
     mock_build_and_run_dag.assert_not_awaited()
 
-    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    stderr_flat = flatten_cli_output(result.stderr)
     assert "Blueprint not found" in stderr_flat
     assert "Workplan not found" not in stderr_flat
-    # the message must name the missing blueprint; rich wraps long paths at
-    # arbitrary points, so strip all whitespace and decoration before matching
-    assert missing_bp.name in "".join(stderr_flat.split())
+    # the message must name the missing blueprint
+    assert missing_bp.name in squash_cli_output(result.stderr)
 
 
 def test_workplan_run_step_blueprint_migration_invalid(
     tmp_path: Path,
     plotter_v1_0_0_model: dict[str, t.Any],
+    flatten_cli_output: Callable[[str], str],
+    squash_cli_output: Callable[[str], str],
 ) -> None:
     """Verify a workplan step whose blueprint migrates to content that fails
     model validation is rejected with a usage error naming the blueprint,
@@ -1752,6 +1760,10 @@ def test_workplan_run_step_blueprint_migration_invalid(
         Temporary directory to read/write test inputs and outputs
     plotter_v1_0_0_model : dict[str, t.Any]
         Fixture providing the raw content of a plotter blueprint at schema 1.0.0
+    flatten_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for phrase matching
+    squash_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for path matching
     """
     # drop fields the migrated model requires so post-migration validation fails
     model = {
@@ -1778,10 +1790,10 @@ def test_workplan_run_step_blueprint_migration_invalid(
     assert result.exit_code == 2
     mock_build_and_run_dag.assert_not_awaited()
 
-    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    stderr_flat = flatten_cli_output(result.stderr)
     assert "is invalid" in stderr_flat
     assert "Details:" in stderr_flat
     # the failing blueprint (not the workplan) is named in the message
-    stderr_squashed = "".join(stderr_flat.split())
+    stderr_squashed = squash_cli_output(result.stderr)
     assert bp_path.name in stderr_squashed
     assert wp_path.name not in stderr_squashed

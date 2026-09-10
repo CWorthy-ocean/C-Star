@@ -1,5 +1,6 @@
 import json
 import typing as t
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -32,7 +33,11 @@ from cstar.orchestration.transforms import ApplyOverridesDirective
 from cstar.roms.simulation import ROMSSimulation
 
 
-def test_blueprint_run_file_dne(tmp_path: Path) -> None:
+def test_blueprint_run_file_dne(
+    tmp_path: Path,
+    flatten_cli_output: Callable[[str], str],
+    squash_cli_output: Callable[[str], str],
+) -> None:
     """Verify that a path to a non-existent blueprint fails to be started due
     to validation and the error identifies the missing file.
 
@@ -40,6 +45,10 @@ def test_blueprint_run_file_dne(tmp_path: Path) -> None:
     ----------
     tmp_path : Path
         Temporary directory to read/write test inputs and outputs
+    flatten_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for phrase matching
+    squash_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for path matching
     """
     bp_path = tmp_path / "blueprint-dne.yml"
 
@@ -50,16 +59,16 @@ def test_blueprint_run_file_dne(tmp_path: Path) -> None:
         color=False,
     )
 
-    assert "not found" in result.stderr
-    # the message must name the missing blueprint; rich wraps long paths at
-    # arbitrary points, so strip all whitespace and decoration before matching
-    stderr_squashed = "".join(result.stderr.replace("│", "").split())
-    assert bp_path.name in stderr_squashed
+    assert "not found" in flatten_cli_output(result.stderr)
+    # the message must name the missing blueprint
+    assert bp_path.name in squash_cli_output(result.stderr)
 
 
 def test_blueprint_run_migrated_blueprint_invalid(
     tmp_path: Path,
     plotter_v1_0_0_model: dict[str, t.Any],
+    flatten_cli_output: Callable[[str], str],
+    squash_cli_output: Callable[[str], str],
 ) -> None:
     """Verify a blueprint whose migrated content fails model validation is
     rejected with a usage error naming the blueprint, instead of a raw
@@ -71,6 +80,10 @@ def test_blueprint_run_migrated_blueprint_invalid(
         Temporary directory to read/write test inputs and outputs
     plotter_v1_0_0_model : dict[str, t.Any]
         Fixture providing the raw content of a plotter blueprint at schema 1.0.0
+    flatten_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for phrase matching
+    squash_cli_output : Callable[[str], str]
+        Fixture providing a helper preparing CLI output for path matching
     """
     # drop fields the migrated model requires so post-migration validation fails
     model = {
@@ -89,11 +102,10 @@ def test_blueprint_run_migrated_blueprint_invalid(
     )
 
     assert result.exit_code == 2
-    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    stderr_flat = flatten_cli_output(result.stderr)
     assert "is invalid" in stderr_flat
     assert "Details:" in stderr_flat
-    stderr_squashed = "".join(stderr_flat.split())
-    assert bp_path.name in stderr_squashed
+    assert bp_path.name in squash_cli_output(result.stderr)
 
 
 def test_blueprint_run_remote_blueprint_dne() -> None:
@@ -410,7 +422,7 @@ def test_blueprint_run_apply_directive_dne(directive_path: str) -> None:
     # Depending on the installed typer/rich versions, usage errors render as a
     # rich panel whose box borders and width-dependent wrapping can split the
     # phrase across lines -- collapse the decoration before matching.
-    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    stderr_flat = " ".join(result.stderr.split()).replace("│", " ")
     assert "file not found" in stderr_flat
     mock_exec.assert_not_called()
 
