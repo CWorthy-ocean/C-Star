@@ -20,19 +20,14 @@ Overview
 
 Registration involves three artifacts:
 
-#. ``cstar/additional_files/lmod_lists/<system-name>.lmod``
+#. ``cstar/additional_files/lmod_lists/<system-name>.lmod`` - lists ``lmod`` 
+   modules C-Star loads on the system.
+#. ``cstar/additional_files/env_files/<system-name>.env`` — environment
+   variables C-Star sets on the system.
+#. A ``SystemContext`` subclass in ``cstar/system/manager.py`` — identifies
+   the system at runtime and describes its scheduler.
 
-   - lists ``lmod`` modules C-Star loads on the system.
-
-#. ``cstar/additional_files/env_files/<system-name>.env`` 
-
-   — environment variables C-Star sets on the system.
-
-#. A ``SystemContext`` subclass in ``cstar/system/manager.py``
-
-  — identifies the system at runtime and describes its scheduler.
-
-Step 1: Configure SSH access
+Step 1: SSH access
 ----------------------------
 
 #. Add the system to your ``~/.ssh/config`` if not yet completed.
@@ -124,10 +119,13 @@ Example (``perlmutter.env``)::
 Step 5: Add a ``SystemContext`` subclass
 ----------------------------------------
 
-In ``cstar/system/manager.py``, add
-``class <system-name>SystemContext(SystemContext)``, placed in alphabetical
-order among the existing subclasses and decorated with
-``@register_sys_context``:
+#. In ``cstar/system/manager.py``, add ``class <system-name>SystemContext(SystemContext)``,
+   placed in alphabetical order among the existing subclasses and decorated
+   with ``@register_sys_context``, e.g.::
+
+      @register_sys_context
+      class ElcapitanSystemContext(SystemContext):
+          ...
 
 #. Set the ``name``, ``compiler``, ``mpi_prefix``, and ``docs`` class
    variables (see ``AnvilSystemContext`` for reference).
