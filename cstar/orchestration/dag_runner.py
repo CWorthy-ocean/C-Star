@@ -762,7 +762,7 @@ async def run_dag(
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,
-        trx_workplan_path=None,
+        trx_workplan_path=wp_path,
         output_path=output_dir,
         run_id=run_id,
         environment=capture_environment(),
