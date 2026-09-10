@@ -12,19 +12,16 @@ it has been tested on a limited number.
 +======================================================================================+============+=========================+
 | `Anvil (RCAC) <https://www.rcac.purdue.edu/anvil>`__                                 | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
-| `Bouchet (YCRC) <https://docs.ycrc.yale.edu/clusters/bouchet/>`__                    | ✅         | Untested                |
+| `Bouchet (YCRC) <https://docs.ycrc.yale.edu/clusters/bouchet/>`__                    | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Derecho (NCAR)                                                                      | ✅         | Untested                |
 | <https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/derecho/>`__         |            |                         |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
-| `Elja (IRHPC) <https://wiki.irei.is>`__                                              | ✅         | Untested                |
+| `Elja (IRHPC) <https://wiki.irei.is>`__                                              | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
 | `Expanse (SDSC) <https://www.sdsc.edu/support/user_guides/expanse.html>`__           | ✅         | Untested                |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
-| MacOS ARM64 (Apple Silicon)                                                          | ✅         | Limited (terminal must  |
-|                                                                                      |            | stay active, cannot     |
-|                                                                                      |            | resume terminated       |
-|                                                                                      |            | session)                |
+| MacOS ARM64 (Apple Silicon)                                                          | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
-| `Perlmutter (NERSC) <https://docs.nersc.gov/systems/perlmutter/architecture/>`__     | ✅         | Untested; should work   |
+| `Perlmutter (NERSC) <https://docs.nersc.gov/systems/perlmutter/architecture/>`__     | ✅         | ✅                      |
 +--------------------------------------------------------------------------------------+------------+-------------------------+
