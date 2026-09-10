@@ -123,35 +123,77 @@ async def disk_usage(path: Path) -> str:
     return result.split()[0]
 
 
-async def get_run_disk_usage(runs: Sequence[WorkplanRun]) -> None:
+async def get_run_disk_usage(
+    runs: Sequence[WorkplanRun],
+    lt_filter: int | None = None,
+    gt_filter: int | None = None,
+) -> None:
     disk_space = await asyncio.gather(*[disk_usage(run.output_path) for run in runs])
-    sizes = [size for size in disk_space]
+    sizes = [int(size) for size in disk_space]
     for i, run in enumerate(runs):
-        run.metadata["size"] = sizes[i]
+        run.metadata["size"] = str(sizes[i])
 
 
-def get_sorters() -> dict[
+def filter_size(
+    runs: Sequence[WorkplanRun],
+    lt_filter: int | None = None,
+    gt_filter: int | None = None,
+) -> Sequence[WorkplanRun]:
+    if not lt_filter and not gt_filter:
+        return runs
+
+    results: list[WorkplanRun] = []
+    for run in runs:
+        size = int(run.metadata["size"])
+        if lt_filter and size > lt_filter:
+            continue
+        if gt_filter and size < gt_filter:
+            continue
+        results.append(run)
+
+    return results
+
+
+def filter_time(
+    runs: Sequence[WorkplanRun],
+    lt_filter: datetime.datetime | None = None,
+    gt_filter: datetime.datetime | None = None,
+) -> Sequence[WorkplanRun]:
+    if not lt_filter and not gt_filter:
+        return runs
+
+    results: list[WorkplanRun] = []
+    for run in runs:
+        if lt_filter and run.start_at.astimezone(datetime.UTC) > lt_filter.astimezone(
+            datetime.UTC
+        ):
+            continue
+        if gt_filter and run.start_at.astimezone(datetime.UTC) < gt_filter.astimezone(
+            datetime.UTC
+        ):
+            continue
+        results.append(run)
+
+    return results
+
+
+sorters: dict[
     FIELD_NAMES, Callable[[Iterable[WorkplanRun], bool], list[WorkplanRun]]
-]:
-    sorters: dict[
-        FIELD_NAMES, Callable[[Iterable[WorkplanRun], bool], list[WorkplanRun]]
-    ] = {
-        "name": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
-        "run-id": lambda runs, desc: sorted(runs, key=lambda x: x.run_id, reverse=desc),
-        "size": lambda runs, desc: sorted(
-            runs, key=lambda x: x.metadata["size"], reverse=desc
-        ),
-        "time": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
-    }
-    return sorters
+] = {
+    "name": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
+    "run-id": lambda runs, desc: sorted(runs, key=lambda x: x.run_id, reverse=desc),
+    "size": lambda runs, desc: sorted(
+        runs, key=lambda x: x.metadata["size"], reverse=desc
+    ),
+    "time": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
+}
 
 
-def get_renderers() -> dict[FORMATS, Callable[[Iterable[ItemView]], None]]:
-    return {
-        "json": json_formatter,
-        "csv": csv_formatter,
-        "table": table_formatter,
-    }
+renderers = {
+    "json": json_formatter,
+    "csv": csv_formatter,
+    "table": table_formatter,
+}
 
 
 @app.command(name="ls", help=HELP_SHORT)
@@ -172,20 +214,46 @@ def ls_runs(
         FORMATS,
         typer.Option("--format", help="Pass the desired output format."),
     ] = "table",
+    runid_filter: t.Annotated[
+        str,
+        typer.Option("--run-filter", help="Pass a search term to match run-id"),
+    ] = "",
+    size_gt_filter: t.Annotated[
+        int | None,
+        typer.Option(
+            "--min-size",
+            help="Pass the minimum disk size (in MB) to include in results",
+        ),
+    ] = None,
+    size_lt_filter: t.Annotated[
+        int | None,
+        typer.Option(
+            "--max-size",
+            help="Pass the maximum disk size (in MB) to include in results",
+        ),
+    ] = None,
+    time_gt_filter: t.Annotated[
+        datetime.datetime | None,
+        typer.Option("--min-time", help="Pass the earliest date allowed in results"),
+    ] = None,
+    time_lt_filter: t.Annotated[
+        datetime.datetime | None,
+        typer.Option("--max-time", help="Pass the latest date allowed in results"),
+    ] = None,
 ) -> None:
     """List all runs started by a user."""
     plan_cache: dict[Path, LiveWorkplan] = {}
     tracking = TrackingRepository()
-    sorters = get_sorters()
-    renderers = get_renderers()
-    renderer = renderers[format]
 
-    runs = asyncio.run(tracking.list_latest_runs())
+    runs = asyncio.run(tracking.list_latest_runs(runid_filter))
+    runs = filter_time(runs, time_lt_filter, time_gt_filter)
+
     asyncio.run(get_run_disk_usage(runs))
+    runs = filter_size(runs, size_lt_filter, size_gt_filter)
 
     runs = sorters[sort](runs, desc)
     views = adapt_runs_to_views(runs, plan_cache)
-    renderer(views)
+    renderers[format](views)
 
 
 if __name__ == "__main__":
