@@ -215,11 +215,11 @@ def ls_runs(
         FIELD_NAMES,
         typer.Option("--sort", help="Pass the column used for sorting"),
     ] = "name",
-    desc: t.Annotated[
+    reverse: t.Annotated[
         bool,
         typer.Option(
-            "--desc",
-            help="Set flag to sort in descending order.",
+            "--reverse",
+            help="Set flag to sort in ascending order.",
         ),
     ] = True,
     format: t.Annotated[
@@ -263,7 +263,7 @@ def ls_runs(
     asyncio.run(get_run_disk_usage(runs))
     runs = filter_size(runs, size_lt_filter, size_gt_filter)
 
-    runs = sorters[sort](runs, desc)
+    runs = sorters[sort](runs, reverse)
     views = adapt_runs_to_views(runs, plan_cache)
     renderers[format](views)
 
