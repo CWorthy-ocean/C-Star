@@ -681,7 +681,7 @@ async def test_runner_on_start_user_unhandled_setup(
     mocked_error_msg = "Mock setup failure"
     mock_setup = mock.Mock(side_effect=CstarExpectationFailed(mocked_error_msg))
 
-    mock_simulation = mock.Mock(setup=mock_setup, run=mock_run)
+    mock_simulation = mock.Mock(setup=mock_setup, run=mock_run, initial_conditions=None)
     mock_shutdown = mock.Mock()
     mock_runner_run = mock.AsyncMock()
 
@@ -728,7 +728,9 @@ async def test_runner_on_start_user_unhandled_build(
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
     # configure the simulation to raise an exception during BUILD
-    mock_simulation = mock.Mock(build=mock_build, run=mock_sim_run)
+    mock_simulation = mock.Mock(
+        build=mock_build, run=mock_sim_run, initial_conditions=None
+    )
     mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
@@ -774,7 +776,9 @@ async def test_runner_on_start_user_unhandled_pre_run(
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
     # configure the simulation to raise an exception during BUILD
-    mock_simulation = mock.Mock(run=mock_sim_run, pre_run=mock_setup)
+    mock_simulation = mock.Mock(
+        run=mock_sim_run, pre_run=mock_setup, initial_conditions=None
+    )
     mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
@@ -816,7 +820,7 @@ async def test_runner_on_iteration(
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
-    mock_simulation = mock.Mock(run=mock_sim_run)
+    mock_simulation = mock.Mock(run=mock_sim_run, initial_conditions=None)
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work

@@ -143,6 +143,24 @@ class TestStagerSubclasses:
         assert result.source is source
         assert result.path == target
 
+    def test_local_binary_file_stager_missing_source_raises(
+        self, tmp_path: Path, mocksourcedata_local_file: SourceDataFactory
+    ) -> None:
+        """A local source that does not exist must fail at staging time instead of
+        leaving a dangling symlink for the model to trip over later.
+        """
+        missing = tmp_path / "src" / "missing.nc"
+        source = mocksourcedata_local_file(location=missing, identifier=None)
+
+        staging_dir = tmp_path / "stage"
+        staging_dir.mkdir()
+
+        s = stager.LocalBinaryFileStager(source)
+        with pytest.raises(FileNotFoundError, match="does not exist"):
+            s.stage(staging_dir)
+
+        assert not (staging_dir / "missing.nc").is_symlink()
+
     def test_remote_repository_stager_returns_stagedrepo(
         self, tmp_path: Path, mocksourcedata_remote_repo: SourceDataFactory
     ) -> None:
