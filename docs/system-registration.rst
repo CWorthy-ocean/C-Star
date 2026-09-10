@@ -12,6 +12,7 @@ the short lowercase name of the new system (e.g. ``anvil``, ``bouchet``,
 
 Prerequisites
 -------------
+
 * You must have an SSH connection configured for the system.
 
 Overview
@@ -19,18 +20,22 @@ Overview
 
 Registration involves three artifacts:
 
-#. ``cstar/additional_files/lmod_lists/<system-name>.lmod`` — the lmod
-   modules C-Star loads on the system.
-#. ``cstar/additional_files/env_files/<system-name>.env`` — environment
-   variables C-Star sets on the system.
-#. A ``SystemContext`` subclass in ``cstar/system/manager.py`` — identifies
-   the system at runtime and describes its scheduler.
+#. ``cstar/additional_files/lmod_lists/<system-name>.lmod``
+
+   - lists ``lmod`` modules C-Star loads on the system.
+
+#. ``cstar/additional_files/env_files/<system-name>.env`` 
+
+   — environment variables C-Star sets on the system.
+
+#. A ``SystemContext`` subclass in ``cstar/system/manager.py``
+
+  — identifies the system at runtime and describes its scheduler.
 
 Step 1: Configure SSH access
 ----------------------------
 
-#. Add an entry for the system to ``~/.ssh/config`` if one does not already
-exist.
+#. Add the system to your ``~/.ssh/config`` if not yet completed.
 #. Connect to the target system.
 
 Step 2: Select lmod modules
@@ -39,7 +44,7 @@ Step 2: Select lmod modules
 C-Star supports loading system-level dependencies via `LMOD <https://lmod.readthedocs.io/en/latest/>`__.
 
 Required modules
-=================
+~~~~~~~~~~~~~~~~
 
 #. netCDF-Fortan
 #. netCDF
@@ -50,7 +55,7 @@ Required modules
 #. cmake
 
 Module Identification
-======================
+~~~~~~~~~~~~~~~~~~~~~
 
 Now, we identify the modules to be used by C-Star.
 
@@ -58,11 +63,13 @@ Now, we identify the modules to be used by C-Star.
    output of ``module avail``).
 #. Identify any required modules that are loaded by default. We will
    explicitly track default modules for stability.
-   * Inspect dependencies pulled in by any identified modules with
-      ``module spider <module-name>``.
+
+   * Inspect dependencies pulled in by any identified modules with ``module spider <module-name>``.
    * Ensure the chosen module dependencies do not conflict or cause unloads.
+
 #. Create ``cstar/additional_files/lmod_lists/<system-name>.lmod``
-#. Add a name for each required module to the `.lmod` file
+#. Add a name for each required module to the ``.lmod`` file
+
    * Add one module name per line.
    * Use comments where useful (e.g. identifying system defaults, hidden modules,
      or implicitly loaded modules).
@@ -83,7 +90,7 @@ Step 3: Identify system-specific environment variables
 #. Run ``module load <module-name>`` for every entry in the new
    ``.lmod`` file.
 #. Capture the environment with ``env`` and locate the variables set by
-   each loaded module (e.g. `env | grep MPI`)
+   each loaded module (e.g. ``env | grep MPI``)
 #. For each module, identify the variable pointing at its root
    installation directory. Confirm the MPI and netCDF root directories are
    correct by checking for ``lib`` and ``bin`` subdirectories.
@@ -123,7 +130,7 @@ order among the existing subclasses and decorated with
 ``@register_sys_context``:
 
 #. Set the ``name``, ``compiler``, ``mpi_prefix``, and ``docs`` class
-   variables (locate ``AnvilSystemContext`` for reference).
+   variables (see ``AnvilSystemContext`` for reference).
 #. Locate the system's web-based SLURM documentation and implement
    ``create_scheduler``, returning a ``SlurmScheduler`` with one
    ``SlurmPartition`` per documented partition.
@@ -135,5 +142,5 @@ order among the existing subclasses and decorated with
     def is_match(cls) -> bool:
         return os.getenv("HOSTNAME", "") == "<system-name>"
 
-Finally, add the new system to the table in :doc:`machines`, keeping the
+Finally, add the new system to the :doc:`machines` table, keeping the
 rows in alphabetical order by system name.
