@@ -72,7 +72,6 @@ def adapt_runs_to_views(
             name = wp.name
         except Exception:
             log.warning(f"The workplan path {str(wp_path)!r} is invalid")
-        else:
             name = "unkown"
 
         yield ItemView(
