@@ -1,4 +1,7 @@
-cpu/1.0
-cray-hdf5/1.12.2.9
-cray-netcdf/4.9.0.9
-cray-parallel-netcdf
+cpu/1.0  # swap from the default gpu/1.0 to the CPU programming environment
+gcc-native/14  # (system default)
+cray-mpich/9.1.0  # (system default)
+cray-hdf5/1.12.2.9  # (system default)
+cray-netcdf/4.9.0.9  # provides both netCDF-C and netCDF-Fortran bindings
+cray-parallel-netcdf/1.12.3.13  # (system default version)
+cmake/3.30.2  # (system default version)
