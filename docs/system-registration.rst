@@ -61,6 +61,21 @@ Now, we identify the modules to be used by C-Star.
 
    * Inspect dependencies pulled in by any identified modules with ``module spider <module-name>``.
    * Ensure the chosen module dependencies do not conflict or cause unloads.
+   * Filter the module list with ``module avail "<keyword>"`` - this will provide
+     additional information to select related modules. For example, we may identify
+     most required modules using this "built with GCC 11.2.0" group::
+
+      ❯ module avail "netCDF" "HDF" "MPI"
+
+      --------------------------------- Applications built with OpenMPI 4.0.6 ----------------------------------
+         hdf5/1.10.7    (L,D)    netcdf-cxx4/4.3.1    (D)      parallel-netcdf/1.11.2
+         netcdf-c/4.7.4 (L,D)    netcdf-fortran/4.5.3 (L,D)    py-mpi4py/3.0.3
+      ----------------------------------- Applications built with GCC 11.2.0 -----------------------------------
+         hdf/4.2.15  (L,D)    netcdf-c/4.7.4       netcdf-fortran/4.5.3    openmpi/4.0.6 (L,D)
+         hdf5/1.10.7          netcdf-cxx4/4.3.1    openmpi/3.1.6           openmpi/4.1.6
+      ------------------------------------------- Core Applications --------------------------------------------
+         hdf/4.2.15    hdf5/1.10.7    netcdf-c/4.7.4    netcdf-cxx4/4.3.1    netcdf-fortran/4.5.3
+
 
 #. Create ``cstar/additional_files/lmod_lists/<system-name>.lmod``
 #. Add a name for each required module to the ``.lmod`` file
