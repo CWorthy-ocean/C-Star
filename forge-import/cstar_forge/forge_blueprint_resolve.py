@@ -1061,6 +1061,15 @@ def build_forge_blueprint(
         # otherwise hard-fail ensure_source_data over a file that is never used).
         None if grid_file_obj is not None else topography_source,
         is_child=grid_kwargs_parent is not None,
+        # A nested parent/child grid may name its own topography dataset (see
+        # ForgeExecutor._nested_topography_pair); note those too so the executor
+        # stages them. A nested dict that only overrides the *path* inherits the
+        # domain-level name, which is already noted above.
+        nested_topography_sources=[
+            gk["topography_source"]
+            for gk in (grid_kwargs_parent, grid_kwargs_child)
+            if gk is not None and gk.get("topography_source") is not None
+        ],
     )  # kept as `sources` locally for brevity
 
     # ----- bgc_mode consistency check ----------------------------------------
@@ -1193,6 +1202,7 @@ def _build_forcing(
     inputs: dict[str, Any],
     topography_source: str | TopographySource | None = None,
     is_child: bool = False,
+    nested_topography_sources: list[Any] | None = None,
 ) -> Forcing:
     """Build the flat ``Forcing`` object from model inputs.
 
@@ -1349,6 +1359,15 @@ def _build_forcing(
     topo = getattr(topography_source, "value", topography_source)
     if topo:
         resolved.setdefault(topo, _resolved_dataset(topo))
+    # ...plus any dataset a nested parent/child grid names for itself
+    # (grid_kwargs_parent/child["topography_source"]; a {'name','path'} dict is
+    # accepted for a hand-authored blueprint).
+    for nested in nested_topography_sources or []:
+        if isinstance(nested, dict):
+            nested = nested.get("name")
+        nested = getattr(nested, "value", nested)
+        if nested:
+            resolved.setdefault(str(nested), _resolved_dataset(str(nested)))
 
     return Forcing(
         initial_conditions=ic,

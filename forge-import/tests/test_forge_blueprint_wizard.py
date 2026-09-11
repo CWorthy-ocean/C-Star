@@ -10,6 +10,7 @@ as fast unit tests.
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -1956,6 +1957,45 @@ def test_wizard_editor_rebuilds_across_roms_ref_schema_boundary():
     assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
 
 
+def test_settings_editor_sync_preserves_in_progress_list_text():
+    """Typing a comma into a list field (e.g. ``marbl_bgc.marbl_tracers_to_write``)
+    must not be reverted. Every keystroke runs on_edit -> wizard._rebuild ->
+    editor.sync(effective); sync used to unconditionally re-join the parsed
+    list, so "a, b," was rewritten to "a, b" and a trailing comma could never
+    be typed (the reported workaround was pasting a finished list). sync() now
+    leaves the text alone when it already parses to the synced value, and
+    still re-renders when the value genuinely differs.
+    """
+    import ipywidgets as W
+
+    model_settings = {"marbl_bgc": {"marbl_tracers_to_write": ["ALK", "DIC"]}}
+    edits: list[tuple[str, str]] = []
+    editor = _SettingsEditor(
+        W, model_settings, on_edit=lambda s, f: edits.append((s, f))
+    )
+    widget, base = editor._widgets[("marbl_bgc", "marbl_tracers_to_write")]
+    assert base is list
+    assert widget.value == "ALK, DIC"
+
+    # Simulate the wizard's per-keystroke loop: the user types a trailing comma,
+    # on_edit fires, the wizard records editor.read() and syncs it back.
+    widget.value = "ALK, DIC,"
+    assert edits == [("marbl_bgc", "marbl_tracers_to_write")]
+    effective = editor.read("marbl_bgc", "marbl_tracers_to_write")
+    assert effective == ["ALK", "DIC"]
+    editor.sync({"marbl_bgc": {"marbl_tracers_to_write": effective}})
+    assert widget.value == "ALK, DIC,"  # trailing comma survives
+
+    widget.value = "ALK, DIC, "  # ...and so does a trailing separator + space
+    editor.sync({"marbl_bgc": {"marbl_tracers_to_write": ["ALK", "DIC"]}})
+    assert widget.value == "ALK, DIC, "
+
+    # A genuine external change (model switch / load / override reset) still
+    # re-renders the field.
+    editor.sync({"marbl_bgc": {"marbl_tracers_to_write": ["PO4"]}})
+    assert widget.value == "PO4"
+
+
 def test_output_spec_defaults_to_daily_restarts():
     """The Output dropdown preselects the precheck-safe 'daily-restarts' spec
     (explicitly, not by sort position); 'standard' stays available for
@@ -2855,6 +2895,151 @@ def _new_wizard():
     return wiz
 
 
+class TestNestedTopographyWidgets:
+    """Parent/child grids carry their own topography (see
+    ForgeExecutor._nested_topography_pair); the wizard's parent/child pick copies
+    the spec's topography, gather emits the keys, and load-back restores them.
+    """
+
+    _SPEC: ClassVar[dict] = {
+        "grid_kwargs": {"nx": 30, "ny": 40, "size_x": 300.0, "size_y": 400.0},
+        "topography_source": "SRTM15",
+        "topography_path": "/hpc/data/srtm15_west.nc",
+    }
+
+    def _pick_parent(self, wiz, monkeypatch, spec):
+        monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
+        monkeypatch.setattr(wiz, "_on_parent_plot", lambda _b: None)
+        wiz.parent_domain_dd.value = wiz.parent_domain_dd.options[1]
+
+    def test_parent_pick_copies_spec_topography_and_gather_emits_it(self, monkeypatch):
+        wiz = _new_wizard()
+        assert wiz.parent_topo_source.value == "(same as this grid)"
+        self._pick_parent(wiz, monkeypatch, self._SPEC)
+
+        assert wiz.parent_enable.value is True
+        assert wiz.parent_w["nx"].value == 30
+        assert wiz.parent_topo_source.value == "SRTM15"
+        assert wiz.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
+
+        pk = wiz._gather()["grid_kwargs_parent"]
+        assert pk["topography_source"] == "SRTM15"
+        assert pk["topography_path"] == "/hpc/data/srtm15_west.nc"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.domain.grid_kwargs_parent["topography_source"] == "SRTM15"
+        assert "SRTM15" in wiz.config.datasets
+
+    def test_parent_pick_with_default_topography_is_explicit_etopo5(self, monkeypatch):
+        """A parent spec built with the default dataset says so explicitly: the
+        parent must NOT silently inherit this grid's (e.g. EMOD) topography.
+        """
+        wiz = _new_wizard()
+        wiz.topo_source.value = "EMOD"
+        wiz.topo_path.value = "/hpc/data/EMODnet_C2.nc"
+        spec = {"grid_kwargs": self._SPEC["grid_kwargs"]}  # no topography keys
+        self._pick_parent(wiz, monkeypatch, spec)
+
+        assert wiz.parent_topo_source.value == "ETOPO5"
+        assert wiz.parent_topo_path.value == ""
+        pk = wiz._gather()["grid_kwargs_parent"]
+        assert pk["topography_source"] == "ETOPO5"
+        assert "topography_path" not in pk
+
+    def test_inherit_sentinel_emits_no_keys(self):
+        wiz = _new_wizard()
+        wiz.parent_enable.value = True
+        wiz.nest_enable.value = True
+        kw = wiz._gather()
+        for key in ("grid_kwargs_parent", "grid_kwargs_child"):
+            assert "topography_source" not in kw[key]
+            assert "topography_path" not in kw[key]
+
+    def test_round_trips_through_populate_from(self, monkeypatch):
+        wiz = _new_wizard()
+        self._pick_parent(wiz, monkeypatch, self._SPEC)
+        wiz.nest_enable.value = True
+        wiz.child_topo_path.value = "/hpc/data/child_tile.nc"  # path-only override
+        wiz._rebuild()
+        cfg = wiz.config
+        assert cfg is not None, wiz.derived.value
+        assert (
+            cfg.domain.grid_kwargs_child["topography_path"] == "/hpc/data/child_tile.nc"
+        )
+        assert "topography_source" not in cfg.domain.grid_kwargs_child
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2.parent_topo_source.value == "SRTM15"
+        assert wiz2.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
+        assert wiz2.child_topo_source.value == "(same as this grid)"
+        assert wiz2.child_topo_path.value == "/hpc/data/child_tile.nc"
+        assert (
+            wiz2._gather()["grid_kwargs_parent"] == wiz._gather()["grid_kwargs_parent"]
+        )
+
+    def test_plot_topography_falls_back_when_file_not_local(self, tmp_path):
+        from cstar_forge.forge_blueprint_wizard import (
+            _effective_nested_topo,
+            _plot_topography_source,
+        )
+
+        assert _plot_topography_source("ETOPO5", "") == (None, "")
+        topo, note = _plot_topography_source("EMOD", "/hpc/only/EMODnet_C2.nc")
+        assert topo is None and "EMOD" in note and "not found here" in note
+        topo, note = _plot_topography_source("EMOD", "")
+        assert topo is None and "no local file" in note
+        local = _write_tiny_netcdf(tmp_path / "topo.nc")
+        assert _plot_topography_source("EMOD", str(local)) == (
+            {"name": "EMOD", "path": str(local)},
+            "",
+        )
+        # inherit: domain pair; source set: domain path is NOT inherited
+        assert _effective_nested_topo("(same as this grid)", "", "EMOD", "/d/e.nc") == (
+            "EMOD",
+            "/d/e.nc",
+        )
+        assert _effective_nested_topo("SRTM15", "", "EMOD", "/d/e.nc") == ("SRTM15", "")
+        assert _effective_nested_topo(
+            "(same as this grid)", "/p.nc", "EMOD", "/d/e.nc"
+        ) == (
+            "EMOD",
+            "/p.nc",
+        )
+
+    def test_parent_plot_builds_parent_with_its_own_topography(
+        self, monkeypatch, tmp_path
+    ):
+        """The parent plot builds the parent grid with the parent's topography
+        (when the file is available here) -- so a parent falling outside its
+        dataset's coverage fails in the preview, not only at executor time.
+        """
+        import roms_tools
+
+        calls: list[dict] = []
+
+        class _G:
+            def __init__(self, **kw):
+                calls.append(kw)
+
+        monkeypatch.setattr(roms_tools, "Grid", _G)
+        monkeypatch.setattr(roms_tools, "plot_nesting", lambda *a, **k: None)
+        wiz = _new_wizard()
+        local = _write_tiny_netcdf(tmp_path / "parent_topo.nc")
+        wiz.parent_enable.value = True
+        wiz.parent_topo_source.value = "EMOD"
+        wiz.parent_topo_path.value = str(local)
+        wiz.topo_source.value = "SRTM15"  # this grid: no local file -> fallback
+
+        wiz._on_parent_plot(None)
+
+        parent_kw, this_kw = calls[0], calls[1]
+        assert parent_kw["topography_source"] == {"name": "EMOD", "path": str(local)}
+        assert "topography_source" not in this_kw
+        assert "SRTM15" in wiz.parent_plot_status.value  # fallback note for this grid
+        assert "EMOD" not in wiz.parent_plot_status.value
+
+
 class TestGridFileAttach:
     def test_attach_locks_and_populates_widgets(self, fake_grid, tmp_path):
         wiz = _new_wizard()
@@ -3000,15 +3185,41 @@ class TestGridFileAttach:
 
         wiz = _new_wizard()
         p = _write_tiny_netcdf(tmp_path / "grid.nc")
-        wiz.grid_file_path.value = str(p)
-        wiz._on_grid_file_attach(None)
+        wiz.grid_file_path.value = str(p)  # submit -> auto-attach (one hash)
         assert calls["n"] == 1
+        assert wiz._grid_file is not None
 
         wiz.description.value = "edited after attach"  # triggers _rebuild()
         wiz._rebuild()
 
         assert calls["n"] == 1  # never rehashed
         assert wiz.config is not None
+
+        # Re-submitting the same path is a dedupe no-op; an explicit Attach click
+        # is the one deliberate re-hash (the file may have changed on disk).
+        wiz._maybe_attach_grid_file()
+        assert calls["n"] == 1
+        wiz._on_grid_file_attach(None)
+        assert calls["n"] == 2
+
+    def test_path_submit_auto_attaches_without_attach_click(self, fake_grid, tmp_path):
+        """Regression (same shape as the river CUSTOM_FILE report): a typed/pasted
+        grid path with no Attach click used to leave the wizard silently
+        building from the grid_kwargs widgets instead of the file.
+        """
+        wiz = _new_wizard()
+        assert wiz.grid_file_path.continuous_update is False
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+
+        wiz.grid_file_path.value = str(p)  # Enter / focus-out, no click
+
+        assert wiz._grid_file == {
+            "location": str(p),
+            "content_hash": wiz._grid_file["content_hash"],
+        }
+        assert wiz.grid_w["nx"].disabled  # locked, exactly like a click-attach
+        assert "attached" in wiz.grid_file_status.value.lower()
+        assert wiz._gather()["grid_file"] == wiz._grid_file
 
     def test_config_round_trips_attached_and_locked_through_populate_from(
         self, fake_grid, tmp_path
@@ -3101,8 +3312,7 @@ class TestCdrFileAttach:
         assert wiz._cdr_forcing is not None
 
         p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
-        wiz.cdr_file_path.value = str(p)
-        wiz._on_cdr_file_attach(None)
+        wiz.cdr_file_path.value = str(p)  # submit -> auto-attach, no click needed
 
         assert wiz._cdr_forcing_file == {
             "location": str(p),
@@ -3111,6 +3321,29 @@ class TestCdrFileAttach:
         assert wiz._cdr_forcing is None
         assert "cleared" in wiz.cdr_file_status.value.lower()
         assert "attached" in wiz.cdr_file_status.value.lower()
+
+    def test_netcdf_mode_shows_hint_until_attached(self, tmp_path):
+        """CdrSpec rejects mode='netcdf' without cdr_forcing_file; the status
+        slot says so (and what to do) instead of staying blank, and Clear
+        brings the hint back.
+        """
+        wiz = _new_wizard()
+        assert wiz.cdr_file_status.value == ""
+
+        wiz.cdr_mode_dd.value = "netcdf"
+        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+        assert wiz.config is None  # invalid until attached, as before
+
+        wiz.cdr_file_path.value = str(_write_tiny_cdr_netcdf(tmp_path / "cdr.nc"))
+        assert "attached" in wiz.cdr_file_status.value.lower()
+        assert "no file attached yet" not in wiz.cdr_file_status.value.lower()
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz._on_cdr_file_clear(None)
+        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+
+        wiz.cdr_mode_dd.value = "none"  # leaving netcdf mode clears the slot
+        assert wiz.cdr_file_status.value == ""
 
     def test_upload_fallback_stages_and_attaches(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
@@ -3173,7 +3406,9 @@ class TestCdrFileAttach:
         wiz._on_cdr_file_clear(None)
 
         assert wiz._cdr_forcing_file is None
-        assert wiz.cdr_file_status.value == ""
+        assert wiz.cdr_file_path.value == ""
+        # Still in netcdf mode with nothing attached -> the not-attached hint.
+        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
         assert wiz._gather()["cdr"]["cdr_forcing_file"] is None
 
     def test_round_trips_through_populate_from(self, tmp_path):
@@ -3381,6 +3616,105 @@ class TestRiverCustomFileAttach:
         item = editor._gather_item("river", w)
 
         assert item == {"source": {"name": "CUSTOM_FILE"}}  # no custom_file key
+
+    def test_path_submit_auto_attaches_without_attach_click(self, editor, tmp_path):
+        """Regression: a user who typed/pasted a path and moved on without
+        clicking Attach got ``RiverForcingItem`` "custom_file is not set" from
+        the blueprint build. Submitting the path Text (Enter / focus-out, i.e.
+        a ``value`` change with ``continuous_update=False``) now attaches.
+        """
+        changes: list[int] = []
+        editor.on_change = lambda: changes.append(1)
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        assert w["custom_file_path"].continuous_update is False
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        changes.clear()
+
+        w["custom_file_path"].value = str(p)  # no Attach click
+
+        assert w["_custom_file"] == {
+            "location": str(p),
+            "content_hash": w["_custom_file"]["content_hash"],
+        }
+        assert "attached" in w["custom_file_status"].value.lower()
+        assert changes == [1]  # attached exactly once, and notified the wizard
+        assert editor._gather_item("river", w) == {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": w["_custom_file"],
+        }
+
+        # Re-submitting the same path is a no-op (no re-hash, no extra notify).
+        w["_maybe_attach_custom_file"](w)
+        assert changes == [1]
+
+    def test_gather_item_attaches_typed_but_unsubmitted_path(self, editor, tmp_path):
+        """Last-resort path: the box holds a valid path but nothing attached it
+        yet (e.g. gather ran before the Text's submit event landed). gather
+        must attach on the fly -- silently, without on_change() (it's already
+        running inside the wizard's rebuild) -- rather than emit an item the
+        schema rejects.
+        """
+        changes: list[int] = []
+        editor.on_change = lambda: changes.append(1)
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+        w["_custom_file"] = None  # simulate "typed, never submitted"
+        changes.clear()
+
+        item = editor._gather_item("river", w)
+
+        assert item["custom_file"]["location"] == str(p)
+        assert w["_custom_file"] is not None
+        assert changes == []  # no on_change() from inside gather
+
+        # A bad path still leaves custom_file unset so the schema error surfaces
+        # (and the failure is shown in the row status).
+        w["custom_file_path"].value = str(tmp_path / "missing.nc")
+        w["_custom_file"] = None
+        assert editor._gather_item("river", w) == {"source": {"name": "CUSTOM_FILE"}}
+        assert "FileNotFoundError" in w["custom_file_status"].value
+
+    def test_selecting_custom_file_shows_hint_until_attached(self, editor, tmp_path):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        assert w["custom_file_status"].value == ""
+
+        w["name"].value = "CUSTOM_FILE"
+        assert "no file attached yet" in w["custom_file_status"].value.lower()
+
+        w["custom_file_path"].value = str(_write_tiny_netcdf(tmp_path / "r.nc"))
+        assert "attached" in w["custom_file_status"].value.lower()
+        assert "no file attached yet" not in w["custom_file_status"].value.lower()
+
+        # A row seeded with a custom_file (load-back) never shows the hint.
+        w2 = editor._make_row(
+            "river",
+            {
+                "source": {"name": "CUSTOM_FILE"},
+                "custom_file": {"location": "/x/r.nc", "content_hash": "abc" * 22},
+            },
+        )
+        assert "no file attached yet" not in w2["custom_file_status"].value.lower()
+
+    def test_wizard_builds_valid_config_after_path_submit_only(self, tmp_path):
+        """End-to-end shape of the bug report: pick CUSTOM_FILE, enter a path,
+        never click Attach -- the wizard's blueprint must still validate.
+        """
+        wiz = _new_wizard()
+        w = wiz._forcing_editor._rows["river"][0]
+        w["name"].value = "CUSTOM_FILE"
+        wiz._rebuild()
+        assert wiz.config is None  # nothing attached yet -> invalid, as before
+        assert "ValidationError" in wiz.derived.value
+
+        w["custom_file_path"].value = str(_write_tiny_netcdf(tmp_path / "river.nc"))
+        wiz._rebuild()
+
+        assert wiz.config is not None, wiz.derived.value
+        (river,) = [it for it in wiz.config.forcing.river if it.custom_file]
+        assert river.source.name == "CUSTOM_FILE"
 
     def test_custom_file_round_trips_through_populate_from(self, tmp_path):
         wiz = _new_wizard()

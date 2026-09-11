@@ -125,6 +125,40 @@ def _suppress_pydantic_warnings():
         yield
 
 
+# roms-tools' topography.nan_check message (roms_tools/setup/topography.py);
+# matched as a substring so a wording tweak upstream degrades to the plain error.
+_TOPO_NAN_MARKER = "NaN values found in regridded topography"
+_GRID_LABELS = {
+    "parent": "parent grid (domain.grid_kwargs_parent)",
+    "self": "grid (domain.grid_kwargs)",
+    "child": "child grid (domain.grid_kwargs_child)",
+}
+
+
+def _describe_grid_kwargs(gk: dict[str, Any]) -> str:
+    """One-line summary of a grid_kwargs dict for error messages: the defining
+    kwargs plus an approximate geographic footprint (spherical arithmetic from
+    center/size, ignoring ``rot`` -- indicative, not exact).
+    """
+    keys = ("nx", "ny", "size_x", "size_y", "center_lon", "center_lat", "rot")
+    parts = [f"{k}={gk[k]}" for k in keys if k in gk]
+    summary = ", ".join(parts)
+    try:
+        import math
+
+        lat = float(gk["center_lat"])
+        lon = float(gk["center_lon"])
+        half_lat = float(gk["size_y"]) / 2.0 / 111.2
+        half_lon = float(gk["size_x"]) / 2.0 / (111.32 * math.cos(math.radians(lat)))
+        summary += (
+            f"; approx. footprint lon [{lon - half_lon:.2f}, {lon + half_lon:.2f}], "
+            f"lat [{lat - half_lat:.2f}, {lat + half_lat:.2f}] (rotation ignored)"
+        )
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        pass
+    return summary
+
+
 class ForgeExecutor(BaseModel):
     """
     Builder for C-Star RomsMarblBlueprint specifications.
@@ -347,6 +381,12 @@ class ForgeExecutor(BaseModel):
         default=None
     )
     _inputs_generated: bool = PrivateAttr(default=False)
+    # Topography dataset names used ONLY via explicit paths, recorded in
+    # model_post_init from the blueprint's own (name, path) pairs -- BEFORE the
+    # grid_kwargs dicts are rewritten with resolved {'name','path'} dicts (after
+    # which every staged source looks like an explicit path). See
+    # _explicit_path_topography_names / ensure_source_data.
+    _explicit_topo_names: set[str] | None = PrivateAttr(default=None)
     _cstar_simulation: Any | None = PrivateAttr(default=None)
     _settings_compile_time: dict[str, Any] = PrivateAttr(default_factory=dict)
     _settings_run_time: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -395,11 +435,47 @@ class ForgeExecutor(BaseModel):
         """Directory for generated input NetCDF files (grid, forcing, etc.)."""
         return self._require_host().working_dir / "input_data"
 
-    def _resolve_topography_source(self) -> dict[str, str] | None:
+    def _build_grid(self, label: str, grid_kwargs: dict[str, Any]) -> Any:
+        """``rt.Grid(**grid_kwargs)`` for one of the (up to three) grids the
+        executor builds, with the roms-tools "NaN values found in regridded
+        topography" failure re-raised naming WHICH grid failed and its
+        approximate footprint.
+
+        roms-tools' message only says "the ROMS grid ... is not fully contained
+        within the topography dataset" -- but a nested setup builds the parent,
+        this grid and the child, each against its own resolved topography (see
+        ``_nested_topography_pair``), and the parent is typically far larger
+        than the grid the user previewed. Without the label the user is left
+        checking the wrong grid against the wrong dataset's coverage.
+        """
+        with mem_log(f"Grid({label})", enabled=self.verbose):
+            try:
+                return rt.Grid(**grid_kwargs, verbose=self.verbose)
+            except ValueError as exc:
+                if _TOPO_NAN_MARKER not in str(exc):
+                    raise
+                raise ValueError(
+                    f"Building the {_GRID_LABELS.get(label, label)} failed: {exc}\n"
+                    f"  grid: {_describe_grid_kwargs(grid_kwargs)}\n"
+                    f"  topography_source: {grid_kwargs.get('topography_source')}\n"
+                    "  This grid must lie fully inside its topography file's "
+                    "longitude/latitude coverage (plus a few cells' margin) -- "
+                    "check the footprint above against that file's lon/lat range. "
+                    "A nested parent/child grid can name its own topography_source/"
+                    "topography_path inside grid_kwargs_parent/grid_kwargs_child."
+                ) from exc
+
+    def _resolve_topography_source(
+        self, name: str | None = None, path: str | None = None
+    ) -> dict[str, str] | None:
         """Stage a non-ETOPO5 topography file and return the roms-tools
         ``topography_source`` dict (``{'name', 'path'}``), or ``None`` for ETOPO5
-        (which roms-tools fetches itself at grid build). An explicit
-        ``topography_path`` short-circuits this and is used verbatim for any source.
+        (which roms-tools fetches itself at grid build). An explicit ``path``
+        short-circuits this and is used verbatim for any source.
+
+        ``name``/``path`` default to the domain-level ``topography_source`` /
+        ``topography_path``; a nested grid (parent/child) passes its own pair --
+        see :meth:`_nested_topography_pair`.
 
         The topo file is a plain download requiring no grid, so it can be staged
         here — before grid construction — which resolves the ordering constraint
@@ -407,10 +483,13 @@ class ForgeExecutor(BaseModel):
         emitted as a plain string (never the ``TopographySource`` enum) so it is
         safe to serialize when the grid is later written to YAML.
         """
-        name = getattr(self.topography_source, "value", self.topography_source)
+        if name is None:
+            name = getattr(self.topography_source, "value", self.topography_source)
+            path = self.topography_path
+        name = str(getattr(name, "value", name))
         # An explicit custom path overrides staging/fetch, regardless of source name.
-        if self.topography_path:
-            return {"name": name, "path": self.topography_path}
+        if path:
+            return {"name": name, "path": str(path)}
         if name == "ETOPO5":
             return None
         sd = source_data.SourceData(
@@ -419,6 +498,95 @@ class ForgeExecutor(BaseModel):
         )
         sd.prepare_all()
         return {"name": name, "path": str(sd.path_for_source(name))}
+
+    def _nested_topography_pair(
+        self, grid_kwargs: dict[str, Any]
+    ) -> tuple[str, str | None]:
+        """The ``(name, path)`` topography pair a nested grid's kwargs dict
+        (``grid_kwargs_parent`` / ``grid_kwargs_child``) resolves to.
+
+        Both keys are optional in the dict and are *inputs to Forge*, not
+        ``rt.Grid`` kwargs (they're popped before the build):
+
+        * neither key: inherit the domain-level ``topography_source`` AND
+          ``topography_path`` (the pre-existing behaviour -- every grid built
+          against the same file);
+        * ``topography_source`` only: that dataset at its default (staged/fetched)
+          location -- the domain-level *path* is deliberately NOT inherited, since
+          it points at a file of a different dataset;
+        * ``topography_path`` only: the domain-level dataset name, read from this
+          file instead;
+        * both: used as given.
+
+        A parent grid is only rebuilt here so roms-tools' ``align_grids`` can
+        blend this grid's mask/topography toward the parent's along the nesting
+        boundaries -- so it must reproduce the bathymetry the parent run was
+        actually built with, which is frequently a different dataset (or a
+        differently-tiled file) than the one that covers this smaller grid.
+        """
+        nested_name = grid_kwargs.get("topography_source")
+        nested_path = grid_kwargs.get("topography_path")
+        if isinstance(nested_name, dict):
+            # Already a roms-tools {'name','path'} dict (hand-authored); honour it.
+            nested_path = nested_path or nested_name.get("path")
+            nested_name = nested_name.get("name")
+        domain_name = str(
+            getattr(self.topography_source, "value", self.topography_source)
+        )
+        if nested_name is None and nested_path is None:
+            return domain_name, self.topography_path
+        if nested_name is None:
+            return domain_name, str(nested_path)
+        return str(getattr(nested_name, "value", nested_name)), (
+            str(nested_path) if nested_path else None
+        )
+
+    def _topography_pairs(self) -> dict[str, tuple[str, str | None]]:
+        """``{grid label: (name, path)}`` for every grid this executor builds
+        (``self`` plus ``parent``/``child`` when nested).
+        """
+        domain_name = str(
+            getattr(self.topography_source, "value", self.topography_source)
+        )
+        pairs = {"self": (domain_name, self.topography_path)}
+        if self.grid_kwargs_parent is not None:
+            pairs["parent"] = self._nested_topography_pair(self.grid_kwargs_parent)
+        if self.grid_kwargs_child is not None:
+            pairs["child"] = self._nested_topography_pair(self.grid_kwargs_child)
+        return pairs
+
+    def _explicit_path_topography_names(self) -> set[str]:
+        """Topography dataset names (upper-cased) whose EVERY use across the
+        grids carries an explicit ``topography_path`` -- those were staged
+        verbatim in ``model_post_init`` and must be dropped from the
+        ``ensure_source_data`` pass (a verify-only handler such as EMOD would
+        otherwise spuriously re-check the conventional cache location).
+        """
+        if self._explicit_topo_names is not None:
+            return set(self._explicit_topo_names)
+        with_path: set[str] = set()
+        without_path: set[str] = set()
+        for name, path in self._topography_pairs().values():
+            (with_path if path else without_path).add(name.upper())
+        return with_path - without_path
+
+    @staticmethod
+    def _with_topography(
+        grid_kwargs: dict[str, Any], topo: dict[str, str] | None
+    ) -> dict[str, Any]:
+        """A copy of ``grid_kwargs`` ready for ``rt.Grid``: Forge's own
+        ``topography_source``/``topography_path`` inputs removed and replaced by
+        the resolved roms-tools ``topography_source`` dict (or nothing, for
+        ETOPO5 -- roms-tools fetches that itself).
+        """
+        out = {
+            k: v
+            for k, v in grid_kwargs.items()
+            if k not in ("topography_source", "topography_path")
+        }
+        if topo is not None:
+            out["topography_source"] = topo
+        return out
 
     def model_post_init(self, __context: Any) -> None:
         """
@@ -461,22 +629,32 @@ class ForgeExecutor(BaseModel):
         else:
             # Topography is a prerequisite of grid construction: roms-tools requires a
             # staged 'path' for any non-ETOPO5 source and silently falls back to ETOPO5
-            # otherwise. Stage the topo file (a plain download, no grid needed) and inject
-            # it into every grid_kwargs BEFORE the rt.Grid calls below. ETOPO5 is left
-            # untouched — roms-tools fetches it itself at grid build.
-            topo = self._resolve_topography_source()
-            if topo is not None:
-                self.grid_kwargs = {**self.grid_kwargs, "topography_source": topo}
-                if self.grid_kwargs_parent is not None:
-                    self.grid_kwargs_parent = {
-                        **self.grid_kwargs_parent,
-                        "topography_source": topo,
-                    }
-                if self.grid_kwargs_child is not None:
-                    self.grid_kwargs_child = {
-                        **self.grid_kwargs_child,
-                        "topography_source": topo,
-                    }
+            # otherwise. Stage each topo file (a plain download, no grid needed) and
+            # inject it into its grid_kwargs BEFORE the rt.Grid calls below. ETOPO5 is
+            # left untouched — roms-tools fetches it itself at grid build.
+            #
+            # Each grid resolves its OWN (name, path): the parent/child dicts may carry
+            # their own topography_source/topography_path (see _nested_topography_pair);
+            # absent those they inherit the domain-level pair, as before.
+            pairs = self._topography_pairs()
+            self._explicit_topo_names = self._explicit_path_topography_names()
+            resolved_topo: dict[tuple[str, str | None], dict[str, str] | None] = {}
+            for label, (name, path) in pairs.items():
+                if (name, path) not in resolved_topo:
+                    resolved_topo[(name, path)] = self._resolve_topography_source(
+                        name, path
+                    )
+                topo = resolved_topo[(name, path)]
+                if label == "self":
+                    self.grid_kwargs = self._with_topography(self.grid_kwargs, topo)
+                elif label == "parent":
+                    self.grid_kwargs_parent = self._with_topography(
+                        self.grid_kwargs_parent, topo
+                    )
+                else:
+                    self.grid_kwargs_child = self._with_topography(
+                        self.grid_kwargs_child, topo
+                    )
 
             # Create grids, 4 cases:
             # has child and no parent, has child and parent, has parent and no child, no parent no child
@@ -488,10 +666,8 @@ class ForgeExecutor(BaseModel):
                     k: v for k, v in self.grid_kwargs_child.items() if k != "metadata"
                 }
 
-                with mem_log("Grid(child)", enabled=self.verbose):
-                    self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
-                with mem_log("Grid(self)", enabled=self.verbose):
-                    self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
+                self.grid_child = self._build_grid("child", grid_kwargs_child)
+                self.grid = self._build_grid("self", self.grid_kwargs)
                 with mem_log("align_grids(self, child)", enabled=self.verbose):
                     self.grid_child = rt.align_grids(
                         self.grid, self.grid_child, verbose=self.verbose
@@ -516,14 +692,9 @@ class ForgeExecutor(BaseModel):
                 }
 
                 # Adapt this grid to its parent, but create nesting data for its child
-                with mem_log("Grid(parent)", enabled=self.verbose):
-                    self.grid_parent = rt.Grid(
-                        **grid_kwargs_parent, verbose=self.verbose
-                    )
-                with mem_log("Grid(child)", enabled=self.verbose):
-                    self.grid_child = rt.Grid(**grid_kwargs_child, verbose=self.verbose)
-                with mem_log("Grid(self)", enabled=self.verbose):
-                    self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
+                self.grid_parent = self._build_grid("parent", grid_kwargs_parent)
+                self.grid_child = self._build_grid("child", grid_kwargs_child)
+                self.grid = self._build_grid("self", grid_kwargs)
 
                 with mem_log("align_grids(parent, self)", enabled=self.verbose):
                     self.grid = rt.align_grids(
@@ -547,20 +718,15 @@ class ForgeExecutor(BaseModel):
                 }
 
                 # Adapt this grid to its parent. no nesting data needed
-                with mem_log("Grid(parent)", enabled=self.verbose):
-                    self.grid_parent = rt.Grid(
-                        **grid_kwargs_parent, verbose=self.verbose
-                    )
-                with mem_log("Grid(self)", enabled=self.verbose):
-                    self.grid = rt.Grid(**grid_kwargs, verbose=self.verbose)
+                self.grid_parent = self._build_grid("parent", grid_kwargs_parent)
+                self.grid = self._build_grid("self", grid_kwargs)
 
                 with mem_log("align_grids(parent, self)", enabled=self.verbose):
                     self.grid = rt.align_grids(
                         self.grid_parent, self.grid, verbose=self.verbose
                     )
             else:
-                with mem_log("Grid(self)", enabled=self.verbose):
-                    self.grid = rt.Grid(**self.grid_kwargs, verbose=self.verbose)
+                self.grid = self._build_grid("self", self.grid_kwargs)
 
         # Initialize blueprint with basic structure
         log.debug("model_post_init: initializing blueprint structure for %r", self.name)
@@ -1468,15 +1634,16 @@ class ForgeExecutor(BaseModel):
 
         # An explicit topography_path was already staged verbatim by
         # _resolve_topography_source (before grid construction, in model_post_init) and
-        # used as-is regardless of source name. Drop the topography key from this main
-        # pass so a verify-only handler (e.g. EMOD/SRTM15) doesn't spuriously re-check
-        # the conventional source_data_dir location when the user pointed elsewhere.
+        # used as-is regardless of source name. Drop such topography keys from this
+        # main pass so a verify-only handler (e.g. EMOD/SRTM15) doesn't spuriously
+        # re-check the conventional source_data_dir location when the user pointed
+        # elsewhere. Considers every grid's pair (a nested parent/child may name its
+        # own dataset/path) -- a name is only dropped if none of its uses relies on
+        # the conventional location.
         dataset_keys = self.source_dataset_keys
-        if self.topography_path:
-            topo_name = str(
-                getattr(self.topography_source, "value", self.topography_source)
-            ).upper()
-            dataset_keys = [k for k in dataset_keys if k.upper() != topo_name]
+        explicit = self._explicit_path_topography_names()
+        if explicit:
+            dataset_keys = [k for k in dataset_keys if k.upper() not in explicit]
 
         self.src_data = source_data.SourceData(
             datasets=dataset_keys,

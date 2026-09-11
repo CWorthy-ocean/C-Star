@@ -679,6 +679,261 @@ class TestForgeExecutorModelPostInitGridFile:
             ForgeExecutor.from_forge_blueprint(cfg, host=host)
 
 
+class TestNestedGridTopography:
+    """A nested parent/child grid_kwargs dict may carry its own
+    ``topography_source``/``topography_path`` (Forge inputs, never rt.Grid
+    kwargs). Resolution rule -- see ForgeExecutor._nested_topography_pair:
+    neither key -> inherit the domain pair; source only -> that dataset at its
+    default location (domain *path* NOT inherited); path only -> domain dataset
+    from that file; both -> as given.
+    """
+
+    _PARENT: ClassVar[dict] = {
+        "nx": 20,
+        "ny": 20,
+        "size_x": 2000,
+        "size_y": 2000,
+        "center_lon": 0,
+        "center_lat": 55,
+        "rot": 0,
+        "N": 3,
+        "theta_s": 5.0,
+        "theta_b": 2.0,
+        "hc": 250.0,
+    }
+
+    def _cfg(self, args, parent_extra, topo_source="EMOD", topo_path="/data/emod.nc"):
+        return build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            grid_kwargs_parent={**self._PARENT, **parent_extra},
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+            topography_source=topo_source,
+            topography_path=topo_path,
+        )
+
+    def _build(self, cfg, tmp_path, mock_grid, staged=None):
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+        with (
+            patch(
+                "cstar_forge.forge.executor.rt.align_grids",
+                return_value=_create_grid_mock(),
+            ),
+            patch("cstar_forge.forge.executor.source_data.SourceData") as mock_sd,
+        ):
+            inst = mock_sd.return_value
+            inst.prepare_all.return_value = inst
+            inst.path_for_source.return_value = staged
+            builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        # Child-but-not-parent order: Grid(parent) then Grid(self).
+        parent_call, self_call = mock_grid.call_args_list[:2]
+        return builder, parent_call.kwargs, self_call.kwargs, mock_sd
+
+    def test_resolver_notes_nested_source_and_keeps_keys(
+        self, minimal_cstar_spec_builder_args
+    ):
+        cfg = self._cfg(
+            minimal_cstar_spec_builder_args, {"topography_source": "SRTM15"}
+        )
+        assert cfg.domain.grid_kwargs_parent["topography_source"] == "SRTM15"
+        assert "SRTM15" in cfg.datasets and "EMOD" in cfg.datasets
+        assert "SRTM15" in cfg.forcing.resolved_datasets
+
+    def test_parent_source_only_uses_its_own_dataset_not_domain_path(
+        self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
+    ):
+        cfg = self._cfg(
+            minimal_cstar_spec_builder_args, {"topography_source": "SRTM15"}
+        )
+        staged = tmp_path / "SRTM15" / "SRTM15_V2.7.nc"
+        builder, parent_kw, self_kw, mock_sd = self._build(
+            cfg, tmp_path, mock_grid, staged
+        )
+
+        # Parent: SRTM15 staged at its default location -- the domain's EMOD
+        # path is NOT inherited alongside a different dataset name.
+        assert parent_kw["topography_source"] == {
+            "name": "SRTM15",
+            "path": str(staged),
+        }
+        mock_sd.assert_called_once()  # exactly one staging call (SRTM15)
+        # This grid: the domain pair, verbatim path -> no staging.
+        assert self_kw["topography_source"] == {"name": "EMOD", "path": "/data/emod.nc"}
+        # Forge-level keys never reach rt.Grid.
+        assert "topography_path" not in parent_kw and "topography_path" not in self_kw
+        assert "topography_path" not in builder.grid_kwargs_parent
+        # ensure_source_data drop set: EMOD is only ever used via an explicit
+        # path -> dropped; SRTM15 relies on the conventional location -> kept.
+        assert builder._explicit_path_topography_names() == {"EMOD"}
+
+    def test_parent_path_only_inherits_domain_dataset_name(
+        self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
+    ):
+        cfg = self._cfg(
+            minimal_cstar_spec_builder_args,
+            {"topography_path": "/data/emod_west_tile.nc"},
+        )
+        builder, parent_kw, self_kw, mock_sd = self._build(cfg, tmp_path, mock_grid)
+
+        assert parent_kw["topography_source"] == {
+            "name": "EMOD",
+            "path": "/data/emod_west_tile.nc",
+        }
+        assert self_kw["topography_source"] == {"name": "EMOD", "path": "/data/emod.nc"}
+        mock_sd.assert_not_called()
+        assert (
+            "SRTM15" not in cfg.datasets
+        )  # nothing new noted for a path-only override
+        assert builder._explicit_path_topography_names() == {"EMOD"}
+
+    def test_parent_without_keys_inherits_both_as_before(
+        self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
+    ):
+        cfg = self._cfg(minimal_cstar_spec_builder_args, {})
+        _builder, parent_kw, self_kw, _ = self._build(cfg, tmp_path, mock_grid)
+        assert (
+            parent_kw["topography_source"]
+            == self_kw["topography_source"]
+            == {
+                "name": "EMOD",
+                "path": "/data/emod.nc",
+            }
+        )
+
+    def test_domain_source_without_path_is_not_dropped_when_parent_has_path(
+        self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
+    ):
+        """Domain EMOD relies on the conventional cache location while the parent
+        reads EMOD from an explicit file: EMOD must stay in the
+        ensure_source_data pass (one use still needs the conventional path).
+        """
+        cfg = self._cfg(
+            minimal_cstar_spec_builder_args,
+            {"topography_path": "/data/emod_west_tile.nc"},
+            topo_path=None,
+        )
+        staged = tmp_path / "EMOD" / "EMODnet.nc"
+        builder, parent_kw, self_kw, _ = self._build(cfg, tmp_path, mock_grid, staged)
+        assert self_kw["topography_source"] == {"name": "EMOD", "path": str(staged)}
+        assert parent_kw["topography_source"]["path"] == "/data/emod_west_tile.nc"
+        assert builder._explicit_path_topography_names() == set()
+
+    def test_etopo5_parent_gets_no_topography_key(
+        self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
+    ):
+        cfg = self._cfg(
+            minimal_cstar_spec_builder_args, {"topography_source": "ETOPO5"}
+        )
+        _b, parent_kw, self_kw, mock_sd = self._build(cfg, tmp_path, mock_grid)
+        assert "topography_source" not in parent_kw  # roms-tools fetches ETOPO5
+        assert self_kw["topography_source"]["name"] == "EMOD"
+        mock_sd.assert_not_called()
+
+
+class TestGridBuildErrorLabels:
+    """The executor builds up to three grids (parent / this / child) against the
+    same topography; roms-tools' "NaN values found in regridded topography"
+    message doesn't say which one fell outside the dataset. The executor re-raises
+    naming the grid, its kwargs and an approximate footprint.
+    """
+
+    _TOPO_NAN_MSG = (
+        "NaN values found in regridded topography. This likely occurs because the "
+        "ROMS grid, including a small safety margin for interpolation, is not fully "
+        "contained within the topography dataset's longitude/latitude range."
+    )
+
+    def test_parent_grid_nan_failure_names_the_parent(
+        self, mock_grid, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        parent_kwargs = {
+            "nx": 512,
+            "ny": 384,
+            "size_x": 384.0,
+            "size_y": 288.0,
+            "center_lon": -22.6,
+            "center_lat": 63.55,
+            "rot": 0.0,
+            "N": 60,
+            "theta_s": 5.0,
+            "theta_b": 2.0,
+            "hc": 300.0,
+        }
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            grid_kwargs_parent=parent_kwargs,
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+            topography_source="EMOD",
+            topography_path="/data/EMODnet_C2.nc",
+        )
+
+        def _grid(**kwargs):
+            if kwargs.get("nx") == parent_kwargs["nx"]:
+                raise ValueError(self._TOPO_NAN_MSG)
+            return _create_grid_mock()
+
+        mock_grid.side_effect = _grid
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+
+        # model_post_init runs inside pydantic validation, so the ValueError
+        # surfaces as a ValidationError (exactly as in the user-facing report).
+        with pytest.raises(ValidationError) as excinfo:
+            ForgeExecutor.from_forge_blueprint(cfg, host=host)
+
+        msg = str(excinfo.value)
+        assert "parent grid (domain.grid_kwargs_parent)" in msg
+        assert self._TOPO_NAN_MSG in msg  # roms-tools' own text is preserved
+        assert "size_x=384.0" in msg and "center_lon=-22.6" in msg
+        assert "EMODnet_C2.nc" in msg
+        # Footprint: 192 km at 63.55N is ~3.9 deg of longitude -> west edge ~ -26.5
+        assert "approx. footprint lon [-26.4" in msg or "lon [-26.5" in msg
+
+    def test_unrelated_grid_valueerror_passes_through_unchanged(
+        self, mock_grid, minimal_cstar_spec_builder_args, tmp_path
+    ):
+        args = minimal_cstar_spec_builder_args
+        cfg = build_forge_blueprint(
+            model_dir=_MODEL_DIR,
+            grid_name=args["grid_name"],
+            grid_kwargs=args["grid_kwargs"],
+            open_boundaries=args["open_boundaries"].model_dump(),
+            partitioning=args["partitioning"].model_dump(),
+            start_date=args["start_date"],
+            end_date=args["end_date"],
+            dt=7200,
+            forcing_inputs=_FORCING_INPUTS,
+            output_settings=_OUTPUT_SETTINGS,
+        )
+        mock_grid.side_effect = ValueError("something else entirely")
+        host = HostPaths(
+            working_dir=tmp_path, source_data_cache=tmp_path, system="test"
+        )
+
+        with pytest.raises(ValidationError, match="something else entirely") as ei:
+            ForgeExecutor.from_forge_blueprint(cfg, host=host)
+        assert "Building the" not in str(ei.value)  # not re-labelled
+
+
 class TestForgeExecutorGetDs:
     """Tests for the get_ds method."""
 

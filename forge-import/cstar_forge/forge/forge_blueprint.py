@@ -808,7 +808,22 @@ class Domain(_Section):
     open_boundaries: OpenBoundaries
     partitioning: Partitioning
     grid_kwargs_parent: dict[str, Any] | None = None
+    """roms-tools ``Grid`` kwargs of the coarser parent this grid is nested in.
+    Besides the geometry keys, the dict may carry two Forge-level inputs that are
+    NOT ``rt.Grid`` kwargs: ``topography_source`` (a :class:`TopographySource`
+    name) and/or ``topography_path``. They override the domain-level
+    ``topography_source``/``topography_path`` for the parent grid only -- a
+    parent is rebuilt here so ``align_grids`` can blend this grid toward the
+    parent's mask/bathymetry, so it must reproduce what the parent run was
+    actually built with. Omit both to inherit the domain-level pair; give only
+    ``topography_source`` to use that dataset at its default location (the
+    domain-level *path* is then deliberately not inherited); give only
+    ``topography_path`` to read the domain-level dataset from another file.
+    See ``ForgeExecutor._nested_topography_pair``."""
     grid_kwargs_child: dict[str, Any] | None = None
+    """roms-tools ``Grid`` kwargs of the finer child grid this domain extracts
+    nesting data for. Accepts the same optional ``topography_source`` /
+    ``topography_path`` overrides as ``grid_kwargs_parent``."""
     metadata_child: dict[str, Any] | None = None
     nesting_include_pressure_fluxes: bool = False
     """Whether to include baroclinic pressure fluxes in the nesting extraction file
