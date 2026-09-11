@@ -24,6 +24,7 @@ from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
 from cstar.execution.file_system import (
     DirectoryManager,
+    get_backup_path,
     is_remote_resource,
     local_copy,
 )
@@ -313,7 +314,7 @@ def on_migrated_callback(plan: MigrationPlan) -> None:
     console.print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
 
 
-def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Path:
+def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     """Determine the persistence path for a migrated model.
 
     If a target is not supplied by the user, write to the `CSTAR_STATE_HOME`
@@ -333,11 +334,11 @@ def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Pa
     target : Path | None
         The user-supplied path
     """
-    if target is not None:
-        output = target
+    if request.target is not None:
+        output = request.target
     else:
-        stem = source.stem
-        suffix = source.suffix
+        stem = request.source.stem
+        suffix = request.source.suffix
         state_dir = DirectoryManager.state_home()
         output = state_dir / f"{stem}_{plan.target}{suffix}"
 
@@ -356,11 +357,14 @@ def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
         msg = "Unable to persist an unplanned migration"
         raise ValueError(msg)
 
-    persist_to = get_persist_to(request.source, request.target, result.plan)
+    persist_to = get_persist_to(request, result.plan)
 
     try:
         bp_type = get_application(result.application).blueprint
         updated_bp = bp_type(**result.migrated)
+        if request.in_place:
+            backup_path = get_backup_path(request.source)
+            backup_path.write_bytes(request.source.read_bytes())
 
         nbytes = serialize(
             persist_to,

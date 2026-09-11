@@ -167,6 +167,29 @@ def clobber_output(ctx: typer.Context, value: bool) -> bool:
 
     return value
 
+
+def report_inplace_conflicts(ctx: typer.Context, value: bool) -> bool:
+    """Display informational message to user when in-place and output path
+    are both specified or the user attempts to clobber in-place.
+
+    Parameters
+    ----------
+    ctx : typer.Context
+        The typer context object.
+    value : bool
+        The value of the in-place parameter.
+
+    Returns
+    -------
+    bool
+    """
+    if value and (output := ctx.params.get("output", "")):
+        console.print(f"Output path {output!r} will be ignored in in-place mode")
+
+    if value and ctx.params.get("clobber", False):
+        msg = "Clobbering in-place will result in loss of the input file. Cancelling."
+        raise typer.BadParameter(msg)
+
     return value
 
 
@@ -200,6 +223,14 @@ def migrate(
             envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
+    in_place: t.Annotated[
+        bool,
+        typer.Option(
+            "--inplace",
+            help="Migrate the blueprint and replace the source file content.",
+            callback=report_inplace_conflicts,
+        ),
+    ] = False,
     verbose: t.Annotated[
         bool,
         typer.Option(
@@ -207,6 +238,7 @@ def migrate(
             help=ARG_VERBOSE_HELP,
             callback=set_flag(ENV_CSTAR_CLI_VERBOSE),
             envvar=ENV_CSTAR_CLI_VERBOSE,
+            is_eager=True,
         ),
     ] = False,
     clobber: t.Annotated[
@@ -219,6 +251,7 @@ def migrate(
                 clobber_output,
             ),
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
+            is_eager=True,
         ),
     ] = False,
     log_level: t.Annotated[
@@ -235,9 +268,11 @@ def migrate(
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
     try:
+        target = Path(path) if in_place else (Path(output) if output else None)
         request = MigrationRequest(
             path=Path(path),
-            output=Path(output) if output else None,
+            output=target,
+            in_place=in_place,
         )
     except ValidationError as ex:
         errors = format_validation_errors(ex)

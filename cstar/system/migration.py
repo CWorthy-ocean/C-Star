@@ -56,6 +56,11 @@ class MigrationRequest(BaseModel):
         frozen=True,
         alias="output",
     )
+    in_place: bool = Field(
+        default=False,
+        description="Enable to overwrite the source file with the migrated content",
+        frozen=True,
+    )
 
     config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
     """Model configuration ensuring attributes have whitespace stripped."""
