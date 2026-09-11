@@ -1,10 +1,8 @@
-.. _unreleased:
+.. _0.13.7:
 
-Unreleased
+0.13.7
 ----------
 
-.. note::
-    This release is currently in development
 
 Breaking Changes
 ~~~~~~~~~~~~~~~~
@@ -19,16 +17,6 @@ New features
 
 - ``RomsNamelistV0_7_0`` with the two new groups: CDR tracer output (``do_cdr_tracer_output``, averaging/monthly/period/records-per-file, and per-field switches for tracers, vertical integrals, thickness-weighted fields, sources, ALK and DIC) and CDR gas-exchange output (``do_cdr_gas_exch_output`` plus averaging/monthly/period/records-per-file). Both groups default to ucla-roms' reference values, so a namelist written for 0.6.x still validates against the 0.7.0 schema. (`#686 <https://github.com/CWorthy-ocean/C-Star/pull/686>`_)
 - The startup pre-check that mirrors ucla-roms' ``check_output_divides_rst`` now covers the two new streams (``cdrtrc``, ``cdrgas``), gated on the ``MARBL`` and ``CDR_FORCING`` cppdefs like the existing CDR stream, so a non-dividing output period is caught before submission rather than at ROMS startup. (`#686 <https://github.com/CWorthy-ocean/C-Star/pull/686>`_)
-
-Bug Fixes
-~~~~~~~~~
-
-- N/A
-
-Improvements
-~~~~~~~~~~~~
-
-- N/A
 
 Miscellaneous
 ~~~~~~~~~~~~~
