@@ -4,7 +4,6 @@ from collections import Counter, OrderedDict
 from collections.abc import Mapping
 
 import typer
-from rich.console import Console
 from rich.table import Column, Table
 
 from cstar.applications.core import (
@@ -18,6 +17,7 @@ from cstar.cli.common import (
     cb_pipeline,
     checkmark,
     colored,
+    console,
     id_label,
     normalize_runid,
     set_ctxmap,
@@ -35,7 +35,6 @@ from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository
 
-console = Console()
 log = get_logger(__name__)
 
 if t.TYPE_CHECKING:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from rich.console import Console
 
 import cstar
 from cstar.applications.core import get_application
@@ -41,6 +42,7 @@ from cstar.system.migration import (
 )
 
 app = typer.Typer()
+console = Console()
 log = get_logger(__name__)
 
 HELP_SHORT = (
@@ -270,20 +272,19 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
     """
     if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE) or not plan.adapters:
         if plan.is_latest:
-            print(f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}")
+            msg = f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}"
+            console.print(msg)
             return
 
         num_steps = len(plan.adapters)
         msg = f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} step(s)."
-        print(msg)
+        console.print(msg)
         return
 
-    from rich.console import Console  # noqa: PLC0415
     from rich.table import Column, Table  # noqa: PLC0415
 
     source, target, adapters = plan
     padding = (0, 1)
-    console = Console()
 
     table = Table(
         Column(header="Step", justify="center"),
@@ -309,7 +310,7 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
 
 
 def on_migrated_callback(plan: MigrationPlan) -> None:
-    print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
+    console.print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
 
 
 def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Path:
@@ -420,11 +421,11 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
 
     migration_result = migrator.plan_and_migrate(dumped)
     if migration_result.error:
-        print(migration_result.error)
+        console.print(migration_result.error)
         raise typer.Exit(1)
 
     if not migration_result.plan:
-        print("Migration failed to produce a plan.")
+        console.print("Migration failed to produce a plan.")
         raise typer.Exit(2)
 
     # An up-to-date blueprint needs no migration: return it untouched unless
@@ -433,9 +434,7 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         return PersistedMigrateResult(migration_result, request.source)
 
     if migration_result.plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
-        from rich.console import Console  # noqa: PLC0415
-
-        Console().print(
+        console.print(
             f"Blueprint at '{request.source}' requires schema migration from "
             f"{colored(migration_result.plan.source, 'green')} to "
             f"{colored(migration_result.plan.target, 'red')}, but migration is "
@@ -469,7 +468,7 @@ def localize_and_migrate(path: str) -> Path:
             persist_result = execute_migration(request)
 
             if persist_result.migration_result.error:
-                print(persist_result.migration_result.error)
+                console.print(persist_result.migration_result.error)
                 raise typer.Exit(1)
 
             local_path = Path(persist_result.target)
@@ -536,6 +535,6 @@ def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
     context_map: dict[str, t.Any] = context.obj
 
     if key in context_map and context_map[key] is not None:
-        print(f"Value in context map using key {key!r} will be overwritten")
+        console.print(f"Value in context map using key {key!r} will be overwritten")
 
     context_map[key] = value

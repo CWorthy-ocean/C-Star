@@ -14,6 +14,7 @@ from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     MigrationRequest,
     cb_pipeline,
+    console,
     execute_migration,
     format_validation_errors,
     set_env,
@@ -137,7 +138,7 @@ def dryrun_notify(ctx: typer.Context, value: bool) -> bool:
     output = ctx.params.get("output", "")
 
     if value and output:
-        print(f"Output path {output!r} will be ignored during dry-run")
+        console.print(f"Output path {output!r} will be ignored during dry-run")
 
     return value
 
@@ -254,8 +255,8 @@ def migrate(
         raise typer.BadParameter(msg) from ex
 
     if not result.migration_result.plan:
-        print("Migration failed to produce a plan.")
+        console.print("Migration failed to produce a plan.")
         raise typer.Exit(2)
 
     if not result.migration_result.plan.is_latest:
-        print(f"Migrated blueprint persisted to {str(result.target)!r}")
+        console.print(f"Migrated blueprint persisted to {str(result.target)!r}")
