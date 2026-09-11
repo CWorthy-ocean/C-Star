@@ -127,13 +127,16 @@ class NestIcRunner(BlueprintRunner[NestIcBlueprint]):
             use_dask=True,
         )
 
-        # only add bgc_source if parent has BGC
+        # only add bgc_source if parent has BGC. roms-tools >= 5.0 requires the BGC
+        # model class alongside any bgc source: it completes the MARBL tracer set
+        # (derivations and constant fills) rather than the forcing class doing so.
         if self._has_bgc(self.blueprint.parent_rst):
             ic_kwargs["bgc_source"] = {
                 "name": "ROMS",
                 "grid": parent_grid,
                 "path": self.blueprint.parent_rst,
             }
+            ic_kwargs["bgc_model"] = roms_tools.BGCMarbl
 
         fname = f"ic_from_parent_rst.{rst.formatted_timestamp}.nc"
         path = Path(self.blueprint.working_dir).expanduser() / "output" / fname
