@@ -9,12 +9,19 @@ from itertools import chain
 from pathlib import Path
 
 from cstar.base.adapter import SchemaAdapter
+from cstar.base.env import ENV_CSTAR_DISABLE_MIGRATION
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.entrypoint.config import JOBFILE_DATE_FORMAT
 from cstar.execution.file_system import local_copy
 from cstar.execution.handler import ExecutionStatus
-from cstar.orchestration.models import BlueprintCore
+from cstar.orchestration.models import Blueprint, BlueprintCore
 from cstar.orchestration.serialization import SerializableModel, deserialize
+from cstar.system.migration import (
+    BlueprintMigration,
+    CstarMigrationError,
+    CstarUnsupportedMigrationError,
+)
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
@@ -479,3 +486,96 @@ def get_app_for_blueprint(path: Path) -> ApplicationDefinition[t.Any, t.Any]:
     """
     name = get_application_name(path)
     return get_application(name)
+
+
+def load_blueprint(path: Path) -> Blueprint:
+    """Load a blueprint from disk, migrating its schema in memory if needed.
+
+    Unlike :func:`deserialize`, which validates a file straight into the
+    application's strict blueprint type, this reads the file leniently (via
+    :class:`BlueprintCore`), runs any registered schema migrations for the
+    application in memory, and only then validates against the current schema.
+    Nothing is written to disk. Callers that must parse a blueprint before
+    execution (schedule-time transforms) use this so a pre-current-schema
+    blueprint is upgraded rather than raising a raw ``ValidationError``.
+
+    Parameters
+    ----------
+    path : Path
+        The path to a file containing a blueprint.
+
+    Returns
+    -------
+    Blueprint
+        The blueprint validated against the application's current schema.
+
+    Raises
+    ------
+    CstarMigrationError
+        If a required migration cannot be planned or completed, or is required
+        but disabled via ``CSTAR_DISABLE_MIGRATION``.
+    """
+    # A single lenient read serves both the application lookup and the migration
+    # input, so a blueprint on a network path is read once, not per-consumer.
+    core = deserialize(path, BlueprintCore)
+    app = get_application(core.application)
+    dumped = core.model_dump()
+
+    adapters = app.migrations or []
+    if adapters:
+        migrator = BlueprintMigration(adapters=adapters)
+        if app.name in migrator.schema_bounds:
+            dumped = _migrate_blueprint_dict(path, migrator, dumped)
+        else:
+            # The registered adapters target a different application (e.g. an
+            # app inheriting another's migrations). Nothing to migrate here;
+            # strict validation below handles current-schema blueprints.
+            log.debug(
+                f"Skipping schema migration for {str(path)!r}: registered adapters "
+                f"do not cover application {app.name!r}"
+            )
+
+    return t.cast("Blueprint", app.blueprint.model_validate(dumped))
+
+
+def _migrate_blueprint_dict(
+    path: Path,
+    migrator: BlueprintMigration,
+    dumped: dict[str, t.Any],
+) -> dict[str, t.Any]:
+    """Plan and apply an in-memory schema migration for a blueprint dict.
+
+    Returns
+    -------
+    dict[str, t.Any]
+        The (possibly) migrated blueprint dict; unchanged if already current.
+
+    Raises
+    ------
+    CstarMigrationError
+        If migration cannot be planned or completed, or is required but disabled
+        via ``CSTAR_DISABLE_MIGRATION``.
+    """
+    try:
+        plan = migrator.plan(dumped)
+    except CstarUnsupportedMigrationError as ex:
+        msg = f"Unable to migrate blueprint {str(path)!r}: {ex}"
+        raise CstarMigrationError(msg) from ex
+
+    if plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
+        msg = (
+            f"Blueprint {str(path)!r} requires schema migration from "
+            f"{plan.source!r} to {plan.target!r}, but migration is disabled "
+            f"({ENV_CSTAR_DISABLE_MIGRATION}=1). Unset {ENV_CSTAR_DISABLE_MIGRATION} "
+            "or run `cstar blueprint migrate` to update the blueprint."
+        )
+        raise CstarMigrationError(msg)
+
+    if plan.is_latest:
+        return dumped
+
+    try:
+        return migrator.migrate(dumped, plan)
+    except CstarMigrationError as ex:
+        msg = f"Unable to migrate blueprint {str(path)!r}: {ex}"
+        raise CstarMigrationError(msg) from ex
