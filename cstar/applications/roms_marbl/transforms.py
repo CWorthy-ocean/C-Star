@@ -1,7 +1,8 @@
 import os
 import re
 import typing as t
-from collections.abc import Sequence
+import warnings
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -15,14 +16,15 @@ from pydantic import (
 
 from cstar.applications.core import Transform
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
-from cstar.base.exceptions import BlueprintDeferredError
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
     ENV_FF_ORCH_TRX_TIMESPLIT_LONGNAME,
     is_feature_enabled,
 )
+from cstar.base.log import get_logger
 from cstar.base.utils import (
     DEFAULT_OUTPUT_ROOT_NAME,
+    coerce_datetime,
     deep_merge,
     min_padded_index,
     slugify,
@@ -31,13 +33,23 @@ from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
+    ApplyOverridesDirective,
     DirectiveConfig,
     OverrideDirective,
     SplitFrequency,
-    effective_blueprint,
     get_time_slices,
 )
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
+
+if t.TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from cstar.base.log import TraceLogger
+    from cstar.orchestration.orchestration import LiveWorkplan
+
+log = get_logger(__name__)
+
+T = t.TypeVar("T")
 
 
 class RomsMarblTimeSplitter(Transform[LiveStep]):
@@ -390,6 +402,61 @@ class RestartFile(BaseModel):
         return self._ts.strftime(self.FMT_TS)
 
 
+def restart_timestamp(location: str | Path) -> datetime | None:
+    """Return the timestamp encoded in a restart-style file name, or `None`.
+
+    Only the file name is inspected (via `RestartFile`'s validators); the file
+    need not exist.
+
+    Parameters
+    ----------
+    location : str | Path
+        A path or file name to inspect.
+
+    Returns
+    -------
+    datetime | None
+        The timestamp encoded in the file name, or `None` if `location` does
+        not match the restart file naming convention.
+    """
+    try:
+        return RestartFile(path=Path(location)).timestamp
+    except ValueError:
+        return None
+
+
+def warn_on_restart_start_date_mismatch(
+    location: str | Path, start_date: datetime, *, log: "TraceLogger"
+) -> None:
+    """Warn when a restart-style initial-conditions file is dated differently
+    from `start_date`.
+
+    ROMS takes its clock from the restart file while `ntimes` is computed from
+    `start_date`, so a mismatch means the run will not cover the intended
+    period.
+
+    Parameters
+    ----------
+    location : str | Path
+        The path or file name of the initial-conditions file.
+    start_date : datetime
+        The blueprint's configured start date.
+    log : TraceLogger
+        The logger to emit the warning to.
+    """
+    ts = restart_timestamp(location)
+    if ts is not None and ts != start_date:
+        log.warning(
+            "Restart file %s is dated %s but start_date is %s. ROMS starts "
+            "from the restart's time; the previous segment may not have "
+            "reached its end date, or the restart directory / start_date is "
+            "wrong.",
+            Path(location).name,
+            ts,
+            start_date,
+        )
+
+
 class RestartFileTrxAdapter:
     """Convert a restart file into a dictionary useful for use in an OverrideTransform."""
 
@@ -625,9 +692,91 @@ class BoundaryFileTrxAdapter:
         }
 
 
+def find_in_step_outputs(
+    workplan: "LiveWorkplan", name: str, find: "Callable[[Path], T | None]"
+) -> T:
+    """Search a completed step's output directories for model outputs.
+
+    Probes `joined_output` first and falls back to `output`, returning the
+    first result `find` produces. Which directory holds usable files depends on
+    how the step ran (ParallelIO writes joined files, a non-PIO run is joined
+    after the fact, the nest_ic app writes straight to `output`), so the
+    directories are probed rather than inferred from the step's blueprint.
+
+    Parameters
+    ----------
+    workplan : LiveWorkplan
+        The workplan containing the named step.
+    name : str
+        The name of the step whose outputs are requested.
+    find : Callable[[Path], T | None]
+        A search function returning `None` when a directory holds nothing
+        usable (e.g. `RestartFile.find` or `BoundaryFile.find`).
+
+    Returns
+    -------
+    T
+        The first non-`None` result of `find`.
+
+    Raises
+    ------
+    KeyError
+        If `workplan` does not contain a step named `name`.
+    ValueError
+        If no candidate directory holds a usable result.
+    """
+    if name not in workplan:
+        msg = f"Unable to locate step {name!r} in workplan"
+        raise KeyError(msg)
+
+    fsm = RomsFileSystemManager(workplan[name].fsm.root_dir)
+    candidates = (fsm.joined_output_dir, fsm.output_dir)
+
+    for search_path in candidates:
+        if search_path.is_dir() and (found := find(search_path)) is not None:
+            return found
+
+    searched = ", ".join(str(p) for p in candidates)
+    msg = f"No usable outputs located for step {name!r}; searched: {searched}"
+    raise ValueError(msg)
+
+
+def _rst_path_continue_from_conflict_message(step_name: str | None) -> str:
+    """Build the error message for a conflicting `rst_path` + `continue-from`.
+
+    Shared between `NestingDirective.__call__` (runtime, where the step name
+    is known) and `NestingDirective.validate_directives` (schedule time,
+    where only the directives mapping is available).
+
+    Parameters
+    ----------
+    step_name : str | None
+        The step's name, when known; `None` when unavailable.
+
+    Returns
+    -------
+    str
+    """
+    subject = f"step {step_name!r}" if step_name is not None else "a step"
+    return (
+        f"nest-from rst_path and continue-from both set initial conditions for "
+        f"{subject}; remove rst_path"
+    )
+
+
 class ContinuanceDirective(OverrideDirective):
     """A transform that locates a restart file with an unknown path at the
-    time the task was scheduled.
+    time the task was scheduled, and applies it as the step's initial
+    conditions.
+
+    Warns only when the step explicitly overrode `start_date` (via the
+    workplan's `blueprint_overrides.runtime_params.start_date`, packaged by
+    `package_runtime_overrides` into the runtime `apply-overrides` directive)
+    and that explicit value disagrees with the restart this directive
+    located. Chained steps that leave `start_date` to the directive (e.g.
+    `continue-from: step: <prev>` with no explicit `start_date` override)
+    stay quiet -- the base blueprint's `start_date` is unrelated to whatever
+    restart gets discovered in that case.
     """
 
     KEY_PATH: t.Final[str] = "path"
@@ -638,6 +787,39 @@ class ContinuanceDirective(OverrideDirective):
     @classmethod
     def key(cls) -> str:
         return "continue-from"
+
+    @t.override
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
+        """Warn on an explicit start_date/restart mismatch, then transform.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step to be transformed.
+
+        Returns
+        -------
+        Sequence[LiveStep]
+            Zero-to-many steps resulting from applying the transform.
+        """
+        data = self._system_overrides.get("initial_conditions", {}).get("data", [])
+        location = data[0].get("location") if data else None
+
+        explicit_start: t.Any = None
+        config = step.directives.get(ApplyOverridesDirective.key(), {})
+        if isinstance(config, Mapping):
+            overrides = config.get(ApplyOverridesDirective.KEY_OVERRIDES)
+            if isinstance(overrides, Mapping):
+                runtime_params = overrides.get("runtime_params")
+                if isinstance(runtime_params, Mapping):
+                    explicit_start = runtime_params.get("start_date")
+
+        if location and explicit_start is not None:
+            warn_on_restart_start_date_mismatch(
+                location, coerce_datetime(explicit_start), log=log
+            )
+
+        return super().__call__(step)
 
     def _generate_overrides(self) -> dict[str, t.Any]:
         """Create an overrides dictionary that will result in the modified blueprint.
@@ -666,37 +848,21 @@ class ContinuanceDirective(OverrideDirective):
             )
             raise NotImplementedError(msg)
 
+        if minimal_keys.issubset(found_keys):
+            msg = (
+                f"Invalid continuance transform configuration: {self.KEY_PATH!r} and "
+                f"{self.KEY_STEP!r} are mutually exclusive; supply only one restart source."
+            )
+            raise NotImplementedError(msg)
+
         search_path: Path | None = None
 
         if target_path := self._config.get(self.KEY_PATH, None):
             search_path = Path(target_path)
 
         if name := self._config.get(self.KEY_STEP, None):
-            if name in self.workplan:
-                step = self.workplan[name]
-                fsm = RomsFileSystemManager(step.fsm.root_dir)
-
-                search_path = fsm.output_dir
-
-                # With ParallelIO there are no partitioned restart files to
-                # reuse; the joined restart files live in `joined_output`.
-                try:
-                    # merge the step's packaged runtime overrides so values
-                    # set via blueprint_overrides (e.g. use_pio) are visible
-                    blueprint = effective_blueprint(step)
-                except BlueprintDeferredError:
-                    # Backstop: deferred+split is prohibited upstream, so treat as non-PIO.
-                    blueprint = None
-
-                if (
-                    isinstance(blueprint, RomsMarblBlueprint)
-                    and blueprint.partitioning.use_pio
-                ):
-                    search_path = fsm.joined_output_dir
-
-            else:
-                msg = f"Unable to locate step {name!r} in workplan"
-                raise KeyError(msg)
+            step_restart = find_in_step_outputs(self.workplan, name, RestartFile.find)
+            return RestartFileTrxAdapter.adapt(step_restart)
 
         if search_path and (
             restart_file := RestartFile.find(search_path, notfound_ok=False)
@@ -719,45 +885,184 @@ class ContinuanceDirective(OverrideDirective):
 
 
 class NestingDirective(OverrideDirective):
-    """A transform that uses a restart file and boundary conditions from a previous parent simulation."""
+    """A transform that supplies boundary forcing from a parent (or sibling)
+    simulation for a nested child run.
+
+    The boundary source is exactly one of `path` (a directory or file) or
+    `step` (a step name resolved via the workplan), the same shape used by
+    `ContinuanceDirective` for initial conditions -- the two directives now
+    touch disjoint blueprint keys (`forcing.boundary` here vs.
+    `initial_conditions` there) and compose in any order.
+
+    `bry_path` is a deprecated alias for `path` (conflicts with `path`/
+    `step` if both are supplied). `rst_path` is a deprecated, optional key
+    that restores the historical "nest-from also sets initial conditions"
+    behavior by applying a restart-file override directly; it is rejected
+    when a `continue-from` directive is also present on the step, since both
+    would set `initial_conditions`. Both deprecated keys emit a
+    `FutureWarning` and a log warning.
+    """
+
+    KEY_PATH: t.Final[str] = ContinuanceDirective.KEY_PATH
+    """Key used to specify a path as the source for the boundary forcing."""
+    KEY_STEP: t.Final[str] = ContinuanceDirective.KEY_STEP
+    """Key used to specify a step name as the source for the boundary forcing."""
+    KEY_BRY_PATH: t.Final[str] = "bry_path"
+    """Deprecated alias for `KEY_PATH`."""
+    KEY_RST_PATH: t.Final[str] = "rst_path"
+    """Deprecated key that also applies a restart-file override."""
 
     @classmethod
     def key(cls) -> str:
         return "nest-from"
 
+    @classmethod
+    def validate_directives(
+        cls, config: Mapping[str, t.Any], directives: Mapping[str, t.Any]
+    ) -> None:
+        """Reject a `rst_path` config combined with a `continue-from` directive.
+
+        Called at schedule time (see `package_runtime_overrides`) so the
+        conflict, which would otherwise only surface on the compute node, is
+        caught before the workplan runs.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+        directives : Mapping[str, t.Any]
+            The step's full directives mapping (this directive's key
+            included).
+
+        Raises
+        ------
+        ValueError
+            If `rst_path` is set alongside a `continue-from` directive.
+        """
+        if cls.KEY_RST_PATH in config and ContinuanceDirective.key() in directives:
+            raise ValueError(_rst_path_continue_from_conflict_message(None))
+
+    @t.override
+    def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
+        """Reject a conflicting `rst_path` + `continue-from` combination, then transform.
+
+        Parameters
+        ----------
+        step : LiveStep
+            The step to be transformed.
+
+        Returns
+        -------
+        Sequence[LiveStep]
+            Zero-to-many steps resulting from applying the transform.
+
+        Raises
+        ------
+        ValueError
+            If the deprecated `rst_path` key is set alongside a
+            `continue-from` directive on the same step; both would set
+            `initial_conditions`.
+        """
+        if (
+            self.KEY_RST_PATH in self._config
+            and ContinuanceDirective.key() in step.directives
+        ):
+            raise ValueError(_rst_path_continue_from_conflict_message(step.name))
+        return super().__call__(step)
+
     def _generate_overrides(self) -> dict[str, t.Any]:
         """Create an overrides dictionary that will result in the modified blueprint.
 
-        NestingDirective creates overrides that will modify the initial conditions
-        and boundary conditions.
+        NestingDirective creates overrides that set the step's boundary
+        forcing, and -- only when the deprecated `rst_path` key is present
+        -- its initial conditions as well.
 
         Returns
         -------
         dict[str, t.Any]
+
+        Raises
+        ------
+        NotImplementedError
+            If the supplied configuration is not supported, or if the
+            deprecated `bry_path` key conflicts with `path`/`step`.
+        ValueError
+            If no boundary files, or (when `rst_path` is supplied) no
+            restart file, can be located with the supplied configuration.
         """
-        if "rst_path" not in self._config:
-            msg = "Invalid nesting transform configuration. Must include rst_path."
+        if self.KEY_BRY_PATH in self._config:
+            msg = (
+                f"{self.key()!r} config key {self.KEY_BRY_PATH!r} is deprecated "
+                f"and will be removed in a future release; use {self.KEY_PATH!r} "
+                "instead."
+            )
+            warnings.warn(msg, FutureWarning, stacklevel=2)
+            log.warning(msg)
+
+            if self.KEY_PATH in self._config or self.KEY_STEP in self._config:
+                msg = (
+                    f"Invalid nesting transform configuration: {self.KEY_BRY_PATH!r} "
+                    f"conflicts with {self.KEY_PATH!r}/{self.KEY_STEP!r}; supply "
+                    "only one boundary source."
+                )
+                raise NotImplementedError(msg)
+
+        found_keys = set(self._config.keys())
+        boundary_keys = {self.KEY_PATH, self.KEY_STEP, self.KEY_BRY_PATH}
+
+        if not found_keys.intersection(boundary_keys):
+            msg = (
+                "Invalid nesting transform configuration; supported configuration: "
+                f"{', '.join(sorted(boundary_keys))}, provided configuration: "
+                f"{', '.join(found_keys)}"
+            )
             raise NotImplementedError(msg)
 
-        if "bry_path" not in self._config:
-            msg = "Invalid nesting transform configuration. Must include bry_path."
+        if {self.KEY_PATH, self.KEY_STEP}.issubset(found_keys):
+            msg = (
+                f"Invalid nesting transform configuration: {self.KEY_PATH!r} and "
+                f"{self.KEY_STEP!r} are mutually exclusive; supply only one boundary source."
+            )
             raise NotImplementedError(msg)
 
-        search_path = Path(self._config["rst_path"])
-        if restart_file := RestartFile.find(search_path, notfound_ok=False):
-            rst_override_dict = RestartFileTrxAdapter.adapt(restart_file)
-        else:
-            msg = f"No restart file located in search path: {search_path!r}"
-            raise ValueError(msg)
+        search_path: Path | None = None
 
-        search_path = Path(self._config["bry_path"])
-        if boundary_files := BoundaryFile.find(search_path, notfound_ok=False):
-            bry_override_dict = BoundaryFileTrxAdapter.adapt(boundary_files)
+        if target_path := self._config.get(self.KEY_PATH) or self._config.get(
+            self.KEY_BRY_PATH
+        ):
+            search_path = Path(target_path)
+
+        if name := self._config.get(self.KEY_STEP):
+            step_boundaries = find_in_step_outputs(
+                self.workplan, name, BoundaryFile.find
+            )
+            overrides = BoundaryFileTrxAdapter.adapt(step_boundaries)
+        elif search_path and (
+            boundary_files := BoundaryFile.find(search_path, notfound_ok=False)
+        ):
+            overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
         else:
             msg = f"No boundary files located in search path: {search_path!r}"
             raise ValueError(msg)
 
-        return {**rst_override_dict, **bry_override_dict}
+        if rst_path := self._config.get(self.KEY_RST_PATH):
+            msg = (
+                f"{self.key()!r} config key {self.KEY_RST_PATH!r} is deprecated "
+                "and will be removed in a future release; use "
+                f"{ContinuanceDirective.key()!r}: {{{ContinuanceDirective.KEY_PATH!r}: "
+                f"{rst_path!r}}} instead."
+            )
+            warnings.warn(msg, FutureWarning, stacklevel=2)
+            log.warning(msg)
+
+            rst_search_path = Path(rst_path)
+            if restart_file := RestartFile.find(rst_search_path, notfound_ok=False):
+                overrides = {**overrides, **RestartFileTrxAdapter.adapt(restart_file)}
+            else:
+                msg = f"No restart file located in search path: {rst_search_path!r}"
+                raise ValueError(msg)
+
+        return overrides
 
     @t.override
     @staticmethod

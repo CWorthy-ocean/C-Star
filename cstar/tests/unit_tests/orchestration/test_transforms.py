@@ -1,4 +1,5 @@
 # ruff: noqa: SLF001, S101
+import logging
 import os
 import typing as t
 import uuid
@@ -14,9 +15,15 @@ from cstar.applications.hello_world import HelloWorldBlueprint
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import (
     ContinuanceDirective,
+    NestingDirective,
     RestartFile,
     RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
+    restart_timestamp,
+    warn_on_restart_start_date_mismatch,
+)
+from cstar.applications.roms_marbl.transforms import (
+    log as transforms_log,
 )
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
@@ -49,6 +56,9 @@ from cstar.orchestration.transforms import (
     package_runtime_overrides,
     resolve_deferred_blueprint,
 )
+
+TRANSFORMS_LOGGER_NAME = "cstar.applications.roms_marbl.transforms"
+"""The logger name used by `cstar.applications.roms_marbl.transforms`."""
 
 
 @pytest.fixture(autouse=True)
@@ -285,18 +295,24 @@ def test_override_transform_system_precedence(
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("use_pio", "expected_dir_attr", "expected_name"),
+    ("joined_available", "expected_dir_attr", "expected_name"),
     [
         pytest.param(
-            False, "output_dir", "output_rst.20120201000000.000.nc", id="no_pio"
+            True,
+            "joined_output_dir",
+            "output_rst.20120201000000.nc",
+            id="joined_preferred",
         ),
         pytest.param(
-            True, "joined_output_dir", "output_rst.20120201000000.nc", id="pio"
+            False,
+            "output_dir",
+            "output_rst.20120201000000.000.nc",
+            id="output_fallback",
         ),
     ],
 )
 async def test_continuance_directive_step_resolution(
-    use_pio: bool,
+    joined_available: bool,
     expected_dir_attr: str,
     expected_name: str,
     tmp_path: Path,
@@ -308,14 +324,15 @@ async def test_continuance_directive_step_resolution(
     """Verify that a continuance directive uses context information to identify
     the search path when a step name is provided.
 
-    When `use_pio` is enabled the prior step writes joined (unpartitioned)
-    restart files to `joined_output`, so the directive must search there
-    instead of `output`.
+    The directive probes `joined_output` first and falls back to `output`, so
+    a step whose outputs were joined resolves to the joined restart and one
+    that was never joined resolves to the partitioned restart in `output`.
 
     Parameters
     ----------
-    use_pio : bool
-        Whether the prior step ran with ParallelIO enabled.
+    joined_available : bool
+        Whether the prior step's `joined_output` holds files (preferred) or
+        only `output` does (fallback).
     tmp_path : Path
         Temporary directory for test outputs
     bp_templates_dir: Path
@@ -355,10 +372,12 @@ async def test_continuance_directive_step_resolution(
 
     await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
 
-    # inject `use_pio` here to ensure it survives into the directive's blueprint read.
-    bp = deserialize(local_bp, RomsMarblBlueprint)
-    bp.partitioning.use_pio = use_pio
-    assert serialize(local_bp, bp)
+    if not joined_available:
+        # a step whose outputs were never joined: only `output` holds files
+        for live_step in t.cast("list[LiveStep]", live_plan.steps):
+            joined_dir = RomsFileSystemManager(live_step.fsm.root_dir).joined_output_dir
+            for joined_file in joined_dir.glob("*.nc"):
+                joined_file.unlink()
 
     for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):
         if i > 0:
@@ -477,6 +496,19 @@ def test_continuance_directive_incomplete_config_supplied(
         _ = ContinuanceDirective({"not-path": str(test_working_dir)})
 
 
+def test_continuance_directive_path_and_step_are_mutually_exclusive(
+    test_working_dir: Path,
+) -> None:
+    """Verify supplying both `path` and `step` is rejected instead of one silently winning."""
+    with pytest.raises(NotImplementedError, match="mutually exclusive"):
+        _ = ContinuanceDirective(
+            {
+                ContinuanceDirective.KEY_PATH: str(test_working_dir),
+                ContinuanceDirective.KEY_STEP: "previous",
+            }
+        )
+
+
 def test_continuance_directive_path_dne() -> None:
     """Verify that sending a path to a directory that does not exist results in
     an exception being raised.
@@ -536,6 +568,535 @@ def test_continuance_directive_happy_path(
 
     # confirm the overrides were removed after being applied
     assert not transformed.blueprint_overrides
+
+
+def _set_explicit_start_date_override(step: LiveStep, start_date: str) -> None:
+    """Mirror the shape `package_runtime_overrides` produces, packaging an
+    explicit `runtime_params.start_date` override into the step's runtime
+    `apply-overrides` directive config.
+
+    Parameters
+    ----------
+    step : LiveStep
+        The step to attach the directive config to.
+    start_date : str
+        The explicit start date to package, as an ISO-like string (as it
+        would arrive from YAML).
+    """
+    step.directives[ApplyOverridesDirective.key()] = {
+        ApplyOverridesDirective.KEY_OVERRIDES: {
+            "runtime_params": {"start_date": start_date},
+        },
+        ApplyOverridesDirective.KEY_APPLICATION: step.application,
+    }
+
+
+def test_continuance_directive_warns_on_explicit_start_date_mismatch(
+    single_step_workplan: Workplan,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a `ContinuanceDirective` warns when the step explicitly
+    requested a `start_date` that disagrees with the located restart file's
+    timestamp, and that the resulting blueprint's `start_date` reflects the
+    restart's timestamp.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    mocked_simulation_outputs : tuple[Path, Path, Path]
+        Paths to mocked simulation outputs; the latest restart there is dated
+        2012-01-01T00:20:00.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    _, continue_from_dir, _ = mocked_simulation_outputs
+    expected_ts = datetime(2012, 1, 1, 0, 20, 0)
+    explicit_start = "2023-02-15 00:00:00"
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+    _set_explicit_start_date_override(step, explicit_start)
+
+    transform = ContinuanceDirective(
+        {ContinuanceDirective.KEY_PATH: str(continue_from_dir)}
+    )
+
+    with caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME):
+        steps = transform(step)
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert len(records) == 1
+    assert explicit_start in records[0].getMessage()
+    assert str(expected_ts) in records[0].getMessage()
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert bp_after.runtime_params.start_date == expected_ts
+
+
+def test_continuance_directive_no_warning_without_explicit_start_date(
+    single_step_workplan: Workplan,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a `ContinuanceDirective` stays quiet for a normal chained step
+    that leaves `start_date` to the directive, even though the base
+    blueprint's `start_date` is unrelated to the located restart.
+
+    This is the false-positive regression case: every chained
+    `continue-from: step: <prev>` step would otherwise warn, since the base
+    blueprint's `start_date` has no relationship to whatever restart is
+    discovered.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    mocked_simulation_outputs : tuple[Path, Path, Path]
+        Paths to mocked simulation outputs; the latest restart there is dated
+        2012-01-01T00:20:00, which differs from the base blueprint's
+        start_date (2020-01-01) -- and no explicit override is set.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    _, continue_from_dir, _ = mocked_simulation_outputs
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    assert bp_before.runtime_params.start_date != datetime(2012, 1, 1, 0, 20, 0)
+    assert ApplyOverridesDirective.key() not in step.directives
+
+    transform = ContinuanceDirective(
+        {ContinuanceDirective.KEY_PATH: str(continue_from_dir)}
+    )
+
+    with caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME):
+        transform(step)
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert not records
+
+
+def test_continuance_directive_no_warning_when_explicit_start_date_matches_restart(
+    single_step_workplan: Workplan,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a `ContinuanceDirective` does not warn when the step's explicit
+    `start_date` override already matches the located restart file's
+    timestamp.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    mocked_simulation_outputs : tuple[Path, Path, Path]
+        Paths to mocked simulation outputs; the latest restart there is dated
+        2012-01-01T00:20:00.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    _, continue_from_dir, _ = mocked_simulation_outputs
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+    _set_explicit_start_date_override(step, "2012-01-01 00:20:00")
+
+    transform = ContinuanceDirective(
+        {ContinuanceDirective.KEY_PATH: str(continue_from_dir)}
+    )
+
+    with caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME):
+        transform(step)
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert not records
+
+
+def test_nesting_directive_path_only_sets_boundary_only(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a `path`-only `nest-from` sets only the boundary forcing,
+    leaving `initial_conditions` and `start_date` untouched.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold a mocked boundary file.
+    """
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    (bry_dir / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+
+    transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
+    assert set(transform._system_overrides) == {"forcing"}
+
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert Path(bp_after.forcing.boundary.data[0].location).name == (
+        "parent_bry.20230201003000.nc"
+    )
+    assert bp_after.initial_conditions == bp_before.initial_conditions
+    assert bp_after.runtime_params.start_date == bp_before.runtime_params.start_date
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("joined_available", "expected_dir_attr", "expected_name"),
+    [
+        pytest.param(
+            True,
+            "joined_output_dir",
+            "parent_bry.20230201003000.nc",
+            id="joined_preferred",
+        ),
+        pytest.param(
+            False,
+            "output_dir",
+            "parent_bry.20230201003000.000.nc",
+            id="output_fallback",
+        ),
+    ],
+)
+async def test_nesting_directive_step_resolution(
+    joined_available: bool,
+    expected_dir_attr: str,
+    expected_name: str,
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    wp_templates_dir: Path,
+    create_mocked_simulation_outputs: Callable[[Path, Path, str], Awaitable[None]],
+    mock_run_id: str,
+) -> None:
+    """Verify a `nest-from` `step` config resolves the boundary search path
+    the same way `continue-from` resolves its restart search path:
+    `joined_output` when it holds boundary files, `output` otherwise.
+
+    Parameters
+    ----------
+    joined_available : bool
+        Whether the prior step's `joined_output` holds files (preferred) or
+        only `output` does (fallback).
+    expected_dir_attr : str
+        The `RomsFileSystemManager` attribute expected to hold the boundary file.
+    expected_name : str
+        The expected boundary file name (partitioned vs. joined).
+    tmp_path : Path
+        Temporary directory for test outputs
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files
+    wp_templates_dir : Path
+        Fixture returning the path to the directory containing workplan template files
+    mock_run_id
+        A unique run-id that has already been added to os.environ
+    """
+    run_id = mock_run_id
+
+    wp_template_file = "linear.yaml"
+    wp_template_path = wp_templates_dir / wp_template_file
+
+    bp_template_file = "blueprint.yaml"
+    bp_template_path = bp_templates_dir / bp_template_file
+
+    local_bp = tmp_path / bp_template_file
+    local_bp.write_text(bp_template_path.read_text())
+
+    wp = deserialize(wp_template_path, Workplan)
+
+    live_steps = [LiveStep.from_step(s) for s in wp.steps]
+
+    for i, step in enumerate(live_steps):
+        if i > 0:
+            step.directives[NestingDirective.key()] = {"step": wp.steps[i - 1].name}
+        attributes = step.model_dump(exclude={"working_dir", "blueprint_path"})
+        attributes["working_dir"] = tmp_path / run_id / step.safe_name
+        attributes["blueprint"] = local_bp
+        live_steps[i] = LiveStep(**attributes)
+
+    live_plan = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    live_wp_path = tmp_path / wp_template_file
+    assert serialize(live_wp_path, live_plan)
+
+    await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
+
+    if not joined_available:
+        # a step whose outputs were never joined: only `output` holds files
+        for live_step in t.cast("list[LiveStep]", live_plan.steps):
+            joined_dir = RomsFileSystemManager(live_step.fsm.root_dir).joined_output_dir
+            for joined_file in joined_dir.glob("*.nc"):
+                joined_file.unlink()
+
+    prior_step = t.cast("LiveStep", live_plan.steps[0])
+    prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
+    expected_dir = getattr(prior_fsm, expected_dir_attr)
+    expected_dir.mkdir(parents=True, exist_ok=True)
+    (expected_dir / expected_name).write_text("mock boundary data")
+
+    step = t.cast("LiveStep", live_plan.steps[1])
+    directives = t.cast("dict[str, dict[str, str]]", step.directives)
+    config = directives[NestingDirective.key()]
+
+    modifier = NestingDirective(config, workplan=live_plan)
+    altered = modifier(step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.forcing.boundary.data[0].location)
+    assert location.is_relative_to(expected_dir)
+    assert location.name == expected_name
+
+
+async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_source(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `continue-from: {step: <name>}` resolves a restart-style file
+    produced under a referenced step's `output` directory even when that
+    step's own blueprint is not a `RomsMarblBlueprint`, mirroring the
+    tutorial's nest_ic-conversion-step -> ROMS-MARBL-child migration path.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    run_id = mock_run_id
+
+    nest_ic_step = LiveStep(
+        name="nest_ic",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "nest_ic",
+    )
+    nest_fsm = RomsFileSystemManager(nest_ic_step.fsm.root_dir)
+    nest_fsm.prepare()
+
+    ic_file = nest_fsm.output_dir / "ic_from_parent_rst.20120101000000.nc"
+    ic_file.write_text("mock restart data")
+
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        bp_tpl_path.read_text().replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+
+    child_step = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "child",
+        directives={
+            ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "nest_ic"}
+        },
+    )
+
+    live_plan = LiveWorkplan(
+        name="nest-ic-plan",
+        description="mocked nest_ic to child plan",
+        steps=[nest_ic_step, child_step],
+    )
+
+    config = t.cast("dict[str, str]", child_step.directives[ContinuanceDirective.key()])
+    modifier = ContinuanceDirective(config, workplan=live_plan)
+    altered = modifier(child_step)[0]
+
+    bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
+    location = Path(bp_after.initial_conditions.data[0].location)
+    assert location == ic_file.resolve()
+
+
+def test_nesting_directive_bry_path_deprecated_matches_path(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify the deprecated `bry_path` key warns (`FutureWarning` and a log
+    warning) and produces the same boundary override as the equivalent
+    `path` config.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold a mocked boundary file.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    (bry_dir / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    path_transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
+    bp_via_path = deserialize(
+        path_transform(step)[0].blueprint_path, RomsMarblBlueprint
+    )
+
+    with (
+        caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME),
+        pytest.warns(FutureWarning, match="bry_path"),
+    ):
+        bry_transform = NestingDirective({NestingDirective.KEY_BRY_PATH: str(bry_dir)})
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert any("bry_path" in r.getMessage() for r in records)
+
+    bp_via_bry = deserialize(bry_transform(step)[0].blueprint_path, RomsMarblBlueprint)
+
+    assert bp_via_bry.forcing.boundary == bp_via_path.forcing.boundary
+
+
+def test_nesting_directive_rst_path_deprecated_still_applies_restart(
+    single_step_workplan: Workplan,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify the deprecated `rst_path` key warns (`FutureWarning` and a log
+    warning) and still applies the restart override (regression guard for
+    the deprecation period).
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    mocked_simulation_outputs : tuple[Path, Path, Path]
+        Paths to mocked simulation outputs; the latest restart there is dated
+        2012-01-01T00:20:00.
+    tmp_path : Path
+        Temporary directory used to hold a mocked boundary file.
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    _, rst_dir, _ = mocked_simulation_outputs
+
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    (bry_dir / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    with (
+        caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME),
+        pytest.warns(FutureWarning, match="rst_path"),
+    ):
+        transform = NestingDirective(
+            {
+                NestingDirective.KEY_RST_PATH: str(rst_dir),
+                NestingDirective.KEY_PATH: str(bry_dir),
+            }
+        )
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert any("rst_path" in r.getMessage() for r in records)
+
+    steps = transform(step)
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+
+    assert bp_after.runtime_params.start_date == datetime(2012, 1, 1, 0, 20, 0)
+    assert Path(bp_after.forcing.boundary.data[0].location).name == (
+        "parent_bry.20230201003000.nc"
+    )
+
+
+def test_nesting_directive_rst_path_conflicts_with_continue_from(
+    single_step_workplan: Workplan,
+    mocked_simulation_outputs: tuple[Path, Path, Path],
+    tmp_path: Path,
+) -> None:
+    """Verify a `nest-from` `rst_path` combined with a `continue-from`
+    directive on the same step raises `ValueError` at call time.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    mocked_simulation_outputs : tuple[Path, Path, Path]
+        Paths to mocked simulation outputs; used as both the (unused)
+        continue-from source and the nest-from rst_path source.
+    tmp_path : Path
+        Temporary directory used to hold a mocked boundary file.
+    """
+    _, rst_dir, _ = mocked_simulation_outputs
+
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    (bry_dir / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+    step.directives[ContinuanceDirective.key()] = {
+        ContinuanceDirective.KEY_PATH: str(rst_dir)
+    }
+
+    with pytest.warns(FutureWarning):
+        transform = NestingDirective(
+            {
+                NestingDirective.KEY_RST_PATH: str(rst_dir),
+                NestingDirective.KEY_PATH: str(bry_dir),
+            }
+        )
+
+    with pytest.raises(ValueError, match="continue-from"):
+        transform(step)
+
+
+def test_nesting_directive_no_boundary_source_raises() -> None:
+    """Verify configuration lacking `path`, `step`, and `bry_path` is rejected."""
+    with pytest.raises(NotImplementedError, match="supported"):
+        NestingDirective({"not-a-boundary-key": "value"})
+
+
+def test_nesting_directive_bry_path_conflicts_with_path(tmp_path: Path) -> None:
+    """Verify supplying `bry_path` alongside `path` is rejected."""
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+
+    with (
+        pytest.warns(FutureWarning),
+        pytest.raises(NotImplementedError, match="conflicts"),
+    ):
+        NestingDirective(
+            {
+                NestingDirective.KEY_PATH: str(bry_dir),
+                NestingDirective.KEY_BRY_PATH: str(bry_dir),
+            }
+        )
+
+
+def test_nesting_directive_path_and_step_are_mutually_exclusive(tmp_path: Path) -> None:
+    """Verify supplying both `path` and `step` is rejected instead of `step` silently winning."""
+    with pytest.raises(NotImplementedError, match="mutually exclusive"):
+        NestingDirective(
+            {
+                NestingDirective.KEY_PATH: str(tmp_path),
+                NestingDirective.KEY_STEP: "outer",
+            }
+        )
 
 
 def test_workplan_transformer_applies_working_dir_overrides(
@@ -638,6 +1199,74 @@ def test_package_runtime_overrides_orders_apply_overrides_first(
     assert list(packaged.directives) == [
         ApplyOverridesDirective.key(),
         ContinuanceDirective.key(),
+    ]
+
+
+def test_package_runtime_overrides_rejects_nest_from_rst_path_with_continue_from(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify `package_runtime_overrides` rejects a `nest-from` `rst_path`
+    combined with `continue-from` on the same step at schedule time, before
+    the workplan is submitted (rather than failing later on the compute
+    node).
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="ordering-step",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "step-root",
+        directives={
+            ContinuanceDirective.key(): {"path": "prior/run"},
+            NestingDirective.key(): {
+                NestingDirective.KEY_RST_PATH: "prior/run",
+                NestingDirective.KEY_BRY_PATH: "prior/bry",
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="continue-from"):
+        package_runtime_overrides(step)
+
+
+def test_package_runtime_overrides_allows_boundary_only_nest_from(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+) -> None:
+    """Verify a boundary-only `nest-from` (no `rst_path`) passes schedule-time
+    validation even when `continue-from` is also present on the step.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    """
+    step = LiveStep(
+        name="ordering-step",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "step-root",
+        directives={
+            ContinuanceDirective.key(): {"path": "prior/run"},
+            NestingDirective.key(): {NestingDirective.KEY_PATH: "prior/bry"},
+        },
+    )
+
+    packaged = package_runtime_overrides(step)
+
+    assert list(packaged.directives) == [
+        ApplyOverridesDirective.key(),
+        ContinuanceDirective.key(),
+        NestingDirective.key(),
     ]
 
 
@@ -1363,6 +1992,112 @@ def test_restart_file_adapter(tmp_path: Path) -> None:
     data0 = data[0]
     assert data0["location"] == reset_file.path.as_posix()
     assert not data0["partitioned"]
+
+
+@pytest.mark.parametrize(
+    ("location", "expected"),
+    [
+        pytest.param(
+            "foo_rst.20230201000000.nc",
+            datetime(2023, 2, 1),
+            id="unparted",
+        ),
+        pytest.param(
+            "foo_rst.20230201000000.003.nc",
+            datetime(2023, 2, 1),
+            id="parted",
+        ),
+        pytest.param(
+            "domain_initial_conditions.nc",
+            None,
+            id="non-restart name",
+        ),
+        pytest.param(
+            "/some/dir/foo_rst.20230201000000.nc",
+            datetime(2023, 2, 1),
+            id="full path",
+        ),
+    ],
+)
+def test_restart_timestamp(location: str, expected: datetime | None) -> None:
+    """Verify `restart_timestamp` parses a restart-style file name (with or
+    without a partition segment) and returns `None` for anything else,
+    without requiring the file to exist.
+
+    Parameters
+    ----------
+    location : str
+        The file name or path to parse.
+    expected : datetime | None
+        The expected timestamp, or `None` when `location` is not a
+        restart-style name.
+    """
+    assert restart_timestamp(location) == expected
+
+
+def test_warn_on_restart_start_date_mismatch_warns_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a single warning is emitted, containing both dates, when the
+    restart file's timestamp disagrees with `start_date`.
+
+    Parameters
+    ----------
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    mismatched_start = datetime(2023, 2, 15)
+
+    with caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME):
+        warn_on_restart_start_date_mismatch(
+            "foo_rst.20230201000000.nc", mismatched_start, log=transforms_log
+        )
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert str(datetime(2023, 2, 1)) in message
+    assert str(mismatched_start) in message
+
+
+def test_warn_on_restart_start_date_mismatch_silent_on_match(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify no warning is emitted when the restart file's timestamp matches
+    `start_date`.
+
+    Parameters
+    ----------
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    with caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME):
+        warn_on_restart_start_date_mismatch(
+            "foo_rst.20230201000000.nc", datetime(2023, 2, 1), log=transforms_log
+        )
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert not records
+
+
+def test_warn_on_restart_start_date_mismatch_silent_for_non_restart_name(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify no warning is emitted for a location that is not a restart-style
+    file name, regardless of `start_date`.
+
+    Parameters
+    ----------
+    caplog : pytest.LogCaptureFixture
+        Captures log records emitted during the test.
+    """
+    with caplog.at_level(logging.WARNING, logger=TRANSFORMS_LOGGER_NAME):
+        warn_on_restart_start_date_mismatch(
+            "domain_initial_conditions.nc", datetime(2023, 2, 1), log=transforms_log
+        )
+
+    records = [r for r in caplog.records if r.name == TRANSFORMS_LOGGER_NAME]
+    assert not records
 
 
 def test_app_specific_system_overrides(live_step_with_templates: LiveStep) -> None:

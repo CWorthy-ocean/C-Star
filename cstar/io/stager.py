@@ -1,5 +1,6 @@
 import shutil
 from abc import ABC
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from cstar.base.utils import _run_cmd, slugify
@@ -8,8 +9,6 @@ from cstar.io.constants import SourceClassification
 from cstar.io.staged_data import StagedFile, StagedRepository
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from cstar.io.retriever import RemoteRepositoryRetriever
     from cstar.io.source_data import SourceData
 
@@ -102,8 +101,15 @@ class LocalBinaryFileStager(Stager):
         target_dir, Path:
             The local directory in which to stage the file
         """
+        # symlink_to succeeds even when the target is absent, and the model would
+        # then fail much later with an opaque I/O error; check up front instead.
+        source_path = Path(self.source.location)
+        if not source_path.exists():
+            msg = f"Cannot stage input dataset: file does not exist: {source_path}"
+            raise FileNotFoundError(msg)
+
         target_path = target_dir / self.source.basename
-        target_path.symlink_to(self.source.location)
+        target_path.symlink_to(source_path)
 
         return StagedFile(
             source=self.source, path=target_path, sha256=(self.source.file_hash or None)

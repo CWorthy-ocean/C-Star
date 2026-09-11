@@ -846,6 +846,11 @@ def package_runtime_overrides(step: LiveStep) -> LiveStep:
     LiveStep
         The transformed step.
     """
+    for directive_key, directive_config in step.directives.items():
+        directive_cls = DirectiveConfig.directive_map.get(directive_key)
+        if directive_cls is not None and isinstance(directive_config, Mapping):
+            directive_cls.validate_directives(directive_config, step.directives)
+
     sys_overrides = {
         key: value.as_posix() if isinstance(value, Path) else value
         for key, value in get_system_overrides(step).items()
@@ -907,6 +912,33 @@ class Directive(Transform[LiveStep], t.Protocol):
         str
         """
         ...
+
+    @classmethod
+    def validate_directives(
+        cls, config: Mapping[str, t.Any], directives: Mapping[str, t.Any]
+    ) -> None:
+        """Validate this directive's config against the step's full directives
+        mapping at schedule time.
+
+        Called by `package_runtime_overrides` before a step is submitted, so
+        a directive can reject a configuration that conflicts with another
+        directive on the same step (e.g. two directives that would both set
+        `initial_conditions`) at `cstar workplan` time rather than on the
+        compute node. Default: no-op.
+
+        Parameters
+        ----------
+        config : Mapping[str, t.Any]
+            This directive's own configuration mapping.
+        directives : Mapping[str, t.Any]
+            The step's full directives mapping (this directive's key
+            included).
+
+        Returns
+        -------
+        None
+        """
+        return
 
     @property
     def workplan(self) -> LiveWorkplan:

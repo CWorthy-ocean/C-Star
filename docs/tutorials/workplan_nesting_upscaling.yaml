@@ -25,9 +25,10 @@ steps:
     depends_on:
       - nest_conversion
     directives:
+      continue-from:
+        step: nest_conversion
       nest-from:
-        rst_path: "{{root_dir: nest_conversion}}"
-        bry_path: "{{root_dir: outer}}/joined_output"
+        step: outer
 
   - name: nest_conversion2
     application: nest_ic
@@ -45,9 +46,10 @@ steps:
     depends_on:
       - nest_conversion2
     directives:
+      continue-from:
+        step: nest_conversion2
       nest-from:
-        rst_path: "{{root_dir: nest_conversion2}}"
-        bry_path: "{{root_dir: middle}}/joined_output"
+        step: middle
 
   - name: upscale_inner_mid
     application: upscaler
