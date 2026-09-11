@@ -14,7 +14,15 @@ from cstar.applications.core import (
 )
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, normalize_runid, set_ctxmap, set_env
+from cstar.cli.common import (
+    cb_pipeline,
+    checkmark,
+    colored,
+    id_label,
+    normalize_runid,
+    set_ctxmap,
+    set_env,
+)
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import (
@@ -138,26 +146,6 @@ def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
         raise typer.BadParameter(msg)
 
     return asyncio.run(list_steps(run_id, incomplete))
-
-
-def checkmark(color: str) -> str:
-    return f"[{color}]:heavy_check_mark:"
-
-
-def colored(msg: str, color: str = "cyan") -> str:
-    return f"[{color}]{msg}[/{color}]"
-
-
-def present(prompt: str, value: str, color: str = "cyan", width: int = 0) -> str:
-    return f"{prompt.rjust(width)}: {colored(value, color)}"
-
-
-def label(name: str, app: str | None) -> str:
-    return f"{name} [italic]({app})[/italic]" if app else name
-
-
-def id_label(id: int, name: str, app: str | None) -> str:
-    return f"{id}. {label(name, app)}"
 
 
 def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:

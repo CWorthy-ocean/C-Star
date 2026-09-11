@@ -21,7 +21,11 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
-from cstar.execution.file_system import DirectoryManager, is_remote_resource, local_copy
+from cstar.execution.file_system import (
+    DirectoryManager,
+    is_remote_resource,
+    local_copy,
+)
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     PersistenceMode,
@@ -47,6 +51,30 @@ HELP_SHORT = (
 
 BoolCallback: t.TypeAlias = Callable[[typer.Context, bool], bool]
 StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
+
+
+def colored(msg: str, color: str = "cyan") -> str:
+    return f"[{color}]{msg}[/{color}]"
+
+
+def italic(msg: str) -> str:
+    return f"[italic]{msg}[/italic]"
+
+
+def checkmark(color: str) -> str:
+    return colored(":heavy_check_mark:", color)
+
+
+def present(prompt: str, value: str, color: str = "cyan", width: int = 0) -> str:
+    return f"{prompt.rjust(width)}: {colored(value, color)}"
+
+
+def label(name: str, app: str | None) -> str:
+    return f"{name} ({italic(app)})" if app else name
+
+
+def id_label(id: int, name: str, app: str | None) -> str:
+    return f"{id}. {label(name, app)}"
 
 
 def version_callback(value: bool) -> bool:
@@ -409,8 +437,8 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
 
         Console().print(
             f"Blueprint at '{request.source}' requires schema migration from "
-            f"[green]{migration_result.plan.source}[/green] to "
-            f"[red]{migration_result.plan.target}[/red], but migration is "
+            f"{colored(migration_result.plan.source, 'green')} to "
+            f"{colored(migration_result.plan.target, 'red')}, but migration is "
             f"disabled ({ENV_CSTAR_DISABLE_MIGRATION}=1). Unset "
             f"{ENV_CSTAR_DISABLE_MIGRATION} to allow migration, or update the "
             "blueprint to the current schema."
