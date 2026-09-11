@@ -123,14 +123,6 @@ class Migration(abc.ABC, LoggingMixin):
         self,
         dumped: dict[str, t.Any],
         plan: MigrationPlan,
-    ) -> dict[str, t.Any]:
-        """Execute the upgrade path."""
-        ...
-
-    @abc.abstractmethod
-    def plan_and_migrate(
-        self,
-        dumped: dict[str, t.Any],
     ) -> MigrateResult:
         """Execute the upgrade path."""
         ...
@@ -240,7 +232,7 @@ class BlueprintMigration(Migration):
         self,
         dumped: dict[str, t.Any],
         plan: MigrationPlan,
-    ) -> dict[str, t.Any]:
+    ) -> MigrateResult:
         """Execute the plan to upgrade the blueprint to the latest version.
 
         Returns
@@ -264,28 +256,10 @@ class BlueprintMigration(Migration):
 
         if self.on_migrated_callback:
             self.on_migrated_callback(plan)
-        return model
-
-    def plan_and_migrate(self, dumped: dict[str, t.Any]) -> MigrateResult:
-        """Create a migration plan and execute it."""
-        try:
-            plan = self.plan(dumped)
-        except CstarUnsupportedMigrationError as ex:
-            msg = f"Unable to plan migration: {ex}"
-            return MigrateResult(dumped, {}, error=msg)
-
-        if plan.is_latest:
-            return MigrateResult(dumped, dumped, plan=plan)
-
-        try:
-            migrated = self.migrate(dumped, plan)
-        except CstarMigrationError as ex:
-            msg = f"Unable to complete migration: {ex}"
-            return MigrateResult(dumped, {}, plan=plan, error=msg)
 
         return MigrateResult(
             dumped,
-            migrated,
+            model,
             plan=plan,
         )
 

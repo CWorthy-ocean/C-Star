@@ -36,7 +36,9 @@ from cstar.orchestration.serialization import (
 )
 from cstar.system.migration import (
     BlueprintMigration,
+    CstarMigrationError,
     CStarMigrationNotRegisteredError,
+    CstarUnsupportedMigrationError,
     MigrateResult,
     MigrationPlan,
     MigrationRequest,
@@ -419,38 +421,49 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         on_migrated=on_migrated_callback,
     )
 
-    if request.dry_run():
-        migrator.plan(dumped)
-        raise typer.Exit(0)
+    try:
+        plan = migrator.plan(dumped)
+    except CstarUnsupportedMigrationError as ex:
+        msg = f"Unable to plan migration: {ex}"
+        result = MigrateResult(dumped, {}, error=msg)
+        # result with target == source indicates no change occurred
+        return PersistedMigrateResult(result, request.source)
 
-    migration_result = migrator.plan_and_migrate(dumped)
-    if migration_result.error:
-        console.print(migration_result.error)
+    if request.dry_run() or plan.is_latest:
+        log.debug("Short-circuiting migration after planning")
+        result = MigrateResult(dumped, dumped, plan=plan)
+        # result with target == source indicates no change occurred
+        return PersistedMigrateResult(result, request.source)
+
+    try:
+        result = migrator.migrate(dumped, plan)
+    except CstarMigrationError as ex:
+        msg = f"Unable to complete migration: {ex}"
+        result = MigrateResult(dumped, {}, plan=plan, error=msg)
+
+    if result.error:
+        console.print(result.error)
         raise typer.Exit(1)
-
-    if not migration_result.plan:
-        console.print("Migration failed to produce a plan.")
-        raise typer.Exit(2)
 
     # An up-to-date blueprint needs no migration: return it untouched unless
     # the user explicitly requested an output copy.
-    if not migration_result.plan.adapters and request.target is None:
-        return PersistedMigrateResult(migration_result, request.source)
+    if not plan.adapters and request.target is None:
+        return PersistedMigrateResult(result, request.source)
 
-    if migration_result.plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
+    if plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
         console.print(
             f"Blueprint at '{request.source}' requires schema migration from "
-            f"{colored(migration_result.plan.source, 'green')} to "
-            f"{colored(migration_result.plan.target, 'red')}, but migration is "
+            f"{colored(plan.source, 'green')} to "
+            f"{colored(plan.target, 'red')}, but migration is "
             f"disabled ({ENV_CSTAR_DISABLE_MIGRATION}=1). Unset "
             f"{ENV_CSTAR_DISABLE_MIGRATION} to allow migration, or update the "
             "blueprint to the current schema."
         )
         raise typer.Exit(1)
 
-    persisted_to = persist_migration(request, migration_result)
+    persisted_to = persist_migration(request, result)
 
-    return PersistedMigrateResult(migration_result, persisted_to)
+    return PersistedMigrateResult(result, persisted_to)
 
 
 def localize_and_migrate(path: str) -> Path:

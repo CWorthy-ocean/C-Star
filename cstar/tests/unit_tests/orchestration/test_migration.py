@@ -72,7 +72,8 @@ def test_migration_version(model: dict[str, t.Any], exp_version: str) -> None:
 
     migrator = BlueprintMigration(adapters)
 
-    result = migrator.plan_and_migrate(bp0)
+    plan = migrator.plan(bp0)
+    result = migrator.migrate(model, plan)
 
     # we now expect the result to reflect the target schema version
     assert "schema_version" in result.migrated
@@ -349,7 +350,8 @@ def test_migration_no_plan_no_changes(hello_world_bp_path: Path) -> None:
     del dumped[KEY_SV]
     original_keys = set(dumped.keys())
 
-    result = migrator.plan_and_migrate(dumped)
+    plan = migrator.plan(dumped)
+    result = migrator.migrate(dumped, plan)
 
     migrated = result.migrated
     migrated_keys = set(migrated.keys())
