@@ -81,6 +81,24 @@ cdr_output:
   monthly_averages: false
   output_period: 3600
   nrpf: 24
+cdr_tracer_output:  # ucla-roms >= 0.7.0 (&CDR_TRACER_OUTPUT_SETTINGS, PR #351); dropped for older pins
+  do_cdr_tracer_output: false
+  do_avg: true
+  monthly_averages: false
+  output_period: 3600
+  nrpf: 24
+  wrt_tracers: true
+  wrt_vertical_integrals: true
+  wrt_thickness_weighted: true
+  wrt_sources: true
+  wrt_alk: true
+  wrt_dic: true
+cdr_gas_exch_output:  # ucla-roms >= 0.7.0 (&CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351); dropped for older pins
+  do_cdr_gas_exch_output: false
+  do_avg: true
+  monthly_averages: false
+  output_period: 3600
+  nrpf: 24
 upscale_output:
   do_upscale: false
   nrpf_uscl: 24

@@ -138,7 +138,8 @@ Handlers populate settings dictionaries:
 - **Compile-time** (`_settings_compile_time`): `cppdefs` only (open boundary flags,
   `sal_restore`, `co2_tvarying`, `cdr_forcing`)
 - **Run-time** (`_settings_run_time`): flat sections — `grid`, `param`, `s_coord`, `initial`,
-  `forcing`, `extract_data`, `blk_frc`, `bgc`, `tides`, `river_frc`, `cdr_frc`, `cdr_output`, etc.
+  `forcing`, `extract_data`, `blk_frc`, `bgc`, `tides`, `river_frc`, `cdr_frc`, `cdr_output`,
+  `cdr_tracer_output` (ucla-roms >= 0.7.0), `cdr_gas_exch_output` (ucla-roms >= 0.7.0), etc.
   (note: `param`, `tides`, and `river_frc` are run-time, not compile-time, despite sounding like
   compile-time concerns)
 
@@ -186,7 +187,9 @@ These settings are used later to render configuration templates.
 - **Handler**: `_generate_cdr_forcing()`
 - **Output**: CDR forcing NetCDF file(s) (optional)
 - **Settings**: Updates compile-time `cppdefs.cdr_forcing`; updates run-time `cdr_frc` and
-  `cdr_output.do_cdr_output`
+  `cdr_output.do_cdr_output`. Does NOT touch `cdr_tracer_output`/`cdr_gas_exch_output`
+  (ucla-roms >= 0.7.0) — those two streams are OutputSpec-owned, opt-in extras a user
+  enables explicitly, never forced on by an active CDR forcing mode
 
 ## Blueprint Integration
 
@@ -224,6 +227,8 @@ settings are all run-time (see below), not compile-time.
 - **tides**: `ntides` (constituent count)
 - **river_frc**: River forcing configuration (`nriv`, variable names)
 - **cdr_frc**/**cdr_output**: CDR forcing configuration
+- **cdr_tracer_output**/**cdr_gas_exch_output** (ucla-roms >= 0.7.0): dedicated CDR
+  tracer / gas-exchange output streams; OutputSpec-owned, not populated by this handler
 
 These settings are later merged with template defaults and used to render configuration files.
 

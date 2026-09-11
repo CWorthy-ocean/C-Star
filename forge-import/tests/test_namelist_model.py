@@ -11,15 +11,18 @@ from pathlib import Path
 
 import pytest
 import yaml
-from cstar.roms.namelist import RomsNamelist, RomsNamelistV0_5_0
+from cstar.roms.namelist import RomsNamelist, RomsNamelistV0_5_0, RomsNamelistV0_7_0
 from pydantic import ValidationError
 
 import cstar_forge
 from cstar_forge.domain_catalog import default_catalog
 from cstar_forge.forge.namelist_model import (
+    CdrGasExchOutputCfg,
+    CdrTracerOutputCfg,
     RunTimeSettings,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
+    RunTimeSettingsV0_7_0,
     build_namelist,
     check_extract_divides_rst,
     run_time_settings_for_ref,
@@ -203,6 +206,51 @@ def test_pio_settings_default_stride():
     rt = RunTimeSettingsV0_6_0.model_validate(d)
     nml = build_namelist(rt, n_tracers=34)
     assert nml.pio_settings.pio_stride == 1
+
+
+def test_cdr_tracer_gas_exch_output_defaults_when_omitted():
+    # &CDR_TRACER_OUTPUT_SETTINGS/&CDR_GAS_EXCH_OUTPUT_SETTINGS are version-gated
+    # to ucla-roms >= 0.7.0 (PR #351). Unlike pio_settings (a ModelSpec physics
+    # section), these two live in the shared "standard" OutputSpec that
+    # ``_populated_rt_dict()`` merges in, so simulate a settings dict/blueprint
+    # saved before OutputSpecs grew these sections by dropping them explicitly.
+    d = _populated_rt_dict()
+    del d["cdr_tracer_output"]
+    del d["cdr_gas_exch_output"]
+    rt = RunTimeSettingsV0_7_0.model_validate(d)
+    nml = build_namelist(rt, n_tracers=34)
+    assert nml.cdr_tracer_output_settings.do_cdr_tracer_output is False
+    assert nml.cdr_tracer_output_settings.nrpf_cdr_trc == 4
+    assert nml.cdr_gas_exch_output_settings.do_cdr_gas_exch_output is False
+    assert nml.cdr_gas_exch_output_settings.nrpf_cdr_gas == 4
+
+
+def test_cdr_tracer_output_cfg_defaults_and_aliases():
+    dumped = CdrTracerOutputCfg().model_dump(by_alias=True)
+    assert dumped == {
+        "do_cdr_tracer_output": False,
+        "wrt_cdr_trc_avg": True,
+        "cdr_trc_monthly_averages": False,
+        "output_period_cdr_trc": 3600.0,
+        "nrpf_cdr_trc": 4,
+        "wrt_tracers": True,
+        "wrt_vertical_integrals": True,
+        "wrt_thickness_weighted": True,
+        "wrt_sources": True,
+        "wrt_alk": True,
+        "wrt_dic": True,
+    }
+
+
+def test_cdr_gas_exch_output_cfg_defaults_and_aliases():
+    dumped = CdrGasExchOutputCfg().model_dump(by_alias=True)
+    assert dumped == {
+        "do_cdr_gas_exch_output": False,
+        "wrt_cdr_gas_avg": True,
+        "cdr_gas_monthly_averages": False,
+        "output_period_cdr_gas": 3600.0,
+        "nrpf_cdr_gas": 4,
+    }
 
 
 def test_read_edit_write(tmp_path):
@@ -438,22 +486,32 @@ def test_run_time_settings_for_ref_none_and_pre_0_5_0_select_legacy():
 
 
 def test_run_time_settings_for_ref_0_5_0_up_to_0_6_0_selects_v0_5_0():
-    # 0.5.0 <= ucla-roms < 0.6.0 selects RunTimeSettingsV0_5_0; 0.6.0 and later
-    # (including anything beyond, e.g. 0.7.3) now selects RunTimeSettingsV0_6_0
-    # -- see test_run_time_settings_for_ref_0_6_0_and_later_selects_v0_6_0 below.
+    # 0.5.0 <= ucla-roms < 0.6.0 selects RunTimeSettingsV0_5_0; 0.6.0 <=
+    # ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 and later
+    # (including anything beyond) selects RunTimeSettingsV0_7_0 -- see
+    # test_run_time_settings_for_ref_0_6_0_up_to_0_7_0_selects_v0_6_0 and
+    # test_run_time_settings_for_ref_0_7_0_and_later_selects_v0_7_0 below.
     for ref in ("0.5.0", "v0.5.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_5_0
 
 
-def test_run_time_settings_for_ref_0_6_0_and_later_selects_v0_6_0():
-    for ref in ("0.6.0", "v0.6.0", "0.7.3"):
+def test_run_time_settings_for_ref_0_6_0_up_to_0_7_0_selects_v0_6_0():
+    # 0.6.0 <= ucla-roms < 0.7.0 selects RunTimeSettingsV0_6_0; 0.7.0 and later
+    # (including anything beyond) now selects RunTimeSettingsV0_7_0 -- see
+    # test_run_time_settings_for_ref_0_7_0_and_later_selects_v0_7_0 below.
+    for ref in ("0.6.0", "v0.6.0"):
         assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_6_0
+
+
+def test_run_time_settings_for_ref_0_7_0_and_later_selects_v0_7_0():
+    for ref in ("0.7.0", "v0.7.0", "0.8.3"):
+        assert run_time_settings_for_ref(ref) is RunTimeSettingsV0_7_0
 
 
 def test_run_time_settings_for_ref_branch_warns_and_uses_latest():
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("main")
-    assert cls is RunTimeSettingsV0_6_0
+    assert cls is RunTimeSettingsV0_7_0
 
 
 def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
@@ -462,7 +520,7 @@ def test_run_time_settings_for_ref_unresolvable_hash_warns_and_uses_latest():
     """
     with pytest.warns(UserWarning, match="not a release tag"):
         cls = run_time_settings_for_ref("a1b2c3d4")
-    assert cls is RunTimeSettingsV0_6_0
+    assert cls is RunTimeSettingsV0_7_0
 
 
 def test_run_time_settings_for_ref_empty_string_selects_legacy():
@@ -516,6 +574,28 @@ def test_build_namelist_v0_5_0_drops_nrpf_rst_and_renames_particles(tmp_path):
     assert "nrpf_rst" not in text
     assert "output_period_particles" in text
     assert "nrpf_particles" in text
+
+
+def test_build_namelist_v0_7_0_dispatches_to_most_specific_class(tmp_path):
+    """A RunTimeSettingsV0_7_0 instance is also a RunTimeSettingsV0_6_0/
+    RunTimeSettingsV0_5_0 instance (subclassing) -- proves ``build_namelist``'s
+    most-specific-first ``isinstance`` chain selects ``RomsNamelistV0_7_0``
+    (with ``&pio_settings`` AND the two new CDR output groups), not one of its
+    superclasses' namelist schemas.
+    """
+    d = _populated_rt_dict()
+    rt = RunTimeSettingsV0_7_0.model_validate(d)
+    nml = build_namelist(rt, n_tracers=34)
+    assert type(nml) is RomsNamelistV0_7_0
+    assert nml.pio_settings.pio_stride == 1
+    assert nml.cdr_tracer_output_settings.do_cdr_tracer_output is False
+    assert nml.cdr_gas_exch_output_settings.do_cdr_gas_exch_output is False
+
+    nml.write(tmp_path / "namelist.nml")
+    text = (tmp_path / "namelist.nml").read_text()
+    assert "&pio_settings" in text
+    assert "&cdr_tracer_output_settings" in text
+    assert "&cdr_gas_exch_output_settings" in text
 
 
 def test_build_namelist_legacy_keeps_nrpf_rst_and_particles_keys():

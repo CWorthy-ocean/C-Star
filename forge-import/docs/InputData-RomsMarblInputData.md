@@ -510,6 +510,9 @@ section name
   path), `cdr_source=True`, `ncdr_parm=len(cdr.releases)`, `forcing_parameterized=True`,
   `cdr_volume=(cdr.releases.release_type == "volume")`
 - **Run-time (`cdr_output`)**: `do_cdr_output = True`
+- Does NOT touch `cdr_tracer_output`/`cdr_gas_exch_output` (ucla-roms >= 0.7.0) — unlike
+  `cdr_output`, those two streams are never forced on by CDR forcing; a user enables them
+  explicitly (see the OutputSpec)
 
 ### Corrections Forcing (`forcing.corrections`, order=90)
 
@@ -658,6 +661,9 @@ def _build_input_args(
   `cdr_frc.cdr_volume`
 - `cdr_output.do_cdr_output`: forced `True` when CDR forcing is generated; also
   independently user-controllable (CDR output does not require CDR forcing)
+- `cdr_tracer_output.do_cdr_tracer_output`/`cdr_gas_exch_output.do_cdr_gas_exch_output`
+  (ucla-roms >= 0.7.0): NOT forced on by CDR forcing generation — both are opt-in extras
+  a user enables explicitly, independent of `cdr_output`
 
 ## ROMS-MARBL Blueprint Element Updates
 

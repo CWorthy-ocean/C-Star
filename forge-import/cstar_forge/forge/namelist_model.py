@@ -35,7 +35,9 @@ from cstar.roms.namelist import (
     BottomDragSettings,
     CalcPflxSettings,
     CdrFrcSettings,
+    CdrGasExchOutputSettings,
     CdrOutputSettings,
+    CdrTracerOutputSettings,
     DiagnosticsSettings,
     DicAlkCorrection,
     ExtractDataSettings,
@@ -60,6 +62,7 @@ from cstar.roms.namelist import (
     RomsNamelistBase,
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
+    RomsNamelistV0_7_0,
     SCoord,
     SimulationNameSettings,
     SpongeTuneSettings,
@@ -558,6 +561,55 @@ class CdrOutputCfg(_SettingsSection):
     nrpf: int = Field(serialization_alias="nrpf_cdr")
 
 
+class CdrTracerOutputCfg(_SettingsSection):
+    """``cdr_tracer_output`` settings -- ucla-roms >= 0.7.0's dedicated
+    ``&CDR_TRACER_OUTPUT_SETTINGS`` group (PR #351), a separate output stream
+    for the CDR tracers (``CDR_OAE_ALK``/``CDR_OAE_DIC``/``CDR_DOR_DIC``),
+    active only under MARBL && CDR_FORCING.
+
+    Every field carries a Pydantic default (the ucla-roms reference default):
+    unlike :class:`CdrOutputCfg`, this section is not forced on by an active
+    CDR forcing mode (see the resolver's CDR tracer/gas-exchange output
+    consistency check) -- a settings dict predating this section, or one that
+    simply never enables it, must still validate.
+    """
+
+    do_cdr_tracer_output: bool = False
+    do_avg: bool = Field(default=True, serialization_alias="wrt_cdr_trc_avg")
+    monthly_averages: bool = Field(
+        default=False, serialization_alias="cdr_trc_monthly_averages"
+    )
+    output_period: float = Field(
+        default=3600.0, serialization_alias="output_period_cdr_trc"
+    )
+    nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_trc")
+    wrt_tracers: bool = True
+    wrt_vertical_integrals: bool = True
+    wrt_thickness_weighted: bool = True
+    wrt_sources: bool = True
+    wrt_alk: bool = True
+    wrt_dic: bool = True
+
+
+class CdrGasExchOutputCfg(_SettingsSection):
+    """``cdr_gas_exch_output`` settings -- ucla-roms >= 0.7.0's dedicated
+    ``&CDR_GAS_EXCH_OUTPUT_SETTINGS`` group (PR #351), a separate output
+    stream for the gas-exchange sensitivities (``ddic_dco2``/``ddic_dalk``),
+    active only under MARBL && CDR_FORCING. Defaults mirror
+    :class:`CdrTracerOutputCfg`.
+    """
+
+    do_cdr_gas_exch_output: bool = False
+    do_avg: bool = Field(default=True, serialization_alias="wrt_cdr_gas_avg")
+    monthly_averages: bool = Field(
+        default=False, serialization_alias="cdr_gas_monthly_averages"
+    )
+    output_period: float = Field(
+        default=3600.0, serialization_alias="output_period_cdr_gas"
+    )
+    nrpf: int = Field(default=4, serialization_alias="nrpf_cdr_gas")
+
+
 class UpscaleOutputCfg(_SettingsSection):
     do_upscale: bool
     nrpf_uscl: int
@@ -686,11 +738,13 @@ class _RunTimeSettingsCommon(_SettingsSection):
     are no value defaults here — the YAML is the single source of defaults.
 
     Not meant to be used directly: the version-varying sections (``ocean_vars``,
-    ``particles``) are typed as the loose common models here, and a
-    version-varying section that some schemas lack entirely (``pio_settings``,
-    added by :class:`RunTimeSettingsV0_6_0`) is simply absent here; use
+    ``particles``) are typed as the loose common models here, and version-varying
+    sections that some schemas lack entirely (``pio_settings``, added by
+    :class:`RunTimeSettingsV0_6_0`; ``cdr_tracer_output``/``cdr_gas_exch_output``,
+    added by :class:`RunTimeSettingsV0_7_0`) are simply absent here; use
     :class:`RunTimeSettings` (ucla-roms < 0.5.0), :class:`RunTimeSettingsV0_5_0`
-    (0.5.0 <= ucla-roms < 0.6.0), or :class:`RunTimeSettingsV0_6_0` (>= 0.6.0),
+    (0.5.0 <= ucla-roms < 0.6.0), :class:`RunTimeSettingsV0_6_0`
+    (0.6.0 <= ucla-roms < 0.7.0), or :class:`RunTimeSettingsV0_7_0` (>= 0.7.0),
     or select one with :func:`run_time_settings_for_ref`.
     """
 
@@ -775,6 +829,27 @@ class RunTimeSettingsV0_6_0(RunTimeSettingsV0_5_0):
     pio_settings: PioSettingsCfg = Field(default_factory=PioSettingsCfg)
 
 
+class RunTimeSettingsV0_7_0(RunTimeSettingsV0_6_0):
+    """Forge's run-time settings dict for ucla-roms >= 0.7.0, typed + validated.
+
+    Subclasses :class:`RunTimeSettingsV0_6_0` directly (rather than
+    ``_RunTimeSettingsCommon``) to inherit its ``ocean_vars``/``particles``/
+    ``pio_settings`` unchanged -- mirrors C-Star's
+    ``RomsNamelistV0_7_0(RomsNamelistV0_6_0)``. Adds ``cdr_tracer_output`` and
+    ``cdr_gas_exch_output`` (ucla-roms PR #351, ``&CDR_TRACER_OUTPUT_SETTINGS``/
+    ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``); both fields carry defaults (see
+    :class:`CdrTracerOutputCfg`/:class:`CdrGasExchOutputCfg`) so a 0.7.0-pinned
+    blueprint saved before these sections existed still validates. Unlike
+    ``cdr_output``, neither is forced on by an active CDR forcing mode -- see
+    the resolver's CDR tracer/gas-exchange output consistency check.
+    """
+
+    cdr_tracer_output: CdrTracerOutputCfg = Field(default_factory=CdrTracerOutputCfg)
+    cdr_gas_exch_output: CdrGasExchOutputCfg = Field(
+        default_factory=CdrGasExchOutputCfg
+    )
+
+
 # Maps each namelist schema class (C-Star, keyed by ucla-roms version range) to
 # the matching run-time settings class (forge's settings vocabulary).
 _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
@@ -783,6 +858,7 @@ _RUN_TIME_SETTINGS_BY_NAMELIST_SCHEMA: dict[
     RomsNamelist: RunTimeSettings,
     RomsNamelistV0_5_0: RunTimeSettingsV0_5_0,
     RomsNamelistV0_6_0: RunTimeSettingsV0_6_0,
+    RomsNamelistV0_7_0: RunTimeSettingsV0_7_0,
 }
 
 
@@ -826,7 +902,8 @@ def run_time_settings_for_ref(roms_ref: str | None) -> type[_RunTimeSettingsComm
     type[_RunTimeSettingsCommon]
         :class:`RunTimeSettings` for ucla-roms < 0.5.0 or when `roms_ref` is
         `None`; :class:`RunTimeSettingsV0_5_0` for 0.5.0 <= ucla-roms < 0.6.0;
-        :class:`RunTimeSettingsV0_6_0` for ucla-roms >= 0.6.0.
+        :class:`RunTimeSettingsV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0;
+        :class:`RunTimeSettingsV0_7_0` for ucla-roms >= 0.7.0.
 
     Warns
     -----
@@ -885,18 +962,26 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     the settings-only fields with no namelist counterpart.
 
     ``rt``'s concrete type (:class:`RunTimeSettings`, :class:`RunTimeSettingsV0_5_0`,
-    or :class:`RunTimeSettingsV0_6_0`) selects the matching namelist schema and
-    ``basic_output_settings``/``particles_settings`` group classes — the
-    ``ocean_vars``/``particles`` sections already carry the right fields and
-    aliases for that variant, so no other branch is needed. ``pio_settings`` is
-    the one section a variant can lack entirely rather than just carry a
-    different subtype (pre-0.6.0 namelist schemas reject the group outright,
-    ``extra="forbid"``), so it's added to the constructor kwargs only when
-    ``rt`` is :class:`RunTimeSettingsV0_6_0`, checked *before* the (subclass)
-    ``RunTimeSettingsV0_5_0`` check below.
+    :class:`RunTimeSettingsV0_6_0`, or :class:`RunTimeSettingsV0_7_0`) selects the
+    matching namelist schema and ``basic_output_settings``/``particles_settings``
+    group classes — the ``ocean_vars``/``particles`` sections already carry the
+    right fields and aliases for that variant, so no other branch is needed.
+    ``pio_settings`` (added by ``RunTimeSettingsV0_6_0``) and
+    ``cdr_tracer_output``/``cdr_gas_exch_output`` (added by
+    ``RunTimeSettingsV0_7_0``) are sections a variant can lack entirely rather
+    than just carry a different subtype (an older namelist schema rejects the
+    group outright, ``extra="forbid"``), so each is added to the constructor
+    kwargs only when ``rt`` is an instance of the class that introduced it —
+    checked in most-specific-first order (``RunTimeSettingsV0_7_0`` before its
+    superclass ``RunTimeSettingsV0_6_0`` before ITS superclass
+    ``RunTimeSettingsV0_5_0``) since ``isinstance`` also matches subclasses.
     """
-    if isinstance(rt, RunTimeSettingsV0_6_0):
-        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_6_0
+    if isinstance(rt, RunTimeSettingsV0_7_0):
+        namelist_cls: type[RomsNamelistBase] = RomsNamelistV0_7_0
+        basic_output_cls = BasicOutputSettingsV0_5_0
+        particles_cls = ParticlesSettingsV0_5_0
+    elif isinstance(rt, RunTimeSettingsV0_6_0):
+        namelist_cls = RomsNamelistV0_6_0
         basic_output_cls = BasicOutputSettingsV0_5_0
         particles_cls = ParticlesSettingsV0_5_0
     elif isinstance(rt, RunTimeSettingsV0_5_0):
@@ -985,6 +1070,13 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     )
     if isinstance(rt, RunTimeSettingsV0_6_0):
         kwargs["pio_settings"] = PioSettings(**grp(rt.pio_settings))
+    if isinstance(rt, RunTimeSettingsV0_7_0):
+        kwargs["cdr_tracer_output_settings"] = CdrTracerOutputSettings(
+            **grp(rt.cdr_tracer_output)
+        )
+        kwargs["cdr_gas_exch_output_settings"] = CdrGasExchOutputSettings(
+            **grp(rt.cdr_gas_exch_output)
+        )
     return namelist_cls(**kwargs)
 
 
@@ -1060,6 +1152,8 @@ _PRECHECK_SECTION_MAP: dict[str, tuple[type[_SettingsSection], str]] = {
     "sponge_tune": (SpongeTuneCfg, "sponge_tune_settings"),
     "diagnostics": (DiagnosticsCfg, "diagnostics_settings"),
     "cdr_output": (CdrOutputCfg, "cdr_output_settings"),
+    "cdr_tracer_output": (CdrTracerOutputCfg, "cdr_tracer_output_settings"),
+    "cdr_gas_exch_output": (CdrGasExchOutputCfg, "cdr_gas_exch_output_settings"),
     "upscale_output": (UpscaleOutputCfg, "upscale_settings"),
     "bgc": (BgcCfg, "bgc_settings"),
     "extract_data": (ExtractDataCfg, "extract_data_settings"),

@@ -42,6 +42,15 @@ _MODEL_DIR_ROMS060 = (
     / "ModelSpec"
     / "roms-marbl-0.6-default"
 )
+# ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
+# &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
+# test below.
+_MODEL_DIR_ROMS070 = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "roms-marbl-0.7-default"
+)
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -1688,6 +1697,38 @@ def test_golden_model_settings_test_tiny_roms060():
     )
 
 
+def test_golden_model_settings_test_tiny_roms070():
+    """Behavior-preservation snapshot for the ``roms-marbl-0.7-default`` ModelSpec
+    (ucla-roms >= 0.7.0, adds ``&CDR_TRACER_OUTPUT_SETTINGS``/
+    ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``, PR #351), resolved from the same test-tiny
+    domain/forcing/output setup as ``test_golden_model_settings_test_tiny``.
+
+    Mirrors ``test_golden_model_settings_test_tiny_roms060`` exactly; the only
+    resolved-settings difference from that fixture is the added
+    ``cdr_tracer_output``/``cdr_gas_exch_output`` entries (see
+    ``TestGoldenNamelist.test_golden_namelist_test_tiny_roms070`` in
+    ``tests/test_core.py`` for the versioned-namelist assertion).
+    """
+    import json
+
+    golden_path = (
+        Path(cstar_forge.__file__).parents[1]
+        / "tests"
+        / "fixtures"
+        / "golden_model_settings_test-tiny-roms070.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    cfg = _build(model_dir=_MODEL_DIR_ROMS070)  # test-tiny, dt=7200
+    got = json.loads(json.dumps(cfg.model_settings, sort_keys=True, default=str))
+    assert got == golden, (
+        "Resolved model_settings for test-tiny (roms-marbl-0.7-default) drifted "
+        "from the golden fixture. If this is an intentional schema/default "
+        "change, regenerate tests/fixtures/golden_model_settings_test-tiny-"
+        "roms070.json; otherwise the change is a regression in the settings the "
+        "executor feeds to namelist.nml / cppdefs.opt."
+    )
+
+
 def test_resolver_nesting_enables_extract_data():
     cfg = _build(
         grid_kwargs_child=dict(
@@ -2301,6 +2342,8 @@ _OUTPUT_SPEC_STREAMS = (
     ("diagnostics", "output_period", "nrpf"),
     ("frc_output", "output_period", "nrpf"),
     ("cdr_output", "output_period", "nrpf"),
+    ("cdr_tracer_output", "output_period", "nrpf"),
+    ("cdr_gas_exch_output", "output_period", "nrpf"),
     ("upscale_output", "output_period_uscl", "nrpf_uscl"),
     ("zslice", "output_period", "nrpf"),
     ("random_output", "output_period", "nrpf"),
@@ -2347,17 +2390,22 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
 
 
 @pytest.mark.parametrize("spec_name", ["daily-restarts", "weekly-restarts"])
-def test_roms050_model_spec_streams_satisfy_roms_divides_rst_precheck(spec_name):
-    """roms-marbl-0.5-default's own streams (sponge, particles) must divide the
-    restart period of every periodic-restart precheck-safe OutputSpec, since a
-    resolved blueprint combines the two.
+@pytest.mark.parametrize(
+    "model_spec_name", ["roms-marbl-0.5-default", "roms-marbl-0.7-default"]
+)
+def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
+    model_spec_name, spec_name
+):
+    """Each versioned ModelSpec's own streams (sponge, particles) must divide
+    the restart period of every periodic-restart precheck-safe OutputSpec,
+    since a resolved blueprint combines the two.
     """
     model_settings = yaml.safe_load(
         (
             Path(cstar_forge.__file__).parent
             / "catalog"
             / "ModelSpec"
-            / "roms-marbl-0.5-default"
+            / model_spec_name
             / "model.yaml"
         ).read_text()
     )["model_settings"]
@@ -2366,7 +2414,7 @@ def test_roms050_model_spec_streams_satisfy_roms_divides_rst_precheck(spec_name)
         model_settings,
         _MODEL_SPEC_STREAMS,
         rst,
-        f"roms-marbl-0.5-default + {spec_name}",
+        f"{model_spec_name} + {spec_name}",
     )
 
 
@@ -2507,7 +2555,11 @@ def test_extract_output_settings_helper():
         extract_output_settings,
     )
 
-    cfg = _build()
+    # OUTPUT_SECTIONS now includes cdr_tracer_output/cdr_gas_exch_output
+    # (ucla-roms >= 0.7.0, PR #351), which _prune_version_gated_sections drops
+    # from an older-pinned build's model_settings -- use a 0.7.0-pinned
+    # ModelSpec so every OUTPUT_SECTIONS entry actually survives resolution.
+    cfg = _build(model_dir=_MODEL_DIR_ROMS070)
     out = extract_output_settings(cfg.model_settings)
     assert set(OUTPUT_SECTIONS) <= set(out)
     assert set(out["marbl_bgc"]) == {
@@ -2709,6 +2761,110 @@ def test_cdr_output_requires_marbl():
             forcing_inputs=_PHYSICS_ONLY_FORCING,
             run_time_overrides={"cdr_output": {"do_cdr_output": True}},
         )
+
+
+def test_cdr_tracer_output_requires_marbl():
+    """do_cdr_tracer_output=True with bgc_mode="none" must raise -- ucla-roms
+    only compiles the CDR tracer output module under MARBL && CDR_FORCING.
+    Unlike do_cdr_output, this flag is never derived from cdr_spec.mode, so no
+    active CDR forcing is needed to trigger the check.
+    """
+    with pytest.raises(ValueError, match="do_cdr_tracer_output"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS070,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
+        )
+
+
+def test_cdr_gas_exch_output_requires_marbl():
+    """do_cdr_gas_exch_output=True with bgc_mode="none" must raise, mirroring
+    test_cdr_tracer_output_requires_marbl.
+    """
+    with pytest.raises(ValueError, match="do_cdr_gas_exch_output"):
+        _build(
+            model_dir=_MODEL_DIR_ROMS070,
+            bgc_mode="none",
+            forcing_inputs=_PHYSICS_ONLY_FORCING,
+            run_time_overrides={
+                "cdr_gas_exch_output": {"do_cdr_gas_exch_output": True}
+            },
+        )
+
+
+def test_cdr_tracer_output_enabled_sets_cppdef():
+    """Enabling do_cdr_tracer_output alone (no CDR forcing; do_cdr_output stays
+    False) still flips cppdefs.cdr_forcing -- it gates compiling the CDR tracer
+    output module.
+    """
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS070,
+        run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
+    )
+    settings = cfg.model_settings
+    assert settings["cdr_tracer_output"]["do_cdr_tracer_output"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    assert settings["cdr_output"]["do_cdr_output"] is False  # not forced on
+
+
+def test_cdr_gas_exch_output_enabled_sets_cppdef():
+    """Mirrors test_cdr_tracer_output_enabled_sets_cppdef for the gas-exchange
+    output group.
+    """
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS070,
+        run_time_overrides={"cdr_gas_exch_output": {"do_cdr_gas_exch_output": True}},
+    )
+    settings = cfg.model_settings
+    assert settings["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] is True
+    assert settings["cppdefs"]["cdr_forcing"] is True
+    assert settings["cdr_output"]["do_cdr_output"] is False
+
+
+def test_active_cdr_forcing_does_not_enable_tracer_gas_exch_output():
+    """Unlike do_cdr_output, an active CDR forcing mode must NOT force
+    do_cdr_tracer_output/do_cdr_gas_exch_output on -- they're opt-in extras a
+    user enables explicitly (see the resolver's CDR tracer/gas-exchange output
+    consistency check).
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS070, cdr_forcing_yaml=_CDR_SAMPLE_YAML)
+    settings = cfg.model_settings
+    assert settings["cdr_output"]["do_cdr_output"] is True  # forced on, as before
+    assert settings["cdr_tracer_output"]["do_cdr_tracer_output"] is False
+    assert settings["cdr_gas_exch_output"]["do_cdr_gas_exch_output"] is False
+
+
+def test_cdr_tracer_gas_exch_output_sections_pruned_before_0_7_0():
+    """A blueprint pinned to ucla-roms 0.6.x (RunTimeSettingsV0_6_0, which has
+    no cdr_tracer_output/cdr_gas_exch_output fields) must not carry either
+    section in model_settings -- see _prune_version_gated_sections in
+    forge_blueprint_resolve.py. The matching 0.7.0-pinned build keeps both.
+    """
+    cfg_060 = _build(model_dir=_MODEL_DIR_ROMS060)
+    assert "cdr_tracer_output" not in cfg_060.model_settings
+    assert "cdr_gas_exch_output" not in cfg_060.model_settings
+
+    cfg_070 = _build(model_dir=_MODEL_DIR_ROMS070)
+    assert "cdr_tracer_output" in cfg_070.model_settings
+    assert "cdr_gas_exch_output" in cfg_070.model_settings
+
+
+def test_pruned_cdr_tracer_output_override_does_not_flip_cppdef_before_0_7_0():
+    """Pruning runs BEFORE the tracer/gas-exchange consistency check: on a
+    0.6.x pin an override enabling do_cdr_tracer_output is dropped (the pin's
+    namelist schema can't emit the group), so it must not leave a stray
+    cppdefs.cdr_forcing=True behind with no section in model_settings to
+    explain it.
+    """
+    cfg = _build(
+        model_dir=_MODEL_DIR_ROMS060,
+        run_time_overrides={"cdr_tracer_output": {"do_cdr_tracer_output": True}},
+    )
+    settings = cfg.model_settings
+    assert "cdr_tracer_output" not in settings
+    assert settings["cppdefs"].get("cdr_forcing", False) is False
+    assert settings["cdr_output"]["do_cdr_output"] is False
 
 
 def test_rst_period_not_divisible_by_dt_raises():

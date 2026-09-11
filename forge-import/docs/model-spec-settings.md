@@ -63,7 +63,12 @@ model_settings:
 (`cppdefs.obc_*`/`marbl`/`co2_tvarying`/`sal_restore`/`tides`/`cdr_forcing`/`use_pio` are resolver-derived
 from the Domain/Forcing selection and the model's `bgc_mode`/`use_pio` toggles, so they're intentionally
 absent from `model.yaml`. `cdr_forcing` is also raised to true whenever CDR output is enabled —
-`cdr_output.do_cdr_output` is user-controllable and does not require an actual CDR forcing.)
+`cdr_output.do_cdr_output` is user-controllable and does not require an actual CDR forcing. The same
+applies to `cdr_tracer_output.do_cdr_tracer_output` and `cdr_gas_exch_output.do_cdr_gas_exch_output`
+(ucla-roms >= 0.7.0, PR #351): enabling either also raises `cdr_forcing` to true and additionally
+requires `bgc_mode == "marbl"` — the resolver raises a `ValueError` otherwise, since ucla-roms only
+compiles those output modules under `MARBL && CDR_FORCING`. Unlike `cdr_output`, neither is forced on
+by an active CDR forcing mode; both stay off until a user explicitly enables them.)
 
 ### User override
 

@@ -566,6 +566,10 @@ def _base_type(ann, value):
 _BOOL_DROPDOWN_FIELDS: dict[tuple[str, str], tuple[str, str]] = {
     ("cdr_output", "do_avg"): ("averaged", "instantaneous"),
     ("cdr_output", "monthly_averages"): ("monthly", "periodic"),
+    ("cdr_tracer_output", "do_avg"): ("averaged", "instantaneous"),
+    ("cdr_tracer_output", "monthly_averages"): ("monthly", "periodic"),
+    ("cdr_gas_exch_output", "do_avg"): ("averaged", "instantaneous"),
+    ("cdr_gas_exch_output", "monthly_averages"): ("monthly", "periodic"),
 }
 
 
@@ -946,7 +950,7 @@ _ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Carbon dioxide removal (CDR)",
-        ("cdr_frc", "cdr_output"),
+        ("cdr_frc", "cdr_output", "cdr_tracer_output", "cdr_gas_exch_output"),
     ),
     (
         _OUTPUT_CATEGORY,
@@ -1009,6 +1013,23 @@ def _split_fields(
     if category_title == _OUTPUT_CATEGORY:
         return frozenset(parts), frozenset()
     return None, frozenset(parts)
+
+
+# Each CDR output stream's master enable flag -- section name -> the field that
+# turns the whole stream on/off. ``_apply_field_rules``/``_register_field_rule_
+# observers`` loop over this table so ``cdr_output`` (ucla-roms's original
+# stream), ``cdr_tracer_output``, and ``cdr_gas_exch_output`` (both added by
+# ucla-roms PR #351, >= 0.7.0) behave identically: every other field of the
+# section (do_avg/monthly_averages/output_period/nrpf, and any stream-specific
+# extras such as cdr_tracer_output's ``wrt_*`` field-group toggles) hides with
+# the master switch, so a new field on a Cfg model is covered without touching
+# this file. Extend here -- not by hand in either method -- when ucla-roms adds
+# another CDR output stream.
+_CDR_STREAM_MASTER_FLAGS: dict[str, str] = {
+    "cdr_output": "do_cdr_output",
+    "cdr_tracer_output": "do_cdr_tracer_output",
+    "cdr_gas_exch_output": "do_cdr_gas_exch_output",
+}
 
 
 class _SettingsEditor:
@@ -1136,7 +1157,7 @@ class _SettingsEditor:
         widget, base = self._widgets[(section, field)]
         return _read_field_widget(widget, base, key=(section, field))
 
-    # ocean_vars/cdr_output cross-field rules -----------------------------------
+    # ocean_vars/CDR output-stream cross-field rules -----------------------------
     def _register_field_rule_observers(self) -> None:
         """Wire the controlling widgets to `_apply_field_rules` for instant
         show/hide + disable feedback, plus the one forcing rule (monthly
@@ -1146,13 +1167,15 @@ class _SettingsEditor:
         def _rerun(_change=None):
             self._apply_field_rules()
 
-        for key in (
+        keys = [
             ("ocean_vars", "wrt_file_rst"),
             ("ocean_vars", "monthly_restarts"),
-            ("cdr_output", "do_cdr_output"),
-            ("cdr_output", "do_avg"),
-            ("cdr_output", "monthly_averages"),
-        ):
+        ]
+        for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
+            keys.append((section, master_flag))
+            keys.append((section, "do_avg"))
+            keys.append((section, "monthly_averages"))
+        for key in keys:
             entry = self._widgets.get(key)
             if entry is not None:
                 entry[0].observe(_rerun, names="value")
@@ -1176,13 +1199,19 @@ class _SettingsEditor:
             monthly_entry[0].observe(_force_wrt_on_monthly, names="value")
 
     def _apply_field_rules(self) -> None:
-        """Show/hide and enable/disable ocean_vars/cdr_output widgets from their
-        CURRENT values -- never mutates a value, only visibility/``disabled``.
+        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets from
+        their CURRENT values -- never mutates a value, only visibility/``disabled``.
 
         Rationale: the dependent fields are meaningless (and ignored by the
         namelist) once their master switch is off, and `output_period_*` has no
         effect once a "monthly" cadence fixes the period implicitly -- hiding/
         disabling them keeps the form from offering a control with no effect.
+        Applies identically to every stream in :data:`_CDR_STREAM_MASTER_FLAGS`
+        (``cdr_output``, ``cdr_tracer_output``, ``cdr_gas_exch_output``): every
+        field of the section other than the master switch hides with it -- the
+        shared do_avg/monthly_averages/output_period/nrpf quartet and any
+        stream-specific extras (``cdr_tracer_output``'s ``wrt_*`` field-group
+        toggles), which are all meaningless once that stream is off.
         """
 
         def _show(entry, on: bool) -> None:
@@ -1201,23 +1230,27 @@ class _SettingsEditor:
             if monthly_r is not None and period_r is not None:
                 period_r[0].disabled = bool(monthly_r[0].value)
 
-        cdr_on = self._widgets.get(("cdr_output", "do_cdr_output"))
-        do_avg = self._widgets.get(("cdr_output", "do_avg"))
-        monthly_avg = self._widgets.get(("cdr_output", "monthly_averages"))
-        period = self._widgets.get(("cdr_output", "output_period"))
-        nrpf = self._widgets.get(("cdr_output", "nrpf"))
-        if cdr_on is not None:
-            on = bool(cdr_on[0].value)
-            _show(do_avg, on)
-            _show(monthly_avg, on)
-            _show(period, on)
-            _show(nrpf, on)
+        for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
+            master = self._widgets.get((section, master_flag))
+            if master is None:
+                continue
+            do_avg = self._widgets.get((section, "do_avg"))
+            monthly_avg = self._widgets.get((section, "monthly_averages"))
+            period = self._widgets.get((section, "output_period"))
+            on = bool(master[0].value)
+            # Every non-master field of the stream follows the master switch --
+            # derived from the widgets actually built for the section (i.e. the
+            # Cfg model's fields), not a hardcoded list, so a field added to a
+            # stream's Cfg later is covered automatically.
+            for (sec, field), entry in self._widgets.items():
+                if sec == section and field != master_flag:
+                    _show(entry, on)
             if on and do_avg is not None:
-                is_avg = self.read("cdr_output", "do_avg")
+                is_avg = self.read(section, "do_avg")
                 _show(monthly_avg, is_avg)
                 if period is not None:
                     is_monthly = (
-                        self.read("cdr_output", "monthly_averages")
+                        self.read(section, "monthly_averages")
                         if is_avg and monthly_avg is not None
                         else False
                     )
@@ -5895,9 +5928,9 @@ class ForgeBlueprintWizard:
         # layer applied on top (effective = composed ⊕ overrides). The editor is
         # rebuilt when the *model* changes (its field set depends on the model) or
         # when the effective ucla-roms ref crosses a schema boundary (e.g. editing
-        # the roms_ref override across the 0.5.0 or 0.6.0 line with the same model
-        # selected) -- see run_time_settings_for_ref / RunTimeSettingsV0_5_0 /
-        # RunTimeSettingsV0_6_0.
+        # the roms_ref override across the 0.5.0, 0.6.0, or 0.7.0 line with the
+        # same model selected) -- see run_time_settings_for_ref /
+        # RunTimeSettingsV0_5_0 / RunTimeSettingsV0_6_0 / RunTimeSettingsV0_7_0.
         composed = cfg.model_settings
         # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
         # reused for the validation call below.

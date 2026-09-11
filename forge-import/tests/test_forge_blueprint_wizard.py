@@ -22,6 +22,7 @@ from cstar_forge.forge.namelist_model import (
     RunTimeSettings,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
+    RunTimeSettingsV0_7_0,
 )
 from cstar_forge.forge_blueprint_wizard import (
     _BOUNDARY_NONE,
@@ -1969,7 +1970,7 @@ def test_default_model_pinned_to_main_uses_latest_settings_schema():
     """The default (first) catalog model is pinned to ucla-roms branch ``main``
     (see ModelSpec ``pio-dev``) -- a non-semver ref, which both the wizard and
     the executor (``write_roms_namelist`` -> ``run_time_settings_for_ref``)
-    resolve to the *latest* known schema (currently ``RunTimeSettingsV0_6_0``),
+    resolve to the *latest* known schema (currently ``RunTimeSettingsV0_7_0``),
     not the legacy one. This is an intentional behavior change from before this
     ref-awareness was added (the editor used to hardcode legacy
     ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
@@ -1981,8 +1982,200 @@ def test_default_model_pinned_to_main_uses_latest_settings_schema():
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
     wiz._rebuild()
-    assert wiz._editor_settings_cls is RunTimeSettingsV0_6_0
+    assert wiz._editor_settings_cls is RunTimeSettingsV0_7_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+
+@pytest.mark.parametrize(
+    "section,master_flag",
+    [
+        ("cdr_tracer_output", "do_cdr_tracer_output"),
+        ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+    ],
+)
+def test_settings_editor_skips_cdr_output_streams_not_in_active_schema(
+    section, master_flag
+):
+    """``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms PR #351, >=
+    0.7.0) are version-gated exactly like ``pio_settings`` (see
+    ``test_settings_editor_skips_version_gated_section_not_in_active_schema``
+    above), one schema tier later: only ``RunTimeSettingsV0_7_0`` models them.
+    A ``model_settings`` dict can still carry the key under an older
+    ``settings_cls`` (e.g. a bundled OutputSpec's defaults survive a
+    ``roms_ref`` override down to "0.6.0" with the same ModelSpec selected),
+    so the editor must build no widget for it under
+    ``RunTimeSettingsV0_6_0`` and build one once the effective schema reaches
+    ``RunTimeSettingsV0_7_0``.
+    """
+    import ipywidgets as W
+
+    model_settings = {section: {master_flag: False, "do_avg": True}}
+
+    v0_6_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_6_0
+    )
+    assert (section, master_flag) not in v0_6_0_editor._widgets
+    assert section not in v0_6_0_editor._pane_sections.get(
+        "Carbon dioxide removal (CDR)", []
+    )
+
+    v0_7_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_7_0
+    )
+    assert (section, master_flag) in v0_7_0_editor._widgets
+    assert section in v0_7_0_editor._pane_sections.get(
+        "Carbon dioxide removal (CDR)", []
+    )
+
+
+def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
+    """End-to-end sibling of the two tests above, driven through the wizard's
+    model selector instead of ``_SettingsEditor`` directly: ``roms-marbl-0.6-
+    default`` pins ucla-roms 0.6.0, so the resolver's
+    ``_prune_version_gated_sections`` drops ``cdr_tracer_output``/
+    ``cdr_gas_exch_output`` from ``model_settings`` entirely (they're
+    OutputSpec-owned -- the default 'daily-restarts' OutputSpec carries them --
+    but this pin's schema can't model them), and the editor never sees the
+    section at all. Switching to ``roms-marbl-0.7-default`` (0.7.0) keeps both
+    sections and their widgets.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz.model_dd.value = "roms-marbl-0.6-default"
+    wiz._rebuild()
+    assert "cdr_tracer_output" not in wiz.config.model_settings
+    assert "cdr_gas_exch_output" not in wiz.config.model_settings
+    assert ("cdr_tracer_output", "do_cdr_tracer_output") not in wiz.editor._widgets
+    assert (
+        "cdr_gas_exch_output",
+        "do_cdr_gas_exch_output",
+    ) not in wiz.editor._widgets
+
+    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz._rebuild()
+    assert "cdr_tracer_output" in wiz.config.model_settings
+    assert "cdr_gas_exch_output" in wiz.config.model_settings
+    assert ("cdr_tracer_output", "do_cdr_tracer_output") in wiz.editor._widgets
+    assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["cdr_output", "cdr_tracer_output", "cdr_gas_exch_output"],
+)
+def test_cdr_output_stream_do_avg_and_monthly_render_as_dropdowns(section):
+    """Every CDR output stream's ``do_avg``/``monthly_averages`` fields render
+    as a two-option mode dropdown, not a checkbox -- see
+    ``_BOOL_DROPDOWN_FIELDS``. ``cdr_output`` is the pre-existing stream;
+    ``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) must
+    behave identically.
+    """
+    import ipywidgets as W
+
+    model_settings = {section: {"do_avg": True, "monthly_averages": False}}
+    editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_7_0)
+
+    do_avg_widget, _ = editor._widgets[(section, "do_avg")]
+    assert isinstance(do_avg_widget, W.Dropdown)
+    assert tuple(do_avg_widget.options) == ("averaged", "instantaneous")
+    assert do_avg_widget.value == "averaged"
+
+    monthly_widget, _ = editor._widgets[(section, "monthly_averages")]
+    assert isinstance(monthly_widget, W.Dropdown)
+    assert tuple(monthly_widget.options) == ("monthly", "periodic")
+    assert monthly_widget.value == "periodic"
+
+
+@pytest.mark.parametrize(
+    "section,master_flag",
+    [
+        ("cdr_output", "do_cdr_output"),
+        ("cdr_tracer_output", "do_cdr_tracer_output"),
+        ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+    ],
+)
+def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag):
+    """Each CDR output stream's ``do_avg``/``monthly_averages``/
+    ``output_period``/``nrpf`` widgets are hidden while its master switch is
+    off and shown once it's turned on -- exercises the
+    ``_CDR_STREAM_MASTER_FLAGS``-driven loop in ``_apply_field_rules``/
+    ``_register_field_rule_observers`` identically across all three streams
+    (``cdr_output`` is the pre-existing behavior this generalization must
+    keep byte-for-byte). ``cdr_tracer_output`` additionally hides its six
+    ``wrt_*`` field-group toggles (every non-master field follows) under the
+    same condition, since they're meaningless while the stream itself is off.
+    Also exercises the averaged/monthly cascade: ``monthly_averages`` stays
+    hidden unless ``do_avg`` is "averaged", and ``output_period`` is disabled
+    only once both ``do_avg`` is "averaged" and ``monthly_averages`` is
+    "monthly" (a fixed monthly cadence makes the period moot).
+    """
+    import ipywidgets as W
+
+    wrt_fields = (
+        "wrt_tracers",
+        "wrt_vertical_integrals",
+        "wrt_thickness_weighted",
+        "wrt_sources",
+        "wrt_alk",
+        "wrt_dic",
+    )
+    section_settings = {
+        master_flag: False,
+        "do_avg": True,
+        "monthly_averages": False,
+        "output_period": 3600.0,
+        "nrpf": 4,
+    }
+    if section == "cdr_tracer_output":
+        section_settings.update(dict.fromkeys(wrt_fields, True))
+    model_settings = {section: section_settings}
+
+    editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_7_0)
+
+    def _visible(field: str) -> bool:
+        widget, _ = editor._widgets[(section, field)]
+        return widget.layout.display != "none"
+
+    # Master off: do_avg/monthly_averages/output_period/nrpf (and, for the
+    # tracer stream, every wrt_* toggle) are hidden.
+    assert not _visible("do_avg")
+    assert not _visible("monthly_averages")
+    assert not _visible("output_period")
+    assert not _visible("nrpf")
+    if section == "cdr_tracer_output":
+        for field in wrt_fields:
+            assert not _visible(field)
+
+    # Master on: they're shown again (do_avg starts "averaged" -> monthly_
+    # averages is shown too; monthly_averages starts "periodic" -> output_
+    # period stays enabled).
+    editor._widgets[(section, master_flag)][0].value = True
+    assert _visible("do_avg")
+    assert _visible("monthly_averages")
+    assert _visible("output_period")
+    assert _visible("nrpf")
+    if section == "cdr_tracer_output":
+        for field in wrt_fields:
+            assert _visible(field)
+    period_widget, _ = editor._widgets[(section, "output_period")]
+    assert period_widget.disabled is False
+
+    # do_avg -- Dropdown widgets, so set the mode label, not a bool -- see
+    # _BOOL_DROPDOWN_FIELDS. "instantaneous": monthly_averages is meaningless
+    # and hidden; output_period stays enabled (there's no fixed cadence to
+    # make it moot).
+    editor._widgets[(section, "do_avg")][0].value = "instantaneous"
+    assert not _visible("monthly_averages")
+    assert period_widget.disabled is False
+
+    # "averaged" + monthly_averages "monthly": output_period is disabled --
+    # the monthly cadence fixes it implicitly.
+    editor._widgets[(section, "do_avg")][0].value = "averaged"
+    editor._widgets[(section, "monthly_averages")][0].value = "monthly"
+    assert _visible("monthly_averages")
+    assert period_widget.disabled is True
 
 
 def test_domain_modified_reflects_deviation_from_catalog_pick():

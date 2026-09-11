@@ -245,22 +245,33 @@ inside `forge/` and are covered by the guard's `_FORGE_APP_MODULES` list.
 
 ucla-roms 0.5.0 made its first breaking namelist change (`nrpf_rst` removed from
 `&BASIC_OUTPUT_SETTINGS`; `&PARTICLES_SETTINGS` `output_period`/`nrpf` renamed to
-`output_period_particles`/`nrpf_particles`). C-Star versions the namelist schema
-by ucla-roms release (`cstar.roms.namelist`: `RomsNamelist` for < 0.5.0,
-`RomsNamelistV0_5_0` for >= 0.5.0, selected by `namelist_schema_for_ref(ref)` —
+`output_period_particles`/`nrpf_particles`); 0.6.0 added `&PIO_SETTINGS`
+(`pio_stride`, required under `PARALLEL_IO`); 0.7.0 adds `&CDR_TRACER_OUTPUT_SETTINGS`
+and `&CDR_GAS_EXCH_OUTPUT_SETTINGS` (ucla-roms PR #351 — two dedicated CDR output
+streams). C-Star versions the namelist schema by ucla-roms release
+(`cstar.roms.namelist`: `RomsNamelist` for < 0.5.0, `RomsNamelistV0_5_0` for
+0.5.0 <= ucla-roms < 0.6.0, `RomsNamelistV0_6_0` for 0.6.0 <= ucla-roms < 0.7.0,
+`RomsNamelistV0_7_0` for >= 0.7.0, selected by `namelist_schema_for_ref(ref)` —
 semver tags select exactly; branch names/hashes warn and fall back to the latest
-schema). Forge mirrors this in `namelist_model.py`: `RunTimeSettings` (legacy)
-vs `RunTimeSettingsV0_5_0`, selected by `run_time_settings_for_ref(roms_ref)`,
-where `roms_ref` is the blueprint's pinned `code.roms.commit` (threaded
-resolver → executor → `write_roms_namelist`). C-Star's registry is the single
-source of version-boundary truth — forge only maps its result to the matching
-settings class. The forge **settings vocabulary is version-stable**: YAML keys
-(`particles.output_period`, `particles.nrpf`) don't change; only the
-`serialization_alias` to namelist names differs per version, and `nrpf_rst`
-(still present in the shared `OutputSpec/standard`) is silently ignored for
-0.5.0+ models via `extra="ignore"`. One ModelSpec per tagged ucla-roms release:
-`roms-marbl-0.5-default` pins `0.5.0`; older specs stay fixed and keep emitting
-byte-identical legacy namelists.
+schema). Forge mirrors this in `namelist_model.py`: `RunTimeSettings` (legacy),
+`RunTimeSettingsV0_5_0`, `RunTimeSettingsV0_6_0` (adds `pio_settings`), and
+`RunTimeSettingsV0_7_0` (adds `cdr_tracer_output`/`cdr_gas_exch_output`), selected
+by `run_time_settings_for_ref(roms_ref)`, where `roms_ref` is the blueprint's
+pinned `code.roms.commit` (threaded resolver → executor → `write_roms_namelist`).
+C-Star's registry is the single source of version-boundary truth — forge only
+maps its result to the matching settings class. The forge **settings vocabulary
+is version-stable**: YAML keys (`particles.output_period`, `particles.nrpf`)
+don't change; only the `serialization_alias` to namelist names differs per
+version, and `nrpf_rst` (still present in the shared `OutputSpec/standard`) is
+silently ignored for 0.5.0+ models via `extra="ignore"`. One ModelSpec per
+tagged ucla-roms release: `roms-marbl-0.5-default` pins `0.5.0`,
+`roms-marbl-0.6-default` pins `0.6.0`, `roms-marbl-0.7-default` pins `0.7.0`; older specs stay
+fixed and keep emitting byte-identical legacy namelists. `version_gated_
+section_names()` (namelist_model.py) collects every section modeled by at
+least one non-legacy tier (`pio_settings`, `cdr_tracer_output`,
+`cdr_gas_exch_output`) — used by the wizard's `_SettingsEditor`
+(`forge_blueprint_wizard.py`) to skip rendering a widget for a version-gated
+section absent from the *active* schema.
 
 ucla-roms 0.5.0 also added a run-start precheck (`check_output_divides_rst`):
 each enabled output stream's `nrpf × output_period` must evenly divide
@@ -324,23 +335,29 @@ any diff as a behavior change to justify, not noise):
 - **Settings-level**: `test_golden_model_settings_test_tiny`
   (test_forge_blueprint.py) diffs resolved `model_settings` against
   `tests/fixtures/golden_model_settings_test-tiny.json`. No regeneration hook —
-  update manually.
+  update manually. Three sibling tests pin the same comparison for each
+  versioned-namelist schema tier: `test_golden_model_settings_test_tiny_roms050`,
+  `_roms060`, and `_roms070` (`roms-marbl-0.{5,6,7}-default`, against
+  `golden_model_settings_test-tiny-roms0{50,60,70}.json`).
 - **Byte-exact namelist**: `tests/test_core.py::TestGoldenNamelist::
   test_golden_namelist_test_tiny` drives the real `generate_inputs()` →
   `configure_build()` chain (real `write_roms_namelist`; only roms-tools
   construction classes are mocked) and diffs the rendered `namelist.nml` against
   `tests/fixtures/golden_namelist_test-tiny.nml` (host-rooted absolute paths
-  normalized to a `<WORKDIR>` token). Two sibling tests pin the versioned-namelist
+  normalized to a `<WORKDIR>` token). Three sibling tests pin the versioned-namelist
   schemas against the same test-tiny domain/forcing/output setup:
   `test_golden_namelist_test_tiny_roms050` (`roms-marbl-0.5-default`,
-  `golden_namelist_test-tiny-roms050.nml`) and
+  `golden_namelist_test-tiny-roms050.nml`),
   `test_golden_namelist_test_tiny_roms060` (`roms-marbl-0.6-default`, adds
-  `&PIO_SETTINGS`, `golden_namelist_test-tiny-roms060.nml`). Regenerate one at a
+  `&PIO_SETTINGS`, `golden_namelist_test-tiny-roms060.nml`), and
+  `test_golden_namelist_test_tiny_roms070` (`roms-marbl-0.7-default`, adds
+  `&CDR_TRACER_OUTPUT_SETTINGS`/`&CDR_GAS_EXCH_OUTPUT_SETTINGS`,
+  `golden_namelist_test-tiny-roms070.nml`). Regenerate one at a
   time via `UPDATE_GOLDEN=1 pytest tests/test_core.py -k <test name>` (the run
   intentionally fails after writing; rerun without the env var to confirm). To
   select *only* the legacy test, use
-  `-k "golden_namelist_test_tiny and not roms050 and not roms060"` -- a bare
-  `-k golden_namelist_test_tiny` matches all three.
+  `-k "golden_namelist_test_tiny and not roms050 and not roms060 and not roms070"`
+  -- a bare `-k golden_namelist_test_tiny` matches all four.
 
 Both fixtures resolve paths via `cstar_forge.__file__`, so they need the
 editable install.

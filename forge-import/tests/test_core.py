@@ -79,6 +79,15 @@ _MODEL_DIR_ROMS060 = (
     / "ModelSpec"
     / "roms-marbl-0.6-default"
 )
+# ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
+# &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
+# test below.
+_MODEL_DIR_ROMS070 = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "roms-marbl-0.7-default"
+)
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -2621,6 +2630,54 @@ class TestGoldenNamelist:
         assert "&pio_settings" in normalized
         pio_settings = normalized.split("&pio_settings")[1].split("/", 1)[0]
         assert "pio_stride = 1" in pio_settings
+
+    def test_golden_namelist_test_tiny_roms070(self, mock_grid, tmp_path):
+        """Same test-tiny domain/forcing/output, but resolved against the
+        ``roms-marbl-0.7-default`` ModelSpec (ucla-roms >= 0.7.0) -- proves the
+        versioned namelist path selects ``RunTimeSettingsV0_7_0``/
+        ``RomsNamelistV0_7_0`` end to end.
+
+        The two schema-visible differences from the roms060 golden are the
+        added ``&cdr_tracer_output_settings``/``&cdr_gas_exch_output_settings``
+        groups; everything else (``&pio_settings``, no ``nrpf_rst``, renamed
+        particles output keys) carries forward unchanged since
+        ``RunTimeSettingsV0_7_0``/``RomsNamelistV0_7_0`` subclass the 0.6.0
+        variants.
+
+        Test name note: this must NOT contain ``roms050``/``roms060`` -- the
+        legacy golden is selected with ``-k "golden_namelist_test_tiny and not
+        roms050 and not roms060 and not roms070"``, which would otherwise also
+        catch this test.
+        """
+        normalized = self._run_golden_namelist_case(
+            mock_grid,
+            tmp_path,
+            _MODEL_DIR_ROMS070,
+            "golden_namelist_test-tiny-roms070.nml",
+        )
+
+        basic_output = normalized.split("&basic_output_settings")[1].split("/", 1)[0]
+        assert "nrpf_rst" not in basic_output
+
+        particles = normalized.split("&particles_settings")[1].split("/", 1)[0]
+        assert "output_period_particles" in particles
+        assert "nrpf_particles" in particles
+
+        assert "&pio_settings" in normalized
+        pio_settings = normalized.split("&pio_settings")[1].split("/", 1)[0]
+        assert "pio_stride = 1" in pio_settings
+
+        # nrpf_cdr_trc/nrpf_cdr_gas = 24 (not the Cfg default of 4) -- the
+        # "standard" OutputSpec sets both to match its cdr_output.nrpf.
+        assert "&cdr_tracer_output_settings" in normalized
+        cdr_trc = normalized.split("&cdr_tracer_output_settings")[1].split("/", 1)[0]
+        assert "do_cdr_tracer_output = .false." in cdr_trc
+        assert "nrpf_cdr_trc = 24" in cdr_trc
+
+        assert "&cdr_gas_exch_output_settings" in normalized
+        cdr_gas = normalized.split("&cdr_gas_exch_output_settings")[1].split("/", 1)[0]
+        assert "do_cdr_gas_exch_output = .false." in cdr_gas
+        assert "nrpf_cdr_gas = 24" in cdr_gas
 
 
 class TestChildDomainNoInitialConditionsValidatesAtEmit:

@@ -1,5 +1,11 @@
 # Release notes
 
+## Unreleased
+
+### New Features
+
+* `namelist.nml` gains two more version-gated output groups for ucla-roms >= 0.7.0 (matching ucla-roms PR #351): `&CDR_TRACER_OUTPUT_SETTINGS` (`cdr_tracer_output`), a dedicated stream for the CDR tracers (`CDR_OAE_ALK`/`CDR_OAE_DIC`/`CDR_DOR_DIC`) with its own `wrt_*` field-group toggles (tracers, vertical integrals, thickness-weighted, sources, alkalinity, DIC), and `&CDR_GAS_EXCH_OUTPUT_SETTINGS` (`cdr_gas_exch_output`) for the gas-exchange sensitivities `ddic_dco2`/`ddic_dalk` -- ucla-roms moved these two variables *out* of the existing `&CDR_OUTPUT_SETTINGS` group's `_cdr` output files into new dedicated `_cdrgas` files, a breaking change on the ucla-roms side worth calling out if you inspect CDR output filenames directly. Both new sections are off by default and, unlike the original `cdr_output`, are never forced on by an active CDR forcing mode -- enabling either requires `bgc_mode: marbl` and raises `cppdefs.cdr_forcing`, same as before. Exposed in the wizard's "Carbon dioxide removal (CDR)" advanced pane; the bundled OutputSpecs (`daily-restarts`, `weekly-restarts`, `monthly-restarts`, `standard`) carry their defaults, and both are pruned from `model_settings` for any ModelSpec pinned before 0.7.0. Added a new `roms-marbl-0.7-default` ModelSpec pinning ucla-roms `0.7.0`; `pio-dev` (pins `main`) picks it up via the existing latest-schema fallback. Existing ModelSpecs are unchanged. C-Star floor bumped to `>=0.13.7`, the release that ships `RomsNamelistV0_7_0`.
+
 ## 0.7.3
 
 ### New Features

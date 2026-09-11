@@ -127,6 +127,7 @@ try:  # pragma: no cover - exercised both ways
         cppdefs_for_precheck,
         ensure_cdr_output_marbl_diagnostics,
         run_time_settings_for_ref,
+        version_gated_section_names,
     )
 except ImportError:  # pragma: no cover
     from namelist_model import (  # type: ignore
@@ -271,6 +272,8 @@ OUTPUT_SECTIONS = (
     "ts_output",
     "frc_output",
     "cdr_output",
+    "cdr_tracer_output",
+    "cdr_gas_exch_output",
     "upscale_output",
     "zslice",
     "random_output",
@@ -314,6 +317,30 @@ def extract_output_settings(model_settings: dict[str, Any]) -> dict[str, Any]:
         if partial:
             out[sec] = copy.deepcopy(partial)
     return out
+
+
+def _prune_version_gated_sections(settings: dict[str, Any], settings_cls: type) -> None:
+    """Drop ``settings`` keys that are version-gated (modeled by SOME run-time
+    settings tier -- :func:`version_gated_section_names`) but not modeled by
+    ``settings_cls``, the tier actually selected for this blueprint's pinned
+    ucla-roms ref.
+
+    OutputSpecs are shared across ModelSpecs pinned to different ucla-roms
+    releases (e.g. the same "daily-restarts" OutputSpec can be selected against
+    both a 0.6- and a 0.7-pinned ModelSpec), so the ``_deep_merge(settings,
+    output_settings)`` above can introduce a section a newer schema tier models
+    (e.g. ``cdr_tracer_output``, ucla-roms >= 0.7.0) into a settings dict pinned
+    to an older tier with no matching field. Left alone, that stale section
+    would ride unpruned into ``model_settings``: the top-level
+    ``extra="ignore"`` on ``_SettingsSection`` would silently drop it again at
+    ``build_namelist``/write time, but only after the blueprint had already
+    snapshotted an inert section nobody can act on. Prune it here instead,
+    right after schema selection and before any precheck/freeze into the
+    blueprint, so a blueprint pinned to an older ucla-roms release never
+    stores a section that release's namelist schema doesn't understand.
+    """
+    for name in version_gated_section_names() - set(settings_cls.model_fields):
+        settings.pop(name, None)
 
 
 # ``river_frc``/``cdr_frc`` namelist run-time defaults: these are Forcing-owned (not
@@ -927,18 +954,9 @@ def build_forge_blueprint(
             marbl.get("marbl_diagnostics_to_write")
         )
 
-    # ----- restart period consistency ----------------------------------------
-    # Fail fast at authoring time (mirrors the executor's net for hand-edited
-    # blueprints): restart writes must land on a timestep.
-    check_rst_period_divisible(
-        settings.get("time_stepping", {}).get("dt"), settings.get("ocean_vars", {})
-    )
-    # Nesting extraction files must roll on restart boundaries under
-    # ucla-roms >= 0.5.0 (its check_output_divides_rst aborts the run
-    # otherwise); older releases don't enforce it, so gate on the schema the
-    # pinned ref selects. The extract values are resolver-derived (child
-    # DomainSpec metadata 'period' x a seeded nrpf), so authoring time is the
-    # only place the author sees the failure with the knobs still in hand.
+    # ----- schema selection + version-gated section pruning -----------------
+    # Which run-time settings tier the pinned ucla-roms ref selects decides
+    # both what gets pruned here and which prechecks below apply.
     roms_block = (model.get("code") or {}).get("roms") or {}
     effective_roms_ref = (
         roms_ref or roms_block.get("commit") or roms_block.get("branch")
@@ -951,6 +969,51 @@ def build_forge_blueprint(
         settings_cls = run_time_settings_for_ref(
             str(effective_roms_ref) if effective_roms_ref is not None else None
         )
+    # Drop any version-gated section (e.g. cdr_tracer_output, ucla-roms >= 0.7.0)
+    # this pin's schema doesn't model -- see _prune_version_gated_sections.
+    # Must run before the consistency checks below (so a section this pin can't
+    # emit never flips cppdefs), before the precheck (which reads `settings`
+    # directly, not a validated model), and before `settings` is frozen into
+    # the blueprint's `model_settings`.
+    _prune_version_gated_sections(settings, settings_cls)
+
+    # ----- CDR tracer / gas-exchange output consistency (ucla-roms >= 0.7.0) --
+    # Unlike do_cdr_output above, these two dedicated output streams (PR #351)
+    # are NEVER forced on by an active CDR forcing mode -- they're opt-in
+    # extras a user enables explicitly (see CdrTracerOutputCfg/
+    # CdrGasExchOutputCfg), so read only the flag actually present in
+    # `settings`, never `cdr_spec.mode`. Both sections are version-gated
+    # (added by RunTimeSettingsV0_7_0 -- older ModelSpec/OutputSpec pairings
+    # simply don't carry them), so `settings.get(...)` rather than
+    # `settings.setdefault(...)` -- a section absent here has nothing to
+    # enable and is left absent.
+    for section_name, do_flag in (
+        ("cdr_tracer_output", "do_cdr_tracer_output"),
+        ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+    ):
+        section = settings.get(section_name)
+        if not section or not section.get(do_flag):
+            continue
+        if bgc_mode != "marbl":
+            raise ValueError(
+                f'{do_flag}=True but bgc_mode != "marbl": ucla-roms only '
+                "compiles the CDR tracer/gas-exchange output modules under "
+                "MARBL && CDR_FORCING."
+            )
+        settings["cppdefs"]["cdr_forcing"] = True
+
+    # ----- restart period consistency ----------------------------------------
+    # Fail fast at authoring time (mirrors the executor's net for hand-edited
+    # blueprints): restart writes must land on a timestep.
+    check_rst_period_divisible(
+        settings.get("time_stepping", {}).get("dt"), settings.get("ocean_vars", {})
+    )
+    # Nesting extraction files must roll on restart boundaries under
+    # ucla-roms >= 0.5.0 (its check_output_divides_rst aborts the run
+    # otherwise); older releases don't enforce it, so gate on the schema the
+    # pinned ref selects. The extract values are resolver-derived (child
+    # DomainSpec metadata 'period' x a seeded nrpf), so authoring time is the
+    # only place the author sees the failure with the knobs still in hand.
     if settings_cls is not RunTimeSettings:
         check_extract_divides_rst(
             settings.get("ocean_vars", {}), settings.get("extract_data", {})
