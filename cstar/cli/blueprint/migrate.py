@@ -160,7 +160,12 @@ def clobber_output(ctx: typer.Context, value: bool) -> bool:
     if value and output:
         path = Path(output)
         if path.exists():
+            log.debug(f"Clobbering output path: {output}")
             path.unlink()
+        else:
+            log.debug(f"No output file to clobber: {output}")
+
+    return value
 
     return value
 
