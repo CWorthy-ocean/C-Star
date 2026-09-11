@@ -9,7 +9,8 @@ Unreleased
 Breaking Changes
 ~~~~~~~~~~~~~~~~
 
-- N/A
+
+- C-Star now requires ``roms_tools>=5.0,<6`` (previously ``>=4.0.1,<5``). The only roms-tools API C-Star itself calls that changed in 5.0 is ``InitialConditions`` call in the ``NestIc`` application; everything else is unaffected. (`#684 <https://github.com/CWorthy-ocean/C-Star/pull/684>`_)
 
 New features
 ~~~~~~~~~~~~
