@@ -9,7 +9,9 @@ from pathlib import Path
 
 import typer
 from pydantic import BaseModel, computed_field
+from rich.console import ConsoleRenderable
 from rich.table import Column, Table
+from rich.text import Text
 
 from cstar.base.log import get_logger
 from cstar.base.utils import _run_cmd
@@ -82,7 +84,7 @@ def adapt_runs_to_views(
         )
 
 
-def table_formatter(data: Iterable[ItemView]) -> None:
+def table_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
     """Display run information as a table."""
     table = Table(
         Column("run-id", justify="right", style="yellow"),
@@ -99,10 +101,10 @@ def table_formatter(data: Iterable[ItemView]) -> None:
             datum.size,
             datum.start,
         )
-    console.print(table)
+    return table
 
 
-def csv_formatter(data: Iterable[ItemView]) -> None:
+def csv_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
     """Display run information as CSV."""
     output = io.StringIO()
 
@@ -112,15 +114,15 @@ def csv_formatter(data: Iterable[ItemView]) -> None:
     writer.writerows(renderables)
     document = output.getvalue()
 
-    console.print(document)
+    return Text(document)
 
 
-def json_formatter(data: Iterable[ItemView]) -> None:
+def json_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
     """Display run information as JSON."""
     container = {"data": [x.model_dump(include=INCLUSIONS) for x in data]}
     document = json.dumps(container)
 
-    console.print(document)
+    return Text(document)
 
 
 async def disk_usage(path: Path) -> str:
@@ -201,7 +203,7 @@ sorters: dict[
 }
 
 
-renderers = {
+formatters = {
     "json": json_formatter,
     "csv": csv_formatter,
     "table": table_formatter,
@@ -265,7 +267,9 @@ def ls_runs(
 
     runs = sorters[sort](runs, reverse)
     views = adapt_runs_to_views(runs, plan_cache)
-    renderers[format](views)
+    content = formatters[format](views)
+
+    console.print(content)
 
 
 if __name__ == "__main__":
