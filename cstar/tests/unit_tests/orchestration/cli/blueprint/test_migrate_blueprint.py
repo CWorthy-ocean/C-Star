@@ -12,7 +12,7 @@ from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
 from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
 from cstar.base.env import ENV_CSTAR_DISABLE_MIGRATION, ENV_CSTAR_STATE_HOME, FLAG_ON
 from cstar.cli.blueprint.migrate import app
-from cstar.entrypoint.utils import ARG_DRY_RUN, ARG_OUTPUT_LONG, ARG_OUTPUT_SHORT
+from cstar.entrypoint.utils import ARG_DRY_RUN
 from cstar.system.migration import KEY_APP, identify_bounds
 
 
@@ -152,11 +152,9 @@ def test_blueprint_migrate_unnecessary(hello_world_bp_path: Path) -> None:
     assert latest in result.stdout
 
 
-@pytest.mark.parametrize("output_param", [ARG_OUTPUT_SHORT, ARG_OUTPUT_LONG])
 def test_blueprint_migrate_custom_output(
     tmp_path: Path,
     plotter_v1_0_0_bp: Path,
-    output_param: str,
 ) -> None:
     """Verify that an output path specified by the user is honored."""
     bp_path = plotter_v1_0_0_bp  # blueprint_1_0_0_sleep
@@ -169,7 +167,6 @@ def test_blueprint_migrate_custom_output(
         app,
         [
             bp_path.as_posix(),
-            output_param,
             expected_output_path.as_posix(),
         ],
         color=False,
@@ -201,7 +198,6 @@ def test_blueprint_migrate_dry_run(
         [
             bp_path.as_posix(),
             ARG_DRY_RUN,
-            ARG_OUTPUT_LONG,
             expected_output_path.as_posix(),
         ],
         color=False,

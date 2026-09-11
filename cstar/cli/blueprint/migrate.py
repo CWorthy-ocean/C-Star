@@ -28,8 +28,6 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
-    ARG_OUTPUT_LONG,
-    ARG_OUTPUT_SHORT,
     ARG_VERBOSE,
     ARG_VERBOSE_HELP,
 )
@@ -178,11 +176,11 @@ def migrate(
     ],
     output: t.Annotated[
         str,
-        typer.Option(
-            ARG_OUTPUT_LONG,
-            ARG_OUTPUT_SHORT,
+        typer.Argument(
             help="Path where the migrated blueprint will be serialized",
             callback=target_callback,
+            dir_okay=False,
+            exists=False,
         ),
     ] = "",
     dry_run: t.Annotated[
