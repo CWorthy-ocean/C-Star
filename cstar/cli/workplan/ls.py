@@ -3,6 +3,7 @@ import csv
 import datetime
 import io
 import json
+import os
 import typing as t
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -137,12 +138,17 @@ async def disk_usage(path: Path) -> str:
         return "0"
 
 
-async def get_run_disk_usage(
-    runs: Sequence[WorkplanRun],
-    lt_filter: int | None = None,
-    gt_filter: int | None = None,
-) -> None:
-    disk_space = await asyncio.gather(*[disk_usage(run.output_path) for run in runs])
+async def _bounded_du(sem: asyncio.Semaphore, path: Path) -> str:
+    """Wrap the disk usage method in a semaphore to limit concurrent IO requests."""
+    async with sem:
+        return await disk_usage(path)
+
+
+async def get_run_disk_usage(runs: Sequence[WorkplanRun]) -> None:
+    max_concurrency = int(os.environ.get("CSTAR_MAX_CONC", 5))
+    sem = asyncio.Semaphore(max_concurrency)
+
+    disk_space = await asyncio.gather(*[_bounded_du(sem, r.output_path) for r in runs])
     sizes = [int(size) for size in disk_space]
     for i, run in enumerate(runs):
         run.metadata["size"] = str(sizes[i])
