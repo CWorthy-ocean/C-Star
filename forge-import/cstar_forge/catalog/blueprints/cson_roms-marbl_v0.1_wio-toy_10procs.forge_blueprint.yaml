@@ -5,7 +5,7 @@ application: forge
 state: notset
 schema_version: 1.0.0
 working_dir: ~/cstar/_forge_bp_runs/cson_roms-marbl_v0.1_wio-toy_10procs
-forge_blueprint_version: 7
+forge_blueprint_version: 8
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -31,12 +31,15 @@ domain:
   partitioning:
     n_procs_x: 2
     n_procs_y: 5
+    auto_tiling: false
+    n_cores: null
   grid_kwargs_parent: null
   grid_kwargs_child: null
   metadata_child: null
   nesting_include_pressure_fluxes: false
   v_sponge: 40000.0
   dt: 7200.0
+  grid_file: null
 forcing:
   initial_conditions:
     source:
@@ -44,11 +47,21 @@ forcing:
       climatology: false
       glorys_layout: regional
       path: null
-    bgc_source:
-      name: UNIFIED
-      climatology: true
-      glorys_layout: null
-      path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
+    bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
+        glorys_layout: null
+        path: null
+        constants: null
+        esper_method: null
+        esper_equation: null
+      use_vars: null
+      bgc_interpolation_method: null
+      serialize_dask: null
     bgc_interpolation_method: depth
     allow_flex_time: false
     prefill: null
@@ -57,12 +70,16 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
+    bypass_validation: false
   surface:
   - source:
       name: ERA5
       climatology: false
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     type: physics
     correct_radiation: true
     coarse_grid_mode: never
@@ -79,6 +96,9 @@ forcing:
       climatology: true
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -95,6 +115,9 @@ forcing:
       climatology: false
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -111,6 +134,9 @@ forcing:
       climatology: true
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     type: restoring
     correct_radiation: false
     coarse_grid_mode: never
@@ -124,12 +150,26 @@ forcing:
     extrap_kwargs: null
     options: {}
   boundary:
-  - source:
+    source:
       name: GLORYS
       climatology: false
       glorys_layout: regional
       path: null
-    type: physics
+      constants: null
+      esper_method: null
+      esper_equation: null
+    bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
+        glorys_layout: null
+        path: null
+        constants: null
+        esper_method: null
+        esper_equation: null
+      use_vars: null
+      bgc_interpolation_method: depth
+      serialize_dask: null
     bgc_interpolation_method: depth
     prefill: null
     prefill_kwargs: null
@@ -137,25 +177,16 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
-  - source:
-      name: UNIFIED
-      climatology: true
-      glorys_layout: null
-      path: null
-    type: bgc
-    bgc_interpolation_method: depth
-    prefill: null
-    prefill_kwargs: null
-    regrid_method: null
-    extrap_method: null
-    extrap_kwargs: null
-    options: {}
+    bypass_validation: false
   tidal:
   - source:
       name: TPXO
       climatology: false
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     ntides: 15
     prefill: null
     prefill_kwargs: null
@@ -169,12 +200,16 @@ forcing:
       climatology: false
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     include_bgc: true
     convert_to_climatology: if_any_missing
     bgc_source: null
     coast_snap_buffer_km: null
     domain_edge_buffer: 20
     options: {}
+    custom_file: null
   resolved_datasets:
     GLORYS:
       dataset_key: GLORYS_REGIONAL
@@ -543,15 +578,20 @@ composition:
     name: glorys-era5-unified
     origin: catalog
     modified: false
+  cdr:
+    name: null
+    origin: custom
+    modified: false
   output:
     name: standard
     origin: catalog
     modified: false
   overrides: {}
 provenance:
-  generated_at: null
-  forge_version: null
-  roms_tools_version: null
+  generated_at: '2026-08-15T17:08:38.764520Z'
+  forge_version: c36ed09-dirty
+  cstar_version: cstar-ocean==0.6.1.dev1+gb180d30d3
+  roms_tools_version: roms-tools==4.1.1.dev6+gc3ecc9af3
   override_files_applied: []
-  content_hash: 657abd06d031c907bd573a67779c430c47d06a929f2f56b09fc5858de0b92811
+  content_hash: b61e7465d87cd5326d14b66a3f921d4047a0f6bd2a75d1969dfaf358aacddfd3
   notes: null

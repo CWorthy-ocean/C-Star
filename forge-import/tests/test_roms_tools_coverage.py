@@ -33,6 +33,16 @@ _RT_DATA_INPUTS = {
     "boundaries",
     "filepath",
     "releases",
+    # BGCMarbl.process_bgc_fields: the already-built forcing objects it completes
+    # in place -- pure data, not a user-configurable option.
+    "forcings",
+    # InitialConditions/BoundaryForcing (roms-tools >=5 monolithic wrapper): the
+    # resolved bgc_sources list (forge_blueprint.BgcSourceItem, each already
+    # resolved through SourceData) and the BGCModel class Forge always passes
+    # (rt.BGCMarbl) when bgc_sources is non-empty -- both pure data, never a raw
+    # user-facing option knob.
+    "bgc_sources",
+    "bgc_model",
 }
 
 # ── option fields in each Forge item model ───────────────────────────────────
@@ -49,6 +59,10 @@ _FORGE_FIELDS = {
         # model_reference_date is handled run-level; options dict is passthrough
         "model_reference_date",
         "options",
+        # wizard "validate" checkbox (checked = bypass_validation=False, the
+        # roms-tools default); promoted from the SKIP_LIST after a real
+        # production crash traced to _validate() running unprotected.
+        "bypass_validation",
     },
     "SurfaceForcing": {
         "type",
@@ -65,7 +79,8 @@ _FORGE_FIELDS = {
         "options",
     },
     "BoundaryForcing": {
-        "type",
+        # `type` dropped entirely in the roms-tools >=5 wrapper (physics is the
+        # required `source`, bgc is the `bgc_sources` list -- no discriminator).
         "bgc_interpolation_method",
         "prefill",
         "prefill_kwargs",
@@ -74,6 +89,10 @@ _FORGE_FIELDS = {
         "extrap_kwargs",
         "model_reference_date",
         "options",
+        # wizard "validate" checkbox (checked = bypass_validation=False, the
+        # roms-tools default); promoted from the SKIP_LIST after a real
+        # production crash traced to _validate() running unprotected.
+        "bypass_validation",
     },
     "TidalForcing": {
         "ntides",
@@ -117,29 +136,35 @@ _FORGE_FIELDS = {
 # Params deliberately NOT typed into the Forge schema. Document the reason.
 _SKIP = {
     # All rt classes: use_dask is hardcoded from RomsMarblInputData.use_dask.
-    "*": {"use_dask"},
+    # serialize_dask: forge-only write flag (a `.save()` kwarg, not a
+    # constructor param of any class here) -- RomsMarblInputData.serialize_dask_write
+    # / BgcSourceItem.serialize_dask control it; never a user-facing rt option.
+    "*": {"use_dask", "serialize_dask"},
     "InitialConditions": {
         "chunks",  # advanced Dask tuning; expose via options passthrough
         "initial_slice_bounds",  # advanced spatial Dask subsetting
-        "bypass_validation",  # dev/debug knob; expose via options passthrough
+        # legacy single-bgc-source convenience (forge never emits this directly,
+        # but rt.InitialConditions' own wrapper constructor still accepts it);
+        # use_vars lives on BgcSourceItem, forwarded per item.
+        "use_vars",
     },
     "SurfaceForcing": {
         "chunks",
         "initial_slice_bounds",
-        "bypass_validation",
-        # new in roms-tools: forcing time-window padding; will be exposed
-        # deliberately (typed fields + resolver/wizard wiring) in an upcoming PR
+        "bypass_validation",  # dev/debug knob; expose via options passthrough
+        # padding an extra time record before/after the run window; roms-tools
+        # defaults (True/True) are correct for the normal case, not yet exposed
+        # as a Forge option (same gap as BoundaryForcing's).
         "start_time_pad",
         "end_time_pad",
     },
     "BoundaryForcing": {
         "chunks",
         "initial_slice_bounds",
-        "bypass_validation",
-        "physics_forcing",  # internal object for density interp wiring (set by Forge, not user)
         "apply_2d_horizontal_fill",  # deprecated in rt>=4 in favor of `prefill`; Forge exposes prefill instead
-        # new in roms-tools: forcing time-window padding; will be exposed
-        # deliberately (typed fields + resolver/wizard wiring) in an upcoming PR
+        # padding an extra time record before/after the run window; roms-tools
+        # defaults (True/True) are correct for the normal ROMS boundary-interp
+        # case, not yet exposed as a Forge option.
         "start_time_pad",
         "end_time_pad",
     },
@@ -199,6 +224,27 @@ def test_all_rt_params_are_exposed_or_skipped(cls_name, forge_cls_name):
     )
 
 
+@pytest.mark.integration
+def test_bgc_marbl_process_bgc_fields_params_are_data_inputs():
+    """``BGCMarbl.process_bgc_fields`` isn't a constructor (so it isn't covered by
+    ``test_all_rt_params_are_exposed_or_skipped`` above) but is still user-facing
+    roms-tools surface Forge drives (batched boundary/IC bgc completion + save --
+    see ``RomsMarblInputData._generate_boundary_forcing``/``_generate_initial_conditions``).
+    Both its params (``forcings``, the already-built objects; ``filepath``, output
+    path(s)) are pure data/output-path inputs, not user-configurable Forge fields.
+    """
+    params = set(
+        inspect.signature(rt.BGCMarbl.process_bgc_fields).parameters.keys()
+    ) - {"self"}
+    uncovered = params - _RT_DATA_INPUTS
+    assert not uncovered, (
+        f"rt.BGCMarbl.process_bgc_fields has parameters NOT accounted for as data "
+        f"inputs: {sorted(uncovered)}. Either add them to _RT_DATA_INPUTS (if "
+        "they're pure data/output-path inputs) or give them proper typed-field/"
+        "SKIP_LIST coverage."
+    )
+
+
 # ── single-source item models ──────────────────────────────────────
 # The forcing/IC item models are now defined ONCE in ``cstar_forge.forge.forge_blueprint``
 # and re-exported by ``cstar_forge.models`` (with ``InitialConditions`` aliased to the
@@ -208,9 +254,10 @@ def test_all_rt_params_are_exposed_or_skipped(cls_name, forge_cls_name):
 _ITEM_MODEL_PAIRS = [
     ("InitialConditionsInput", "InitialConditions"),
     ("SurfaceForcingItem", "SurfaceForcingItem"),
-    ("BoundaryForcingItem", "BoundaryForcingItem"),
+    ("BoundaryForcing", "BoundaryForcing"),
     ("TidalForcingItem", "TidalForcingItem"),
     ("RiverForcingItem", "RiverForcingItem"),
+    ("BgcSourceItem", "BgcSourceItem"),
 ]
 
 

@@ -8,9 +8,10 @@ initial_conditions:
   source:
     name: GLORYS
     glorys_layout: regional
-  bgc_source:
-    name: UNIFIED
-    climatology: true
+  bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
 
 forcing:
   surface:
@@ -35,14 +36,13 @@ forcing:
       type: restoring
       coarse_grid_mode: "never"
   boundary:
-    - source:
-        name: GLORYS
-        glorys_layout: regional
-      type: physics
-    - source:
-        name: UNIFIED
-        climatology: true
-      type: bgc
+    source:
+      name: GLORYS
+      glorys_layout: regional
+    bgc_sources:
+      - source:
+          name: UNIFIED
+          climatology: true
   tidal:
     - source:
         name: TPXO

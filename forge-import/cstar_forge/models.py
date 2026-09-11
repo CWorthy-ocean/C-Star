@@ -9,7 +9,7 @@ conditions/forcing source selection (a ForcingSpec's job) and no output-control
 sections (an OutputSpec's job). Both must always be explicitly selected; there
 is no more "model default" fallback embedded here.
 
-The forcing/IC item models (``SurfaceForcingItem``, ``BoundaryForcingItem``, etc.)
+The forcing/IC item models (``SurfaceForcingItem``, ``BoundaryForcing``, etc.)
 are defined once in ``cstar_forge.forge.forge_blueprint`` and re-exported here
 (single source of truth -- see ``docs/roms-tools-contributor-guide.md`` and
 ``test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced``) for
@@ -26,7 +26,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cstar_forge.forge.forge_blueprint import (
     CDR_MODES,
-    BoundaryForcingItem,
+    BgcSourceItem,
+    BoundaryForcing,
     CdrSpec,
     CodeRepo,
     RiverForcingItem,
@@ -45,7 +46,8 @@ from cstar_forge.forge.forge_blueprint import (
 
 __all__ = [
     "CDR_MODES",
-    "BoundaryForcingItem",
+    "BgcSourceItem",
+    "BoundaryForcing",
     "CdrSpec",
     "InitialConditionsInput",
     "ModelCode",

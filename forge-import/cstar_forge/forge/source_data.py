@@ -101,6 +101,7 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
 # without the heavy acquisition deps). Re-exported here for existing consumers.
 # -----------------------------------------
 from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
+    DERIVED_BGC_SOURCES,
     GLOFAS_CDS_URL,
     GLOFAS_FILENAME,
     GLORYS_DATASET_ID,
@@ -113,6 +114,10 @@ from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
     UNIFIED_BGC_URL,
     UNIFIED_BGC_VERSION,
     UNSTAGED_DATASETS,
+    WOA23_BASE_URL,
+    WOA23_BGC_VARIABLES,
+    WOA23_GRID,
+    WOA23_PERIODS,
     WOA_DOWNLOAD_URL,
     map_source_to_dataset_key,
 )
@@ -120,7 +125,9 @@ from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
 # Back-compat alias (handlers reference the lowercase name).
 glorys_dataset_id: str = GLORYS_DATASET_ID
 
-WOA_FILENAMES: list[str] = [f"woa*_decav_s{month:02d}_*.nc" for month in range(1, 13)]
+# Quarter-degree ("_04") only: the 1-degree salinity files staged by the WOA_BGC
+# handler live in the same directory and must not match this pattern.
+WOA_FILENAMES: list[str] = [f"woa*_decav_s{month:02d}_04.nc" for month in range(1, 13)]
 
 
 # -----------------------------------------
@@ -329,6 +336,16 @@ class SourceData:
         return (
             logical_name.upper() in upper_streamable or key.upper() in upper_streamable
         )
+
+    def derived_for_source(self, logical_name: str) -> bool:
+        """
+        Whether ``logical_name`` is a derived/computed pseudo-source (e.g. ``ESPER``,
+        ``constants``) -- never staged by Forge at all, so there is no ``self.paths``
+        entry to look up. Callers must use the source's own explicit ``path`` (if any,
+        e.g. ESPER's required PyESPER directory) as-is, the same way a streamable
+        source's path is left untouched -- see ``streamable_for_source``.
+        """
+        return logical_name.upper() in DERIVED_BGC_SOURCES
 
     def path_for_source(
         self,
@@ -782,8 +799,11 @@ def _prepare_woa(self: SourceData) -> Path:
     """
     woa_path = self.source_data_dir / "WOA"
 
+    # The "_04" suffix pins the quarter-degree grid. Without it this glob would also
+    # match the 1-degree salinity files that the WOA_BGC handler stages into the same
+    # directory, and matches[0] could silently pick the wrong resolution.
     woa_dict = {
-        f"s{m:02d}": woa_path / f"woa*_decav_s{m:02d}_*.nc" for m in range(1, 13)
+        f"s{m:02d}": woa_path / f"woa*_decav_s{m:02d}_04.nc" for m in range(1, 13)
     }
 
     # Check that the base directory exists
@@ -816,7 +836,88 @@ def _prepare_woa(self: SourceData) -> Path:
 
     print(f"✔️  WOA dataset verified at: {woa_path}")
     self.paths["WOA"] = woa_path
-    return woa_path / "woa*_decav_s*.nc"
+    return woa_path / "woa*_decav_s*_04.nc"
+
+
+# ---------------------------
+# WOA_BGC handler (WOA23 1-degree gridded BGC source)
+# ---------------------------
+
+
+@register_dataset("WOA_BGC")
+def _prepare_woa_bgc(self: SourceData) -> Path:
+    """
+    Ensure the WOA23 1-degree BGC climatology exists locally.
+
+    Downloads the twelve monthly files for each of nitrate, phosphate, silicate,
+    oxygen, temperature and salinity, plus the full-depth annual (period 00) file for
+    each. roms-tools' ``WOABGCDataset`` reads the monthly fields and splices the annual
+    ones underneath them, because monthly WOA stops at 800 m for the nutrients and
+    1500 m for oxygen and T/S.
+
+    Temperature and salinity are staged alongside the tracers because roms-tools needs
+    them twice: to convert umol/kg to mmol/m3, and as the source density coordinate for
+    ``density`` / ``density_mld`` BGC interpolation. Without them that interpolation
+    silently falls back to depth space.
+
+    Files are stored flat in ``self.source_data_dir / "WOA"`` -- the same directory the
+    SSS-restoring WOA handler uses. The two sets do not collide: the BGC files carry the
+    ``_01`` (1-degree) suffix and the restoring files ``_04`` (quarter-degree).
+
+    Individual files already present are skipped unless ``self.clobber`` is set, so an
+    interrupted staging run resumes where it left off.
+
+    Returns
+    -------
+    Path
+        The directory holding the files, which is what roms-tools expects as the
+        source ``path`` for a ``{"name": "WOA"}`` BGC source.
+    """
+    woa_path = self.source_data_dir / "WOA"
+    woa_path.mkdir(parents=True, exist_ok=True)
+
+    targets: list[tuple[str, str]] = []
+    for subdir, decade, code in WOA23_BGC_VARIABLES.values():
+        for period in WOA23_PERIODS:
+            filename = f"woa23_{decade}_{code}{period:02d}_{WOA23_GRID}.nc"
+            url = f"{WOA23_BASE_URL}/{subdir}/netcdf/{decade}/1.00/{filename}"
+            targets.append((filename, url))
+
+    pending = [
+        (fn, url) for fn, url in targets if self.clobber or not (woa_path / fn).exists()
+    ]
+
+    if not pending:
+        print(f"✔️  Using existing WOA23 BGC dataset ({len(targets)} files): {woa_path}")
+        self.paths["WOA_BGC"] = woa_path
+        return woa_path
+
+    print(
+        f"⬇️  Downloading WOA23 1° BGC climatology → {woa_path} "
+        f"({len(pending)} of {len(targets)} files, ~3 GB total)"
+    )
+
+    for index, (filename, url) in enumerate(pending, start=1):
+        path = woa_path / filename
+        if path.exists():
+            print(f"⚠️  Clobber=True: removing existing WOA23 file {filename}")
+            path.unlink()
+
+        print(f"    [{index}/{len(pending)}] {filename}")
+        # Stream to a temporary file in the destination directory and move it into
+        # place, so an interrupted download never leaves a truncated file that a later
+        # run would mistake for a complete one.
+        with tempfile.NamedTemporaryFile(
+            delete=False, dir=str(woa_path), suffix=".part"
+        ) as tmpfile:
+            with urlopen(url) as r:
+                shutil.copyfileobj(r, tmpfile)
+            tmp_path = Path(tmpfile.name)
+        tmp_path.replace(path)
+
+    print(f"✔️  WOA23 BGC download complete: {woa_path}")
+    self.paths["WOA_BGC"] = woa_path
+    return woa_path
 
 
 # ---------------------------
@@ -950,3 +1051,81 @@ def _prepare_rivr2o(self: SourceData) -> Path:
     print(f"✔️  RIVR2O dataset verified at: {rivr2o_dir} ({len(matches)} file(s))")
     self.paths["RIVR2O"] = pattern
     return pattern
+
+
+# ---------------------------
+# GLODAP handler (user-provided dataset)
+# ---------------------------
+
+# roms-tools' GLODAPv2Dataset/GLODAPv2BGCDataset (roms_tools/datasets/lat_lon_datasets.py)
+# read one file per variable named "GLODAPv2.2016b.{var}.nc" out of a directory
+# (unlike EMOD/RIVR2O's any-filename/wildcard pattern). Six BGC variables are
+# required (var_names); temperature/salinity are optional (opt_var_names) --
+# without them post_process() falls back to a uniform 1025 kg/m^3 density for
+# the umol/kg -> mmol/m3 conversion instead of computing in-situ density.
+GLODAP_FILE_PREFIX = "GLODAPv2.2016b"
+GLODAP_REQUIRED_FILES = ("TAlk", "TCO2", "NO3", "PO4", "silicate", "oxygen")
+GLODAP_OPTIONAL_FILES = ("temperature", "salinity")
+
+
+@register_dataset("GLODAP")
+def _prepare_glodap(self: SourceData) -> Path:
+    """
+    Verify that the user has provided GLODAPv2.2016b mapped-climatology files.
+
+    GLODAP has no roms-tools auto-download (unlike the CONSTANTS river-BGC
+    default), so this is a USER_DATASET, like EMOD/RIVR2O/TPXO/WOA: the files
+    must already exist at the expected location.
+
+    Expected location: self.source_data_dir / "GLODAP" /
+    "GLODAPv2.2016b.{var}.nc" for each of the six required BGC variables
+    (TAlk, TCO2, NO3, PO4, silicate, oxygen). The optional temperature/salinity
+    files are not required for this check (a warning is logged if either is
+    missing) since roms-tools tolerates their absence with a coarser density
+    fallback -- see ``GLODAP_OPTIONAL_FILES``'s module comment above.
+
+    Returns
+    -------
+    Path
+        The GLODAP directory itself -- roms-tools' ``filename`` for this
+        dataset is a directory, same as WOA_BGC, not a single file/wildcard.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the GLODAP directory or any required variable file is missing.
+    """
+    glodap_dir = self.source_data_dir / "GLODAP"
+
+    missing_required = [
+        f"{GLODAP_FILE_PREFIX}.{var}.nc"
+        for var in GLODAP_REQUIRED_FILES
+        if not (glodap_dir / f"{GLODAP_FILE_PREFIX}.{var}.nc").exists()
+    ]
+    if missing_required:
+        raise FileNotFoundError(
+            f"GLODAPv2.2016b dataset incomplete/not found at: {glodap_dir}\n"
+            "GLODAPv2.2016b must be obtained separately (mapped climatology, "
+            "https://www.glodap.info/) and placed as one .nc file per "
+            f"variable in {glodap_dir}; missing required file(s): "
+            f"{missing_required}"
+        )
+
+    missing_optional = [
+        var
+        for var in GLODAP_OPTIONAL_FILES
+        if not (glodap_dir / f"{GLODAP_FILE_PREFIX}.{var}.nc").exists()
+    ]
+    if missing_optional:
+        logger.warning(
+            "GLODAP temperature/salinity file(s) missing at %s (%s); "
+            "roms-tools falls back to a uniform 1025 kg/m^3 density for the "
+            "umol/kg -> mmol/m3 unit conversion instead of computing in-situ "
+            "density.",
+            glodap_dir,
+            missing_optional,
+        )
+
+    print(f"✔️  GLODAP dataset verified at: {glodap_dir}")
+    self.paths["GLODAP"] = glodap_dir
+    return glodap_dir

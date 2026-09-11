@@ -103,13 +103,14 @@ so it remains lightweight (no ROMS/MARBL build, no roms-tools); `cstar-ocean` is
 a required pip dependency of this package regardless (see `pyproject.toml`).
 
 Top-level shape: `forge_blueprint_version` (int, bump only on breaking change;
-currently 7) · `application` (=`"forge"`, C-Star app discriminator, required by the
+currently 8) · `application` (=`"forge"`, C-Star app discriminator, required by the
 `Blueprint` base) · `name`/`description` (required top-level fields on the `Blueprint`
 base; `name` is the single user-editable canonical name — `casename`/`working_dir`/
 `B_{name}.yaml`/netCDF stems all derive from it) · `run` (start/end date,
 model_reference_date) · `domain` (`grid_name`, grid_kwargs, topography_source,
 open_boundaries, partitioning, nesting) · `forcing` (flat: initial_conditions,
-surface/boundary/tidal/river lists, resolved_datasets) · `cdr` (`CdrSpec`: a 5-mode
+a single boundary section (`BoundaryForcing`, mirroring `InitialConditions`),
+surface/tidal/river lists, resolved_datasets) · `cdr` (`CdrSpec`: a 5-mode
 CDR-forcing selection — none/simple/yaml/netcdf/upscaled — carrying the compiled
 roms-tools `CDRForcing` kwargs or a user-provided netCDF ref; its own composable
 catalog spec, independent of `forcing`) · `datasets`
@@ -124,9 +125,13 @@ out on load).
 Older blueprint files load transparently: a `model_validator(mode="before")`
 (`migrate_forge_blueprint_data`) migrates v2/v3 layouts (removed `identity`
 sub-model, removed `ensemble_id`), the v4→v5 `do_cdr`→`do_cdr_output` rename,
-and the v6→v7 CDR move (`forcing.cdr_forcing`/`cdr_forcing_file` → the
-top-level `cdr` section, mode inferred) to the current shape, reproducing
-derived names bit-for-bit. `model_name`/`grid_name` live in
+the v6→v7 CDR move (`forcing.cdr_forcing`/`cdr_forcing_file` → the
+top-level `cdr` section, mode inferred), and the v7→v8 BGC-sources move
+(`initial_conditions.bgc_source` rewrapped as a one-item `bgc_sources` list;
+`forcing.boundary`'s flat, type-discriminated `BoundaryForcingItem` list split
+into a single `BoundaryForcing` section with `source` + `bgc_sources`, mirroring
+`InitialConditions`) to the current shape, reproducing derived names
+bit-for-bit. `model_name`/`grid_name` live in
 `composition.model.name`/`domain.grid_name`; `grid_name` is results-affecting —
 `SourceData` keys cache filenames off it.
 
@@ -275,8 +280,8 @@ from the resolver and gated to >= 0.5.0 pins.
 
 ## 5. `models.py` vs `forge/forge_blueprint.py`
 
-The forcing/IC item models (`BoundaryForcingItem`, `SurfaceForcingItem`,
-`InitialConditions`, `OpenBoundaries`, etc.) are defined once, in
+The forcing/IC item models (`BoundaryForcing`, `SurfaceForcingItem`,
+`InitialConditions`, `BgcSourceItem`, `OpenBoundaries`, etc.) are defined once, in
 `forge/forge_blueprint.py`; `models.py` imports and re-exports them — single
 source of truth, no duplication. What `models.py` owns is the `model.yaml`
 *wrapper* shape (`ModelSpec`, `ModelCode`, `ModelTemplates`, `load_models_yaml`)

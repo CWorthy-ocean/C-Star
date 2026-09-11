@@ -85,17 +85,20 @@ When a knob is stable and worth surfacing, promote it. Typed fields get Pydantic
 validation, enum dropdowns, tooltips, and discoverability. Checklist:
 
 1. **Add the field once, to the item model in `cstar_forge/forge/forge_blueprint.py`.** The
-   item models (`SurfaceForcingItem`, `BoundaryForcingItem`, `TidalForcingItem`,
-   `RiverForcingItem`, `InitialConditions`, `SourceSpec`) are **single-sourced** there and
-   re-exported by `cstar_forge/models.py` (with `InitialConditions` aliased to the legacy
-   name `InitialConditionsInput`), so one edit covers both the authoring and processing
-   sides. For a constrained set of values, define a `str, Enum` in `forge_blueprint.py` too
-   (it stays import-light and relocatable). Items are `extra="forbid"` — unknown kwargs
-   must go through `options`, not as loose fields. `SourceSpec` is single-sourced too, but
-   it is a Forge-internal dataset reference with no roms-tools-constructor counterpart, so
-   it has no `_FORGE_FIELDS`/`_ITEM_MODEL_PAIRS` entry and step 2 does not apply to it.
-   (Note `_FORGE_FIELDS` is keyed by the roms-tools class name — `SurfaceForcing`, not
-   `SurfaceForcingItem`.)
+   item models (`SurfaceForcingItem`, `BoundaryForcing`, `TidalForcingItem`,
+   `RiverForcingItem`, `InitialConditions`, `BgcSourceItem`, `SourceSpec`) are
+   **single-sourced** there and re-exported by `cstar_forge/models.py` (with
+   `InitialConditions` aliased to the legacy name `InitialConditionsInput`), so one edit
+   covers both the authoring and processing sides. For a constrained set of values, define
+   a `str, Enum` in `forge_blueprint.py` too (it stays import-light and relocatable). Items
+   are `extra="forbid"` — unknown kwargs must go through `options`, not as loose fields.
+   `SourceSpec` is single-sourced too, but it is a Forge-internal dataset reference with no
+   roms-tools-constructor counterpart, so it has no `_FORGE_FIELDS`/`_ITEM_MODEL_PAIRS` entry
+   and step 2 does not apply to it. (Note `_FORGE_FIELDS` is keyed by the roms-tools class
+   name — `SurfaceForcing`, not `SurfaceForcingItem`; `BoundaryForcing` and `InitialConditions`
+   match their roms-tools class name directly, and per-source BGC knobs — `use_vars`,
+   `bgc_interpolation_method`, `serialize_dask` — live on `BgcSourceItem`, which has its own
+   `_ITEM_MODEL_PAIRS` entry.)
 2. **Record it in the drift guard** — add the field name to the class's entry in
    `_FORGE_FIELDS` in `tests/test_roms_tools_coverage.py`.
 3. **Surface it in the wizard** — add a control in `forge_blueprint_wizard.py`

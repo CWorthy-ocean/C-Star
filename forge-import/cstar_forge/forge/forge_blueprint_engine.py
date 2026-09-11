@@ -154,10 +154,19 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
             d["glorys_layout"] = spec.glorys_layout
         if spec.path:
             d["path"] = spec.path
+        if spec.constants:
+            d["constants"] = spec.constants
+        # roms-tools' own source-dict keys are "method"/"equation" (see
+        # roms_tools.setup.esper.estimate_bgc_fields); esper_method/esper_equation
+        # are namespaced on SourceSpec since it's shared by every source type.
+        if spec.esper_method:
+            d["method"] = spec.esper_method
+        if spec.esper_equation:
+            d["equation"] = spec.esper_equation
         return d
 
     def _item(item) -> dict[str, Any]:
-        # mode="json" coerces enum-typed fields (SurfaceType, BoundaryType, …) to their
+        # mode="json" coerces enum-typed fields (SurfaceType, CoarseGridMode, …) to their
         # string values. Plain model_dump() would leave them as enum *instances*, which
         # then leak into output filenames (f"{key}-{type}") and into roms-tools' SafeDumper
         # (which cannot represent a Forge enum) → the "cannot represent an object" warning.
@@ -166,25 +175,41 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
         d["source"] = _src(item.source)
         return {k: v for k, v in d.items() if v is not None}
 
-    def _ic(spec) -> dict[str, Any]:
-        # Mirror _item, but IC carries a second SourceSpec (bgc_source) that also
-        # needs _src conversion. Forwarding the typed fields
-        # (bgc_interpolation_method, allow_flex_time) and the options passthrough
-        # here is what lets authored/UI IC choices actually reach input_data —
-        # previously only source/bgc_source were propagated, so any other IC field
-        # set in the wizard was silently dropped on the ForgeBlueprint path.
-        d = spec.model_dump(exclude={"source", "bgc_source"}, mode="json")
+    def _bgc_section(spec) -> dict[str, Any]:
+        # Mirror _item, but this section carries `bgc_sources` (a list of
+        # source+use_vars+bgc_interpolation_method items, each needing its own
+        # _src conversion) rather than a single nested SourceSpec. Shared by
+        # InitialConditions and BoundaryForcing, which have this identical shape.
+        # Forwarding the typed fields (bgc_interpolation_method, allow_flex_time)
+        # and the options passthrough here is what lets authored/UI choices
+        # actually reach input_data — previously only source/bgc_source were
+        # propagated, so any other field set in the wizard was silently dropped
+        # on the ForgeBlueprint path.
+        d = spec.model_dump(exclude={"source", "bgc_sources"}, mode="json")
         d["source"] = _src(spec.source)
-        if spec.bgc_source:
-            d["bgc_source"] = _src(spec.bgc_source)
+        if spec.bgc_sources:
+            # Introspect BgcSourceItem's own fields (via model_dump) rather than
+            # hand-listing them: a hand-written dict silently DROPS any field
+            # added to the model later -- that is how `serialize_dask` first
+            # went missing here, so the per-source write-scheduler flag never
+            # reached input_data._bgc_serialize_flags in production even though
+            # the resolver had already introspected+carried it faithfully.
+            d["bgc_sources"] = [
+                {
+                    **bs.model_dump(mode="json", exclude={"source"}, exclude_none=True),
+                    "source": _src(bs.source),
+                }
+                for bs in spec.bgc_sources
+            ]
         return {k: v for k, v in d.items() if v is not None}
 
     f = cfg.forcing
 
     forc: dict[str, Any] = {}
+    if f.boundary is not None:
+        forc["boundary"] = _bgc_section(f.boundary)
     for cat, items in [
         ("surface", f.surface),
-        ("boundary", f.boundary),
         ("tidal", f.tidal),
         ("river", f.river),
     ]:
@@ -196,7 +221,7 @@ def sources_to_forcing_override(cfg: ForgeBlueprint) -> dict[str, Any]:
     # parent's nesting extraction) -- omit the key entirely rather than
     # emitting a None/placeholder value.
     if f.initial_conditions is not None:
-        out["initial_conditions"] = _ic(f.initial_conditions)
+        out["initial_conditions"] = _bgc_section(f.initial_conditions)
     return out
 
 
@@ -329,6 +354,7 @@ def process_forge_blueprint(
     clobber: bool = False,
     use_dask: bool = True,
     dask_num_workers: int = 8,
+    serialize_dask_write: bool | None = None,
     subchunk: bool = True,
     validate: bool = True,
     executor_factory: ExecutorFactory | None = None,
@@ -376,9 +402,17 @@ def process_forge_blueprint(
         skip-existing logic) and emit the blueprint.
     dask_num_workers :
         Cap on dask's default threaded-scheduler worker count during input
-        generation (paired with pinning BLAS/OpenMP to 1 thread), to avoid thread
-        oversubscription hangs on high-core HPC nodes. Only applied when
-        ``use_dask`` is True. Default 8.
+        generation, to avoid thread oversubscription (each worker's own
+        BLAS/numba call is, in turn, capped to its own share of the remaining
+        cores) on high-core HPC nodes. Only applied when ``use_dask`` is True.
+        Default 8.
+    serialize_dask_write :
+        Forwarded to every IC/boundary ``.save()`` call as ``serialize_dask=``
+        (see :func:`roms_tools.utils.save_datasets`). Default ``None`` resolves
+        to the ordinary concurrent write for every source (PyESPER protects
+        itself). Pass ``True`` to force the serialized, one-task-at-a-time
+        write everywhere -- a manual low-memory / troubleshooting tool. Only
+        applied when ``use_dask`` is True.
     subchunk :
         Just-in-time build a kerchunk-subchunked reference for multi-file
         GLORYS sources (see ``glorys_subchunk.py``) and read from it instead
@@ -444,6 +478,7 @@ def process_forge_blueprint(
             clobber=clobber,
             use_dask=use_dask,
             dask_num_workers=dask_num_workers,
+            serialize_dask_write=serialize_dask_write,
             subchunk=subchunk,
             only=resolved_only,
         )

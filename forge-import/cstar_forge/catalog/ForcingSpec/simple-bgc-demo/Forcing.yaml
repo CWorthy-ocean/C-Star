@@ -3,9 +3,10 @@ initial_conditions:
   source:
     name: GLORYS
     glorys_layout: regional
-  bgc_source:
-    name: UNIFIED
-    climatology: true
+  bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
 forcing:
   surface:
   - source:
@@ -19,13 +20,12 @@ forcing:
     type: bgc
     coarse_grid_mode: never
   boundary:
-  - source:
+    source:
       name: GLORYS
       glorys_layout: regional
-    type: physics
-  - source:
-      name: UNIFIED
-      climatology: true
-    type: bgc
+    bgc_sources:
+      - source:
+          name: UNIFIED
+          climatology: true
   tidal: []
   river: []

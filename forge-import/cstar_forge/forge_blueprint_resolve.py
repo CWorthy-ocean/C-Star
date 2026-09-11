@@ -38,7 +38,8 @@ import yaml
 # Dual import: package context (production) or standalone file (lightweight / UI / test).
 try:  # pragma: no cover - exercised both ways
     from cstar_forge.forge.forge_blueprint import (
-        BoundaryForcingItem,
+        BgcSourceItem,
+        BoundaryForcing,
         CdrSpec,
         Code,
         CodeRepo,
@@ -66,7 +67,8 @@ try:  # pragma: no cover - exercised both ways
     )
 except ImportError:  # pragma: no cover
     from forge_blueprint import (  # type: ignore
-        BoundaryForcingItem,
+        BgcSourceItem,
+        BoundaryForcing,
         CdrSpec,
         Code,
         CodeRepo,
@@ -94,9 +96,17 @@ except ImportError:  # pragma: no cover
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
 # dependency-free. Dual import to keep the resolver standalone-importable.
 try:  # pragma: no cover - exercised both ways
-    from cstar_forge.forge.source_registry import resolve_dataset_key, resolve_source
+    from cstar_forge.forge.source_registry import (
+        DERIVED_BGC_SOURCES,
+        resolve_dataset_key,
+        resolve_source,
+    )
 except ImportError:  # pragma: no cover
-    from source_registry import resolve_dataset_key, resolve_source  # type: ignore
+    from source_registry import (  # type: ignore
+        DERIVED_BGC_SOURCES,
+        resolve_dataset_key,
+        resolve_source,
+    )
 
 # Default repo serving the render templates (now at the forge repo root `templates/`,
 # decoupled from the ModelSpec). A ModelSpec pins the serving commit via
@@ -136,20 +146,37 @@ def _resolved_dataset(name: str, glorys_layout: str | None = None) -> ResolvedDa
 
 
 def _parse_source(block: Any) -> SourceSpec:
-    """A model.yaml ``source`` block: a bare name string or a dict."""
+    """A model.yaml ``source`` block: a bare name string or a dict.
+
+    Forwards every ``SourceSpec`` field a source dict may carry -- ``path`` (a
+    custom dataset path, or the required PyESPER package directory for an
+    ``ESPER`` source), ``constants`` (a ``name="constants"`` source's value
+    mapping), and ``esper_method``/``esper_equation`` (an ``ESPER`` source's
+    PyESPER knobs) -- not just ``name``/``climatology``/``glorys_layout``, so a
+    constants/ESPER/custom-path source authored via the wizard (or any
+    ``forcing_inputs`` caller) actually reaches ``SourceSpec`` instead of being
+    silently dropped.
+    """
     if isinstance(block, str):
         name = block
         d: dict[str, Any] = {}
     else:
         d = dict(block or {})
         name = d.get("name")
-    layout = d.get("glorys_layout")
-    return SourceSpec(
-        name=name,
-        climatology=bool(d.get("climatology", False)),
-        glorys_layout=layout,
-        path=d.get("path"),
-    )
+    kw: dict[str, Any] = {
+        "name": name,
+        "climatology": bool(d.get("climatology", False)),
+        "glorys_layout": d.get("glorys_layout"),
+    }
+    if d.get("path"):
+        kw["path"] = d["path"]
+    if d.get("constants"):
+        kw["constants"] = d["constants"]
+    if d.get("esper_method"):
+        kw["esper_method"] = d["esper_method"]
+    if d.get("esper_equation"):
+        kw["esper_equation"] = d["esper_equation"]
+    return SourceSpec(**kw)
 
 
 def _normalize_user_file(
@@ -982,17 +1009,19 @@ def build_forge_blueprint(
             if it.type == "bgc":
                 src_name = it.source.name if it.source else "?"
                 bgc_signals.append(f"surface[{i}] (source={src_name}, type=bgc)")
-        for i, it in enumerate(sources.boundary):
-            if it.type == "bgc":
-                src_name = it.source.name if it.source else "?"
-                bgc_signals.append(f"boundary[{i}] (source={src_name}, type=bgc)")
-        if (
-            sources.initial_conditions is not None
-            and sources.initial_conditions.bgc_source is not None
+        if sources.boundary is not None:
+            for i, bs in enumerate(sources.boundary.bgc_sources):
+                bgc_signals.append(
+                    f"boundary.bgc_sources[{i}] (source={bs.source.name})"
+                )
+        # initial_conditions is None only for a child domain with no explicit IC.
+        for i, bs in enumerate(
+            sources.initial_conditions.bgc_sources
+            if sources.initial_conditions is not None
+            else []
         ):
             bgc_signals.append(
-                "initial_conditions.bgc_source (source="
-                f"{sources.initial_conditions.bgc_source.name})"
+                f"initial_conditions.bgc_sources[{i}] (source={bs.source.name})"
             )
         for i, it in enumerate(sources.river):
             if it.include_bgc:
@@ -1120,12 +1149,23 @@ def _build_forcing(
     ic_block = inputs.get("initial_conditions", {}) or {}
     forcing_block = inputs.get("forcing", {}) or {}
 
-    def _items(key, cls, extra):
+    def _items(key, cls, source_fields=("source",)):
+        """Build a list of `cls` instances from forcing_block[key].
+
+        Copies every field the model itself declares (introspected from
+        `cls.model_fields`), except `source_fields` -- which need special parsing
+        (`_parse_source`) rather than a plain copy. This used to be a manually-
+        maintained per-category whitelist tuple (`extra`); that pattern silently
+        dropped any field added to the schema but forgotten here (confirmed for
+        `wind_dropoff`/`options` on every category) -- deriving the field set from
+        the model itself means a new field is picked up with no edit needed here.
+        """
+        plain_fields = set(cls.model_fields) - set(source_fields)
         out = []
         for it in forcing_block.get(key, []) or []:
             it = it or {}
-            kw = {"source": _parse_source(it.get("source"))}
-            for f in extra:
+            kw = {f: _parse_source(it.get(f)) for f in source_fields}
+            for f in plain_fields:
                 if f in it:
                     if f == "custom_file":
                         # Accept the same three forms as grid_file (str/Path/dict/
@@ -1137,22 +1177,40 @@ def _build_forcing(
             out.append(cls(**kw))
         return out
 
-    # Source-prefill / horizontal-regrid / destination-extrapolation knobs shared by
-    # SurfaceForcing, BoundaryForcing, TidalForcing, and InitialConditions (roms-tools
-    # >=4). Kept as one tuple so all four load-back whitelists stay in lockstep with
-    # each other and with tests/test_roms_tools_coverage.py::_FORGE_FIELDS.
-    _REGRID_FIELDS = (
-        "prefill",
-        "prefill_kwargs",
-        "regrid_method",
-        "extrap_method",
-        "extrap_kwargs",
-    )
+    def _build_bgc_section(cls, block):
+        """Build an `InitialConditions`/`BoundaryForcing`-shaped section: a
+        required physics `source` plus zero or more `BgcSourceItem` `bgc_sources`.
+
+        Both sections share this exact shape (see `BgcSourceItem`'s docstring),
+        so one builder serves both instead of two hand-written, driftable copies
+        -- mirrors `_items`'s model-introspection approach for the plain fields,
+        but `bgc_sources` needs its own nested construction the generic loop
+        can't do.
+        """
+        # Introspect BgcSourceItem's own fields rather than hand-listing them:
+        # a hand-written list silently DROPS any field added to the model later
+        # (that is how `serialize_dask` first went missing here), which for a
+        # write-behaviour flag means the blueprint quietly loses the setting that
+        # makes a large domain generate at all.
+        bgc_item_fields = set(BgcSourceItem.model_fields) - {"source"}
+        bgc_sources = [
+            BgcSourceItem(
+                source=_parse_source(bs.get("source")),
+                **{f: bs[f] for f in bgc_item_fields if f in bs},
+            )
+            for bs in (block.get("bgc_sources") or [])
+        ]
+        plain_fields = set(cls.model_fields) - {"source", "bgc_sources"}
+        kw = {"source": _parse_source(block.get("source")), "bgc_sources": bgc_sources}
+        for f in plain_fields:
+            if f in block:
+                kw[f] = block[f]
+        return cls(**kw)
 
     if not ic_block.get("source"):
         # No IC source given. A child domain gets its state from the parent's
         # nesting extraction, so IC is optional -- skip building it entirely,
-        # the same way boundary items are skipped above, so nothing leaks into
+        # the same way boundary is skipped below, so nothing leaks into
         # resolved_datasets/datasets. A non-child domain has no other source of
         # state, so this is a hard error.
         if not is_child:
@@ -1163,60 +1221,31 @@ def _build_forcing(
             )
         ic = None
     else:
-        ic_kw = {
-            "source": _parse_source(ic_block.get("source")),
-            "bgc_source": _parse_source(ic_block["bgc_source"])
-            if ic_block.get("bgc_source")
-            else None,
-        }
-        for f in ("bgc_interpolation_method", "allow_flex_time", *_REGRID_FIELDS):
-            if f in ic_block:
-                ic_kw[f] = ic_block[f]
-        ic = InitialConditions(**ic_kw)
+        ic = _build_bgc_section(InitialConditions, ic_block)
 
-    surface = _items(
-        "surface",
-        SurfaceForcingItem,
-        (
-            "type",
-            "correct_radiation",
-            "coarse_grid_mode",
-            "restoring_forces",
-            *_REGRID_FIELDS,
-        ),
-    )
+    surface = _items("surface", SurfaceForcingItem)
+    boundary_block = forcing_block.get("boundary")
     boundary = (
-        []
-        if is_child
-        else _items(
-            "boundary",
-            BoundaryForcingItem,
-            (
-                "type",
-                "bgc_interpolation_method",
-                *_REGRID_FIELDS,
-            ),
-        )
+        None
+        if is_child or not boundary_block
+        else _build_bgc_section(BoundaryForcing, boundary_block)
     )
-    tidal = _items("tidal", TidalForcingItem, ("ntides", *_REGRID_FIELDS))
-    river = _items(
-        "river",
-        RiverForcingItem,
-        (
-            "include_bgc",
-            "convert_to_climatology",
-            "bgc_source",
-            "coast_snap_buffer_km",
-            "domain_edge_buffer",
-            "custom_file",
-        ),
-    )
+    tidal = _items("tidal", TidalForcingItem)
+    # `bgc_source` is a plain dict (not a SourceSpec) on RiverForcingItem -- exclude
+    # it from the generic source-parsing path so it copies through as-is via the
+    # plain-fields loop, same as always.
+    river = _items("river", RiverForcingItem, source_fields=("source",))
 
     # snapshot every distinct logical source touched
     resolved: dict[str, ResolvedDataset] = {}
 
     def _note(src: SourceSpec):
         if not (src and src.name):
+            return
+        # DERIVED_BGC_SOURCES (CONSTANTS/ESPER) are computed at generation time, not
+        # fetched/staged by Forge -- noting them here would land them in
+        # resolved_datasets/datasets and raise "Unknown dataset" downstream in SourceData.
+        if str(src.name).upper() in DERIVED_BGC_SOURCES:
             return
         # CUSTOM_FILE (river.source) has no registry entry -- the file is
         # verified/staged directly from RiverForcingItem.custom_file, not from
@@ -1234,19 +1263,24 @@ def _build_forcing(
 
     if ic is not None:
         _note(ic.source)
-        _note(ic.bgc_source)
-    for grp in (surface, boundary, tidal, river):
+        for bs in ic.bgc_sources:
+            _note(bs.source)
+    if boundary is not None:
+        _note(boundary.source)
+        for bs in boundary.bgc_sources:
+            _note(bs.source)
+    for grp in (surface, tidal, river):
         for it in grp:
             _note(it.source)
     # River BGC source (a plain dict, not a SourceSpec — separate from it.source, the
-    # river discharge source). CONSTANTS is not noted: it is roms-tools' own
-    # auto-downloaded default and has no Forge SourceData handler/registry entry, so
-    # staging it here would raise "Unknown dataset" downstream. Only a genuinely
+    # river discharge source). DERIVED_BGC_SOURCES (CONSTANTS) is not noted: it is
+    # roms-tools' own auto-downloaded default and has no Forge SourceData handler/registry
+    # entry, so staging it here would raise "Unknown dataset" downstream. Only a genuinely
     # Forge-staged BGC source (e.g. RIVR2O) needs to land in resolved_datasets/datasets
     # so the executor verifies it.
     for it in river:
         bgc_name = (it.bgc_source or {}).get("name")
-        if bgc_name and str(bgc_name).upper() != "CONSTANTS":
+        if bgc_name and str(bgc_name).upper() not in DERIVED_BGC_SOURCES:
             resolved.setdefault(str(bgc_name).upper(), _resolved_dataset(bgc_name))
     # topography source (now a Domain-level input, not read from ForcingSpec)
     topo = getattr(topography_source, "value", topography_source)

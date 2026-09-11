@@ -9,15 +9,22 @@ as fast unit tests.
 
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from cstar_forge.forge.forge_blueprint import (
+    BgcSourceItem,
+    Forcing,
+    SurfaceForcingItem,
+)
 from cstar_forge.forge.namelist_model import (
     RunTimeSettings,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
 )
 from cstar_forge.forge_blueprint_wizard import (
+    _BOUNDARY_NONE,
     ForgeBlueprintWizard,
     _drain_stream_buffer,
     _ForcingEditor,
@@ -84,18 +91,162 @@ def test_surface_row_visibility_by_type(editor):
 
 
 def test_boundary_row_layout_visibility_by_source_name(editor):
-    """Item 7: glorys_layout only shows when the source name is GLORYS. Switching
-    the boundary `type` to bgc resets `name` away from GLORYS (bgc boundary sources
-    are UNIFIED/CESM_REGRIDDED) and must hide the layout box via the same cascade
-    that resets the name dropdown's options (_on_type_change).
+    """Item 7: glorys_layout only shows when the source name is GLORYS. Boundary's
+    physics source is a required scalar now (self.boundary_name/boundary_layout,
+    mirroring IC's), not a row -- see __init__/_ROW_CATEGORIES. BGC boundary
+    sources (UNIFIED/CESM_REGRIDDED/GLODAP/constants/ESPER) live in their own
+    "boundary_bgc" row-list/pane instead, which never offers GLORYS and has no
+    glorys_layout widget at all (not just hidden -- absent).
     """
-    w = editor._make_row("boundary", {"type": "physics", "source": {"name": "GLORYS"}})
-    assert w["name"].value == "GLORYS"
-    assert _display(w["glorys_layout"]) == ""
+    assert editor.boundary_name.value == "GLORYS"
+    assert _display(editor.boundary_layout) == ""
 
+    bgc_w = editor._make_row("boundary_bgc", {"source": {"name": "UNIFIED"}})
+    assert bgc_w["name"].value != "GLORYS"
+    assert "glorys_layout" not in bgc_w
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+@pytest.mark.parametrize("name", ["constants", "ESPER", "GLODAP"])
+def test_climatology_hidden_for_static_bgc_sources(editor, cat, name):
+    """None of these sources has a time axis of its own -- constants is inline
+    values, ESPER is derived from the physics T/S, and GLODAP is a single static
+    field -- so none can be a climatology, and roms-tools raises ValueError if one
+    is handed climatology=True. Hiding the checkbox keeps that unreachable.
+    """
+    w = editor._make_row(cat, {"source": {"name": name}})
+    assert _display(w["climatology"]) == "none"
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_climatology_shown_for_dataset_backed_bgc_sources(editor, cat):
+    """The gate is only about the static sources -- a regridded, time-varying
+    dataset still gets the checkbox.
+    """
+    for name in ("UNIFIED", "WOA_BGC"):
+        w = editor._make_row(cat, {"source": {"name": name}})
+        assert _display(w["climatology"]) == "", name
+
+
+def test_glodap_keeps_regrid_knobs_unlike_constants_and_esper(editor):
+    """GLODAP has a wider climatology gate than the regrid gate: it IS a regridded
+    dataset, so hiding its climatology must not sweep away the regrid knobs the way
+    the derived pseudo-sources do.
+    """
+    w = editor._make_row("boundary_bgc", {"source": {"name": "GLODAP"}})
+    assert _display(w["climatology"]) == "none"
+    assert _display(w["bgc_interpolation_method"]) == ""  # still regridded
+
+    w = editor._make_row("boundary_bgc", {"source": {"name": "constants"}})
+    assert _display(w["bgc_interpolation_method"]) == "none"  # not a dataset at all
+
+
+def test_stale_climatology_not_emitted_after_switch_to_static_source(editor):
+    """The checkbox is hidden rather than destroyed, so a tick left over from a
+    previously selected source would otherwise be gathered into the blueprint and
+    trip roms-tools' validation on a source that can never be a climatology.
+    """
+    w = editor._make_row(
+        "boundary_bgc", {"source": {"name": "UNIFIED", "climatology": True}}
+    )
+    assert editor._gather_item("boundary_bgc", w)["source"]["climatology"] is True
+
+    w["name"].value = "GLODAP"
+    editor._apply_row_visibility(w)
+    assert w["climatology"].value is True  # widget state survives the switch
+    assert "climatology" not in editor._gather_item("boundary_bgc", w)["source"]
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_esper_dropdown_is_labelled_experimental_but_stores_plain_name(editor, cat):
+    """PyESPER support is experimental, and the dropdown says so -- but the label is
+    presentation only: the blueprint must still carry the bare "ESPER" source name.
+    """
+    w = editor._make_row(cat, {"source": {"name": "ESPER"}})
+    assert ("ESPER (experimental)", "ESPER") in w["name"].options
+    assert w["name"].value == "ESPER"
+    assert editor._gather_item(cat, w)["source"]["name"] == "ESPER"
+
+
+def test_unlabelled_sources_keep_their_bare_name_in_the_dropdown(editor):
+    """Only ESPER carries a display label; every other source is its own label, so
+    `(label, value)` options must not change what the rest of the UI sees.
+    """
+    w = editor._make_row("boundary_bgc", {"source": {"name": "UNIFIED"}})
+    assert ("UNIFIED", "UNIFIED") in w["name"].options
+    assert [value for _label, value in w["name"].options] == [
+        "UNIFIED",
+        "CESM_REGRIDDED",
+        "GLODAP",
+        "WOA_BGC",
+        "constants",
+        "ESPER",
+    ]
+
+
+def test_type_switch_rebuilds_labelled_options(editor):
+    """Changing a surface row's type rewrites the source dropdown; membership there
+    has to be tested against the bare names, not the (label, value) pairs, or the
+    value reset would fire on every switch.
+    """
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
     w["type"].value = "bgc"
-    assert w["name"].value != "GLORYS"
-    assert _display(w["glorys_layout"]) == "none"
+    assert [value for _label, value in w["name"].options] == [
+        "UNIFIED",
+        "CESM_REGRIDDED",
+        "MBL_co2",
+    ]
+    assert w["name"].value == "UNIFIED"
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+@pytest.mark.parametrize("name", ["ESPER", "UNIFIED"])
+def test_serialize_dask_is_not_offered_as_a_widget(editor, cat, name):
+    """`serialize_dask` is deliberately unexposed, for every source including ESPER.
+
+    PyESPER serialises entry into its own numba kernels with a per-process
+    semaphore, so the flag no longer buys the protection it was added for -- it
+    only forces the rest of that write onto the one-task-at-a-time path. It stays
+    a blueprint field and a CLI flag for manual troubleshooting.
+    """
+    w = editor._make_row(cat, {"source": {"name": name}})
+    assert "serialize_dask" not in w
+    item = editor._gather_item(cat, w)
+    assert "serialize_dask" not in item
+    assert "serialize_dask" not in item["source"]
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_serialize_dask_round_trips_when_the_blueprint_already_set_it(editor, cat):
+    """Loading a blueprint that sets it and re-saving must not drop it.
+
+    The wizard has no widget for it, but silently rewriting someone's blueprint on
+    an unrelated edit is worse than leaving a field they can delete deliberately --
+    and `_build_bgc_section` has already been bitten once by dropping exactly this
+    field. It lands at item level, never inside `source`, where roms-tools'
+    extra="forbid" validation would reject it.
+    """
+    w = editor._make_row(cat, {"source": {"name": "ESPER"}, "serialize_dask": True})
+    item = editor._gather_item(cat, w)
+    assert item["serialize_dask"] is True
+    assert "serialize_dask" not in item["source"]
+
+
+def test_serialize_dask_not_invented_for_rows_that_lacked_it(editor):
+    """An untouched row stays absent, so the source keeps inheriting the CLI flag
+    rather than pinning a hard value.
+    """
+    w = editor._make_row("ic_bgc", {"source": {"name": "ESPER"}})
+    assert "serialize_dask" not in editor._gather_item("ic_bgc", w)
+
+
+def test_serialize_dask_not_offered_on_surface_rows(editor):
+    """Surface bgc is not a BgcSourceItem -- its schema has no `serialize_dask`, and
+    `_Section` is extra="forbid", so emitting one there would fail validation.
+    """
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "UNIFIED"}})
+    assert "serialize_dask" not in w
+    assert "serialize_dask" not in editor._gather_item("surface", w)
 
 
 def test_surface_row_never_shows_layout(editor):
@@ -120,11 +271,14 @@ def test_ic_layout_visibility_initial_state():
     assert _display(ed.ic_layout) == ""
 
 
-def test_row_box_puts_type_first(editor):
-    """Item 3: `type` (when present) is the left-most widget in the row."""
+def test_row_box_puts_remove_button_first_then_type(editor):
+    """The remove button is always left-most (never clipped off-screen by a wide
+    row -- see _row_box); `type` (when present) comes right after it.
+    """
     w = editor._make_row("surface", {"type": "bgc", "source": {"name": "ERA5"}})
     box = editor._row_box(w)
-    assert box.children[0] is w["type"]
+    assert box.children[0] is w["_remove_btn"]
+    assert box.children[1] is w["type"]
 
 
 def test_row_box_without_type_unaffected(editor):
@@ -134,7 +288,29 @@ def test_row_box_without_type_unaffected(editor):
     assert w["ntides"] in box.children
 
 
-@pytest.mark.parametrize("cat", ["surface", "boundary", "tidal"])
+def test_boundary_bgc_add_and_remove_buttons_always_present(editor):
+    """The "boundary_bgc" row-list (the only boundary row-list now -- physics is a required
+    scalar, see __init__) keeps its add/remove buttons regardless of row count,
+    like every other bgc row-list ("ic_bgc").
+    """
+    assert editor._rows["boundary_bgc"] == []
+    editor._render("boundary_bgc")
+    assert any(
+        getattr(c, "description", "") == "add bgc source"
+        for c in editor._containers["boundary_bgc"].children
+    )
+
+    editor._add("boundary_bgc")
+    assert len(editor._rows["boundary_bgc"]) == 1
+    remove_btn = editor._rows["boundary_bgc"][0]["_remove_btn"]
+    assert remove_btn.layout.display == ""
+    assert any(
+        getattr(c, "description", "") == "add bgc source"
+        for c in editor._containers["boundary_bgc"].children
+    )
+
+
+@pytest.mark.parametrize("cat", ["surface", "tidal"])
 def test_regrid_widgets_present_and_gathered(editor, cat):
     """prefill/regrid_method/extrap_method dropdowns (roms-tools >=4) are built for
     surface, boundary, and tidal rows alike, and a non-blank selection round-trips
@@ -198,6 +374,450 @@ def test_ic_regrid_widgets_seed_gather_and_layout():
     assert ed.ic_prefill in all_children
     assert ed.ic_regrid_method in all_children
     assert ed.ic_extrap_method in all_children
+
+
+def test_boundary_regrid_widgets_seed_gather_and_layout():
+    """Boundary's prefill/regrid_method/extrap_method dropdowns (a scalar group,
+    mirroring IC's -- see __init__/gather()) seed from a loaded config, gather
+    back into the authored dict, and are actually placed in the rendered widget.
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "forcing": {
+                "boundary": {
+                    "source": {"name": "GLORYS"},
+                    "prefill": "nearest_neighbor",
+                    "regrid_method": "scipy",
+                }
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.boundary_prefill.value == "nearest_neighbor"
+    assert ed.boundary_regrid_method.value == "scipy"
+    assert ed.boundary_extrap_method.value == ""
+
+    ed.boundary_extrap_method.value = "nearest_s2d"
+    gathered = ed.gather()
+    boundary = gathered["forcing"]["boundary"]
+    assert boundary["prefill"] == "nearest_neighbor"
+    assert boundary["regrid_method"] == "scipy"
+    assert boundary["extrap_method"] == "nearest_s2d"
+
+    all_children = []
+
+    def _walk(node):
+        all_children.append(node)
+        for c in getattr(node, "children", []):
+            _walk(c)
+
+    _walk(ed.widget)
+    assert ed.boundary_prefill in all_children
+    assert ed.boundary_regrid_method in all_children
+    assert ed.boundary_extrap_method in all_children
+
+
+def test_ic_bypass_validation_round_trips_through_editor():
+    """Item 7: the "validate" checkbox is checked (validation on) by default;
+    unchecking it must round-trip as ``bypass_validation: True`` and reload
+    still unchecked.
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bypass_validation": True,
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.ic_validate.value is False
+    gathered = ed.gather()
+    assert gathered["initial_conditions"]["bypass_validation"] is True
+
+    ed2 = _ForcingEditor(W, gathered, on_change=lambda: None)
+    assert ed2.ic_validate.value is False
+
+
+def test_boundary_bypass_validation_round_trips_through_editor():
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "forcing": {
+                "boundary": {
+                    "source": {"name": "GLORYS"},
+                    "bypass_validation": True,
+                }
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.boundary_validate.value is False
+    gathered = ed.gather()
+    assert gathered["forcing"]["boundary"]["bypass_validation"] is True
+
+    ed2 = _ForcingEditor(W, gathered, on_change=lambda: None)
+    assert ed2.boundary_validate.value is False
+
+
+def test_remove_middle_row_preserves_order(editor):
+    """Nit: removing a middle row must not reorder or drop its neighbors."""
+    for name in ("UNIFIED", "GLODAP", "WOA_BGC"):
+        editor._rows["ic_bgc"].append(
+            editor._make_row("ic_bgc", {"source": {"name": name}})
+        )
+    editor._render("ic_bgc")
+    assert len(editor._rows["ic_bgc"]) == 3
+
+    editor._remove("ic_bgc", editor._rows["ic_bgc"][1])
+
+    gathered = editor.gather()
+    assert [
+        b["source"]["name"] for b in gathered["initial_conditions"]["bgc_sources"]
+    ] == ["UNIFIED", "WOA_BGC"]
+
+
+# ===========================================================================
+# F1: a surface bgc row must never offer/emit `use_vars`/`constants`/`esper_*`
+# (SurfaceForcingItem has no `use_vars` field at all, and BgcSurfaceSource
+# never offers "constants"/"ESPER").
+# ===========================================================================
+
+
+def test_surface_bgc_row_never_gets_use_vars_or_bgc_source_widgets(editor):
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "UNIFIED"}})
+    assert "use_vars" not in w
+    assert "constants" not in w
+    assert "esper_method" not in w
+    assert "esper_equation" not in w
+
+
+def test_surface_bgc_row_gathers_a_validating_surface_forcing_item(editor):
+    """A surface bgc row (even with use_vars unavailable to type into) must
+    still gather to a dict that validates as ``SurfaceForcingItem`` --
+    ``use_vars`` is not part of that schema (``extra='forbid'``), so it must
+    never be emitted for a surface row the way it correctly is for ic_bgc/
+    boundary_bgc rows.
+    """
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "UNIFIED"}})
+    item = editor._gather_item("surface", w)
+    assert "use_vars" not in item
+    SurfaceForcingItem(**item)
+
+
+# ===========================================================================
+# F2: constants/esper_method/esper_equation/per-row bgc_interpolation_method
+# must never leak from a hidden widget after the row's source name switches
+# away from the source they belong to; a 'constants' source takes no `path`.
+# ===========================================================================
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_stale_constants_not_emitted_after_switch_to_static_source(editor, cat):
+    w = editor._make_row(
+        cat, {"source": {"name": "constants", "constants": {"Fe": 0.003}}}
+    )
+    assert editor._gather_item(cat, w)["source"]["constants"] == {"Fe": 0.003}
+
+    w["name"].value = "UNIFIED"
+    editor._apply_row_visibility(w)
+    item = editor._gather_item(cat, w)
+    assert "constants" not in item["source"]
+    BgcSourceItem(**item)
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_stale_esper_fields_not_emitted_after_switch_to_static_source(editor, cat):
+    w = editor._make_row(
+        cat,
+        {"source": {"name": "ESPER", "esper_method": "lir", "esper_equation": 16}},
+    )
+    item = editor._gather_item(cat, w)
+    assert item["source"]["esper_method"] == "lir"
+    assert item["source"]["esper_equation"] == 16
+
+    w["name"].value = "GLODAP"
+    editor._apply_row_visibility(w)
+    item = editor._gather_item(cat, w)
+    assert "esper_method" not in item["source"]
+    assert "esper_equation" not in item["source"]
+    BgcSourceItem(**item)
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_path_hidden_and_not_emitted_for_constants_source(editor, cat):
+    w = editor._make_row(cat, {"source": {"name": "UNIFIED", "path": "/x/y.nc"}})
+    assert _display(w["path"]) == ""
+    assert editor._gather_item(cat, w)["source"]["path"] == "/x/y.nc"
+
+    w["name"].value = "constants"
+    editor._apply_row_visibility(w)
+    assert _display(w["path"]) == "none"
+    w["constants"].value = "Fe=0.003"
+    item = editor._gather_item(cat, w)
+    assert "path" not in item["source"]
+    BgcSourceItem(**item)
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_stale_per_row_interp_not_emitted_for_derived_bgc_sources(editor, cat):
+    """constants/ESPER are derived/inline, not a regridded dataset -- a per-row
+    ``bgc_interpolation_method`` left over from a previously selected dataset-
+    backed source must not leak through once the row switches to one of them.
+    """
+    w = editor._make_row(
+        cat, {"source": {"name": "UNIFIED"}, "bgc_interpolation_method": "density"}
+    )
+    assert editor._gather_item(cat, w)["bgc_interpolation_method"] == "density"
+
+    w["name"].value = "constants"
+    w["constants"].value = "Fe=0.003"
+    editor._apply_row_visibility(w)
+    item = editor._gather_item(cat, w)
+    assert "bgc_interpolation_method" not in item
+    BgcSourceItem(**item)
+
+
+# ===========================================================================
+# F4: a pre-v8 ("old-shaped") ForcingSpec dict must migrate cleanly instead of
+# crashing ``_ForcingEditor.__init__`` or silently dropping data.
+# ===========================================================================
+
+
+def test_forcing_editor_migrates_singular_ic_bgc_source():
+    import ipywidgets as W
+
+    old_shaped = {
+        "initial_conditions": {
+            "source": {"name": "GLORYS"},
+            "bgc_source": {"name": "UNIFIED"},
+        },
+        "forcing": {},
+    }
+    ed = _ForcingEditor(W, old_shaped, on_change=lambda: None)
+    assert len(ed._rows["ic_bgc"]) == 1
+    assert ed._rows["ic_bgc"][0]["name"].value == "UNIFIED"
+    gathered = ed.gather()
+    assert gathered["initial_conditions"]["bgc_sources"] == [
+        {"source": {"name": "UNIFIED"}}
+    ]
+    # migration deep-copies before mutating -- the caller's dict is untouched
+    assert old_shaped["initial_conditions"]["bgc_source"] == {"name": "UNIFIED"}
+    assert "bgc_sources" not in old_shaped["initial_conditions"]
+
+
+def test_forcing_editor_migrates_list_shaped_boundary():
+    import ipywidgets as W
+
+    old_shaped = {
+        "initial_conditions": {"source": {"name": "GLORYS"}},
+        "forcing": {
+            "boundary": [
+                {"type": "physics", "source": {"name": "GLORYS"}},
+                {"type": "bgc", "source": {"name": "UNIFIED"}, "use_vars": ["ALK"]},
+            ]
+        },
+    }
+    ed = _ForcingEditor(W, old_shaped, on_change=lambda: None)
+    assert ed.boundary_name.value == "GLORYS"
+    assert len(ed._rows["boundary_bgc"]) == 1
+    gathered = ed.gather()
+    boundary = gathered["forcing"]["boundary"]
+    assert boundary["source"] == {"name": "GLORYS"}
+    assert boundary["bgc_sources"] == [
+        {"source": {"name": "UNIFIED"}, "use_vars": ["ALK"]}
+    ]
+    # migration deep-copies before mutating -- the caller's dict is untouched
+    assert isinstance(old_shaped["forcing"]["boundary"], list)
+
+
+# ===========================================================================
+# F9: "(none)" boundary sentinel -- a non-child domain must be able to express
+# "no boundary forcing at all" (``Forcing.boundary is None``), mirroring the
+# existing IC "(none)" sentinel.
+# ===========================================================================
+
+
+def test_boundary_none_option_present_in_dropdown(editor):
+    assert _BOUNDARY_NONE in editor.boundary_name.options
+
+
+def test_boundary_none_sentinel_gathers_null_boundary_and_hides_widgets(editor):
+    editor.boundary_name.value = _BOUNDARY_NONE
+    gathered = editor.gather()
+    assert gathered["forcing"]["boundary"] is None
+    assert _display(editor.boundary_path) == "none"
+    assert _display(editor.boundary_bgc_interp) == "none"
+    assert _display(editor._containers["boundary_bgc"]) == "none"
+
+    # switching back to a real source restores both the gathered dict and the
+    # widgets' visibility
+    editor.boundary_name.value = "GLORYS"
+    gathered2 = editor.gather()
+    assert gathered2["forcing"]["boundary"]["source"]["name"] == "GLORYS"
+    assert _display(editor.boundary_path) == ""
+    assert _display(editor._containers["boundary_bgc"]) == ""
+
+
+def test_boundary_none_sentinel_preserves_boundary_bgc_rows_across_switch(editor):
+    """Rows are hidden, not destroyed -- switching "(none)" on and back off must
+    not lose whatever boundary_bgc rows were already configured.
+    """
+    editor._rows["boundary_bgc"] = [
+        editor._make_row("boundary_bgc", {"source": {"name": "UNIFIED"}})
+    ]
+    editor._render("boundary_bgc")
+
+    editor.boundary_name.value = _BOUNDARY_NONE
+    assert len(editor._rows["boundary_bgc"]) == 1
+
+    editor.boundary_name.value = "GLORYS"
+    gathered = editor.gather()
+    assert gathered["forcing"]["boundary"]["bgc_sources"] == [
+        {"source": {"name": "UNIFIED"}}
+    ]
+
+
+def test_boundary_none_seeded_from_explicit_null_forcing_input():
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "initial_conditions": {"source": {"name": "GLORYS"}},
+            "forcing": {"boundary": None},
+        },
+        on_change=lambda: None,
+    )
+    assert ed.boundary_name.value == _BOUNDARY_NONE
+    assert ed.gather()["forcing"]["boundary"] is None
+
+
+def test_sources_to_inputs_seeds_boundary_none_sentinel_for_missing_boundary():
+    """`_sources_to_inputs` must emit an explicit ``forcing["boundary"] = None``
+    (not merely omit the key) so a resolved config with no boundary forcing at
+    all reloads with the "(none)" sentinel selected, instead of falling back to
+    the fresh-wizard GLORYS default.
+    """
+    forcing = Forcing.model_validate(
+        {"initial_conditions": {"source": {"name": "GLORYS"}}, "boundary": None}
+    )
+    cfg = SimpleNamespace(forcing=forcing)
+    seed = ForgeBlueprintWizard._sources_to_inputs(cfg)
+    assert "boundary" in seed["forcing"]
+    assert seed["forcing"]["boundary"] is None
+
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, seed, on_change=lambda: None)
+    assert ed.boundary_name.value == _BOUNDARY_NONE
+    assert ed.gather()["forcing"]["boundary"] is None
+
+
+# ===========================================================================
+# F7: "Copy IC bgc -> Boundary" / "Copy Boundary bgc -> IC" must also copy the
+# section-level default BGC interpolation method, not just the rows -- a
+# copied row's blank (inherit-the-default) per-row bgc_interpolation_method
+# would otherwise silently change meaning if the two panels' defaults differ.
+# ===========================================================================
+
+
+def test_sync_ic_to_boundary_copies_default_interp_alongside_rows(editor):
+    editor.ic_bgc_interp.value = "density"
+    editor._rows["ic_bgc"] = [
+        editor._make_row(
+            "ic_bgc",
+            {
+                "source": {"name": "UNIFIED", "climatology": True},
+                "use_vars": ["ALK"],
+                "serialize_dask": True,
+            },
+        )
+    ]
+    editor._render("ic_bgc")
+
+    editor._sync_bgc("ic_bgc", "boundary_bgc")
+    gathered = editor.gather()
+    assert gathered["forcing"]["boundary"]["bgc_interpolation_method"] == "density"
+    assert (
+        gathered["forcing"]["boundary"]["bgc_sources"]
+        == gathered["initial_conditions"]["bgc_sources"]
+    )
+
+
+def test_sync_boundary_to_ic_copies_default_interp_alongside_rows(editor):
+    editor.boundary_bgc_interp.value = "density_mld"
+    editor._rows["boundary_bgc"] = [
+        editor._make_row("boundary_bgc", {"source": {"name": "GLODAP"}})
+    ]
+    editor._render("boundary_bgc")
+
+    editor._sync_bgc("boundary_bgc", "ic_bgc")
+    gathered = editor.gather()
+    assert gathered["initial_conditions"]["bgc_interpolation_method"] == "density_mld"
+    assert (
+        gathered["initial_conditions"]["bgc_sources"]
+        == gathered["forcing"]["boundary"]["bgc_sources"]
+    )
+
+
+# ===========================================================================
+# F5: `_sources_to_inputs`'s `bgc_section()`/`src()` now build on the generic
+# `plain()` helper instead of a hand-listed field set -- must still round-trip
+# every field losslessly.
+# ===========================================================================
+
+
+def test_sources_to_inputs_round_trips_ic_bgc_sources_losslessly():
+    forcing = Forcing.model_validate(
+        {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bgc_sources": [
+                    {
+                        "source": {"name": "UNIFIED", "climatology": True},
+                        "use_vars": ["ALK", "DIC"],
+                        "bgc_interpolation_method": "density",
+                    },
+                    {
+                        "source": {
+                            "name": "ESPER",
+                            "esper_method": "lir",
+                            "esper_equation": 16,
+                        },
+                        "use_vars": ["NO3"],
+                        "serialize_dask": True,
+                    },
+                    {
+                        "source": {
+                            "name": "constants",
+                            "constants": {"Fe": 0.003},
+                        },
+                        "use_vars": ["PO4"],
+                    },
+                ],
+                "bgc_interpolation_method": "density_mld",
+                "bypass_validation": True,
+            },
+            "boundary": None,
+        }
+    )
+    cfg = SimpleNamespace(forcing=forcing)
+    seed = ForgeBlueprintWizard._sources_to_inputs(cfg)
+
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, seed, on_change=lambda: None)
+    gathered = ed.gather()
+    assert gathered["initial_conditions"] == seed["initial_conditions"]
 
 
 def test_river_bgc_widgets_visible_only_when_include_bgc_checked(editor):
@@ -497,14 +1117,16 @@ def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
     wiz.end.value = date(2012, 1, 2)
 
     fe = wiz._forcing_editor
-    for cat in ("surface", "boundary"):
-        for ws in list(fe._rows[cat]):
-            if ws.get("type") is not None and ws["type"].value == "bgc":
-                fe._remove(cat, ws)
+    for ws in list(fe._rows["surface"]):
+        if ws.get("type") is not None and ws["type"].value == "bgc":
+            fe._remove("surface", ws)
+    for ws in list(fe._rows["boundary_bgc"]):
+        fe._remove("boundary_bgc", ws)
     for ws in list(fe._rows["river"]):
         if "include_bgc" in ws:
             ws["include_bgc"].value = False
-    fe.ic_bgc_name.value = ""
+    for ws in list(fe._rows["ic_bgc"]):
+        fe._remove("ic_bgc", ws)
 
     wiz.bgc_dd.value = "none"
     wiz._rebuild()

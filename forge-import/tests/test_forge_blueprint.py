@@ -437,6 +437,84 @@ def test_migrate_tolerates_missing_cdr_output_section():
     assert migrated["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
 
 
+def test_migrate_v5_ic_bgc_source_becomes_bgc_sources_list():
+    """v6 -> v7: a pre-v7 singular ``initial_conditions.bgc_source`` is
+    rewrapped as a one-item ``bgc_sources`` list; the old key is gone.
+    """
+    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+
+    data = {
+        "forge_blueprint_version": 5,
+        "forcing": {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bgc_source": {"name": "UNIFIED", "climatology": True},
+            }
+        },
+    }
+    migrated = migrate_forge_blueprint_data(data)
+    ic = migrated["forcing"]["initial_conditions"]
+    assert "bgc_source" not in ic
+    assert ic["bgc_sources"] == [{"source": {"name": "UNIFIED", "climatology": True}}]
+    assert migrated["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
+
+
+def test_migrate_v5_ic_bgc_source_none_becomes_empty_list():
+    """v6 -> v7: an absent/``None`` ``bgc_source`` becomes an empty list, not
+    a list containing ``None``.
+    """
+    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+
+    data = {
+        "forge_blueprint_version": 5,
+        "forcing": {
+            "initial_conditions": {"source": {"name": "GLORYS"}, "bgc_source": None}
+        },
+    }
+    migrated = migrate_forge_blueprint_data(data)
+    assert migrated["forcing"]["initial_conditions"]["bgc_sources"] == []
+
+
+def test_migrate_v5_ic_bgc_source_migration_is_idempotent():
+    """Already-current (bgc_sources-shaped) data passes through unchanged."""
+    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+
+    data = {
+        "forge_blueprint_version": 7,
+        "forcing": {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bgc_sources": [{"source": {"name": "UNIFIED"}}],
+            }
+        },
+    }
+    migrated = migrate_forge_blueprint_data(data)
+    assert migrated["forcing"]["initial_conditions"]["bgc_sources"] == [
+        {"source": {"name": "UNIFIED"}}
+    ]
+
+
+def test_migrate_v5_ic_bgc_source_and_bgc_sources_both_present_raises():
+    """Both the pre-v7 singular key and the v7+ list key in the same dict is an
+    inconsistent (likely hand-edited) shape -- must raise, not silently discard
+    `bgc_source`.
+    """
+    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+
+    data = {
+        "forge_blueprint_version": 5,
+        "forcing": {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bgc_source": {"name": "UNIFIED"},
+                "bgc_sources": [{"source": {"name": "GLODAP"}}],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="bgc_source.*bgc_sources"):
+        migrate_forge_blueprint_data(data)
+
+
 def test_migrate_v5_shaped_dict_loads_with_null_user_file_fields(tmp_path):
     """A v5 file (predating user-provided files) loads, migrates its version to
     current, and the new fields default to ``None`` -- purely additive, no data
@@ -1681,29 +1759,32 @@ def test_resolver_parent_grid_stored_and_is_child():
 
 
 def test_resolver_parent_grid_clears_boundary_forcing():
-    # the bundled glorys-era5-unified ForcingSpec carries boundary items --
+    # the bundled glorys-era5-unified ForcingSpec carries a boundary section --
     # a child grid (has a parent) must not generate boundary forcing (it
     # receives boundaries from the parent's nesting.nc extraction instead).
     fi = _CATALOG.forcing_data("glorys-era5-unified")
-    assert fi["forcing"]["boundary"]  # sanity: fixture actually has boundary items
+    assert fi["forcing"]["boundary"]  # sanity: fixture actually has a boundary section
     cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS)
-    assert cfg.forcing.boundary == []
+    assert cfg.forcing.boundary is None
     # open-boundary edge flags are untouched -- edges stay open, just fed by
     # nesting.nc instead of reanalysis boundary forcing.
     assert cfg.domain.open_boundaries.model_dump() == _BOUNDARIES
 
 
 def test_resolver_parent_grid_skips_boundary_only_dataset():
-    # Boundary items must be skipped entirely (not just cleared afterward) so a
+    # Boundary must be skipped entirely (not just cleared afterward) so a
     # boundary-only source never leaks into resolved_datasets/datasets -- e.g.
     # CESM_REGRIDDED here isn't used by surface/IC/tidal/river in this fixture,
     # so a stale post-hoc clear would still leave it in cfg.datasets.
     import copy
 
     fi = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
-    fi["forcing"]["boundary"] = [{"source": {"name": "CESM_REGRIDDED"}, "type": "bgc"}]
+    fi["forcing"]["boundary"] = {
+        "source": {"name": "GLORYS"},
+        "bgc_sources": [{"source": {"name": "CESM_REGRIDDED"}}],
+    }
     cfg = _build(grid_kwargs_parent=_PARENT_GRID_KWARGS, forcing_inputs=fi)
-    assert cfg.forcing.boundary == []
+    assert cfg.forcing.boundary is None
     assert "CESM_REGRIDDED" not in cfg.datasets
     assert "CESM_REGRIDDED" not in cfg.forcing.resolved_datasets
 
@@ -1726,7 +1807,8 @@ def test_resolver_child_grid_is_parent_and_keeps_boundary_forcing():
     )
     assert cfg.domain.is_parent is True
     assert cfg.domain.is_child is False
-    assert cfg.forcing.boundary  # a parent-only grid keeps its own boundary forcing
+    # a parent-only grid keeps its own boundary forcing
+    assert cfg.forcing.boundary is not None
 
 
 def test_resolver_parent_grid_skips_initial_conditions():
@@ -1798,6 +1880,72 @@ def test_resolver_threads_river_bgc_source_and_climatology():
     assert "RIVR2O" in cfg.datasets
     assert "RIVR2O" in cfg.forcing.resolved_datasets
     assert "CONSTANTS" not in cfg.datasets
+
+
+def test_resolver_ic_bgc_esper_source_excluded_from_datasets():
+    """Regression: an ESPER-named IC-BGC source (SourceSpec.name == "ESPER") is
+    derived from physics T/S via PyESPER at generation time -- Forge has no
+    SourceData handler for it and never will, so it must never land in
+    datasets/resolved_datasets (see DERIVED_BGC_SOURCES in source_registry.py);
+    doing so previously raised "Unknown dataset(s) requested: ESPER" downstream
+    in SourceData.__post_init__.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["initial_conditions"]["bgc_sources"] = [
+        {"source": {"name": "ESPER", "path": "/tmp/PyESPER"}}
+    ]
+
+    cfg = _build(forcing_inputs=fdata)
+
+    assert cfg.forcing.initial_conditions.bgc_sources[0].source.name == "ESPER"
+    assert "ESPER" not in cfg.datasets
+    assert "ESPER" not in cfg.forcing.resolved_datasets
+
+
+def test_resolver_boundary_bgc_esper_source_excluded_from_datasets():
+    """Same regression as above, for an ESPER-named boundary bgc source."""
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {
+        "name": "ESPER",
+        "path": "/tmp/PyESPER",
+    }
+
+    cfg = _build(forcing_inputs=fdata)
+
+    assert cfg.forcing.boundary.bgc_sources[-1].source.name == "ESPER"
+    assert "ESPER" not in cfg.datasets
+    assert "ESPER" not in cfg.forcing.resolved_datasets
+
+
+def test_resolver_ic_bgc_constants_source_excluded_from_datasets():
+    """Same regression, via the generic IC-BGC path (not the river bgc_source path
+    already covered by test_resolver_threads_river_bgc_source_and_climatology) --
+    a "constants"-named source must not land in datasets either.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["initial_conditions"]["bgc_sources"] = [
+        {"source": {"name": "constants", "constants": {"Fe": 3.0e-3}}}
+    ]
+
+    cfg = _build(forcing_inputs=fdata)
+
+    assert cfg.forcing.initial_conditions.bgc_sources[0].source.constants == {
+        "Fe": 3.0e-3
+    }
+    assert "CONSTANTS" not in cfg.datasets
+    assert "CONSTANTS" not in cfg.forcing.resolved_datasets
 
 
 def test_resolver_topography_source_emod_lands_in_datasets():
@@ -2025,7 +2173,7 @@ def test_regrid_options_survive_wizard_load_back():
 
 
 def test_forcing_override_coerces_enums_to_strings():
-    """Regression: enum-typed item fields (SurfaceType, BoundaryType, BgcInterpMethod,
+    """Regression: enum-typed item fields (SurfaceType, BgcInterpMethod,
     ClimatologyMode, …) must be dumped as plain strings, not enum instances. Enum
     instances leaked into output filenames (f"{key}-{type}") and into roms-tools'
     SafeDumper (→ 'cannot represent an object'). The bridge dumps with mode="json".
@@ -2613,6 +2761,34 @@ def test_rst_period_not_divisible_accepted_with_rst_writing_off():
     assert cfg.model_settings["ocean_vars"]["output_period_rst"] == 150.0
 
 
+def test_bgc_source_item_serialize_dask_roundtrips():
+    """`serialize_dask` is a per-source write option, not a roms-tools source
+    parameter: it must survive a blueprint round-trip, default to None (inherit
+    the --serialize-dask-write CLI flag), and not loosen `extra="forbid"`.
+    """
+    from pydantic import ValidationError
+
+    from cstar_forge.forge.forge_blueprint import BgcSourceItem
+
+    item = BgcSourceItem(
+        source={"name": "ESPER"}, use_vars=["ALK", "DIC"], serialize_dask=True
+    )
+    assert item.serialize_dask is True
+    assert item.model_dump()["serialize_dask"] is True
+    assert BgcSourceItem(**item.model_dump()).serialize_dask is True
+
+    # Omitted means "inherit", which must stay distinguishable from an explicit
+    # False -- the CLI flag can only take over when the source said nothing.
+    assert BgcSourceItem(source={"name": "ESPER"}).serialize_dask is None
+    assert (
+        BgcSourceItem(source={"name": "ESPER"}, serialize_dask=False).serialize_dask
+        is False
+    )
+
+    with pytest.raises(ValidationError):
+        BgcSourceItem(source={"name": "ESPER"}, serialize_dsk=True)
+
+
 class TestEnsureCdrOutputMarblDiagnostics:
     def test_none_input_returns_all_required(self):
         from cstar_forge.forge.namelist_model import (
@@ -2955,7 +3131,7 @@ def test_sources_resolved_from_modelspec():
     # dataset_key is no longer stored on SourceSpec — derive it when needed
     ic_src = s.initial_conditions.source
     assert resolve_dataset_key(ic_src.name, ic_src.glorys_layout) == "GLORYS_REGIONAL"
-    bgc_src = s.initial_conditions.bgc_source
+    bgc_src = s.initial_conditions.bgc_sources[0].source
     assert resolve_dataset_key(bgc_src.name, bgc_src.glorys_layout) == "UNIFIED_BGC"
     assert [i.source.name for i in s.surface] == ["ERA5", "UNIFIED", "MBL_co2", "WOA"]
     assert s.tidal[0].ntides == 15
@@ -3020,6 +3196,224 @@ def test_committed_example_validates():
     cfg = ForgeBlueprint.from_yaml(example)
     assert cfg.composition.model.name == "cson_roms-marbl_v0.1"
     assert cfg.composition.model.origin == "catalog"
+
+
+# ---------------------------------------------------------------------------
+# Multiple bgc_sources: use_vars partitioning is required and enforced disjoint
+# on both InitialConditions and BoundaryForcing (_require_partitioned_bgc_use_vars).
+# ---------------------------------------------------------------------------
+class TestBgcSourcesUseVarsPartitioning:
+    def _two_sources(self, use_vars=(None, None)):
+        from cstar_forge.forge.forge_blueprint import BgcSourceItem
+
+        return [
+            BgcSourceItem(source={"name": "UNIFIED"}, use_vars=use_vars[0]),
+            BgcSourceItem(source={"name": "GLODAP"}, use_vars=use_vars[1]),
+        ]
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_single_bgc_source_needs_no_use_vars(self, section_cls_name):
+        """Control: a single bgc source is never ambiguous, so use_vars stays
+        optional -- the shipped blueprints all have exactly one.
+        """
+        from cstar_forge.forge import forge_blueprint as fb
+
+        cls = getattr(fb, section_cls_name)
+        section = cls(
+            source={"name": "GLORYS"},
+            bgc_sources=[fb.BgcSourceItem(source={"name": "UNIFIED"})],
+        )
+        assert section.bgc_sources[0].use_vars is None
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_multiple_bgc_sources_require_use_vars_on_every_item(
+        self, section_cls_name
+    ):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        cls = getattr(fb, section_cls_name)
+        with pytest.raises(ValueError, match="partition with use_vars"):
+            cls(
+                source={"name": "GLORYS"},
+                bgc_sources=self._two_sources(use_vars=(["ALK"], None)),
+            )
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_multiple_bgc_sources_reject_overlapping_use_vars(self, section_cls_name):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        cls = getattr(fb, section_cls_name)
+        with pytest.raises(ValueError, match="partition with use_vars"):
+            cls(
+                source={"name": "GLORYS"},
+                bgc_sources=self._two_sources(use_vars=(["ALK", "DIC"], ["DIC"])),
+            )
+
+    @pytest.mark.parametrize(
+        "section_cls_name", ["InitialConditions", "BoundaryForcing"]
+    )
+    def test_multiple_bgc_sources_accept_disjoint_use_vars(self, section_cls_name):
+        from cstar_forge.forge import forge_blueprint as fb
+
+        cls = getattr(fb, section_cls_name)
+        section = cls(
+            source={"name": "GLORYS"},
+            bgc_sources=self._two_sources(use_vars=(["ALK", "DIC"], ["NO3"])),
+        )
+        assert [bs.use_vars for bs in section.bgc_sources] == [["ALK", "DIC"], ["NO3"]]
+
+    def test_shipped_blueprints_have_single_bgc_source_and_still_validate(self):
+        """The new validator must not break any file already in the repo -- every
+        shipped blueprint has exactly one bgc source per section.
+        """
+        for p in _shipped_blueprint_paths():
+            cfg = ForgeBlueprint.from_yaml(p)
+            for section in (cfg.forcing.initial_conditions, cfg.forcing.boundary):
+                if section is not None:
+                    assert len(section.bgc_sources) <= 1, (
+                        f"{p} has multiple bgc_sources -- the validator matrix "
+                        "above should gain a case for this instead of relying "
+                        "on this assumption"
+                    )
+
+
+# ---------------------------------------------------------------------------
+# migrate_forcing_inputs hardening: warn on dropped per-item bgc keys, raise on
+# a non-dict boundary entry (silent data loss before), and a direct test of the
+# shared function on a ForcingSpec-shaped (ic + forcing siblings) pair.
+# ---------------------------------------------------------------------------
+class TestMigrateForcingInputsHardening:
+    def test_dropped_bgc_item_keys_warn_with_index_and_source_name(self):
+        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+
+        forcing = {
+            "boundary": [
+                {"type": "physics", "source": {"name": "GLORYS"}},
+                {
+                    "type": "bgc",
+                    "source": {"name": "UNIFIED"},
+                    "regrid_method": "nearest",  # not on BgcSourceItem -- dropped
+                },
+            ]
+        }
+        with pytest.warns(
+            UserWarning, match=r"forcing\.boundary\[1\].*UNIFIED.*regrid_method"
+        ):
+            migrate_forcing_inputs(None, forcing)
+        assert forcing["boundary"]["bgc_sources"] == [{"source": {"name": "UNIFIED"}}]
+
+    def test_no_warning_when_no_extra_keys_dropped(self):
+        import warnings
+
+        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+
+        forcing = {
+            "boundary": [
+                {"type": "physics", "source": {"name": "GLORYS"}},
+                {"type": "bgc", "source": {"name": "UNIFIED"}, "use_vars": None},
+            ]
+        }
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            migrate_forcing_inputs(None, forcing)
+        assert not w
+
+    def test_non_dict_boundary_entry_raises(self):
+        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+
+        with pytest.raises(ValueError, match="non-dict entr"):
+            migrate_forcing_inputs(
+                None,
+                {"boundary": [{"type": "physics", "source": {"name": "GLORYS"}}, None]},
+            )
+
+    def test_all_non_dict_boundary_list_raises_not_silently_none(self):
+        """Previously an all-non-dict list silently became `None` (boundary
+        forcing quietly vanishing); it must now raise instead.
+        """
+        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+
+        with pytest.raises(ValueError, match="non-dict entr"):
+            migrate_forcing_inputs(None, {"boundary": [None, "not-a-dict"]})
+
+    def test_direct_call_on_forcingspec_shaped_pair(self):
+        """A catalog ``Forcing.yaml`` keeps ``initial_conditions`` and
+        ``forcing`` as top-level siblings (not nested under one ``forcing``
+        dict, unlike a full ForgeBlueprint) -- migrate_forcing_inputs must
+        accept exactly that shape, since it's the wizard's ForcingSpec loader's
+        real call signature.
+        """
+        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+
+        ic = {"bgc_source": {"name": "UNIFIED"}}
+        forcing = {
+            "boundary": [
+                {"type": "physics", "source": {"name": "GLORYS"}},
+                {"type": "bgc", "source": {"name": "UNIFIED"}},
+            ]
+        }
+        migrate_forcing_inputs(ic, forcing)
+        assert ic["bgc_sources"] == [{"source": {"name": "UNIFIED"}}]
+        assert forcing["boundary"]["source"] == {"name": "GLORYS"}
+        assert forcing["boundary"]["bgc_sources"] == [{"source": {"name": "UNIFIED"}}]
+
+    def test_already_migrated_pair_is_a_no_op(self):
+        import copy
+
+        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+
+        ic = {"bgc_sources": [{"source": {"name": "UNIFIED"}}]}
+        forcing = {"boundary": {"source": {"name": "GLORYS"}, "bgc_sources": []}}
+        ic_before, forcing_before = copy.deepcopy(ic), copy.deepcopy(forcing)
+        migrate_forcing_inputs(ic, forcing)
+        assert ic == ic_before
+        assert forcing == forcing_before
+
+
+# ---------------------------------------------------------------------------
+# Shipped-blueprint hygiene: every checked-in blueprint must be current version,
+# hash-consistent with its own content, and load with no warnings.
+# ---------------------------------------------------------------------------
+def _shipped_blueprint_paths() -> list[Path]:
+    pkg_root = Path(cstar_forge.__file__).parent
+    repo_root = pkg_root.parent
+    paths = sorted((pkg_root / "catalog" / "blueprints").glob("*.forge_blueprint.yaml"))
+    example = repo_root / "docs" / "forge-blueprint-example.wio-toy.yaml"
+    if example.exists():
+        paths.append(example)
+    return paths
+
+
+@pytest.mark.parametrize("path", _shipped_blueprint_paths(), ids=lambda p: p.name)
+def test_shipped_blueprint_hygiene(path):
+    import warnings
+
+    raw = yaml.safe_load(path.read_text())
+    assert raw.get("forge_blueprint_version") == FORGE_BLUEPRINT_VERSION, (
+        f"{path} is stamped forge_blueprint_version={raw.get('forge_blueprint_version')!r}, "
+        f"expected {FORGE_BLUEPRINT_VERSION!r} -- restamp it (see B1's restamp recipe)."
+    )
+    stored_hash = raw.get("provenance", {}).get("content_hash")
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        cfg = ForgeBlueprint.from_yaml(path)
+    assert not w, (
+        f"{path} emits warning(s) on load: {[str(x.message) for x in w]} -- a "
+        "shipped blueprint should already be in current, warning-free shape."
+    )
+
+    assert stored_hash == cfg.content_hash(), (
+        f"{path}'s stored provenance.content_hash is stale -- restamp it (see "
+        "B1's restamp recipe: rewrite the content_hash: line with "
+        "ForgeBlueprint.from_yaml(p).content_hash())."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3203,6 +3597,33 @@ class TestProvenanceStamping:
         assert back.provenance.roms_tools_version == "pinned"
         # fields left unset are still stamped as normal
         assert back.provenance.forge_version == "abc1234"
+
+
+class _ReadOnlyValueGuard:
+    """Wraps a widget so a bare ``.value = ...`` raises ``TraitError``, the way a
+    read-only ``value`` trait would -- while ``.set_trait("value", ...)`` (the
+    sanctioned traitlets escape hatch) and plain reads still work.
+
+    ``FileUpload.value`` is read-only in some installed ipywidgets versions (e.g.
+    7.x -- confirmed via ``ipywidgets.FileUpload.value.read_only`` there) but not
+    others (e.g. this repo's dev env, ipywidgets>=8), so a bug in code that does
+    `widget.value = ...` directly can pass every test here yet crash for a real
+    user on a different ipywidgets version. This wrapper reproduces that failure
+    mode regardless of which version happens to be installed for the test run.
+    """
+
+    def __init__(self, widget):
+        object.__setattr__(self, "_widget", widget)
+
+    def __getattr__(self, name):
+        return getattr(self._widget, name)
+
+    def __setattr__(self, name, value):
+        if name == "value":
+            from traitlets import TraitError
+
+            raise TraitError('The "value" trait is read-only.')
+        setattr(self._widget, name, value)
 
 
 # ---------------------------------------------------------------------------
@@ -3912,6 +4333,150 @@ class TestForgeBlueprintWizard:
         assert w2.config.composition.forcing.origin == "catalog"
         assert w2.config.composition.forcing.modified is True
 
+    def test_ic_bgc_multi_source_round_trips_through_load(self, tmp_path):
+        """Two (or more) IC-BGC rows -- different sources, each with its own
+        use_vars down-select -- must gather -> resolve -> reload with both rows
+        (and their use_vars) intact, both into `config.forcing` and back into a
+        freshly-loaded wizard's own IC-BGC rows.
+        """
+        w1 = self._wizard()
+        if "glorys-era5-unified" in w1.forcing_dd.options:
+            w1.forcing_dd.value = "glorys-era5-unified"
+        fe = w1._forcing_editor
+        for ws in list(fe._rows["ic_bgc"]):
+            fe._remove("ic_bgc", ws)
+        fe._add("ic_bgc")
+        row1 = fe._rows["ic_bgc"][-1]
+        row1["name"].value = "UNIFIED"
+        row1["use_vars"].value = "ALK, DIC"
+        fe._add("ic_bgc")
+        row2 = fe._rows["ic_bgc"][-1]
+        row2["name"].value = "GLODAP"
+        row2["use_vars"].value = "PO4, NO3"
+
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        assert [
+            bs.source.name for bs in w1.config.forcing.initial_conditions.bgc_sources
+        ] == [
+            "UNIFIED",
+            "GLODAP",
+        ]
+
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        bgc_sources = w2.config.forcing.initial_conditions.bgc_sources
+        assert [bs.source.name for bs in bgc_sources] == ["UNIFIED", "GLODAP"]
+        assert bgc_sources[0].use_vars == ["ALK", "DIC"]
+        assert bgc_sources[1].use_vars == ["PO4", "NO3"]
+        # the reloaded wizard's own IC-BGC rows reflect the same, so re-editing and
+        # re-gathering round-trips too (not just the one-shot load).
+        fe2 = w2._forcing_editor
+        assert [r["name"].value for r in fe2._rows["ic_bgc"]] == ["UNIFIED", "GLODAP"]
+        assert fe2._rows["ic_bgc"][0]["use_vars"].value == "ALK, DIC"
+        assert fe2._rows["ic_bgc"][1]["use_vars"].value == "PO4, NO3"
+
+    def test_boundary_bgc_use_vars_round_trips_through_load(self, tmp_path):
+        """A boundary type='bgc' row's use_vars down-select must survive save/load.
+
+        "boundary_bgc" is its own row-list/pane now (mirroring "ic_bgc"), split out
+        of "boundary" (physics-only, no per-row type widget anymore) -- see
+        _ROW_CATEGORIES/_make_row. Every row seeded there is implicitly bgc-type.
+        """
+        w1 = self._wizard()
+        if "glorys-era5-unified" in w1.forcing_dd.options:
+            w1.forcing_dd.value = "glorys-era5-unified"
+        fe = w1._forcing_editor
+        bgc_rows = fe._rows["boundary_bgc"]
+        assert bgc_rows, "expected a bgc boundary row in the bundled ForcingSpec"
+        bgc_rows[0]["use_vars"].value = "ALK, DIC, NO3"
+
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        bgc_items = w2.config.forcing.boundary.bgc_sources
+        assert bgc_items and bgc_items[0].use_vars == ["ALK", "DIC", "NO3"]
+
+    def test_ic_bgc_constants_source_round_trips_through_load(self, tmp_path):
+        """A `name="constants"` IC-BGC row's constants mapping must survive save/load."""
+        w1 = self._wizard()
+        if "glorys-era5-unified" in w1.forcing_dd.options:
+            w1.forcing_dd.value = "glorys-era5-unified"
+        fe = w1._forcing_editor
+        for ws in list(fe._rows["ic_bgc"]):
+            fe._remove("ic_bgc", ws)
+        fe._add("ic_bgc")
+        row = fe._rows["ic_bgc"][-1]
+        row["name"].value = "constants"
+        row["constants"].value = "Fe=3.0e-3, ALK=2300"
+
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        assert w1.config.forcing.initial_conditions.bgc_sources[0].source.constants == {
+            "Fe": 3.0e-3,
+            "ALK": 2300.0,
+        }
+
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        bgc_sources = w2.config.forcing.initial_conditions.bgc_sources
+        assert bgc_sources[0].source.name == "constants"
+        assert bgc_sources[0].source.constants == {"Fe": 3.0e-3, "ALK": 2300.0}
+        from cstar_forge.forge_blueprint_wizard import _parse_constants
+
+        fe2 = w2._forcing_editor
+        assert _parse_constants(fe2._rows["ic_bgc"][0]["constants"].value) == {
+            "Fe": 3.0e-3,
+            "ALK": 2300.0,
+        }
+
+    def test_ic_bgc_esper_source_round_trips_through_load(self, tmp_path):
+        """A `name="ESPER"` IC-BGC row's esper_method/esper_equation must survive
+        save/load (and its otherwise-required path).
+        """
+        w1 = self._wizard()
+        if "glorys-era5-unified" in w1.forcing_dd.options:
+            w1.forcing_dd.value = "glorys-era5-unified"
+        fe = w1._forcing_editor
+        for ws in list(fe._rows["ic_bgc"]):
+            fe._remove("ic_bgc", ws)
+        fe._add("ic_bgc")
+        row = fe._rows["ic_bgc"][-1]
+        row["name"].value = "ESPER"
+        row["path"].value = "/data/PyESPER"
+        row["esper_method"].value = "mixed"
+        row["esper_equation"].value = "16"
+
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+        esper_src = w1.config.forcing.initial_conditions.bgc_sources[0].source
+        assert esper_src.esper_method == "mixed"
+        assert esper_src.esper_equation == 16
+
+        w2 = self._wizard()
+        w2.load_path.value = str(p)
+        w2._on_load_path(None)
+        bgc_sources = w2.config.forcing.initial_conditions.bgc_sources
+        assert bgc_sources[0].source.name == "ESPER"
+        assert bgc_sources[0].source.esper_method == "mixed"
+        assert bgc_sources[0].source.esper_equation == 16
+        fe2 = w2._forcing_editor
+        assert fe2._rows["ic_bgc"][0]["esper_method"].value == "mixed"
+        assert fe2._rows["ic_bgc"][0]["esper_equation"].value == "16"
+
     def test_nest_from_domain_dropdown_prefills_child(self):
         w = self._wizard()
         if "gulf-guinea-toy" not in w._dd_values(w.nest_domain_dd):
@@ -3978,7 +4543,7 @@ class TestForgeBlueprintWizard:
 
     def test_parent_ui_stores_grid_kwargs_parent_and_clears_boundary_forcing(self):
         w = self._wizard()
-        assert w.config.forcing.boundary  # sanity: default forcing has boundary items
+        assert w.config.forcing.boundary is not None  # sanity: default forcing has one
         w.parent_enable.value = True
         w.parent_w["N"].value = 25
         cfg = w.config
@@ -3986,7 +4551,7 @@ class TestForgeBlueprintWizard:
         assert cfg.domain.grid_kwargs_parent["N"] == 25
         assert cfg.domain.is_child is True
         assert cfg.domain.is_parent is False
-        assert cfg.forcing.boundary == []
+        assert cfg.forcing.boundary is None
         # open-boundary edge flags (obc_*) are untouched -- edges stay open, fed
         # by the parent's nesting.nc extraction instead of reanalysis forcing.
         assert cfg.domain.open_boundaries.model_dump() == {
@@ -4007,7 +4572,7 @@ class TestForgeBlueprintWizard:
         assert w2.parent_enable.value is True
         assert w2.parent_w["N"].value == 30
         assert w2.config.domain.is_child is True
-        assert w2.config.forcing.boundary == []
+        assert w2.config.forcing.boundary is None
 
     def test_parent_toggle_clears_ic_and_reselecting_source_restores_it(self):
         """Enabling a parent defaults IC to "(none)" (mirrors boundary), but
@@ -4186,6 +4751,54 @@ class TestForgeBlueprintWizard:
         assert "color:#b00" in w.load_status.value
         w._load_bytes(b"not: [valid spec config")
         assert "color:#b00" in w.load_status.value
+
+    def test_cdr_clear_button_resets_upload_value_without_error(self):
+        """Regression: clicking the CDR 'clear' button used to do
+        `self.cdr_upload.value = ()` directly, which raises `TraitError` on an
+        ipywidgets version where `FileUpload.value` is read-only (real user report:
+        `TraitError: The "value" trait is read-only.` from `_on_cdr_clear`). Forced
+        via `_ReadOnlyValueGuard` so this is caught regardless of the installed
+        ipywidgets version's own read-only-ness (see class docstring).
+        """
+        wiz = self._wizard()
+        real_upload = wiz.cdr_upload
+        wiz.cdr_upload = _ReadOnlyValueGuard(real_upload)
+        try:
+            wiz._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
+            wiz._on_cdr_clear(None)  # must not raise TraitError
+        finally:
+            wiz.cdr_upload = real_upload
+        assert wiz._cdr_forcing is None
+        assert wiz.cdr_status.value == ""
+
+    def test_loading_blueprint_with_cdr_forcing_does_not_raise(self, tmp_path):
+        """Regression: loading a saved blueprint that has `cdr_forcing` set used to
+        crash in `_populate_from` for the same reason as the clear-button bug above
+        (`self.cdr_upload.value = ()` on a read-only trait) -- this is the exact
+        path the original bug report hit (`ForgeBlueprintWizard._on_load_path` ->
+        `_populate_from`, loading `.../ccs-4km_64procs.forge_blueprint.yaml`).
+        """
+        w1 = self._wizard()
+        w1.cdr_mode_dd.value = "yaml"
+        w1._cdr_forcing = {"releases": [{"lon": 1.0, "lat": 2.0}]}
+        w1._rebuild()
+        assert w1.config.cdr.cdr_forcing == w1._cdr_forcing
+
+        p = tmp_path / "forge_blueprint.yaml"
+        w1.save_path.value = str(p)
+        w1._boundaries_touched = True  # not exercising boundary derivation here
+        w1._on_save(None)
+
+        w2 = self._wizard()
+        real_upload = w2.cdr_upload
+        w2.cdr_upload = _ReadOnlyValueGuard(real_upload)
+        try:
+            w2.load_path.value = str(p)
+            w2._on_load_path(None)  # must not raise TraitError
+        finally:
+            w2.cdr_upload = real_upload
+        assert "color:#b00" not in w2.load_status.value
+        assert w2._cdr_forcing == w1._cdr_forcing
 
     def test_download_link_encodes_the_config(self):
         """The browser-download link (used by Voilà) carries the resolved YAML."""
@@ -4843,9 +5456,10 @@ class TestSaveModifiedSpecsToCatalog:
 
     def test_save_forcing_spec_marks_unmodified(self, isolated_catalog):
         wiz = self._wizard(isolated_catalog)
-        wiz._forcing_editor.ic_bgc_clim.value = (
-            not wiz._forcing_editor.ic_bgc_clim.value
-        )
+        # Toggle the climatology checkbox on the first IC-BGC row (the bundled
+        # "glorys-era5-unified" ForcingSpec seeds one -- UNIFIED, climatology=true).
+        ic_bgc_row = wiz._forcing_editor._rows["ic_bgc"][0]
+        ic_bgc_row["climatology"].value = not ic_bgc_row["climatology"].value
         wiz._on_forcing_change()
         assert wiz.config.composition.forcing.modified is True
 
@@ -4877,6 +5491,51 @@ class TestSaveModifiedSpecsToCatalog:
         assert wiz.config.composition.forcing.modified is False
         saved = isolated_catalog.forcing_data("child-no-ic-forcing")
         assert "initial_conditions" not in saved
+
+    def test_save_forcing_spec_preserves_per_source_serialize_dask(
+        self, isolated_catalog
+    ):
+        """A per-source `serialize_dask` must survive save -> reload.
+
+        The field is no longer wizard-editable -- PyESPER serialises its own
+        kernels, so the checkbox was removed -- but a blueprint that already sets
+        it must round-trip rather than be silently rewritten on an unrelated edit.
+        `_verify_spec_roundtrip` compares `content_hash()`, which covers all
+        results-affecting blueprint data, so a dropped field shows up here as a
+        failed round-trip. Seeded through the row's opaque carry, which is how
+        `_make_row` preserves it without a widget.
+        """
+        wiz = self._wizard(isolated_catalog)
+        rows = wiz._forcing_editor._rows["boundary_bgc"]
+        if not rows:
+            pytest.skip("bundled forcing spec has no boundary bgc source to flag")
+        row = rows[0]
+        row["name"].value = "ESPER"
+        row["_serialize_dask"] = True
+        wiz._rebuild()
+
+        bgc = wiz.config.forcing.boundary.bgc_sources
+        assert any(bs.serialize_dask for bs in bgc), (
+            "editor state did not reach the resolved blueprint"
+        )
+
+        wiz.save_forcing_name.value = "serialized-esper-forcing"
+        wiz._on_save_forcing(None)
+        # modified=False is the round-trip verdict: the saved spec reproduces the
+        # live config content-hash-exactly, serialize_dask included.
+        assert wiz.config.composition.forcing.modified is False
+
+        saved = isolated_catalog.forcing_data("serialized-esper-forcing")
+        saved_bgc = saved["forcing"]["boundary"]["bgc_sources"]
+        assert any(bs.get("serialize_dask") for bs in saved_bgc), (
+            f"serialize_dask missing from the written spec: {saved_bgc}"
+        )
+        wiz = self._wizard(isolated_catalog)
+
+        # And a fresh wizard picking that spec back up still carries it.
+        wiz2 = self._wizard(isolated_catalog)
+        wiz2.forcing_dd.value = "serialized-esper-forcing"
+        assert any(bs.serialize_dask for bs in wiz2.config.forcing.boundary.bgc_sources)
 
     def test_save_cdr_spec_marks_unmodified(self, isolated_catalog):
         """The CDR row in "Save modified specs to catalog": register_cdr from the

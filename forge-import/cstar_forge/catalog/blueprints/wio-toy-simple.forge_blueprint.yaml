@@ -5,7 +5,7 @@ application: forge
 state: notset
 schema_version: 1.0.0
 working_dir: ~/cstar/_forge_bp_runs/wio-toy-simple
-forge_blueprint_version: 7
+forge_blueprint_version: 8
 run:
   start_date: '2012-01-01T00:00:00'
   end_date: '2012-01-02T00:00:00'
@@ -31,12 +31,15 @@ domain:
   partitioning:
     n_procs_x: 2
     n_procs_y: 5
+    auto_tiling: false
+    n_cores: null
   grid_kwargs_parent: null
   grid_kwargs_child: null
   metadata_child: null
   nesting_include_pressure_fluxes: false
   v_sponge: 40000.0
   dt: 7200.0
+  grid_file: null
 forcing:
   initial_conditions:
     source:
@@ -44,11 +47,21 @@ forcing:
       climatology: false
       glorys_layout: regional
       path: null
-    bgc_source:
-      name: UNIFIED
-      climatology: true
-      glorys_layout: null
-      path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
+    bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
+        glorys_layout: null
+        path: null
+        constants: null
+        esper_method: null
+        esper_equation: null
+      use_vars: null
+      bgc_interpolation_method: null
+      serialize_dask: null
     bgc_interpolation_method: depth
     allow_flex_time: false
     prefill: null
@@ -57,12 +70,16 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
+    bypass_validation: false
   surface:
   - source:
       name: ERA5
       climatology: false
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     type: physics
     correct_radiation: true
     coarse_grid_mode: never
@@ -79,6 +96,9 @@ forcing:
       climatology: true
       glorys_layout: null
       path: null
+      constants: null
+      esper_method: null
+      esper_equation: null
     type: bgc
     correct_radiation: false
     coarse_grid_mode: never
@@ -91,12 +111,26 @@ forcing:
     extrap_kwargs: null
     options: {}
   boundary:
-  - source:
+    source:
       name: GLORYS
       climatology: false
       glorys_layout: regional
       path: null
-    type: physics
+      constants: null
+      esper_method: null
+      esper_equation: null
+    bgc_sources:
+    - source:
+        name: UNIFIED
+        climatology: true
+        glorys_layout: null
+        path: null
+        constants: null
+        esper_method: null
+        esper_equation: null
+      use_vars: null
+      bgc_interpolation_method: depth
+      serialize_dask: null
     bgc_interpolation_method: depth
     prefill: null
     prefill_kwargs: null
@@ -104,19 +138,7 @@ forcing:
     extrap_method: null
     extrap_kwargs: null
     options: {}
-  - source:
-      name: UNIFIED
-      climatology: true
-      glorys_layout: null
-      path: null
-    type: bgc
-    bgc_interpolation_method: depth
-    prefill: null
-    prefill_kwargs: null
-    regrid_method: null
-    extrap_method: null
-    extrap_kwargs: null
-    options: {}
+    bypass_validation: false
   tidal: []
   river: []
   resolved_datasets:
@@ -463,6 +485,10 @@ composition:
     name: simple-bgc-demo
     origin: catalog
     modified: false
+  cdr:
+    name: null
+    origin: custom
+    modified: false
   output:
     name: standard
     origin: catalog
@@ -474,5 +500,5 @@ provenance:
   cstar_version: cstar-ocean==0.10.0
   roms_tools_version: roms-tools==4.0.2.dev5+g8b6cd6c7c
   override_files_applied: []
-  content_hash: 70cd05db5c440d5d2855c4c6b0ec6cc4f6d0550da248eb4f965bae207dd3b3b9
+  content_hash: ab0112ede724ce65dc36061a4c666eea5ec6f9064fdf7a4bb8ee463328651d4d
   notes: null

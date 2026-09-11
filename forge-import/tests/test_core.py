@@ -2371,6 +2371,9 @@ class TestGoldenNamelist:
         mock_sd.streamable_for_source = MagicMock(
             side_effect=lambda name, glorys_layout=None: name.upper() in {"ERA5", "DAI"}
         )
+        mock_sd.derived_for_source = MagicMock(
+            side_effect=lambda name: name.upper() in {"ESPER", "CONSTANTS"}
+        )
         return mock_sd
 
     def _run_golden_namelist_case(
@@ -2452,8 +2455,16 @@ class TestGoldenNamelist:
             mock_surface_instance.use_coarse_grid = False
             mock_surface.return_value = mock_surface_instance
 
+            # rt.BoundaryForcing is a container, not one merged save: `.physics`
+            # plus one `.bgc` entry per bgc source, each written by its OWN
+            # `.save()` call -- _generate_boundary_forcing drives them separately
+            # so serialization can be set per source (BgcSourceItem.serialize_dask).
+            # The bundled glorys-era5-unified ForcingSpec has one boundary bgc source.
             mock_boundary_instance = MagicMock()
-            mock_boundary_instance.save.side_effect = self._touch_save
+            mock_boundary_instance.physics.save.side_effect = self._touch_save_list
+            mock_boundary_bgc = MagicMock()
+            mock_boundary_bgc.save.side_effect = self._touch_save_list
+            mock_boundary_instance.bgc = [mock_boundary_bgc]
             mock_boundary.return_value = mock_boundary_instance
 
             mock_tidal_instance = MagicMock()
@@ -2876,8 +2887,18 @@ class TestForgeRunnerEndToEnd:
             mock_surface_instance.use_coarse_grid = False
             mock_surface.return_value = mock_surface_instance
 
+            # rt.BoundaryForcing is a container, not one merged save: `.physics`
+            # plus one `.bgc` entry per bgc source, each written by its OWN
+            # `.save()` call -- _generate_boundary_forcing drives them separately
+            # so serialization can be set per source (BgcSourceItem.serialize_dask).
+            # The bundled glorys-era5-unified ForcingSpec has one boundary bgc source.
             mock_boundary_instance = MagicMock()
-            mock_boundary_instance.save.side_effect = TestGoldenNamelist._touch_save
+            mock_boundary_instance.physics.save.side_effect = (
+                TestGoldenNamelist._touch_save_list
+            )
+            mock_boundary_bgc = MagicMock()
+            mock_boundary_bgc.save.side_effect = TestGoldenNamelist._touch_save_list
+            mock_boundary_instance.bgc = [mock_boundary_bgc]
             mock_boundary.return_value = mock_boundary_instance
 
             mock_tidal_instance = MagicMock()
@@ -3075,6 +3096,9 @@ class TestOnlyInputsReuseIsIdempotent:
         mock_sd.streamable_for_source = MagicMock(
             side_effect=lambda name, glorys_layout=None: name.upper() in {"ERA5", "DAI"}
         )
+        mock_sd.derived_for_source = MagicMock(
+            side_effect=lambda name: name.upper() in {"ESPER", "CONSTANTS"}
+        )
         return mock_sd
 
     def _run_one_pass(self, cfg, host, mock_grid, tmp_path):
@@ -3120,8 +3144,16 @@ class TestOnlyInputsReuseIsIdempotent:
             mock_surface.return_value = mock_surface_instance
 
             mock_boundary_instance = MagicMock()
-            mock_boundary_instance.save.side_effect = self._touch_save
+            mock_boundary_instance.physics.save.side_effect = self._touch_save_list
             mock_boundary_instance.to_yaml.side_effect = self._touch_yaml
+            # The bundled glorys-era5-unified ForcingSpec has one boundary bgc
+            # source (UNIFIED) -- its own yaml sidecar must be real too (see
+            # _generate_boundary_forcing's per-bgc-source to_yaml loop), or pass
+            # 2's reuse check treats it as missing and rebuilds unnecessarily.
+            mock_boundary_bgc_instance = MagicMock()
+            mock_boundary_bgc_instance.to_yaml.side_effect = self._touch_yaml
+            mock_boundary_bgc_instance.save.side_effect = self._touch_save_list
+            mock_boundary_instance.bgc = [mock_boundary_bgc_instance]
             mock_boundary.return_value = mock_boundary_instance
 
             mock_tidal_instance = MagicMock()

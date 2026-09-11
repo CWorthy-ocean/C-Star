@@ -104,6 +104,26 @@ def _coerce_pathlike(v):
 PathStr = Annotated[str | None, BeforeValidator(_coerce_pathlike)]
 
 
+def _coerce_pathlist(v):
+    """Accept ``None`` (-> ``[]``), a single path-like, or a list of them for
+    settings fields that now hold *multiple* generated paths (one per bgc source
+    -- see ``ForcingCfg.surface_forcing_bgc_path``/``boundary_forcing_bgc_path``).
+    Each entry is coerced like ``_coerce_pathlike``.
+    """
+    if v is None:
+        return []
+    items = v if isinstance(v, (list, tuple)) else [v]
+    return [
+        os.fspath(item) if isinstance(item, os.PathLike) else item for item in items
+    ]
+
+
+# A list of path strings that also accepts None/a single path-like/Path objects
+# (coerced to str each). Used for the bgc forcing-path settings fields, which may
+# now hold one entry per bgc source in a category.
+PathListStr = Annotated[list[str], BeforeValidator(_coerce_pathlist)]
+
+
 # ===========================================================================
 # Settings-vocabulary models (forge's run-time dict, validated)
 #
@@ -181,9 +201,14 @@ class InitialCfg(_SettingsSection):
 
 class ForcingCfg(_SettingsSection):
     surface_forcing_path: PathStr = None
-    surface_forcing_bgc_path: PathStr = None
+    surface_forcing_bgc_path: PathListStr = Field(default_factory=list)
+    """One path per surface bgc source (e.g. UNIFIED + MBL_co2 both contribute) --
+    was a last-write-wins scalar; ROMS's ``frcfiles`` array scans all listed files
+    for whichever variables it needs, so all of them must survive into the
+    namelist (see ``_FORCING_ORDER`` in ``build_namelist``)."""
     boundary_forcing_path: PathStr = None
-    boundary_forcing_bgc_path: PathStr = None
+    boundary_forcing_bgc_path: PathListStr = Field(default_factory=list)
+    """One path per boundary bgc source. See ``surface_forcing_bgc_path``."""
     tidal_forcing_path: PathStr = None
     river_path: PathStr = None
 
@@ -841,6 +866,12 @@ _FORCING_ORDER = (
     "river_path",
 )
 
+# The two *_bgc_path fields hold a list (one path per bgc source in that
+# category) rather than a single scalar path -- see ForcingCfg.
+_FORCING_LIST_KEYS = frozenset(
+    {"surface_forcing_bgc_path", "boundary_forcing_bgc_path"}
+)
+
 
 def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBase:
     """The settings -> namelist transform.
@@ -880,11 +911,18 @@ def build_namelist(rt: _RunTimeSettingsCommon, n_tracers: int) -> RomsNamelistBa
     def grp(section) -> dict:
         return section.model_dump(by_alias=True)
 
-    frc = [
-        getattr(rt.forcing, k)
-        for k in _FORCING_ORDER
-        if getattr(rt.forcing, k) is not None
-    ]
+    # A *_bgc_path field is a list (one path per bgc source); every other
+    # forcing field is a single optional scalar path. ROMS scans all listed
+    # frcfiles for whichever variables it needs, so order doesn't matter to it --
+    # sorting each bgc list keeps this deterministic regardless of the order bgc
+    # sources happened to be generated in.
+    frc: list[str] = []
+    for k in _FORCING_ORDER:
+        v = getattr(rt.forcing, k)
+        if k in _FORCING_LIST_KEYS:
+            frc.extend(sorted(v))
+        elif v is not None:
+            frc.append(v)
 
     kwargs: dict[str, Any] = dict(
         # ---- structural transforms (regroup / computed / cross-section) ----

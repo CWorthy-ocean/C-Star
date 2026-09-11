@@ -66,7 +66,10 @@ spec):
 1. **Grid**: Always appended as `("grid", {})` — the grid handler ignores kwargs and uses the
    injected `grid` (and, if present, `grid_child`/`metadata_child`) object directly.
 2. **Initial Conditions**: `forcing_override["initial_conditions"]`, if present → `("initial_conditions", kwargs)`
-3. **Forcing**: Iterates over `forcing_override["forcing"]` categories (surface, boundary, tidal, river) and items within each → `("forcing.{category}", kwargs)` for each item
+3. **Forcing**: Iterates over `forcing_override["forcing"]` categories. `surface`/`tidal`/`river`
+   are lists of items → `("forcing.{category}", kwargs)` for each item. `boundary` is a single
+   `BoundaryForcing`-shaped dict (`source` + `bgc_sources` list, mirroring
+   `initial_conditions`) → one `("forcing.boundary", kwargs)` entry for the whole section
 4. **CDR Forcing**: If the `cdr_forcing` constructor kwarg is set → `("cdr_forcing", {"cdr_kwargs": self.cdr_forcing})`
 
 A missing `forcing_override` raises `ValueError` — it is required whenever the blueprint path is
@@ -76,10 +79,10 @@ used (the resolver always fills it, from the model default or an authored select
 ```python
 [
     ("grid", {}),
-    ("initial_conditions", {"source": {"name": "GLORYS"}, "bgc_source": {...}}),
+    ("initial_conditions", {"source": {"name": "GLORYS"}, "bgc_sources": [{"source": {"name": "UNIFIED_BGC"}}]}),
     ("forcing.surface", {"source": {"name": "ERA5"}, "type": "physics", ...}),
     ("forcing.surface", {"source": {"name": "UNIFIED"}, "type": "bgc", ...}),
-    ("forcing.boundary", {"source": {"name": "GLORYS"}, "type": "physics", ...}),
+    ("forcing.boundary", {"source": {"name": "GLORYS"}, "bgc_sources": [{"source": {"name": "GLODAP"}}]}),
     ("forcing.tidal", {"source": {"name": "TPXO"}, "ntides": 15}),
     ("forcing.river", {"source": {"name": "DAI"}, "include_bgc": True}),
 ]
@@ -291,8 +294,8 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - Initial conditions YAML metadata: `_initial_conditions.yaml`
 
 **Source Resolution:**
-- Uses `source` and optional `bgc_source` from kwargs
-- Resolves paths via `_resolve_source_block()` → `SourceData.path_for_source()`
+- Uses `source` and optional `bgc_sources` (zero or more `BgcSourceItem`-shaped entries) from kwargs
+- Resolves paths via `_resolve_source_block()` / `_resolve_bgc_sources_list()` → `SourceData.path_for_source()`
 - Per-day source file lists are trimmed to `[start_date, start_date + 1 day]` (roms-tools only
   needs the day-of and next-day files for `ini_time`) — see `filter_paths_by_time_window()`
 
@@ -311,9 +314,14 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 **Handler**: `_generate_surface_forcing()`
 
 **Generates:**
-- Surface forcing NetCDF file(s): `{domain_name}_surface-{type}_YYYYMM.nc` (bgc items sourced
-  from `MBL_co2` instead get `surface-{type}-co2` in the stem)
-- Surface forcing YAML metadata: `_forcing.surface-{type}.yaml` (or `-{type}-co2` for MBL_co2)
+- Surface forcing NetCDF file(s): `{domain_name}_surface-{type}_YYYYMM.nc` for physics/restoring;
+  bgc items instead get `surface-bgc-{source suffix}_YYYYMM.nc` (e.g. `surface-bgc-unified.nc`,
+  `surface-bgc-mbl_co2.nc`) — one file per bgc surface item, disambiguated by source name (+
+  `use_vars` when the same source is split across multiple items). This replaced the old ad hoc
+  `surface-bgc-co2` special case, which left every other bgc source undisambiguated (see
+  `_forcing_detail_suffix`/`_bgc_output_suffix`).
+- Surface forcing YAML metadata: `_forcing.surface-{type}.yaml` (or `-bgc-{source suffix}` for bgc
+  items)
 
 **Key Features:**
 - Supports multiple surface forcing sources (physics, bgc, and restoring)
@@ -334,10 +342,14 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 - **Run-time (`blk_frc`/`bgc`)**: `interp_frc` (1 if the coarse grid was used, else 0) — set on
   `blk_frc` for physics/restoring, on `bgc` for bgc (only when the model has MARBL/BGC compiled
   in); a mismatch between forcing types raises `ValueError`
-- **Run-time (`forcing`)**: Surface forcing file paths
+- **Run-time (`forcing`)**: Surface forcing file paths. `surface_forcing_bgc_path` is a *list* —
+  each bgc surface item appends its own path rather than overwriting the last one, so every bgc
+  surface file reaches ROMS's `frcfiles` (previously a last-write-wins scalar silently dropped all
+  but one surface bgc file)
   ```python
   if "bgc" in type:
-      self._settings_run_time["forcing"]["surface_forcing_bgc_path"] = paths[0]
+      self._settings_run_time["forcing"].setdefault("surface_forcing_bgc_path", [])
+      self._settings_run_time["forcing"]["surface_forcing_bgc_path"].append(paths[0])
   else:  # physics or restoring
       self._settings_run_time["forcing"]["surface_forcing_path"] = paths[0]
   ```
@@ -347,36 +359,50 @@ def _generate_input(self, key: str = "input_key", **kwargs):
 **Handler**: `_generate_boundary_forcing()`
 
 **Generates:**
-- Boundary forcing NetCDF file(s): `{domain_name}_boundary-{type}_YYYYMM.nc`
-- Boundary forcing YAML metadata: `_forcing.boundary-{type}.yaml`
+- Boundary physics NetCDF file: `{domain_name}_boundary-physics_YYYYMM.nc`
+- One boundary bgc NetCDF file per `bgc_sources` entry:
+  `{domain_name}_boundary-bgc-{source suffix}_YYYYMM.nc` (e.g. `boundary-bgc-glodap.nc`,
+  `boundary-bgc-unified_bgc.nc`) — disambiguated by source name (+ `use_vars` when the same
+  source is split across multiple entries), the same `_forcing_detail_suffix`/
+  `_bgc_output_suffix` mechanism `_generate_surface_forcing` uses. Unlike initial conditions
+  (which merge every bgc source into one file), boundary bgc sources are never merged — ROMS's
+  `frcfiles` namelist key accepts a list, so each source keeps its own file.
+- Boundary physics/bgc YAML metadata: `_forcing.boundary-physics.yaml` /
+  `_forcing.boundary-bgc-{source suffix}.yaml`
 
 **Key Features:**
-- Supports multiple boundary forcing sources (physics and bgc)
-- Each item in `forcing.boundary` list generates a separate file
-- Requires `type` parameter: `"physics"` or `"bgc"`
+- The `forcing.boundary` kwargs are a single `BoundaryForcing`-shaped dict (structurally mirroring
+  `initial_conditions`), not a list of type-discriminated items: `source` (physics) + zero or more
+  `bgc_sources` entries (each `{source, use_vars, bgc_interpolation_method, serialize_dask}`, see
+  `forge_blueprint.BgcSourceItem`)
+- One `rt.BoundaryForcing` call builds the physics object plus one bgc companion per
+  `bgc_sources` entry internally (via `physics_forcing=`, reusing the physics object's temp/salt),
+  completing them together via `BGCMarbl().process_bgc_fields()` — an all-or-nothing unit; reuse of
+  existing output requires the physics file AND every bgc file to already exist
 - Uses `boundaries` configuration for open boundary specification
 - Skipped entirely for child/nested domains (`grid_parent is not None`) — a child domain's
   boundaries come from the parent's data extraction (`nesting.nc`), not from reanalysis
-- When `type == "bgc"` and `bgc_interpolation_method` is `"density"`/`"density_mld"`, builds a
-  companion physics `rt.BoundaryForcing` (`_build_physics_boundary_companion()`) and passes it as
-  `physics_forcing=` so roms-tools can interpolate in density space instead of depth space; if no
-  physics boundary item exists to anchor it, a warning is issued and roms-tools falls back to
-  depth-space interpolation
+- When a bgc source's (effective) `bgc_interpolation_method` is `"density"`/`"density_mld"`, the
+  section's own physics object already anchors the density-space interpolation (all bgc sources
+  share it via `physics_forcing=`), so no separate companion-building step is needed
 
 **Source Resolution:**
-- Uses `source` from kwargs
-- Resolves path via `_resolve_source_block()`
+- Uses `source` and `bgc_sources` from kwargs
+- Resolves paths via `_resolve_source_block()` / `_resolve_bgc_sources_list()`
 
 **Updates ROMS-MARBL Blueprint:**
 - Appends `Resource(s)` to `roms_marbl_blueprint_elements.forcing.boundary.data`
 
 **Populates Settings:**
-- **Run-time (`forcing`)**: Boundary forcing file paths
+- **Run-time (`forcing`)**: Boundary forcing file paths. `boundary_forcing_bgc_path` is a *list* —
+  each bgc source appends its own path so every boundary bgc file reaches ROMS's `frcfiles`
+  (previously a last-write-wins scalar silently dropped all but one boundary bgc file)
   ```python
-  if type == "bgc":
-      self._settings_run_time["forcing"]["boundary_forcing_bgc_path"] = paths[0]
+  if type_ == "bgc":
+      self._settings_run_time["forcing"].setdefault("boundary_forcing_bgc_path", [])
+      self._settings_run_time["forcing"]["boundary_forcing_bgc_path"].append(path_list[0])
   else:  # physics
-      self._settings_run_time["forcing"]["boundary_forcing_path"] = paths[0]
+      self._settings_run_time["forcing"]["boundary_forcing_path"] = path_list[0]
   ```
 
 **Note**: Compile-time settings are not populated by the boundary handler.
@@ -603,12 +629,16 @@ def _build_input_args(
 
 **Surface Forcing:**
 - `forcing.surface_forcing_path`: Path to physics/restoring surface forcing file
-- `forcing.surface_forcing_bgc_path`: Path to bgc surface forcing file
+- `forcing.surface_forcing_bgc_path`: **List** of paths, one per bgc surface item (`PathListStr`) —
+  all of them reach ROMS's `frcfiles`; previously a last-write-wins scalar that silently dropped
+  all but the last surface bgc file
 - `blk_frc.interp_frc` / `bgc.interp_frc`: 1 if the coarse grid was used, else 0
 
 **Boundary Forcing:**
 - `forcing.boundary_forcing_path`: Path to physics boundary forcing file
-- `forcing.boundary_forcing_bgc_path`: Path to bgc boundary forcing file
+- `forcing.boundary_forcing_bgc_path`: **List** of paths, one per `bgc_sources` entry
+  (`PathListStr`) — one NetCDF file per bgc source (`boundary-bgc-<source>.nc`), all listed in
+  `frcfiles`
 
 **Tidal Forcing:**
 - `tides.ntides`: Number of tidal constituents actually generated (`bry_tides`/`pot_tides`/

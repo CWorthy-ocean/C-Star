@@ -606,8 +606,21 @@ class ForgeExecutor(BaseModel):
                     boundaries = self.open_boundaries.model_dump()
                     if not any(boundaries.values()):
                         continue
+                    # `boundary` is a single BoundaryForcing-shaped dict (a
+                    # required physics `source` + zero or more `bgc_sources`),
+                    # not a list -- one physics file + one file per bgc source
+                    # (never merged, unlike initial_conditions -- see
+                    # RomsMarblInputData._generate_boundary_forcing).
+                    _add_nc("boundary-physics")
+                    for bs in entries.get("bgc_sources") or []:
+                        bs_source = bs.get("source") or {}
+                        suffix = input_data.RomsMarblInputData._bgc_output_suffix(
+                            bs_source.get("name"), bs.get("use_vars")
+                        )
+                        _add_nc(f"boundary-bgc-{suffix}")
+                    continue
 
-                if category in {"surface", "boundary"} and isinstance(entries, list):
+                if category == "surface" and isinstance(entries, list):
                     for entry in entries:
                         forcing_type = None
                         if isinstance(entry, dict):
@@ -1481,6 +1494,7 @@ class ForgeExecutor(BaseModel):
         clobber: bool = False,
         use_dask: bool = True,
         dask_num_workers: int = 8,
+        serialize_dask_write: bool | None = None,
         subchunk: bool = True,
         test: bool = False,
         only: set[str] | None = None,
@@ -1502,9 +1516,17 @@ class ForgeExecutor(BaseModel):
             Use dask for parallel computations. Default True.
         dask_num_workers : int, optional
             Cap on dask's default threaded-scheduler worker count while generating
-            inputs (paired with pinning BLAS/OpenMP to 1 thread), to avoid thread
-            oversubscription hangs on high-core HPC nodes. Only applied when
+            inputs, to avoid thread oversubscription (each worker's own BLAS/numba
+            call is, in turn, capped to its own share of the remaining cores --
+            see ``RomsMarblInputData.generate_all``). Only applied when
             ``use_dask`` is True. Default 8.
+        serialize_dask_write : bool, optional
+            Forwarded to every IC/boundary ``.save()`` call as ``serialize_dask=``
+            (see :func:`roms_tools.utils.save_datasets`). Default ``None`` resolves
+            to the ordinary concurrent write for every source (PyESPER protects
+            itself). Pass ``True`` to force the serialized, one-task-at-a-time
+            write everywhere -- a manual low-memory / troubleshooting tool. Only
+            applied when ``use_dask`` is True.
         subchunk : bool, optional
             Just-in-time build a kerchunk-subchunked reference for multi-file
             GLORYS sources (see ``glorys_subchunk.py``) and read from it
@@ -1581,6 +1603,7 @@ class ForgeExecutor(BaseModel):
             cdr_forcing_file=self.cdr_forcing_file,
             use_dask=use_dask,
             dask_num_workers=dask_num_workers,
+            serialize_dask_write=serialize_dask_write,
             subchunk=subchunk,
             use_pio=self._use_pio,
             verbose=self.verbose,

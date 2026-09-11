@@ -17,7 +17,8 @@ import pytest
 from pydantic import ValidationError
 
 from cstar_forge.models import (
-    BoundaryForcingItem,
+    BgcSourceItem,
+    BoundaryForcing,
     InitialConditionsInput,
     RiverForcingItem,
     SourceSpec,
@@ -81,16 +82,45 @@ class TestInitialConditionsInput:
         source = SourceSpec(name="GLORYS")
         ic = InitialConditionsInput(source=source)
         assert ic.source.name == "GLORYS"
-        assert ic.bgc_source is None  # Default value
+        assert ic.bgc_sources == []  # Default value
 
     def test_initialconditionsinput_creation_with_bgc(self):
-        """Test creating InitialConditionsInput with bgc_source."""
+        """Test creating InitialConditionsInput with a single bgc source."""
         source = SourceSpec(name="GLORYS")
         bgc_source = SourceSpec(name="UNIFIED", climatology=True)
-        ic = InitialConditionsInput(source=source, bgc_source=bgc_source)
+        ic = InitialConditionsInput(
+            source=source,
+            bgc_sources=[BgcSourceItem(source=bgc_source)],
+        )
         assert ic.source.name == "GLORYS"
-        assert ic.bgc_source.name == "UNIFIED"
-        assert ic.bgc_source.climatology is True
+        assert ic.bgc_sources[0].source.name == "UNIFIED"
+        assert ic.bgc_sources[0].source.climatology is True
+
+    def test_initialconditionsinput_creation_with_multiple_bgc_sources(self):
+        """Multiple bgc_sources, each with its own use_vars down-selection."""
+        ic = InitialConditionsInput(
+            source=SourceSpec(name="GLORYS"),
+            bgc_sources=[
+                BgcSourceItem(
+                    source=SourceSpec(name="UNIFIED", climatology=True),
+                    use_vars=["CHL", "PO4", "NO3", "SiO3", "O2"],
+                ),
+                BgcSourceItem(
+                    source=SourceSpec(name="GLODAP"), use_vars=["ALK", "DIC"]
+                ),
+                BgcSourceItem(
+                    source=SourceSpec(name="constants", constants={"Fe": 3.0e-3}),
+                    use_vars=["Fe"],
+                ),
+            ],
+        )
+        assert [b.source.name for b in ic.bgc_sources] == [
+            "UNIFIED",
+            "GLODAP",
+            "constants",
+        ]
+        assert ic.bgc_sources[0].use_vars == ["CHL", "PO4", "NO3", "SiO3", "O2"]
+        assert ic.bgc_sources[2].source.constants == {"Fe": 3.0e-3}
 
     def test_initialconditionsinput_validation_missing_source(self):
         """Test that InitialConditionsInput raises error when source is missing."""
@@ -138,31 +168,56 @@ class TestSurfaceForcingItem:
             SurfaceForcingItem()
 
 
-class TestBoundaryForcingItem:
-    """Tests for BoundaryForcingItem class."""
+class TestBoundaryForcing:
+    """Tests for BoundaryForcing class -- a structural mirror of
+    InitialConditionsInput (see BgcSourceItem's docstring): a required physics
+    `source` plus zero or more `bgc_sources`, no `type` discriminator.
+    """
 
-    def test_boundaryforcingitem_creation_physics(self):
-        """Test creating BoundaryForcingItem with physics type."""
+    def test_boundaryforcing_creation_physics_only(self):
+        """Test creating BoundaryForcing with just a physics source."""
         source = SourceSpec(name="GLORYS")
-        item = BoundaryForcingItem(source=source, type="physics")
+        item = BoundaryForcing(source=source)
         assert item.source.name == "GLORYS"
-        assert item.type == "physics"
+        assert item.bgc_sources == []  # Default value
 
-    def test_boundaryforcingitem_creation_bgc(self):
-        """Test creating BoundaryForcingItem with bgc type."""
-        source = SourceSpec(name="UNIFIED", climatology=True)
-        item = BoundaryForcingItem(source=source, type="bgc")
-        assert item.type == "bgc"
-
-    def test_boundaryforcingitem_validation_invalid_type(self):
-        """Test that BoundaryForcingItem rejects invalid type."""
+    def test_boundaryforcing_creation_with_bgc(self):
+        """Test creating BoundaryForcing with a bgc source."""
         source = SourceSpec(name="GLORYS")
-        with pytest.raises(ValidationError) as exc_info:
-            BoundaryForcingItem(source=source, type="invalid")
-        assert (
-            "type" in str(exc_info.value).lower()
-            or "pattern" in str(exc_info.value).lower()
+        bgc_source = SourceSpec(name="UNIFIED", climatology=True)
+        item = BoundaryForcing(
+            source=source,
+            bgc_sources=[BgcSourceItem(source=bgc_source)],
         )
+        assert item.source.name == "GLORYS"
+        assert item.bgc_sources[0].source.name == "UNIFIED"
+        assert item.bgc_sources[0].source.climatology is True
+
+    def test_boundaryforcing_creation_with_multiple_bgc_sources(self):
+        """Multiple bgc_sources, each optionally overriding bgc_interpolation_method."""
+        item = BoundaryForcing(
+            source=SourceSpec(name="GLORYS"),
+            bgc_sources=[
+                BgcSourceItem(
+                    source=SourceSpec(name="UNIFIED", climatology=True),
+                    use_vars=["CHL", "PO4", "NO3", "SiO3", "O2"],
+                ),
+                BgcSourceItem(
+                    source=SourceSpec(name="GLODAP"),
+                    use_vars=["ALK", "DIC"],
+                    bgc_interpolation_method="density",
+                ),
+            ],
+        )
+        assert [b.source.name for b in item.bgc_sources] == ["UNIFIED", "GLODAP"]
+        assert item.bgc_sources[0].bgc_interpolation_method is None
+        assert item.bgc_sources[1].bgc_interpolation_method == "density"
+
+    def test_boundaryforcing_validation_missing_source(self):
+        """Test that BoundaryForcing raises error when source is missing."""
+        with pytest.raises(ValidationError) as exc_info:
+            BoundaryForcing()
+        assert "source" in str(exc_info.value).lower()
 
 
 class TestTidalForcingItem:

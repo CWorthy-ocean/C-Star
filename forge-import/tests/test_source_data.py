@@ -793,6 +793,82 @@ class TestPrepareRivr2o:
         assert sd.dataset_key_for_source("RIVR2O") == "RIVR2O"
 
 
+class TestPrepareGlodap:
+    """Tests for the GLODAP (GLODAPv2.2016b mapped climatology) user-provided
+    BGC dataset handler.
+    """
+
+    _REQUIRED = ("TAlk", "TCO2", "NO3", "PO4", "silicate", "oxygen")
+
+    def test_missing_dir_raises_naming_required_files(self, tmp_path):
+        """Missing GLODAP directory raises FileNotFoundError naming every
+        required per-variable file.
+        """
+        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+
+        with pytest.raises(FileNotFoundError) as excinfo:
+            sd.prepare_all()
+        msg = str(excinfo.value)
+        assert "GLODAP" in msg
+        for var in self._REQUIRED:
+            assert f"GLODAPv2.2016b.{var}.nc" in msg
+
+    def test_partial_required_files_raises_naming_only_the_missing_ones(self, tmp_path):
+        """A directory with some but not all required files still raises,
+        listing only what's actually missing.
+        """
+        glodap_dir = tmp_path / "GLODAP"
+        glodap_dir.mkdir(parents=True)
+        (glodap_dir / "GLODAPv2.2016b.TAlk.nc").touch()
+
+        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+        with pytest.raises(FileNotFoundError) as excinfo:
+            sd.prepare_all()
+        msg = str(excinfo.value)
+        assert "GLODAPv2.2016b.TAlk.nc" not in msg
+        assert "GLODAPv2.2016b.TCO2.nc" in msg
+
+    def test_verified_when_required_files_present_returns_directory(
+        self, tmp_path, caplog
+    ):
+        """With every required file present, the directory itself (not a
+        wildcard/single file) is returned and recorded in sd.paths; missing
+        optional temperature/salinity logs a warning, not an error.
+        """
+        glodap_dir = tmp_path / "GLODAP"
+        glodap_dir.mkdir(parents=True)
+        for var in self._REQUIRED:
+            (glodap_dir / f"GLODAPv2.2016b.{var}.nc").touch()
+
+        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+        with caplog.at_level("WARNING"):
+            sd.prepare_all()
+
+        assert sd.paths["GLODAP"] == glodap_dir
+        assert "temperature/salinity" in caplog.text
+
+    def test_no_warning_when_optional_ts_files_present(self, tmp_path, caplog):
+        """Providing the optional temperature/salinity files silences the
+        density-fallback warning.
+        """
+        glodap_dir = tmp_path / "GLODAP"
+        glodap_dir.mkdir(parents=True)
+        for var in (*self._REQUIRED, "temperature", "salinity"):
+            (glodap_dir / f"GLODAPv2.2016b.{var}.nc").touch()
+
+        sd = SourceData(datasets=["GLODAP"], source_data_dir=tmp_path)
+        with caplog.at_level("WARNING"):
+            sd.prepare_all()
+
+        assert sd.paths["GLODAP"] == glodap_dir
+        assert "temperature/salinity" not in caplog.text
+
+    def test_dataset_key_for_source(self):
+        """Logical name 'GLODAP' resolves to the 'GLODAP' dataset key."""
+        sd = SourceData(datasets=["GLODAP"])
+        assert sd.dataset_key_for_source("GLODAP") == "GLODAP"
+
+
 class TestConstantsRiverBgcSource:
     """Regression: an explicit river bgc_source={"name": "CONSTANTS"} must not crash
     at generation. roms-tools auto-downloads CONSTANTS' own file
@@ -850,3 +926,128 @@ class TestSourceDataHelperMethods:
         assert path.parent == tmp_path / "source_data" / "GLORYS_GLOBAL"
         # Global should not have grid_name in filename
         assert "test_grid" not in str(path)
+
+
+class TestWOABGCHandler:
+    """The WOA23 1-degree gridded BGC source (``WOA_BGC``).
+
+    Distinct from the SSS-restoring ``WOA`` source: different files, different staged
+    path shape, but the same staging directory.
+    """
+
+    def test_woa_bgc_key_reconciles_to_handler(self):
+        sd = SourceData(datasets=["WOA_BGC"])
+        assert "WOA_BGC" in sd.datasets
+        assert sd.dataset_key_for_source("WOA_BGC") == "WOA_BGC"
+        assert "WOA_BGC" in DATASET_REGISTRY
+
+    def test_woa_and_woa_bgc_are_distinct_datasets(self):
+        """The bare name must keep resolving to the restoring source, not the BGC one."""
+        assert map_source_to_dataset_key("WOA") == "WOA"
+        assert map_source_to_dataset_key("WOA_BGC") == "WOA_BGC"
+        assert SOURCE_ALIAS["WOA"] != SOURCE_ALIAS["WOA_BGC"]
+
+    def test_manifest_covers_the_tracers_and_the_density_pair(self):
+        """T/S must be staged: without them roms-tools cannot convert umol/kg to
+        mmol/m3, and density / density_mld interpolation silently degrades to depth.
+        """
+        from cstar_forge.forge.source_registry import (
+            WOA23_BGC_VARIABLES,
+            WOA23_PERIODS,
+        )
+
+        assert set(WOA23_BGC_VARIABLES) == {
+            "NO3",
+            "PO4",
+            "SiO3",
+            "O2",
+            "temp_bgc",
+            "salt_bgc",
+        }
+        # 12 monthly files plus the full-depth annual (period 0) file per variable.
+        assert sorted(WOA23_PERIODS) == list(range(13))
+        assert len(WOA23_BGC_VARIABLES) * len(WOA23_PERIODS) == 78
+
+    def test_nutrient_and_ts_decade_tokens_match_ncei(self):
+        """'decav'/'all' is the over-years averaging token, not the within-year period.
+
+        Nutrients and oxygen are published only under "all"; T/S under "decav".
+        Getting these backwards yields 404s for every file.
+        """
+        from cstar_forge.forge.source_registry import WOA23_BGC_VARIABLES
+
+        assert WOA23_BGC_VARIABLES["NO3"] == ("nitrate", "all", "n")
+        assert WOA23_BGC_VARIABLES["O2"] == ("oxygen", "all", "o")
+        assert WOA23_BGC_VARIABLES["temp_bgc"] == ("temperature", "decav", "t")
+        assert WOA23_BGC_VARIABLES["salt_bgc"] == ("salinity", "decav", "s")
+
+    def test_handler_stages_into_the_shared_woa_directory(self, tmp_path):
+        """Both WOA sources live in source_data_dir/"WOA"; only the files differ."""
+        sd = SourceData(datasets=["WOA_BGC"], source_data_dir=tmp_path)
+        woa_dir = tmp_path / "WOA"
+        woa_dir.mkdir()
+        # Pre-create every expected file so the handler short-circuits the download.
+        from cstar_forge.forge.source_registry import (
+            WOA23_BGC_VARIABLES,
+            WOA23_GRID,
+            WOA23_PERIODS,
+        )
+
+        for _subdir, decade, code in WOA23_BGC_VARIABLES.values():
+            for period in WOA23_PERIODS:
+                (woa_dir / f"woa23_{decade}_{code}{period:02d}_{WOA23_GRID}.nc").touch()
+
+        with patch.object(source_data, "urlopen") as fake:
+            sd.prepare_all()
+        fake.assert_not_called()
+        result = sd.paths["WOA_BGC"]
+        # roms-tools' WOABGCDataset takes the directory, not a glob.
+        assert result == woa_dir
+        assert sd.paths["WOA_BGC"] == woa_dir
+
+    def test_handler_downloads_only_the_missing_files(self, tmp_path):
+        """Staging must be resumable: present files are skipped, absent ones fetched."""
+        sd = SourceData(datasets=["WOA_BGC"], source_data_dir=tmp_path)
+        woa_dir = tmp_path / "WOA"
+        woa_dir.mkdir()
+        from cstar_forge.forge.source_registry import (
+            WOA23_BGC_VARIABLES,
+            WOA23_GRID,
+            WOA23_PERIODS,
+        )
+
+        expected = [
+            f"woa23_{decade}_{code}{period:02d}_{WOA23_GRID}.nc"
+            for _subdir, decade, code in WOA23_BGC_VARIABLES.values()
+            for period in WOA23_PERIODS
+        ]
+        for name in expected[:-3]:
+            (woa_dir / name).touch()
+
+        with (
+            patch.object(source_data, "urlopen") as fake_urlopen,
+            patch.object(source_data.shutil, "copyfileobj") as fake_copy,
+        ):
+            fake_urlopen.return_value.__enter__.return_value = MagicMock()
+            sd.prepare_all()
+
+        assert fake_copy.call_count == 3
+        for name in expected[-3:]:
+            assert (woa_dir / name).exists()
+
+    def test_restoring_woa_glob_ignores_the_one_degree_bgc_salinity(self, tmp_path):
+        """The SSS source is quarter-degree ("_04"). The BGC handler stages 1-degree
+        salinity ("_01") into the same directory, and the restoring glob must not
+        match it -- otherwise matches[0] can silently pick the wrong resolution.
+        """
+        sd = SourceData(datasets=["WOA"], source_data_dir=tmp_path)
+        woa_dir = tmp_path / "WOA"
+        woa_dir.mkdir()
+        for month in range(1, 13):
+            (woa_dir / f"woa23_decav_s{month:02d}_04.nc").touch()  # restoring
+            (woa_dir / f"woa23_decav_s{month:02d}_01.nc").touch()  # BGC density pair
+
+        sd.prepare_all()
+        result = sd.paths["WOA"]
+        assert result.name.endswith("_04.nc")
+        assert "_01.nc" not in str(result)

@@ -112,9 +112,10 @@
 
 &forcing_files
     frcfiles = '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_surface-restoring.nc',
-               '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_surface-bgc-co2.nc',
+               '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_surface-bgc-mbl_co2.nc',
+               '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_surface-bgc-unified.nc',
                '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_boundary-physics.nc',
-               '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_boundary-bgc.nc',
+               '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_boundary-bgc-unified.nc',
                '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_tidal.nc',
                '<WORKDIR>/input_data/cson_roms-marbl_v0_1_test-tiny_1procs_river.nc'
 /
