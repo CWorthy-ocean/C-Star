@@ -15,7 +15,7 @@ steps:
         - outer
     blueprint_overrides:
       parent_grid: "{{input_dir: outer}}/input_datasets/cson_roms-marbl_v0.1_P0p5_down__8procs_grid.nc"
-      parent_rst: "{{root_dir: outer}}/joined_output/output_rst.20100103000000.nc"
+      parent_rst: "{{root_dir: outer}}/output/output_rst.20100103000000.nc"
       child_grid: "/Users/eilerman/cson-forge-data/input-data/cson_roms-marbl_v0.1_P0p25_down__8procs/cson_roms-marbl_v0.1_P0p25_down__8procs_grid.nc"
 
 
@@ -37,7 +37,7 @@ steps:
         - middle
     blueprint_overrides:
       parent_grid: "{{input_dir: middle}}/input_datasets/cson_roms-marbl_v0.1_P0p25_down__8procs_grid.nc"
-      parent_rst: "{{root_dir: middle}}/joined_output/output_rst.20100104000000.nc"
+      parent_rst: "{{root_dir: middle}}/output/output_rst.20100104000000.nc"
       child_grid: "/Users/eilerman/cson-forge-data/input-data/cson_roms-marbl_v0.1_P0p125__16procs/cson_roms-marbl_v0.1_P0p125__16procs_grid.nc"
 
   - name: inner

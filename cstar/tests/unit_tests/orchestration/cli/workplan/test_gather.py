@@ -3,21 +3,59 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from cstar.cli.workplan.gather import app
-from cstar.execution.file_system import (
-    RomsFileSystemManager,
-    StateDirectoryManager,
-)
+from cstar.cli.workplan.gather import GATHERED_OUTPUT_NAME, app, collect_links
+from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.models import Step, Workplan
-from cstar.orchestration.orchestration import LiveStep
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 
 
-def _joined_output_dir(step: Step) -> Path:
-    """Return the `joined_output` directory for a step's working directory,
+def _make_two_step_workplan(tmp_path: Path) -> tuple[LiveStep, LiveStep, LiveWorkplan]:
+    """Build a two-step `LiveWorkplan` directly, without going through a
+    template file or the `TrackingRepository`, for `collect_links` unit tests
+    that need more than one step. Each step's `working_dir` is a distinct
+    directory under `tmp_path`; the blueprint file just needs to exist on
+    disk (its content is never read by `collect_links`).
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to root the steps' working directories and the
+        shared placeholder blueprint file in.
+
+    Returns
+    -------
+    tuple[LiveStep, LiveStep, LiveWorkplan]
+        The two steps and the workplan containing them.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step_a = LiveStep(
+        name="step-a",
+        application="roms_marbl",
+        blueprint=bp_path,
+        working_dir=tmp_path / "step-a",
+    )
+    step_b = LiveStep(
+        name="step-b",
+        application="roms_marbl",
+        blueprint=bp_path,
+        working_dir=tmp_path / "step-b",
+    )
+    workplan = LiveWorkplan(
+        name="test workplan",
+        description="test workplan",
+        steps=[step_a, step_b],
+    )
+    return step_a, step_b, workplan
+
+
+def _output_dir(step: Step) -> Path:
+    """Return the `output` directory for a step's working directory,
     computed the same way production code does via `LiveStep`.
     """
     working_dir = LiveStep.from_step(step).working_dir
-    return RomsFileSystemManager(working_dir).joined_output_dir
+    return JobFileSystemManager(working_dir).output_dir
 
 
 def _run_root() -> Path:
@@ -25,14 +63,14 @@ def _run_root() -> Path:
 
 
 def _dest_dir() -> Path:
-    return RomsFileSystemManager(_run_root()).joined_output_dir
+    return _run_root() / GATHERED_OUTPUT_NAME
 
 
 def test_cli_workplan_gather_happy_path(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
     """Verify that a unique file per step is linked into the consolidated
-    `joined_output` directory as a relative symlink pointing at the source.
+    `gathered_output` directory as a relative symlink pointing at the source.
 
     Parameters
     ----------
@@ -43,10 +81,10 @@ def test_cli_workplan_gather_happy_path(
 
     sources: dict[str, Path] = {}
     for i, step in enumerate(wp.steps):
-        joined = _joined_output_dir(step)
-        joined.mkdir(parents=True)
+        output = _output_dir(step)
+        output.mkdir(parents=True)
         name = f"out_{i}.nc"
-        src = joined / name
+        src = output / name
         src.write_text("data")
         sources[name] = src
 
@@ -77,9 +115,9 @@ def test_cli_workplan_gather_is_rerunnable(
     _, wp, fake_run_id = executed_workplan
 
     step = wp.steps[0]
-    joined = _joined_output_dir(step)
-    joined.mkdir(parents=True)
-    stale_src = joined / "stale.nc"
+    output = _output_dir(step)
+    output.mkdir(parents=True)
+    stale_src = output / "stale.nc"
     stale_src.write_text("data")
 
     runner = CliRunner()
@@ -90,7 +128,7 @@ def test_cli_workplan_gather_is_rerunnable(
     assert (dest / "stale.nc").is_symlink()
 
     stale_src.unlink()
-    new_src = joined / "fresh.nc"
+    new_src = output / "fresh.nc"
     new_src.write_text("data")
 
     result = runner.invoke(app, [fake_run_id], color=False, catch_exceptions=False)
@@ -102,75 +140,97 @@ def test_cli_workplan_gather_is_rerunnable(
     assert (dest / "fresh.nc").resolve() == new_src.resolve()
 
 
-def test_cli_workplan_gather_conflict_aborts(
-    executed_workplan: tuple[Path, Workplan, str],
-) -> None:
-    """Verify that a filename collision across steps aborts with an error and
-    modifies nothing on disk, including a pre-existing consolidated directory.
+def test_collect_links_mangles_names_on_collision(tmp_path: Path) -> None:
+    """Verify that a filename produced by more than one step is linked once
+    per producing step under a step-name-mangled name, while a filename
+    produced by only one step keeps its own name.
+
+    Built directly against `collect_links` with a hand-built two-step
+    `LiveWorkplan` (rather than through the CLI and the single-step
+    `executed_workplan` fixture) so the multi-step scenario always runs.
 
     Parameters
     ----------
-    executed_workplan : tuple[Path, Workplan, str]
-        The path to a workplan YAML file, the workplan instance, and a run-id.
+    tmp_path : Path
+        Temporary directory to root the fake steps' working directories in.
     """
-    _, wp, fake_run_id = executed_workplan
+    first_step, second_step, workplan = _make_two_step_workplan(tmp_path)
 
-    if len(wp.steps) < 2:
-        pytest.skip("Conflict detection requires a workplan with at least 2 steps")
+    first_output = _output_dir(first_step)
+    first_output.mkdir(parents=True)
+    second_output = _output_dir(second_step)
+    second_output.mkdir(parents=True)
 
-    runner = CliRunner()
-
-    # Seed and gather one distinct file first, to prove the pre-existing
-    # consolidated directory is left untouched by the failed gather below.
-    first_step = wp.steps[0]
-    first_joined = _joined_output_dir(first_step)
-    first_joined.mkdir(parents=True)
-    (first_joined / "untouched.nc").write_text("data")
-
-    result = runner.invoke(app, [fake_run_id], color=False, catch_exceptions=False)
-    assert result.exit_code == 0
-
-    dest = _dest_dir()
-    assert (dest / "untouched.nc").is_symlink()
-    pre_existing_target = (dest / "untouched.nc").resolve()
-
-    # An orphaned symlink from an earlier gather (its source is gone). A
-    # correct gather aborts on conflict before touching the consolidated
-    # directory, so it must survive; a relink-then-check ordering would
-    # remove it.
-    orphan = dest / "orphan.nc"
-    orphan.symlink_to("no-longer-exists.nc")
-
-    # Now introduce a collision between the first two steps.
-    second_step = wp.steps[1]
-    second_joined = _joined_output_dir(second_step)
-    second_joined.mkdir(parents=True)
-
-    colliding_a = first_joined / "colliding.nc"
+    colliding_name = "output_rst.20120201000000.nc"
+    colliding_a = first_output / colliding_name
     colliding_a.write_text("data-a")
-    colliding_b = second_joined / "colliding.nc"
+    colliding_b = second_output / colliding_name
     colliding_b.write_text("data-b")
 
-    result = runner.invoke(app, [fake_run_id], color=False)
+    unique_src = first_output / "unique.nc"
+    unique_src.write_text("data-unique")
 
-    assert result.exit_code == 1
-    assert "colliding.nc" in result.stdout
-    assert str(colliding_a) in result.stdout
-    assert str(colliding_b) in result.stdout
+    links, conflicts, mangled_count = collect_links(workplan)
 
-    # Pre-existing consolidated content is untouched.
-    assert (dest / "untouched.nc").is_symlink()
-    assert (dest / "untouched.nc").resolve() == pre_existing_target
-    assert orphan.is_symlink()
+    assert conflicts == {}
+    assert mangled_count == 2
+
+    mangled_a_name = f"{first_step.safe_name}__{colliding_name}"
+    mangled_b_name = f"{second_step.safe_name}__{colliding_name}"
+    assert links[mangled_a_name] == colliding_a
+    assert links[mangled_b_name] == colliding_b
+    assert colliding_name not in links
+
+    assert links["unique.nc"] == unique_src
 
 
-def test_cli_workplan_gather_skips_steps_without_joined_output(
+def test_collect_links_residual_collision_reported(tmp_path: Path) -> None:
+    """Verify that a mangled name which still collides with another link
+    name is reported as a residual conflict rather than silently linked.
+
+    Built directly against `collect_links` with a hand-built two-step
+    `LiveWorkplan` for the same reason as the mangling test above.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to root the fake steps' working directories in.
+    """
+    first_step, second_step, workplan = _make_two_step_workplan(tmp_path)
+
+    first_output = _output_dir(first_step)
+    first_output.mkdir(parents=True)
+    second_output = _output_dir(second_step)
+    second_output.mkdir(parents=True)
+
+    # Both steps produce the same basename (which would mangle to
+    # `<step>__colliding.nc` each), *and* one step also directly produces a
+    # file whose plain name equals the other step's mangled name, so the
+    # residual collision cannot be resolved by mangling alone.
+    colliding_name = "colliding.nc"
+    colliding_a = first_output / colliding_name
+    colliding_a.write_text("data-a")
+    (second_output / colliding_name).write_text("data-b")
+
+    residual_name = f"{first_step.safe_name}__{colliding_name}"
+    residual_src = second_output / residual_name
+    residual_src.write_text("data-c")
+
+    links, conflicts, mangled_count = collect_links(workplan)
+
+    assert residual_name not in links
+    assert residual_name in conflicts
+    assert set(conflicts[residual_name]) == {colliding_a, residual_src}
+    assert mangled_count == 2
+
+
+def test_cli_workplan_gather_skips_steps_without_output(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
-    """Verify that steps with no `joined_output` directory are skipped quietly.
+    """Verify that steps with no `output` directory are skipped quietly.
 
-    When no step has produced any joined output, an empty consolidated
-    directory is still created along with a friendly informational message.
+    When no step has produced any output, an empty consolidated directory is
+    still created along with a friendly informational message.
 
     Parameters
     ----------
@@ -183,7 +243,7 @@ def test_cli_workplan_gather_skips_steps_without_joined_output(
     result = runner.invoke(app, [fake_run_id], color=False, catch_exceptions=False)
 
     assert result.exit_code == 0
-    assert "No joined output was found" in result.stdout
+    assert "No output was found" in result.stdout
 
     dest = _dest_dir()
     assert dest.exists()
@@ -193,8 +253,8 @@ def test_cli_workplan_gather_skips_steps_without_joined_output(
 def test_cli_workplan_gather_skips_one_populated_step(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
-    """Verify that only steps with an existing `joined_output` directory
-    contribute links, while other steps are skipped without error.
+    """Verify that only steps with an existing `output` directory contribute
+    links, while other steps are skipped without error.
 
     Parameters
     ----------
@@ -204,9 +264,9 @@ def test_cli_workplan_gather_skips_one_populated_step(
     _, wp, fake_run_id = executed_workplan
 
     step = wp.steps[0]
-    joined = _joined_output_dir(step)
-    joined.mkdir(parents=True)
-    src = joined / "only.nc"
+    output = _output_dir(step)
+    output.mkdir(parents=True)
+    src = output / "only.nc"
     src.write_text("data")
 
     runner = CliRunner()
@@ -224,7 +284,7 @@ def test_cli_workplan_gather_refuses_to_delete_real_files(
     executed_workplan: tuple[Path, Workplan, str],
 ) -> None:
     """Verify that gather refuses to wipe non-symlink entries from an
-    existing consolidated `joined_output` directory.
+    existing consolidated `gathered_output` directory.
 
     Parameters
     ----------
@@ -253,7 +313,7 @@ def test_cli_workplan_gather_dest_is_not_a_directory(
     dest_kind: str,
 ) -> None:
     """Verify that gather refuses to proceed when the consolidated
-    `joined_output` path exists but is not a directory.
+    `gathered_output` path exists but is not a directory.
 
     Parameters
     ----------

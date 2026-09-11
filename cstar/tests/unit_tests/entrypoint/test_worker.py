@@ -1034,7 +1034,7 @@ def test_worker_main_directive_args_parsed(
     """
     *_, step_dir, bp_path = mocked_simulation_outputs
 
-    reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
+    reset_dir = RomsFileSystemManager(step_dir).output_dir
 
     mock_sim_instance = mock.Mock()
     mock_sim_instance.name = "test simulation"

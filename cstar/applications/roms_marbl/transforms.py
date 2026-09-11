@@ -42,14 +42,10 @@ from cstar.orchestration.transforms import (
 from cstar.orchestration.utils import ENV_CSTAR_ORCH_TRX_FREQ
 
 if t.TYPE_CHECKING:
-    from collections.abc import Callable
-
     from cstar.base.log import TraceLogger
     from cstar.orchestration.orchestration import LiveWorkplan
 
 log = get_logger(__name__)
-
-T = t.TypeVar("T")
 
 
 class RomsMarblTimeSplitter(Transform[LiveStep]):
@@ -182,14 +178,11 @@ class RomsMarblTimeSplitter(Transform[LiveStep]):
             # use dependency on the prior substep to chain all the dynamic steps
             depends_on = [child_step.name]
 
-            # determine padding on partition segment of name from number of partitions
-            partition_segment: str | None = None
-            if bp_copy.partitioning:
-                partition_segment = min_padded_index(0, bp_copy.cpus_needed)
-
-            # Use the last restart file as initial conditions for the follow-up step
+            # post_run always leaves a whole restart file in `output`, so the
+            # predicted name for the follow-up step's initial conditions never
+            # carries a partition segment.
             restart_file = RestartFile.from_parts(
-                output_root_name, ed, partition_segment, child_fs.output_dir
+                output_root_name, ed, None, child_fs.output_dir
             )
 
             # use output dir of the last step as the input for the next step
@@ -692,53 +685,106 @@ class BoundaryFileTrxAdapter:
         }
 
 
-def find_in_step_outputs(
-    workplan: "LiveWorkplan", name: str, find: "Callable[[Path], T | None]"
-) -> T:
-    """Search a completed step's output directories for model outputs.
+_LEGACY_LAYOUT_HINT: t.Final[str] = (
+    "Runs completed before this version kept joined files in a `joined_output` "
+    "directory; run `cstar admin migrate-outputs <run dir>` to move them, or "
+    "point `path:` at that directory."
+)
+"""Appended to not-found errors so users of old run directories know what to do."""
 
-    Probes `joined_output` first and falls back to `output`, returning the
-    first result `find` produces. Which directory holds usable files depends on
-    how the step ran (ParallelIO writes joined files, a non-PIO run is joined
-    after the fact, the nest_ic app writes straight to `output`), so the
-    directories are probed rather than inferred from the step's blueprint.
+
+def _require_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
+    """Resolve a step's `output` directory and require it to exist.
 
     Parameters
     ----------
     workplan : LiveWorkplan
         The workplan containing the named step.
     name : str
-        The name of the step whose outputs are requested.
-    find : Callable[[Path], T | None]
-        A search function returning `None` when a directory holds nothing
-        usable (e.g. `RestartFile.find` or `BoundaryFile.find`).
+        The name of the step whose output directory is requested.
 
     Returns
     -------
-    T
-        The first non-`None` result of `find`.
+    Path
 
     Raises
     ------
     KeyError
         If `workplan` does not contain a step named `name`.
-    ValueError
-        If no candidate directory holds a usable result.
+    FileNotFoundError
+        If the step has no `output` directory yet (it has not run, or failed
+        before producing output).
+    """
+    search_path = resolve_step_output_dir(workplan, name)
+    if not search_path.is_dir():
+        msg = (
+            f"Step {name!r} has no output directory at {search_path}; "
+            "it may not have run yet."
+        )
+        raise FileNotFoundError(msg)
+    return search_path
+
+
+def _reject_partitioned_step_output(name: str, partitioned: bool, found: Path) -> None:
+    """Refuse partition pieces found in a step's `output` directory.
+
+    Under the current layout `output` only ever holds whole files, so a
+    partition piece there means the step ran under the old layout (which left
+    partitioned restarts in `output`) and must be migrated first.
+
+    Parameters
+    ----------
+    name : str
+        The referenced step's name.
+    partitioned : bool
+        Whether the located file is a partition piece.
+    found : Path
+        The located file, for the error message.
+
+    Raises
+    ------
+    FileNotFoundError
+        If `partitioned` is true.
+    """
+    if partitioned:
+        msg = (
+            f"Step {name!r} output holds only partitioned files ({found.name}), "
+            f"not a whole file. {_LEGACY_LAYOUT_HINT}"
+        )
+        raise FileNotFoundError(msg)
+
+
+def resolve_step_output_dir(workplan: "LiveWorkplan", name: str) -> Path:
+    """Resolve the `output` directory of a named, completed workplan step.
+
+    Every step type writes its final, whole files to `output` (ROMS-MARBL
+    steps write partitioned pieces to `temp_output` first and join them
+    into `output`; other apps, e.g. nest_ic, write straight to `output`), so a
+    step's outputs are always found there regardless of how the step ran.
+
+    Parameters
+    ----------
+    workplan : LiveWorkplan
+        The workplan containing the named step.
+    name : str
+        The name of the step whose output directory is requested.
+
+    Returns
+    -------
+    Path
+        The step's `output` directory.
+
+    Raises
+    ------
+    KeyError
+        If `workplan` does not contain a step named `name`.
     """
     if name not in workplan:
         msg = f"Unable to locate step {name!r} in workplan"
         raise KeyError(msg)
 
     fsm = RomsFileSystemManager(workplan[name].fsm.root_dir)
-    candidates = (fsm.joined_output_dir, fsm.output_dir)
-
-    for search_path in candidates:
-        if search_path.is_dir() and (found := find(search_path)) is not None:
-            return found
-
-    searched = ", ".join(str(p) for p in candidates)
-    msg = f"No usable outputs located for step {name!r}; searched: {searched}"
-    raise ValueError(msg)
+    return fsm.output_dir
 
 
 def _rst_path_continue_from_conflict_message(step_name: str | None) -> str:
@@ -861,13 +907,19 @@ class ContinuanceDirective(OverrideDirective):
             search_path = Path(target_path)
 
         if name := self._config.get(self.KEY_STEP, None):
-            step_restart = find_in_step_outputs(self.workplan, name, RestartFile.find)
-            return RestartFileTrxAdapter.adapt(step_restart)
+            search_path = _require_step_output_dir(self.workplan, name)
 
-        if search_path and (
-            restart_file := RestartFile.find(search_path, notfound_ok=False)
-        ):
-            return RestartFileTrxAdapter.adapt(restart_file)
+        if search_path:
+            try:
+                restart_file = RestartFile.find(search_path, notfound_ok=False)
+            except FileNotFoundError as err:
+                raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
+            if restart_file:
+                if name:
+                    _reject_partitioned_step_output(
+                        name, restart_file.is_partitioned, restart_file.path
+                    )
+                return RestartFileTrxAdapter.adapt(restart_file)
 
         msg = f"No restart file located in search path: {search_path!r}"
         raise ValueError(msg)
@@ -1033,13 +1085,21 @@ class NestingDirective(OverrideDirective):
             search_path = Path(target_path)
 
         if name := self._config.get(self.KEY_STEP):
-            step_boundaries = find_in_step_outputs(
-                self.workplan, name, BoundaryFile.find
-            )
-            overrides = BoundaryFileTrxAdapter.adapt(step_boundaries)
-        elif search_path and (
-            boundary_files := BoundaryFile.find(search_path, notfound_ok=False)
-        ):
+            search_path = _require_step_output_dir(self.workplan, name)
+
+        boundary_files: Sequence[BoundaryFile] | None = None
+        if search_path:
+            try:
+                boundary_files = BoundaryFile.find(search_path, notfound_ok=False)
+            except FileNotFoundError as err:
+                raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
+
+        if boundary_files and name:
+            partitioned = next((b for b in boundary_files if b.is_partitioned), None)
+            if partitioned is not None:
+                _reject_partitioned_step_output(name, True, partitioned.path)
+
+        if boundary_files:
             overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
         else:
             msg = f"No boundary files located in search path: {search_path!r}"
