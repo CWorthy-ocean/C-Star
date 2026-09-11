@@ -29,7 +29,7 @@ def populated_output_dir(tmp_path: Path) -> tuple[Path, list[Path]]:
     files = [
         fs.input_dir / "some_input_file",
         fs.output_dir / "some_output_file",
-        fs.joined_output_dir / "some_joined_file",
+        fs.temp_output_dir / "some_temp_file",
     ]
 
     for f in files:
@@ -64,7 +64,7 @@ def test_file_system_prepare(
 
     assert fs.output_dir.exists()
     assert fs.input_dir.exists()
-    assert fs.joined_output_dir.exists()
+    assert fs.temp_output_dir.exists()
     assert fs._codebases_dir.exists()
     assert fs.root_dir.exists()
 
@@ -88,7 +88,7 @@ def test_file_system_clear(
     (fs.compile_time_code_dir / "a.txt").touch()
     (fs.runtime_code_dir / "b.txt").touch()
     (fs.input_datasets_dir / "c.txt").touch()
-    (fs.joined_output_dir / "d.txt").touch()
+    (fs.temp_output_dir / "d.txt").touch()
     (fs.run_dir / "e.txt").touch()
     (fs.run_dir / "f.yaml").touch()
     (fs.run_dir / "g.yml").touch()
@@ -98,7 +98,7 @@ def test_file_system_clear(
     assert not fs.compile_time_code_dir.exists()
     assert not fs.runtime_code_dir.exists()
     assert not fs.input_datasets_dir.exists()
-    assert not fs.joined_output_dir.exists()
+    assert not fs.temp_output_dir.exists()
 
     # confirm yaml in work_dir is not removed.
     assert not (fs.run_dir / "e.txt").exists()

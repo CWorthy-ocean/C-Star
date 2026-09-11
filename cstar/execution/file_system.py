@@ -295,7 +295,11 @@ class RomsFileSystemManager(JobFileSystemManager):
     _RUNTIME_NAME: t.ClassVar[t.Literal["runtime_code"]] = "runtime_code"
     _INPUT_DATASETS_NAME: t.ClassVar[t.Literal["input_datasets"]] = "input_datasets"
     _CODEBASES_NAME: t.ClassVar[t.Literal["codebases"]] = "codebases"
-    _JOINED_OUTPUT_NAME: t.ClassVar[t.Literal["joined_output"]] = "joined_output"
+    _TEMP_OUTPUT_NAME: t.ClassVar[t.Literal["temp_output"]] = "temp_output"
+    PARTITIONED_OUTPUT_GLOB: t.ClassVar[str] = "*.??????????????.*.nc"
+    """Glob matching one partition piece of a ROMS output: a 14-digit timestamp
+    followed by a partition index, e.g. `output_rst.20120201000000.000.nc`.
+    """
 
     def __init__(self, root_directory: Path) -> None:
         super().__init__(root_directory)
@@ -311,7 +315,7 @@ class RomsFileSystemManager(JobFileSystemManager):
                     self.runtime_code_dir,
                     self.input_datasets_dir,
                     self._codebases_dir,
-                    self.joined_output_dir,
+                    self.temp_output_dir,
                 }
             )
         )
@@ -337,9 +341,11 @@ class RomsFileSystemManager(JobFileSystemManager):
         return self.input_dir / self._CODEBASES_NAME
 
     @property
-    def joined_output_dir(self) -> Path:
-        """The directory for de-partitioned outputs."""
-        return self.root_dir / self._JOINED_OUTPUT_NAME
+    def temp_output_dir(self) -> Path:
+        """The directory for partitioned outputs written by a non-ParallelIO
+        run before they are joined into `output`.
+        """
+        return self.root_dir / self._TEMP_OUTPUT_NAME
 
     def codebase_subdir(self, key: str) -> Path:
         """Return a codebase subdirectory path.
@@ -360,7 +366,7 @@ class RomsFileSystemManager(JobFileSystemManager):
             self.runtime_code_dir,
             self.input_datasets_dir,
             self._codebases_dir,
-            self.joined_output_dir,
+            self.temp_output_dir,
         ]:
             if directory.exists():
                 shutil.rmtree(directory)
