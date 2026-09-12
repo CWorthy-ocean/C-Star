@@ -19,7 +19,7 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.execution.file_system import StateDirectoryManager
+from cstar.execution.file_system import StateDirectoryManager, disk_usage
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import KEY_CLOBBER, Step, UserDefinedVariables, Workplan
@@ -37,7 +37,7 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
 from cstar.orchestration.state import StateRepository, load_sentinels
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_SIZE, TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
@@ -684,6 +684,7 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     run = await run_repo.get_workplan_run(handle.run_id)
 
     if path and run:
+        run.metadata[KEY_RUN_SIZE] = await disk_usage(run.output_path)
         run.sentinels.add(path)
         await run_repo.put_workplan_run(run)
 

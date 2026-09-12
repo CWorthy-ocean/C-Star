@@ -15,11 +15,11 @@ from rich.text import Text
 
 from cstar.base.env import max_concurrency
 from cstar.base.log import get_logger
-from cstar.cli.workplan.shared import KEY_RUN_SIZE, attach_disk_usage, console
+from cstar.cli.workplan.shared import attach_disk_usage, console
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize_all
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_SIZE, TrackingRepository, WorkplanRun
 
 log = get_logger(__name__)
 app = typer.Typer()

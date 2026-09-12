@@ -31,8 +31,7 @@ from cstar.cli.workplan.ls import (
     sorters,
     table_formatter,
 )
-from cstar.cli.workplan.shared import KEY_RUN_SIZE
-from cstar.orchestration.tracking import WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_SIZE, WorkplanRun
 
 LS_LOGGER = "cstar.cli.workplan.ls"
 

@@ -34,12 +34,10 @@ from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, try_deserialize
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_SIZE, TrackingRepository, WorkplanRun
 
 log = get_logger(__name__)
 
-KEY_RUN_SIZE: t.Final[str] = "size"
-"""Key used to store disk-usage in the run metadata."""
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
