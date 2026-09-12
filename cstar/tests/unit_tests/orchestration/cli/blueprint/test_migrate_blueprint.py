@@ -14,16 +14,17 @@ from cstar.applications.plotter import PlotterSchemaAdapterV1V2
 from cstar.applications.roms_marbl.app import APP_NAME as APP_ROMS
 from cstar.applications.roms_marbl.migration import RomsMarblSchemaAdapter2025v1
 from cstar.base.env import (
+    ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_STATE_HOME,
+    FLAG_OFF,
     FLAG_ON,
 )
 from cstar.cli.blueprint.migrate import (
     app,
-    clobber_output,
-    dryrun_notify,
     report_inplace_conflicts,
+    target_callback,
 )
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DRY_RUN
 from cstar.system.migration import KEY_APP, identify_bounds
@@ -221,61 +222,156 @@ def test_blueprint_migrate_dry_run(
     assert not result.stderr, result.stderr
     assert not expected_output_path.exists()
     assert f"Migrating {source!r}->{target!r}" in result.stdout
+    assert "will be ignored during dry-run" in " ".join(result.stdout.split())
 
 
 @pytest.mark.parametrize(
-    "params",
+    ("in_place", "clobber"),
     [
-        {},
-        {"output": "", "clobber": False},
-        {"output": "some/output.yaml", "clobber": True},
+        (False, False),
+        (False, True),
+        (True, False),
     ],
 )
-def test_report_inplace_conflicts_disabled(params: dict[str, object]) -> None:
-    """Verify that the callback is a no-op when in-place mode is not requested,
-    regardless of the other parameter values.
-    """
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = params
-
-    assert report_inplace_conflicts(ctx, value=False) is False
-
-
-def test_report_inplace_conflicts_no_conflicts(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Verify that in-place mode without conflicting parameters passes through
-    silently.
-    """
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {"output": "", "clobber": False}
-
-    assert report_inplace_conflicts(ctx, value=True) is True
-    assert not capsys.readouterr().out
-
-
-def test_report_inplace_conflicts_output_ignored(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Verify that the user is informed that an output path is ignored when
-    combined with in-place mode.
-    """
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {"output": "out.yaml"}
-
-    assert report_inplace_conflicts(ctx, value=True) is True
-    assert "'out.yaml' will be ignored in in-place mode" in capsys.readouterr().out
+def test_report_inplace_conflicts_compatible(in_place: bool, clobber: bool) -> None:
+    """Verify that compatible parameter combinations pass through silently."""
+    report_inplace_conflicts(in_place, clobber)
 
 
 def test_report_inplace_conflicts_clobber_cancels() -> None:
     """Verify that combining in-place mode with clobber is rejected to avoid
     destroying the input file.
     """
+    with pytest.raises(typer.BadParameter, match="Cancelling"):
+        report_inplace_conflicts(in_place=True, clobber=True)
+
+
+@pytest.mark.parametrize("value", ["", " ", "\t"])
+def test_target_callback_empty(value: str) -> None:
+    """Verify that an empty output path passes through untouched."""
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {}
+
+    assert target_callback(ctx, value) == ""
+
+
+def test_target_callback_inplace_notifies(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify that the user is informed that an output path is ignored when
+    in-place mode was requested.
+    """
+    output_path = tmp_path / "out.yaml"
+
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {"in_place": True}
+
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+    assert "will be ignored in in-place mode" in capsys.readouterr().out
+
+
+def test_target_callback_dryrun_notifies(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify that the user is informed that an output path is ignored when
+    dry-run mode was requested.
+    """
+    output_path = tmp_path / "out.yaml"
+
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {"dry_run": True}
+
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+    assert "will be ignored during dry-run" in capsys.readouterr().out
+
+
+def test_target_callback_dryrun_env_notifies(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that dry-run mode enabled only through the environment variable
+    is detected even though the parameter is not yet processed.
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
+    output_path = tmp_path / "out.yaml"
+
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {}
+
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+    assert "will be ignored during dry-run" in capsys.readouterr().out
+
+
+def test_target_callback_clobber_env_removes_existing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify that clobber mode enabled only through the environment variable
+    is detected even though the parameter is not yet processed.
+    """
+    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_ON)
+    output_path = tmp_path / "output.yaml"
+    output_path.touch()
+
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {}
+
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+    assert not output_path.exists()
+
+
+def test_target_callback_clobber_removes_existing(tmp_path: Path) -> None:
+    """Verify that an existing output file is removed when clobber is enabled."""
+    output_path = tmp_path / "output.yaml"
+    output_path.touch()
+
     ctx = mock.Mock(spec=typer.Context)
     ctx.params = {"clobber": True}
 
-    with pytest.raises(typer.BadParameter, match="Cancelling"):
-        report_inplace_conflicts(ctx, value=True)
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+    assert not output_path.exists()
+
+
+def test_target_callback_clobber_missing_output(tmp_path: Path) -> None:
+    """Verify that a non-existent output file is tolerated when clobber is
+    enabled.
+    """
+    output_path = tmp_path / "output.yaml"
+
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {"clobber": True}
+
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+
+
+def test_target_callback_clobber_skipped_when_output_ignored(
+    tmp_path: Path,
+) -> None:
+    """Verify that an existing output file is NOT removed when the output path
+    is ignored due to in-place or dry-run mode.
+    """
+    output_path = tmp_path / "output.yaml"
+    output_path.touch()
+
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {"in_place": True, "clobber": True}
+
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+    assert output_path.exists()
+
+
+def test_target_callback_creates_parent(tmp_path: Path) -> None:
+    """Verify that missing parent directories of the output path are created."""
+    output_path = tmp_path / "nested" / "dirs" / "output.yaml"
+
+    ctx = mock.Mock(spec=typer.Context)
+    ctx.params = {}
+
+    assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
+    assert output_path.parent.is_dir()
 
 
 def test_blueprint_migrate_inplace(plotter_v1_0_0_bp: Path) -> None:
@@ -338,26 +434,32 @@ def test_blueprint_migrate_inplace_ignores_output(
     # the migration lands in the source file, not the requested output
     assert not output_path.exists()
     assert latest in bp_path.read_text()
+    assert "will be ignored in in-place mode" in " ".join(result.stdout.split())
 
 
+@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_OFF})
+@pytest.mark.parametrize(
+    "flags",
+    [
+        [ARG_INPLACE, ARG_CLOBBER],
+        [ARG_CLOBBER, ARG_INPLACE],
+    ],
+)
 def test_blueprint_migrate_inplace_clobber_conflict(
     plotter_v1_0_0_bp: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    flags: list[str],
 ) -> None:
     """Verify that requesting in-place migration with clobber enabled is
-    rejected and leaves the source file untouched.
+    rejected, regardless of the flag order, and leaves the source file
+    untouched.
     """
-    # register the env var with monkeypatch so the flag set by the clobber
-    # callback during invocation is rolled back after the test
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, "0")
-
     bp_path = plotter_v1_0_0_bp
     original_content = bp_path.read_text()
 
     runner = CliRunner()
     result = runner.invoke(
         app,
-        [bp_path.as_posix(), ARG_INPLACE, ARG_CLOBBER],
+        [bp_path.as_posix(), *flags],
         color=False,
     )
 
@@ -370,60 +472,98 @@ def test_blueprint_migrate_inplace_clobber_conflict(
     assert not bp_path.with_suffix(f"{bp_path.suffix}.bak").exists()
 
 
-def test_dryrun_notify_output_ignored(capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify that the user is informed that an output path is ignored when
-    combined with dry-run mode.
+@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_ON})
+def test_blueprint_migrate_inplace_env_clobber_conflict(
+    plotter_v1_0_0_bp: Path,
+) -> None:
+    """Verify that clobber enabled via the environment variable also cancels
+    an in-place migration.
     """
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {"output": "out.yaml"}
+    bp_path = plotter_v1_0_0_bp
+    original_content = bp_path.read_text()
 
-    assert dryrun_notify(ctx, value=True) is True
-    assert "'out.yaml' will be ignored during dry-run" in capsys.readouterr().out
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [bp_path.as_posix(), ARG_INPLACE],
+        color=False,
+    )
 
-
-def test_dryrun_notify_disabled(capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify that the callback is silent when dry-run mode is not requested."""
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {"output": "out.yaml"}
-
-    assert dryrun_notify(ctx, value=False) is False
-    assert not capsys.readouterr().out
-
-
-def test_clobber_output_removes_existing(tmp_path: Path) -> None:
-    """Verify that an existing output file is removed when clobber is enabled."""
-    output_path = tmp_path / "output.yaml"
-    output_path.touch()
-
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {"output": output_path.as_posix()}
-
-    assert clobber_output(ctx, value=True) is True
-    assert not output_path.exists()
+    assert result.exit_code != 0
+    plain_stderr = " ".join(result.stderr.replace("│", " ").split())
+    assert "Clobbering in-place will result in loss of the input file" in plain_stderr
+    assert bp_path.read_text() == original_content
 
 
-def test_clobber_output_missing_output(tmp_path: Path) -> None:
-    """Verify that a non-existent output file is tolerated when clobber is
+@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_OFF})
+def test_blueprint_migrate_clobber_output(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+) -> None:
+    """Verify that a pre-existing output file is replaced when clobber is
     enabled.
     """
-    output_path = tmp_path / "output.yaml"
+    bp_path = plotter_v1_0_0_bp
+    output_path = tmp_path / "output.json"
+    output_path.write_text("pre-existing content")
 
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {"output": output_path.as_posix()}
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [bp_path.as_posix(), output_path.as_posix(), ARG_CLOBBER],
+        color=False,
+    )
 
-    assert clobber_output(ctx, value=True) is True
+    assert not result.stderr, result.stderr
+    assert result.exit_code == 0, result.output
+    assert output_path.read_text() != "pre-existing content"
 
 
-def test_clobber_output_disabled(tmp_path: Path) -> None:
-    """Verify that an existing output file is kept when clobber is disabled."""
-    output_path = tmp_path / "output.yaml"
-    output_path.touch()
+@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_OFF})
+def test_blueprint_migrate_dry_run_clobber_preserves_output(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+) -> None:
+    """Verify that a dry run never removes a pre-existing output file, even
+    when clobber is enabled, since the output path is ignored.
+    """
+    bp_path = plotter_v1_0_0_bp
+    output_path = tmp_path / "output.json"
+    output_path.write_text("pre-existing content")
 
-    ctx = mock.Mock(spec=typer.Context)
-    ctx.params = {"output": output_path.as_posix()}
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [bp_path.as_posix(), output_path.as_posix(), ARG_DRY_RUN, ARG_CLOBBER],
+        color=False,
+    )
 
-    assert clobber_output(ctx, value=False) is False
-    assert output_path.exists()
+    assert not result.stderr, result.stderr
+    assert result.exit_code == 0, result.output
+    assert output_path.read_text() == "pre-existing content"
+
+
+@mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON})
+def test_blueprint_migrate_dry_run_env(
+    tmp_path: Path,
+    plotter_v1_0_0_bp: Path,
+) -> None:
+    """Verify that dry-run mode enabled only through the environment variable
+    still reports the ignored output path and produces no file.
+    """
+    bp_path = plotter_v1_0_0_bp
+    expected_output_path = tmp_path / "upgraded.yaml"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [bp_path.as_posix(), expected_output_path.as_posix()],
+        color=False,
+    )
+
+    assert not result.stderr, result.stderr
+    assert not expected_output_path.exists()
+    assert "will be ignored during dry-run" in " ".join(result.stdout.split())
 
 
 def test_blueprint_migrate_unplannable(

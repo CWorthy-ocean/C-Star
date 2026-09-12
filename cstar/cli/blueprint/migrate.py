@@ -10,6 +10,7 @@ from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     ENV_CSTAR_LOG_LEVEL,
 )
+from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger
 from cstar.cli.common import (
     MigrationRequest,
@@ -95,8 +96,13 @@ def path_callback(value: str) -> str:
         return local_path.as_posix()
 
 
-def target_callback(value: str) -> str:
-    """Ensure the user provided a non-empty path.
+def target_callback(ctx: typer.Context, value: str) -> str:
+    """Ensure the user provided a non-empty path and resolve conflicts with
+    parameters processed earlier.
+
+    An output path is reported as ignored when in-place or dry-run mode is
+    requested; otherwise a pre-existing output file is removed when clobber
+    is enabled, mitigating a FileExistsError.
 
     Resulting path has been expanded and resolved.
 
@@ -114,83 +120,41 @@ def target_callback(value: str) -> str:
     if not value or not value.strip():
         return value.strip()
 
+    # combine each parameter with its environment variable: a flag enabled
+    # only through the environment is processed after this callback and is
+    # not yet present in ctx.params
+    if ctx.params.get("in_place", False):
+        console.print(f"Output path {value!r} will be ignored in in-place mode")
+    elif ctx.params.get("dry_run", False) or is_flag_enabled(ENV_CSTAR_CLI_DRY_RUN):
+        console.print(f"Output path {value!r} will be ignored during dry-run")
+    elif ctx.params.get("clobber", False) or is_flag_enabled(
+        ENV_CSTAR_CLOBBER_WORKING_DIR
+    ):
+        path = Path(value)
+        if path.exists():
+            log.debug(f"Clobbering output path: {value}")
+            path.unlink()
+        else:
+            log.debug(f"No output file to clobber: {value}")
+
     path = Path(value)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path.as_posix()
 
 
-def dryrun_notify(ctx: typer.Context, value: bool) -> bool:
-    """Display informational message to user if a parameter conflict is found.
+def report_inplace_conflicts(in_place: bool, clobber: bool) -> None:
+    """Cancel execution when the user attempts to clobber in-place.
 
     Parameters
     ----------
-    ctx : typer.Context
-        The typer context object.
-    value : bool
-        The value of the dry-run parameter.
-
-    Returns
-    -------
-    bool
-    """
-    output = ctx.params.get("output", "")
-
-    if value and output:
-        console.print(f"Output path {output!r} will be ignored during dry-run")
-
-    return value
-
-
-def clobber_output(ctx: typer.Context, value: bool) -> bool:
-    """Callback for clobber parameter that removes a pre-existing output file
-    and mitigates a FileExistsError.
-
-    Parameters
-    ----------
-    ctx : typer.Context
-        The typer context object.
-    value : bool
-        The value of the clobber parameter.
-
-    Returns
-    -------
-    bool
-    """
-    output = ctx.params.get("output", "")
-    if value and output:
-        path = Path(output)
-        if path.exists():
-            log.debug(f"Clobbering output path: {output}")
-            path.unlink()
-        else:
-            log.debug(f"No output file to clobber: {output}")
-
-    return value
-
-
-def report_inplace_conflicts(ctx: typer.Context, value: bool) -> bool:
-    """Display informational message to user when in-place and output path
-    are both specified or the user attempts to clobber in-place.
-
-    Parameters
-    ----------
-    ctx : typer.Context
-        The typer context object.
-    value : bool
+    in_place : bool
         The value of the in-place parameter.
-
-    Returns
-    -------
-    bool
+    clobber : bool
+        The value of the clobber parameter.
     """
-    if value and (output := ctx.params.get("output", "")):
-        console.print(f"Output path {output!r} will be ignored in in-place mode")
-
-    if value and ctx.params.get("clobber", False):
+    if in_place and clobber:
         msg = "Clobbering in-place will result in loss of the input file. Cancelling."
         raise typer.BadParameter(msg)
-
-    return value
 
 
 @app.command(name=CMD_NAME, help=HELP_LONG, short_help=HELP_SHORT)
@@ -216,10 +180,7 @@ def migrate(
         typer.Option(
             ARG_DRY_RUN,
             help="Generate the migration plan without executing it.",
-            callback=cb_pipeline(
-                set_flag(ENV_CSTAR_CLI_DRY_RUN),
-                dryrun_notify,
-            ),
+            callback=set_flag(ENV_CSTAR_CLI_DRY_RUN),
             envvar=ENV_CSTAR_CLI_DRY_RUN,
         ),
     ] = False,
@@ -228,7 +189,7 @@ def migrate(
         typer.Option(
             "--inplace",
             help="Migrate the blueprint and replace the source file content.",
-            callback=report_inplace_conflicts,
+            is_eager=True,
         ),
     ] = False,
     verbose: t.Annotated[
@@ -246,10 +207,7 @@ def migrate(
         typer.Option(
             ARG_CLOBBER,
             help=ARG_CLOBBER_HELP,
-            callback=cb_pipeline(
-                set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
-                clobber_output,
-            ),
+            callback=set_flag(ENV_CSTAR_CLOBBER_WORKING_DIR),
             envvar=ENV_CSTAR_CLOBBER_WORKING_DIR,
             is_eager=True,
         ),
@@ -267,6 +225,8 @@ def migrate(
     ] = LogLevelChoices.INFO,
 ) -> None:
     """Migrate the schema of an old blueprint to the latest version."""
+    report_inplace_conflicts(in_place, clobber)
+
     try:
         target = Path(path) if in_place else (Path(output) if output else None)
         request = MigrationRequest(
