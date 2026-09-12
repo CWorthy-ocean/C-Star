@@ -266,7 +266,11 @@ def test_target_callback_inplace_notifies(
     ctx.params = {"in_place": True}
 
     assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    assert "will be ignored in in-place mode" in capsys.readouterr().out
+    # rich wraps long paths at the terminal width, so normalize whitespace
+    # before matching
+    assert "will be ignored in in-place mode" in " ".join(
+        capsys.readouterr().out.split()
+    )
 
 
 def test_target_callback_dryrun_notifies(
@@ -282,7 +286,9 @@ def test_target_callback_dryrun_notifies(
     ctx.params = {"dry_run": True}
 
     assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    assert "will be ignored during dry-run" in capsys.readouterr().out
+    # rich wraps long paths at the terminal width, so normalize whitespace
+    # before matching
+    assert "will be ignored during dry-run" in " ".join(capsys.readouterr().out.split())
 
 
 @mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON})
@@ -299,7 +305,9 @@ def test_target_callback_dryrun_env_notifies(
     ctx.params = {}
 
     assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    assert "will be ignored during dry-run" in capsys.readouterr().out
+    # rich wraps long paths at the terminal width, so normalize whitespace
+    # before matching
+    assert "will be ignored during dry-run" in " ".join(capsys.readouterr().out.split())
 
 
 @mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_ON})
