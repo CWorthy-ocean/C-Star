@@ -254,7 +254,7 @@ def display_summary(
         )
 
     raw_size = run.metadata.get(KEY_RUN_SIZE, "")
-    caption = "Disk consumption not yet calculated"
+    caption = "Disk consumption has not been calculated"
 
     try:
         run_size = int(raw_size)
