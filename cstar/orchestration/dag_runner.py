@@ -768,6 +768,7 @@ async def run_dag(
         environment=capture_environment(),
         user_variables=user_variables or {},
         sentinels={StateRepository.sentinel_path(s) for s in steps},
+        metadata={"name": planner.workplan.name},
     )
 
     if not dry_run:

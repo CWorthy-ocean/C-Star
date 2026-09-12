@@ -13,8 +13,8 @@ from rich.console import ConsoleRenderable
 from rich.table import Column, Table
 from rich.text import Text
 
+from cstar.base.env import max_concurrency
 from cstar.base.log import get_logger
-from cstar.cli.common import max_concurrency
 from cstar.cli.workplan.shared import KEY_RUN_SIZE, attach_disk_usage, console
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.orchestration import LiveWorkplan
@@ -174,7 +174,7 @@ def filter_size(
     lt_filter: int | None = None,
     gt_filter: int | None = None,
 ) -> list[WorkplanRun]:
-    if not lt_filter and not gt_filter:
+    if lt_filter is None and gt_filter is None:
         return list(runs)
 
     results: list[WorkplanRun] = []
@@ -188,15 +188,15 @@ def filter_size(
             results.append(run)
             continue
 
-        if lt_filter and size > lt_filter:
+        if lt_filter is not None and size > lt_filter:
             continue
-        if gt_filter and size < gt_filter:
+        if gt_filter is not None and size < gt_filter:
             continue
 
         results.append(run)
 
     if warn_unsized:
-        console.print(
+        log.warning(
             f"Runs without disk consumption calculations were not filtered: {','.join(warn_unsized)}"
         )
 
@@ -306,6 +306,9 @@ def ls_runs(
 
     raw_runs = asyncio.run(_list_runs())
     runs = [r for r in raw_runs if r is not None]
+    if dropped := len(raw_runs) - len(runs):
+        log.warning(f"{dropped} run record(s) could not be read and were omitted")
+
     runs = filter_time(runs, time_lt_filter, time_gt_filter)
 
     asyncio.run(attach_disk_usage(runs, refresh=refresh_usage))

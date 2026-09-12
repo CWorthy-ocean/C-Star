@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from cstar.base.env import max_concurrency
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
@@ -433,7 +434,8 @@ class TrackingRepository(LoggingMixin):
         Sequence[WorkplanRun | None]
         """
         run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
-        return await deserialize_all(run_paths, WorkplanRun, sem=self._sem)
+        limit = max_concurrency()
+        return await deserialize_all(run_paths, WorkplanRun, limit, sem=self._sem)
 
     async def list_history_runs(
         self, run_id_filter: str
@@ -450,7 +452,8 @@ class TrackingRepository(LoggingMixin):
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
         glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
         run_paths = list(self.history_dir.rglob(glob_pattern))
-        return await deserialize_all(run_paths, WorkplanRun, sem=self._sem)
+        limit = max_concurrency()
+        return await deserialize_all(run_paths, WorkplanRun, limit, sem=self._sem)
 
     @classmethod
     def bound(cls, limit: int):

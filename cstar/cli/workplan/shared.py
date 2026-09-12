@@ -12,11 +12,10 @@ from cstar.applications.core import (
     RunnerRequest,
     get_application,
 )
-from cstar.base.env import ENV_CSTAR_RUNID
+from cstar.base.env import ENV_CSTAR_RUNID, max_concurrency
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
-    max_concurrency,
     normalize_runid,
     set_ctxmap,
     set_env,
@@ -161,7 +160,14 @@ def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
         msg = "run-id is required to autocomplete steps"
         raise typer.BadParameter(msg)
 
-    return asyncio.run(list_steps(run_id, incomplete))
+    try:
+        return asyncio.run(list_steps(run_id, incomplete))
+    except Exception:
+        log.warning(
+            f"Step listing failed; autocomplete will be empty for run {run_id!r}"
+        )
+
+    return []
 
 
 def checkmark(color: str) -> str:
@@ -248,11 +254,15 @@ def display_summary(
         )
 
     raw_size = run.metadata.get(KEY_RUN_SIZE, "")
+    caption = "Disk consumption not yet calculated"
+
     try:
         run_size = int(raw_size)
-        caption = f"{run_size}MB disk consumed"
+        if run_size >= 0:
+            caption = f"{run_size}MB disk consumed"
     except Exception:
-        caption = "Disk consumption not yet calculated"
+        log.debug(f"run size {raw_size!r} for {run.run_id!r} could not be parsed")
+        caption = "Disk consumption could not be calculated"
 
     table.caption = caption
 

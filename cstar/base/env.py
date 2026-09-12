@@ -12,6 +12,10 @@ from pathlib import Path
 if t.TYPE_CHECKING:
     from types import ModuleType
 
+import logging
+
+log = logging.getLogger(__name__)
+
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
 GROUP_FS: t.Final[str] = "File System Configuration"
@@ -395,3 +399,24 @@ def unset(key: str) -> str | None:
         The value that was previously stored for the key
     """
     return os.environ.pop(key, None)
+
+
+def max_concurrency() -> int:
+    """Utility to get commonly used max-concurrency value from env vars
+    for bounding simultaneous IO operations.
+    """
+    env_item = get_env_item(ENV_CSTAR_ORCH_MAX_CONC)
+
+    try:
+        value = int(env_item.value)
+    except Exception:
+        msg = f"Unable to parse value of {ENV_CSTAR_ORCH_MAX_CONC}: {env_item.value}"
+        log.warning(msg)
+        value = -1
+
+    if value < 1:
+        # fall back to the default if it's specified as a value that will blow up
+        msg = f"The configured value of {ENV_CSTAR_ORCH_MAX_CONC} is invalid. Using default"
+        log.warning(msg)
+        value = int(env_item.default)
+    return value

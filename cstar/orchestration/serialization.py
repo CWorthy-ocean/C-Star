@@ -373,8 +373,8 @@ def try_deserialize(
 async def deserialize_all(
     paths: list[Path],
     klass: type[_T],
+    limit: int,
     mode: PersistenceMode = PersistenceMode.auto,
-    limit: int = 10,
     sem: asyncio.Semaphore | None = None,
 ) -> Sequence[_T | None]:
     """Deserialize a collection of items of the same type."""
