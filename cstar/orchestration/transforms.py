@@ -31,7 +31,7 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
@@ -1140,7 +1140,7 @@ class DirectiveConfig(BaseModel):
 
         wp_path = run.trx_workplan_path
 
-        if wp_path and (wp := deserialize(wp_path, LiveWorkplan)):  # pyright: ignore[reportArgumentType]
+        if wp := try_deserialize(wp_path, LiveWorkplan):
             return wp
 
         msg = f"No live workplan for run-id {run_id!r} found at {str(wp_path)!r}"

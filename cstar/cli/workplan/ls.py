@@ -95,9 +95,7 @@ async def adapt_runs_to_views(
                 )
 
     missing = {
-        r.trx_workplan_path
-        for r in runs
-        if r.trx_workplan_path not in plan_cache and r.trx_workplan_path is not None
+        r.trx_workplan_path for r in runs if r.trx_workplan_path not in plan_cache
     }
     await _populate_cache(list(sorted(missing)), plan_cache)
 
@@ -108,8 +106,7 @@ async def adapt_runs_to_views(
         name = "unknown"
 
         try:
-            if wp_path is not None:
-                name = plan_cache[wp_path].name
+            name = plan_cache[wp_path].name
         except KeyError:
             log.warning(f"The workplan path {str(wp_path)!r} was not loaded into cache")
 

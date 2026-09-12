@@ -52,9 +52,6 @@ def status(
 
     launcher = get_launcher()
     wp_path = run.trx_workplan_path
-    if not wp_path:
-        msg = f"No live workplan for run-id `{run.run_id}` could be found."
-        raise RuntimeError(msg)
 
     try:
         workplan = deserialize(wp_path, LiveWorkplan)

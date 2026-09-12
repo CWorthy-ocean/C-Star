@@ -104,13 +104,7 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
             msg = f"No run for run-id {run_id!r} could be found."
             raise RuntimeError(msg)
 
-        wp_path = wp_run.trx_workplan_path
-
-        if not wp_path:
-            msg = f"No live workplan for run-id {run_id!r} could be found."
-            raise RuntimeError(msg)
-
-        wp = deserialize(wp_path, LiveWorkplan)
+        wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
         step_names = [str(s.name) for s in wp.steps]
 
         if incomplete:
@@ -418,9 +412,6 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     set_ctxmap(context, "run", run)
 
     wp_path = run.trx_workplan_path
-    if not wp_path:
-        msg = f"No live workplan for run-id {run.run_id!r} could be found."
-        raise RuntimeError(msg)
 
     wp = try_deserialize(wp_path, LiveWorkplan)
     if not wp:

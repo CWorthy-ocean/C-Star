@@ -31,7 +31,7 @@ class WorkplanRun(BaseModel):
     workplan_path: Path
     """The path to the original workplan."""
 
-    trx_workplan_path: Path | None
+    trx_workplan_path: Path
     """The path to the transformed workplan."""
 
     output_path: Path

@@ -266,12 +266,7 @@ async def reload_dag(wp_run: WorkplanRun) -> DagStatus:
     -------
     DagStatus
     """
-    wp_path = wp_run.trx_workplan_path
-    if not wp_path:
-        msg = f"No live workplan for run-id {wp_run.run_id!r} could be found."
-        raise RuntimeError(msg)
-
-    wp = deserialize(wp_path, LiveWorkplan)
+    wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
     msg = f"Reloading workplan run: {wp.name}"
     log.debug(msg)
 
@@ -502,12 +497,8 @@ class ExecutiveRunSummary(BaseModel):
         cls,
         run: WorkplanRun,
     ) -> "ExecutiveRunSummary":
-        wp_path = run.trx_workplan_path
-        if not wp_path:
-            msg = f"No live workplan for run-id `{run.run_id}` could be found."
-            raise RuntimeError(msg)
 
-        workplan = deserialize(wp_path, LiveWorkplan)
+        workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
         steps = [LiveStep.from_step(s) for s in workplan.steps]
         step_summaries: list[ExecutiveStepSummary] = []
 
@@ -731,6 +722,7 @@ async def build_dag(
 
 async def run_dag(
     wp_path: Path,
+    trx_wp_path: Path,
     run_id: str,
     planner: Planner,
     user_variables: Mapping[str, str] | None = None,
@@ -762,7 +754,7 @@ async def run_dag(
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,
-        trx_workplan_path=wp_path,
+        trx_workplan_path=trx_wp_path,
         output_path=output_dir,
         run_id=run_id,
         environment=capture_environment(),
@@ -777,7 +769,7 @@ async def run_dag(
     orchestrator = get_orchestrator(planner)
 
     if dry_run:
-        msg = f"Dry run complete. Prepared workplan location: {wp_path}"
+        msg = f"Dry run complete. Prepared workplan location: {trx_wp_path}"
         log.debug(msg)
         return wp_run
 
@@ -825,6 +817,7 @@ async def build_and_run_dag(
         clobber_steps=clobber_steps,
     )
     return await run_dag(
+        wp_path,
         prepared_wp_path,
         run_id,
         planner,

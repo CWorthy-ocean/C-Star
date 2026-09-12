@@ -446,7 +446,7 @@ def preprocess_path(workplan_path: str | None) -> str | None:
     return workplan_path
 
 
-async def handle_run_reloading(run_id: str) -> str:
+async def handle_run_reloading(run_id: str) -> tuple[Path, Path]:
     """Locate a prior run for the run ID and update the `RunCmdContext` with
     the correct `Workplan`.
 
@@ -454,6 +454,11 @@ async def handle_run_reloading(run_id: str) -> str:
     ----------
     run_id : str
         The run-id to reload
+
+    Returns
+    -------
+    tuple[Path, Path]
+        2-Tuple containing the original and prepared workplan paths.
     """
     repo = TrackingRepository()
     wp_run = await repo.get_workplan_run(run_id)
@@ -461,18 +466,14 @@ async def handle_run_reloading(run_id: str) -> str:
         msg = f"No runs with the id `{run_id}` could be found."
         raise typer.BadParameter(msg)
 
-    if not wp_run.trx_workplan_path:
-        msg = f"No live workplan for run-id `{run_id}` could be found."
-        raise typer.BadParameter(msg)
-
     # ensure the environment matches the prior run
     os.environ.update(wp_run.environment)
 
-    path = wp_run.workplan_path
-    msg = f"Re-starting run-id `{run_id}` with workplan originating in `{path}`"
+    source = wp_run.workplan_path
+    msg = f"Re-starting run-id {run_id!r} with workplan originating in {source!r}"
     log.info(msg)
 
-    return wp_run.trx_workplan_path.as_posix()
+    return wp_run.workplan_path, wp_run.trx_workplan_path
 
 
 @app.command(name="run", help=HELP_LONG, short_help=HELP_SHORT)
@@ -561,17 +562,19 @@ def run(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
-    reload = False
+    trx_path: Path | None = None
+    original_path: Path | None = None
+
     if not path:
-        reload = True
-        path = asyncio.run(handle_run_reloading(run_id))
+        original_path, trx_path = asyncio.run(handle_run_reloading(run_id))
+        path = str(trx_path)
 
     try:
         with local_copy(path) as wp_path:
             clobber = resolve_clobber_selection(wp_path, clobber)
             user_vars = t.cast("Mapping[str, str]", ctx.obj)
 
-            if not reload:
+            if trx_path is None or original_path is None:
                 wp_run = asyncio.run(
                     build_and_run_dag(
                         wp_path,
@@ -585,9 +588,11 @@ def run(
                 wp = deserialize(wp_path, LiveWorkplan)
                 apply_clobber_overrides(wp, clobber)
                 planner = Planner(wp)
+
                 wp_run = asyncio.run(
                     run_dag(
-                        wp_path,
+                        original_path,
+                        trx_path,
                         run_id,
                         planner,
                         user_variables=user_vars,
