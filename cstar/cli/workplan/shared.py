@@ -248,8 +248,14 @@ def display_summary(
             ref_label(x, refs_map),
         )
 
-    if run_size := run.metadata.get(KEY_RUN_SIZE, None):
-        table.caption = f"{run_size}MB disk consumed"
+    raw_size = run.metadata.get(KEY_RUN_SIZE, "")
+    try:
+        run_size = int(raw_size)
+        caption = f"{run_size}MB disk consumed"
+    except Exception:
+        caption = "Disk consumption not yet calculated"
+
+    table.caption = caption
 
     console.print(table)
 
