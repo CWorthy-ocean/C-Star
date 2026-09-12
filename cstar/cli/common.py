@@ -59,26 +59,106 @@ StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
 
 
 def colored(msg: str, color: str = "cyan") -> str:
+    """Wrap a message in rich markup applying the given color.
+
+    Parameters
+    ----------
+    msg : str
+        The message to decorate.
+    color : str
+        The rich color name to apply.
+
+    Returns
+    -------
+    str
+    """
     return f"[{color}]{msg}[/{color}]"
 
 
 def italic(msg: str) -> str:
+    """Wrap a message in rich markup applying an italic style.
+
+    Parameters
+    ----------
+    msg : str
+        The message to decorate.
+
+    Returns
+    -------
+    str
+    """
     return f"[italic]{msg}[/italic]"
 
 
 def checkmark(color: str) -> str:
+    """Create a checkmark glyph in the given color.
+
+    Parameters
+    ----------
+    color : str
+        The rich color name to apply.
+
+    Returns
+    -------
+    str
+    """
     return colored(":heavy_check_mark:", color)
 
 
 def present(prompt: str, value: str, color: str = "cyan", width: int = 0) -> str:
+    """Format a prompt and its colored value for display.
+
+    Parameters
+    ----------
+    prompt : str
+        The text labeling the value.
+    value : str
+        The value to display.
+    color : str
+        The rich color name applied to the value.
+    width : int
+        The minimum width the prompt is right-justified within.
+
+    Returns
+    -------
+    str
+    """
     return f"{prompt.rjust(width)}: {colored(value, color)}"
 
 
 def label(name: str, app: str | None) -> str:
+    """Format an entity name, including its application when available.
+
+    Parameters
+    ----------
+    name : str
+        The name of the entity.
+    app : str | None
+        The name of the application associated with the entity.
+
+    Returns
+    -------
+    str
+    """
     return f"{name} ({italic(app)})" if app else name
 
 
 def id_label(id: int, name: str, app: str | None) -> str:
+    """Format an entity name prefixed with its numeric identifier.
+
+    Parameters
+    ----------
+    id : int
+        The numeric identifier of the entity.
+    name : str
+        The name of the entity.
+    app : str | None
+        The name of the application associated with the entity.
+
+    Returns
+    -------
+    str
+    """
     return f"{id}. {label(name, app)}"
 
 
@@ -270,7 +350,7 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
     ----------
     bp_path : Path
         The path to the blueprint being migrated.
-    migration_plan : MigrationPlan
+    plan : MigrationPlan
         Details of the planned migration.
     """
     if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE) or not plan.adapters:
@@ -284,7 +364,7 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
         console.print(msg)
         return
 
-    from rich.table import Column, Table  # noqa: PLC0415
+    from rich.table import Column, Table
 
     source, target, adapters = plan
     padding = (0, 1)
@@ -313,6 +393,13 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
 
 
 def on_migrated_callback(plan: MigrationPlan) -> None:
+    """Display a notification that the migration is complete.
+
+    Parameters
+    ----------
+    plan : MigrationPlan
+        Details of the completed migration.
+    """
     console.print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
 
 
@@ -331,10 +418,15 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
 
     Parameters
     ----------
-    source : Path
-        Path to the file containing the original, serialized model.
-    target : Path | None
-        The user-supplied path
+    request : MigrationRequest
+        The request naming the source file and optional user-supplied target.
+    plan : MigrationPlan
+        The migration plan providing the target schema version.
+
+    Returns
+    -------
+    Path
+        The path where the migrated model will be persisted.
     """
     if request.target is not None:
         output = request.target
@@ -350,10 +442,27 @@ def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
 def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     """Serialize the migrated entity to disk.
 
+    For an in-place migration, the original source file is preserved in a
+    backup file before it is overwritten.
+
+    Parameters
+    ----------
+    request : MigrationRequest
+        Parameters passed to the migrator.
+    result : MigrateResult
+        The result of the executed migration.
+
     Returns
     -------
     Path
         The path to the persisted entity file.
+
+    Raises
+    ------
+    ValueError
+        If the result does not contain a migration plan.
+    typer.BadParameter
+        If the migrated content cannot be serialized.
     """
     if result.plan is None:
         msg = "Unable to persist an unplanned migration"
@@ -391,16 +500,19 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
 
     Returns
     -------
-    PersistedMigrationResult
-        Named tuple containing the migration result and path where it was persisted.
+    PersistedMigrateResult
+        Named tuple containing the migration result and path where it was
+        persisted; a target matching the source indicates no change occurred.
 
     Raises
     ------
+    typer.BadParameter
+        If the blueprint fails content validation.
     CStarMigrationNotRegisteredError
         If there are no registered migrations for the requested schema.
     typer.Exit
-        If the blueprint requires migration but migration is disabled via
-        `CSTAR_DISABLE_MIGRATION`.
+        If the planned migration fails to complete, or the blueprint requires
+        migration but migration is disabled via `CSTAR_DISABLE_MIGRATION`.
     """
     validation_result = validate_serialized_entity(request.source, BlueprintCore)
     if validation_result.item is None:
@@ -471,8 +583,13 @@ def localize_and_migrate(path: str) -> Path:
 
     Returns
     -------
-    str
+    Path
         The path to the local blueprint (or the newly migrated blueprint file).
+
+    Raises
+    ------
+    typer.Exit
+        If the migration produces an error.
     """
     with local_copy(path) as local_path:
         request = MigrationRequest(path=local_path)
@@ -496,7 +613,7 @@ def format_validation_errors(ex: ValidationError) -> str:
     for error in ex.errors():
         msg = f"{error['msg']!r}"
 
-        if "loc" in error and error["loc"]:
+        if error.get("loc"):
             msg = "`Invalid {} value ({}): {}`".format(
                 error["loc"][0],
                 error["input"],
@@ -540,7 +657,18 @@ def get_from_ctxmap(context: typer.Context, key: str, klass: type[_TValue]) -> _
 
 
 def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
-    """Prepare a mapping in the typer context and store the supplied value at the chosen key."""
+    """Prepare a mapping in the typer context and store the supplied value at
+    the chosen key.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context object.
+    key : str
+        The key the value is stored under.
+    value : object
+        The value to store in the context map.
+    """
     if context.obj is None:
         context.obj = {}
 

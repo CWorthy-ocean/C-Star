@@ -64,12 +64,17 @@ def path_callback(value: str) -> str:
 
     Parameters
     ----------
-    value : bool
+    value : str
         The value of the path parameter.
 
     Returns
     -------
     str
+
+    Raises
+    ------
+    typer.BadParameter
+        If the path is empty, was not found, or could not be retrieved.
     """
     value = value.strip() if value else ""
 
@@ -110,7 +115,7 @@ def target_callback(ctx: typer.Context, value: str) -> str:
     ----------
     ctx : typer.Context
         The typer context object.
-    value : bool
+    value : str
         The value of the output parameter.
 
     Returns
@@ -151,6 +156,11 @@ def report_inplace_conflicts(in_place: bool, clobber: bool) -> None:
         The value of the in-place parameter.
     clobber : bool
         The value of the clobber parameter.
+
+    Raises
+    ------
+    typer.BadParameter
+        If in-place and clobber are both enabled.
     """
     if in_place and clobber:
         msg = "Clobbering in-place will result in loss of the input file. Cancelling."

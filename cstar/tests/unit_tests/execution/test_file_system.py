@@ -166,15 +166,15 @@ def test_live_step(tmp_path: Path) -> None:
 
         directory_mgr = DirectoryManager()
         data_home = directory_mgr.data_home()
-        expected = data_home / run_id / task_dir_name / ls_1.safe_name  # noqa: SLF001
+        expected = data_home / run_id / task_dir_name / ls_1.safe_name
         assert actual == expected
 
         actual = ls_2.working_dir
-        expected = ls_1.working_dir / task_dir_name / ls_2.safe_name  # type: ignore # noqa: SLF001
+        expected = ls_1.working_dir / task_dir_name / ls_2.safe_name  # type: ignore
         assert actual == expected
 
         actual = ls_3.working_dir
-        expected = ls_2.working_dir / task_dir_name / ls_3.safe_name  # type: ignore # noqa: SLF001
+        expected = ls_2.working_dir / task_dir_name / ls_3.safe_name  # type: ignore
         assert actual == expected
 
         actual = ls_4.working_dir

@@ -45,6 +45,8 @@ ConverterMap: t.TypeAlias = dict[tuple[str, str, str], type[SchemaAdapter]]
 
 
 class MigrationRequest(BaseModel):
+    """User-supplied parameters describing a blueprint schema migration."""
+
     source: FilePath = Field(
         frozen=True,
         description="Path to a file containing a serialized blueprint",
@@ -235,10 +237,18 @@ class BlueprintMigration(Migration):
     ) -> MigrateResult:
         """Execute the plan to upgrade the blueprint to the latest version.
 
+        Parameters
+        ----------
+        dumped : dict[str, t.Any]
+            The raw dictionary of model attributes to migrate.
+        plan : MigrationPlan
+            The plan describing the adapters to apply.
+
         Returns
         -------
-        dict[str, t.Any]
-            The raw dictionary of model attributes with schema changes applied.
+        MigrateResult
+            Named tuple containing the original and migrated model attributes
+            along with the executed plan.
 
         Raises
         ------
