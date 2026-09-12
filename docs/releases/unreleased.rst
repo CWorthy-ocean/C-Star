@@ -32,6 +32,7 @@ Improvements
 - Relocate ``rich.console.Console()`` instance to correct shared module (avoid circular deps) (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
 - Relocate rich output utilities to correct shared module for re-use (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
 - Partially complete docstrings in affected code have been completed throughout (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
+- Reduced code duplication in admin-clean handler (`#689 <https://github.com/CWorthy-ocean/C-Star/pull/689>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
