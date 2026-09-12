@@ -357,6 +357,19 @@ def deserialize(
     return model
 
 
+def try_deserialize(
+    path: Path | str,
+    klass: type[_T],
+    mode: PersistenceMode = PersistenceMode.auto,
+) -> _T | None:
+    try:
+        return deserialize(path, klass, mode=mode)
+    except Exception:
+        msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
+        log.debug(msg)
+        return None
+
+
 async def deserialize_all(
     paths: list[Path],
     klass: type[_T],
@@ -369,27 +382,10 @@ async def deserialize_all(
     async def _bounded(p: Path, s: asyncio.Semaphore) -> _T | None:
         """Deserialize the item with concurrency bounded."""
         async with s:
-            try:
-                return await asyncio.to_thread(deserialize, p, klass, mode)
-            except Exception:
-                log.error(f"Deserialization of {str(p)!r} failed")
-                return None
+            return await asyncio.to_thread(try_deserialize, p, klass, mode)
 
     sem = sem or asyncio.Semaphore(limit)
     return await asyncio.gather(*(_bounded(Path(p), sem) for p in paths))
-
-
-def try_deserialize(
-    path: Path | str,
-    klass: type[_T],
-    mode: PersistenceMode = PersistenceMode.auto,
-) -> _T | None:
-    try:
-        return deserialize(path, klass, mode=mode)
-    except Exception:
-        msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
-        log.debug(msg)
-        return None
 
 
 def serialize(
