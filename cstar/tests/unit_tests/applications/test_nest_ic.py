@@ -195,6 +195,47 @@ class TestCreateInitialConditionsRouting:
         mock_convert.assert_called_once_with(nc4_path, final_path)
         assert result == final_path
 
+    def test_bgc_parent_passes_bgc_source_and_bgc_model(
+        self,
+        blueprint_kwargs: dict[str, Any],
+        _mock_has_bgc: mock.Mock,
+    ) -> None:
+        """A parent restart with BGC tracers must produce a `bgc_source` AND the
+        `bgc_model` roms-tools >= 5.0 requires alongside it (it completes the MARBL
+        tracer set); omitting `bgc_model` raises "bgc_model is required" there.
+        """
+        from cstar.applications import nest_ic as nest_ic_module
+
+        _mock_has_bgc.return_value = True
+        bp = NestIcBlueprint(**blueprint_kwargs, pio=False)
+        runner = _make_runner(bp)
+
+        runner._create_initial_conditions()
+
+        mocked_roms_tools = nest_ic_module.roms_tools
+        kwargs = mocked_roms_tools.InitialConditions.call_args.kwargs
+        assert kwargs["bgc_source"]["name"] == "ROMS"
+        assert kwargs["bgc_source"]["path"] == bp.parent_rst
+        assert kwargs["bgc_model"] is mocked_roms_tools.BGCMarbl
+
+    def test_physics_only_parent_passes_no_bgc_kwargs(
+        self,
+        blueprint_kwargs: dict[str, Any],
+    ) -> None:
+        """Without BGC in the parent restart neither `bgc_source` nor `bgc_model`
+        is passed, so a physics-only nest does not require any BGC model.
+        """
+        from cstar.applications import nest_ic as nest_ic_module
+
+        bp = NestIcBlueprint(**blueprint_kwargs, pio=False)
+        runner = _make_runner(bp)
+
+        runner._create_initial_conditions()
+
+        kwargs = nest_ic_module.roms_tools.InitialConditions.call_args.kwargs
+        assert "bgc_source" not in kwargs
+        assert "bgc_model" not in kwargs
+
     def test_pio_false_saves_directly_without_conversion(
         self,
         blueprint_kwargs: dict[str, Any],

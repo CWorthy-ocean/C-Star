@@ -583,3 +583,34 @@ def remove_files(file_dir: Path, wildcard_pattern: str) -> bool:
         removed = True
 
     return removed
+
+
+def get_backup_path(path: Path, backup_ext: str = ".bak") -> Path:
+    """Identify a unique backup path for the input.
+
+    Adds `.bak` on first execution and appends `.bak.<i>` for each subsequent
+    backup to ensure the original is never lost.
+
+    Parameters
+    ----------
+    path : Path
+        The source path
+    backup_ext : str
+        An extension differentiating the backup files from the source file.
+
+    Returns
+    -------
+    Path
+    """
+    if not backup_ext.startswith("."):
+        # ensure a new extension is always added
+        backup_ext = f".{backup_ext}"
+
+    suffix = f"{path.suffix}{backup_ext}"
+    backup_path = path.with_suffix(suffix)
+    i = 1
+    while backup_path.exists():
+        suffix = f"{path.suffix}{backup_ext}.{i:03d}"
+        backup_path = path.with_suffix(suffix)
+        i += 1
+    return backup_path

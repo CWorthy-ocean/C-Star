@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 from pydantic import ValidationError
+from rich.console import Console
 
 import cstar
 from cstar.applications.core import get_application
@@ -21,7 +22,12 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
 from cstar.base.utils import slugify
-from cstar.execution.file_system import DirectoryManager, is_remote_resource, local_copy
+from cstar.execution.file_system import (
+    DirectoryManager,
+    get_backup_path,
+    is_remote_resource,
+    local_copy,
+)
 from cstar.orchestration.models import BlueprintCore
 from cstar.orchestration.serialization import (
     PersistenceMode,
@@ -39,6 +45,7 @@ from cstar.system.migration import (
 )
 
 app = typer.Typer()
+console = Console()
 log = get_logger(__name__)
 
 HELP_SHORT = (
@@ -49,6 +56,110 @@ HELP_SHORT = (
 
 BoolCallback: t.TypeAlias = Callable[[typer.Context, bool], bool]
 StrCallback: t.TypeAlias = Callable[[typer.Context, str], str]
+
+
+def colored(msg: str, color: str = "cyan") -> str:
+    """Wrap a message in rich markup applying the given color.
+
+    Parameters
+    ----------
+    msg : str
+        The message to decorate.
+    color : str
+        The rich color name to apply.
+
+    Returns
+    -------
+    str
+    """
+    return f"[{color}]{msg}[/{color}]"
+
+
+def italic(msg: str) -> str:
+    """Wrap a message in rich markup applying an italic style.
+
+    Parameters
+    ----------
+    msg : str
+        The message to decorate.
+
+    Returns
+    -------
+    str
+    """
+    return f"[italic]{msg}[/italic]"
+
+
+def checkmark(color: str) -> str:
+    """Create a checkmark glyph in the given color.
+
+    Parameters
+    ----------
+    color : str
+        The rich color name to apply.
+
+    Returns
+    -------
+    str
+    """
+    return colored(":heavy_check_mark:", color)
+
+
+def present(prompt: str, value: str, color: str = "cyan", width: int = 0) -> str:
+    """Format a prompt and its colored value for display.
+
+    Parameters
+    ----------
+    prompt : str
+        The text labeling the value.
+    value : str
+        The value to display.
+    color : str
+        The rich color name applied to the value.
+    width : int
+        The minimum width the prompt is right-justified within.
+
+    Returns
+    -------
+    str
+    """
+    return f"{prompt.rjust(width)}: {colored(value, color)}"
+
+
+def label(name: str, app: str | None) -> str:
+    """Format an entity name, including its application when available.
+
+    Parameters
+    ----------
+    name : str
+        The name of the entity.
+    app : str | None
+        The name of the application associated with the entity.
+
+    Returns
+    -------
+    str
+    """
+    return f"{name} ({italic(app)})" if app else name
+
+
+def id_label(id: int, name: str, app: str | None) -> str:
+    """Format an entity name prefixed with its numeric identifier.
+
+    Parameters
+    ----------
+    id : int
+        The numeric identifier of the entity.
+    name : str
+        The name of the entity.
+    app : str | None
+        The name of the application associated with the entity.
+
+    Returns
+    -------
+    str
+    """
+    return f"{id}. {label(name, app)}"
 
 
 def version_callback(value: bool) -> bool:
@@ -239,25 +350,24 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
     ----------
     bp_path : Path
         The path to the blueprint being migrated.
-    migration_plan : MigrationPlan
+    plan : MigrationPlan
         Details of the planned migration.
     """
     if not is_flag_enabled(ENV_CSTAR_CLI_VERBOSE) or not plan.adapters:
         if plan.is_latest:
-            print(f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}")
+            msg = f"No migration needed for schema {plan.source!r} in {str(bp_path)!r}"
+            console.print(msg)
             return
 
         num_steps = len(plan.adapters)
         msg = f"Migrating {plan.source!r}->{plan.target!r} in {num_steps} step(s)."
-        print(msg)
+        console.print(msg)
         return
 
-    from rich.console import Console  # noqa: PLC0415
-    from rich.table import Column, Table  # noqa: PLC0415
+    from rich.table import Column, Table
 
     source, target, adapters = plan
     padding = (0, 1)
-    console = Console()
 
     table = Table(
         Column(header="Step", justify="center"),
@@ -283,10 +393,17 @@ def on_planned_callback(bp_path: Path, plan: MigrationPlan) -> None:
 
 
 def on_migrated_callback(plan: MigrationPlan) -> None:
-    print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
+    """Display a notification that the migration is complete.
+
+    Parameters
+    ----------
+    plan : MigrationPlan
+        Details of the completed migration.
+    """
+    console.print(f"Migration from {plan.source!r}->{plan.target!r} is complete.")
 
 
-def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Path:
+def get_persist_to(request: MigrationRequest, plan: MigrationPlan) -> Path:
     """Determine the persistence path for a migrated model.
 
     If a target is not supplied by the user, write to the `CSTAR_STATE_HOME`
@@ -301,16 +418,21 @@ def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Pa
 
     Parameters
     ----------
-    source : Path
-        Path to the file containing the original, serialized model.
-    target : Path | None
-        The user-supplied path
+    request : MigrationRequest
+        The request naming the source file and optional user-supplied target.
+    plan : MigrationPlan
+        The migration plan providing the target schema version.
+
+    Returns
+    -------
+    Path
+        The path where the migrated model will be persisted.
     """
-    if target is not None:
-        output = target
+    if request.target is not None:
+        output = request.target
     else:
-        stem = source.stem
-        suffix = source.suffix
+        stem = request.source.stem
+        suffix = request.source.suffix
         state_dir = DirectoryManager.state_home()
         output = state_dir / f"{stem}_{plan.target}{suffix}"
 
@@ -320,20 +442,40 @@ def get_persist_to(source: Path, target: Path | None, plan: MigrationPlan) -> Pa
 def persist_migration(request: MigrationRequest, result: MigrateResult) -> Path:
     """Serialize the migrated entity to disk.
 
+    For an in-place migration, the original source file is preserved in a
+    backup file before it is overwritten.
+
+    Parameters
+    ----------
+    request : MigrationRequest
+        Parameters passed to the migrator.
+    result : MigrateResult
+        The result of the executed migration.
+
     Returns
     -------
     Path
         The path to the persisted entity file.
+
+    Raises
+    ------
+    ValueError
+        If the result does not contain a migration plan.
+    typer.BadParameter
+        If the migrated content cannot be serialized.
     """
     if result.plan is None:
         msg = "Unable to persist an unplanned migration"
         raise ValueError(msg)
 
-    persist_to = get_persist_to(request.source, request.target, result.plan)
+    persist_to = get_persist_to(request, result.plan)
 
     try:
         bp_type = get_application(result.application).blueprint
         updated_bp = bp_type(**result.migrated)
+        if request.in_place:
+            backup_path = get_backup_path(request.source)
+            backup_path.write_bytes(request.source.read_bytes())
 
         nbytes = serialize(
             persist_to,
@@ -358,16 +500,19 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
 
     Returns
     -------
-    PersistedMigrationResult
-        Named tuple containing the migration result and path where it was persisted.
+    PersistedMigrateResult
+        Named tuple containing the migration result and path where it was
+        persisted; a target matching the source indicates no change occurred.
 
     Raises
     ------
+    typer.BadParameter
+        If the blueprint fails content validation.
     CStarMigrationNotRegisteredError
         If there are no registered migrations for the requested schema.
     typer.Exit
-        If the blueprint requires migration but migration is disabled via
-        `CSTAR_DISABLE_MIGRATION`.
+        If the planned migration fails to complete, or the blueprint requires
+        migration but migration is disabled via `CSTAR_DISABLE_MIGRATION`.
     """
     validation_result = validate_serialized_entity(request.source, BlueprintCore)
     if validation_result.item is None:
@@ -388,42 +533,44 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         on_migrated=on_migrated_callback,
     )
 
-    if request.dry_run():
-        return PersistedMigrateResult(
-            MigrateResult(dumped, dumped, plan=migrator.plan(dumped)),
-            request.source,
-        )
+    try:
+        plan = migrator.plan(dumped)
+    except CstarUnsupportedMigrationError as ex:
+        msg = f"Unable to plan migration: {ex}"
+        result = MigrateResult(dumped, {}, error=msg)
+        # result with target == source indicates no change occurred
+        return PersistedMigrateResult(result, request.source)
 
-    migration_result = migrator.plan_and_migrate(dumped)
-    if migration_result.error:
-        print(migration_result.error)
+    if request.dry_run() or plan.is_latest:
+        log.debug("Short-circuiting migration after planning")
+        result = MigrateResult(dumped, dumped, plan=plan)
+        # result with target == source indicates no change occurred
+        return PersistedMigrateResult(result, request.source)
+
+    try:
+        result = migrator.migrate(dumped, plan)
+    except CstarMigrationError as ex:
+        msg = f"Unable to complete migration: {ex}"
+        result = MigrateResult(dumped, {}, plan=plan, error=msg)
+
+    if result.error:
+        console.print(result.error)
         raise typer.Exit(1)
 
-    if not migration_result.plan:
-        print("Migration failed to produce a plan.")
-        raise typer.Exit(2)
-
-    # An up-to-date blueprint needs no migration: return it untouched unless
-    # the user explicitly requested an output copy.
-    if not migration_result.plan.adapters and request.target is None:
-        return PersistedMigrateResult(migration_result, request.source)
-
-    if migration_result.plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
-        from rich.console import Console  # noqa: PLC0415
-
-        Console().print(
+    if plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
+        console.print(
             f"Blueprint at '{request.source}' requires schema migration from "
-            f"[green]{migration_result.plan.source}[/green] to "
-            f"[red]{migration_result.plan.target}[/red], but migration is "
+            f"{colored(plan.source, 'green')} to "
+            f"{colored(plan.target, 'red')}, but migration is "
             f"disabled ({ENV_CSTAR_DISABLE_MIGRATION}=1). Unset "
             f"{ENV_CSTAR_DISABLE_MIGRATION} to allow migration, or update the "
             "blueprint to the current schema."
         )
         raise typer.Exit(1)
 
-    persisted_to = persist_migration(request, migration_result)
+    persisted_to = persist_migration(request, result)
 
-    return PersistedMigrateResult(migration_result, persisted_to)
+    return PersistedMigrateResult(result, persisted_to)
 
 
 def localize_and_migrate(path: str) -> tuple[Path, bool]:
@@ -452,7 +599,7 @@ def localize_and_migrate(path: str) -> tuple[Path, bool]:
             persist_result = execute_migration(request)
 
             if persist_result.migration_result.error:
-                print(persist_result.migration_result.error)
+                console.print(persist_result.migration_result.error)
                 raise typer.Exit(1)
 
             # a migration occurred only when the blueprint was persisted to a
@@ -479,7 +626,7 @@ def format_validation_errors(ex: ValidationError) -> str:
     for error in ex.errors():
         msg = f"{error['msg']!r}"
 
-        if "loc" in error and error["loc"]:
+        if error.get("loc"):
             msg = "`Invalid {} value ({}): {}`".format(
                 error["loc"][0],
                 error["input"],
@@ -523,13 +670,24 @@ def get_from_ctxmap(context: typer.Context, key: str, klass: type[_TValue]) -> _
 
 
 def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
-    """Prepare a mapping in the typer context and store the supplied value at the chosen key."""
+    """Prepare a mapping in the typer context and store the supplied value at
+    the chosen key.
+
+    Parameters
+    ----------
+    context : typer.Context
+        The typer context object.
+    key : str
+        The key the value is stored under.
+    value : object
+        The value to store in the context map.
+    """
     if context.obj is None:
         context.obj = {}
 
     context_map: dict[str, t.Any] = context.obj
 
     if key in context_map and context_map[key] is not None:
-        print(f"Value in context map using key {key!r} will be overwritten")
+        console.print(f"Value in context map using key {key!r} will be overwritten")
 
     context_map[key] = value

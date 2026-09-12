@@ -225,7 +225,8 @@ class TestNamelistOverrides:
     ):
         """Test that a `pio_settings` override validates silently for an
         unpinned `code.roms` ref: the fallback schema for an unpinned ref is
-        the latest (`RomsNamelistV0_6_0`), which has `&pio_settings`.
+        the latest (`RomsNamelistV0_7_0`), which inherits `&pio_settings`
+        from `RomsNamelistV0_6_0`.
         """
         complete_blueprint_dict["namelist_overrides"] = {
             "pio_settings": {"pio_stride": 4}
@@ -246,6 +247,38 @@ class TestNamelistOverrides:
             "pio_settings": {"pio_stride": 4}
         }
         with pytest.raises(ValidationError, match="pio_settings"):
+            RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+
+    def test_cdr_tracer_output_settings_override_valid_for_unpinned_ref(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `cdr_tracer_output_settings` override validates
+        silently for an unpinned `code.roms` ref: the fallback schema for an
+        unpinned ref is the latest (`RomsNamelistV0_7_0`), which has
+        `&cdr_tracer_output_settings`.
+        """
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            bp = RomsMarblBlueprint.model_validate(complete_blueprint_dict)
+        assert bp.namelist_overrides == {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+
+    def test_cdr_tracer_output_settings_override_rejected_for_0_6_1_pin(
+        self, complete_blueprint_dict
+    ):
+        """Test that a `cdr_tracer_output_settings` override is rejected for a
+        `code.roms` pin at 0.6.1, since `&cdr_tracer_output_settings` was
+        added in ucla-roms 0.7.0.
+        """
+        complete_blueprint_dict["code"]["roms"]["branch"] = "v0.6.1"
+        complete_blueprint_dict["namelist_overrides"] = {
+            "cdr_tracer_output_settings": {"wrt_alk": False}
+        }
+        with pytest.raises(ValidationError, match="cdr_tracer_output_settings"):
             RomsMarblBlueprint.model_validate(complete_blueprint_dict)
 
 

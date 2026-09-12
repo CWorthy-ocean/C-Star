@@ -20,6 +20,7 @@ from cstar.cli.common import (
     format_validation_errors,
     localize_and_migrate,
     normalize_runid,
+    present,
     set_env,
     set_flag,
     update_loggers,
@@ -29,7 +30,6 @@ from cstar.cli.workplan.shared import (
     colored,
     console,
     list_runs,
-    present,
 )
 from cstar.entrypoint.utils import (
     ARG_CLOBBER,
