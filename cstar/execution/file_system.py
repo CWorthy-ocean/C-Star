@@ -606,7 +606,7 @@ async def disk_usage(path: Path) -> str:
         _ = int(value)
         return value
     except Exception:
-        return "0"
+        return "-1"
 
 
 async def bounded_du(path: Path, sem: asyncio.Semaphore) -> str:
