@@ -60,7 +60,9 @@ class ItemView(BaseModel):
     @property
     def start(self) -> str:
         """The start time as a string for display."""
-        return self.raw_start.strftime("%Y-%m-%d %H:%M")
+        if self.format == "table":
+            return self.raw_start.astimezone().strftime("%Y-%m-%d %H:%M")
+        return self.raw_start.isoformat()
 
 
 async def adapt_runs_to_views(
