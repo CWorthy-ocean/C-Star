@@ -573,7 +573,7 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
     return PersistedMigrateResult(result, persisted_to)
 
 
-def localize_and_migrate(path: str) -> Path:
+def localize_and_migrate(path: str) -> tuple[Path, bool]:
     """Copy the blueprint locally and auto-migrate its schema if necessary.
 
     Parameters
@@ -583,16 +583,18 @@ def localize_and_migrate(path: str) -> Path:
 
     Returns
     -------
-    Path
-        The path to the local blueprint (or the newly migrated blueprint file).
-
-    Raises
-    ------
-    typer.Exit
-        If the migration produces an error.
+    tuple[Path, bool]
+        Tuple containing:
+        - Path to the localized blueprint (the migrated copy when one was created)
+        - True if the blueprint was migrated and persisted to a new location,
+          meaning references to the original path must be updated. False when
+          the blueprint was left untouched (already up-to-date, dry-run, or no
+          adapters registered for its application).
     """
     with local_copy(path) as local_path:
         request = MigrationRequest(path=local_path)
+        is_migrated = False
+
         try:
             persist_result = execute_migration(request)
 
@@ -600,10 +602,21 @@ def localize_and_migrate(path: str) -> Path:
                 console.print(persist_result.migration_result.error)
                 raise typer.Exit(1)
 
+            # a migration occurred only when the blueprint was persisted to a
+            # new location; up-to-date and dry-run requests return the source
+            is_migrated = Path(persist_result.target) != local_path
             local_path = Path(persist_result.target)
         except CStarMigrationNotRegisteredError:
             log.debug("Skipping schema migration; no registered adapters")
-        return local_path
+        except CstarUnsupportedMigrationError as ex:
+            msg = f"Unable to migrate blueprint: {str(path)!r}"
+            log.exception(msg)
+            raise typer.Exit(1) from ex
+        except CstarMigrationError as ex:
+            msg = f"Migration failed for {path!r}"
+            log.exception(msg)
+            raise typer.BadParameter(msg) from ex
+        return local_path, is_migrated
 
 
 def format_validation_errors(ex: ValidationError) -> str:

@@ -1,4 +1,5 @@
 import enum
+import errno
 import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -122,7 +123,7 @@ def read_raw(
     """
     if not path.exists():
         msg = f"Unable to read raw model from path: {path}"
-        raise FileNotFoundError(msg)
+        raise FileNotFoundError(errno.ENOENT, msg, path)
 
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
@@ -340,7 +341,7 @@ def deserialize(
 
     if not path.exists():
         msg = f"No file found at path `{path}` to deserialize to `{klass.__name__}`"
-        raise FileNotFoundError(msg)
+        raise FileNotFoundError(errno.ENOENT, msg, path)
 
     if mode == PersistenceMode.auto:
         mode = _mode_detect(path)
