@@ -228,6 +228,11 @@ def filter_time(
     return results
 
 
+def format_runid_filter(value: str) -> str:
+    """Ensure the run-id filter has been converted to lower-case for comparisons."""
+    return value.casefold()
+
+
 sorters: dict[FIELD_NAMES, Callable[[Iterable[ItemView], bool], list[ItemView]]] = {
     "name": lambda runs, desc: sorted(runs, key=lambda x: x.name, reverse=desc),
     "run-id": lambda runs, desc: sorted(runs, key=lambda x: x.run_id, reverse=desc),
@@ -263,7 +268,11 @@ def ls_runs(
     ] = "table",
     runid_filter: t.Annotated[
         str,
-        typer.Option("--run-filter", help="Pass a search term to match run-id"),
+        typer.Option(
+            "--run-filter",
+            help="Pass a search term to match run-id",
+            callback=format_runid_filter,
+        ),
     ] = "",
     size_gt_filter: t.Annotated[
         int | None,
