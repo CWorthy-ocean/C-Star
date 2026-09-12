@@ -230,7 +230,7 @@ sorters: dict[FIELD_NAMES, Callable[[Iterable[ItemView], bool], list[ItemView]]]
     "name": lambda runs, desc: sorted(runs, key=lambda x: x.name, reverse=desc),
     "run-id": lambda runs, desc: sorted(runs, key=lambda x: x.run_id, reverse=desc),
     "size": lambda runs, desc: sorted(runs, key=lambda x: x.raw_size, reverse=desc),
-    "time": lambda runs, desc: sorted(runs, key=lambda x: x.start, reverse=desc),
+    "time": lambda runs, desc: sorted(runs, key=lambda x: x.raw_start, reverse=desc),
 }
 
 
