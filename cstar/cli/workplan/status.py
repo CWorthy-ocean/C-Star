@@ -5,8 +5,8 @@ import typer
 from rich.console import Console
 
 from cstar.base.log import get_logger
-from cstar.cli.workplan.ls import attach_disk_usage
 from cstar.cli.workplan.shared import (
+    attach_disk_usage,
     display_summary,
     list_runs,
 )

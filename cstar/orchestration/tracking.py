@@ -2,7 +2,6 @@ import asyncio
 import fcntl
 import os
 import typing as t
-from collections import defaultdict
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -52,7 +51,7 @@ class WorkplanRun(BaseModel):
     sentinels: set[Path] = Field(default_factory=set[Path])
     """State files expected to be created during execution of the run."""
 
-    metadata: dict[str, str] = Field(default_factory=lambda: defaultdict(lambda: ""))
+    metadata: dict[str, str] = Field(default_factory=dict)
     """Optional metadata for the run."""
 
     @staticmethod
@@ -414,15 +413,16 @@ class TrackingRepository(LoggingMixin):
         Path
             The path to the persisted history record
         """
-        coro = asyncio.to_thread(self.put_workplan_run_sync, run)
-
         if self._sem:
             async with self._sem:
+                coro = asyncio.to_thread(self.put_workplan_run_sync, run)
                 return await coro
 
-        return await coro
+        return await asyncio.to_thread(self.put_workplan_run_sync, run)
 
-    async def list_latest_runs(self, run_id_filter: str = "") -> Sequence[WorkplanRun]:
+    async def list_latest_runs(
+        self, run_id_filter: str = ""
+    ) -> Sequence[WorkplanRun | None]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
 
         run_id_filter : str
@@ -430,12 +430,14 @@ class TrackingRepository(LoggingMixin):
 
         Returns
         -------
-        Sequence[WorkplanRun]
+        Sequence[WorkplanRun | None]
         """
         run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
         return await deserialize_all(run_paths, WorkplanRun, sem=self._sem)
 
-    async def list_history_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
+    async def list_history_runs(
+        self, run_id_filter: str
+    ) -> Sequence[WorkplanRun | None]:
         """Retrieve a list of all WorkplanRun instances executed with a given run-id.
 
         run_id_filter : str
@@ -443,20 +445,22 @@ class TrackingRepository(LoggingMixin):
 
         Returns
         -------
-        Sequence[WorkplanRun]
+        Sequence[WorkplanRun | None]
         """
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
         glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
         run_paths = list(self.history_dir.rglob(glob_pattern))
         return await deserialize_all(run_paths, WorkplanRun, sem=self._sem)
 
-    def __call__(self, limit: int):
+    @classmethod
+    def bound(cls, limit: int):
         @asynccontextmanager
         async def _manager() -> AsyncGenerator[TrackingRepository]:
+            tracking = TrackingRepository()
             try:
-                self._sem = asyncio.Semaphore(limit)
-                yield self
+                tracking._sem = asyncio.Semaphore(limit)
+                yield tracking
             finally:
-                self._sem = None
+                tracking._sem = None
 
         return _manager()

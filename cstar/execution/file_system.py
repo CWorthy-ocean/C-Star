@@ -2,6 +2,7 @@ import asyncio
 import errno
 import functools
 import os
+import shlex
 import shutil
 import sys
 import typing as t
@@ -596,10 +597,12 @@ async def disk_usage(path: Path) -> str:
     -------
     str
     """
-    result = await asyncio.to_thread(_run_cmd, f"du -sm {str(path)}")
+    result = await asyncio.to_thread(_run_cmd, f"du -sm {shlex.quote(str(path))}")
 
-    value = result.split()[0]
     try:
+        # if du fails to produce the expected output, split will fail
+        value = result.split()[0]
+
         _ = int(value)
         return value
     except Exception:

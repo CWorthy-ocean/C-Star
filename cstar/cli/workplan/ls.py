@@ -15,7 +15,7 @@ from rich.text import Text
 
 from cstar.base.log import get_logger
 from cstar.cli.common import max_concurrency
-from cstar.cli.workplan.shared import attach_disk_usage, console
+from cstar.cli.workplan.shared import KEY_RUN_SIZE, attach_disk_usage, console
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize_all
@@ -34,12 +34,10 @@ FIELD_NAMES: t.TypeAlias = t.Literal[
 """Fields available for use in listing, filtering, and sorting operations."""
 FORMATS: t.TypeAlias = t.Literal["table", "csv", "json"]
 """Output format options."""
-EXCLUSIONS: set[str] = {"raw_size", "raw_start"}
+EXCLUSIONS: set[str] = {"raw_size", "raw_start", "format"}
 """View fields excluded from rendered outputs."""
 INCLUSIONS: set[str] = {"run_id", "name", "size", "start"}
 """View fields included in the rendered outputs."""
-KEY_RUN_SIZE: t.Final[str] = "size"
-"""Key used to store disk-usage in the run metadata."""
 
 
 class ItemView(BaseModel):
@@ -47,12 +45,13 @@ class ItemView(BaseModel):
     name: str
     raw_size: int
     raw_start: datetime.datetime
+    format: FORMATS
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def size(self) -> str:
         """The size as a string for display (includes units)."""
-        if self.raw_size == -1:
+        if self.raw_size == -1 and self.format == "table":
             return f'Run "cstar workplan status {self.run_id} {ARG_SIZE}"'
 
         return f"{self.raw_size}MB"
@@ -67,6 +66,7 @@ class ItemView(BaseModel):
 async def adapt_runs_to_views(
     runs: Sequence[WorkplanRun],
     plan_cache: dict[Path, LiveWorkplan],
+    format: FORMATS,
 ) -> Sequence[ItemView]:
     """Build the raw dataset that will be rendered in the view."""
 
@@ -85,29 +85,39 @@ async def adapt_runs_to_views(
         limit = max_concurrency()
         workplans = await deserialize_all(paths, LiveWorkplan, limit=limit)
         for path, wp in zip(paths, workplans):
-            cache[path] = wp
+            if wp:
+                cache[path] = wp
+            else:
+                log.debug(
+                    f"Workplan at {str(path)!r} failed deserialization. Skipping cache"
+                )
 
-    missing = [r.workplan_path for r in runs if r.workplan_path not in plan_cache]
-    await _populate_cache(missing, plan_cache)
+    missing = {
+        r.trx_workplan_path
+        for r in runs
+        if r.trx_workplan_path not in plan_cache and r.trx_workplan_path is not None
+    }
+    await _populate_cache(list(sorted(missing)), plan_cache)
 
     views: list[ItemView] = []
 
     for run in runs:
-        wp_path = run.workplan_path
-        name = "unkown"
+        wp_path = run.trx_workplan_path
+        name = "unknown"
 
         try:
-            if wp := plan_cache.get(wp_path, None):
-                name = wp.name
-        except Exception:
-            log.warning(f"The workplan path {str(wp_path)!r} is invalid")
+            if wp_path is not None:
+                name = plan_cache[wp_path].name
+        except KeyError:
+            log.warning(f"The workplan path {str(wp_path)!r} was not loaded into cache")
 
         views.append(
             ItemView(
                 run_id=run.run_id,
                 name=name,
-                raw_size=int(run.metadata[KEY_RUN_SIZE]),
+                raw_size=int(run.metadata.get(KEY_RUN_SIZE, "-1")),
                 raw_start=run.start_at,
+                format=format,
             )
         )
     return views
@@ -163,18 +173,32 @@ def filter_size(
     runs: Sequence[WorkplanRun],
     lt_filter: int | None = None,
     gt_filter: int | None = None,
-) -> Sequence[WorkplanRun]:
+) -> list[WorkplanRun]:
     if not lt_filter and not gt_filter:
-        return runs
+        return list(runs)
 
     results: list[WorkplanRun] = []
+    warn_unsized: list[str] = []
+
     for run in runs:
         size = int(run.metadata[KEY_RUN_SIZE])
+        if size == -1:
+            # never filter items with uncomputed sizes
+            warn_unsized.append(run.run_id)
+            results.append(run)
+            continue
+
         if lt_filter and size > lt_filter:
             continue
         if gt_filter and size < gt_filter:
             continue
+
         results.append(run)
+
+    if warn_unsized:
+        console.print(
+            f"Runs without disk consumption calculations were not filtered: {','.join(warn_unsized)}"
+        )
 
     return results
 
@@ -183,9 +207,9 @@ def filter_time(
     runs: Sequence[WorkplanRun],
     lt_filter: datetime.datetime | None = None,
     gt_filter: datetime.datetime | None = None,
-) -> Sequence[WorkplanRun]:
+) -> list[WorkplanRun]:
     if not lt_filter and not gt_filter:
-        return runs
+        return list(runs)
 
     results: list[WorkplanRun] = []
     for run in runs:
@@ -202,15 +226,11 @@ def filter_time(
     return results
 
 
-sorters: dict[
-    FIELD_NAMES, Callable[[Iterable[WorkplanRun], bool], list[WorkplanRun]]
-] = {
-    "name": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
+sorters: dict[FIELD_NAMES, Callable[[Iterable[ItemView], bool], list[ItemView]]] = {
+    "name": lambda runs, desc: sorted(runs, key=lambda x: x.name, reverse=desc),
     "run-id": lambda runs, desc: sorted(runs, key=lambda x: x.run_id, reverse=desc),
-    "size": lambda runs, desc: sorted(
-        runs, key=lambda x: int(x.metadata[KEY_RUN_SIZE]), reverse=desc
-    ),
-    "time": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
+    "size": lambda runs, desc: sorted(runs, key=lambda x: x.raw_size, reverse=desc),
+    "time": lambda runs, desc: sorted(runs, key=lambda x: x.start, reverse=desc),
 }
 
 
@@ -227,12 +247,12 @@ def ls_runs(
     sort: t.Annotated[
         FIELD_NAMES,
         typer.Option("--sort", help="Pass the column used for sorting"),
-    ] = "name",
+    ] = "time",
     reverse: t.Annotated[
         bool,
         typer.Option(
             "--reverse",
-            help="Set flag to sort in ascending order.",
+            help="Set flag to reverse the sort order.",
         ),
     ] = False,
     format: t.Annotated[
@@ -278,21 +298,22 @@ def ls_runs(
 ) -> None:
     """List all runs started by a user."""
     plan_cache: dict[Path, LiveWorkplan] = {}
-    repo = TrackingRepository()
 
-    async def _list_runs() -> Sequence[WorkplanRun]:
+    async def _list_runs() -> Sequence[WorkplanRun | None]:
         """Perform a max-concurrency bounded retrieval of the run list."""
-        async with repo(max_concurrency()) as bounded:
-            return await bounded.list_latest_runs(runid_filter)
+        async with TrackingRepository.bound(max_concurrency()) as repo:
+            return await repo.list_latest_runs(runid_filter)
 
-    runs = asyncio.run(_list_runs())
+    raw_runs = asyncio.run(_list_runs())
+    runs = [r for r in raw_runs if r is not None]
     runs = filter_time(runs, time_lt_filter, time_gt_filter)
 
     asyncio.run(attach_disk_usage(runs, refresh=refresh_usage))
     runs = filter_size(runs, size_lt_filter, size_gt_filter)
 
-    runs = sorters[sort](runs, reverse)
-    views = asyncio.run(adapt_runs_to_views(runs, plan_cache))
+    views = asyncio.run(adapt_runs_to_views(runs, plan_cache, format))
+
+    views = sorters[sort](views, reverse)
     content = formatters[format](views)
 
     console.print(content)

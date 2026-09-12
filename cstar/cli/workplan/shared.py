@@ -59,11 +59,10 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
     """
     incomplete = incomplete.lower()
 
-    async def _bounded() -> Sequence[WorkplanRun]:
+    async def _bounded() -> Sequence[WorkplanRun | None]:
         """Retrieve the run list while limiting concurrent reads."""
-        repo = TrackingRepository()
-        async with repo(max_concurrency()) as bounded:
-            return await bounded.list_latest_runs(incomplete)
+        async with TrackingRepository.bound(max_concurrency()) as repo:
+            return await repo.list_latest_runs(incomplete)
 
     run_list = asyncio.run(_bounded())
 
@@ -474,9 +473,8 @@ async def attach_disk_usage(runs: Sequence[WorkplanRun], refresh: bool = False) 
         for run in runs:
             run.metadata[KEY_RUN_SIZE] = str(du[run.run_id])
 
-        repo = TrackingRepository()
-        async with repo(limit=max_concurrency()) as r:
-            coros = [r.put_workplan_run(run) for run in runs]
+        async with TrackingRepository.bound(max_concurrency()) as repo:
+            coros = [repo.put_workplan_run(run) for run in runs]
             await asyncio.gather(*coros)
     else:
         for run in runs:

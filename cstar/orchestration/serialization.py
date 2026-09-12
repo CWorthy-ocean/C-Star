@@ -363,13 +363,17 @@ async def deserialize_all(
     mode: PersistenceMode = PersistenceMode.auto,
     limit: int = 10,
     sem: asyncio.Semaphore | None = None,
-) -> Sequence[_T]:
+) -> Sequence[_T | None]:
     """Deserialize a collection of items of the same type."""
 
-    async def _bounded(p: Path, s: asyncio.Semaphore) -> _T:
+    async def _bounded(p: Path, s: asyncio.Semaphore) -> _T | None:
         """Deserialize the item with concurrency bounded."""
         async with s:
-            return await asyncio.to_thread(deserialize, p, klass, mode)
+            try:
+                return await asyncio.to_thread(deserialize, p, klass, mode)
+            except Exception:
+                log.error(f"Deserialization of {str(p)!r} failed")
+                return None
 
     sem = sem or asyncio.Semaphore(limit)
     return await asyncio.gather(*(_bounded(Path(p), sem) for p in paths))
