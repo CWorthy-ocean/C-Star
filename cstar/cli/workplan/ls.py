@@ -41,6 +41,8 @@ INCLUSIONS: set[str] = {"run_id", "name", "size", "start"}
 
 
 class ItemView(BaseModel):
+    """A single run prepared for rendering in one of the output formats."""
+
     run_id: str
     name: str
     raw_size: int
@@ -70,7 +72,26 @@ async def adapt_runs_to_views(
     plan_cache: dict[Path, LiveWorkplan],
     format: FORMATS,
 ) -> Sequence[ItemView]:
-    """Build the raw dataset that will be rendered in the view."""
+    """Build the raw dataset that will be rendered in the view.
+
+    Workplan names are resolved by deserializing each run's transformed
+    workplan; a run whose workplan cannot be loaded is shown as "unknown".
+
+    Parameters
+    ----------
+    runs : Sequence[WorkplanRun]
+        The runs to adapt for display.
+    plan_cache : dict[Path, LiveWorkplan]
+        Previously loaded workplans, keyed on their file path; missing
+        entries are loaded from disk and added.
+    format : FORMATS
+        The output format the views will be rendered with.
+
+    Returns
+    -------
+    Sequence[ItemView]
+        One view per run, in input order.
+    """
 
     async def _populate_cache(
         paths: list[Path], cache: dict[Path, LiveWorkplan]
@@ -97,7 +118,7 @@ async def adapt_runs_to_views(
     missing = {
         r.trx_workplan_path for r in runs if r.trx_workplan_path not in plan_cache
     }
-    await _populate_cache(list(sorted(missing)), plan_cache)
+    await _populate_cache(sorted(missing), plan_cache)
 
     views: list[ItemView] = []
 
@@ -123,7 +144,18 @@ async def adapt_runs_to_views(
 
 
 def table_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
-    """Display run information as a table."""
+    """Display run information as a table.
+
+    Parameters
+    ----------
+    data : Iterable[ItemView]
+        The run views to render.
+
+    Returns
+    -------
+    ConsoleRenderable
+        A rich table with one row per run.
+    """
     table = Table(
         Column("run-id", justify="right", style="yellow"),
         Column("workplan", justify="left", style="white"),
@@ -143,7 +175,18 @@ def table_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
 
 
 def csv_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
-    """Display run information as CSV."""
+    """Display run information as CSV.
+
+    Parameters
+    ----------
+    data : Iterable[ItemView]
+        The run views to render.
+
+    Returns
+    -------
+    ConsoleRenderable
+        A CSV document with a header row followed by one row per run.
+    """
     output = io.StringIO()
 
     renderables = (x.model_dump(exclude=EXCLUSIONS) for x in data)
@@ -161,7 +204,18 @@ def csv_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
 
 
 def json_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
-    """Display run information as JSON."""
+    """Display run information as JSON.
+
+    Parameters
+    ----------
+    data : Iterable[ItemView]
+        The run views to render.
+
+    Returns
+    -------
+    ConsoleRenderable
+        A JSON document with the runs under a top-level "data" key.
+    """
     container = {"data": [x.model_dump(include=INCLUSIONS) for x in data]}
     document = json.dumps(container)
 
@@ -173,6 +227,25 @@ def filter_size(
     lt_filter: int | None = None,
     gt_filter: int | None = None,
 ) -> list[WorkplanRun]:
+    """Filter runs by their recorded disk usage.
+
+    Bounds are inclusive. Runs whose usage has not been computed (the -1
+    sentinel) are never filtered out; a warning names them when any exist.
+
+    Parameters
+    ----------
+    runs : Sequence[WorkplanRun]
+        The runs to filter; size metadata must already be attached.
+    lt_filter : int | None
+        The maximum disk usage (in MB) to include in results.
+    gt_filter : int | None
+        The minimum disk usage (in MB) to include in results.
+
+    Returns
+    -------
+    list[WorkplanRun]
+        The runs within the requested bounds, in input order.
+    """
     if lt_filter is None and gt_filter is None:
         return list(runs)
 
@@ -207,6 +280,25 @@ def filter_time(
     lt_filter: datetime.datetime | None = None,
     gt_filter: datetime.datetime | None = None,
 ) -> list[WorkplanRun]:
+    """Filter runs by their start time.
+
+    Bounds are inclusive and are normalized to UTC before comparison; a
+    naive bound is interpreted in the system local timezone.
+
+    Parameters
+    ----------
+    runs : Sequence[WorkplanRun]
+        The runs to filter.
+    lt_filter : datetime.datetime | None
+        The latest start time to include in results.
+    gt_filter : datetime.datetime | None
+        The earliest start time to include in results.
+
+    Returns
+    -------
+    list[WorkplanRun]
+        The runs within the requested bounds, in input order.
+    """
     if not lt_filter and not gt_filter:
         return list(runs)
 
@@ -226,7 +318,18 @@ def filter_time(
 
 
 def format_runid_filter(value: str) -> str:
-    """Ensure the run-id filter has been converted to lower-case for comparisons."""
+    """Ensure the run-id filter has been converted to lower-case for comparisons.
+
+    Parameters
+    ----------
+    value : str
+        The raw filter value supplied by the user.
+
+    Returns
+    -------
+    str
+        The case-folded filter value.
+    """
     return value.casefold()
 
 

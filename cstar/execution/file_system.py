@@ -596,6 +596,8 @@ async def disk_usage(path: Path) -> str:
     Returns
     -------
     str
+        The size of the directory in MB, or "-1" when the measurement
+        fails (e.g. the path is missing or unreadable).
     """
     result = await asyncio.to_thread(_run_cmd, f"du -sm {shlex.quote(str(path))}")
 
@@ -622,6 +624,7 @@ async def bounded_du(path: Path, sem: asyncio.Semaphore) -> str:
     Returns
     -------
     str
+        The size of the directory in MB, or "-1" when the measurement fails.
     """
     async with sem:
         return await disk_usage(path)

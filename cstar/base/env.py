@@ -404,6 +404,14 @@ def unset(key: str) -> str | None:
 def max_concurrency() -> int:
     """Utility to get commonly used max-concurrency value from env vars
     for bounding simultaneous IO operations.
+
+    A value that cannot be parsed as an integer, or is less than 1, is
+    replaced with the environment variable's default; a warning is logged.
+
+    Returns
+    -------
+    int
+        The maximum number of concurrent disk IO operations.
     """
     env_item = get_env_item(ENV_CSTAR_ORCH_MAX_CONC)
 

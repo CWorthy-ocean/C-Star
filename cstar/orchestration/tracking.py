@@ -426,12 +426,17 @@ class TrackingRepository(LoggingMixin):
     ) -> Sequence[WorkplanRun | None]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
 
+        Parameters
+        ----------
         run_id_filter : str
-            A run-id used to filter records. Matches will be included in results.
+            A run-id prefix used to filter records. Matches will be included
+            in results.
 
         Returns
         -------
         Sequence[WorkplanRun | None]
+            The latest run record per matching run-id; a record that cannot
+            be read is returned as `None`.
         """
         run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
         limit = max_concurrency()
@@ -442,12 +447,17 @@ class TrackingRepository(LoggingMixin):
     ) -> Sequence[WorkplanRun | None]:
         """Retrieve a list of all WorkplanRun instances executed with a given run-id.
 
+        Parameters
+        ----------
         run_id_filter : str
-            A run-id used to filter records. Matches will be included in results.
+            A run-id prefix used to filter records. Matches will be included
+            in results.
 
         Returns
         -------
         Sequence[WorkplanRun | None]
+            Every historical run record for matching run-ids; a record that
+            cannot be read is returned as `None`.
         """
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
         glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
@@ -457,6 +467,20 @@ class TrackingRepository(LoggingMixin):
 
     @classmethod
     def bound(cls, limit: int):
+        """Create a repository whose disk operations are concurrency-bounded.
+
+        Parameters
+        ----------
+        limit : int
+            The maximum number of concurrent disk operations.
+
+        Returns
+        -------
+        AsyncContextManager[TrackingRepository]
+            An async context manager yielding a new repository that holds a
+            semaphore for the lifetime of the context.
+        """
+
         @asynccontextmanager
         async def _manager() -> AsyncGenerator[TrackingRepository]:
             tracking = TrackingRepository()

@@ -497,7 +497,18 @@ class ExecutiveRunSummary(BaseModel):
         cls,
         run: WorkplanRun,
     ) -> "ExecutiveRunSummary":
+        """Build a run summary from a persisted run record.
 
+        Parameters
+        ----------
+        run : WorkplanRun
+            The run record to summarize.
+
+        Returns
+        -------
+        ExecutiveRunSummary
+            A summary of the run and the status of each of its steps.
+        """
         workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
         steps = [LiveStep.from_step(s) for s in workplan.steps]
         step_summaries: list[ExecutiveStepSummary] = []
@@ -700,9 +711,9 @@ async def build_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    tuple[Planner, Path]
+        The planner built from the prepared workplan, and the path to the
+        workplan after any transformations were applied.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -733,7 +744,9 @@ async def run_dag(
     Parameters
     ----------
     wp_path : Path
-        The path to the blueprint to execute
+        The path to the original workplan, recorded on the run for provenance.
+    trx_wp_path : Path
+        The path to the prepared (transformed) workplan that is executed.
     run_id : str
         The run-id to be used by the orchestrator.
     planner : Planner

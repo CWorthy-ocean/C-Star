@@ -447,8 +447,10 @@ def preprocess_path(workplan_path: str | None) -> str | None:
 
 
 async def handle_run_reloading(run_id: str) -> tuple[Path, Path]:
-    """Locate a prior run for the run ID and update the `RunCmdContext` with
-    the correct `Workplan`.
+    """Locate the prior run for the run-id and restore its environment.
+
+    The environment variables captured when the run was originally started
+    are re-exported so the reload executes under matching configuration.
 
     Parameters
     ----------
@@ -459,6 +461,11 @@ async def handle_run_reloading(run_id: str) -> tuple[Path, Path]:
     -------
     tuple[Path, Path]
         2-Tuple containing the original and prepared workplan paths.
+
+    Raises
+    ------
+    typer.BadParameter
+        If no run record exists for the supplied run-id.
     """
     repo = TrackingRepository()
     wp_run = await repo.get_workplan_run(run_id)

@@ -90,6 +90,13 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
     Returns
     -------
     list[str]
+        The matching step names, from the recorded workplan when available
+        and otherwise from a scan of the tasks directory.
+
+    Raises
+    ------
+    RuntimeError
+        If no run record exists for the supplied run-id.
     """
     if not run_id:
         return []
@@ -428,10 +435,18 @@ def preload_run(context: typer.Context, run_id: str) -> str:
 async def get_run_disk_usage(runs: Sequence[WorkplanRun]) -> dict[str, int]:
     """Retrieve the disk space consumed for a collection of runs.
 
+    Measurements run concurrently, bounded by the configured max-concurrency.
+
+    Parameters
+    ----------
+    runs : Sequence[WorkplanRun]
+        The runs whose output directories will be measured.
+
     Returns
     -------
     dict[str, int]
-        A dictionary mapping the run-id to the disk usage for the run.
+        A dictionary mapping the run-id to the disk usage (in MB) for the
+        run; a failed measurement is reported as -1.
     """
     sem = asyncio.Semaphore(max_concurrency())
 
@@ -458,11 +473,12 @@ async def attach_disk_usage(runs: Sequence[WorkplanRun], refresh: bool = False) 
     If refresh is disabled, current usage will not be updated and a default
     or previously-loaded metadata will be used.
 
-    When refresh is enabled, size metadata will be cached on the run record
+    When refresh is enabled, disk usage is re-measured and the size metadata
+    is cached on the persisted run record.
 
     Parameters
     ----------
-    runs : Sequence[WorkplanRuns]
+    runs : Sequence[WorkplanRun]
         The runs to be enriched with usage metadata.
     refresh : bool
         When `True`, re-calculate disk usage. Otherwise, use default (-1) or
