@@ -3,7 +3,8 @@ import fcntl
 import os
 import typing as t
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -16,7 +17,12 @@ from cstar.execution.file_system import (
     local_copy,
 )
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    deserialize_all,
+    serialize,
+)
 
 
 class WorkplanRun(BaseModel):
@@ -47,6 +53,7 @@ class WorkplanRun(BaseModel):
     """State files expected to be created during execution of the run."""
 
     metadata: dict[str, str] = Field(default_factory=lambda: defaultdict(lambda: ""))
+    """Optional metadata for the run."""
 
     @staticmethod
     def get_default_run_id(uri: str) -> str:
@@ -92,6 +99,9 @@ class TrackingRepository(LoggingMixin):
 
     _MODE: PersistenceMode = PersistenceMode.yaml
     """The serialization mode to use."""
+
+    _sem: asyncio.Semaphore | None = None
+    """A semaphore used to limit concurrent disk accesses."""
 
     @property
     def _root(self) -> Path:
@@ -327,7 +337,9 @@ class TrackingRepository(LoggingMixin):
             return deserialize(run_path, WorkplanRun)
 
     async def get_workplan_run(
-        self, run_id: str, run_date: datetime | None = None
+        self,
+        run_id: str,
+        run_date: datetime | None = None,
     ) -> WorkplanRun | None:
         """Locate a WorkplanRun record.
 
@@ -343,6 +355,11 @@ class TrackingRepository(LoggingMixin):
         WorkplanRun | None
             The record when it can be located in history or latest runs, otherwise `None`.
         """
+        if self._sem:
+            async with self._sem:
+                return await asyncio.to_thread(
+                    self.get_workplan_run_sync, run_id, run_date
+                )
         return await asyncio.to_thread(self.get_workplan_run_sync, run_id, run_date)
 
     def put_workplan_run_sync(self, run: WorkplanRun) -> Path:
@@ -397,7 +414,13 @@ class TrackingRepository(LoggingMixin):
         Path
             The path to the persisted history record
         """
-        return await asyncio.to_thread(self.put_workplan_run_sync, run)
+        coro = asyncio.to_thread(self.put_workplan_run_sync, run)
+
+        if self._sem:
+            async with self._sem:
+                return await coro
+
+        return await coro
 
     async def list_latest_runs(self, run_id_filter: str = "") -> Sequence[WorkplanRun]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
@@ -410,11 +433,7 @@ class TrackingRepository(LoggingMixin):
         Sequence[WorkplanRun]
         """
         run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
-        coros = [
-            asyncio.to_thread(deserialize, run_path, WorkplanRun)
-            for run_path in run_paths
-        ]
-        return await asyncio.gather(*coros)
+        return await deserialize_all(run_paths, WorkplanRun, sem=self._sem)
 
     async def list_history_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
         """Retrieve a list of all WorkplanRun instances executed with a given run-id.
@@ -429,8 +448,15 @@ class TrackingRepository(LoggingMixin):
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
         glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
         run_paths = list(self.history_dir.rglob(glob_pattern))
-        coros = [
-            asyncio.to_thread(deserialize, run_path, WorkplanRun)
-            for run_path in run_paths
-        ]
-        return await asyncio.gather(*coros)
+        return await deserialize_all(run_paths, WorkplanRun, sem=self._sem)
+
+    def __call__(self, limit: int):
+        @asynccontextmanager
+        async def _manager() -> AsyncGenerator[TrackingRepository]:
+            try:
+                self._sem = asyncio.Semaphore(limit)
+                yield self
+            finally:
+                self._sem = None
+
+        return _manager()

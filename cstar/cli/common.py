@@ -16,7 +16,9 @@ from cstar.base.env import (
     ENV_CSTAR_CLI_VERBOSE,
     ENV_CSTAR_DISABLE_MIGRATION,
     ENV_CSTAR_LOG_LEVEL,
+    ENV_CSTAR_ORCH_MAX_CONC,
     FLAG_ON,
+    get_env_item,
 )
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import LogLevelChoices, get_logger, reset_log_level
@@ -511,3 +513,10 @@ def set_ctxmap(context: typer.Context, key: str, value: object) -> None:
         print(f"Value in context map using key {key!r} will be overwritten")
 
     context_map[key] = value
+
+
+def max_concurrency() -> int:
+    """Utility to get commonly used max-concurrency value from env vars
+    for bounding simultaneous IO operations.
+    """
+    return int(get_env_item(ENV_CSTAR_ORCH_MAX_CONC).value)

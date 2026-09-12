@@ -335,6 +335,17 @@ ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
 """Delay (in seconds) between status queries in the local launcher proxy script."""
 
 
+ENV_CSTAR_ORCH_MAX_CONC: t.Annotated[
+    t.Literal["CSTAR_ORCH_MAX_CONC"],
+    EnvVar(
+        "The maximum number of concurrent disk IO operations.",
+        GROUP_SIM,
+        default="10",
+    ),
+] = "CSTAR_ORCH_MAX_CONC"
+"""The maximum number of concurrent disk IO operations."""
+
+
 @lru_cache
 def discover_env_vars() -> dict[str, EnvItem]:
     """Return a mapping from env-var constant to the associated metadata."""

@@ -23,7 +23,7 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.log import LoggingMixin, get_logger
-from cstar.base.utils import slugify
+from cstar.base.utils import _run_cmd, slugify
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem
@@ -582,3 +582,43 @@ def remove_files(file_dir: Path, wildcard_pattern: str) -> bool:
         removed = True
 
     return removed
+
+
+async def disk_usage(path: Path) -> str:
+    """Return the size of all assets stored in a directory.
+
+    Parameters
+    ----------
+    path : Path
+        The path to compute disk usage for
+
+    Returns
+    -------
+    str
+    """
+    result = await asyncio.to_thread(_run_cmd, f"du -sm {str(path)}")
+
+    value = result.split()[0]
+    try:
+        _ = int(value)
+        return value
+    except Exception:
+        return "0"
+
+
+async def bounded_du(path: Path, sem: asyncio.Semaphore) -> str:
+    """Wrap the disk usage method in a semaphore to limit concurrent IO requests.
+
+    Parameters
+    ----------
+    path : Path
+        The path to compute disk usage for
+    sem : asyncio.Semaphore
+        A semaphore for bounding concurrent executions
+
+    Returns
+    -------
+    str
+    """
+    async with sem:
+        return await disk_usage(path)

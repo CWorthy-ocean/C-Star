@@ -1,6 +1,7 @@
+import asyncio
 import enum
 import typing as t
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
 
@@ -354,6 +355,24 @@ def deserialize(
     log.trace(msg)
 
     return model
+
+
+async def deserialize_all(
+    paths: list[Path],
+    klass: type[_T],
+    mode: PersistenceMode = PersistenceMode.auto,
+    limit: int = 10,
+    sem: asyncio.Semaphore | None = None,
+) -> Sequence[_T]:
+    """Deserialize a collection of items of the same type."""
+
+    async def _bounded(p: Path, s: asyncio.Semaphore) -> _T:
+        """Deserialize the item with concurrency bounded."""
+        async with s:
+            return await asyncio.to_thread(deserialize, p, klass, mode)
+
+    sem = sem or asyncio.Semaphore(limit)
+    return await asyncio.gather(*(_bounded(Path(p), sem) for p in paths))
 
 
 def try_deserialize(

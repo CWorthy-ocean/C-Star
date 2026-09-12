@@ -3,7 +3,6 @@ import csv
 import datetime
 import io
 import json
-import os
 import typing as t
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -15,10 +14,11 @@ from rich.table import Column, Table
 from rich.text import Text
 
 from cstar.base.log import get_logger
-from cstar.base.utils import _run_cmd
-from cstar.cli.workplan.shared import console
+from cstar.cli.common import max_concurrency
+from cstar.cli.workplan.shared import attach_disk_usage, console
+from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.orchestration import LiveWorkplan
-from cstar.orchestration.serialization import deserialize
+from cstar.orchestration.serialization import deserialize_all
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 log = get_logger(__name__)
@@ -38,6 +38,8 @@ EXCLUSIONS: set[str] = {"raw_size", "raw_start"}
 """View fields excluded from rendered outputs."""
 INCLUSIONS: set[str] = {"run_id", "name", "size", "start"}
 """View fields included in the rendered outputs."""
+KEY_RUN_SIZE: t.Final[str] = "size"
+"""Key used to store disk-usage in the run metadata."""
 
 
 class ItemView(BaseModel):
@@ -50,6 +52,9 @@ class ItemView(BaseModel):
     @property
     def size(self) -> str:
         """The size as a string for display (includes units)."""
+        if self.raw_size == -1:
+            return f'Run "cstar workplan status {self.run_id} {ARG_SIZE}"'
+
         return f"{self.raw_size}MB"
 
     @computed_field  # type: ignore[prop-decorator]
@@ -59,30 +64,53 @@ class ItemView(BaseModel):
         return self.raw_start.strftime("%Y-%m-%d %H:%M")
 
 
-def adapt_runs_to_views(
+async def adapt_runs_to_views(
     runs: Sequence[WorkplanRun],
     plan_cache: dict[Path, LiveWorkplan],
-) -> Iterable[ItemView]:
+) -> Sequence[ItemView]:
     """Build the raw dataset that will be rendered in the view."""
+
+    async def _populate_cache(
+        paths: list[Path], cache: dict[Path, LiveWorkplan]
+    ) -> None:
+        """Load workplans from disk and add them to the in-memory cache.
+
+        Parameters
+        ----------
+        paths : list[Path]
+            The paths to serialized workplans.
+        cache : dict[Path, LiveWorkplan]
+            The cached copy of loaded workplans, keyed on their file path.
+        """
+        limit = max_concurrency()
+        workplans = await deserialize_all(paths, LiveWorkplan, limit=limit)
+        for path, wp in zip(paths, workplans):
+            cache[path] = wp
+
+    missing = [r.workplan_path for r in runs if r.workplan_path not in plan_cache]
+    await _populate_cache(missing, plan_cache)
+
+    views: list[ItemView] = []
+
     for run in runs:
         wp_path = run.workplan_path
-        if not wp_path.exists():
-            console.print(f"Workplan not found at {str(wp_path)!r}. Skipping")
-            continue
+        name = "unkown"
 
         try:
-            wp = plan_cache.get(wp_path, deserialize(wp_path, LiveWorkplan))
-            name = wp.name
+            if wp := plan_cache.get(wp_path, None):
+                name = wp.name
         except Exception:
             log.warning(f"The workplan path {str(wp_path)!r} is invalid")
-            name = "unkown"
 
-        yield ItemView(
-            run_id=run.run_id,
-            name=name,
-            raw_size=int(run.metadata["size"]),
-            raw_start=run.start_at,
+        views.append(
+            ItemView(
+                run_id=run.run_id,
+                name=name,
+                raw_size=int(run.metadata[KEY_RUN_SIZE]),
+                raw_start=run.start_at,
+            )
         )
+    return views
 
 
 def table_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
@@ -126,34 +154,6 @@ def json_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
     return Text(document)
 
 
-async def disk_usage(path: Path) -> str:
-    """Return the size of all assets stored in a directory."""
-    result = await asyncio.to_thread(_run_cmd, f"du -sm {str(path)}")
-
-    value = result.split()[0]
-    try:
-        _ = int(value)
-        return value
-    except Exception:
-        return "0"
-
-
-async def _bounded_du(sem: asyncio.Semaphore, path: Path) -> str:
-    """Wrap the disk usage method in a semaphore to limit concurrent IO requests."""
-    async with sem:
-        return await disk_usage(path)
-
-
-async def get_run_disk_usage(runs: Sequence[WorkplanRun]) -> None:
-    max_concurrency = int(os.environ.get("CSTAR_MAX_CONC", 5))
-    sem = asyncio.Semaphore(max_concurrency)
-
-    disk_space = await asyncio.gather(*[_bounded_du(sem, r.output_path) for r in runs])
-    sizes = [int(size) for size in disk_space]
-    for i, run in enumerate(runs):
-        run.metadata["size"] = str(sizes[i])
-
-
 def filter_size(
     runs: Sequence[WorkplanRun],
     lt_filter: int | None = None,
@@ -164,7 +164,7 @@ def filter_size(
 
     results: list[WorkplanRun] = []
     for run in runs:
-        size = int(run.metadata["size"])
+        size = int(run.metadata[KEY_RUN_SIZE])
         if lt_filter and size > lt_filter:
             continue
         if gt_filter and size < gt_filter:
@@ -203,7 +203,7 @@ sorters: dict[
     "name": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
     "run-id": lambda runs, desc: sorted(runs, key=lambda x: x.run_id, reverse=desc),
     "size": lambda runs, desc: sorted(
-        runs, key=lambda x: x.metadata["size"], reverse=desc
+        runs, key=lambda x: x.metadata[KEY_RUN_SIZE], reverse=desc
     ),
     "time": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
 }
@@ -260,19 +260,34 @@ def ls_runs(
         datetime.datetime | None,
         typer.Option("--max-time", help="Pass the latest date allowed in results"),
     ] = None,
+    refresh_usage: t.Annotated[
+        bool,
+        typer.Option(
+            ARG_SIZE,
+            help=(
+                f"{ARG_SIZE_HELP} This operation may be slow; "
+                "combine with `--run-filter` and `--[min|max]-time` for best performance."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """List all runs started by a user."""
     plan_cache: dict[Path, LiveWorkplan] = {}
-    tracking = TrackingRepository()
+    repo = TrackingRepository()
 
-    runs = asyncio.run(tracking.list_latest_runs(runid_filter))
+    async def _list_runs() -> Sequence[WorkplanRun]:
+        """Perform a max-concurrency bounded retrieval of the run list."""
+        async with repo(max_concurrency()) as bounded:
+            return await bounded.list_latest_runs(runid_filter)
+
+    runs = asyncio.run(_list_runs())
     runs = filter_time(runs, time_lt_filter, time_gt_filter)
 
-    asyncio.run(get_run_disk_usage(runs))
+    asyncio.run(attach_disk_usage(runs, refresh=refresh_usage))
     runs = filter_size(runs, size_lt_filter, size_gt_filter)
 
     runs = sorters[sort](runs, reverse)
-    views = adapt_runs_to_views(runs, plan_cache)
+    views = asyncio.run(adapt_runs_to_views(runs, plan_cache))
     content = formatters[format](views)
 
     console.print(content)

@@ -1,7 +1,7 @@
 import asyncio
 import typing as t
 from collections import Counter, OrderedDict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import typer
 from rich.console import Console
@@ -14,25 +14,34 @@ from cstar.applications.core import (
 )
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.log import get_logger
-from cstar.cli.common import cb_pipeline, normalize_runid, set_ctxmap, set_env
+from cstar.cli.common import (
+    cb_pipeline,
+    max_concurrency,
+    normalize_runid,
+    set_ctxmap,
+    set_env,
+)
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
+    bounded_du,
 )
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, try_deserialize
-from cstar.orchestration.tracking import TrackingRepository
+from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 console = Console()
 log = get_logger(__name__)
 
+KEY_RUN_SIZE: t.Final[str] = "size"
+"""Key used to store disk-usage in the run metadata."""
+
 if t.TYPE_CHECKING:
     from cstar.entrypoint.config import JobConfig, ServiceConfiguration
-    from cstar.orchestration.tracking import WorkplanRun
 
 
 def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
@@ -49,8 +58,14 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
         A tuple for each run-id discovered containing [run-id, workplan-path]
     """
     incomplete = incomplete.lower()
-    repo = TrackingRepository()
-    run_list = asyncio.run(repo.list_latest_runs(incomplete))
+
+    async def _bounded() -> Sequence[WorkplanRun]:
+        """Retrieve the run list while limiting concurrent reads."""
+        repo = TrackingRepository()
+        async with repo(max_concurrency()) as bounded:
+            return await bounded.list_latest_runs(incomplete)
+
+    run_list = asyncio.run(_bounded())
 
     if not run_list:
         if incomplete:
@@ -188,7 +203,7 @@ def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:
 
 
 def display_summary(
-    run_id: str,
+    run: WorkplanRun,
     lookup: OrderedDict[str, DagDetailRecord],
 ) -> None:
     """Display a summary describing the current state of
@@ -196,9 +211,9 @@ def display_summary(
 
     Parameters
     ----------
-    run_id : str
-        The run-id to retrieve the status for.
-    dag_status : DagStatus
+    run : WorkplanRun
+        The run record that will be summarized.
+    lookup : OrderedDict[str, DagDetailRecord]
         The status object produced by the DAG runner containing task status details.
     """
     # don't pad the top and bottom but give some horizontal space
@@ -213,7 +228,7 @@ def display_summary(
         Column(header="Failed", justify="center"),
         Column(header="Cancelled", justify="center"),
         Column(header="Dependencies", justify="center"),
-        title=f"Run [yellow]{run_id}[/yellow] Results",
+        title=f"Run {colored(run.run_id, 'yellow')} Results",
         show_lines=True,
         padding=padding,
         pad_edge=False,
@@ -232,6 +247,9 @@ def display_summary(
             checkmark("yellow") if x.cancelled else "",
             ref_label(x, refs_map),
         )
+
+    if run_size := run.metadata.get(KEY_RUN_SIZE, None):
+        table.caption = f"{run_size}MB disk consumed"
 
     console.print(table)
 
@@ -401,6 +419,21 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     return run_id
 
 
+async def get_run_disk_usage(runs: Sequence[WorkplanRun]) -> dict[str, int]:
+    """Retrieve the disk space consumed for a collection of runs.
+
+    Returns
+    -------
+    dict[str, int]
+        A dictionary mapping the run-id to the disk usage for the run.
+    """
+    sem = asyncio.Semaphore(max_concurrency())
+
+    disk_space = await asyncio.gather(*[bounded_du(r.output_path, sem) for r in runs])
+    sizes = {run.run_id: int(size) for run, size in zip(runs, disk_space)}
+    return sizes
+
+
 RunIdArgument = t.Annotated[
     str,
     typer.Argument(
@@ -411,3 +444,35 @@ RunIdArgument = t.Annotated[
 ]
 """Shared run-id argument: normalize the value, export it to the environment,
 and preload the `WorkplanRun` and transformed workplan into the context map."""
+
+
+async def attach_disk_usage(runs: Sequence[WorkplanRun], refresh: bool = False) -> None:
+    """Add disk usage to run metadata for display.
+
+    If refresh is disabled, current usage will not be updated and a default
+    or previously-loaded metadata will be used.
+
+    When refresh is enabled, size metadata will be cached on the run record
+
+    Parameters
+    ----------
+    runs : Sequence[WorkplanRuns]
+        The runs to be enriched with usage metadata.
+    refresh : bool
+        When `True`, re-calculate disk usage. Otherwise, use default (-1) or
+        previously stored metadata that may be out-of-date.
+    """
+    if refresh:
+        du = await get_run_disk_usage(runs)
+
+        for run in runs:
+            run.metadata[KEY_RUN_SIZE] = str(du[run.run_id])
+
+        repo = TrackingRepository()
+        async with repo(limit=max_concurrency()) as r:
+            coros = [r.put_workplan_run(run) for run in runs]
+            await asyncio.gather(*coros)
+    else:
+        for run in runs:
+            if KEY_RUN_SIZE not in run.metadata:
+                run.metadata[KEY_RUN_SIZE] = "-1"
