@@ -4,7 +4,6 @@ from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
 
 import typer
-from rich.console import Console
 from rich.table import Column, Table
 
 from cstar.applications.core import (
@@ -16,6 +15,10 @@ from cstar.base.env import ENV_CSTAR_RUNID, max_concurrency
 from cstar.base.log import get_logger
 from cstar.cli.common import (
     cb_pipeline,
+    checkmark,
+    colored,
+    console,
+    id_label,
     normalize_runid,
     set_ctxmap,
     set_env,
@@ -33,7 +36,6 @@ from cstar.orchestration.orchestration import LiveWorkplan
 from cstar.orchestration.serialization import deserialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
-console = Console()
 log = get_logger(__name__)
 
 KEY_RUN_SIZE: t.Final[str] = "size"
@@ -169,26 +171,6 @@ def autocomplete_step_list(ctx: typer.Context, incomplete: str) -> list[str]:
         )
 
     return []
-
-
-def checkmark(color: str) -> str:
-    return f"[{color}]:heavy_check_mark:"
-
-
-def colored(msg: str, color: str = "cyan") -> str:
-    return f"[{color}]{msg}[/{color}]"
-
-
-def present(prompt: str, value: str, color: str = "cyan", width: int = 0) -> str:
-    return f"{prompt.rjust(width)}: {colored(value, color)}"
-
-
-def label(name: str, app: str | None) -> str:
-    return f"{name} [italic]({app})[/italic]" if app else name
-
-
-def id_label(id: int, name: str, app: str | None) -> str:
-    return f"{id}. {label(name, app)}"
 
 
 def ref_label(record: DagDetailRecord, ref_map: dict[str, int]) -> str:

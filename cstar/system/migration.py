@@ -45,6 +45,8 @@ ConverterMap: t.TypeAlias = dict[tuple[str, str, str], type[SchemaAdapter]]
 
 
 class MigrationRequest(BaseModel):
+    """User-supplied parameters describing a blueprint schema migration."""
+
     source: FilePath = Field(
         frozen=True,
         description="Path to a file containing a serialized blueprint",
@@ -55,6 +57,11 @@ class MigrationRequest(BaseModel):
         description="Path where the migrated blueprint will be serialized",
         frozen=True,
         alias="output",
+    )
+    in_place: bool = Field(
+        default=False,
+        description="Enable to overwrite the source file with the migrated content",
+        frozen=True,
     )
 
     config: t.ClassVar[ConfigDict] = ConfigDict(str_strip_whitespace=True)
@@ -118,14 +125,6 @@ class Migration(abc.ABC, LoggingMixin):
         self,
         dumped: dict[str, t.Any],
         plan: MigrationPlan,
-    ) -> dict[str, t.Any]:
-        """Execute the upgrade path."""
-        ...
-
-    @abc.abstractmethod
-    def plan_and_migrate(
-        self,
-        dumped: dict[str, t.Any],
     ) -> MigrateResult:
         """Execute the upgrade path."""
         ...
@@ -235,13 +234,21 @@ class BlueprintMigration(Migration):
         self,
         dumped: dict[str, t.Any],
         plan: MigrationPlan,
-    ) -> dict[str, t.Any]:
+    ) -> MigrateResult:
         """Execute the plan to upgrade the blueprint to the latest version.
+
+        Parameters
+        ----------
+        dumped : dict[str, t.Any]
+            The raw dictionary of model attributes to migrate.
+        plan : MigrationPlan
+            The plan describing the adapters to apply.
 
         Returns
         -------
-        dict[str, t.Any]
-            The raw dictionary of model attributes with schema changes applied.
+        MigrateResult
+            Named tuple containing the original and migrated model attributes
+            along with the executed plan.
 
         Raises
         ------
@@ -259,28 +266,10 @@ class BlueprintMigration(Migration):
 
         if self.on_migrated_callback:
             self.on_migrated_callback(plan)
-        return model
-
-    def plan_and_migrate(self, dumped: dict[str, t.Any]) -> MigrateResult:
-        """Create a migration plan and execute it."""
-        try:
-            plan = self.plan(dumped)
-        except CstarUnsupportedMigrationError as ex:
-            msg = f"Unable to plan migration: {ex}"
-            return MigrateResult(dumped, {}, error=msg)
-
-        if plan.is_latest:
-            return MigrateResult(dumped, dumped, plan=plan)
-
-        try:
-            migrated = self.migrate(dumped, plan)
-        except CstarMigrationError as ex:
-            msg = f"Unable to complete migration: {ex}"
-            return MigrateResult(dumped, {}, plan=plan, error=msg)
 
         return MigrateResult(
             dumped,
-            migrated,
+            model,
             plan=plan,
         )
 
