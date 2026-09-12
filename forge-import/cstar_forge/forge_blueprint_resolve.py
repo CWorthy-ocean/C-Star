@@ -1350,11 +1350,27 @@ def _build_forcing(
     # roms-tools' own auto-downloaded default and has no Forge SourceData handler/registry
     # entry, so staging it here would raise "Unknown dataset" downstream. Only a genuinely
     # Forge-staged BGC source (e.g. RIVR2O) needs to land in resolved_datasets/datasets
-    # so the executor verifies it.
+    # so the executor verifies it -- and, as in `_note`, not when an explicit path is
+    # given: the executor reads that path verbatim, so noting it would make
+    # _prepare_rivr2o demand files at the canonical staged location that are never used.
     for it in river:
-        bgc_name = (it.bgc_source or {}).get("name")
-        if bgc_name and str(bgc_name).upper() not in DERIVED_BGC_SOURCES:
+        bgc_src = it.bgc_source or {}
+        bgc_name = bgc_src.get("name")
+        if (
+            bgc_name
+            and not bgc_src.get("path")
+            and str(bgc_name).upper() not in DERIVED_BGC_SOURCES
+        ):
             resolved.setdefault(str(bgc_name).upper(), _resolved_dataset(bgc_name))
+    # River temperature source (surface_forcing_source, also a plain dict). An
+    # explicit path bypasses staging entirely -- same as `_note` -- but ERA5 is
+    # streamable with a no-op SourceData handler (_prepare_era5), so noting it
+    # here keeps resolved_datasets/datasets honest without triggering staging.
+    for it in river:
+        temp_src = it.surface_forcing_source or {}
+        temp_name = temp_src.get("name")
+        if temp_name and not temp_src.get("path"):
+            resolved.setdefault(str(temp_name).upper(), _resolved_dataset(temp_name))
     # topography source (now a Domain-level input, not read from ForcingSpec)
     topo = getattr(topography_source, "value", topography_source)
     if topo:

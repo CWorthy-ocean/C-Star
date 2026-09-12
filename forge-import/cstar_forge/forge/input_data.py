@@ -1345,7 +1345,8 @@ class RomsMarblInputData(InputData):
         Merge per-input defaults with runtime arguments.
 
         Uses base_kwargs (always provided from input_list).
-        Resolves "source" and "bgc_source" through SourceData.
+        Resolves "source", "bgc_source", and "surface_forcing_source" through
+        SourceData.
         Merges with extra, where extra overrides defaults.
         """
         # base_kwargs always comes from input_list entries.
@@ -1353,7 +1354,7 @@ class RomsMarblInputData(InputData):
 
         # Resolve source blocks (convert SourceSpec Pydantic models to dicts with paths).
         # Skip None values — optional bgc_source etc. are absent when not configured.
-        for field_name in ("source", "bgc_source"):
+        for field_name in ("source", "bgc_source", "surface_forcing_source"):
             if field_name in cfg and cfg[field_name] is not None:
                 # If it's a Pydantic model (SourceSpec), convert to dict first
                 if hasattr(cfg[field_name], "model_dump"):
@@ -1368,7 +1369,7 @@ class RomsMarblInputData(InputData):
         # chunks= from options/extra wins (checked after merging below).
         subchunked = any(
             self._block_is_subchunked(cfg.get(field_name))
-            for field_name in ("source", "bgc_source")
+            for field_name in ("source", "bgc_source", "surface_forcing_source")
         )
 
         # Unpack any `options` passthrough dict from the item config before merging.

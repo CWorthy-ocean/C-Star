@@ -58,6 +58,7 @@ from cstar_forge.forge.forge_blueprint import (
     RiverBgcSource,
     RiverForcingItem,
     RiverSource,
+    RiverTemperatureSource,
     SourceSpec,
     SpecRef,
     SurfaceForcingItem,
@@ -491,6 +492,22 @@ HELP_TEXT: dict[str, str] = {
         "domain_edge_buffer",
     ): "Number of grid cells beyond the domain edge kept in the bounding-box pre-filter "
     "when selecting rivers. Default: 20.",
+    (
+        "river",
+        "surface_forcing_source_name",
+    ): "Derive river temperature from ERA5 air temperature sampled at each river "
+    "mouth (smoothed, floored at 0 °C) instead of roms-tools' flat constant "
+    "15.6 °C default. Blank keeps the constant.",
+    (
+        "river",
+        "surface_forcing_source_path",
+    ): "Optional explicit ERA5 path/glob. Blank reads the remote ARCO ERA5 archive "
+    "roms-tools defaults to -- no local staging required.",
+    (
+        "river",
+        "river_temp_smoothing_window_days",
+    ): "Rolling-mean window (days) applied to the sampled air temperature, a "
+    "deliberately simple stand-in for a river's thermal inertia. Default: 30.",
     (
         "river",
         "custom_file",
@@ -1443,6 +1460,7 @@ _IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource] + [_IC_NONE]
 # instead of a sourceless dict, matching `Forcing.boundary: BoundaryForcing | None`.
 _BOUNDARY_NONE = "(none)"
 _RIVER_BGC_SOURCE_OPTS = [""] + [e.value for e in RiverBgcSource]
+_RIVER_TEMP_SOURCE_OPTS = [""] + [e.value for e in RiverTemperatureSource]
 # ESPER source fields (SourceSpec.esper_method/esper_equation); "" = unset (roms-tools
 # default: method="nn", equation=8).
 _ESPER_METHOD_OPTS = ["", "lir", "nn", "mixed"]
@@ -2475,6 +2493,34 @@ class _ForcingEditor:
                 layout=W.Layout(width="220px"),
                 tooltip=_tip("river", "bgc_source_path"),
             )
+            _temp_src = item.get("surface_forcing_source") or {}
+            # Validator accepts any case ("era5"); the dropdown options are upper.
+            _temp_name_val = str(_temp_src.get("name") or "").upper()
+            if _temp_name_val not in _RIVER_TEMP_SOURCE_OPTS:
+                _temp_name_val = ""
+            w["surface_forcing_source_name"] = W.Dropdown(
+                options=_RIVER_TEMP_SOURCE_OPTS,
+                value=_temp_name_val,
+                description="temp. source:",
+                style=small,
+                layout=W.Layout(width="170px"),
+                tooltip=_tip("river", "surface_forcing_source_name"),
+            )
+            w["surface_forcing_source_path"] = W.Text(
+                value=str(_temp_src.get("path") or ""),
+                description="temp. path:",
+                placeholder="(default)",
+                style=small,
+                layout=W.Layout(width="220px"),
+                tooltip=_tip("river", "surface_forcing_source_path"),
+            )
+            w["river_temp_smoothing_window_days"] = W.FloatText(
+                value=float(item.get("river_temp_smoothing_window_days", 30.0)),
+                description="temp. smoothing (days):",
+                style=small,
+                layout=W.Layout(width="220px"),
+                tooltip=_tip("river", "river_temp_smoothing_window_days"),
+            )
 
             # bgc_source only takes effect when include_bgc is checked (roms-tools
             # silently ignores it otherwise — see RiverForcingItem validation).
@@ -2485,6 +2531,20 @@ class _ForcingEditor:
 
             w["include_bgc"].observe(_sync_river_bgc_visibility, names="value")
             _sync_river_bgc_visibility()
+
+            # The smoothing window/path only matter once a temperature source is
+            # picked (mirrors the bgc pair above).
+            def _sync_river_temp_visibility(_change=None, ws=w):
+                on = bool(ws["surface_forcing_source_name"].value)
+                ws["surface_forcing_source_path"].layout.display = "" if on else "none"
+                ws["river_temp_smoothing_window_days"].layout.display = (
+                    "" if on else "none"
+                )
+
+            w["surface_forcing_source_name"].observe(
+                _sync_river_temp_visibility, names="value"
+            )
+            _sync_river_temp_visibility()
 
             # RiverSource.CUSTOM_FILE replaces this whole standard-source row
             # (climatology/bgc/coast-snap/edge-buffer/generic path) with a
@@ -2498,6 +2558,10 @@ class _ForcingEditor:
                     "coast_snap_buffer_km",
                     "domain_edge_buffer",
                     "path",
+                    # Unlike bgc_source_name/surface_forcing_source_path below, the
+                    # temp-source dropdown itself has no other gate -- it's simply
+                    # unconditional on custom-mode, like domain_edge_buffer.
+                    "surface_forcing_source_name",
                 ):
                     ws[key].layout.display = "none" if is_custom else ""
                 for key in (
@@ -2508,11 +2572,15 @@ class _ForcingEditor:
                 ):
                     ws[key].layout.display = "" if is_custom else "none"
                 if is_custom:
-                    # Keep the bgc widgets hidden regardless of include_bgc --
-                    # a custom-file river item carries no bgc_source (see
-                    # RiverForcingItem._custom_file_excludes_bgc_source).
+                    # Keep the bgc/temperature widgets hidden regardless of
+                    # include_bgc/surface_forcing_source_name -- a custom-file
+                    # river item carries neither (see
+                    # RiverForcingItem._custom_file_excludes_bgc_source and
+                    # ._custom_file_excludes_surface_forcing_source).
                     ws["bgc_source_name"].layout.display = "none"
                     ws["bgc_source_path"].layout.display = "none"
+                    ws["surface_forcing_source_path"].layout.display = "none"
+                    ws["river_temp_smoothing_window_days"].layout.display = "none"
                     # Until a file is attached the gathered item fails
                     # RiverForcingItem validation ("custom_file is not set");
                     # say what to do rather than leave the blank status to be
@@ -2523,10 +2591,11 @@ class _ForcingEditor:
                     ):
                         ws["custom_file_status"].value = _RIVER_CUSTOM_FILE_HINT
                 else:
-                    # Restored from custom-file mode (or never in it): let
-                    # include_bgc's own sync decide bgc widget visibility again,
-                    # rather than unconditionally showing them here.
+                    # Restored from custom-file mode (or never in it): let each
+                    # field's own sync decide widget visibility again, rather
+                    # than unconditionally showing them here.
                     _sync_river_bgc_visibility()
+                    _sync_river_temp_visibility()
 
             w["name"].observe(_sync_river_custom_visibility, names="value")
         # Advanced passthrough: raw roms-tools kwargs not (yet) typed above.
@@ -2755,7 +2824,8 @@ class _ForcingEditor:
             # (the executor stages the file directly -- see
             # RiverForcingItem.custom_file) -- none of the standard-source fields
             # (climatology/include_bgc/convert_to_climatology/coast_snap_buffer_km/
-            # domain_edge_buffer/bgc_source/options) apply, and the schema
+            # domain_edge_buffer/bgc_source/surface_forcing_source/
+            # river_temp_smoothing_window_days/options) apply, and the schema
             # forbids most of them from being paired with a source path.
             item: dict[str, Any] = {"source": {"name": w["name"].value}}
             if not w.get("_custom_file") and w.get("_maybe_attach_custom_file"):
@@ -2855,6 +2925,32 @@ class _ForcingEditor:
                 ):  # blank = derive default path
                     bgc_src["path"] = w["bgc_source_path"].value.strip()
                 item["bgc_source"] = bgc_src
+        if (
+            "surface_forcing_source_name" in w
+            and w["surface_forcing_source_name"].value
+        ):
+            temp_src: dict[str, Any] = {"name": w["surface_forcing_source_name"].value}
+            if (
+                "surface_forcing_source_path" in w
+                and w["surface_forcing_source_path"].value.strip()
+            ):  # blank = the remote ARCO ERA5 archive
+                temp_src["path"] = w["surface_forcing_source_path"].value.strip()
+            item["surface_forcing_source"] = temp_src
+        # Emitted whenever non-default, even with no temperature source selected
+        # (roms-tools ignores it then): dropping it would silently change the
+        # content_hash of a loaded blueprint that carries the value -- same
+        # round-trip-fidelity rule as domain_edge_buffer. Exception: while the
+        # widget is hidden (no source), a stale non-positive value is dropped
+        # rather than emitted -- otherwise the schema's `> 0` check would reject
+        # the blueprint naming a field the user cannot see to fix.
+        if "river_temp_smoothing_window_days" in w:
+            window = float(w["river_temp_smoothing_window_days"].value)
+            visible = bool(
+                w.get("surface_forcing_source_name")
+                and w["surface_forcing_source_name"].value
+            )
+            if window != 30.0 and (visible or window > 0):
+                item["river_temp_smoothing_window_days"] = window
         if "convert_to_climatology" in w:
             item["convert_to_climatology"] = w["convert_to_climatology"].value
         if (

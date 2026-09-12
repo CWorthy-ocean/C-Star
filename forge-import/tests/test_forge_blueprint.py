@@ -763,6 +763,94 @@ def test_river_custom_file_excludes_bgc_source():
         )
 
 
+def test_river_surface_forcing_source_defaults():
+    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+
+    river = RiverForcingItem(source=SourceSpec(name="DAI"))
+    assert river.surface_forcing_source is None
+    assert river.river_temp_smoothing_window_days == 30.0
+
+
+@pytest.mark.parametrize("name", ["ERA5", "era5"])
+def test_river_surface_forcing_source_accepts_era5(name):
+    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+
+    river = RiverForcingItem(
+        source=SourceSpec(name="DAI"),
+        surface_forcing_source={"name": name, "path": "/x/era5"},
+    )
+    # Normalized: roms-tools compares against the literal "ERA5".
+    assert river.surface_forcing_source == {"name": "ERA5", "path": "/x/era5"}
+
+
+def test_river_surface_forcing_source_rejects_unsupported_name():
+    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+
+    with pytest.raises(ValueError, match="is not one of"):
+        RiverForcingItem(
+            source=SourceSpec(name="DAI"),
+            surface_forcing_source={"name": "GLORYS"},
+        )
+
+
+def test_river_surface_forcing_source_requires_name():
+    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+
+    with pytest.raises(ValueError, match="is not one of"):
+        RiverForcingItem(
+            source=SourceSpec(name="DAI"),
+            surface_forcing_source={"path": "/tmp/era5.nc"},
+        )
+
+
+def test_river_custom_file_excludes_surface_forcing_source():
+    from cstar_forge.forge.forge_blueprint import (
+        RiverForcingItem,
+        SourceSpec,
+        UserProvidedFile,
+    )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        RiverForcingItem(
+            source=SourceSpec(name="CUSTOM_FILE"),
+            custom_file=UserProvidedFile(**_USER_FILE_KWARGS),
+            surface_forcing_source={"name": "ERA5"},
+        )
+
+
+@pytest.mark.parametrize("window", [0, -1.0])
+def test_river_temp_smoothing_window_days_rejects_non_positive(window):
+    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+
+    with pytest.raises(ValueError, match="must be > 0"):
+        RiverForcingItem(
+            source=SourceSpec(name="DAI"),
+            surface_forcing_source={"name": "ERA5"},
+            river_temp_smoothing_window_days=window,
+        )
+
+
+def test_river_surface_forcing_source_round_trips_through_yaml(tmp_path):
+    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+
+    cfg = _build()
+    river = RiverForcingItem(
+        source=SourceSpec(name="DAI"),
+        surface_forcing_source={"name": "ERA5", "path": "/x/era5.nc"},
+        river_temp_smoothing_window_days=7.0,
+    )
+    cfg = cfg.model_copy(
+        update={"forcing": cfg.forcing.model_copy(update={"river": [river]})}
+    )
+    p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
+    back = ForgeBlueprint.from_yaml(p)
+    assert back.forcing.river[0].surface_forcing_source == {
+        "name": "ERA5",
+        "path": "/x/era5.nc",
+    }
+    assert back.forcing.river[0].river_temp_smoothing_window_days == 7.0
+
+
 class TestCdrSpecValidatorMatrix:
     """``CdrSpec._fields_match_mode``: each of the five modes accepts exactly the
     field combination its docstring promises, and rejects every other one.
@@ -1907,20 +1995,103 @@ def test_resolver_threads_river_bgc_source_and_climatology():
     from cstar_forge.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
-    fdata["forcing"]["river"][0]["bgc_source"] = {
-        "name": "RIVR2O",
-        "path": "/tmp/rivr2o/*.nc",
-    }
+    fdata["forcing"]["river"][0]["bgc_source"] = {"name": "RIVR2O"}
     fdata["forcing"]["river"][0]["convert_to_climatology"] = "always"
 
     cfg = _build(forcing_inputs=fdata)
     river = cfg.forcing.river[0]
 
-    assert river.bgc_source == {"name": "RIVR2O", "path": "/tmp/rivr2o/*.nc"}
+    assert river.bgc_source == {"name": "RIVR2O"}
     assert river.convert_to_climatology.value == "always"
     assert "RIVR2O" in cfg.datasets
     assert "RIVR2O" in cfg.forcing.resolved_datasets
     assert "CONSTANTS" not in cfg.datasets
+
+
+def test_resolver_river_bgc_source_with_path_not_noted():
+    """An explicit bgc_source path bypasses staging (the executor reads it verbatim,
+    see input_data._resolve_source_block), so RIVR2O must NOT be noted into
+    datasets/resolved_datasets -- otherwise _prepare_rivr2o would demand files at
+    the canonical staged location that are never used. Same rule as `_note` and
+    the river surface_forcing_source loop.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"][0]["bgc_source"] = {
+        "name": "RIVR2O",
+        "path": "/tmp/rivr2o/*.nc",
+    }
+
+    cfg = _build(forcing_inputs=fdata)
+
+    assert cfg.forcing.river[0].bgc_source == {
+        "name": "RIVR2O",
+        "path": "/tmp/rivr2o/*.nc",
+    }
+    assert "RIVR2O" not in cfg.datasets
+    assert "RIVR2O" not in cfg.forcing.resolved_datasets
+
+
+def test_resolver_threads_river_surface_forcing_source():
+    """The resolver's river _items() must also thread surface_forcing_source and
+    river_temp_smoothing_window_days into RiverForcingItem (same generic plain-fields
+    loop as bgc_source/convert_to_climatology). A streamable ERA5 source with no
+    explicit path lands in datasets/resolved_datasets so the executor verifies it;
+    an explicit path bypasses staging entirely, same as SourceSpec.path.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    # Drop the catalog's own ERA5 surface-physics entry so the assertion below
+    # actually demonstrates the river noting logic, not ERA5 already being noted
+    # for an unrelated reason.
+    fdata["forcing"]["surface"] = [
+        item for item in fdata["forcing"]["surface"] if item["source"]["name"] != "ERA5"
+    ]
+    fdata["forcing"]["river"][0]["surface_forcing_source"] = {"name": "ERA5"}
+    fdata["forcing"]["river"][0]["river_temp_smoothing_window_days"] = 14.0
+
+    cfg = _build(forcing_inputs=fdata)
+    river = cfg.forcing.river[0]
+
+    assert river.surface_forcing_source == {"name": "ERA5"}
+    assert river.river_temp_smoothing_window_days == 14.0
+    assert "ERA5" in cfg.datasets
+    assert "ERA5" in cfg.forcing.resolved_datasets
+
+
+def test_resolver_river_surface_forcing_source_with_path_not_noted():
+    """An explicit path bypasses staging entirely (mirrors SourceSpec.path
+    semantics), so ERA5 must not be noted into resolved_datasets/datasets when a
+    path is already given -- it is never fetched via SourceData in that case.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    # Drop the catalog's own ERA5 surface-physics entry so the assertion below
+    # actually demonstrates the path-bypasses-staging logic, not ERA5 already
+    # being noted for an unrelated reason.
+    fdata["forcing"]["surface"] = [
+        item for item in fdata["forcing"]["surface"] if item["source"]["name"] != "ERA5"
+    ]
+    fdata["forcing"]["river"][0]["surface_forcing_source"] = {
+        "name": "ERA5",
+        "path": "/tmp/era5/*.nc",
+    }
+
+    cfg = _build(forcing_inputs=fdata)
+    river = cfg.forcing.river[0]
+
+    assert river.surface_forcing_source == {"name": "ERA5", "path": "/tmp/era5/*.nc"}
+    assert "ERA5" not in cfg.datasets
+    assert "ERA5" not in cfg.forcing.resolved_datasets
 
 
 def test_resolver_ic_bgc_esper_source_excluded_from_datasets():
@@ -2012,23 +2183,51 @@ def test_sources_to_forcing_override_carries_river_bgc_source():
     )
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
-    fdata["forcing"]["river"][0]["bgc_source"] = {
-        "name": "RIVR2O",
-        "path": "/tmp/rivr2o/*.nc",
-    }
+    # No explicit path: that is the Forge-staged case in which RIVR2O must be
+    # noted into datasets (an explicit path bypasses staging -- see
+    # test_resolver_river_bgc_source_with_path_not_noted).
+    fdata["forcing"]["river"][0]["bgc_source"] = {"name": "RIVR2O"}
     fdata["forcing"]["river"][0]["convert_to_climatology"] = "always"
 
     cfg = _build(forcing_inputs=fdata, topography_source="EMOD")
 
     ov = sources_to_forcing_override(cfg)
     river_ov = ov["forcing"]["river"][0]
-    assert river_ov["bgc_source"] == {"name": "RIVR2O", "path": "/tmp/rivr2o/*.nc"}
+    assert river_ov["bgc_source"] == {"name": "RIVR2O"}
     assert river_ov["convert_to_climatology"] == "always"
 
     kwargs = forge_blueprint_to_builder_kwargs(cfg)
     assert kwargs["topography_source"] == "EMOD"
     assert "RIVR2O" in kwargs["source_dataset_keys"]
     assert "EMOD" in kwargs["source_dataset_keys"]
+
+
+def test_sources_to_forcing_override_carries_river_surface_forcing_source():
+    """Same bridge, for surface_forcing_source/river_temp_smoothing_window_days --
+    sources_to_forcing_override dumps RiverForcingItem generically, but confirm
+    both new fields actually survive the round trip rather than assuming it.
+    """
+    import copy
+
+    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+
+    fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
+    fdata["forcing"]["river"][0]["surface_forcing_source"] = {
+        "name": "ERA5",
+        "path": "/tmp/era5/*.nc",
+    }
+    fdata["forcing"]["river"][0]["river_temp_smoothing_window_days"] = 21.0
+
+    cfg = _build(forcing_inputs=fdata)
+
+    ov = sources_to_forcing_override(cfg)
+    river_ov = ov["forcing"]["river"][0]
+    assert river_ov["surface_forcing_source"] == {
+        "name": "ERA5",
+        "path": "/tmp/era5/*.nc",
+    }
+    assert river_ov["river_temp_smoothing_window_days"] == 21.0
 
 
 def test_sources_to_forcing_override_carries_river_custom_file():

@@ -594,7 +594,8 @@ def _build_input_args(
     Merge per-input defaults with runtime arguments.
 
     Uses base_kwargs (always provided from input_list).
-    Resolves "source" and "bgc_source" through SourceData.
+    Resolves "source", "bgc_source", and "surface_forcing_source" through
+    SourceData.
     Merges with extra, where extra overrides defaults.
     """
 ```
@@ -602,8 +603,8 @@ def _build_input_args(
 **Process:**
 1. Get base config: `base_kwargs`, always supplied from an `input_list` entry (there is no
    model-spec fallback)
-2. Resolve source blocks: Convert `source` and `bgc_source` Pydantic models to dicts with paths
-   via `_resolve_source_block()`
+2. Resolve source blocks: Convert `source`, `bgc_source`, and `surface_forcing_source` Pydantic
+   models to dicts with paths via `_resolve_source_block()`
 3. Unpack `options`: an optional `options` passthrough dict in the item config is popped out and
    forwarded verbatim to the roms-tools constructor
 4. Merge: `cfg` (base kwargs) < `item_options` < `extra` (extra always wins — it carries runtime

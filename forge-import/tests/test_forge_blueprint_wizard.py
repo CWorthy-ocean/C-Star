@@ -885,6 +885,149 @@ def test_gather_item_river_bgc_source_omits_path_when_blank(editor):
     assert item["bgc_source"] == {"name": "CONSTANTS"}
 
 
+def test_river_temp_source_widgets_visible_only_when_source_selected(editor):
+    """The temperature-source path/smoothing-window widgets only matter once a
+    source (ERA5) is picked, so they stay hidden until then (mirrors the bgc pair).
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    assert _display(w["surface_forcing_source_path"]) == "none"
+    assert _display(w["river_temp_smoothing_window_days"]) == "none"
+
+    w["surface_forcing_source_name"].value = "ERA5"
+    assert _display(w["surface_forcing_source_path"]) == ""
+    assert _display(w["river_temp_smoothing_window_days"]) == ""
+
+    w["surface_forcing_source_name"].value = ""
+    assert _display(w["surface_forcing_source_path"]) == "none"
+    assert _display(w["river_temp_smoothing_window_days"]) == "none"
+
+
+def test_river_temp_source_seeded_from_existing_item(editor):
+    """Loading an item with a pre-set surface_forcing_source (ERA5) seeds the
+    dropdown/path/window and shows the widgets immediately.
+    """
+    w = editor._make_row(
+        "river",
+        {
+            "source": {"name": "DAI"},
+            "surface_forcing_source": {"name": "ERA5", "path": "/x/era5"},
+            "river_temp_smoothing_window_days": 7.0,
+        },
+    )
+    assert w["surface_forcing_source_name"].value == "ERA5"
+    assert w["surface_forcing_source_path"].value == "/x/era5"
+    assert w["river_temp_smoothing_window_days"].value == 7.0
+    assert _display(w["surface_forcing_source_path"]) == ""
+    assert _display(w["river_temp_smoothing_window_days"]) == ""
+
+
+def test_gather_item_river_omits_temp_source_when_blank(editor):
+    """_gather_item must not emit surface_forcing_source when no temperature
+    source is selected. The smoothing window follows the domain_edge_buffer rule
+    instead -- emitted whenever non-default, source or not -- so a loaded
+    blueprint carrying the value round-trips with an unchanged content_hash.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    item = editor._gather_item("river", w)
+    assert "surface_forcing_source" not in item
+    assert "river_temp_smoothing_window_days" not in item
+
+    w["river_temp_smoothing_window_days"].value = 45.0
+    item = editor._gather_item("river", w)
+    assert "surface_forcing_source" not in item
+    assert item["river_temp_smoothing_window_days"] == 45.0
+
+
+def test_gather_item_river_drops_stale_invalid_window_when_hidden(editor):
+    """Pick ERA5, type an invalid window, then blank the source again: the
+    hidden widget keeps the stale 0. Emitting it would make the schema's `> 0`
+    check reject the blueprint over a field the user can no longer see, so the
+    stale invalid value is dropped instead. With ERA5 still selected the value
+    is emitted as typed and validation reports it against a visible widget.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["surface_forcing_source_name"].value = "ERA5"
+    w["river_temp_smoothing_window_days"].value = 0.0
+    assert editor._gather_item("river", w)["river_temp_smoothing_window_days"] == 0.0
+
+    w["surface_forcing_source_name"].value = ""
+    item = editor._gather_item("river", w)
+    assert "surface_forcing_source" not in item
+    assert "river_temp_smoothing_window_days" not in item
+
+
+def test_river_temp_source_seed_normalizes_name_case(editor):
+    """RiverForcingItem accepts any case ("era5"); the dropdown options are
+    upper-case, so seeding must normalize or the source is silently dropped.
+    """
+    w = editor._make_row(
+        "river",
+        {"source": {"name": "DAI"}, "surface_forcing_source": {"name": "era5"}},
+    )
+    assert w["surface_forcing_source_name"].value == "ERA5"
+    assert editor._gather_item("river", w)["surface_forcing_source"] == {"name": "ERA5"}
+
+
+def test_gather_item_river_temp_source_omits_path_when_blank(editor):
+    """A blank ERA5 path means 'read the remote ARCO archive' — omit the key
+    rather than emitting an empty string. The window also stays omitted at its
+    30.0 default.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["surface_forcing_source_name"].value = "ERA5"
+
+    item = editor._gather_item("river", w)
+    assert item["surface_forcing_source"] == {"name": "ERA5"}
+    assert "river_temp_smoothing_window_days" not in item
+
+
+def test_gather_item_river_temp_source_includes_path_and_changed_window(editor):
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["surface_forcing_source_name"].value = "ERA5"
+    w["surface_forcing_source_path"].value = "/x/era5/*.nc"
+    w["river_temp_smoothing_window_days"].value = 14.0
+
+    item = editor._gather_item("river", w)
+    assert item["surface_forcing_source"] == {"name": "ERA5", "path": "/x/era5/*.nc"}
+    assert item["river_temp_smoothing_window_days"] == 14.0
+
+
+def test_river_temp_source_round_trips_through_yaml(tmp_path):
+    """Full round trip: build → to_yaml → load into a fresh wizard → gather.
+    Both fields must survive and the reloaded blueprint must hash identically.
+    """
+    wiz = _new_wizard()
+    fe = wiz._forcing_editor
+    w = fe._rows["river"][0]
+    w["surface_forcing_source_name"].value = "ERA5"
+    w["surface_forcing_source_path"].value = "/data/era5/*.nc"
+    w["river_temp_smoothing_window_days"].value = 10.0
+    assert wiz.config is not None, wiz.derived.value
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.config is not None
+    assert wiz2.config.content_hash() == wiz.config.content_hash()
+
+    fe2 = wiz2._forcing_editor
+    w2 = fe2._rows["river"][0]
+    assert w2["surface_forcing_source_name"].value == "ERA5"
+    assert w2["surface_forcing_source_path"].value == "/data/era5/*.nc"
+    assert w2["river_temp_smoothing_window_days"].value == 10.0
+
+    item = fe2._gather_item("river", w2)
+    assert item["surface_forcing_source"] == {
+        "name": "ERA5",
+        "path": "/data/era5/*.nc",
+    }
+    assert item["river_temp_smoothing_window_days"] == 10.0
+
+
 def test_topo_source_dropdown_includes_emod():
     """The topography-source dropdown must offer EMOD alongside ETOPO5/SRTM15."""
     wiz = ForgeBlueprintWizard()
@@ -3541,6 +3684,20 @@ class TestRiverCustomFileAttach:
         w["include_bgc"].value = True
         assert _display(w["bgc_source_name"]) == ""
 
+    def test_selecting_custom_file_hides_temperature_source_widgets(self, editor):
+        """A custom-file river carries no surface_forcing_source either (see
+        RiverForcingItem._custom_file_excludes_surface_forcing_source) --
+        mirrors the bgc-widget assertions above.
+        """
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        assert _display(w["surface_forcing_source_name"]) == "none"
+        assert _display(w["surface_forcing_source_path"]) == "none"
+        assert _display(w["river_temp_smoothing_window_days"]) == "none"
+
+        w["name"].value = "DAI"
+        assert _display(w["surface_forcing_source_name"]) == ""
+
     def test_attach_and_gather_emits_custom_file_omits_standard_fields(
         self, editor, tmp_path
     ):
@@ -3557,6 +3714,24 @@ class TestRiverCustomFileAttach:
             "content_hash": w["_custom_file"]["content_hash"],
         }
         assert "attached" in w["custom_file_status"].value.lower()
+
+        item = editor._gather_item("river", w)
+
+        assert item == {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": w["_custom_file"],
+        }
+
+    def test_attach_and_gather_emits_custom_file_omits_temperature_source(
+        self, editor, tmp_path
+    ):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["surface_forcing_source_name"].value = "ERA5"  # leftover state; ignored
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+
+        w["custom_file_attach_btn"].click()
 
         item = editor._gather_item("river", w)
 

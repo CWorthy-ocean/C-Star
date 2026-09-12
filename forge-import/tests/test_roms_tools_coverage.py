@@ -112,6 +112,8 @@ _FORGE_FIELDS = {
         "domain_edge_buffer",
         "model_reference_date",
         "options",
+        "surface_forcing_source",
+        "river_temp_smoothing_window_days",
     },
     "Grid": {
         "nx",
@@ -173,8 +175,6 @@ _SKIP = {
     },
     "RiverForcing": {
         "indices",  # manual river grid placement; advanced, expose later
-        "surface_forcing_source",  # ERA5 source for river temperature sampling; not yet exposed
-        "river_temp_smoothing_window_days",  # smoothing window for river temp estimate; not yet exposed
     },
     "Grid": {
         "verbose",  # debug/dev only

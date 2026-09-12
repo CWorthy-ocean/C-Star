@@ -1031,6 +1031,61 @@ class TestRomsMarblInputDataHelperMethods:
 
         assert result["chunks"] == {}
 
+    def test_build_input_args_resolves_surface_forcing_source_streamable_none_path_omitted(
+        self, sample_roms_marbl_input_data
+    ):
+        """surface_forcing_source goes through the same source-block resolution as
+        source/bgc_source: a streamable ERA5 with a None path (as SourceSpec-style
+        dicts emit) stays path-less rather than leaking path=None.
+        """
+        with patch(
+            "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES", {"ERA5"}
+        ):
+            base_kwargs = {
+                "source": {"name": "DAI"},
+                "surface_forcing_source": {"name": "ERA5", "path": None},
+            }
+            result = sample_roms_marbl_input_data._build_input_args(
+                "forcing.river", base_kwargs=base_kwargs
+            )
+        assert result["surface_forcing_source"] == {"name": "ERA5"}
+
+    def test_build_input_args_surface_forcing_source_explicit_path_survives(
+        self, sample_roms_marbl_input_data
+    ):
+        """An explicit surface_forcing_source path is kept verbatim, same as source/
+        bgc_source.
+        """
+        with patch(
+            "cstar_forge.forge.input_data.source_data.STREAMABLE_SOURCES", {"ERA5"}
+        ):
+            base_kwargs = {
+                "source": {"name": "DAI"},
+                "surface_forcing_source": {"name": "ERA5", "path": "/data/era5"},
+            }
+            result = sample_roms_marbl_input_data._build_input_args(
+                "forcing.river", base_kwargs=base_kwargs
+            )
+        assert result["surface_forcing_source"] == {
+            "name": "ERA5",
+            "path": "/data/era5",
+        }
+
+    def test_build_input_args_river_temp_smoothing_window_days_passes_through(
+        self, sample_roms_marbl_input_data
+    ):
+        """river_temp_smoothing_window_days is a plain float, not a source block --
+        it must pass through _build_input_args untouched.
+        """
+        base_kwargs = {
+            "source": {"name": "DAI"},
+            "river_temp_smoothing_window_days": 7.0,
+        }
+        result = sample_roms_marbl_input_data._build_input_args(
+            "forcing.river", base_kwargs=base_kwargs
+        )
+        assert result["river_temp_smoothing_window_days"] == 7.0
+
     def test_block_is_subchunked_handles_list_path(self, sample_roms_marbl_input_data):
         """A list-valued path (e.g. a multi-file source, subchunking off) must not
         raise -- Path(list) and `list in set(...)` both throw TypeError.
@@ -3995,20 +4050,22 @@ class TestBoundaryBgcSources:
         """
         data = multi_bgc_boundary_input_data
         # physics reused, UNIFIED missing, GLODAP reused -> partial reuse.
-        with patch.object(
-            data,
-            "_existing_output_paths",
-            side_effect=[["boundary-physics.nc"], [], ["boundary-bgc-glodap.nc"]],
+        with (
+            patch.object(
+                data,
+                "_existing_output_paths",
+                side_effect=[["boundary-physics.nc"], [], ["boundary-bgc-glodap.nc"]],
+            ),
+            pytest.raises(RuntimeError, match="partial reuse|already exist"),
         ):
-            with pytest.raises(RuntimeError, match="partial reuse|already exist"):
-                data._generate_boundary_forcing(
-                    key="forcing.boundary",
-                    source={"name": "GLORYS"},
-                    bgc_sources=[
-                        {"source": {"name": "UNIFIED", "climatology": True}},
-                        {"source": {"name": "GLODAP"}},
-                    ],
-                )
+            data._generate_boundary_forcing(
+                key="forcing.boundary",
+                source={"name": "GLORYS"},
+                bgc_sources=[
+                    {"source": {"name": "UNIFIED", "climatology": True}},
+                    {"source": {"name": "GLODAP"}},
+                ],
+            )
         mock_bf_class.assert_not_called()
 
     @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")

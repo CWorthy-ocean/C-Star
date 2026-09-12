@@ -302,6 +302,15 @@ class RiverBgcSource(str, Enum):
     RIVR2O = "RIVR2O"
 
 
+class RiverTemperatureSource(str, Enum):
+    """Source names accepted by RiverForcing's ``surface_forcing_source`` (the
+    air-temperature dataset river temperature is sampled from). roms-tools
+    currently accepts only ERA5.
+    """
+
+    ERA5 = "ERA5"
+
+
 class TopographySource(str, Enum):
     """Source names accepted by Grid (without a custom path)."""
 
@@ -1022,6 +1031,54 @@ class RiverForcingItem(_Section):
     ``_custom_file_matches_custom_source``); a custom file has no separate
     river-BGC dataset config, so ``bgc_source`` must be unset (see
     ``_custom_file_excludes_bgc_source``)."""
+    surface_forcing_source: dict[str, Any] | None = None
+    """Air-temperature dataset river temperature is sampled from (roms-tools
+    ``RiverForcing(surface_forcing_source=...)``); same ``{"name": ..., "path":
+    ...}`` shape as ``bgc_source``. ``None`` (the default) keeps roms-tools'
+    flat constant river temperature. Only ``ERA5`` is accepted (see
+    :class:`RiverTemperatureSource`); omit ``path`` to read the remote ARCO
+    ERA5 archive roms-tools defaults to. Ignored for a ``custom_file`` river,
+    so the two are mutually exclusive."""
+    river_temp_smoothing_window_days: float = 30.0
+    """Rolling-mean window (days) applied to the sampled air temperature as a
+    simple stand-in for a river's thermal inertia (the result is floored at
+    0 °C). Only used when ``surface_forcing_source`` is set."""
+
+    @model_validator(mode="after")
+    def _surface_forcing_source_is_supported(self) -> RiverForcingItem:
+        if self.surface_forcing_source is not None:
+            name = self.surface_forcing_source.get("name")
+            valid = {m.value for m in RiverTemperatureSource}
+            if name is None or str(name).upper() not in valid:
+                raise ValueError(
+                    f"river surface_forcing_source name {name!r} is not one of "
+                    f"{sorted(valid)}"
+                )
+            # roms-tools compares the name against the literal "ERA5", so
+            # normalize here rather than let a lowercase spelling fail at build.
+            if name != str(name).upper():
+                self.surface_forcing_source = {
+                    **self.surface_forcing_source,
+                    "name": str(name).upper(),
+                }
+        if self.river_temp_smoothing_window_days <= 0:
+            raise ValueError(
+                "river_temp_smoothing_window_days must be > 0 (got "
+                f"{self.river_temp_smoothing_window_days!r})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _custom_file_excludes_surface_forcing_source(self) -> RiverForcingItem:
+        # A user-supplied river file is never rebuilt through roms-tools, so a
+        # temperature source would be silently ignored -- same reasoning as
+        # `_custom_file_excludes_bgc_source`.
+        if self.custom_file is not None and self.surface_forcing_source is not None:
+            raise ValueError(
+                "river custom_file and surface_forcing_source are mutually exclusive; "
+                "a user-supplied river file already carries its own temperature"
+            )
+        return self
 
     @model_validator(mode="after")
     def _bgc_source_requires_include_bgc(self) -> RiverForcingItem:
