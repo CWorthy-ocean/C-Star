@@ -48,7 +48,11 @@ def _squash_cli_output(text: str) -> str:
 
 @pytest.fixture
 def flatten_cli_output() -> Callable[[str], str]:
-    """Fixture providing a helper that prepares CLI output for phrase matching."""
+    """Fixture providing a helper that prepares CLI output for phrase matching.
+
+    `rich` wraps long paths at the terminal width, so normalize whitespace
+    before matching
+    """
     return _flatten_cli_output
 
 
