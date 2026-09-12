@@ -1,6 +1,7 @@
+import asyncio
 import enum
 import typing as t
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
 
@@ -29,21 +30,21 @@ class SerializableModel(t.Protocol):
     with metacalases in a protocol.
     """
 
-    def model_dump_json(self, *args, **kwargs) -> str:  # type: ignore  # noqa: ANN002, ANN003, PGH003
+    def model_dump_json(self, *args, **kwargs) -> str:  # type: ignore
         """Return a JSON string representation of the object."""
         ...
 
-    def model_dump(self, *args, **kwargs) -> dict[str, t.Any]:  # type: ignore  # noqa: ANN002, ANN003, PGH003
+    def model_dump(self, *args, **kwargs) -> dict[str, t.Any]:  # type: ignore
         """Return a dictionary representation of the object."""
         ...
 
     @classmethod
-    def model_validate_json(cls, *args, **kwargs) -> "t.Self":  # type: ignore  # noqa: ANN002, ANN003, PGH003
+    def model_validate_json(cls, *args, **kwargs) -> "t.Self":  # type: ignore
         """Return a dictionary representation of the object."""
         ...
 
     @classmethod
-    def model_validate(cls, *args, **kwargs) -> "t.Self":  # type: ignore  # noqa: ANN002, ANN003, PGH003
+    def model_validate(cls, *args, **kwargs) -> "t.Self":  # type: ignore
         """Return a dictionary representation of the object."""
         ...
 
@@ -165,7 +166,7 @@ def _read_json(path: Path, klass: type[_T]) -> _T:
     model_dict = read_json_to_raw(path)
     if model_dict:
         model_dict.pop("$schema", None)
-    return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
+    return klass.model_validate(model_dict)  # type: ignore
 
 
 def _read_yaml(path: Path, klass: type[_T]) -> _T:
@@ -185,7 +186,7 @@ def _read_yaml(path: Path, klass: type[_T]) -> _T:
     model_dict = read_yaml_to_raw(path)
     if model_dict:
         model_dict.pop("$schema", None)
-    return klass.model_validate(model_dict)  # type: ignore  # noqa: PGH003
+    return klass.model_validate(model_dict)  # type: ignore
 
 
 def path_representer(
@@ -367,6 +368,47 @@ def try_deserialize(
         msg = f"try-deserialize failed loading {klass.__name__!r} from {str(path)!r}"
         log.debug(msg)
         return None
+
+
+async def deserialize_all(
+    paths: list[Path],
+    klass: type[_T],
+    limit: int,
+    mode: PersistenceMode = PersistenceMode.auto,
+    sem: asyncio.Semaphore | None = None,
+) -> Sequence[_T | None]:
+    """Deserialize a collection of items of the same type.
+
+    Reads are performed concurrently, bounded by `sem` when supplied and
+    otherwise by a new semaphore permitting `limit` concurrent reads.
+
+    Parameters
+    ----------
+    paths : list[Path]
+        The paths to the serialized items.
+    klass : type[_T]
+        The model type to deserialize each item into.
+    mode : PersistenceMode
+        The persistence mode used to read the items.
+    limit : int
+        The maximum number of concurrent reads; ignored when `sem` is supplied.
+    sem : asyncio.Semaphore | None
+        An externally owned semaphore used to bound concurrent reads.
+
+    Returns
+    -------
+    Sequence[_T | None]
+        The deserialized items in input order; an item that cannot be read
+        or fails validation is returned as `None`.
+    """
+
+    async def _bounded(p: Path, s: asyncio.Semaphore) -> _T | None:
+        """Deserialize the item with concurrency bounded."""
+        async with s:
+            return await asyncio.to_thread(try_deserialize, p, klass, mode)
+
+    sem = sem or asyncio.Semaphore(limit)
+    return await asyncio.gather(*(_bounded(Path(p), sem) for p in paths))
 
 
 def serialize(

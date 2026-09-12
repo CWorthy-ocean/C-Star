@@ -2,6 +2,7 @@ import asyncio
 import errno
 import functools
 import os
+import shlex
 import shutil
 import sys
 import typing as t
@@ -23,7 +24,7 @@ from cstar.base.env import (
     get_env_item,
 )
 from cstar.base.log import LoggingMixin, get_logger
-from cstar.base.utils import slugify
+from cstar.base.utils import _run_cmd, slugify
 
 if t.TYPE_CHECKING:
     from cstar.base.env import EnvItem
@@ -584,15 +585,56 @@ def remove_files(file_dir: Path, wildcard_pattern: str) -> bool:
     return removed
 
 
+async def disk_usage(path: Path) -> str:
+    """Return the size of all assets stored in a directory.
+
+    Parameters
+    ----------
+    path : Path
+        The path to compute disk usage for
+
+    Returns
+    -------
+    str
+        The size of the directory in MB, or "-1" when the measurement
+        fails (e.g. the path is missing or unreadable).
+    """
+    result = await asyncio.to_thread(_run_cmd, f"du -sm {shlex.quote(str(path))}")
+
+    try:
+        # if du fails to produce the expected output, split will fail
+        value = result.split()[0]
+
+        _ = int(value)
+        return value
+    except Exception:
+        return "-1"
+
+
+async def bounded_du(path: Path, sem: asyncio.Semaphore) -> str:
+    """Wrap the disk usage method in a semaphore to limit concurrent IO requests.
+
+    Parameters
+    ----------
+    path : Path
+        The path to compute disk usage for
+    sem : asyncio.Semaphore
+        A semaphore for bounding concurrent executions
+
+    Returns
+    -------
+    str
+        The size of the directory in MB, or "-1" when the measurement fails.
+    """
+    async with sem:
+        return await disk_usage(path)
+
+
 def get_backup_path(path: Path, backup_ext: str = ".bak") -> Path:
     """Identify a unique backup path for the input.
 
     Adds `.bak` on first execution and appends `.bak.<i>` for each subsequent
     backup to ensure the original is never lost.
-
-    Parameters
-    ----------
-    path : Path
         The source path
     backup_ext : str
         An extension differentiating the backup files from the source file.

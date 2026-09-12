@@ -33,3 +33,6 @@ ARG_URI_SHORT: t.Final[str] = "-b"
 
 ARG_VERBOSE: t.Final[str] = "--verbose"
 ARG_VERBOSE_HELP: t.Final[str] = "Set this flag to print verbose CLI outputs."
+
+ARG_SIZE: t.Final[str] = "--size"
+ARG_SIZE_HELP: t.Final[str] = "Set this flag to refresh disk-usage statistics."

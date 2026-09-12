@@ -31,7 +31,7 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
-from cstar.orchestration.serialization import deserialize, serialize
+from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
@@ -1113,16 +1113,20 @@ class DirectiveConfig(BaseModel):
     def load_workplan(
         cls,
     ) -> LiveWorkplan:
-        """Identify the path to the output directory for another step.
+        """Load the transformed workplan for the active run.
 
-        Parameters
-        ----------
-        name : str
-            The name of the step to locate
+        The run is identified by the run-id exported in the environment.
 
         Returns
         -------
-        Path
+        LiveWorkplan
+            The transformed workplan recorded for the active run.
+
+        Raises
+        ------
+        RuntimeError
+            If no run-id is exported in the environment, no run record exists
+            for it, or the recorded workplan cannot be deserialized.
         """
         run_id = os.getenv(ENV_CSTAR_RUNID, None)
         run: WorkplanRun | None = None
@@ -1140,10 +1144,10 @@ class DirectiveConfig(BaseModel):
 
         wp_path = run.trx_workplan_path
 
-        if wp := deserialize(run.trx_workplan_path, LiveWorkplan):
+        if wp := try_deserialize(wp_path, LiveWorkplan):
             return wp
 
-        msg = f"Unable to load workplan for run-id {run_id!r} from {wp_path}"
+        msg = f"No live workplan for run-id {run_id!r} found at {str(wp_path)!r}"
         raise RuntimeError(msg)
 
     @classmethod
