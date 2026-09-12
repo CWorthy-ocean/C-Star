@@ -138,8 +138,13 @@ def csv_formatter(data: Iterable[ItemView]) -> ConsoleRenderable:
     output = io.StringIO()
 
     renderables = (x.model_dump(exclude=EXCLUSIONS) for x in data)
-    writer = csv.DictWriter(output, fieldnames=INCLUSIONS, quoting=csv.QUOTE_STRINGS)
+    writer = csv.DictWriter(
+        output,
+        fieldnames=sorted(INCLUSIONS),
+        quoting=csv.QUOTE_STRINGS,
+    )
 
+    writer.writeheader()
     writer.writerows(renderables)
     document = output.getvalue()
 
@@ -203,7 +208,7 @@ sorters: dict[
     "name": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
     "run-id": lambda runs, desc: sorted(runs, key=lambda x: x.run_id, reverse=desc),
     "size": lambda runs, desc: sorted(
-        runs, key=lambda x: x.metadata[KEY_RUN_SIZE], reverse=desc
+        runs, key=lambda x: int(x.metadata[KEY_RUN_SIZE]), reverse=desc
     ),
     "time": lambda runs, desc: sorted(runs, key=lambda x: x.start_at, reverse=desc),
 }
