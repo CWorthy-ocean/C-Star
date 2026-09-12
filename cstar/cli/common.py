@@ -445,11 +445,6 @@ def execute_migration(request: MigrationRequest) -> PersistedMigrateResult:
         console.print(result.error)
         raise typer.Exit(1)
 
-    # An up-to-date blueprint needs no migration: return it untouched unless
-    # the user explicitly requested an output copy.
-    if not plan.adapters and request.target is None:
-        return PersistedMigrateResult(result, request.source)
-
     if plan.adapters and is_flag_enabled(ENV_CSTAR_DISABLE_MIGRATION):
         console.print(
             f"Blueprint at '{request.source}' requires schema migration from "

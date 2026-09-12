@@ -10,6 +10,7 @@ from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
     RomsFileSystemManager,
+    get_backup_path,
     is_remote_resource,
     local_copy,
     local_copy_async,
@@ -398,3 +399,88 @@ def test_file_system_remove_files_directories(tmp_path: Path) -> None:
     assert not path.exists()
     assert not file_match.exists()
     assert not log.exists()
+
+
+def test_file_system_get_backup_path_first_backup(tmp_path: Path) -> None:
+    """Verify that the first backup path appends the backup extension to the
+    full original file name.
+    """
+    source = tmp_path / "blueprint.yaml"
+    source.touch()
+
+    backup_path = get_backup_path(source)
+
+    assert backup_path == tmp_path / "blueprint.yaml.bak"
+
+
+def test_file_system_get_backup_path_does_not_require_source(
+    tmp_path: Path,
+) -> None:
+    """Verify that a backup path is produced even if the source does not exist."""
+    source = tmp_path / "blueprint.yaml"
+
+    backup_path = get_backup_path(source)
+
+    assert backup_path == tmp_path / "blueprint.yaml.bak"
+
+
+def test_file_system_get_backup_path_existing_backup(tmp_path: Path) -> None:
+    """Verify that an existing backup is never overwritten; a numeric
+    suffix is appended instead.
+    """
+    source = tmp_path / "blueprint.yaml"
+    source.touch()
+    (tmp_path / "blueprint.yaml.bak").touch()
+
+    backup_path = get_backup_path(source)
+
+    assert backup_path == tmp_path / "blueprint.yaml.bak.001"
+
+
+def test_file_system_get_backup_path_multiple_existing_backups(
+    tmp_path: Path,
+) -> None:
+    """Verify that the numeric suffix increments past all existing backups."""
+    source = tmp_path / "blueprint.yaml"
+    source.touch()
+    (tmp_path / "blueprint.yaml.bak").touch()
+    (tmp_path / "blueprint.yaml.bak.001").touch()
+    (tmp_path / "blueprint.yaml.bak.002").touch()
+
+    backup_path = get_backup_path(source)
+
+    assert backup_path == tmp_path / "blueprint.yaml.bak.003"
+
+
+def test_file_system_get_backup_path_multidot_name(tmp_path: Path) -> None:
+    """Verify that a versioned file name keeps its full stem in the backup."""
+    source = tmp_path / "blueprint.1.0.0.yaml"
+    source.touch()
+
+    backup_path = get_backup_path(source)
+
+    assert backup_path == tmp_path / "blueprint.1.0.0.yaml.bak"
+
+
+def test_file_system_get_backup_path_no_suffix(tmp_path: Path) -> None:
+    """Verify that a file without an extension gets the backup extension."""
+    source = tmp_path / "blueprint"
+    source.touch()
+
+    backup_path = get_backup_path(source)
+
+    assert backup_path == tmp_path / "blueprint.bak"
+
+
+@pytest.mark.parametrize("backup_ext", ["orig", ".orig"])
+def test_file_system_get_backup_path_custom_ext(
+    tmp_path: Path,
+    backup_ext: str,
+) -> None:
+    """Verify that a custom extension is honored, with or without a leading dot."""
+    source = tmp_path / "blueprint.yaml"
+    source.touch()
+
+    backup_path = get_backup_path(source, backup_ext=backup_ext)
+
+    assert backup_path == tmp_path / "blueprint.yaml.orig"
