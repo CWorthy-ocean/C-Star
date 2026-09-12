@@ -127,15 +127,13 @@ def test_blueprint_migrate_persist_to_default(
     assert app_name in content
 
 
+@mock.patch.dict(os.environ, {ENV_CSTAR_DISABLE_MIGRATION: FLAG_ON})
 def test_blueprint_migrate_disabled(
     plotter_v1_0_0_bp: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify that `CSTAR_DISABLE_MIGRATION` blocks migration of an
     out-of-date blueprint with an early error.
     """
-    monkeypatch.setenv(ENV_CSTAR_DISABLE_MIGRATION, FLAG_ON)
-
     runner = CliRunner()
     result = runner.invoke(
         app,
@@ -287,15 +285,14 @@ def test_target_callback_dryrun_notifies(
     assert "will be ignored during dry-run" in capsys.readouterr().out
 
 
+@mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON})
 def test_target_callback_dryrun_env_notifies(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify that dry-run mode enabled only through the environment variable
     is detected even though the parameter is not yet processed.
     """
-    monkeypatch.setenv(ENV_CSTAR_CLI_DRY_RUN, FLAG_ON)
     output_path = tmp_path / "out.yaml"
 
     ctx = mock.Mock(spec=typer.Context)
@@ -305,14 +302,13 @@ def test_target_callback_dryrun_env_notifies(
     assert "will be ignored during dry-run" in capsys.readouterr().out
 
 
+@mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_ON})
 def test_target_callback_clobber_env_removes_existing(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify that clobber mode enabled only through the environment variable
     is detected even though the parameter is not yet processed.
     """
-    monkeypatch.setenv(ENV_CSTAR_CLOBBER_WORKING_DIR, FLAG_ON)
     output_path = tmp_path / "output.yaml"
     output_path.touch()
 
