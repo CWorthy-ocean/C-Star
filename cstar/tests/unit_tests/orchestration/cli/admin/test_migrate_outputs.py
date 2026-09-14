@@ -298,4 +298,32 @@ def test_cli_admin_migrate_outputs_dry_run_flag(tmp_path: Path) -> None:
     assert "[dry-run]" in result.stdout
     assert jo_dir.exists()
     assert (jo_dir / "out_final.nc").exists()
+
+
+def test_cli_migrate_outputs_prints_bracketed_paths_verbatim(tmp_path: Path) -> None:
+    """Verify that a path containing square brackets is printed as-is rather
+    than being consumed as a Rich markup tag.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to build the old-layout step directory in.
+    """
+    step_dir = tmp_path / "step[a]"
+    jo_dir = step_dir / "joined_output"
+    jo_dir.mkdir(parents=True)
+    (jo_dir / "out_final.nc").write_text("final data")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [str(step_dir), "--dry-run"],
+        color=False,
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0
+    assert "[dry-run]" in result.stdout
+    assert str(jo_dir / "out_final.nc") in result.stdout
+    assert str(step_dir / "output" / "out_final.nc") in result.stdout
     assert not (tmp_path / "output").exists()

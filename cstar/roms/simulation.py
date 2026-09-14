@@ -29,6 +29,7 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
@@ -50,7 +51,7 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager, remove_files
+from cstar.execution.file_system import remove_files
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -832,13 +833,18 @@ class ROMSSimulation(Simulation):
                 self.nesting_info.working_copy.path  # type: ignore[union-attr]
             )
 
-        # These next values must stay short: ucla-roms builds
-        # the extraction filename in a fixed character(len=99) buffer
-        # so an absolute path could silently truncate.
-        # ParallelIO writes whole files directly into `output`; a non-PIO run
-        # writes partitioned pieces into `temp_output`, joined by post_run
-        # into `output`.
-        root = "../output" if self.use_pio else "../temp_output"
+        # ParallelIO writes directly to output_dir without join/partition steps,
+        # otherwise the step should put intermediate work in the temporary directory
+        target = (
+            self.fs_manager.output_dir
+            if self.use_pio
+            else self.fs_manager.temp_output_dir
+        )
+
+        # ROMS runs from `run_dir`; use a path relative to it to keep the string
+        # short (ucla-roms builds output filenames in a 99-character buffer).
+        root = str(target.relative_to(self.fs_manager.run_dir, walk_up=True))
+
         nml.simulation_name_settings.output_root_name = f"{root}/output"
 
         # Note: only PARALLEL_IO builds honor extract_root_name;

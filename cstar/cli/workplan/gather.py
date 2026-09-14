@@ -1,6 +1,5 @@
 import os
 import shutil
-import typing as t
 from collections import defaultdict
 from pathlib import Path
 
@@ -15,15 +14,12 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 log = get_logger(__name__)
 app = typer.Typer()
 
-GATHERED_OUTPUT_NAME: t.Final[str] = "gathered_output"
-"""The name of the run-level directory of symlinks built by `gather`."""
-
 HELP_SHORT = "Consolidate per-step output into a single directory."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
 Every step's `output` directory is scanned and a run-level
-`{GATHERED_OUTPUT_NAME}` directory of symlinks is (re)built pointing at
+`gathered_output` directory of symlinks is (re)built pointing at
 whatever files currently exist. A filename produced by more than one step is
 linked under a `<step>__<filename>` name so every file is still gathered
 instead of aborting the run. Safe to re-run at any time, including while the
@@ -184,7 +180,7 @@ def gather(
         report_conflicts(conflicts)
         raise typer.Exit(1)
 
-    dest = StateDirectoryManager.data_dir(run_id) / GATHERED_OUTPUT_NAME
+    dest = StateDirectoryManager.user_dir(run_id)
     relink(dest, links)
 
     if not links:

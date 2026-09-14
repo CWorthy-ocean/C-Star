@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from cstar.cli.workplan.gather import GATHERED_OUTPUT_NAME, app, collect_links
+from cstar.cli.workplan.gather import app, collect_links
 from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.models import Step, Workplan
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
@@ -58,12 +58,8 @@ def _output_dir(step: Step) -> Path:
     return JobFileSystemManager(working_dir).output_dir
 
 
-def _run_root() -> Path:
-    return StateDirectoryManager.data_dir("fake-run-id")
-
-
 def _dest_dir() -> Path:
-    return _run_root() / GATHERED_OUTPUT_NAME
+    return StateDirectoryManager.user_dir()
 
 
 def test_cli_workplan_gather_happy_path(

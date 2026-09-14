@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 from cstar.applications.core import Transform
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
@@ -29,7 +30,6 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (
@@ -805,7 +805,7 @@ def _rst_path_continue_from_conflict_message(step_name: str | None) -> str:
     """
     subject = f"step {step_name!r}" if step_name is not None else "a step"
     return (
-        f"nest-from rst_path and continue-from both set initial conditions for "
+        "nest-from rst_path and continue-from both set initial conditions for "
         f"{subject}; remove rst_path"
     )
 

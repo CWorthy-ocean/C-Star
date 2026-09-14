@@ -6,10 +6,10 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_DRY_RUN
-from cstar.execution.file_system import RomsFileSystemManager
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -47,19 +47,19 @@ class MigrationReport:
     current `output` / `temp_output` layout.
     """
 
-    moved: list[tuple[Path, Path]] = field(default_factory=list)
+    moved: list[tuple[Path, Path]] = field(default_factory=list[tuple[Path, Path]])
     """Pairs of `(source, destination)` for every file moved (or, in
     `dry_run` mode, that would be moved).
     """
-    skipped_collisions: list[Path] = field(default_factory=list)
+    skipped_collisions: list[Path] = field(default_factory=list[Path])
     """Files left in place because a file with the same name already exists
     at the intended destination.
     """
-    removed_dirs: list[Path] = field(default_factory=list)
+    removed_dirs: list[Path] = field(default_factory=list[Path])
     """Now-empty `joined_output` directories removed (or, in `dry_run` mode,
     that would be removed).
     """
-    gather_dirs_removed: list[Path] = field(default_factory=list)
+    gather_dirs_removed: list[Path] = field(default_factory=list[Path])
     """Old run-level `cstar workplan gather` result directories (holding only
     symlinks) removed (or, in `dry_run` mode, that would be removed).
     """
@@ -134,6 +134,11 @@ def _migrate_one(jo_dir: Path, *, dry_run: bool, report: MigrationReport) -> Non
     # `RomsFileSystemManager.__init__` resolves its root, so `out_dir` /
     # `temp_dir` stay consistent with `jo_dir` only because
     # `migrate_output_layout` already resolved `root` before `rglob`.
+
+    from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+    # TODO: this is bad, but temporary... migration should not have app-specific code
+    # in the core behaviors. It needs to move to the roms migration handlers.
+
     fsm = RomsFileSystemManager(jo_dir.parent)
     out_dir = fsm.output_dir
     temp_dir = fsm.temp_output_dir
@@ -235,30 +240,21 @@ def migrate_outputs(
 ) -> None:
     """Migrate an old-layout run or step directory to the current output layout."""
     report = migrate_output_layout(path, dry_run=dry_run)
-
-    # `markup=False` everywhere below: paths and the "[dry-run]" prefix are
-    # plain text, not Rich markup (a literal `[dry-run]` would otherwise be
-    # parsed as an unknown style tag and silently dropped).
-    prefix = "[dry-run] " if dry_run else ""
+    # Paths and the "[dry-run]" prefix are plain text: escape them so a
+    # literal `[...]` is not parsed as a Rich style tag and silently dropped.
+    prefix = f"{escape('[dry-run]')} " if dry_run else ""
+    console.soft_wrap = True
 
     for src, dst in report.moved:
-        console.print(f"{prefix}moved {src} -> {dst}", soft_wrap=True, markup=False)
+        console.print(f"{prefix}moved {escape(str(src))} -> {escape(str(dst))}")
     for p in report.skipped_collisions:
-        console.print(
-            f"{prefix}skipped (exists): {p} was left in place",
-            soft_wrap=True,
-            markup=False,
-        )
+        console.print(f"{prefix}skipped (exists): {escape(str(p))} was left in place")
     for p in report.removed_dirs:
-        console.print(
-            f"{prefix}removed empty directory {p}", soft_wrap=True, markup=False
-        )
+        console.print(f"{prefix}removed empty directory {escape(str(p))}")
     for p in report.gather_dirs_removed:
         console.print(
-            f"{prefix}removed old run-level gather directory {p}; "
-            "re-run `cstar workplan gather <run-id>` to rebuild it",
-            soft_wrap=True,
-            markup=False,
+            f"{prefix}removed old run-level gather directory {escape(str(p))}; "
+            "re-run `cstar workplan gather <run-id>` to rebuild it"
         )
 
     console.print(
@@ -266,10 +262,9 @@ def migrate_outputs(
         f"skipped {len(report.skipped_collisions)} collision(s), "
         f"removed {len(report.removed_dirs)} empty `joined_output` "
         f"director(y/ies), removed {len(report.gather_dirs_removed)} old "
-        "run-level gather director(y/ies).",
-        soft_wrap=True,
-        markup=False,
+        "run-level gather director(y/ies)."
     )
+    console.soft_wrap = False
 
 
 if __name__ == "__main__":
