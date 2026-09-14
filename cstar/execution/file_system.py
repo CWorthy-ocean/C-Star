@@ -299,7 +299,7 @@ class StateDirectoryManager:
     _RUN_TRACKING_NAME: t.ClassVar[t.Literal["run_tracking"]] = "run_tracking"
     """The name of the directory where run-tracking files are written."""
 
-    _USER_VIEW_NAME: t.ClassVar[t.Literal["user"]] = "user"
+    _USER_VIEW_NAME: t.ClassVar[t.Literal["gathered_output"]] = "gathered_output"
     """The name of the directory where an aggregated user view of outputs is created."""
 
     @classmethod

@@ -240,18 +240,20 @@ def migrate_outputs(
 ) -> None:
     """Migrate an old-layout run or step directory to the current output layout."""
     report = migrate_output_layout(path, dry_run=dry_run)
+    # Paths and the "[dry-run]" prefix are plain text: escape them so a
+    # literal `[...]` is not parsed as a Rich style tag and silently dropped.
     prefix = f"{escape('[dry-run]')} " if dry_run else ""
     console.soft_wrap = True
 
     for src, dst in report.moved:
-        console.print(f"{prefix}moved {src} -> {dst}")
+        console.print(f"{prefix}moved {escape(str(src))} -> {escape(str(dst))}")
     for p in report.skipped_collisions:
-        console.print(f"{prefix}skipped (exists): {p} was left in place")
+        console.print(f"{prefix}skipped (exists): {escape(str(p))} was left in place")
     for p in report.removed_dirs:
-        console.print(f"{prefix}removed empty directory {p}")
+        console.print(f"{prefix}removed empty directory {escape(str(p))}")
     for p in report.gather_dirs_removed:
         console.print(
-            f"{prefix}removed old run-level gather directory {p}; "
+            f"{prefix}removed old run-level gather directory {escape(str(p))}; "
             "re-run `cstar workplan gather <run-id>` to rebuild it"
         )
 

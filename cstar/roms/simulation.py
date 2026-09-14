@@ -841,8 +841,9 @@ class ROMSSimulation(Simulation):
             else self.fs_manager.temp_output_dir
         )
 
-        # use relative paths to avoid truncation due to roms 99 character limit
-        root = str(target.relative_to(self.fs_manager.tasks_dir, walk_up=True))
+        # ROMS runs from `run_dir`; use a path relative to it to keep the string
+        # short (ucla-roms builds output filenames in a 99-character buffer).
+        root = str(target.relative_to(self.fs_manager.run_dir, walk_up=True))
 
         nml.simulation_name_settings.output_root_name = f"{root}/output"
 

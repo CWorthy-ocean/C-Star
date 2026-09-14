@@ -18,8 +18,8 @@ HELP_SHORT = "Consolidate per-step output into a single directory."
 HELP_LONG = f"""\
 {HELP_SHORT}
 
-Every step's `output` directory is scanned and a user-friendly
-directory of run-level symlinks is (re)built pointing at
+Every step's `output` directory is scanned and a run-level
+`gathered_output` directory of symlinks is (re)built pointing at
 whatever files currently exist. A filename produced by more than one step is
 linked under a `<step>__<filename>` name so every file is still gathered
 instead of aborting the run. Safe to re-run at any time, including while the
