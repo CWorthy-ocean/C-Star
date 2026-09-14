@@ -46,19 +46,19 @@ class MigrationReport:
     current `output` / `temp_output` layout.
     """
 
-    moved: list[tuple[Path, Path]] = field(default_factory=list)
+    moved: list[tuple[Path, Path]] = field(default_factory=list[tuple[Path, Path]])
     """Pairs of `(source, destination)` for every file moved (or, in
     `dry_run` mode, that would be moved).
     """
-    skipped_collisions: list[Path] = field(default_factory=list)
+    skipped_collisions: list[Path] = field(default_factory=list[Path])
     """Files left in place because a file with the same name already exists
     at the intended destination.
     """
-    removed_dirs: list[Path] = field(default_factory=list)
+    removed_dirs: list[Path] = field(default_factory=list[Path])
     """Now-empty `joined_output` directories removed (or, in `dry_run` mode,
     that would be removed).
     """
-    gather_dirs_removed: list[Path] = field(default_factory=list)
+    gather_dirs_removed: list[Path] = field(default_factory=list[Path])
     """Old run-level `cstar workplan gather` result directories (holding only
     symlinks) removed (or, in `dry_run` mode, that would be removed).
     """
