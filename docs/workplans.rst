@@ -306,11 +306,26 @@ Checking Workplan Status
 Gathering Workplan Outputs
 --------------------------
 
+Every step writes its final outputs to its own ``output`` directory. ROMS steps
+that run without ParallelIO first write partitioned files to ``temp_output``;
+C-Star joins those into whole files in ``output`` after the run and removes the
+partition pieces.
+
 Use the ``gather`` command from the ``cstar`` CLI to consolidate every step's
-``joined_output`` files into a single run-level ``joined_output`` directory of
-symlinks. It is safe to re-run while a workplan is still in progress, and it
-fails if two steps produce a file with the same name.
+``output`` files into a single run-level ``gathered_output`` directory of
+symlinks. It is safe to re-run while a workplan is still in progress. When two
+steps produce a file with the same name, each link is prefixed with its step
+name (``<step>__<file>``) so both remain reachable.
 
 .. code-block:: console
 
     cstar workplan gather <my-unique-id>
+
+Runs completed with an earlier C-Star release kept joined files in a
+``joined_output`` directory next to ``output``. Move such a run to the current
+layout before continuing from it or gathering it:
+
+.. code-block:: console
+
+    cstar admin migrate-outputs <path-to-run-or-step-directory> --dry-run
+    cstar admin migrate-outputs <path-to-run-or-step-directory>

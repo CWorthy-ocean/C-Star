@@ -462,7 +462,8 @@ class TestROMSSimulationInitialization:
             fake_nesting_path
         )
         assert (
-            tested_settings.extract_data_settings.extract_root_name == "../output/child"
+            tested_settings.extract_data_settings.extract_root_name
+            == "../temp_output/child"
         )
 
         # Test with no MARBL files — marbl_config_file keeps the namelist's value
@@ -494,7 +495,7 @@ class TestROMSSimulationInitialization:
         assert result_no_nesting.extract_data_settings.extract_file == "sample_edata.nc"
         assert (
             result_no_nesting.extract_data_settings.extract_root_name
-            == "../output/child"
+            == "../temp_output/child"
         )
 
     def test_roms_runtime_settings_raises_if_no_runtime_code_working_copy(
@@ -696,6 +697,73 @@ class TestROMSSimulationInitialization:
         assert result.simulation_name_settings.output_root_name == (
             "custom/output_root"
         )
+
+    @pytest.mark.parametrize(
+        ("use_pio", "expected_output_root", "expected_extract_root"),
+        [
+            pytest.param(True, "../output/output", "../output/child", id="pio"),
+            pytest.param(
+                False,
+                "../temp_output/output",
+                "../temp_output/child",
+                id="non_pio",
+            ),
+        ],
+    )
+    @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
+    @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        ROMSInitialConditions,
+        "path_for_roms_unpartitioned",
+        new_callable=mock.PropertyMock,
+    )
+    @mock.patch.object(
+        ROMSInitialConditions, "path_for_roms", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(
+        ROMSModelGrid, "path_for_roms_unpartitioned", new_callable=mock.PropertyMock
+    )
+    @mock.patch.object(ROMSModelGrid, "path_for_roms", new_callable=mock.PropertyMock)
+    def test_roms_runtime_settings_output_root_by_pio_mode(
+        self,
+        mock_grid_path,
+        mock_grid_path_unpartitioned,
+        mock_ini_path,
+        mock_ini_path_unpartitioned,
+        mock_forcing_paths,
+        mock_schema_for_ref,
+        use_pio,
+        expected_output_root,
+        expected_extract_root,
+        stub_romssimulation,
+        stageddatacollection_remote_files,
+    ):
+        """`output_root_name`/`extract_root_name` derive from `use_pio`.
+
+        With ParallelIO, ROMS writes whole files directly into `output`; a
+        non-PIO run stages partitioned pieces in `temp_output` first, joined
+        by `post_run` into `output`.
+        """
+        sim = self._prepare_sim_for_runtime_settings(
+            stub_romssimulation,
+            stageddatacollection_remote_files,
+            mock_grid_path,
+            mock_ini_path,
+            mock_forcing_paths,
+            mock_schema_for_ref,
+        )
+        # PIO reads the unpartitioned dataset path instead; mock it too so
+        # both branches of the `self.use_pio` check resolve to a real path.
+        mock_grid_path_unpartitioned.return_value = [Path("grid.nc")]
+        mock_ini_path_unpartitioned.return_value = [Path("fake_ini.nc")]
+        sim.use_pio = use_pio
+
+        result = sim.roms_runtime_settings
+
+        assert result.simulation_name_settings.output_root_name == (
+            expected_output_root
+        )
+        assert result.extract_data_settings.extract_root_name == (expected_extract_root)
 
     @mock.patch("cstar.roms.simulation.namelist_schema_for_ref")
     @mock.patch.object(ROMSSimulation, "_forcing_paths", new_callable=mock.PropertyMock)
@@ -2255,6 +2323,53 @@ class TestProcessingAndExecution:
             assert execution_handler == mock_process_instance
 
     @pytest.mark.parametrize(
+        ("use_pio", "expect_temp_output"),
+        [
+            pytest.param(False, True, id="non_pio_creates_temp_output"),
+            pytest.param(True, False, id="pio_skips_temp_output"),
+        ],
+    )
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_run_creates_temp_output_dir_only_when_not_pio(
+        self,
+        mock_runtime_settings,
+        use_pio,
+        expect_temp_output,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+    ):
+        """`run` creates `temp_output_dir` for a non-PIO simulation, where
+        ROMS writes partitioned pieces there before `post_run` joins them
+        into `output`; a PIO simulation writes whole files directly into
+        `output` and never needs `temp_output`.
+        """
+        sim = stub_romssimulation
+        sim.use_pio = use_pio
+
+        with (
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=mock.PropertyMock,
+                return_value=None,
+            ),
+            mock.patch("pathlib.Path.rename", new_callable=mock.Mock),
+        ):
+            sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+            mock_local_process.return_value = mock.MagicMock()
+            runtime_code_dir = sim.fs_manager.runtime_code_dir
+            sim.runtime_code._working_copy = stageddatacollection_remote_files(
+                paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+                sources=sim.runtime_code.source,
+            )
+
+            sim.run()
+
+        assert sim.fs_manager.temp_output_dir.exists() == expect_temp_output
+
+    @pytest.mark.parametrize(
         "mock_system_name,exp_mpi_prefix",
         [
             ["darwin_arm64", "mpirun"],
@@ -2441,28 +2556,31 @@ class TestProcessingAndExecution:
     ) -> None:
         """Tests that `post_run` correctly merges partitioned NetCDF output files.
 
-        This test verifies that `post_run` identifies NetCDF output files, executes
-        `ncjoin` to merge them, and moves the partitioned files to the `PARTITIONED`
-        subdirectory. It creates mock netCDF files in a temporary directory (using
-        touch) and then checks these are correctly handled.
+        This test verifies that `post_run` identifies partitioned NetCDF output
+        files in `temp_output`, executes `ncjoin` to merge them, moves the
+        joined result into `output`, and removes every partition piece
+        (restarts included). It creates mock netCDF files in a temporary
+        directory (using touch) and then checks these are correctly handled.
         """
         # Setup
         sim = stub_romssimulation
         sim.fs_manager.prepare()
         output_dir = sim.fs_manager.output_dir
+        temp_output_dir = sim.fs_manager.temp_output_dir
 
         # Create fake partitioned NetCDF files
-        (output_dir / "ocean_his.20240101000000.001.nc").touch()
-        (output_dir / "ocean_his.20240101000000.002.nc").touch()
-        (output_dir / "ocean_rst.20240101000000.001.nc").touch()
+        (temp_output_dir / "ocean_his.20240101000000.001.nc").touch()
+        (temp_output_dir / "ocean_his.20240101000000.002.nc").touch()
+        (temp_output_dir / "ocean_rst.20240101000000.001.nc").touch()
 
         # Create fake partitioned ext files which shouldn't be joined
-        (output_dir / "ocean_ext.20240101000000.001.nc").touch()
+        (temp_output_dir / "ocean_ext.20240101000000.001.nc").touch()
 
-        # Create fake output of join process to make sure it gets moved
-        (output_dir / "ocean_his.20240101000000.nc").touch()
-        (output_dir / "ocean_rst.20240101000000.nc").touch()
-        (output_dir / "child_bry.20240101000000.nc").touch()
+        # Create fake output of join process (what `ncjoin`/`extract_data_join`
+        # would have written into `temp_output`) to make sure it gets moved
+        (temp_output_dir / "ocean_his.20240101000000.nc").touch()
+        (temp_output_dir / "ocean_rst.20240101000000.nc").touch()
+        (temp_output_dir / "child_bry.20240101000000.nc").touch()
 
         # Mock execution handler
         sim._execution_handler = mock.MagicMock()
@@ -2477,14 +2595,14 @@ class TestProcessingAndExecution:
         # Check that ncjoin was called correctly
         mock_subprocess.assert_any_call(
             "ncjoin ocean_his.20240101000000.*.nc",
-            cwd=output_dir,
+            cwd=temp_output_dir,
             capture_output=True,
             text=True,
             shell=True,
         )
         mock_subprocess.assert_any_call(
             "ncjoin ocean_rst.20240101000000.*.nc",
-            cwd=output_dir,
+            cwd=temp_output_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -2492,24 +2610,23 @@ class TestProcessingAndExecution:
 
         mock_subprocess.assert_any_call(
             "extract_data_join ocean_ext.20240101000000.*.nc",
-            cwd=output_dir,
+            cwd=temp_output_dir,
             capture_output=True,
             text=True,
             shell=True,
         )
 
-        # Check that output file was moved
-        new_joined_dir = sim.fs_manager.joined_output_dir
-        assert new_joined_dir.exists()
-        assert (new_joined_dir / "ocean_his.20240101000000.nc").exists()
-        assert (new_joined_dir / "ocean_rst.20240101000000.nc").exists()
-        assert (new_joined_dir / "child_bry.20240101000000.nc").exists()
+        # Check that the joined output files landed in `output`
+        assert output_dir.exists()
+        assert (output_dir / "ocean_his.20240101000000.nc").exists()
+        assert (output_dir / "ocean_rst.20240101000000.nc").exists()
+        assert (output_dir / "child_bry.20240101000000.nc").exists()
 
-        # assert all non-rst partitioned files got cleaned up
-        assert not (output_dir / "ocean_his.20240101000000.001.nc").exists()
-        assert not (output_dir / "ocean_his.20240101000000.002.nc").exists()
-        assert not (output_dir / "ocean_ext.20240101000000.001.nc").exists()
-        assert (output_dir / "ocean_rst.20240101000000.001.nc").exists()
+        # assert all partitioned files got cleaned up, restarts included
+        assert not (temp_output_dir / "ocean_his.20240101000000.001.nc").exists()
+        assert not (temp_output_dir / "ocean_his.20240101000000.002.nc").exists()
+        assert not (temp_output_dir / "ocean_ext.20240101000000.001.nc").exists()
+        assert not (temp_output_dir / "ocean_rst.20240101000000.001.nc").exists()
 
     @mock.patch.object(Path, "glob", return_value=[])  # Mock glob to return no files
     def test_post_run_prints_message_if_no_files(
@@ -2556,13 +2673,13 @@ class TestProcessingAndExecution:
         """
         # Setup
         sim = stub_romssimulation
-        output_dir = sim.fs_manager.output_dir
-        output_dir.mkdir(exist_ok=True, parents=True)
+        temp_output_dir = sim.fs_manager.temp_output_dir
+        temp_output_dir.mkdir(exist_ok=True, parents=True)
 
         # Fake file paths to match ncjoin pattern
         fake_files = [
-            output_dir / "ocean_his.20240101000000.001.nc",
-            output_dir / "ocean_his.20240101000000.002.nc",
+            temp_output_dir / "ocean_his.20240101000000.001.nc",
+            temp_output_dir / "ocean_his.20240101000000.002.nc",
         ]
         mock_glob.return_value = fake_files
 
@@ -2584,7 +2701,7 @@ class TestProcessingAndExecution:
 
         mock_subprocess.assert_called_once_with(
             "ncjoin ocean_his.20240101000000.*.nc",
-            cwd=output_dir,
+            cwd=temp_output_dir,
             capture_output=True,
             text=True,
             shell=True,
@@ -2807,15 +2924,16 @@ class TestROMSSimulationUsePIO:
     def test_post_run_moves_files_without_joining(
         self, mock_subprocess, stub_romssimulation: ROMSSimulation
     ) -> None:
-        """Test that `post_run` with `use_pio` moves the (already-joined) outputs to
-        the joined output directory without calling any joining tools.
+        """Test that `post_run` with `use_pio` only checks the already-whole
+        outputs in `output`, without calling any joining tools or moving
+        anything.
         """
         sim = stub_romssimulation
         sim.use_pio = True
         sim.fs_manager.prepare()
         output_dir = sim.fs_manager.output_dir
 
-        # PIO output files are already joined (no partition-index segment)
+        # PIO output files are already whole (no partition-index segment)
         (output_dir / "ocean_his.20240101000000.nc").touch()
         (output_dir / "ocean_rst.20240101000000.nc").touch()
 
@@ -2826,11 +2944,9 @@ class TestROMSSimulationUsePIO:
 
         mock_subprocess.assert_not_called()
 
-        joined_dir = sim.fs_manager.joined_output_dir
-        assert (joined_dir / "ocean_his.20240101000000.nc").exists()
-        assert (joined_dir / "ocean_rst.20240101000000.nc").exists()
-        assert not (output_dir / "ocean_his.20240101000000.nc").exists()
-        assert not (output_dir / "ocean_rst.20240101000000.nc").exists()
+        # nothing was moved; the files stay put in `output`
+        assert (output_dir / "ocean_his.20240101000000.nc").exists()
+        assert (output_dir / "ocean_rst.20240101000000.nc").exists()
 
     def test_post_run_prints_message_if_no_files(
         self,

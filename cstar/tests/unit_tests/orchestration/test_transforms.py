@@ -294,27 +294,7 @@ def test_override_transform_system_precedence(
 
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("joined_available", "expected_dir_attr", "expected_name"),
-    [
-        pytest.param(
-            True,
-            "joined_output_dir",
-            "output_rst.20120201000000.nc",
-            id="joined_preferred",
-        ),
-        pytest.param(
-            False,
-            "output_dir",
-            "output_rst.20120201000000.000.nc",
-            id="output_fallback",
-        ),
-    ],
-)
 async def test_continuance_directive_step_resolution(
-    joined_available: bool,
-    expected_dir_attr: str,
-    expected_name: str,
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
@@ -324,15 +304,11 @@ async def test_continuance_directive_step_resolution(
     """Verify that a continuance directive uses context information to identify
     the search path when a step name is provided.
 
-    The directive probes `joined_output` first and falls back to `output`, so
-    a step whose outputs were joined resolves to the joined restart and one
-    that was never joined resolves to the partitioned restart in `output`.
+    The directive resolves a named step's `output` directory and locates the
+    whole restart file written there.
 
     Parameters
     ----------
-    joined_available : bool
-        Whether the prior step's `joined_output` holds files (preferred) or
-        only `output` does (fallback).
     tmp_path : Path
         Temporary directory for test outputs
     bp_templates_dir: Path
@@ -372,12 +348,7 @@ async def test_continuance_directive_step_resolution(
 
     await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
 
-    if not joined_available:
-        # a step whose outputs were never joined: only `output` holds files
-        for live_step in t.cast("list[LiveStep]", live_plan.steps):
-            joined_dir = RomsFileSystemManager(live_step.fsm.root_dir).joined_output_dir
-            for joined_file in joined_dir.glob("*.nc"):
-                joined_file.unlink()
+    expected_name = "output_rst.20120201000000.nc"
 
     for i, step in enumerate(t.cast("list[LiveStep]", live_plan.steps)):
         if i > 0:
@@ -402,11 +373,10 @@ async def test_continuance_directive_step_resolution(
             assert ContinuanceDirective.KEY_STEP in config
             assert ContinuanceDirective.KEY_PATH not in config
 
-            # confirm the initial conditions were overridden to continue from the
-            # latest restart of the named step (see parametrization for the
-            # expected directory and file per PIO mode).
+            # confirm the initial conditions were overridden to continue from
+            # the latest whole restart file in the named step's `output`.
             prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
-            expected_dir = getattr(prior_fsm, expected_dir_attr)
+            expected_dir = prior_fsm.output_dir
 
             bp = deserialize(altered.blueprint_path, RomsMarblBlueprint)
             location = Path(bp.initial_conditions.data[0].location)
@@ -754,27 +724,7 @@ def test_nesting_directive_path_only_sets_boundary_only(
 
 @pytest.mark.usefixtures("read_yaml_intercept")
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("joined_available", "expected_dir_attr", "expected_name"),
-    [
-        pytest.param(
-            True,
-            "joined_output_dir",
-            "parent_bry.20230201003000.nc",
-            id="joined_preferred",
-        ),
-        pytest.param(
-            False,
-            "output_dir",
-            "parent_bry.20230201003000.000.nc",
-            id="output_fallback",
-        ),
-    ],
-)
 async def test_nesting_directive_step_resolution(
-    joined_available: bool,
-    expected_dir_attr: str,
-    expected_name: str,
     tmp_path: Path,
     bp_templates_dir: Path,
     wp_templates_dir: Path,
@@ -782,18 +732,11 @@ async def test_nesting_directive_step_resolution(
     mock_run_id: str,
 ) -> None:
     """Verify a `nest-from` `step` config resolves the boundary search path
-    the same way `continue-from` resolves its restart search path:
-    `joined_output` when it holds boundary files, `output` otherwise.
+    the same way `continue-from` resolves its restart search path: the named
+    step's `output` directory.
 
     Parameters
     ----------
-    joined_available : bool
-        Whether the prior step's `joined_output` holds files (preferred) or
-        only `output` does (fallback).
-    expected_dir_attr : str
-        The `RomsFileSystemManager` attribute expected to hold the boundary file.
-    expected_name : str
-        The expected boundary file name (partitioned vs. joined).
     tmp_path : Path
         Temporary directory for test outputs
     bp_templates_dir : Path
@@ -804,6 +747,7 @@ async def test_nesting_directive_step_resolution(
         A unique run-id that has already been added to os.environ
     """
     run_id = mock_run_id
+    expected_name = "parent_bry.20230201003000.nc"
 
     wp_template_file = "linear.yaml"
     wp_template_path = wp_templates_dir / wp_template_file
@@ -832,16 +776,9 @@ async def test_nesting_directive_step_resolution(
 
     await create_mocked_simulation_outputs(wp_template_path, live_wp_path, run_id)
 
-    if not joined_available:
-        # a step whose outputs were never joined: only `output` holds files
-        for live_step in t.cast("list[LiveStep]", live_plan.steps):
-            joined_dir = RomsFileSystemManager(live_step.fsm.root_dir).joined_output_dir
-            for joined_file in joined_dir.glob("*.nc"):
-                joined_file.unlink()
-
     prior_step = t.cast("LiveStep", live_plan.steps[0])
     prior_fsm = RomsFileSystemManager(prior_step.fsm.root_dir)
-    expected_dir = getattr(prior_fsm, expected_dir_attr)
+    expected_dir = prior_fsm.output_dir
     expected_dir.mkdir(parents=True, exist_ok=True)
     (expected_dir / expected_name).write_text("mock boundary data")
 
@@ -923,6 +860,220 @@ async def test_continuance_directive_resolves_step_output_for_non_roms_marbl_sou
     bp_after = deserialize(altered.blueprint_path, RomsMarblBlueprint)
     location = Path(bp_after.initial_conditions.data[0].location)
     assert location == ic_file.resolve()
+
+
+async def test_continuance_directive_step_output_dir_missing(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `continue-from: {step: <name>}` raises `FileNotFoundError`
+    when the referenced step has no `output` directory yet (it has not run,
+    or failed before producing output).
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    run_id = mock_run_id
+
+    # deliberately never `.prepare()`d: no `output` directory exists on disk
+    parent_step = LiveStep(
+        name="parent",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "parent",
+    )
+
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        bp_tpl_path.read_text().replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+
+    child_step = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "child",
+        directives={
+            ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "parent"}
+        },
+    )
+
+    live_plan = LiveWorkplan(
+        name="missing-output-plan",
+        description="parent step with no output directory",
+        steps=[parent_step, child_step],
+    )
+
+    config = t.cast("dict[str, str]", child_step.directives[ContinuanceDirective.key()])
+
+    with pytest.raises(FileNotFoundError, match="no output directory"):
+        ContinuanceDirective(config, workplan=live_plan)
+
+
+async def test_continuance_directive_step_output_rejects_partitioned(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `continue-from: {step: <name>}` raises `FileNotFoundError`
+    pointing at `cstar admin migrate-outputs` when the referenced step's
+    `output` holds only a legacy partition piece.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    run_id = mock_run_id
+
+    parent_step = LiveStep(
+        name="parent",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "parent",
+    )
+    parent_fsm = RomsFileSystemManager(parent_step.fsm.root_dir)
+    parent_fsm.prepare()
+    (parent_fsm.output_dir / "output_rst.20120201000000.000.nc").write_text(
+        "mock partitioned restart data"
+    )
+
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        bp_tpl_path.read_text().replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+
+    child_step = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "child",
+        directives={
+            ContinuanceDirective.key(): {ContinuanceDirective.KEY_STEP: "parent"}
+        },
+    )
+
+    live_plan = LiveWorkplan(
+        name="partitioned-output-plan",
+        description="parent step whose output holds only a partition piece",
+        steps=[parent_step, child_step],
+    )
+
+    config = t.cast("dict[str, str]", child_step.directives[ContinuanceDirective.key()])
+
+    with pytest.raises(FileNotFoundError, match="migrate-outputs"):
+        ContinuanceDirective(config, workplan=live_plan)
+
+
+def test_nesting_directive_step_output_rejects_partitioned(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `nest-from: {step: <name>}` raises `FileNotFoundError` pointing
+    at `cstar admin migrate-outputs` when the referenced step's `output`
+    holds only a legacy partition piece.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    run_id = mock_run_id
+
+    parent_step = LiveStep(
+        name="parent",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "parent",
+    )
+    parent_fsm = RomsFileSystemManager(parent_step.fsm.root_dir)
+    parent_fsm.prepare()
+    (parent_fsm.output_dir / "parent_bry.20230201003000.000.nc").write_text(
+        "mock partitioned boundary data"
+    )
+
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        bp_tpl_path.read_text().replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+
+    child_step = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "child",
+        directives={NestingDirective.key(): {NestingDirective.KEY_STEP: "parent"}},
+    )
+
+    live_plan = LiveWorkplan(
+        name="partitioned-boundary-plan",
+        description="parent step whose output holds only a partition piece",
+        steps=[parent_step, child_step],
+    )
+
+    config = t.cast("dict[str, str]", child_step.directives[NestingDirective.key()])
+
+    with pytest.raises(FileNotFoundError, match="migrate-outputs"):
+        NestingDirective(config, workplan=live_plan)
+
+
+def test_nesting_directive_path_allows_partitioned(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify `nest-from: {path: <dir>}` still succeeds against a directory
+    holding only a legacy partition piece -- the partitioned-output guard
+    (`_reject_partitioned_step_output`) applies only to `step:` sources.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold a mocked, partitioned boundary file.
+    """
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    (bry_dir / "parent_bry.20230201003000.000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = NestingDirective({NestingDirective.KEY_PATH: str(bry_dir)})
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert Path(bp_after.forcing.boundary.data[0].location).name == (
+        "parent_bry.20230201003000.000.nc"
+    )
 
 
 def test_nesting_directive_bry_path_deprecated_matches_path(
@@ -1658,15 +1809,15 @@ def test_template_fill_yields_single_step(live_step_with_templates: LiveStep) ->
 @pytest.mark.parametrize(
     ("use_var", "use_placeholder", "exp_resolved_var", "exp_resolved_ph"),
     [
-        ("var1", "ph1", "123", "ABC/joined_output"),
-        ("var1", "ph2", "123", "DEF/joined_output"),
-        ("var1", "ph3", "123", "GHI/joined_output"),
-        ("var2", "ph1", "XYZ", "ABC/joined_output"),
-        ("var2", "ph2", "XYZ", "DEF/joined_output"),
-        ("var2", "ph3", "XYZ", "GHI/joined_output"),
-        ("var3", "ph1", "PQR", "ABC/joined_output"),
-        ("var3", "ph2", "PQR", "DEF/joined_output"),
-        ("var3", "ph3", "PQR", "GHI/joined_output"),
+        ("var1", "ph1", "123", "ABC/final_output"),
+        ("var1", "ph2", "123", "DEF/final_output"),
+        ("var1", "ph3", "123", "GHI/final_output"),
+        ("var2", "ph1", "XYZ", "ABC/final_output"),
+        ("var2", "ph2", "XYZ", "DEF/final_output"),
+        ("var2", "ph3", "XYZ", "GHI/final_output"),
+        ("var3", "ph1", "PQR", "ABC/final_output"),
+        ("var3", "ph2", "PQR", "DEF/final_output"),
+        ("var3", "ph3", "PQR", "GHI/final_output"),
     ],
 )
 def test_template_fill_combined_resolvers(
@@ -1706,7 +1857,7 @@ def test_template_fill_combined_resolvers(
         update={
             "blueprint_overrides": {
                 "variable": mustache(use_var),
-                "input_dir": f"{template}/joined_output",
+                "input_dir": f"{template}/final_output",
             },
         },
     )
