@@ -13,6 +13,7 @@ import pytest
 
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.roms_marbl.app import RomsMarblRunner, main
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
@@ -33,7 +34,6 @@ from cstar.entrypoint.utils import (
     ARG_URI_LONG,
     ARG_URI_SHORT,
 )
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize
@@ -681,7 +681,7 @@ async def test_runner_on_start_user_unhandled_setup(
     mocked_error_msg = "Mock setup failure"
     mock_setup = mock.Mock(side_effect=CstarExpectationFailed(mocked_error_msg))
 
-    mock_simulation = mock.Mock(setup=mock_setup, run=mock_run)
+    mock_simulation = mock.Mock(setup=mock_setup, run=mock_run, initial_conditions=None)
     mock_shutdown = mock.Mock()
     mock_runner_run = mock.AsyncMock()
 
@@ -728,7 +728,9 @@ async def test_runner_on_start_user_unhandled_build(
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
     # configure the simulation to raise an exception during BUILD
-    mock_simulation = mock.Mock(build=mock_build, run=mock_sim_run)
+    mock_simulation = mock.Mock(
+        build=mock_build, run=mock_sim_run, initial_conditions=None
+    )
     mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
@@ -774,7 +776,9 @@ async def test_runner_on_start_user_unhandled_pre_run(
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
     # configure the simulation to raise an exception during BUILD
-    mock_simulation = mock.Mock(run=mock_sim_run, pre_run=mock_setup)
+    mock_simulation = mock.Mock(
+        run=mock_sim_run, pre_run=mock_setup, initial_conditions=None
+    )
     mock_runner_run = mock.AsyncMock()
 
     # don't let it perform any real work
@@ -816,7 +820,7 @@ async def test_runner_on_iteration(
     mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
     mock_sim_run = mock.Mock(return_value=mock_handler)
 
-    mock_simulation = mock.Mock(run=mock_sim_run)
+    mock_simulation = mock.Mock(run=mock_sim_run, initial_conditions=None)
     mock_shutdown = mock.Mock()
 
     # don't let it perform any real work
@@ -1030,7 +1034,7 @@ def test_worker_main_directive_args_parsed(
     """
     *_, step_dir, bp_path = mocked_simulation_outputs
 
-    reset_dir = RomsFileSystemManager(step_dir).joined_output_dir
+    reset_dir = RomsFileSystemManager(step_dir).output_dir
 
     mock_sim_instance = mock.Mock()
     mock_sim_instance.name = "test simulation"

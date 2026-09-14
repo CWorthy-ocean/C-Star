@@ -15,7 +15,10 @@ from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapterV21V3,
 )
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
-from cstar.applications.roms_marbl.transforms import RomsMarblTimeSplitter
+from cstar.applications.roms_marbl.transforms import (
+    RomsMarblTimeSplitter,
+    warn_on_restart_start_date_mismatch,
+)
 from cstar.base.exceptions import CstarError
 from cstar.base.utils import slugify
 from cstar.entrypoint.config import (
@@ -84,6 +87,12 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
         if not self.simulation:
             msg = "Simulation creation failed. Unable to execute simulation runner"
             raise RuntimeError(msg)
+
+        ic = self.simulation.initial_conditions
+        if ic is not None and self.simulation.start_date is not None:
+            warn_on_restart_start_date_mismatch(
+                ic.source.location, self.simulation.start_date, log=self.log
+            )
 
         self.log.trace("Setting up simulation")
         self.simulation.setup()

@@ -5,11 +5,11 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.adapter import (
     StepToPlaceholderAdapter,
     StepToRunRequestAdapter,
@@ -148,13 +148,13 @@ def test_convert_step_to_preprocessed_roms_sim_no_reset_files(
     # delete any mocked reset files to trigger validation failure
     assert step.working_dir, "Fixture failed to set `working_dir` on step"
     fsm = RomsFileSystemManager(step.working_dir)
-    shutil.rmtree(fsm.joined_output_dir, ignore_errors=True)
-    fsm.joined_output_dir.mkdir(parents=True)
+    shutil.rmtree(fsm.output_dir, ignore_errors=True)
+    fsm.output_dir.mkdir(parents=True)
 
     assert not step.blueprint_overrides, "Empty overrides expected"
     assert step.working_dir, "Ensure fixture sets workdir"
 
-    config = {ContinuanceDirective.KEY_PATH: fsm.joined_output_dir}
+    config = {ContinuanceDirective.KEY_PATH: fsm.output_dir}
 
     with pytest.raises(FileNotFoundError, match="No restart files"):
         _ = ContinuanceDirective(config)
@@ -184,7 +184,7 @@ def test_continuance_transform(
     original_ic = original_bp.initial_conditions.data[0].location
 
     trx = ContinuanceDirective(
-        config={ContinuanceDirective.KEY_PATH: str(fsm.joined_output_dir)}
+        config={ContinuanceDirective.KEY_PATH: str(fsm.output_dir)}
     )
 
     transformed_step = next(iter(trx(step)), None)

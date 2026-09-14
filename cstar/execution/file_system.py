@@ -290,88 +290,6 @@ class JobFileSystemManager(LoggingMixin):
         self.__dict__.update({"_root": Path(state["_root"])})
 
 
-class RomsFileSystemManager(JobFileSystemManager):
-    _COMPILE_TIME_NAME: t.ClassVar[t.Literal["compile_time_code"]] = "compile_time_code"
-    _RUNTIME_NAME: t.ClassVar[t.Literal["runtime_code"]] = "runtime_code"
-    _INPUT_DATASETS_NAME: t.ClassVar[t.Literal["input_datasets"]] = "input_datasets"
-    _CODEBASES_NAME: t.ClassVar[t.Literal["codebases"]] = "codebases"
-    _JOINED_OUTPUT_NAME: t.ClassVar[t.Literal["joined_output"]] = "joined_output"
-
-    def __init__(self, root_directory: Path) -> None:
-        super().__init__(root_directory)
-
-    @t.override
-    def _dir_set(self) -> set[Path]:
-        return (
-            super()
-            ._dir_set()
-            .union(
-                {
-                    self.compile_time_code_dir,
-                    self.runtime_code_dir,
-                    self.input_datasets_dir,
-                    self._codebases_dir,
-                    self.joined_output_dir,
-                }
-            )
-        )
-
-    @property
-    def compile_time_code_dir(self) -> Path:
-        """The directory for compile-time code."""
-        return self.input_dir / self._COMPILE_TIME_NAME
-
-    @property
-    def runtime_code_dir(self) -> Path:
-        """The directory for runtime code."""
-        return self.input_dir / self._RUNTIME_NAME
-
-    @property
-    def input_datasets_dir(self) -> Path:
-        """The directory for input datasets."""
-        return self.input_dir / self._INPUT_DATASETS_NAME
-
-    @property
-    def _codebases_dir(self) -> Path:
-        """The directory for codebases."""
-        return self.input_dir / self._CODEBASES_NAME
-
-    @property
-    def joined_output_dir(self) -> Path:
-        """The directory for de-partitioned outputs."""
-        return self.root_dir / self._JOINED_OUTPUT_NAME
-
-    def codebase_subdir(self, key: str) -> Path:
-        """Return a codebase subdirectory path.
-
-        Returns
-        -------
-        str
-        """
-        return self._codebases_dir / key
-
-    def clear(self) -> None:
-        """Ensure the job's working directories are empty."""
-        msg = f"Emptying ROMS working directories for job `{self.root_dir.name}`"
-        self.log.debug(msg)
-
-        for directory in [
-            self.compile_time_code_dir,
-            self.runtime_code_dir,
-            self.input_datasets_dir,
-            self._codebases_dir,
-            self.joined_output_dir,
-        ]:
-            if directory.exists():
-                shutil.rmtree(directory)
-
-        # clear everything from workdir except blueprints
-        if self.run_dir.exists():
-            for f in self.run_dir.iterdir():
-                if not f.name.endswith(".yml") and not f.name.endswith(".yaml"):
-                    f.unlink()
-
-
 class StateDirectoryManager:
     """Manage the system file system."""
 
@@ -380,6 +298,9 @@ class StateDirectoryManager:
 
     _RUN_TRACKING_NAME: t.ClassVar[t.Literal["run_tracking"]] = "run_tracking"
     """The name of the directory where run-tracking files are written."""
+
+    _USER_VIEW_NAME: t.ClassVar[t.Literal["gathered_output"]] = "gathered_output"
+    """The name of the directory where an aggregated user view of outputs is created."""
 
     @classmethod
     def root_dir(cls) -> Path:
@@ -431,6 +352,19 @@ class StateDirectoryManager:
         data_home = DirectoryManager.data_home()
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
         return data_home / run_id
+
+    @classmethod
+    def user_dir(cls, run_id: str | None = None) -> Path:
+        """The directory containing a user-view of assets created during a run.
+
+        The result is a _run-specific_ directory.
+
+        Returns
+        -------
+        Path
+        """
+        run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
+        return cls.data_dir(run_id) / cls._USER_VIEW_NAME
 
 
 def is_remote_resource(uri: str) -> bool:

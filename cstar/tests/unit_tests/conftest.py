@@ -13,6 +13,7 @@ from unittest import mock
 import dotenv
 import pytest
 
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
@@ -28,7 +29,6 @@ from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import get_logger
 from cstar.base.utils import additional_files_dir
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector
@@ -1969,7 +1969,7 @@ def mocked_simulation_outputs(
     - work
     - logs
     - output
-    - joined output
+    - temp_output
     - etc.
 
     > See RomsFileSystemManager for the more information.
@@ -2008,15 +2008,15 @@ def mocked_simulation_outputs(
     log_path.write_text(info_msg)
     log_path.write_text("Simulation completed successfully\n")
 
-    joined_dir = fsm.joined_output_dir
+    output_dir = fsm.output_dir
 
     # Restart timestamps must fall within the continue-from blueprint's
     # simulation window; `find` continues from the most recent one
     # (00:20:00 here).
     reset_files = [
-        joined_dir / "output_rst.20120101000000.000.nc",
-        joined_dir / "output_rst.20120101001000.001.nc",
-        joined_dir / "output_rst.20120101002000.002.nc",
+        output_dir / "output_rst.20120101000000.000.nc",
+        output_dir / "output_rst.20120101001000.001.nc",
+        output_dir / "output_rst.20120101002000.002.nc",
     ]
     for file in reset_files:
         file.write_text(info_msg)
@@ -2036,7 +2036,7 @@ def create_mocked_simulation_outputs(
     - work
     - logs
     - output
-    - joined output
+    - temp_output
     - etc.
 
     > See RomsFileSystemManager for the more information.
@@ -2083,22 +2083,23 @@ def create_mocked_simulation_outputs(
 
             output_dir = step.fsm.output_dir
 
-            # A real run leaves partitioned restart files for every restart
-            # timestamp it wrote, each as a full set of partition files. Mock
-            # two timestamps so the "continue from the latest restart" logic is
-            # actually exercised (20120201... is the most recent).
+            # A non-PIO run leaves partitioned restart files for every restart
+            # timestamp it wrote, each as a full set of partition files, in
+            # `temp_output` prior to joining. Mock two timestamps so the
+            # "continue from the latest restart" logic is actually exercised
+            # (20120201... is the most recent).
             for timestamp in ("20120101000000", "20120201000000"):
                 for segment in ("000", "001", "002"):
-                    (output_dir / f"output_rst.{timestamp}.{segment}.nc").write_text(
-                        info_msg
-                    )
+                    (
+                        roms_fsm.temp_output_dir
+                        / f"output_rst.{timestamp}.{segment}.nc"
+                    ).write_text(info_msg)
 
-            # With ParallelIO the restart files are joined (no partition segment)
-            # and live in `joined_output`; mock the same two timestamps.
+            # The joined (or ParallelIO-written) restart files, with no
+            # partition segment, live in `output`; mock the same two
+            # timestamps.
             for timestamp in ("20120101000000", "20120201000000"):
-                (roms_fsm.joined_output_dir / f"output_rst.{timestamp}.nc").write_text(
-                    info_msg
-                )
+                (output_dir / f"output_rst.{timestamp}.nc").write_text(info_msg)
 
     return _inner
 
@@ -2115,7 +2116,7 @@ def preprocessable_roms_step(
         Paths to directories created to mock output of a ROMS simulation.
     """
     *_, step_dir, bp_path = mocked_simulation_outputs
-    joined_dir = step_dir / "joined_output"
+    output_dir = step_dir / "output"
 
     return Step(
         name="test step",
@@ -2123,7 +2124,7 @@ def preprocessable_roms_step(
         blueprint=bp_path,
         directives={
             "continue-from": {
-                "path": joined_dir.as_posix(),
+                "path": output_dir.as_posix(),
             },
         },
     )

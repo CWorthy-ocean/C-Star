@@ -5,7 +5,7 @@ application: plotter
 schema_version: 1.0.0
 output_dir: "~/cstar/wales_plotter/plotsx"
 state: draft
-input_dir: "~/cstar/wales_toy_blueprint/joined_output"
+input_dir: "~/cstar/wales_toy_blueprint/output"
 variables:
   - "ALK"
   - "pH_3D"
