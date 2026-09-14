@@ -58,10 +58,6 @@ def _output_dir(step: Step) -> Path:
     return JobFileSystemManager(working_dir).output_dir
 
 
-# def _run_root() -> Path:
-#     return StateDirectoryManager.data_dir("fake-run-id")
-
-
 def _dest_dir() -> Path:
     return StateDirectoryManager.user_dir()
 
