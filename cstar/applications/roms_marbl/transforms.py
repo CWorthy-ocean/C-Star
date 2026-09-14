@@ -15,6 +15,7 @@ from pydantic import (
 )
 
 from cstar.applications.core import Transform
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.feature import (
     ENV_FF_ORCH_TRX_TIMESPLIT,
@@ -29,7 +30,6 @@ from cstar.base.utils import (
     min_padded_index,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.orchestration import LiveStep
 from cstar.orchestration.serialization import serialize
 from cstar.orchestration.transforms import (

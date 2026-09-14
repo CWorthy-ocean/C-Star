@@ -5,11 +5,11 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.execution.file_system import (
     DirectoryManager,
     JobFileSystemManager,
-    RomsFileSystemManager,
     is_remote_resource,
     local_copy,
     local_copy_async,

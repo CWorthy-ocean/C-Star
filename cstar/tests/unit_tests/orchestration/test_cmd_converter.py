@@ -5,11 +5,11 @@ from unittest import mock
 
 import pytest
 
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
 from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.adapter import (
     StepToPlaceholderAdapter,
     StepToRunRequestAdapter,

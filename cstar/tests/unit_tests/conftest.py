@@ -13,6 +13,7 @@ from unittest import mock
 import dotenv
 import pytest
 
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.discretization import Discretization
 from cstar.base.env import (
@@ -28,7 +29,6 @@ from cstar.base.gitutils import git_location_to_raw
 from cstar.base.input_dataset import InputDataset
 from cstar.base.log import get_logger
 from cstar.base.utils import additional_files_dir
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.io.constants import SourceClassification
 from cstar.io.retriever import Retriever
 from cstar.io.source_data import SourceData, SourceDataCollection, _SourceInspector

@@ -13,6 +13,7 @@ import pytest
 
 from cstar.applications.core import RunnerRequest, RunnerResult, RunnerState
 from cstar.applications.roms_marbl.app import RomsMarblRunner, main
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.exceptions import BlueprintError, CstarError, CstarExpectationFailed
@@ -33,7 +34,6 @@ from cstar.entrypoint.utils import (
     ARG_URI_LONG,
     ARG_URI_SHORT,
 )
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.execution.handler import ExecutionHandler, ExecutionStatus
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import deserialize

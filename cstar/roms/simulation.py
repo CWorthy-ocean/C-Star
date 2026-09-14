@@ -29,6 +29,7 @@ from cstar.applications.roms_marbl.adapter import (
     SurfaceForcingAdapter,
     TidalForcingAdapter,
 )
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.additional_code import AdditionalCode
 from cstar.base.env import (
@@ -50,7 +51,7 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import RomsFileSystemManager, remove_files
+from cstar.execution.file_system import remove_files
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job

@@ -9,7 +9,6 @@ from rich.console import Console
 
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_DRY_RUN
-from cstar.execution.file_system import RomsFileSystemManager
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -134,6 +133,11 @@ def _migrate_one(jo_dir: Path, *, dry_run: bool, report: MigrationReport) -> Non
     # `RomsFileSystemManager.__init__` resolves its root, so `out_dir` /
     # `temp_dir` stay consistent with `jo_dir` only because
     # `migrate_output_layout` already resolved `root` before `rglob`.
+
+    from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
+    # TODO: this is bad, but temporary... migration should not have app-specific code
+    # in the core behaviors. It needs to move to the roms migration handlers.
+
     fsm = RomsFileSystemManager(jo_dir.parent)
     out_dir = fsm.output_dir
     temp_dir = fsm.temp_output_dir

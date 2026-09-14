@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.applications.hello_world import HelloWorldBlueprint
+from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import (
     ContinuanceDirective,
@@ -28,7 +29,6 @@ from cstar.applications.roms_marbl.transforms import (
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
-from cstar.execution.file_system import RomsFileSystemManager
 from cstar.orchestration.models import (
     Application,
     BlueprintState,
