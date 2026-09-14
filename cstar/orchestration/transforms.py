@@ -570,8 +570,14 @@ class OverrideTransform(Transform[LiveStep]):
     """Transform that overrides a step by returning a blueprint with all overridden attributes applied."""
 
     _system_overrides: dict[str, t.Any]
+    _replace_lists: bool
 
-    def __init__(self, sys_overrides: dict[str, t.Any] | None = None) -> None:
+    def __init__(
+        self,
+        sys_overrides: dict[str, t.Any] | None = None,
+        *,
+        replace_lists: bool = False,
+    ) -> None:
         """Initialize the instance.
 
         Parameters
@@ -579,8 +585,12 @@ class OverrideTransform(Transform[LiveStep]):
         sys_overrides : dict[str, t.Any] | None
             System-level blueprint overrides that will be applied after
             the user-supplied values.
+        replace_lists : bool
+            If True, a list in `sys_overrides` replaces the blueprint's list
+            outright instead of merging element-wise.
         """
         self._system_overrides = sys_overrides or {}
+        self._replace_lists = replace_lists
 
     def apply(
         self,
@@ -611,11 +621,14 @@ class OverrideTransform(Transform[LiveStep]):
         )
 
         # system-level overrides take precedence over step-level overrides
-        changeset = deep_merge(overrides, self._system_overrides)
-        merged = deep_merge(model, changeset)
+        merged = deep_merge(model, overrides)
+        merged = deep_merge(
+            merged, self._system_overrides, replace_lists=self._replace_lists
+        )
 
+        overridden = {**overrides, **self._system_overrides}
         description = (
-            f"{bp.description}; overridden keys [{', '.join(changeset.keys())}]"
+            f"{bp.description}; overridden keys [{', '.join(overridden.keys())}]"
         )
         merged.update(description=description)
         bp_type = type(bp)
@@ -966,6 +979,12 @@ class OverrideDirective(Directive, OverrideTransform):
 
     _overrides: dict[str, t.Any]
 
+    REPLACE_LISTS: t.ClassVar[bool] = False
+    """Whether lists in the generated overrides replace the blueprint's lists
+    outright. Directives that locate a complete set of files (e.g. boundary
+    or restart files) set this so no stale entries survive; the default keeps
+    the element-wise merge that user overrides rely on."""
+
     def __init__(
         self,
         config: dict[str, t.Any],
@@ -982,7 +1001,9 @@ class OverrideDirective(Directive, OverrideTransform):
             The workplan instance containing contextual information for the directive.
         """
         Directive.__init__(self, config, workplan=workplan)
-        OverrideTransform.__init__(self, self._generate_overrides())
+        OverrideTransform.__init__(
+            self, self._generate_overrides(), replace_lists=self.REPLACE_LISTS
+        )
 
     def _generate_overrides(self) -> dict[str, t.Any]:
         """Generate any system overrides required by the directive.

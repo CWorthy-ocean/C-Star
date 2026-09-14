@@ -810,6 +810,23 @@ def _rst_path_continue_from_conflict_message(step_name: str | None) -> str:
     )
 
 
+def _split_sources(value: t.Any, delimiter: str) -> list[str]:
+    """Split a delimited scalar into an ordered list of trimmed, non-empty tokens.
+
+    Parameters
+    ----------
+    value : t.Any
+        The scalar value to split; coerced to `str` before splitting.
+    delimiter : str
+        The delimiter separating tokens.
+
+    Returns
+    -------
+    list[str]
+    """
+    return [token for raw in str(value).split(delimiter) if (token := raw.strip())]
+
+
 class ContinuanceDirective(OverrideDirective):
     """A transform that locates a restart file with an unknown path at the
     time the task was scheduled, and applies it as the step's initial
@@ -824,6 +841,8 @@ class ContinuanceDirective(OverrideDirective):
     stay quiet -- the base blueprint's `start_date` is unrelated to whatever
     restart gets discovered in that case.
     """
+
+    REPLACE_LISTS = True
 
     KEY_PATH: t.Final[str] = "path"
     """Key used to specify a path as the source for continuance."""
@@ -944,7 +963,11 @@ class NestingDirective(OverrideDirective):
     `step` (a step name resolved via the workplan), the same shape used by
     `ContinuanceDirective` for initial conditions -- the two directives now
     touch disjoint blueprint keys (`forcing.boundary` here vs.
-    `initial_conditions` there) and compose in any order.
+    `initial_conditions` there) and compose in any order. `path`, `bry_path`,
+    and `step` each accept several sources in one string, separated by `;`
+    (surrounding whitespace ignored); boundary files from every listed source
+    are combined, in the order given, and every listed source must contain
+    boundary files.
 
     `bry_path` is a deprecated alias for `path` (conflicts with `path`/
     `step` if both are supplied). `rst_path` is a deprecated, optional key
@@ -955,6 +978,8 @@ class NestingDirective(OverrideDirective):
     `FutureWarning` and a log warning.
     """
 
+    REPLACE_LISTS = True
+
     KEY_PATH: t.Final[str] = ContinuanceDirective.KEY_PATH
     """Key used to specify a path as the source for the boundary forcing."""
     KEY_STEP: t.Final[str] = ContinuanceDirective.KEY_STEP
@@ -963,6 +988,8 @@ class NestingDirective(OverrideDirective):
     """Deprecated alias for `KEY_PATH`."""
     KEY_RST_PATH: t.Final[str] = "rst_path"
     """Deprecated key that also applies a restart-file override."""
+    SOURCE_DELIMITER: t.Final[str] = ";"
+    """Delimiter separating multiple sources in a `path`/`bry_path`/`step` value."""
 
     @classmethod
     def key(cls) -> str:
@@ -1039,8 +1066,11 @@ class NestingDirective(OverrideDirective):
             If the supplied configuration is not supported, or if the
             deprecated `bry_path` key conflicts with `path`/`step`.
         ValueError
-            If no boundary files, or (when `rst_path` is supplied) no
-            restart file, can be located with the supplied configuration.
+            If the value is empty after splitting, or (when `rst_path` is
+            supplied) no restart file can be located.
+        FileNotFoundError
+            If a listed source contains no boundary files, or a listed step
+            has no `output` directory.
         """
         if self.KEY_BRY_PATH in self._config:
             msg = (
@@ -1077,33 +1107,53 @@ class NestingDirective(OverrideDirective):
             )
             raise NotImplementedError(msg)
 
-        search_path: Path | None = None
+        sources: list[tuple[Path, str | None]] = []
 
-        if target_path := self._config.get(self.KEY_PATH) or self._config.get(
+        if target_value := self._config.get(self.KEY_PATH) or self._config.get(
             self.KEY_BRY_PATH
         ):
-            search_path = Path(target_path)
+            sources.extend(
+                (Path(token), None)
+                for token in _split_sources(target_value, self.SOURCE_DELIMITER)
+            )
 
-        if name := self._config.get(self.KEY_STEP):
-            search_path = _require_step_output_dir(self.workplan, name)
+        if step_value := self._config.get(self.KEY_STEP):
+            sources.extend(
+                (_require_step_output_dir(self.workplan, token), token)
+                for token in _split_sources(step_value, self.SOURCE_DELIMITER)
+            )
 
-        boundary_files: Sequence[BoundaryFile] | None = None
-        if search_path:
+        if not sources:
+            key = next(
+                k
+                for k in (self.KEY_PATH, self.KEY_BRY_PATH, self.KEY_STEP)
+                if k in self._config
+            )
+            msg = (
+                f"Invalid nesting transform configuration: no boundary source "
+                f"given in {key!r}"
+            )
+            raise ValueError(msg)
+
+        boundary_files: list[BoundaryFile] = []
+        for search_path, step_name in sources:
             try:
-                boundary_files = BoundaryFile.find(search_path, notfound_ok=False)
+                found = BoundaryFile.find(search_path, notfound_ok=False) or ()
             except FileNotFoundError as err:
                 raise FileNotFoundError(f"{err} {_LEGACY_LAYOUT_HINT}") from err
 
-        if boundary_files and name:
-            partitioned = next((b for b in boundary_files if b.is_partitioned), None)
-            if partitioned is not None:
-                _reject_partitioned_step_output(name, True, partitioned.path)
+            if step_name is not None:
+                partitioned = next((b for b in found if b.is_partitioned), None)
+                if partitioned is not None:
+                    _reject_partitioned_step_output(step_name, True, partitioned.path)
 
-        if boundary_files:
-            overrides = BoundaryFileTrxAdapter.adapt(boundary_files)
-        else:
-            msg = f"No boundary files located in search path: {search_path!r}"
-            raise ValueError(msg)
+            boundary_files.extend(found)
+
+        deduped: dict[Path, BoundaryFile] = {}
+        for bry in boundary_files:
+            deduped.setdefault(bry.path, bry)
+
+        overrides = BoundaryFileTrxAdapter.adapt(list(deduped.values()))
 
         if rst_path := self._config.get(self.KEY_RST_PATH):
             msg = (

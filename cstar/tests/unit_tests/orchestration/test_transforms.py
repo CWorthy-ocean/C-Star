@@ -20,6 +20,7 @@ from cstar.applications.roms_marbl.transforms import (
     RestartFile,
     RestartFileTrxAdapter,
     RomsMarblTimeSplitter,
+    _split_sources,
     restart_timestamp,
     warn_on_restart_start_date_mismatch,
 )
@@ -290,6 +291,116 @@ def test_override_transform_system_precedence(
     # system level override was applied last.
     assert Path(bp_old.working_dir) == dir_orig
     assert Path(bp_new.working_dir) == sys_od
+
+
+def test_override_transform_system_list_replaces_wholesale(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify `replace_lists=True` makes a system-level override list replace
+    the blueprint's list wholesale, instead of merging element-wise -- no
+    stale entries or fields (e.g. `hash`) from the original entries survive.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to build a user-level override value.
+    """
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+    user_working_dir = tmp_path / "user_override"
+    step.blueprint_overrides["working_dir"] = user_working_dir.as_posix()
+
+    bp_before = deserialize(step.blueprint_path, RomsMarblBlueprint)
+    assert len(bp_before.forcing.boundary.data) == 3
+
+    location = "http://mockdoc.com/x_bry.20230201003000.nc"
+    transform = OverrideTransform(
+        sys_overrides={
+            "forcing": {
+                "boundary": {"data": [{"location": location, "partitioned": False}]}
+            }
+        },
+        replace_lists=True,
+    )
+
+    steps = transform(step)
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+
+    assert len(bp_after.forcing.boundary.data) == 1
+    assert bp_after.forcing.boundary.data[0].location == location
+    assert getattr(bp_after.forcing.boundary.data[0], "hash", None) is None
+
+    # the user-level scalar override still applies alongside the
+    # system-level list replacement.
+    assert Path(bp_after.working_dir) == user_working_dir.expanduser().resolve()
+
+
+def test_override_transform_system_list_without_flag_merges_elementwise(
+    single_step_workplan: Workplan,
+) -> None:
+    """Verify that without `replace_lists=True` (the default), a
+    system-level override list merges element-wise just like a user-level
+    one, leaving stale entries and fields (e.g. `hash`) in place.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    """
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    location = "http://mockdoc.com/x_bry.20230201003000.nc"
+    transform = OverrideTransform(
+        sys_overrides={
+            "forcing": {
+                "boundary": {"data": [{"location": location, "partitioned": False}]}
+            }
+        }
+    )
+
+    steps = transform(step)
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    data = bp_after.forcing.boundary.data
+
+    assert len(data) == 3
+    assert data[0].location == location
+    assert data[0].hash == "abc"
+    assert data[1].location == "http://mockdoc.com/partitioning2.nc"
+    assert data[2].location == "http://mockdoc.com/partitioning3.nc"
+
+
+def test_override_transform_user_list_merges_elementwise(
+    single_step_workplan: Workplan,
+) -> None:
+    """Verify a user-level (step `blueprint_overrides`) list still merges
+    element-wise into the blueprint's list, unlike a system-level override.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    """
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+    step.blueprint_overrides["forcing"] = {
+        "boundary": {"data": [{"location": "http://mockdoc.com/replaced1.nc"}]}
+    }
+
+    transform = OverrideTransform()
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    data = bp_after.forcing.boundary.data
+
+    assert len(data) == 3
+    assert data[0].location == "http://mockdoc.com/replaced1.nc"
+    assert data[0].hash == "abc"
+    assert data[1].location == "http://mockdoc.com/partitioning2.nc"
+    assert data[2].location == "http://mockdoc.com/partitioning3.nc"
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")
@@ -1248,6 +1359,284 @@ def test_nesting_directive_path_and_step_are_mutually_exclusive(tmp_path: Path) 
                 NestingDirective.KEY_STEP: "outer",
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("a; b", ["a", "b"]),
+        ("a ;b ; c;d", ["a", "b", "c", "d"]),
+        ("a;", ["a"]),
+        (" ; ", []),
+        ("single", ["single"]),
+        ("", []),
+    ],
+)
+def test_split_sources(value: str, expected: list[str]) -> None:
+    """Verify `_split_sources` trims whitespace and drops empty tokens.
+
+    Parameters
+    ----------
+    value : str
+        The delimited scalar to split.
+    expected : list[str]
+        The expected ordered list of tokens.
+    """
+    assert _split_sources(value, ";") == expected
+
+
+def test_nesting_directive_multiple_paths(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify a `path` value with multiple `;`-delimited sources combines
+    boundary files from each source, in the order given, replacing the
+    template's static boundary entries wholesale.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold two mocked boundary sources.
+    """
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    (dir_a / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
+    (dir_b / "sibling_bry.20230301003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = NestingDirective({NestingDirective.KEY_PATH: f"{dir_a} ; {dir_b}"})
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert [Path(d.location).name for d in bp_after.forcing.boundary.data] == [
+        "parent_bry.20230201003000.nc",
+        "sibling_bry.20230301003000.nc",
+    ]
+    assert all(getattr(d, "hash", None) is None for d in bp_after.forcing.boundary.data)
+
+
+def test_nesting_directive_multiple_steps(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `step` value with multiple `;`-delimited step names combines
+    boundary files from each step's output directory, in the order given.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    run_id = mock_run_id
+
+    first_step = LiveStep(
+        name="first",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "first",
+    )
+    first_fsm = RomsFileSystemManager(first_step.fsm.root_dir)
+    first_fsm.prepare()
+    (first_fsm.output_dir / "first_bry.20230201003000.nc").write_text(
+        "mock boundary data"
+    )
+
+    second_step = LiveStep(
+        name="second",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "second",
+    )
+    second_fsm = RomsFileSystemManager(second_step.fsm.root_dir)
+    second_fsm.prepare()
+    (second_fsm.output_dir / "second_bry.20230301003000.nc").write_text(
+        "mock boundary data"
+    )
+
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        bp_tpl_path.read_text().replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+
+    child_step = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "child",
+        directives={
+            NestingDirective.key(): {NestingDirective.KEY_STEP: "first; second ;"}
+        },
+    )
+
+    live_plan = LiveWorkplan(
+        name="multiple-steps-plan",
+        description="two parent steps supplying boundary files",
+        steps=[first_step, second_step, child_step],
+    )
+
+    config = t.cast("dict[str, str]", child_step.directives[NestingDirective.key()])
+    transform = NestingDirective(config, workplan=live_plan)
+    steps = transform(child_step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    data = bp_after.forcing.boundary.data
+    assert len(data) == 2
+    assert Path(data[0].location).is_relative_to(first_fsm.output_dir)
+    assert Path(data[1].location).is_relative_to(second_fsm.output_dir)
+
+
+def test_nesting_directive_multiple_steps_missing_output_raises(
+    tmp_path: Path,
+    bp_templates_dir: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a `step` value listing a step with no output directory raises
+    `FileNotFoundError` naming that step, even when an earlier listed step
+    resolves fine.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs.
+    bp_templates_dir : Path
+        Fixture returning the path to the directory containing blueprint template files.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    run_id = mock_run_id
+
+    first_step = LiveStep(
+        name="first",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "first",
+    )
+    first_fsm = RomsFileSystemManager(first_step.fsm.root_dir)
+    first_fsm.prepare()
+    (first_fsm.output_dir / "first_bry.20230201003000.nc").write_text(
+        "mock boundary data"
+    )
+
+    second_step = LiveStep(
+        name="second",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "second",
+    )
+
+    bp_tpl_path = bp_templates_dir / "blueprint.yaml"
+    child_bp_path = tmp_path / "child_bp.yaml"
+    child_bp_path.write_text(
+        bp_tpl_path.read_text().replace("working_dir: .", f"working_dir: {tmp_path}")
+    )
+
+    child_step = LiveStep(
+        name="child",
+        application="roms_marbl",
+        blueprint=child_bp_path.as_posix(),
+        working_dir=tmp_path / run_id / "child",
+        directives={
+            NestingDirective.key(): {NestingDirective.KEY_STEP: "first; second"}
+        },
+    )
+
+    live_plan = LiveWorkplan(
+        name="multiple-steps-missing-output-plan",
+        description="second parent step has no output directory",
+        steps=[first_step, second_step, child_step],
+    )
+
+    config = t.cast("dict[str, str]", child_step.directives[NestingDirective.key()])
+
+    with pytest.raises(FileNotFoundError, match="second"):
+        NestingDirective(config, workplan=live_plan)
+
+
+def test_nesting_directive_duplicate_paths_deduplicated(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify listing the same source twice yields one boundary entry, not two.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold a mocked boundary source.
+    """
+    bry_dir = tmp_path / "bry"
+    bry_dir.mkdir()
+    (bry_dir / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    transform = NestingDirective({NestingDirective.KEY_PATH: f"{bry_dir}; {bry_dir}"})
+    steps = transform(step)
+
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert len(bp_after.forcing.boundary.data) == 1
+
+
+def test_nesting_directive_empty_sources_raises() -> None:
+    """Verify a `path` value that is empty after splitting is rejected."""
+    with pytest.raises(ValueError, match="no boundary source"):
+        NestingDirective({NestingDirective.KEY_PATH: " ; "})
+
+
+def test_nesting_directive_bry_path_multiple_paths(
+    single_step_workplan: Workplan,
+    tmp_path: Path,
+) -> None:
+    """Verify the deprecated `bry_path` key also accepts multiple
+    `;`-delimited sources, combining boundary files from each.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    tmp_path : Path
+        Temporary directory used to hold two mocked boundary sources.
+    """
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    (dir_a / "parent_bry.20230201003000.nc").write_text("mock boundary data")
+
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
+    (dir_b / "sibling_bry.20230301003000.nc").write_text("mock boundary data")
+
+    step = single_step_workplan.steps[0]
+    step.blueprint_overrides.clear()
+
+    with pytest.warns(FutureWarning, match="bry_path"):
+        transform = NestingDirective(
+            {NestingDirective.KEY_BRY_PATH: f"{dir_a} ; {dir_b}"}
+        )
+
+    steps = transform(step)
+    bp_after = deserialize(steps[0].blueprint_path, RomsMarblBlueprint)
+    assert len(bp_after.forcing.boundary.data) == 2
 
 
 def test_workplan_transformer_applies_working_dir_overrides(
@@ -2762,6 +3151,61 @@ def test_apply_overrides_directive_requires_overrides() -> None:
     """Verify the directive rejects configuration without an overrides mapping."""
     with pytest.raises(ValueError, match="overrides"):
         _ = ApplyOverridesDirective({"application": "hello_world"})
+
+
+def test_replace_lists_flag_matches_directive_semantics() -> None:
+    """Verify each directive's `REPLACE_LISTS` matches its semantics.
+
+    `ApplyOverridesDirective` carries packaged user overrides (see
+    `test_apply_overrides_directive_user_list_merges_elementwise`), so it
+    must keep the element-wise default. `NestingDirective` locates a
+    complete set of boundary files, so it replaces lists wholesale.
+    """
+    assert ApplyOverridesDirective.REPLACE_LISTS is False
+    assert NestingDirective.REPLACE_LISTS is True
+
+
+def test_apply_overrides_directive_user_list_merges_elementwise(
+    single_step_workplan: Workplan,
+) -> None:
+    """Regression test: a user-supplied list override, packaged into an
+    `apply-overrides` directive by `package_runtime_overrides`, still merges
+    element-wise at runtime instead of replacing the blueprint's list
+    wholesale.
+
+    `ApplyOverridesDirective._generate_overrides` returns the packaged user
+    `blueprint_overrides` verbatim, so those overrides land in
+    `OverrideTransform._system_overrides` the same way a directive-located
+    file list does; `ApplyOverridesDirective.REPLACE_LISTS` must stay `False`
+    so a user's shorter override list doesn't silently drop the blueprint's
+    other static entries.
+
+    Parameters
+    ----------
+    single_step_workplan : Workplan
+        A workplan with a valid blueprint file on disk.
+    """
+    step = LiveStep.from_step(single_step_workplan.steps[0])
+    step.blueprint_overrides.clear()
+    step.blueprint_overrides["forcing"] = {
+        "boundary": {"data": [{"location": "http://mockdoc.com/replaced1.nc"}]}
+    }
+
+    packaged = package_runtime_overrides(step)
+    config = t.cast(
+        "dict[str, t.Any]", packaged.directives[ApplyOverridesDirective.key()]
+    )
+    directive = ApplyOverridesDirective(config)
+    transformed = directive(packaged)[0]
+
+    bp_after = deserialize(Path(transformed.blueprint_path), RomsMarblBlueprint)
+    data = bp_after.forcing.boundary.data
+
+    assert len(data) == 3
+    assert data[0].location == "http://mockdoc.com/replaced1.nc"
+    assert data[0].hash == "abc"
+    assert data[1].location == "http://mockdoc.com/partitioning2.nc"
+    assert data[2].location == "http://mockdoc.com/partitioning3.nc"
 
 
 @pytest.fixture
