@@ -592,7 +592,7 @@ def localize_and_migrate(path: str) -> Path:
         If the migration produces an error.
     """
     with local_copy(path) as local_path:
-        request = MigrationRequest(path=local_path)
+        request = MigrationRequest(path=local_path, in_place=True)
         try:
             persist_result = execute_migration(request)
 
