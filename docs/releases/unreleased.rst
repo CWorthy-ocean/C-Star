@@ -31,6 +31,7 @@ New features
 - The ROMS-MARBL runner warns when a blueprint's initial-conditions file has a restart-style name (``*_rst.<YYYYmmddHHMMSS>.nc``) dated differently from ``start_date``, catching hand-assembled blueprints. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
 - ``cstar admin migrate-outputs <path> [--dry-run]`` moves ``joined_output`` contents into ``output``, moves leftover partition pieces into ``temp_output``, removes old run-level gather symlink directories, and reports collisions without overwriting anything. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
 - ``{{temp_output_dir: <step>}}`` is available as a workplan template placeholder for ROMS steps. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``nest-from`` accepts several boundary sources in one value, separated by ``;`` (surrounding whitespace ignored): ``path: /runs/a/output; /runs/b/output`` or ``step: seg1; seg2; seg3``. Boundary files from every listed source are combined in the order given, duplicates are dropped, and each listed source must contain boundary files or the step fails before it is scheduled. The values stay plain strings, and the deprecated ``bry_path`` alias splits the same way. ``continue-from`` remains single-source, since several restarts would be ambiguous. (`#691 <https://github.com/CWorthy-ocean/C-Star/pull/691>`_)
 
 Bug Fixes
 ~~~~~~~~~
@@ -38,6 +39,7 @@ Bug Fixes
 
 - Fix unexpected migration parameter callback execution order (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
 - Staging a local input dataset whose file does not exist now raises ``FileNotFoundError`` at setup, instead of creating a dangling symlink and letting the model fail later with an opaque PIO abort. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- Lists produced by a directive (``nest-from`` boundary files, ``continue-from`` restart) now replace the blueprint's corresponding list outright. Previously they were merged element-wise, so a blueprint with more boundary entries than the directive located kept the extra original entries, and every replaced entry inherited the original entry's ``hash``. User ``blueprint_overrides`` lists still merge element-wise as before. (`#691 <https://github.com/CWorthy-ocean/C-Star/pull/691>`_)
 
 Improvements
 ~~~~~~~~~~~~
