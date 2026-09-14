@@ -11,18 +11,33 @@ Breaking Changes
 
 
 - ``BlueprintMigration`` protocol deprecates aggregate plan-and-migrate method (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
+- The per-step ``joined_output`` directory no longer exists. Whole (joined) output files live in ``output``. Workplans and blueprints that referenced ``.../joined_output/...`` paths must point at ``.../output/...`` instead; the shipped tutorials were updated. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- Runs completed with an earlier release must be migrated with ``cstar admin migrate-outputs <run or step dir>`` before a new step continues from them or before gathering. ``continue-from`` and ``nest-from`` raise with that hint when they find the old layout. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- Non-ParallelIO ROMS runs now write partitioned files to ``temp_output``, and every partition piece (restarts included) is deleted once its join succeeds. Previously partitioned restart files were kept in ``output``. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``continue-from: step:`` and ``nest-from: step:`` read only the referenced step's ``output`` directory and never use partitioned files. A non-ParallelIO follow-on step re-partitions the whole restart at setup, which costs some time but removes a class of directory-layout bugs. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``cstar workplan gather`` writes to ``<run dir>/gathered_output`` instead of ``<run dir>/joined_output``, and reads each step's ``output`` directory (so nest_ic and upscaler outputs are gathered too). Duplicate file names across steps no longer abort the command: each duplicate is linked as ``<step>__<file>``. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``nest-from`` no longer requires ``rst_path``. The key is deprecated and still honored for one release with a ``FutureWarning``; use ``continue-from`` for the restart instead. A step that sets both ``nest-from.rst_path`` and ``continue-from`` is rejected at scheduling time and at runtime, since both would set the initial conditions. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``nest-from.bry_path`` is deprecated in favor of ``nest-from.path`` (still honored for one release with a ``FutureWarning``). (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``continue-from`` and ``nest-from`` now reject a configuration that sets both ``path`` and ``step``. Previously ``step`` silently won. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
 
 New features
 ~~~~~~~~~~~~
 
 
 - Add ability to perform an in-place migration with backup of original blueprint (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
+- ``nest-from`` takes the same ``path`` / ``step`` configuration as ``continue-from``; ``step: <parent>`` finds the parent's boundary files in its ``output`` directory, so users no longer hand-build the boundary path. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``continue-from`` and ``nest-from`` can be combined on one step: the first child segment continues from the ``nest_ic`` step and takes boundaries from the parent; later child segments continue from the previous child segment with the same ``nest-from``. The nesting tutorial workplan shows the new shape. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``continue-from`` and ``nest-from`` warn when a step explicitly sets ``runtime_params.start_date`` in its ``blueprint_overrides`` and that date differs from the restart file the directive selected. The restart date still wins, as before. Chained steps that leave ``start_date`` to the directive are not warned about. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- The ROMS-MARBL runner warns when a blueprint's initial-conditions file has a restart-style name (``*_rst.<YYYYmmddHHMMSS>.nc``) dated differently from ``start_date``, catching hand-assembled blueprints. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``cstar admin migrate-outputs <path> [--dry-run]`` moves ``joined_output`` contents into ``output``, moves leftover partition pieces into ``temp_output``, removes old run-level gather symlink directories, and reports collisions without overwriting anything. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``{{temp_output_dir: <step>}}`` is available as a workplan template placeholder for ROMS steps. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
 
 Bug Fixes
 ~~~~~~~~~
 
 
 - Fix unexpected migration parameter callback execution order (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
+- Staging a local input dataset whose file does not exist now raises ``FileNotFoundError`` at setup, instead of creating a dangling symlink and letting the model fail later with an opaque PIO abort. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
 
 Improvements
 ~~~~~~~~~~~~
@@ -36,8 +51,12 @@ Improvements
 - Fix for typer color rendering on build machines causing stdout match failures (`#669 <https://github.com/CWorthy-ocean/C-Star/pull/669>`_)
 - Fix problematic manual indentation of yaml content in fixture (`#669 <https://github.com/CWorthy-ocean/C-Star/pull/669>`_)
 - Fix inconsistent arguments when raising ``FileNotFoundError`` resulting in empty filename in logs. (`#669 <https://github.com/CWorthy-ocean/C-Star/pull/669>`_)
+- The ``step:`` resolution shared by ``continue-from`` and ``nest-from`` is a single directory lookup with no ParallelIO or blueprint introspection. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ``RomsMarblTimeSplitter`` predicts the next segment's restart as a whole file in ``output``. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- The ROMS-specific file-system manager moved from the core execution package into the ROMS-MARBL application package, and the run-level gather directory is exposed as ``StateDirectoryManager.user_dir()``. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
+- ROMS namelist output roots are derived from the step's directory layout relative to the run directory instead of hard-coded strings. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
 
-- N/A
+- Tutorials (``docs/tutorials/*.yaml``, ``tutorial_bp.ipynb``, ``tutorial_wp.ipynb``) and the workplans guide describe the new layout, the ``gathered_output`` directory, and the migration command. (`#682 <https://github.com/CWorthy-ocean/C-Star/pull/682>`_)
