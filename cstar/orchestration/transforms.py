@@ -846,10 +846,11 @@ def package_runtime_overrides(step: LiveStep) -> LiveStep:
     LiveStep
         The transformed step.
     """
-    for directive_key, directive_config in step.directives.items():
-        directive_cls = DirectiveConfig.directive_map.get(directive_key)
-        if directive_cls is not None and isinstance(directive_config, Mapping):
-            directive_cls.validate_directives(directive_config, step.directives)
+    # for directive_key, directive_config in step.directives.items():
+    #     directive_cls = DirectiveConfig.directive_map.get(directive_key)
+    #     if directive_cls is not None and isinstance(directive_config, Mapping):
+    #         directive = directive_cls(directive_config)
+    #         directive.validate(step)
 
     sys_overrides = {
         key: value.as_posix() if isinstance(value, Path) else value
@@ -914,8 +915,10 @@ class Directive(Transform[LiveStep], t.Protocol):
         ...
 
     @classmethod
-    def validate_directives(
-        cls, config: Mapping[str, t.Any], directives: Mapping[str, t.Any]
+    def validate(
+        cls,
+        config: Mapping[str, t.Any],
+        step: LiveStep,
     ) -> None:
         """Validate this directive's config against the step's full directives
         mapping at schedule time.
@@ -1136,7 +1139,8 @@ class DirectiveConfig(BaseModel):
                 )
                 for key, config in ordered
             ]
-            for transform in transforms:
+            for transform, config in zip(transforms, ordered):
+                transform.validate(t.cast("dict[str, dict[str, t.Any]]", config), step)
                 step = transform(step)[0]
 
         return str(step.blueprint_path)

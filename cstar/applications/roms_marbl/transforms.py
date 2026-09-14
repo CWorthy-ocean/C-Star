@@ -969,8 +969,10 @@ class NestingDirective(OverrideDirective):
         return "nest-from"
 
     @classmethod
-    def validate_directives(
-        cls, config: Mapping[str, t.Any], directives: Mapping[str, t.Any]
+    def validate(
+        cls,
+        config: Mapping[str, t.Any],
+        step: LiveStep,
     ) -> None:
         """Reject a `rst_path` config combined with a `continue-from` directive.
 
@@ -991,8 +993,11 @@ class NestingDirective(OverrideDirective):
         ValueError
             If `rst_path` is set alongside a `continue-from` directive.
         """
-        if cls.KEY_RST_PATH in config and ContinuanceDirective.key() in directives:
-            raise ValueError(_rst_path_continue_from_conflict_message(None))
+        if (
+            NestingDirective.KEY_RST_PATH in config
+            and ContinuanceDirective.key() in step.directives
+        ):
+            raise ValueError(_rst_path_continue_from_conflict_message(step.name))
 
     @t.override
     def __call__(self, step: LiveStep) -> Sequence[LiveStep]:
@@ -1015,11 +1020,7 @@ class NestingDirective(OverrideDirective):
             `continue-from` directive on the same step; both would set
             `initial_conditions`.
         """
-        if (
-            self.KEY_RST_PATH in self._config
-            and ContinuanceDirective.key() in step.directives
-        ):
-            raise ValueError(_rst_path_continue_from_conflict_message(step.name))
+        self.validate(self._config, step)
         return super().__call__(step)
 
     def _generate_overrides(self) -> dict[str, t.Any]:
