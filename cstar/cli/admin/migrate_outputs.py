@@ -6,6 +6,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from cstar.base.log import get_logger
 from cstar.entrypoint.utils import ARG_DRY_RUN
@@ -239,30 +240,19 @@ def migrate_outputs(
 ) -> None:
     """Migrate an old-layout run or step directory to the current output layout."""
     report = migrate_output_layout(path, dry_run=dry_run)
-
-    # `markup=False` everywhere below: paths and the "[dry-run]" prefix are
-    # plain text, not Rich markup (a literal `[dry-run]` would otherwise be
-    # parsed as an unknown style tag and silently dropped).
-    prefix = "[dry-run] " if dry_run else ""
+    prefix = f"{escape('[dry-run]')} " if dry_run else ""
+    console.soft_wrap = True
 
     for src, dst in report.moved:
-        console.print(f"{prefix}moved {src} -> {dst}", soft_wrap=True, markup=False)
+        console.print(f"{prefix}moved {src} -> {dst}")
     for p in report.skipped_collisions:
-        console.print(
-            f"{prefix}skipped (exists): {p} was left in place",
-            soft_wrap=True,
-            markup=False,
-        )
+        console.print(f"{prefix}skipped (exists): {p} was left in place")
     for p in report.removed_dirs:
-        console.print(
-            f"{prefix}removed empty directory {p}", soft_wrap=True, markup=False
-        )
+        console.print(f"{prefix}removed empty directory {p}")
     for p in report.gather_dirs_removed:
         console.print(
             f"{prefix}removed old run-level gather directory {p}; "
-            "re-run `cstar workplan gather <run-id>` to rebuild it",
-            soft_wrap=True,
-            markup=False,
+            "re-run `cstar workplan gather <run-id>` to rebuild it"
         )
 
     console.print(
@@ -270,10 +260,9 @@ def migrate_outputs(
         f"skipped {len(report.skipped_collisions)} collision(s), "
         f"removed {len(report.removed_dirs)} empty `joined_output` "
         f"director(y/ies), removed {len(report.gather_dirs_removed)} old "
-        "run-level gather director(y/ies).",
-        soft_wrap=True,
-        markup=False,
+        "run-level gather director(y/ies)."
     )
+    console.soft_wrap = False
 
 
 if __name__ == "__main__":
