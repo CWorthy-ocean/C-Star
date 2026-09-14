@@ -387,6 +387,9 @@ class StateDirectoryManager:
     _RUN_TRACKING_NAME: t.ClassVar[t.Literal["run_tracking"]] = "run_tracking"
     """The name of the directory where run-tracking files are written."""
 
+    _USER_VIEW_NAME: t.ClassVar[t.Literal["user"]] = "user"
+    """The name of the directory where an aggregated user view of outputs is created."""
+
     @classmethod
     def root_dir(cls) -> Path:
         """The root directory containing all job outputs.
@@ -437,6 +440,19 @@ class StateDirectoryManager:
         data_home = DirectoryManager.data_home()
         run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
         return data_home / run_id
+
+    @classmethod
+    def user_dir(cls, run_id: str | None = None) -> Path:
+        """The directory containing a user-view of assets created during a run.
+
+        The result is a _run-specific_ directory.
+
+        Returns
+        -------
+        Path
+        """
+        run_id = run_id or get_env_item(ENV_CSTAR_RUNID).value
+        return cls.data_dir(run_id) / cls._USER_VIEW_NAME
 
 
 def is_remote_resource(uri: str) -> bool:
