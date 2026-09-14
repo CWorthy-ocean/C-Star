@@ -832,13 +832,17 @@ class ROMSSimulation(Simulation):
                 self.nesting_info.working_copy.path  # type: ignore[union-attr]
             )
 
-        # These next values must stay short: ucla-roms builds
-        # the extraction filename in a fixed character(len=99) buffer
-        # so an absolute path could silently truncate.
-        # ParallelIO writes whole files directly into `output`; a non-PIO run
-        # writes partitioned pieces into `temp_output`, joined by post_run
-        # into `output`.
-        root = "../output" if self.use_pio else "../temp_output"
+        # ParallelIO writes directly to output_dir without join/partition steps,
+        # otherwise the step should put intermediate work in the temporary directory
+        target = (
+            self.fs_manager.output_dir
+            if self.use_pio
+            else self.fs_manager.temp_output_dir
+        )
+
+        # use relative paths to avoid truncation due to roms 99 character limit
+        root = str(target.relative_to(self.fs_manager.tasks_dir, walk_up=True))
+
         nml.simulation_name_settings.output_root_name = f"{root}/output"
 
         # Note: only PARALLEL_IO builds honor extract_root_name;
