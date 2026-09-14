@@ -33,6 +33,9 @@ Improvements
 - Relocate rich output utilities to correct shared module for re-use (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
 - Partially complete docstrings in affected code have been completed throughout (`#688 <https://github.com/CWorthy-ocean/C-Star/pull/688>`_)
 - Reduced code duplication in admin-clean handler (`#689 <https://github.com/CWorthy-ocean/C-Star/pull/689>`_)
+- Fix for typer color rendering on build machines causing stdout match failures (`#669 <https://github.com/CWorthy-ocean/C-Star/pull/669>`_)
+- Fix problematic manual indentation of yaml content in fixture (`#669 <https://github.com/CWorthy-ocean/C-Star/pull/669>`_)
+- Fix inconsistent arguments when raising ``FileNotFoundError`` resulting in empty filename in logs. (`#669 <https://github.com/CWorthy-ocean/C-Star/pull/669>`_)
 
 Miscellaneous
 ~~~~~~~~~~~~~
