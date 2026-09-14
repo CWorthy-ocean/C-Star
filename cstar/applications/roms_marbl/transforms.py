@@ -805,7 +805,7 @@ def _rst_path_continue_from_conflict_message(step_name: str | None) -> str:
     """
     subject = f"step {step_name!r}" if step_name is not None else "a step"
     return (
-        f"nest-from rst_path and continue-from both set initial conditions for "
+        "nest-from rst_path and continue-from both set initial conditions for "
         f"{subject}; remove rst_path"
     )
 
