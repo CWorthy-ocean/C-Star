@@ -1,6 +1,7 @@
 import json
 import os
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -256,6 +257,7 @@ def test_target_callback_empty(value: str) -> None:
 def test_target_callback_inplace_notifies(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    flatten_cli_output: Callable[[str], str],
 ) -> None:
     """Verify that the user is informed that an output path is ignored when
     in-place mode was requested.
@@ -266,16 +268,15 @@ def test_target_callback_inplace_notifies(
     ctx.params = {"in_place": True}
 
     assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    # rich wraps long paths at the terminal width, so normalize whitespace
-    # before matching
-    assert "will be ignored in in-place mode" in " ".join(
-        capsys.readouterr().out.split()
+    assert "will be ignored in in-place mode" in flatten_cli_output(
+        capsys.readouterr().out
     )
 
 
 def test_target_callback_dryrun_notifies(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    flatten_cli_output: Callable[[str], str],
 ) -> None:
     """Verify that the user is informed that an output path is ignored when
     dry-run mode was requested.
@@ -286,15 +287,16 @@ def test_target_callback_dryrun_notifies(
     ctx.params = {"dry_run": True}
 
     assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    # rich wraps long paths at the terminal width, so normalize whitespace
-    # before matching
-    assert "will be ignored during dry-run" in " ".join(capsys.readouterr().out.split())
+    assert "will be ignored during dry-run" in flatten_cli_output(
+        capsys.readouterr().out
+    )
 
 
 @mock.patch.dict(os.environ, {ENV_CSTAR_CLI_DRY_RUN: FLAG_ON})
 def test_target_callback_dryrun_env_notifies(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    flatten_cli_output: Callable[[str], str],
 ) -> None:
     """Verify that dry-run mode enabled only through the environment variable
     is detected even though the parameter is not yet processed.
@@ -305,9 +307,9 @@ def test_target_callback_dryrun_env_notifies(
     ctx.params = {}
 
     assert target_callback(ctx, output_path.as_posix()) == output_path.as_posix()
-    # rich wraps long paths at the terminal width, so normalize whitespace
-    # before matching
-    assert "will be ignored during dry-run" in " ".join(capsys.readouterr().out.split())
+    assert "will be ignored during dry-run" in flatten_cli_output(
+        capsys.readouterr().out
+    )
 
 
 @mock.patch.dict(os.environ, {ENV_CSTAR_CLOBBER_WORKING_DIR: FLAG_ON})

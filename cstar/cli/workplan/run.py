@@ -5,7 +5,7 @@ import typing as t
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
@@ -17,6 +17,8 @@ from cstar.base.log import LogLevelChoices, get_logger
 from cstar.base.utils import slugify
 from cstar.cli.common import (
     cb_pipeline,
+    format_validation_errors,
+    localize_and_migrate,
     normalize_runid,
     present,
     set_env,
@@ -409,6 +411,37 @@ def auto_compose(path: str) -> str:
         return str(wp_path)
 
 
+def migrate_steps(path: Path, workplan: Workplan):
+    """Perform automatic migration of the blueprints referenced by a workplan.
+
+    Parameters
+    ----------
+    path : Path
+        The path where the updated workplan will be persisted.
+    workplan : Workplan
+        The workplan to perform migrations on.
+    """
+    is_updated = False
+    for step in workplan.steps:
+        if not isinstance(step.blueprint_path, (Path, str)):
+            continue
+
+        try:
+            step.blueprint_path, modified = localize_and_migrate(
+                str(step.blueprint_path),
+            )
+            if modified:
+                is_updated = True
+        except ValidationError as ex:
+            errors = format_validation_errors(ex)
+            bp_path = str(step.blueprint_path)
+            msg = f"Blueprint {bp_path!r} is invalid. Details: {errors}"
+            raise typer.BadParameter(msg) from ex
+    if is_updated:
+        log.info("Updating workplan with migrated blueprints")
+        serialize(path, workplan)
+
+
 def preprocess_path(workplan_path: str | None) -> str | None:
     """Perform validation related to the workplan path.
 
@@ -438,6 +471,11 @@ def preprocess_path(workplan_path: str | None) -> str | None:
                     msg = f"The workplan file in `{workplan_path}` is improperly formatted"
                     raise typer.BadParameter(msg)
 
+                try:
+                    migrate_steps(local_path, validation_result.item)
+                except FileNotFoundError as ex:
+                    msg = f"Blueprint not found at path: {ex.filename}"
+                    raise typer.BadParameter(msg) from ex
                 return str(local_path)
         except FileNotFoundError as ex:
             msg = f"Workplan not found at path: {workplan_path}"

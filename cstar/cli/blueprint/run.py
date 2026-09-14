@@ -109,7 +109,8 @@ def path_callback(
         log.info(msg)
 
     try:
-        return str(localize_and_migrate(path))
+        localized_path, _ = localize_and_migrate(path)
+        return str(localized_path)
     except FileNotFoundError as ex:
         msg = f"Blueprint file not found: {ex.filename}"
         raise typer.BadParameter(msg) from ex
