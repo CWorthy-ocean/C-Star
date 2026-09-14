@@ -15,8 +15,11 @@ subclasses:
   unversioned (no suffix) for backward compatibility: this is the name
   historically imported by C-Star Forge and other consumers.
 - :class:`RomsNamelistV0_5_0` — the schema for ucla-roms **>= 0.5.0, < 0.6.0**.
-- :class:`RomsNamelistV0_6_0` — the schema for ucla-roms **>= 0.6.0**. Adds
-  the ``&PIO_SETTINGS`` group (ucla-roms PR #346) on top of 0.5.0.
+- :class:`RomsNamelistV0_6_0` — the schema for ucla-roms **>= 0.6.0, < 0.7.0**.
+  Adds the ``&PIO_SETTINGS`` group (ucla-roms PR #346) on top of 0.5.0.
+- :class:`RomsNamelistV0_7_0` — the schema for ucla-roms **>= 0.7.0**. Adds
+  the ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS``
+  groups (ucla-roms PR #351) on top of 0.6.0.
 
 Later breaking releases add a further ``RomsNamelistV<major>_<minor>_<patch>``
 subclass following the same ``V<major>_<minor>_<patch>`` suffix convention.
@@ -500,6 +503,62 @@ class CdrOutputSettings(_NmlGroup):
     """Time records per output file"""
 
 
+class CdrTracerOutputSettings(_NmlGroup):
+    """``&CDR_TRACER_OUTPUT_SETTINGS`` for ucla-roms >= 0.7.0 (PR #351).
+
+    Dedicated output stream for the CDR tracers (``CDR_OAE_ALK``/``CDR_OAE_DIC``
+    and ``CDR_DOR_DIC``). Requires the ``MARBL`` and ``CDR_FORCING`` cppkeys.
+    Every field carries the ucla-roms reference default so the group can be
+    omitted from an older namelist and still validate.
+    """
+
+    do_cdr_tracer_output: bool = False
+    """Output dedicated CDR tracers"""
+    wrt_cdr_trc_avg: bool = True
+    """Write averaged (T) or instantaneous (F)"""
+    cdr_trc_monthly_averages: bool = False
+    """Write averaged outputs per calendar month"""
+    output_period_cdr_trc: float = 3600.0
+    """Frequency of CDR tracer output (s)"""
+    nrpf_cdr_trc: int = 4
+    """Time records per output file"""
+    wrt_tracers: bool = True
+    """Write CDR tracer concentrations"""
+    wrt_vertical_integrals: bool = True
+    """Write int_z_* fields"""
+    wrt_thickness_weighted: bool = True
+    """Write h* and h*_avg fields"""
+    wrt_sources: bool = True
+    """Write *_source fields (if cdr_source)"""
+    wrt_alk: bool = True
+    """Write CDR_OAE_ALK and its variants"""
+    wrt_dic: bool = True
+    """Write CDR_OAE_DIC, CDR_DOR_DIC and variants"""
+
+
+class CdrGasExchOutputSettings(_NmlGroup):
+    """``&CDR_GAS_EXCH_OUTPUT_SETTINGS`` for ucla-roms >= 0.7.0 (PR #351).
+
+    Dedicated output stream for the gas-exchange sensitivities ``ddic_dco2``
+    (beta) and ``ddic_dalk`` (eta), which PR #351 moved out of the
+    ``&CDR_OUTPUT_SETTINGS`` stream. Requires the ``MARBL`` and
+    ``CDR_FORCING`` cppkeys. Every field carries the ucla-roms reference
+    default so the group can be omitted from an older namelist and still
+    validate.
+    """
+
+    do_cdr_gas_exch_output: bool = False
+    """Output CDR gas-exchange sensitivities"""
+    wrt_cdr_gas_avg: bool = True
+    """Write averaged (T) or instantaneous (F)"""
+    cdr_gas_monthly_averages: bool = False
+    """Write averaged outputs per calendar month"""
+    output_period_cdr_gas: float = 3600.0
+    """Frequency of CDR gas-exch output (s)"""
+    nrpf_cdr_gas: int = 4
+    """Time records per output file"""
+
+
 class UpscaleSettings(_NmlGroup):
     do_upscale: bool
     """Record CDR tracer fluxes thru domain boundaries"""
@@ -702,9 +761,11 @@ class RomsNamelistBase(BaseModel):
 
     Not meant to be instantiated directly: use a versioned subclass
     (:class:`RomsNamelist` for ucla-roms < 0.5.0, :class:`RomsNamelistV0_5_0`
-    for ucla-roms >= 0.5.0, < 0.6.0, or :class:`RomsNamelistV0_6_0` for
-    ucla-roms >= 0.6.0, which adds ``&PIO_SETTINGS``) or select one
-    automatically with :func:`namelist_schema_for_ref`.
+    for ucla-roms >= 0.5.0, < 0.6.0, :class:`RomsNamelistV0_6_0` for
+    ucla-roms >= 0.6.0, < 0.7.0, which adds ``&PIO_SETTINGS``, or
+    :class:`RomsNamelistV0_7_0` for ucla-roms >= 0.7.0, which adds the two
+    CDR tracer / gas-exchange output groups) or select one automatically with
+    :func:`namelist_schema_for_ref`.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(
@@ -896,7 +957,7 @@ class RomsNamelistV0_5_0(RomsNamelistBase):
 
 
 class RomsNamelistV0_6_0(RomsNamelistV0_5_0):
-    """The ROMS namelist schema for ucla-roms >= 0.6.0.
+    """The ROMS namelist schema for ucla-roms >= 0.6.0, < 0.7.0.
 
     Adds `&PIO_SETTINGS` (ucla-roms PR #346) on top of the 0.5.0 schema;
     otherwise unchanged.
@@ -905,12 +966,30 @@ class RomsNamelistV0_6_0(RomsNamelistV0_5_0):
     pio_settings: PioSettings = Field(default_factory=PioSettings)
 
 
+class RomsNamelistV0_7_0(RomsNamelistV0_6_0):
+    """The ROMS namelist schema for ucla-roms >= 0.7.0.
+
+    Adds `&CDR_TRACER_OUTPUT_SETTINGS` and `&CDR_GAS_EXCH_OUTPUT_SETTINGS`
+    (ucla-roms PR #351) on top of the 0.6.0 schema; otherwise unchanged. Both
+    groups default to their ucla-roms reference values (output off), so an
+    older namelist without them still validates; both are always written.
+    """
+
+    cdr_tracer_output_settings: CdrTracerOutputSettings = Field(
+        default_factory=CdrTracerOutputSettings
+    )
+    cdr_gas_exch_output_settings: CdrGasExchOutputSettings = Field(
+        default_factory=CdrGasExchOutputSettings
+    )
+
+
 # ---- Schema version selection ----
 
 # ucla-roms releases with breaking namelist changes, as comparable version
 # tuples (named so registry entries read as versions, not bare tuples).
 UCLA_ROMS_0_5_0: Final[tuple[int, int, int]] = (0, 5, 0)
 UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
+UCLA_ROMS_0_7_0: Final[tuple[int, int, int]] = (0, 7, 0)
 
 # Half-open ucla-roms version ranges ``[lower, upper)`` mapped to the schema
 # class that applies; `None` bounds are unbounded. Ranges must be contiguous
@@ -921,7 +1000,7 @@ UCLA_ROMS_0_6_0: Final[tuple[int, int, int]] = (0, 6, 0)
 #   1. Add the release constant:
 #        UCLA_ROMS_0_8_0: Final[tuple[int, int, int]] = (0, 8, 0)
 #   2. Cap the current last entry's upper bound at the new version:
-#        (UCLA_ROMS_0_6_0, UCLA_ROMS_0_8_0, RomsNamelistV0_6_0),
+#        (UCLA_ROMS_0_7_0, UCLA_ROMS_0_8_0, RomsNamelistV0_7_0),
 #   3. Append a new open-ended entry for the new schema:
 #        (UCLA_ROMS_0_8_0, None, RomsNamelistV0_8_0),
 NAMELIST_SCHEMA_REGISTRY: tuple[
@@ -932,7 +1011,8 @@ NAMELIST_SCHEMA_REGISTRY: tuple[
 ] = (
     (None, UCLA_ROMS_0_5_0, RomsNamelist),
     (UCLA_ROMS_0_5_0, UCLA_ROMS_0_6_0, RomsNamelistV0_5_0),
-    (UCLA_ROMS_0_6_0, None, RomsNamelistV0_6_0),
+    (UCLA_ROMS_0_6_0, UCLA_ROMS_0_7_0, RomsNamelistV0_6_0),
+    (UCLA_ROMS_0_7_0, None, RomsNamelistV0_7_0),
 )
 
 

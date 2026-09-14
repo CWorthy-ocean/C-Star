@@ -3,7 +3,7 @@
 Mirrors ucla-roms' `src/precheck.F90::do_precheck`/`check_output_divides_rst`:
 for every *enabled* output stream, `nrpf * output_period` must be positive and
 must evenly divide `basic_output_settings.output_period_rst`, when restarts
-are on (`wrt_file_rst`). Four stream groups are additionally gated on a
+are on (`wrt_file_rst`). Six stream groups are additionally gated on a
 compile-time cppdef.
 
 Operates on C-Star's canonical namelist vocabulary (RomsNamelistBase group
@@ -47,6 +47,16 @@ def _base_settings(**overrides):
             "do_cdr_output": False,
             "output_period_cdr": 3600,
             "nrpf_cdr": 24,
+        },
+        "cdr_tracer_output_settings": {
+            "do_cdr_tracer_output": False,
+            "output_period_cdr_trc": 3600,
+            "nrpf_cdr_trc": 4,
+        },
+        "cdr_gas_exch_output_settings": {
+            "do_cdr_gas_exch_output": False,
+            "output_period_cdr_gas": 3600,
+            "nrpf_cdr_gas": 4,
         },
         "upscale_settings": {
             "do_upscale": False,
@@ -118,6 +128,98 @@ def test_enabled_cppdef_active_non_dividing_raises():
             settings,
             cppdefs={"marbl": True, "marbl_diags": True, "cdr_forcing": True},
         )
+
+
+def test_cdr_tracer_cppdef_inactive_skips_even_when_it_would_fail():
+    """`cdrtrc` is skipped entirely when its guarding cppdefs (`marbl` and
+    `cdr_forcing`) are not both active, even with a genuinely non-dividing
+    config.
+    """
+    settings = _base_settings()
+    settings["cdr_tracer_output_settings"] = {
+        "do_cdr_tracer_output": True,
+        "output_period_cdr_trc": 1000,
+        "nrpf_cdr_trc": 3,
+    }
+    # cppdefs omits "cdr_forcing" -> guard unsatisfied.
+    check_output_streams_divide_rst(settings, cppdefs={"marbl": True})
+
+
+def test_cdr_tracer_enabled_cppdef_active_non_dividing_raises():
+    """An enabled, cppdef-active `cdrtrc` stream whose frequency doesn't evenly
+    divide the restart period raises.
+    """
+    settings = _base_settings()
+    settings["cdr_tracer_output_settings"] = {
+        "do_cdr_tracer_output": True,
+        "output_period_cdr_trc": 1000,
+        "nrpf_cdr_trc": 3,
+    }
+    with pytest.raises(ValueError, match="cdrtrc"):
+        check_output_streams_divide_rst(
+            settings, cppdefs={"marbl": True, "cdr_forcing": True}
+        )
+
+
+def test_cdr_tracer_disabled_stream_passes():
+    """A disabled `cdrtrc` stream (`do_cdr_tracer_output` false) passes even
+    with a non-dividing frequency and active cppdef guard.
+    """
+    settings = _base_settings()
+    settings["cdr_tracer_output_settings"] = {
+        "do_cdr_tracer_output": False,
+        "output_period_cdr_trc": 1000,
+        "nrpf_cdr_trc": 3,
+    }
+    check_output_streams_divide_rst(
+        settings, cppdefs={"marbl": True, "cdr_forcing": True}
+    )
+
+
+def test_cdr_gas_exch_cppdef_inactive_skips_even_when_it_would_fail():
+    """`cdrgas` is skipped entirely when its guarding cppdefs (`marbl` and
+    `cdr_forcing`) are not both active, even with a genuinely non-dividing
+    config.
+    """
+    settings = _base_settings()
+    settings["cdr_gas_exch_output_settings"] = {
+        "do_cdr_gas_exch_output": True,
+        "output_period_cdr_gas": 1000,
+        "nrpf_cdr_gas": 3,
+    }
+    # cppdefs omits "cdr_forcing" -> guard unsatisfied.
+    check_output_streams_divide_rst(settings, cppdefs={"marbl": True})
+
+
+def test_cdr_gas_exch_enabled_cppdef_active_non_dividing_raises():
+    """An enabled, cppdef-active `cdrgas` stream whose frequency doesn't evenly
+    divide the restart period raises.
+    """
+    settings = _base_settings()
+    settings["cdr_gas_exch_output_settings"] = {
+        "do_cdr_gas_exch_output": True,
+        "output_period_cdr_gas": 1000,
+        "nrpf_cdr_gas": 3,
+    }
+    with pytest.raises(ValueError, match="cdrgas"):
+        check_output_streams_divide_rst(
+            settings, cppdefs={"marbl": True, "cdr_forcing": True}
+        )
+
+
+def test_cdr_gas_exch_disabled_stream_passes():
+    """A disabled `cdrgas` stream (`do_cdr_gas_exch_output` false) passes even
+    with a non-dividing frequency and active cppdef guard.
+    """
+    settings = _base_settings()
+    settings["cdr_gas_exch_output_settings"] = {
+        "do_cdr_gas_exch_output": False,
+        "output_period_cdr_gas": 1000,
+        "nrpf_cdr_gas": 3,
+    }
+    check_output_streams_divide_rst(
+        settings, cppdefs={"marbl": True, "cdr_forcing": True}
+    )
 
 
 def test_non_positive_newfile_freq_raises():
@@ -232,7 +334,7 @@ def test_diagnostics_or_gate_fires_when_only_one_field_present():
 # `_get` silently returns None on a wrong/renamed field name, and the row
 # then just `continue`s (skipped) -- so a field-name/alias drift in an
 # untested row would otherwise disable that row's check with no test
-# failure. These two parametrized tests exercise all 16 rows directly from
+# failure. These two parametrized tests exercise all 18 rows directly from
 # the table itself, proving every row's section/gate/period/nrpf field names
 # actually resolve against a real settings dict.
 
@@ -288,9 +390,9 @@ def test_every_stream_row_passes_when_enabled_active_and_dividing(row):
     "row", [r for r in _STREAM_CHECKS if r.cppdef_guard], ids=lambda r: r.label
 )
 def test_every_guarded_row_skipped_when_cppdef_inactive(row):
-    """Every cppdef-gated row (diagnostics, cdr, upscale, the four bgc_*
-    streams) is skipped -- even with a genuinely non-dividing config -- when
-    its guard is not satisfied.
+    """Every cppdef-gated row (diagnostics, cdr, cdrtrc, cdrgas, upscale, the
+    four bgc_* streams) is skipped -- even with a genuinely non-dividing
+    config -- when its guard is not satisfied.
     """
     settings = _settings_for_row(
         row, nrpf=_NON_DIVIDING_NRPF, period=_NON_DIVIDING_PERIOD

@@ -13,12 +13,14 @@ from cstar.roms.namelist import (
     RomsNamelistBase,
     RomsNamelistV0_5_0,
     RomsNamelistV0_6_0,
+    RomsNamelistV0_7_0,
     namelist_schema_for_ref,
 )
 
 OLD_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist.nml"
 NEW_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_5_0.nml"
 V0_6_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_6_0.nml"
+V0_7_0_NAMELIST = Path(__file__).parent / "fixtures" / "example_namelist_v0_7_0.nml"
 
 PIO_SETTINGS_BLOCK = "&pio_settings\n    pio_stride = 1\n/\n\n"
 
@@ -43,11 +45,20 @@ def test_namelist_schema_for_ref_0_5_0_range(checkout_target):
 
 @pytest.mark.parametrize(
     "checkout_target",
-    ["0.6.0", "v0.6.0", "0.6.1", "0.7.3", "12.0.0"],
+    ["0.6.0", "v0.6.0", "0.6.1", "0.6.9"],
 )
 def test_namelist_schema_for_ref_post_0_6_0(checkout_target):
-    """Refs at or above 0.6.0 select `RomsNamelistV0_6_0`."""
+    """Refs in `[0.6.0, 0.7.0)` select `RomsNamelistV0_6_0`."""
     assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_6_0
+
+
+@pytest.mark.parametrize(
+    "checkout_target",
+    ["0.7.0", "v0.7.0", "0.7.3", "12.0.0"],
+)
+def test_namelist_schema_for_ref_post_0_7_0(checkout_target):
+    """Refs at or above 0.7.0 select `RomsNamelistV0_7_0`."""
+    assert namelist_schema_for_ref(checkout_target) is RomsNamelistV0_7_0
 
 
 @pytest.mark.parametrize(
@@ -66,7 +77,7 @@ def test_namelist_schema_for_ref_fallback_warns(checkout_target):
     """Non-release-tag refs fall back to the latest schema and warn about it."""
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref(checkout_target)
-    assert schema is RomsNamelistV0_6_0
+    assert schema is RomsNamelistV0_7_0
 
 
 @pytest.fixture
@@ -159,7 +170,7 @@ def test_namelist_schema_for_ref_branch_ignores_repo_path(tagged_ucla_roms_clone
     info = tagged_ucla_roms_clone
     with pytest.warns(UserWarning, match="use at your own risk"):
         schema = namelist_schema_for_ref("main", repo_path=info["repo"])
-    assert schema is RomsNamelistV0_6_0
+    assert schema is RomsNamelistV0_7_0
 
 
 def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
@@ -171,12 +182,12 @@ def test_namelist_schema_for_ref_unresolvable_hash_falls_back():
     ):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_6_0
+    assert schema is RomsNamelistV0_7_0
 
     with mock.patch("cstar.roms.namelist._describe_nearest_tag", return_value=None):
         with pytest.warns(UserWarning, match="use at your own risk"):
             schema = namelist_schema_for_ref("a" * 40, repo_path="/some/repo")
-    assert schema is RomsNamelistV0_6_0
+    assert schema is RomsNamelistV0_7_0
 
 
 def test_roms_namelist_round_trip():
@@ -285,6 +296,55 @@ def test_pio_settings_rejects_non_positive_stride():
         PioSettings(pio_stride=0)
 
 
+def test_roms_namelist_v0_7_0_round_trip(tmp_path):
+    """`RomsNamelistV0_7_0.read` parses the 0.7.0 fixture, and a read -> write
+    -> read round trip reproduces the same model.
+    """
+    nml = RomsNamelistV0_7_0.read(V0_7_0_NAMELIST)
+
+    out = tmp_path / "namelist.nml"
+    nml.write(out)
+    reread = RomsNamelistV0_7_0.read(out)
+
+    assert reread == nml
+
+
+def test_roms_namelist_v0_6_0_rejects_v0_7_0_fixture():
+    """`RomsNamelistV0_6_0` is strict: the 0.7.0 fixture carries the two new
+    CDR output groups, so it is rejected as unknown extra groups.
+    """
+    with pytest.raises(ValidationError):
+        RomsNamelistV0_6_0.read(V0_7_0_NAMELIST)
+
+
+def test_cdr_output_settings_default_when_groups_missing():
+    """A 0.6.0-schema namelist without `&cdr_tracer_output_settings` or
+    `&cdr_gas_exch_output_settings` still validates under `RomsNamelistV0_7_0`,
+    defaulting both groups to their ucla-roms reference values.
+    """
+    nml = RomsNamelistV0_7_0.read(V0_6_0_NAMELIST)
+
+    assert nml.cdr_tracer_output_settings.do_cdr_tracer_output is False
+    assert nml.cdr_tracer_output_settings.wrt_cdr_trc_avg is True
+    assert nml.cdr_tracer_output_settings.nrpf_cdr_trc == 4
+    assert nml.cdr_gas_exch_output_settings.do_cdr_gas_exch_output is False
+    assert nml.cdr_gas_exch_output_settings.wrt_cdr_gas_avg is True
+    assert nml.cdr_gas_exch_output_settings.nrpf_cdr_gas == 4
+
+
+def test_cdr_output_settings_always_written_even_when_constructed_without_them():
+    """Both new CDR output groups are present in written output even when the
+    model was constructed without explicit groups (using the defaults).
+    """
+    nml = RomsNamelistV0_7_0.read(V0_6_0_NAMELIST)
+    d = nml.to_f90nml_dict()
+
+    assert d["cdr_tracer_output_settings"]["do_cdr_tracer_output"] is False
+    assert d["cdr_tracer_output_settings"]["nrpf_cdr_trc"] == 4
+    assert d["cdr_gas_exch_output_settings"]["do_cdr_gas_exch_output"] is False
+    assert d["cdr_gas_exch_output_settings"]["nrpf_cdr_gas"] == 4
+
+
 class TestUnknownOverrideKeys:
     """Tests for `RomsNamelistBase.unknown_override_keys`."""
 
@@ -335,3 +395,19 @@ class TestUnknownOverrideKeys:
         violations = RomsNamelistV0_5_0.unknown_override_keys(overrides)
         assert len(violations) == 1
         assert "pio_settings" in violations[0]
+
+    def test_cdr_output_settings_keys(self):
+        """`cdr_tracer_output_settings`/`cdr_gas_exch_output_settings` keys are
+        only known from 0.7.0 on: `RomsNamelistV0_7_0` accepts them, but
+        `RomsNamelistV0_6_0` (which lacks the groups) reports them as unknown.
+        """
+        overrides = {
+            "cdr_tracer_output_settings": {"wrt_alk": False},
+            "cdr_gas_exch_output_settings": {"wrt_cdr_gas_avg": False},
+        }
+        assert RomsNamelistV0_7_0.unknown_override_keys(overrides) == []
+
+        violations = RomsNamelistV0_6_0.unknown_override_keys(overrides)
+        assert len(violations) == 2
+        assert any("cdr_tracer_output_settings" in v for v in violations)
+        assert any("cdr_gas_exch_output_settings" in v for v in violations)

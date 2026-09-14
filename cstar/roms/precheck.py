@@ -5,9 +5,10 @@ ucla-roms >= 0.5.0 aborts at startup (``check_output_divides_rst``) if any
 *enabled* output stream's file-rollover frequency (``nrpf * output_period``)
 is not positive, or does not evenly divide ``output_period_rst`` -- writing a
 restart mid-file would otherwise leave a partial output file. The whole check
-is gated on ``basic_output_settings.wrt_file_rst``; four of the per-stream
+is gated on ``basic_output_settings.wrt_file_rst``; six of the per-stream
 groups are further gated on a ucla-roms compile-time cppdef (``DIAGNOSTICS``,
-and the three MARBL/BGC-diagnostics groups).
+and the five MARBL/BGC-diagnostics groups: ``cdr``, ``cdrtrc``, ``cdrgas``,
+``upscale``, and ``bgc``).
 
 :func:`check_output_streams_divide_rst` reproduces this in Python so C-Star
 (and consumers building ucla-roms run-time settings, e.g. C-Star Forge) can
@@ -95,7 +96,7 @@ class _StreamCheck:
 # `gate_fields`/`period_field`/`nrpf_field` are the real Fortran namelist keys
 # within that group. Verified against `cstar/roms/namelist.py` (the group
 # classes) and `cstar/tests/unit_tests/roms/fixtures/example_namelist_v0_6_0.nml`
-# (the `&<group>` headers).
+# / `example_namelist_v0_7_0.nml` (the `&<group>` headers).
 _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
     _StreamCheck(
         "extract",
@@ -171,6 +172,22 @@ _STREAM_CHECKS: tuple[_StreamCheck, ...] = (
         "output_period_cdr",
         "nrpf_cdr",
         cppdef_guard=("marbl", "marbl_diags", "cdr_forcing"),
+    ),
+    _StreamCheck(
+        "cdrtrc",
+        "cdr_tracer_output_settings",
+        ("do_cdr_tracer_output",),
+        "output_period_cdr_trc",
+        "nrpf_cdr_trc",
+        cppdef_guard=("marbl", "cdr_forcing"),
+    ),
+    _StreamCheck(
+        "cdrgas",
+        "cdr_gas_exch_output_settings",
+        ("do_cdr_gas_exch_output",),
+        "output_period_cdr_gas",
+        "nrpf_cdr_gas",
+        cppdef_guard=("marbl", "cdr_forcing"),
     ),
     _StreamCheck(
         "upscale",
@@ -254,10 +271,11 @@ def check_output_streams_divide_rst(
         stream applies.
     cppdefs
         Mapping of cppdef name -> whether it is active in this build (e.g.
-        ``{"marbl": True, "cdr_forcing": True}``). Governs the four
-        cppdef-gated groups (``diagnostics``; the three MARBL/BGC-diagnostics
-        groups: ``cdr``, ``upscale``, and the four ``bgc_*`` streams, gated on
-        ``MARBL || BIOLOGY_BEC2``). ``None``/absent names are treated as
+        ``{"marbl": True, "cdr_forcing": True}``). Governs the six
+        cppdef-gated groups (``diagnostics``; the five MARBL/BGC-diagnostics
+        groups: ``cdr``, ``cdrtrc``, ``cdrgas``, ``upscale``, and the four
+        ``bgc_*`` streams, gated on ``MARBL || BIOLOGY_BEC2``). ``None``/absent
+        names are treated as
         inactive, so a caller that doesn't build MARBL/BIOLOGY_BEC2 at all can
         just omit them -- the cppdef-gated groups are then always skipped,
         exactly as ucla-roms itself would (it never compiles their write

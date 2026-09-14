@@ -1,3 +1,4 @@
+import errno
 import textwrap
 import typing as t
 import uuid
@@ -550,3 +551,21 @@ def test_read_raw_no_auto(
         pets = person.get("pets", [])
         assert "Waffles" in pets
         assert "Grits" in pets
+
+
+def test_read_raw_file_dne(tmp_path: Path) -> None:
+    """Verify reading a non-existent file raises a `FileNotFoundError` that
+    carries the missing path in `filename` so callers can report it accurately.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory to read/write test inputs and outputs
+    """
+    path = tmp_path / "does-not-exist.yaml"
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        read_raw(path)
+
+    assert exc_info.value.errno == errno.ENOENT
+    assert exc_info.value.filename == path

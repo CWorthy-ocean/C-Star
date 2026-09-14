@@ -1,0 +1,24 @@
+.. _0.13.7:
+
+0.13.7
+----------
+
+
+Breaking Changes
+~~~~~~~~~~~~~~~~
+
+
+- Blueprints whose ``code.roms`` is unpinned (or pinned at/after 0.7.0) now generate namelists with the ``&CDR_TRACER_OUTPUT_SETTINGS`` and ``&CDR_GAS_EXCH_OUTPUT_SETTINGS`` groups, always written, at ucla-roms' reference defaults (both outputs off). They are meant to be run with ucla-roms 0.7.0 or later. (`#686 <https://github.com/CWorthy-ocean/C-Star/pull/686>`_)
+- ``RomsNamelistV0_6_0`` now applies to ucla-roms >= 0.6.0, < 0.7.0 only; ``namelist_overrides`` naming either new group are rejected at blueprint validation when ``code.roms`` is pinned below 0.7.0. (`#686 <https://github.com/CWorthy-ocean/C-Star/pull/686>`_)
+
+New features
+~~~~~~~~~~~~
+
+
+- ``RomsNamelistV0_7_0`` with the two new groups: CDR tracer output (``do_cdr_tracer_output``, averaging/monthly/period/records-per-file, and per-field switches for tracers, vertical integrals, thickness-weighted fields, sources, ALK and DIC) and CDR gas-exchange output (``do_cdr_gas_exch_output`` plus averaging/monthly/period/records-per-file). Both groups default to ucla-roms' reference values, so a namelist written for 0.6.x still validates against the 0.7.0 schema. (`#686 <https://github.com/CWorthy-ocean/C-Star/pull/686>`_)
+- The startup pre-check that mirrors ucla-roms' ``check_output_divides_rst`` now covers the two new streams (``cdrtrc``, ``cdrgas``), gated on the ``MARBL`` and ``CDR_FORCING`` cppdefs like the existing CDR stream, so a non-dividing output period is caught before submission rather than at ROMS startup. (`#686 <https://github.com/CWorthy-ocean/C-Star/pull/686>`_)
+
+Miscellaneous
+~~~~~~~~~~~~~
+
+- New reference fixture ``example_namelist_v0_7_0.nml``; tests for schema selection at the 0.7.0 boundary, round trip, rejection of a 0.7.0 file by the 0.6.0 schema, default/always-written behaviour of the new groups, the pre-check for both new streams, and ``namelist_overrides`` validation for pinned vs unpinned refs. (`#686 <https://github.com/CWorthy-ocean/C-Star/pull/686>`_)

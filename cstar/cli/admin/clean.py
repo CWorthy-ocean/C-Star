@@ -3,7 +3,7 @@ import asyncio
 import shutil
 import typing as t
 from abc import ABC
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from enum import IntEnum, auto
 from pathlib import Path
 
@@ -250,6 +250,14 @@ def get_default_cleanup_actions() -> list[CleanupAction]:
     )
 
 
+def display_groups(displays: Iterable[list[str]], msg: str, color: str) -> None:
+    """Display the status of cleanup actions."""
+    for group in displays:
+        group[0] = f"{colored(msg, color)}: {group[0]}"
+        for item in group:
+            console.print(item)
+
+
 async def perform_actions(actions: Sequence[CleanupAction]) -> int:
     """Perform all specified clean-up actions.
 
@@ -278,17 +286,11 @@ async def perform_actions(actions: Sequence[CleanupAction]) -> int:
 
             displays = (task.result().display().split("\n") for task in done)
 
-            for group in displays:
-                group[0] = f"{colored(msg, color)}: {group[0]}"
-                for item in group:
-                    console.print(item)
+            display_groups(displays, msg, color)
     else:
         displays = (a.display().split("\n") for a in actions)
 
-        for group in displays:
-            group[0] = f"{colored(msg, color)}: {group[0]}"
-            for item in group:
-                console.print(item)
+        display_groups(displays, msg, color)
 
     return sum(len(a.state.ledger) for a in actions)
 
