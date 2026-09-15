@@ -4,7 +4,7 @@ import io
 import json
 import logging
 import typing as t
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -31,7 +31,7 @@ from cstar.cli.workplan.ls import (
     sorters,
     table_formatter,
 )
-from cstar.orchestration.tracking import KEY_RUN_SIZE, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_NAME, KEY_RUN_SIZE, WorkplanRun
 
 LS_LOGGER = "cstar.cli.workplan.ls"
 
@@ -43,6 +43,7 @@ T0 = datetime.datetime(2026, 9, 12, 3, 4, 0, tzinfo=UTC)
 def make_run(
     run_id: str,
     size: int | None = None,
+    name: str | None = None,
     start: datetime.datetime | None = None,
 ) -> WorkplanRun:
     """Build a `WorkplanRun` with dummy paths for filter tests.
@@ -60,7 +61,14 @@ def make_run(
     -------
     WorkplanRun
     """
-    metadata = {} if size is None else {KEY_RUN_SIZE: str(size)}
+    metadata: dict[str, str] = {}
+
+    if size is not None:
+        metadata[KEY_RUN_SIZE] = str(size)
+
+    if name is not None:
+        metadata[KEY_RUN_NAME] = name
+
     kwargs: dict[str, t.Any] = {} if start is None else {"start_at": start}
 
     return WorkplanRun(
@@ -586,6 +594,27 @@ async def test_adapt_runs_builds_views_from_cached_workplans(
     assert view.format == "json"
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["Workplan 0", "Workplan 1", "Workplan 2"],
+)
+async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
+    """Verify that the name in the run metadata is used when the workplan can't be
+    loaded from disk.
+    """
+    run = make_run("r1", size=7, start=T0, name=name)
+
+    views = await adapt_runs_to_views([run], {}, "json")
+
+    assert len(views) == 1
+    view = views[0]
+    assert view.run_id == "r1"
+    assert view.raw_size == 7
+    assert view.raw_start == T0
+    assert view.format == "json"
+    assert view.name == name
+
+
 async def test_adapt_runs_defaults_size_when_metadata_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -671,7 +700,7 @@ def patch_ls_pipeline(
         @classmethod
         def bound(cls, limit: int) -> t.Any:
             @asynccontextmanager
-            async def _manager() -> t.Any:
+            async def _manager() -> AsyncGenerator[t.Any]:
                 yield cls()
 
             return _manager()

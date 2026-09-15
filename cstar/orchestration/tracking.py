@@ -26,6 +26,8 @@ from cstar.orchestration.serialization import (
 
 KEY_RUN_SIZE: t.Final[str] = "size"
 """Key used to store disk-usage in the run metadata."""
+KEY_RUN_NAME: t.Final[str] = "name"
+"""Key used to store the workplan name in the run metadata."""
 
 
 class WorkplanRun(BaseModel):

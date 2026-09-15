@@ -38,6 +38,10 @@ EXCLUSIONS: set[str] = {"raw_size", "raw_start", "format"}
 """View fields excluded from rendered outputs."""
 INCLUSIONS: set[str] = {"run_id", "name", "size", "start"}
 """View fields included in the rendered outputs."""
+UNKNOWN_SIZE: t.Final[int] = -1
+"""Constant value used by the system when a value for size has not been computed."""
+UNKNOWN_NAME: t.Final[str] = "unknown"
+"""Constant value used by the system when a name cannot be retrieved."""
 
 
 class ItemView(BaseModel):
@@ -53,7 +57,7 @@ class ItemView(BaseModel):
     @property
     def size(self) -> str:
         """The size as a string for display (includes units)."""
-        if self.raw_size == -1 and self.format == "table":
+        if self.raw_size == UNKNOWN_SIZE and self.format == "table":
             return f'Run "cstar workplan status {self.run_id} {ARG_SIZE}"'
 
         return f"{self.raw_size}MB"
@@ -124,10 +128,11 @@ async def adapt_runs_to_views(
 
     for run in runs:
         wp_path = run.trx_workplan_path
-        name = "unknown"
+        name = run.metadata.get("name", UNKNOWN_NAME)
 
         try:
-            name = plan_cache[wp_path].name
+            if name == UNKNOWN_NAME:
+                name = plan_cache[wp_path].name
         except KeyError:
             log.warning(f"The workplan path {str(wp_path)!r} was not loaded into cache")
 
@@ -135,7 +140,7 @@ async def adapt_runs_to_views(
             ItemView(
                 run_id=run.run_id,
                 name=name,
-                raw_size=int(run.metadata.get(KEY_RUN_SIZE, "-1")),
+                raw_size=int(run.metadata.get(KEY_RUN_SIZE, UNKNOWN_SIZE)),
                 raw_start=run.start_at,
                 format=format,
             )
@@ -253,8 +258,10 @@ def filter_size(
     warn_unsized: list[str] = []
 
     for run in runs:
-        size = int(run.metadata[KEY_RUN_SIZE])
-        if size == -1:
+        raw_size = run.metadata.get(KEY_RUN_SIZE)
+        size = int(raw_size) if raw_size is not None else 0
+
+        if size == UNKNOWN_SIZE:
             # never filter items with uncomputed sizes
             warn_unsized.append(run.run_id)
             results.append(run)
