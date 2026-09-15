@@ -43,7 +43,7 @@ def _add_marker_nodes(graph: "DiGraph") -> "DiGraph":
     if START_NODE not in graph.nodes:
         graph.add_node(
             START_NODE,
-            **{"action": "start"},
+            action="start",
         )
     else:
         graph.nodes[START_NODE]["action"] = "start"
@@ -51,7 +51,7 @@ def _add_marker_nodes(graph: "DiGraph") -> "DiGraph":
     if TERMINAL_NODE not in graph.nodes:
         graph.add_node(
             TERMINAL_NODE,
-            **{"action": "term"},
+            action="term",
         )
     else:
         graph.nodes[TERMINAL_NODE]["action"] = "term"

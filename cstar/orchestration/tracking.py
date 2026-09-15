@@ -2,12 +2,14 @@ import asyncio
 import fcntl
 import os
 import typing as t
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from cstar.base.env import max_concurrency
 from cstar.base.log import LoggingMixin
 from cstar.base.utils import slugify, utc_now
 from cstar.execution.file_system import (
@@ -15,7 +17,17 @@ from cstar.execution.file_system import (
     local_copy,
 )
 from cstar.orchestration.models import Workplan
-from cstar.orchestration.serialization import PersistenceMode, deserialize, serialize
+from cstar.orchestration.serialization import (
+    PersistenceMode,
+    deserialize,
+    deserialize_all,
+    serialize,
+)
+
+KEY_RUN_SIZE: t.Final[str] = "size"
+"""Key used to store disk-usage in the run metadata."""
+KEY_RUN_NAME: t.Final[str] = "name"
+"""Key used to store the workplan name in the run metadata."""
 
 
 class WorkplanRun(BaseModel):
@@ -44,6 +56,9 @@ class WorkplanRun(BaseModel):
 
     sentinels: set[Path] = Field(default_factory=set[Path])
     """State files expected to be created during execution of the run."""
+
+    metadata: dict[str, str] = Field(default_factory=dict)
+    """Optional metadata for the run."""
 
     @staticmethod
     def get_default_run_id(uri: str) -> str:
@@ -89,6 +104,9 @@ class TrackingRepository(LoggingMixin):
 
     _MODE: PersistenceMode = PersistenceMode.yaml
     """The serialization mode to use."""
+
+    _sem: asyncio.Semaphore | None = None
+    """A semaphore used to limit concurrent disk accesses."""
 
     @property
     def _root(self) -> Path:
@@ -259,7 +277,7 @@ class TrackingRepository(LoggingMixin):
         run_paths: list[Path] = []
 
         latest = self.latest_path(run_id)
-        lock_path = latest.with_suffix(".lock")
+        lock_path = self._get_lock_path(run_id)
         with lock_path.open("w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
 
@@ -305,12 +323,9 @@ class TrackingRepository(LoggingMixin):
             msg = "A valid run-id was not provided; unable to retrieve run"
             raise ValueError(msg) from ex
 
-        latest_path = self.latest_path(run_id)
         run_path = self._find_run_path(run_id, run_date)
 
-        lock_path = latest_path.with_suffix(".lock")
-        if not lock_path.parent.exists():
-            lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self._get_lock_path(run_id)
 
         with lock_path.open("w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
@@ -324,7 +339,9 @@ class TrackingRepository(LoggingMixin):
             return deserialize(run_path, WorkplanRun)
 
     async def get_workplan_run(
-        self, run_id: str, run_date: datetime | None = None
+        self,
+        run_id: str,
+        run_date: datetime | None = None,
     ) -> WorkplanRun | None:
         """Locate a WorkplanRun record.
 
@@ -340,6 +357,11 @@ class TrackingRepository(LoggingMixin):
         WorkplanRun | None
             The record when it can be located in history or latest runs, otherwise `None`.
         """
+        if self._sem:
+            async with self._sem:
+                return await asyncio.to_thread(
+                    self.get_workplan_run_sync, run_id, run_date
+                )
         return await asyncio.to_thread(self.get_workplan_run_sync, run_id, run_date)
 
     def put_workplan_run_sync(self, run: WorkplanRun) -> Path:
@@ -362,9 +384,7 @@ class TrackingRepository(LoggingMixin):
 
         # use the latest path (e.g. /tmp/<run-id>.yaml) as a lock in case
         # multiple runs occur simultaneously.
-        lock_path = latest_path.with_suffix(".lock")
-        if not lock_path.parent.exists():
-            lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self._get_lock_path(run.run_id)
 
         with lock_path.open("w") as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
@@ -394,40 +414,100 @@ class TrackingRepository(LoggingMixin):
         Path
             The path to the persisted history record
         """
+        if self._sem:
+            async with self._sem:
+                coro = asyncio.to_thread(self.put_workplan_run_sync, run)
+                return await coro
+
         return await asyncio.to_thread(self.put_workplan_run_sync, run)
 
-    async def list_latest_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
+    def _get_lock_path(self, run_id: str) -> Path:
+        """Identify the path to the lock-file for a run id.
+
+        Parameters
+        ----------
+        run_id : str
+            The run-id to be locked.
+
+        Returns
+        -------
+        Path
+        """
+        latest_path = self.latest_path(run_id)
+        lock_path = latest_path.with_suffix(".lock")
+
+        if not lock_path.parent.exists():
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+        return lock_path
+
+    async def list_latest_runs(
+        self, run_id_filter: str = ""
+    ) -> Sequence[WorkplanRun | None]:
         """Retrieve a list of the latest WorkplanRun for all known run-id's.
 
+        Parameters
+        ----------
         run_id_filter : str
-            A run-id used to filter records. Matches will be included in results.
+            A run-id prefix used to filter records. Matches will be included
+            in results.
 
         Returns
         -------
-        Sequence[WorkplanRun]
+        Sequence[WorkplanRun | None]
+            The latest run record per matching run-id; a record that cannot
+            be read is returned as `None`.
         """
         run_paths = list(self.latest_dir.glob(f"{run_id_filter}*.{self._MODE}"))
-        coros = [
-            asyncio.to_thread(deserialize, run_path, WorkplanRun)
-            for run_path in run_paths
-        ]
-        return await asyncio.gather(*coros)
+        limit = max_concurrency()
+        return await deserialize_all(run_paths, WorkplanRun, limit, sem=self._sem)
 
-    async def list_history_runs(self, run_id_filter: str) -> Sequence[WorkplanRun]:
+    async def list_history_runs(
+        self, run_id_filter: str
+    ) -> Sequence[WorkplanRun | None]:
         """Retrieve a list of all WorkplanRun instances executed with a given run-id.
 
+        Parameters
+        ----------
         run_id_filter : str
-            A run-id used to filter records. Matches will be included in results.
+            A run-id prefix used to filter records. Matches will be included
+            in results.
 
         Returns
         -------
-        Sequence[WorkplanRun]
+        Sequence[WorkplanRun | None]
+            Every historical run record for matching run-ids; a record that
+            cannot be read is returned as `None`.
         """
         # Filter run-id subfolder w/filename format YYYYMMDDHHMMSS.XXXXXX.yaml
         glob_pattern = f"{run_id_filter}*/??????????????.??????.{self._MODE}"
         run_paths = list(self.history_dir.rglob(glob_pattern))
-        coros = [
-            asyncio.to_thread(deserialize, run_path, WorkplanRun)
-            for run_path in run_paths
-        ]
-        return await asyncio.gather(*coros)
+        limit = max_concurrency()
+        return await deserialize_all(run_paths, WorkplanRun, limit, sem=self._sem)
+
+    @classmethod
+    def bound(cls, limit: int):
+        """Create a repository whose disk operations are concurrency-bounded.
+
+        Parameters
+        ----------
+        limit : int
+            The maximum number of concurrent disk operations.
+
+        Returns
+        -------
+        AsyncContextManager[TrackingRepository]
+            An async context manager yielding a new repository that holds a
+            semaphore for the lifetime of the context.
+        """
+
+        @asynccontextmanager
+        async def _manager() -> AsyncGenerator[TrackingRepository]:
+            tracking = TrackingRepository()
+            try:
+                tracking._sem = asyncio.Semaphore(limit)
+                yield tracking
+            finally:
+                tracking._sem = None
+
+        return _manager()

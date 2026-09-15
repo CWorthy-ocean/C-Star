@@ -12,6 +12,10 @@ from pathlib import Path
 if t.TYPE_CHECKING:
     from types import ModuleType
 
+import logging
+
+log = logging.getLogger(__name__)
+
 GROUP_FF: t.Final[str] = "Feature Flags"
 """Group name for feature flag environment variables in documentation."""
 GROUP_FS: t.Final[str] = "File System Configuration"
@@ -335,6 +339,17 @@ ENV_CSTAR_ORCH_LOCAL_DELAY: t.Annotated[
 """Delay (in seconds) between status queries in the local launcher proxy script."""
 
 
+ENV_CSTAR_ORCH_MAX_CONC: t.Annotated[
+    t.Literal["CSTAR_ORCH_MAX_CONC"],
+    EnvVar(
+        "The maximum number of concurrent disk IO operations.",
+        GROUP_SIM,
+        default="10",
+    ),
+] = "CSTAR_ORCH_MAX_CONC"
+"""The maximum number of concurrent disk IO operations."""
+
+
 @lru_cache
 def discover_env_vars() -> dict[str, EnvItem]:
     """Return a mapping from env-var constant to the associated metadata."""
@@ -384,3 +399,32 @@ def unset(key: str) -> str | None:
         The value that was previously stored for the key
     """
     return os.environ.pop(key, None)
+
+
+def max_concurrency() -> int:
+    """Utility to get commonly used max-concurrency value from env vars
+    for bounding simultaneous IO operations.
+
+    A value that cannot be parsed as an integer, or is less than 1, is
+    replaced with the environment variable's default; a warning is logged.
+
+    Returns
+    -------
+    int
+        The maximum number of concurrent disk IO operations.
+    """
+    env_item = get_env_item(ENV_CSTAR_ORCH_MAX_CONC)
+
+    try:
+        value = int(env_item.value)
+    except Exception:
+        msg = f"Unable to parse value of {ENV_CSTAR_ORCH_MAX_CONC}: {env_item.value}"
+        log.warning(msg)
+        value = -1
+
+    if value < 1:
+        # fall back to the default if it's specified as a value that will blow up
+        msg = f"The configured value of {ENV_CSTAR_ORCH_MAX_CONC} is invalid. Using default"
+        log.warning(msg)
+        value = int(env_item.default)
+    return value
