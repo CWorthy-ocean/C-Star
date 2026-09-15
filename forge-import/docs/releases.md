@@ -1,10 +1,53 @@
 # Release notes
 
-## Unreleased
+## 0.8.0
+
+### Breaking Changes
+
+* This update breaks previous forge_blueprint structure ([#151](https://github.com/CWorthy-ocean/cstar-forge/pull/151))
+* ucla-roms 0.7.0 moved the gas-exchange sensitivities `ddic_dco2`/`ddic_dalk` out of the `_cdr` output files into new `_cdrgas` files. Forge does not change this, but anyone reading CDR output filenames directly should expect it once they pin 0.7.0. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
 
 ### New Features
 
-* `namelist.nml` gains two more version-gated output groups for ucla-roms >= 0.7.0 (matching ucla-roms PR #351): `&CDR_TRACER_OUTPUT_SETTINGS` (`cdr_tracer_output`), a dedicated stream for the CDR tracers (`CDR_OAE_ALK`/`CDR_OAE_DIC`/`CDR_DOR_DIC`) with its own `wrt_*` field-group toggles (tracers, vertical integrals, thickness-weighted, sources, alkalinity, DIC), and `&CDR_GAS_EXCH_OUTPUT_SETTINGS` (`cdr_gas_exch_output`) for the gas-exchange sensitivities `ddic_dco2`/`ddic_dalk` -- ucla-roms moved these two variables *out* of the existing `&CDR_OUTPUT_SETTINGS` group's `_cdr` output files into new dedicated `_cdrgas` files, a breaking change on the ucla-roms side worth calling out if you inspect CDR output filenames directly. Both new sections are off by default and, unlike the original `cdr_output`, are never forced on by an active CDR forcing mode -- enabling either requires `bgc_mode: marbl` and raises `cppdefs.cdr_forcing`, same as before. Exposed in the wizard's "Carbon dioxide removal (CDR)" advanced pane; the bundled OutputSpecs (`daily-restarts`, `weekly-restarts`, `monthly-restarts`, `standard`) carry their defaults, and both are pruned from `model_settings` for any ModelSpec pinned before 0.7.0. Added a new `roms-marbl-0.7-default` ModelSpec pinning ucla-roms `0.7.0`; `pio-dev` (pins `main`) picks it up via the existing latest-schema fallback. Existing ModelSpecs are unchanged. C-Star floor bumped to `>=0.13.7`, the release that ships `RomsNamelistV0_7_0`.
+* Support for multiple BGC data sources, including new sources and the ability to mix-and-match fields. ([#151](https://github.com/CWorthy-ocean/cstar-forge/pull/151))
+* `namelist.nml` gains two version-gated output groups for ucla-roms >= 0.7.0: `cdr_tracer_output` (CDR tracer concentrations with per-field-group toggles for tracers, vertical integrals, thickness-weighted fields, sources, alkalinity and DIC) and `cdr_gas_exch_output` (gas-exchange sensitivities). Both carry the ucla-roms reference defaults (averaged, hourly period, off), verified field for field against the tagged 0.7.0 `src/namelist.nml`. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* Enabling either stream requires `bgc_mode: marbl` and raises the `cdr_forcing` cppdef, matching what ucla-roms compiles them under; the resolver rejects the combination otherwise. Unlike the original `cdr_output`, neither stream is ever forced on by an active CDR forcing mode. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* New `roms-marbl-0.7-default` ModelSpec pinning ucla-roms `0.7.0`; `pio-dev` (pinned to `main`) picks up the new schema through the existing latest-schema fallback. Existing ModelSpecs are unchanged. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* The bundled OutputSpecs (`daily-restarts`, `weekly-restarts`, `monthly-restarts`, `standard`) carry both sections with defaults (off, hourly, 24 records per file). Because OutputSpecs are shared across ModelSpecs, sections a blueprint's pinned ucla-roms release cannot model are pruned at resolve time, so a 0.6-pinned blueprint never stores an inert `cdr_tracer_output` block. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* Wizard: both streams appear in the "Carbon dioxide removal (CDR)" advanced pane, only when the selected ModelSpec's pin admits them. Their fields hide with the stream's master switch, and averaged/instantaneous and monthly/periodic render as dropdowns like the existing CDR output. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* `domain.grid_kwargs_parent` / `domain.grid_kwargs_child` may carry `topography_source` and/or `topography_path` (Forge inputs, popped before `rt.Grid`). Resolution (see `ForgeExecutor._nested_topography_pair`, documented on the `Domain` fields): ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+  * neither key -> inherit the domain pair (previous behaviour);
+  * `topography_source` only -> that dataset at its default (staged/fetched) location -- the domain *path* is deliberately NOT inherited;
+  * `topography_path` only -> the domain dataset, read from that file;
+  * both -> as given.
+* Executor resolves and stages topography per grid (deduped per `(name, path)`); the `ensure_source_data` "explicit path -> drop from the staging pass" rule now considers every grid's pair (recorded before the kwargs are rewritten). ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* Resolver notes a nested grid's own topography dataset into `resolved_datasets`/`datasets` so the executor stages it. ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* Wizard: "parent topo" / "child topo" dropdowns (sentinel `(same as this grid)`) + path fields in the Parent/Child grid sections. A *Parent from* / *Child from* catalog pick copies the spec's topography (explicit `ETOPO5` when the spec has none -- never silently this grid's). `_gather` emits the keys, load-back restores them, the domain modified-snapshot covers them. ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* Wizard grid / parent / nesting plots (and derive-from-grid) build each grid with **its** topography when the file exists locally, falling back to ETOPO5 with a visible status note otherwise -- previously every wizard-side build used roms-tools' default ETOPO5, which is why the Iceland2 parent problem never showed in the preview. ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* River forcing items accept `surface_forcing_source: {name: ERA5, path: <optional>}`: river temperature is sampled from ERA5 air temperature at each river mouth (smoothed, floored at 0 °C) instead of roms-tools' flat 15.6 °C constant. Leave `path` out to read the remote ARCO ERA5 archive roms-tools defaults to; give a path to use a local copy. ([#165](https://github.com/CWorthy-ocean/cstar-forge/pull/165))
+* River forcing items accept `river_temp_smoothing_window_days` (default 30) to control the rolling-mean window applied to the sampled air temperature. ([#165](https://github.com/CWorthy-ocean/cstar-forge/pull/165))
+* Wizard river rows gain a "temp. source" dropdown, an optional "temp. path" box (blank = default archive), and a "temp. smoothing (days)" field; the last two appear only once a source is picked, and all three are hidden for custom-file rivers. ([#165](https://github.com/CWorthy-ocean/cstar-forge/pull/165))
+
+### Bug Fixes
+
+* Advanced-settings list fields (e.g. `marbl_bgc.marbl_tracers_to_write`): typing a trailing comma was reverted on every keystroke (`on_edit -> _rebuild -> _SettingsEditor.sync()` re-joined the parsed list). `sync()` now leaves the text alone when it already parses to the synced value. ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* River `CUSTOM_FILE` rows / grid file / CDR netcdf: a path typed or uploaded but never submitted via **Attach** left the file unattached (e.g. `river source is 'CUSTOM_FILE' but custom_file is not set`). The path fields now attach on Enter/focus-out (`continuous_update=False` + observer, deduped against the attached location); the river row also attaches a typed-but-unsubmitted path from `_gather_item` as a last resort. An explicit Attach click still always re-hashes. ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* A river `bgc_source` with an explicit `path` (e.g. your own RIVR2O files) was still recorded as a Forge-staged dataset, so runs failed with "RIVR2O dataset not found" unless copies also sat at the canonical staged location. An explicit path now bypasses staging, as it already did for every other source. ([#165](https://github.com/CWorthy-ocean/cstar-forge/pull/165))
+
+### Improvements
+
+* The wizard's CDR output-stream visibility rules are table-driven (`cdr_output`, `cdr_tracer_output`, `cdr_gas_exch_output` share one code path), so a future ucla-roms output stream is one table entry rather than hand-written show/hide logic. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* The run-time settings tier is selected most-specific-first (0.7.0, then 0.6.0, then 0.5.0), so a subclass never falls back to a superclass's kwargs. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* `ForgeExecutor._build_grid`: roms-tools' "NaN values found in regridded topography" is re-raised naming which grid (parent / this grid / child) failed, its kwargs, an approximate lon/lat footprint and its resolved `topography_source`. ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* "No file attached yet -- enter a path and press Enter (or click Attach / upload)" hint in the status slot wherever the blueprint is invalid without a file (CUSTOM_FILE river row; CDR mode `netcdf`, incl. after Clear). ([#166](https://github.com/CWorthy-ocean/cstar-forge/pull/166))
+* `surface_forcing_source` is resolved like `source`/`bgc_source` at build time (explicit path kept verbatim; blank path left for roms-tools' default) and, when no path is given, ERA5 is recorded in the blueprint's `datasets` list. ([#165](https://github.com/CWorthy-ocean/cstar-forge/pull/165))
+* The source name is normalized to upper case at validation time (roms-tools requires the literal `ERA5`), and the schema rejects a non-positive smoothing window or a temperature source paired with `custom_file`. ([#165](https://github.com/CWorthy-ocean/cstar-forge/pull/165))
+
+### Miscellaneous
+
+* Golden fixtures `golden_namelist_test-tiny-roms070.nml` and `golden_model_settings_test-tiny-roms070.json` for a 0.7.0-pinned blueprint; the 0.5.0/0.6.0 goldens are untouched. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* Docs: `architecture-details.md`, `model-spec-settings.md`, `InputData-intro.md`, `InputData-RomsMarblInputData.md` describe the new sections, the pruning rule, and the opt-in policy; release note added under Unreleased. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
+* Tests cover schema selection at the 0.7.0 boundary, defaults and aliases, override round trip, the MARBL requirement and cppdef flip, pruning for older pins (including that a pruned override cannot flip a cppdef), the restart-divisibility pre-check for the new streams, and the wizard gating and field rules. ([#167](https://github.com/CWorthy-ocean/cstar-forge/pull/167))
 
 ## 0.7.3
 
