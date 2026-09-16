@@ -1,9 +1,13 @@
+import asyncio
 import errno
 import textwrap
+import threading
+import time
 import typing as t
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from pydantic import BaseModel, Field, ValidationError
@@ -15,6 +19,7 @@ from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
 from cstar.orchestration.serialization import (
     PersistenceMode,
     deserialize,
+    deserialize_all,
     read_json_to_raw,
     read_raw,
     read_yaml_to_raw,
@@ -569,3 +574,83 @@ def test_read_raw_file_dne(tmp_path: Path) -> None:
 
     assert exc_info.value.errno == errno.ENOENT
     assert exc_info.value.filename == path
+
+
+class _SimpleModel(BaseModel):
+    """A minimal model used to exercise `deserialize_all`."""
+
+    value: int
+
+
+def _write_simple_model(path: Path, value: int) -> Path:
+    """Write a valid `_SimpleModel` document to disk.
+
+    Parameters
+    ----------
+    path : Path
+        The destination path.
+    value : int
+        The value to persist.
+    """
+    serialize(path, _SimpleModel(value=value))
+    return path
+
+
+async def test_deserialize_all_preserves_order(tmp_path: Path) -> None:
+    """Verify results are returned in the same order as the input paths."""
+    paths = [
+        _write_simple_model(tmp_path / f"model-{i}.yaml", value=i) for i in range(5)
+    ]
+
+    results = await deserialize_all(paths, _SimpleModel, limit=10)
+
+    assert [r.value if r else None for r in results] == list(range(5))
+
+
+async def test_deserialize_all_returns_none_for_unreadable(tmp_path: Path) -> None:
+    """Verify an unreadable or invalid file yields `None` at its position."""
+    good_path = _write_simple_model(tmp_path / "good.yaml", value=1)
+    bad_path = tmp_path / "bad.yaml"
+    bad_path.write_text("value: not-an-int\n")
+    missing_path = tmp_path / "missing.yaml"
+
+    results = await deserialize_all(
+        [good_path, bad_path, missing_path], _SimpleModel, limit=10
+    )
+
+    assert results[0] is not None
+    assert results[0].value == 1
+    assert results[1] is None
+    assert results[2] is None
+
+
+async def test_deserialize_all_honours_supplied_semaphore(tmp_path: Path) -> None:
+    """Verify an externally supplied semaphore bounds concurrent reads."""
+    limit = 2
+    lock = threading.Lock()
+    state = {"in_flight": 0, "peak": 0}
+
+    def fake_try_deserialize(path, klass, mode=PersistenceMode.auto):
+        with lock:
+            state["in_flight"] += 1
+            state["peak"] = max(state["peak"], state["in_flight"])
+        time.sleep(0.05)
+        with lock:
+            state["in_flight"] -= 1
+        return None
+
+    paths = [tmp_path / f"model-{i}.yaml" for i in range(6)]
+    for p in paths:
+        p.touch()
+
+    sem = asyncio.Semaphore(limit)
+
+    with mock.patch(
+        "cstar.orchestration.serialization.try_deserialize",
+        side_effect=fake_try_deserialize,
+    ):
+        # `limit` is intentionally larger than the supplied semaphore's limit
+        # to confirm the supplied `sem` takes precedence.
+        await deserialize_all(paths, _SimpleModel, limit=len(paths), sem=sem)
+
+    assert state["peak"] <= limit

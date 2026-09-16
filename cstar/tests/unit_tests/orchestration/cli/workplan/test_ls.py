@@ -31,7 +31,7 @@ from cstar.cli.workplan.ls import (
     sorters,
     table_formatter,
 )
-from cstar.orchestration.tracking import KEY_RUN_NAME, KEY_RUN_SIZE, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_NAME, WorkplanRun
 
 LS_LOGGER = "cstar.cli.workplan.ls"
 
@@ -53,7 +53,10 @@ def make_run(
     run_id : str
         The unique run identifier.
     size : int | None
-        When supplied, stored in metadata under the disk-usage key.
+        When supplied, stored as a single step's measured size; `None`
+        leaves `step_sizes` empty (i.e. unmeasured).
+    name : str | None
+        When supplied, stored in metadata under the run-name key.
     start : datetime.datetime | None
         When supplied, used as the run start time.
 
@@ -63,11 +66,10 @@ def make_run(
     """
     metadata: dict[str, str] = {}
 
-    if size is not None:
-        metadata[KEY_RUN_SIZE] = str(size)
-
     if name is not None:
         metadata[KEY_RUN_NAME] = name
+
+    step_sizes: dict[str, int] = {} if size is None else {"step": size}
 
     kwargs: dict[str, t.Any] = {} if start is None else {"start_at": start}
 
@@ -77,6 +79,7 @@ def make_run(
         output_path=Path(f"/tmp/{run_id}/out"),
         run_id=run_id,
         metadata=metadata,
+        step_sizes=step_sizes,
         **kwargs,
     )
 
@@ -235,8 +238,8 @@ def test_filter_size_bounds(
 def test_filter_size_never_drops_unsized_runs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify runs with the -1 sentinel pass every filter and warn once."""
-    runs = [make_run("sized", size=100), make_run("unsized", size=-1)]
+    """Verify unmeasured runs pass every filter and warn once."""
+    runs = [make_run("sized", size=100), make_run("unsized")]
 
     with caplog.at_level(logging.WARNING, logger=LS_LOGGER):
         actual = filter_size(runs, lt_filter=10)
@@ -548,29 +551,32 @@ def test_format_runid_filter_casefolds(value: str, expected: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def stub_deserialize_all(
+def stub_load_workplans(
     names: Mapping[Path, str | None],
     calls: list[list[Path]] | None = None,
 ) -> t.Any:
-    """Build a `deserialize_all` replacement serving canned workplan stubs.
+    """Build a `load_workplans` replacement serving canned workplan stubs.
 
     Parameters
     ----------
     names : Mapping[Path, str | None]
-        Workplan name to serve per path; None simulates a failed load.
+        Workplan name to store in the cache per path; a missing or falsy
+        entry simulates a failed load (the path is left out of the cache).
     calls : list[list[Path]] | None
         When supplied, receives the path list of each invocation.
 
     Returns
     -------
     t.Any
-        An async callable matching the `deserialize_all` signature.
+        An async callable matching the `load_workplans` signature.
     """
 
-    async def _stub(paths: list[Path], *args: t.Any, **kwargs: t.Any) -> list[t.Any]:
+    async def _stub(paths: Sequence[Path], cache: dict[Path, t.Any]) -> None:
         if calls is not None:
             calls.append(list(paths))
-        return [SimpleNamespace(name=names[p]) if names.get(p) else None for p in paths]
+        for p in paths:
+            if names.get(p):
+                cache[p] = SimpleNamespace(name=names[p])
 
     return _stub
 
@@ -582,7 +588,7 @@ async def test_adapt_runs_builds_views_from_cached_workplans(
     run = make_run("r1", size=7, start=T0)
     names = {run.trx_workplan_path: "plan-a"}
     monkeypatch.setattr(
-        "cstar.cli.workplan.ls.deserialize_all", stub_deserialize_all(names)
+        "cstar.cli.workplan.ls.load_workplans", stub_load_workplans(names)
     )
 
     views = await adapt_runs_to_views([run], {}, "json")
@@ -618,11 +624,11 @@ async def test_adapt_runs_builds_views_from_run_metadata(name: str) -> None:
 async def test_adapt_runs_defaults_size_when_metadata_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify a run without size metadata renders the -1 sentinel."""
+    """Verify a run without measured step sizes renders the -1 sentinel."""
     run = make_run("r1")
     names = {run.trx_workplan_path: "plan-a"}
     monkeypatch.setattr(
-        "cstar.cli.workplan.ls.deserialize_all", stub_deserialize_all(names)
+        "cstar.cli.workplan.ls.load_workplans", stub_load_workplans(names)
     )
 
     views = await adapt_runs_to_views([run], {}, "table")
@@ -637,15 +643,16 @@ async def test_adapt_runs_falls_back_to_unknown_on_failed_deserialization(
     """Verify a workplan that fails to load yields an 'unknown' name row."""
     run = make_run("r1", size=1)
     monkeypatch.setattr(
-        "cstar.cli.workplan.ls.deserialize_all",
-        stub_deserialize_all({run.trx_workplan_path: None}),
+        "cstar.cli.workplan.ls.load_workplans",
+        stub_load_workplans({run.trx_workplan_path: None}),
     )
 
-    with caplog.at_level(logging.WARNING, logger=LS_LOGGER):
+    with caplog.at_level(logging.DEBUG, logger=LS_LOGGER):
         views = await adapt_runs_to_views([run], {}, "table")
 
     assert [v.name for v in views] == ["unknown"]
-    assert any("not loaded into cache" in r.message for r in caplog.records)
+    assert any("workplan not readable" in r.message for r in caplog.records)
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 async def test_adapt_runs_deserializes_each_path_once(
@@ -657,8 +664,8 @@ async def test_adapt_runs_deserializes_each_path_once(
     cached = make_run("r3", size=3)
     calls: list[list[Path]] = []
     monkeypatch.setattr(
-        "cstar.cli.workplan.ls.deserialize_all",
-        stub_deserialize_all({first.trx_workplan_path: "shared"}, calls),
+        "cstar.cli.workplan.ls.load_workplans",
+        stub_load_workplans({first.trx_workplan_path: "shared"}, calls),
     )
     plan_cache = {cached.trx_workplan_path: SimpleNamespace(name="cached")}
 
@@ -672,6 +679,28 @@ async def test_adapt_runs_deserializes_each_path_once(
     assert [v.name for v in views] == ["shared", "shared", "cached"]
 
 
+async def test_adapt_runs_only_loads_workplans_for_runs_missing_a_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a cached run-name skips the workplan load entirely.
+
+    A run whose metadata already carries a name must not trigger
+    `load_workplans`; a run without one must.
+    """
+    named = make_run("r1", name="already-named")
+    unnamed = make_run("r2")
+    calls: list[list[Path]] = []
+    monkeypatch.setattr(
+        "cstar.cli.workplan.ls.load_workplans",
+        stub_load_workplans({unnamed.trx_workplan_path: "plan-b"}, calls),
+    )
+
+    views = await adapt_runs_to_views([named, unnamed], {}, "table")
+
+    assert calls == [[unnamed.trx_workplan_path]]
+    assert [v.name for v in views] == ["already-named", "plan-b"]
+
+
 # ---------------------------------------------------------------------------
 # ls_runs command body
 # ---------------------------------------------------------------------------
@@ -679,21 +708,22 @@ async def test_adapt_runs_deserializes_each_path_once(
 
 def patch_ls_pipeline(
     monkeypatch: pytest.MonkeyPatch,
-    runs: Sequence[WorkplanRun | None],
-) -> io.StringIO:
+    runs: Sequence[WorkplanRun],
+) -> tuple[io.StringIO, mock.AsyncMock]:
     """Patch the IO boundaries of `ls_runs` and capture console output.
 
     Parameters
     ----------
     monkeypatch : pytest.MonkeyPatch
         The active monkeypatch fixture.
-    runs : Sequence[WorkplanRun | None]
+    runs : Sequence[WorkplanRun]
         The run records the stubbed repository will return.
 
     Returns
     -------
-    io.StringIO
-        The buffer receiving the command's console output.
+    tuple[io.StringIO, mock.AsyncMock]
+        The buffer receiving the command's console output, and the mock
+        standing in for `refresh_disk_usage`.
     """
 
     class StubRepo:
@@ -708,23 +738,18 @@ def patch_ls_pipeline(
         async def list_latest_runs(self, run_id_filter: str = "") -> t.Any:
             return list(runs)
 
-    async def stub_attach(
-        attached: Sequence[WorkplanRun], refresh: bool = False
-    ) -> None:
-        for run in attached:
-            run.metadata.setdefault(KEY_RUN_SIZE, "-1")
-
-    names = {r.trx_workplan_path: f"plan-{r.run_id}" for r in runs if r}
+    names = {r.trx_workplan_path: f"plan-{r.run_id}" for r in runs}
+    refresh_mock = mock.AsyncMock()
     buffer = io.StringIO()
     monkeypatch.setattr("cstar.cli.workplan.ls.TrackingRepository", StubRepo)
-    monkeypatch.setattr("cstar.cli.workplan.ls.attach_disk_usage", stub_attach)
     monkeypatch.setattr(
-        "cstar.cli.workplan.ls.deserialize_all", stub_deserialize_all(names)
+        "cstar.cli.workplan.ls.load_workplans", stub_load_workplans(names)
     )
+    monkeypatch.setattr("cstar.cli.workplan.ls.refresh_disk_usage", refresh_mock)
     monkeypatch.setattr(
         "cstar.cli.workplan.ls.console", Console(file=buffer, width=200)
     )
-    return buffer
+    return buffer, refresh_mock
 
 
 def test_ls_runs_renders_sorted_json_document(
@@ -735,28 +760,13 @@ def test_ls_runs_renders_sorted_json_document(
         make_run("r2", size=5, start=T0 + datetime.timedelta(hours=1)),
         make_run("r1", size=9, start=T0),
     ]
-    buffer = patch_ls_pipeline(monkeypatch, runs)
+    buffer, _ = patch_ls_pipeline(monkeypatch, runs)
 
     ls_runs(mock.Mock(), format="json")
 
     parsed = json.loads(buffer.getvalue())
     assert [row["run_id"] for row in parsed["data"]] == ["r1", "r2"]
     assert parsed["data"][0]["name"] == "plan-r1"
-
-
-def test_ls_runs_warns_about_unreadable_records(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Verify unreadable run records are dropped with a single warning."""
-    buffer = patch_ls_pipeline(monkeypatch, [make_run("r1", size=5), None])
-
-    with caplog.at_level(logging.WARNING, logger=LS_LOGGER):
-        ls_runs(mock.Mock(), format="json")
-
-    assert any("could not be read" in r.message for r in caplog.records)
-    parsed = json.loads(buffer.getvalue())
-    assert [row["run_id"] for row in parsed["data"]] == ["r1"]
 
 
 def test_ls_runs_applies_filters_and_reverse_sort(
@@ -769,7 +779,7 @@ def test_ls_runs_applies_filters_and_reverse_sort(
         make_run("old", size=5, start=T0 - datetime.timedelta(days=1)),
         make_run("big-old", size=50, start=T0 - datetime.timedelta(days=1)),
     ]
-    buffer = patch_ls_pipeline(monkeypatch, runs)
+    buffer, _ = patch_ls_pipeline(monkeypatch, runs)
 
     ls_runs(
         mock.Mock(),
@@ -782,3 +792,31 @@ def test_ls_runs_applies_filters_and_reverse_sort(
 
     parsed = json.loads(buffer.getvalue())
     assert [row["run_id"] for row in parsed["data"]] == ["large"]
+
+
+def test_ls_runs_refresh_usage_awaits_refresh_disk_usage_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `--size` triggers exactly one refresh call with all filtered runs."""
+    runs = [make_run("r1", size=1), make_run("r2", size=2)]
+    buffer, refresh_mock = patch_ls_pipeline(monkeypatch, runs)
+
+    ls_runs(mock.Mock(), format="json", refresh_usage=True)
+
+    refresh_mock.assert_awaited_once()
+    assert refresh_mock.await_args is not None
+    awaited_runs = refresh_mock.await_args.args[0]
+    assert {r.run_id for r in awaited_runs} == {"r1", "r2"}
+    assert buffer.getvalue()
+
+
+def test_ls_runs_without_refresh_usage_never_awaits_refresh_disk_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify omitting `--size` never triggers a refresh."""
+    runs = [make_run("r1", size=1)]
+    _buffer, refresh_mock = patch_ls_pipeline(monkeypatch, runs)
+
+    ls_runs(mock.Mock(), format="json", refresh_usage=False)
+
+    refresh_mock.assert_not_awaited()

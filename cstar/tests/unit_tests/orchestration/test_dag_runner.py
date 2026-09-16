@@ -28,6 +28,7 @@ from cstar.orchestration.dag_runner import (
     check_clobber_targets,
     get_status_detail_map,
     load_run_state,
+    on_status_changed,
     prepare_workplan,
 )
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
@@ -39,7 +40,7 @@ from cstar.orchestration.models import (
     Workplan,
     WorkplanState,
 )
-from cstar.orchestration.orchestration import LiveWorkplan, Planner, Status
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -585,3 +586,210 @@ async def test_executive_run_summary_pairs_each_step_with_its_own_sentinel(
         assert step_summary.sentinel_path.name == StateRepository.sentinel_name(
             handle.safe_name
         )
+
+
+@pytest.fixture
+async def status_change_workplan_run(
+    tmp_path: Path,
+    mock_run_id: str,
+) -> WorkplanRun:
+    """Persist a `WorkplanRun` whose `trx_workplan_path` holds a real `LiveWorkplan`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Unique path for test-specific files.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+
+    Returns
+    -------
+    WorkplanRun
+        The persisted run record, with a single step named `step-a`.
+    """
+    bp_path = tmp_path / "bp.yaml"
+    bp_path.touch()
+    step = LiveStep(
+        name="step-a",
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "step-a-wd",
+    )
+    live_plan = LiveWorkplan(
+        name="status-change-wp",
+        description="A workplan used to test on_status_changed",
+        steps=[step],
+    )
+    trx_path = tmp_path / "trx.yaml"
+    assert serialize(trx_path, live_plan)
+
+    run = WorkplanRun(
+        workplan_path=tmp_path / "wp.yaml",
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=mock_run_id,
+    )
+    repo = TrackingRepository()
+    await repo.put_workplan_run(run)
+    return run
+
+
+@pytest.mark.asyncio
+async def test_on_status_changed_non_terminal_skips_measurement(
+    status_change_workplan_run: WorkplanRun,
+    mock_run_id: str,
+) -> None:
+    """A non-terminal status leaves `step_sizes` untouched and never measures."""
+    handle = LocalHandle(
+        pid="1",
+        name="step-a",
+        run_id=mock_run_id,
+        start_at=datetime.now(),
+        status=Status.Running,
+    )
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.measure_step_sizes",
+            mock.AsyncMock(),
+        ) as mock_measure,
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+            mock.AsyncMock(return_value=status_change_workplan_run),
+        ),
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.update_workplan_run",
+            mock.AsyncMock(),
+        ) as mock_update,
+        mock.patch(
+            "cstar.orchestration.state.StateRepository.put_sentinel",
+            mock.AsyncMock(return_value=Path("/tmp/sentinel")),
+        ),
+    ):
+        await on_status_changed(handle)
+
+    mock_measure.assert_not_awaited()
+    assert status_change_workplan_run.step_sizes == {}
+    mock_update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_status_changed_terminal_measures_known_step(
+    tmp_path: Path,
+    status_change_workplan_run: WorkplanRun,
+    mock_run_id: str,
+) -> None:
+    """A terminal status for a real step measures only that step's directory."""
+    handle = LocalHandle(
+        pid="1",
+        name="step-a",
+        run_id=mock_run_id,
+        start_at=datetime.now(),
+        status=Status.Done,
+    )
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.measure_step_sizes",
+            mock.AsyncMock(),
+        ) as mock_measure,
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+            mock.AsyncMock(return_value=status_change_workplan_run),
+        ),
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.update_workplan_run",
+            mock.AsyncMock(),
+        ) as mock_update,
+        mock.patch(
+            "cstar.orchestration.state.StateRepository.put_sentinel",
+            mock.AsyncMock(return_value=Path("/tmp/sentinel")),
+        ),
+    ):
+        await on_status_changed(handle)
+
+    mock_measure.assert_awaited_once_with(
+        status_change_workplan_run,
+        {"step-a": tmp_path / "step-a-wd"},
+        mock.ANY,
+    )
+    mock_update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_status_changed_terminal_unknown_step_skips_measurement(
+    status_change_workplan_run: WorkplanRun,
+    mock_run_id: str,
+) -> None:
+    """A terminal status for a step absent from the workplan is not measured,
+    but the run is still persisted.
+    """
+    handle = LocalHandle(
+        pid="1",
+        name="not-a-real-step",
+        run_id=mock_run_id,
+        start_at=datetime.now(),
+        status=Status.Failed,
+    )
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.measure_step_sizes",
+            mock.AsyncMock(),
+        ) as mock_measure,
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.get_workplan_run",
+            mock.AsyncMock(return_value=status_change_workplan_run),
+        ),
+        mock.patch(
+            "cstar.orchestration.tracking.TrackingRepository.update_workplan_run",
+            mock.AsyncMock(),
+        ) as mock_update,
+        mock.patch(
+            "cstar.orchestration.state.StateRepository.put_sentinel",
+            mock.AsyncMock(return_value=Path("/tmp/sentinel")),
+        ),
+    ):
+        await on_status_changed(handle)
+
+    mock_measure.assert_not_awaited()
+    mock_update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_status_changed_terminal_persists_size_and_sentinel(
+    tmp_path: Path,
+    status_change_workplan_run: WorkplanRun,
+    mock_run_id: str,
+) -> None:
+    """A terminal transition records the step's size and sentinel on the
+    persisted record through the locked update, not an in-memory copy.
+    """
+    handle = LocalHandle(
+        pid="1",
+        name="step-a",
+        run_id=mock_run_id,
+        start_at=datetime.now(),
+        status=Status.Done,
+    )
+    sentinel = tmp_path / "step-a.sentinel"
+
+    with (
+        mock.patch(
+            "cstar.orchestration.tracking.step_disk_usage",
+            mock.AsyncMock(return_value=5),
+        ),
+        mock.patch(
+            "cstar.orchestration.state.StateRepository.put_sentinel",
+            mock.AsyncMock(return_value=sentinel),
+        ),
+    ):
+        await on_status_changed(handle)
+
+    persisted = await TrackingRepository().get_workplan_run(mock_run_id)
+    assert persisted is not None
+    assert persisted.step_sizes == {"step-a": 5}
+    assert persisted.size_measured_at is not None
+    assert sentinel in persisted.sentinels
+    # the object handed to the hook was not the one persisted
+    assert status_change_workplan_run.sentinels == set()

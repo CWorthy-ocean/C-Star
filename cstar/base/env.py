@@ -417,7 +417,7 @@ def max_concurrency() -> int:
 
     try:
         value = int(env_item.value)
-    except Exception:
+    except ValueError:
         msg = f"Unable to parse value of {ENV_CSTAR_ORCH_MAX_CONC}: {env_item.value}"
         log.warning(msg)
         value = -1

@@ -14,12 +14,13 @@ from cstar.base.env import (
     ENV_CSTAR_CLOBBER_WORKING_DIR,
     FLAG_OFF,
     capture_environment,
+    max_concurrency,
     unset,
 )
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.execution.file_system import StateDirectoryManager, disk_usage
+from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import KEY_CLOBBER, Step, UserDefinedVariables, Workplan
@@ -37,7 +38,12 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
 from cstar.orchestration.state import StateRepository, load_sentinels
-from cstar.orchestration.tracking import KEY_RUN_SIZE, TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    KEY_RUN_NAME,
+    TrackingRepository,
+    WorkplanRun,
+    measure_step_sizes,
+)
 from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
@@ -244,7 +250,14 @@ async def load_run_state(
     # ensure most recent status is retrieved in case of crash or system failure
     updates = await asyncio.gather(*map(launcher.update_status, sentinels))
     changes = [h for (is_updated, h) in updates if is_updated]
-    await asyncio.gather(*map(on_status_changed, changes))
+
+    sem = asyncio.Semaphore(max_concurrency())
+
+    async def _bounded_status_changed(handle: ProcessHandle) -> None:
+        async with sem:
+            await on_status_changed(handle)
+
+    await asyncio.gather(*map(_bounded_status_changed, changes))
 
     closed_set = {s.name: s.status for s in sentinels if Status.is_terminal(s.status)}
     open_set = {s.name: s.status for s in sentinels if s.name not in closed_set}
@@ -676,17 +689,48 @@ def apply_clobber_overrides(
 
 
 async def on_status_changed(handle: ProcessHandle) -> None:
-    """Persist updates to process handles."""
+    """Persist updates to process handles.
+
+    On a terminal status transition, the step's own disk usage is measured
+    and recorded on the run's `step_sizes` before the run is persisted.
+    """
     state_repo = StateRepository()
     run_repo = TrackingRepository()
 
     path = await state_repo.put_sentinel(handle)
     run = await run_repo.get_workplan_run(handle.run_id)
 
-    if path and run:
-        run.metadata[KEY_RUN_SIZE] = await disk_usage(run.output_path)
-        run.sentinels.add(path)
-        await run_repo.put_workplan_run(run)
+    if not path or run is None:
+        return
+
+    sentinel: Path = path
+    sizes: dict[str, int] = {}
+
+    if Status.is_terminal(handle.status):
+        wp = try_deserialize(run.trx_workplan_path, LiveWorkplan)
+        step = (
+            next((s for s in wp.steps if s.name == handle.name), None) if wp else None
+        )
+        if step is not None:
+            sizes = await measure_step_sizes(
+                run, {step.name: step.working_dir}, asyncio.Semaphore(1)
+            )
+        else:
+            msg = (
+                f"Could not measure disk usage for step {handle.name!r} in "
+                f"run {handle.run_id!r}: step not found in workplan"
+            )
+            log.debug(msg)
+
+    def _apply(latest: WorkplanRun) -> None:
+        """Merge this event into the freshly loaded record under the run lock."""
+        latest.sentinels.add(sentinel)
+        if sizes:
+            latest.record_step_sizes(sizes)
+
+    # measured outside the lock, applied atomically: concurrent step events for
+    # the same run must not overwrite each other's sentinels or sizes
+    await run_repo.update_workplan_run(handle.run_id, _apply)
 
 
 async def build_dag(
@@ -774,7 +818,7 @@ async def run_dag(
         environment=capture_environment(),
         user_variables=user_variables or {},
         sentinels={StateRepository.sentinel_path(s) for s in steps},
-        metadata={"name": planner.workplan.name},
+        metadata={KEY_RUN_NAME: planner.workplan.name},
     )
 
     if not dry_run:

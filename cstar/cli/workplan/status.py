@@ -6,9 +6,9 @@ from rich.console import Console
 
 from cstar.base.log import get_logger
 from cstar.cli.workplan.shared import (
-    attach_disk_usage,
     display_summary,
     list_runs,
+    refresh_disk_usage,
 )
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.dag_runner import (
@@ -60,8 +60,8 @@ def status(
         status = asyncio.run(load_run_state(run_id, launcher))
         lookup = get_status_detail_map(planner, status)
 
-        runs = [run]
-        asyncio.run(attach_disk_usage(runs, refresh=refresh_usage))
+        if refresh_usage:
+            asyncio.run(refresh_disk_usage([run], {wp_path: workplan}))
 
         display_summary(run, lookup)
     except FileNotFoundError:  # blueprint not found.

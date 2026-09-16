@@ -520,49 +520,66 @@ def remove_files(file_dir: Path, wildcard_pattern: str) -> bool:
     return removed
 
 
-async def disk_usage(path: Path) -> str:
-    """Return the size of all assets stored in a directory.
+UNKNOWN_SIZE: t.Final[int] = -1
+"""Sentinel value for a disk-usage measurement that was not taken or failed."""
+
+
+async def _du_mb(path: Path) -> int:
+    """Return the disk usage of a path in MB via `du -sm`.
 
     Parameters
     ----------
     path : Path
-        The path to compute disk usage for
+        The file or directory to measure.
 
     Returns
     -------
-    str
-        The size of the directory in MB, or "-1" when the measurement
-        fails (e.g. the path is missing or unreadable).
+    int
+        The size in MB, or `UNKNOWN_SIZE` when `du` produces no parseable total.
     """
+    # _run_cmd logs and returns "" on a non-zero exit rather than raising
     result = await asyncio.to_thread(_run_cmd, f"du -sm {shlex.quote(str(path))}")
 
     try:
-        # if du fails to produce the expected output, split will fail
-        value = result.split()[0]
-
-        _ = int(value)
-        return value
-    except Exception:
-        return "-1"
+        return int(result.split()[0])
+    except (ValueError, IndexError):
+        return UNKNOWN_SIZE
 
 
-async def bounded_du(path: Path, sem: asyncio.Semaphore) -> str:
-    """Wrap the disk usage method in a semaphore to limit concurrent IO requests.
+async def step_disk_usage(step_root: Path) -> int:
+    """Measure the disk usage of a single step's own directory tree.
+
+    Nested sub-steps live under `JobFileSystemManager._TASKS_NAME` and are
+    measured independently, so that subtree is subtracted here to avoid
+    double-counting.
 
     Parameters
     ----------
-    path : Path
-        The path to compute disk usage for
-    sem : asyncio.Semaphore
-        A semaphore for bounding concurrent executions
+    step_root : Path
+        The root directory of the step.
 
     Returns
     -------
-    str
-        The size of the directory in MB, or "-1" when the measurement fails.
+    int
+        The size of the step's directory in MB, excluding nested sub-steps;
+        0 when the directory does not exist; `UNKNOWN_SIZE` when the
+        measurement fails.
     """
-    async with sem:
-        return await disk_usage(path)
+    tasks_dir = step_root / JobFileSystemManager._TASKS_NAME
+
+    try:
+        if not step_root.is_dir():
+            return 0
+        has_nested = tasks_dir.is_dir()
+    except OSError:
+        return UNKNOWN_SIZE
+
+    total = await _du_mb(step_root)
+    if total < 0 or not has_nested:
+        return total
+
+    nested = await _du_mb(tasks_dir)
+    return UNKNOWN_SIZE if nested < 0 else max(total - nested, 0)
 
 
 def get_backup_path(path: Path, backup_ext: str = ".bak") -> Path:
@@ -570,6 +587,10 @@ def get_backup_path(path: Path, backup_ext: str = ".bak") -> Path:
 
     Adds `.bak` on first execution and appends `.bak.<i>` for each subsequent
     backup to ensure the original is never lost.
+
+    Parameters
+    ----------
+    path : Path
         The source path
     backup_ext : str
         An extension differentiating the backup files from the source file.
