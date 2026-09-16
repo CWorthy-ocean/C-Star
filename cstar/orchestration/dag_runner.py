@@ -19,7 +19,7 @@ from cstar.base.env import (
 from cstar.base.feature import is_flag_enabled
 from cstar.base.log import get_logger
 from cstar.base.utils import slugify
-from cstar.execution.file_system import StateDirectoryManager
+from cstar.execution.file_system import StateDirectoryManager, disk_usage
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
 from cstar.orchestration.models import KEY_CLOBBER, Step, UserDefinedVariables, Workplan
@@ -37,7 +37,7 @@ from cstar.orchestration.orchestration import (
 )
 from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
 from cstar.orchestration.state import StateRepository, load_sentinels
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import KEY_RUN_SIZE, TrackingRepository, WorkplanRun
 from cstar.orchestration.transforms import (
     TemplateFillTransform,
     WorkplanTransformer,
@@ -497,6 +497,18 @@ class ExecutiveRunSummary(BaseModel):
         cls,
         run: WorkplanRun,
     ) -> "ExecutiveRunSummary":
+        """Build a run summary from a persisted run record.
+
+        Parameters
+        ----------
+        run : WorkplanRun
+            The run record to summarize.
+
+        Returns
+        -------
+        ExecutiveRunSummary
+            A summary of the run and the status of each of its steps.
+        """
         workplan = deserialize(run.trx_workplan_path, LiveWorkplan)
         steps = [LiveStep.from_step(s) for s in workplan.steps]
         step_summaries: list[ExecutiveStepSummary] = []
@@ -672,6 +684,7 @@ async def on_status_changed(handle: ProcessHandle) -> None:
     run = await run_repo.get_workplan_run(handle.run_id)
 
     if path and run:
+        run.metadata[KEY_RUN_SIZE] = await disk_usage(run.output_path)
         run.sentinels.add(path)
         await run_repo.put_workplan_run(run)
 
@@ -699,9 +712,9 @@ async def build_dag(
 
     Returns
     -------
-    Path
-        The path to the workplan that was executed after any tranformations
-        were applied.
+    tuple[Planner, Path]
+        The planner built from the prepared workplan, and the path to the
+        workplan after any transformations were applied.
     """
     if run_id:
         run_id = slugify(run_id)
@@ -721,6 +734,7 @@ async def build_dag(
 
 async def run_dag(
     wp_path: Path,
+    trx_wp_path: Path,
     run_id: str,
     planner: Planner,
     user_variables: Mapping[str, str] | None = None,
@@ -731,7 +745,9 @@ async def run_dag(
     Parameters
     ----------
     wp_path : Path
-        The path to the blueprint to execute
+        The path to the original workplan, recorded on the run for provenance.
+    trx_wp_path : Path
+        The path to the prepared (transformed) workplan that is executed.
     run_id : str
         The run-id to be used by the orchestrator.
     planner : Planner
@@ -752,12 +768,13 @@ async def run_dag(
 
     wp_run = WorkplanRun(
         workplan_path=wp_path,
-        trx_workplan_path=wp_path,
+        trx_workplan_path=trx_wp_path,
         output_path=output_dir,
         run_id=run_id,
         environment=capture_environment(),
         user_variables=user_variables or {},
         sentinels={StateRepository.sentinel_path(s) for s in steps},
+        metadata={"name": planner.workplan.name},
     )
 
     if not dry_run:
@@ -766,7 +783,7 @@ async def run_dag(
     orchestrator = get_orchestrator(planner)
 
     if dry_run:
-        msg = f"Dry run complete. Prepared workplan location: {wp_path}"
+        msg = f"Dry run complete. Prepared workplan location: {trx_wp_path}"
         log.debug(msg)
         return wp_run
 
@@ -814,6 +831,7 @@ async def build_and_run_dag(
         clobber_steps=clobber_steps,
     )
     return await run_dag(
+        wp_path,
         prepared_wp_path,
         run_id,
         planner,
