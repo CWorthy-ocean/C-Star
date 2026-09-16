@@ -607,10 +607,9 @@ def run(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
-    trx_path: Path | None = None
-    original_path: Path | None = None
+    reload = not path
 
-    if not path:
+    if reload:
         original_path, trx_path = asyncio.run(handle_run_reloading(run_id))
         path = str(trx_path)
 
@@ -619,17 +618,7 @@ def run(
             clobber = resolve_clobber_selection(wp_path, clobber)
             user_vars = t.cast("Mapping[str, str]", ctx.obj)
 
-            if trx_path is None or original_path is None:
-                wp_run = asyncio.run(
-                    build_and_run_dag(
-                        wp_path,
-                        run_id,
-                        user_variables=user_vars,
-                        dry_run=dry_run,
-                        clobber_steps=clobber,
-                    ),
-                )
-            else:
+            if reload:
                 wp = deserialize(wp_path, LiveWorkplan)
                 apply_clobber_overrides(wp, clobber)
                 planner = Planner(wp)
@@ -642,6 +631,16 @@ def run(
                         planner,
                         user_variables=user_vars,
                         dry_run=dry_run,
+                    ),
+                )
+            else:
+                wp_run = asyncio.run(
+                    build_and_run_dag(
+                        wp_path,
+                        run_id,
+                        user_variables=user_vars,
+                        dry_run=dry_run,
+                        clobber_steps=clobber,
                     ),
                 )
 

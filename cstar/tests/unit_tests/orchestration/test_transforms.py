@@ -3419,3 +3419,104 @@ def test_workplan_transformer_deferred_split_producer_raises(
         pytest.raises(CstarExpectationFailed, match="split"),
     ):
         _ = WorkplanTransformer(wp).apply()
+
+
+async def test_load_workplan_missing_trx_file_raises_runtime_error(
+    tmp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """A run record pointing at a nonexistent trx workplan surfaces
+    `FileNotFoundError` rather than a generic `RuntimeError`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    trx_path = tmp_path / "missing_trx.yaml"
+
+    repo = TrackingRepository()
+    await repo.put_workplan_run(
+        WorkplanRun(
+            workplan_path=tmp_path / "wp.yaml",
+            trx_workplan_path=trx_path,
+            output_path=tmp_path,
+            run_id=mock_run_id,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Unable to load workplan"):
+        DirectiveConfig.load_workplan()
+
+
+async def test_load_workplan_invalid_content_raises_runtime_error(
+    tmp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """A run record whose trx workplan fails validation surfaces the
+    underlying `ValidationError` (a `ValueError` subclass) rather than a
+    generic `RuntimeError`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    trx_path = tmp_path / "bad_trx.yaml"
+    # valid YAML, but missing the `name` required by `Workplan`
+    trx_path.write_text(
+        """\
+description: a workplan missing its required name
+steps: []
+"""
+    )
+
+    repo = TrackingRepository()
+    await repo.put_workplan_run(
+        WorkplanRun(
+            workplan_path=tmp_path / "wp.yaml",
+            trx_workplan_path=trx_path,
+            output_path=tmp_path,
+            run_id=mock_run_id,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Unable to load workplan"):
+        DirectiveConfig.load_workplan()
+
+
+async def test_load_workplan_malformed_yaml_raises_runtime_error(
+    tmp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """A trx workplan with broken YAML syntax (e.g. a partial write) is
+    reported as the documented `RuntimeError`, chained from the parser error.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    mock_run_id : str
+        A unique run-id that has already been added to os.environ.
+    """
+    trx_path = tmp_path / "truncated_trx.yaml"
+    trx_path.write_text("name: truncated\nsteps: [\n  - name: step-a\n")
+
+    repo = TrackingRepository()
+    await repo.put_workplan_run(
+        WorkplanRun(
+            workplan_path=tmp_path / "wp.yaml",
+            trx_workplan_path=trx_path,
+            output_path=tmp_path,
+            run_id=mock_run_id,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Unable to load workplan") as exc_info:
+        DirectiveConfig.load_workplan()
+
+    assert exc_info.value.__cause__ is not None

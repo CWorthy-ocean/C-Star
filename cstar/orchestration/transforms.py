@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
+import yaml
 from pydantic import (
     BaseModel,
 )
@@ -31,7 +32,7 @@ from cstar.orchestration.models import (
     Workplan,
 )
 from cstar.orchestration.orchestration import LiveStep, LiveWorkplan
-from cstar.orchestration.serialization import deserialize, serialize, try_deserialize
+from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
@@ -1179,7 +1180,9 @@ class DirectiveConfig(BaseModel):
         ------
         RuntimeError
             If no run-id is exported in the environment, no run record exists
-            for it, or the recorded workplan cannot be deserialized.
+            for it, or the recorded workplan cannot be loaded. In the last case
+            the underlying `FileNotFoundError`, `ValueError` or `yaml.YAMLError`
+            is chained as the cause and its message is included.
         """
         run_id = os.getenv(ENV_CSTAR_RUNID, None)
         run: WorkplanRun | None = None
@@ -1196,12 +1199,11 @@ class DirectiveConfig(BaseModel):
             raise RuntimeError(msg)
 
         wp_path = run.trx_workplan_path
-
-        if wp := try_deserialize(wp_path, LiveWorkplan):
-            return wp
-
-        msg = f"No live workplan for run-id {run_id!r} found at {str(wp_path)!r}"
-        raise RuntimeError(msg)
+        try:
+            return deserialize(wp_path, LiveWorkplan)
+        except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
+            msg = f"Unable to load workplan for run-id {run_id!r} from {str(wp_path)!r}: {ex}"
+            raise RuntimeError(msg) from ex
 
     @classmethod
     def register(cls, key: str, directive: type[Directive]) -> None:

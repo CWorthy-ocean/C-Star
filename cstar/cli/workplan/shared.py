@@ -1,7 +1,9 @@
 import asyncio
+import functools
 import typing as t
 from collections import Counter, OrderedDict
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import typer
 from rich.table import Column, Table
@@ -25,16 +27,24 @@ from cstar.cli.common import (
 )
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.entrypoint.runner import BlueprintRunner
+from cstar.entrypoint.utils import ARG_SIZE
 from cstar.execution.file_system import (
     JobFileSystemManager,
     StateDirectoryManager,
-    bounded_du,
 )
 from cstar.orchestration.dag_runner import DagDetailRecord
 from cstar.orchestration.models import Blueprint
 from cstar.orchestration.orchestration import LiveWorkplan
-from cstar.orchestration.serialization import deserialize, try_deserialize
-from cstar.orchestration.tracking import KEY_RUN_SIZE, TrackingRepository, WorkplanRun
+from cstar.orchestration.serialization import (
+    deserialize,
+    deserialize_all,
+    try_deserialize,
+)
+from cstar.orchestration.tracking import (
+    TrackingRepository,
+    WorkplanRun,
+    measure_step_sizes,
+)
 
 log = get_logger(__name__)
 
@@ -58,7 +68,7 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
     """
     incomplete = incomplete.lower()
 
-    async def _bounded() -> Sequence[WorkplanRun | None]:
+    async def _bounded() -> Sequence[WorkplanRun]:
         """Retrieve the run list while limiting concurrent reads."""
         async with TrackingRepository.bound(max_concurrency()) as repo:
             return await repo.list_latest_runs(incomplete)
@@ -71,7 +81,7 @@ def list_runs(incomplete: str = "") -> list[tuple[str, str]]:
 
         return [("run-id", "no results found")]
 
-    return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list if r]
+    return [(r.run_id, f"Workplan path: {r.workplan_path}") for r in run_list]
 
 
 async def list_steps(run_id: str, incomplete: str) -> list[str]:
@@ -92,36 +102,27 @@ async def list_steps(run_id: str, incomplete: str) -> list[str]:
     list[str]
         The matching step names, from the recorded workplan when available
         and otherwise from a scan of the tasks directory.
-
-    Raises
-    ------
-    RuntimeError
-        If no run record exists for the supplied run-id.
     """
     if not run_id:
         return []
 
     incomplete = incomplete.lower()
-    wp_run: WorkplanRun | None = None
-    try:
-        repo = TrackingRepository()
-        wp_run = await repo.get_workplan_run(run_id)
+    repo = TrackingRepository()
 
-        if not wp_run:
-            msg = f"No run for run-id {run_id!r} could be found."
-            raise RuntimeError(msg)
+    if wp_run := await repo.get_workplan_run(run_id):
+        try:
+            wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
+            step_names = [str(s.name) for s in wp.steps]
 
-        wp = deserialize(wp_run.trx_workplan_path, LiveWorkplan)
-        step_names = [str(s.name) for s in wp.steps]
+            if incomplete:
+                step_names = [s for s in step_names if s.lower().startswith(incomplete)]
 
-        if incomplete:
-            step_names = [s for s in step_names if s.lower().startswith(incomplete)]
-
-        return step_names
-    except FileNotFoundError:
-        if wp_run:
+            return step_names
+        except FileNotFoundError:
             msg = f"Workplan run contains a dead path: {wp_run.trx_workplan_path} was not found"
             log.debug(msg)
+    else:
+        log.debug(f"No run for run-id {run_id!r} could be found.")
 
     # run state may be cleaned up. fallback to directory search
     run_dir = StateDirectoryManager.data_dir()
@@ -234,16 +235,12 @@ def display_summary(
             ref_label(x, refs_map),
         )
 
-    raw_size = run.metadata.get(KEY_RUN_SIZE, "")
-    caption = "Disk consumption has not been calculated"
-
-    try:
-        run_size = int(raw_size)
-        if run_size >= 0:
-            caption = f"{run_size}MB disk consumed"
-    except Exception:
-        log.debug(f"run size {raw_size!r} for {run.run_id!r} could not be parsed")
-        caption = "Disk consumption could not be calculated"
+    if run.size_mb >= 0:
+        caption = f"{run.size_mb}MB of step output"
+        if run.size_measured_at:
+            caption += f" as of {run.size_measured_at.astimezone():%Y-%m-%d %H:%M}"
+    else:
+        caption = f"Disk usage not measured. Run: cstar workplan status {run.run_id} {ARG_SIZE}"
 
     table.caption = caption
 
@@ -412,29 +409,6 @@ def preload_run(context: typer.Context, run_id: str) -> str:
     return run_id
 
 
-async def get_run_disk_usage(runs: Sequence[WorkplanRun]) -> dict[str, int]:
-    """Retrieve the disk space consumed for a collection of runs.
-
-    Measurements run concurrently, bounded by the configured max-concurrency.
-
-    Parameters
-    ----------
-    runs : Sequence[WorkplanRun]
-        The runs whose output directories will be measured.
-
-    Returns
-    -------
-    dict[str, int]
-        A dictionary mapping the run-id to the disk usage (in MB) for the
-        run; a failed measurement is reported as -1.
-    """
-    sem = asyncio.Semaphore(max_concurrency())
-
-    disk_space = await asyncio.gather(*[bounded_du(r.output_path, sem) for r in runs])
-    sizes = {run.run_id: int(size) for run, size in zip(runs, disk_space)}
-    return sizes
-
-
 RunIdArgument = t.Annotated[
     str,
     typer.Argument(
@@ -447,33 +421,105 @@ RunIdArgument = t.Annotated[
 and preload the `WorkplanRun` and transformed workplan into the context map."""
 
 
-async def attach_disk_usage(runs: Sequence[WorkplanRun], refresh: bool = False) -> None:
-    """Add disk usage to run metadata for display.
+async def load_workplans(
+    paths: Sequence[Path], cache: dict[Path, LiveWorkplan]
+) -> None:
+    """Load workplans from disk and add them to the in-memory cache.
 
-    If refresh is disabled, current usage will not be updated and a default
-    or previously-loaded metadata will be used.
+    Parameters
+    ----------
+    paths : Sequence[Path]
+        The paths to serialized, transformed workplans.
+    cache : dict[Path, LiveWorkplan]
+        The cached copy of loaded workplans, keyed on their file path;
+        updated in place with the successfully loaded workplans.
+    """
+    limit = max_concurrency()
+    workplans = await deserialize_all(list(paths), LiveWorkplan, limit=limit)
 
-    When refresh is enabled, disk usage is re-measured and the size metadata
-    is cached on the persisted run record.
+    failed: list[Path] = []
+    for path, wp in zip(paths, workplans):
+        if wp:
+            cache[path] = wp
+        else:
+            failed.append(path)
+
+    if failed:
+        log.debug(
+            f"Workplan(s) failed deserialization and were skipped: "
+            f"{', '.join(str(p) for p in failed)}"
+        )
+
+
+async def refresh_disk_usage(
+    runs: Sequence[WorkplanRun], plans: Mapping[Path, LiveWorkplan]
+) -> None:
+    """Re-measure and persist per-step disk usage for a collection of runs.
+
+    A run whose transformed workplan is not present in `plans` falls back to
+    the subdirectories of its tasks directory; a run with neither is skipped.
 
     Parameters
     ----------
     runs : Sequence[WorkplanRun]
-        The runs to be enriched with usage metadata.
-    refresh : bool
-        When `True`, re-calculate disk usage. Otherwise, use default (-1) or
-        previously stored metadata that may be out-of-date.
+        The runs whose step sizes will be measured and persisted.
+    plans : Mapping[Path, LiveWorkplan]
+        Loaded workplans, keyed on their transformed workplan path.
     """
-    if refresh:
-        du = await get_run_disk_usage(runs)
+    sem = asyncio.Semaphore(max_concurrency())
+    by_id = {run.run_id: run for run in runs}
+    step_dirs_by_run: dict[str, Mapping[str, Path]] = {}
+    fallback: list[str] = []
+    skipped: list[str] = []
 
-        for run in runs:
-            run.metadata[KEY_RUN_SIZE] = str(du[run.run_id])
+    for run in runs:
+        if (plan := plans.get(run.trx_workplan_path)) is not None:
+            step_dirs_by_run[run.run_id] = {s.name: s.working_dir for s in plan.steps}
+            continue
 
-        async with TrackingRepository.bound(max_concurrency()) as repo:
-            coros = [repo.put_workplan_run(run) for run in runs]
-            await asyncio.gather(*coros)
-    else:
-        for run in runs:
-            if KEY_RUN_SIZE not in run.metadata:
-                run.metadata[KEY_RUN_SIZE] = "-1"
+        # no loadable workplan: take the step directories from the run's tasks dir
+        tasks_dir = JobFileSystemManager(run.output_path).tasks_dir
+        dirs = (
+            {d.name: d for d in sorted(tasks_dir.iterdir()) if d.is_dir()}
+            if tasks_dir.is_dir()
+            else {}
+        )
+        if dirs:
+            step_dirs_by_run[run.run_id] = dirs
+            fallback.append(run.run_id)
+        else:
+            skipped.append(run.run_id)
+
+    if fallback:
+        log.debug(
+            "Step directories were taken from the tasks directory for run(s) "
+            f"without a loadable workplan: {', '.join(fallback)}"
+        )
+    if skipped:
+        log.warning(
+            "Disk usage was not refreshed for run(s) without a loadable workplan "
+            f"or tasks directory: {', '.join(skipped)}"
+        )
+
+    if not step_dirs_by_run:
+        return
+
+    results = await asyncio.gather(
+        *(
+            measure_step_sizes(by_id[rid], dirs, sem)
+            for rid, dirs in step_dirs_by_run.items()
+        )
+    )
+    measured = dict(zip(step_dirs_by_run, results))
+
+    # apply under each run's lock so a concurrently running orchestrator's
+    # sentinel/size updates are not overwritten
+    async with TrackingRepository.bound(max_concurrency()) as repo:
+        await asyncio.gather(
+            *(
+                repo.update_workplan_run(
+                    rid, functools.partial(WorkplanRun.record_step_sizes, sizes=sizes)
+                )
+                for rid, sizes in measured.items()
+            )
+        )

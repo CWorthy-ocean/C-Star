@@ -8,18 +8,22 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, ConfigDict, computed_field
 from rich.console import ConsoleRenderable
 from rich.table import Column, Table
 from rich.text import Text
 
 from cstar.base.env import max_concurrency
 from cstar.base.log import get_logger
-from cstar.cli.workplan.shared import attach_disk_usage, console
+from cstar.cli.workplan.shared import console, load_workplans, refresh_disk_usage
 from cstar.entrypoint.utils import ARG_SIZE, ARG_SIZE_HELP
 from cstar.orchestration.orchestration import LiveWorkplan
-from cstar.orchestration.serialization import deserialize_all
-from cstar.orchestration.tracking import KEY_RUN_SIZE, TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    KEY_RUN_NAME,
+    UNKNOWN_SIZE,
+    TrackingRepository,
+    WorkplanRun,
+)
 
 log = get_logger(__name__)
 app = typer.Typer()
@@ -38,8 +42,6 @@ EXCLUSIONS: set[str] = {"raw_size", "raw_start", "format"}
 """View fields excluded from rendered outputs."""
 INCLUSIONS: set[str] = {"run_id", "name", "size", "start"}
 """View fields included in the rendered outputs."""
-UNKNOWN_SIZE: t.Final[int] = -1
-"""Constant value used by the system when a value for size has not been computed."""
 UNKNOWN_NAME: t.Final[str] = "unknown"
 """Constant value used by the system when a name cannot be retrieved."""
 
@@ -47,11 +49,26 @@ UNKNOWN_NAME: t.Final[str] = "unknown"
 class ItemView(BaseModel):
     """A single run prepared for rendering in one of the output formats."""
 
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        use_attribute_docstrings=True,
+    )
+
     run_id: str
+    """The unique identifier of the run."""
+
     name: str
+    """The resolved workplan name, or the "unknown" sentinel."""
+
     raw_size: int
+    """The disk usage in MB, or the `UNKNOWN_SIZE` sentinel."""
+
     raw_start: datetime.datetime
+    """The time the run started."""
+
     format: FORMATS
+    """The output format this view will be rendered with."""
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -78,8 +95,9 @@ async def adapt_runs_to_views(
 ) -> Sequence[ItemView]:
     """Build the raw dataset that will be rendered in the view.
 
-    Workplan names are resolved by deserializing each run's transformed
-    workplan; a run whose workplan cannot be loaded is shown as "unknown".
+    A run's name is taken from its recorded metadata when present; otherwise
+    its transformed workplan is loaded to resolve the name, and a run whose
+    workplan cannot be loaded is shown as "unknown".
 
     Parameters
     ----------
@@ -96,55 +114,43 @@ async def adapt_runs_to_views(
     Sequence[ItemView]
         One view per run, in input order.
     """
-
-    async def _populate_cache(
-        paths: list[Path], cache: dict[Path, LiveWorkplan]
-    ) -> None:
-        """Load workplans from disk and add them to the in-memory cache.
-
-        Parameters
-        ----------
-        paths : list[Path]
-            The paths to serialized workplans.
-        cache : dict[Path, LiveWorkplan]
-            The cached copy of loaded workplans, keyed on their file path.
-        """
-        limit = max_concurrency()
-        workplans = await deserialize_all(paths, LiveWorkplan, limit=limit)
-        for path, wp in zip(paths, workplans):
-            if wp:
-                cache[path] = wp
-            else:
-                log.debug(
-                    f"Workplan at {str(path)!r} failed deserialization. Skipping cache"
-                )
-
     missing = {
-        r.trx_workplan_path for r in runs if r.trx_workplan_path not in plan_cache
+        r.trx_workplan_path
+        for r in runs
+        if KEY_RUN_NAME not in r.metadata and r.trx_workplan_path not in plan_cache
     }
-    await _populate_cache(sorted(missing), plan_cache)
+    if missing:
+        await load_workplans(sorted(missing), plan_cache)
 
     views: list[ItemView] = []
+    unresolved: list[str] = []
 
     for run in runs:
-        wp_path = run.trx_workplan_path
-        name = run.metadata.get("name", UNKNOWN_NAME)
+        name = run.metadata.get(KEY_RUN_NAME)
 
-        try:
-            if name == UNKNOWN_NAME:
-                name = plan_cache[wp_path].name
-        except KeyError:
-            log.warning(f"The workplan path {str(wp_path)!r} was not loaded into cache")
+        if not name:
+            plan = plan_cache.get(run.trx_workplan_path)
+            name = plan.name if plan else UNKNOWN_NAME
+
+        if name == UNKNOWN_NAME:
+            unresolved.append(run.run_id)
 
         views.append(
             ItemView(
                 run_id=run.run_id,
                 name=name,
-                raw_size=int(run.metadata.get(KEY_RUN_SIZE, UNKNOWN_SIZE)),
+                raw_size=run.size_mb,
                 raw_start=run.start_at,
                 format=format,
             )
         )
+
+    if unresolved:
+        log.debug(
+            f"{len(unresolved)} run(s) shown as {UNKNOWN_NAME!r}: transformed "
+            f"workplan not readable: {', '.join(unresolved)}"
+        )
+
     return views
 
 
@@ -258,8 +264,7 @@ def filter_size(
     warn_unsized: list[str] = []
 
     for run in runs:
-        raw_size = run.metadata.get(KEY_RUN_SIZE)
-        size = int(raw_size) if raw_size is not None else 0
+        size = run.size_mb
 
         if size == UNKNOWN_SIZE:
             # never filter items with uncomputed sizes
@@ -417,25 +422,26 @@ def ls_runs(
     """List all runs started by a user."""
     plan_cache: dict[Path, LiveWorkplan] = {}
 
-    async def _list_runs() -> Sequence[WorkplanRun | None]:
-        """Perform a max-concurrency bounded retrieval of the run list."""
+    async def _pipeline() -> Sequence[ItemView]:
+        """List, filter, optionally re-measure, and adapt runs for display."""
         async with TrackingRepository.bound(max_concurrency()) as repo:
-            return await repo.list_latest_runs(runid_filter)
+            runs = await repo.list_latest_runs(runid_filter)
 
-    raw_runs = asyncio.run(_list_runs())
-    runs = [r for r in raw_runs if r is not None]
-    if dropped := len(raw_runs) - len(runs):
-        log.warning(f"{dropped} run record(s) could not be read and were omitted")
+        filtered = filter_time(list(runs), time_lt_filter, time_gt_filter)
 
-    runs = filter_time(runs, time_lt_filter, time_gt_filter)
+        if refresh_usage:
+            paths = {r.trx_workplan_path for r in filtered}
+            await load_workplans(sorted(paths), plan_cache)
+            await refresh_disk_usage(filtered, plan_cache)
 
-    asyncio.run(attach_disk_usage(runs, refresh=refresh_usage))
-    runs = filter_size(runs, size_lt_filter, size_gt_filter)
+        filtered = filter_size(filtered, size_lt_filter, size_gt_filter)
 
-    views = asyncio.run(adapt_runs_to_views(runs, plan_cache, format))
+        return await adapt_runs_to_views(filtered, plan_cache, format)
 
-    views = sorters[sort](views, reverse)
-    content = formatters[format](views)
+    views = asyncio.run(_pipeline())
+
+    sorted_views = sorters[sort](views, reverse)
+    content = formatters[format](sorted_views)
 
     console.print(content)
 

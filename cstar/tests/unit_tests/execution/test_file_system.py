@@ -1,5 +1,6 @@
 import os
 import pickle
+import shlex
 from pathlib import Path
 from unittest import mock
 
@@ -8,6 +9,7 @@ import pytest
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.execution.file_system import (
+    UNKNOWN_SIZE,
     DirectoryManager,
     JobFileSystemManager,
     get_backup_path,
@@ -15,6 +17,7 @@ from cstar.execution.file_system import (
     local_copy,
     local_copy_async,
     remove_files,
+    step_disk_usage,
 )
 from cstar.orchestration.models import Step
 from cstar.orchestration.orchestration import LiveStep
@@ -484,3 +487,83 @@ def test_file_system_get_backup_path_custom_ext(
     backup_path = get_backup_path(source, backup_ext=backup_ext)
 
     assert backup_path == tmp_path / "blueprint.yaml.orig"
+
+
+async def test_step_disk_usage_missing_dir(tmp_path: Path) -> None:
+    """Verify a missing step directory reports zero usage without running `du`."""
+    with mock.patch("cstar.execution.file_system._run_cmd") as mock_run_cmd:
+        size = await step_disk_usage(tmp_path / "does-not-exist")
+
+    assert size == 0
+    mock_run_cmd.assert_not_called()
+
+
+async def test_step_disk_usage_without_nested_steps(tmp_path: Path) -> None:
+    """Verify a step without a `tasks` subdirectory is measured with one `du`."""
+    step_root = tmp_path / "step"
+    (step_root / "output").mkdir(parents=True)
+
+    with mock.patch(
+        "cstar.execution.file_system._run_cmd", return_value=f"7\t{step_root}\n"
+    ) as mock_run_cmd:
+        size = await step_disk_usage(step_root)
+
+    assert size == 7
+    assert mock_run_cmd.call_count == 1
+    assert shlex.quote(str(step_root)) in mock_run_cmd.call_args.args[0]
+
+
+async def test_step_disk_usage_subtracts_tasks_dir(tmp_path: Path) -> None:
+    """Verify the nested `tasks` subtree is measured separately and subtracted."""
+    step_root = tmp_path / "step"
+    tasks_dir = step_root / "tasks"
+    (step_root / "output").mkdir(parents=True)
+    tasks_dir.mkdir()
+
+    outputs = [f"12\t{step_root}\n", f"4\t{tasks_dir}\n"]
+
+    with mock.patch(
+        "cstar.execution.file_system._run_cmd", side_effect=outputs
+    ) as mock_run_cmd:
+        size = await step_disk_usage(step_root)
+
+    assert size == 8
+    assert mock_run_cmd.call_count == 2
+    assert shlex.quote(str(tasks_dir)) in mock_run_cmd.call_args_list[1].args[0]
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        ["garbage"],
+        [""],
+        ["12\t/step\n", "nope"],
+    ],
+    ids=["unparseable-total", "empty-total", "unparseable-nested"],
+)
+async def test_step_disk_usage_failures_report_unknown(
+    tmp_path: Path, outputs: list[str]
+) -> None:
+    """Verify any unparseable `du` output results in `UNKNOWN_SIZE`."""
+    step_root = tmp_path / "step"
+    (step_root / "tasks").mkdir(parents=True)
+
+    with mock.patch("cstar.execution.file_system._run_cmd", side_effect=outputs):
+        size = await step_disk_usage(step_root)
+
+    assert size == UNKNOWN_SIZE
+
+
+async def test_step_disk_usage_unreadable_dir_reports_unknown(tmp_path: Path) -> None:
+    """Verify an `OSError` while inspecting the step directory yields `UNKNOWN_SIZE`."""
+    step_root = tmp_path / "step"
+    step_root.mkdir()
+
+    with (
+        mock.patch("pathlib.Path.is_dir", side_effect=PermissionError("denied")),
+        mock.patch("cstar.execution.file_system._run_cmd") as mock_run_cmd,
+    ):
+        size = await step_disk_usage(step_root)
+
+    assert size == UNKNOWN_SIZE
+    mock_run_cmd.assert_not_called()

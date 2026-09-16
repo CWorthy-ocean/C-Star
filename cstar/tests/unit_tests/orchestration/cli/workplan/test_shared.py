@@ -1,17 +1,32 @@
+import datetime
+import io
+import logging
+import os
+import typing as t
+from collections import OrderedDict
 from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 import typer
+from rich.console import Console
 
+from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.cli.workplan.shared import (
     autocomplete_step_list,
     check_and_capture_kvp,
     check_and_capture_kvps,
+    display_summary,
     list_steps,
+    refresh_disk_usage,
 )
+from cstar.execution.file_system import JobFileSystemManager, StateDirectoryManager
 from cstar.orchestration.models import Workplan
+from cstar.orchestration.tracking import WorkplanRun
+
+SHARED_LOGGER = "cstar.cli.workplan.shared"
 
 
 @pytest.mark.parametrize(
@@ -274,3 +289,259 @@ def test_autocomplete_step_list_happy_path(
     with mock.patch("typer.Context", mock_typer_ctx):
         steps = autocomplete_step_list(mock_typer_ctx, incomplete="")
         assert len(steps) == len(wp.steps)
+
+
+# ---------------------------------------------------------------------------
+# list_steps: fallback to tasks-directory search
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_steps_falls_back_to_tasks_dir_when_no_run_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a missing run record falls through to the tasks-directory scan.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory used to stand in for the state/data home.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    """
+    fake_run_id = "fake-run-id"
+
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.TrackingRepository.get_workplan_run",
+        mock.AsyncMock(return_value=None),
+    )
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_RUNID: fake_run_id}):
+        data_dir = StateDirectoryManager.data_dir()
+        tasks_dir = JobFileSystemManager(data_dir).tasks_dir
+        for step_name in ("step-a", "step-b"):
+            (tasks_dir / step_name).mkdir(parents=True, exist_ok=True)
+
+        steps = await list_steps(fake_run_id, incomplete="")
+
+    assert set(steps) == {"step-a", "step-b"}
+
+
+# ---------------------------------------------------------------------------
+# refresh_disk_usage
+# ---------------------------------------------------------------------------
+
+
+def make_plan(steps: Mapping[str, Path]) -> SimpleNamespace:
+    """Build a stand-in workplan exposing only what `refresh_disk_usage` reads.
+
+    Parameters
+    ----------
+    steps : Mapping[str, Path]
+        Step name to working directory.
+
+    Returns
+    -------
+    SimpleNamespace
+        An object with a `.steps` list of name/working_dir pairs.
+    """
+    return SimpleNamespace(
+        steps=[
+            SimpleNamespace(name=name, working_dir=path) for name, path in steps.items()
+        ]
+    )
+
+
+def make_workplan_run(run_id: str, tmp_path: Path) -> WorkplanRun:
+    """Build a bare `WorkplanRun` with dummy paths under `tmp_path`.
+
+    Parameters
+    ----------
+    run_id : str
+        The unique run identifier.
+    tmp_path : Path
+        The directory the dummy paths are rooted under.
+
+    Returns
+    -------
+    WorkplanRun
+    """
+    return WorkplanRun(
+        workplan_path=tmp_path / run_id / "workplan.yaml",
+        trx_workplan_path=tmp_path / run_id / "trx.yaml",
+        output_path=tmp_path / run_id / "out",
+        run_id=run_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_refresh_disk_usage_measures_and_persists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify measured runs are passed step directories and then persisted.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for dummy step paths.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    """
+    run = make_workplan_run("run-1", tmp_path)
+    step_dirs = {"step-a": tmp_path / "step-a", "step-b": tmp_path / "step-b"}
+    plan = make_plan(step_dirs)
+
+    measure_mock = mock.AsyncMock()
+    put_mock = mock.AsyncMock()
+    monkeypatch.setattr("cstar.cli.workplan.shared.measure_step_sizes", measure_mock)
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.TrackingRepository.update_workplan_run", put_mock
+    )
+
+    plans = t.cast("dict[Path, t.Any]", {run.trx_workplan_path: plan})
+    await refresh_disk_usage([run], plans)
+
+    measure_mock.assert_awaited_once()
+    assert measure_mock.await_args is not None
+    awaited_run, awaited_step_dirs, _sem = measure_mock.await_args.args
+    assert awaited_run is run
+    assert awaited_step_dirs == step_dirs
+    put_mock.assert_awaited_once_with(run.run_id, mock.ANY)
+
+
+@pytest.mark.asyncio
+async def test_refresh_disk_usage_skips_and_warns_for_run_without_plan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a run with neither a loaded workplan nor a tasks directory is
+    skipped, not measured or persisted.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for dummy step paths.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    caplog : pytest.LogCaptureFixture
+        Captures the collapsed warning naming the skipped run.
+    """
+    run = make_workplan_run("run-without-plan", tmp_path)
+
+    measure_mock = mock.AsyncMock()
+    put_mock = mock.AsyncMock()
+    monkeypatch.setattr("cstar.cli.workplan.shared.measure_step_sizes", measure_mock)
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.TrackingRepository.update_workplan_run", put_mock
+    )
+
+    with caplog.at_level(logging.WARNING, logger=SHARED_LOGGER):
+        await refresh_disk_usage([run], {})
+
+    measure_mock.assert_not_awaited()
+    put_mock.assert_not_awaited()
+    assert any("run-without-plan" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_refresh_disk_usage_falls_back_to_tasks_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a run without a loadable workplan is measured from the
+    subdirectories of its tasks directory.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for dummy step paths.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    """
+    run = make_workplan_run("run-fallback", tmp_path)
+    tasks_dir = run.output_path / "tasks"
+    for name in ("step-a", "step-b"):
+        (tasks_dir / name).mkdir(parents=True)
+    (tasks_dir / "not-a-step.txt").write_text("ignored")
+
+    measure_mock = mock.AsyncMock(return_value={"step-a": 1})
+    update_mock = mock.AsyncMock()
+    monkeypatch.setattr("cstar.cli.workplan.shared.measure_step_sizes", measure_mock)
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.TrackingRepository.update_workplan_run", update_mock
+    )
+
+    await refresh_disk_usage([run], {})
+
+    assert measure_mock.await_args is not None
+    _run, awaited_step_dirs, _sem = measure_mock.await_args.args
+    assert awaited_step_dirs == {
+        "step-a": tasks_dir / "step-a",
+        "step-b": tasks_dir / "step-b",
+    }
+    update_mock.assert_awaited_once_with(run.run_id, mock.ANY)
+
+
+# ---------------------------------------------------------------------------
+# display_summary caption
+# ---------------------------------------------------------------------------
+
+
+def test_display_summary_caption_shows_measured_size_and_timestamp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify a measured run's caption shows total MB and the measurement time.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for dummy run paths.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    """
+    measured_at = datetime.datetime(2026, 9, 12, 3, 4, 0, tzinfo=datetime.UTC)
+    run = make_workplan_run("run-1", tmp_path)
+    run.step_sizes.update({"step-a": 5, "step-b": 3})
+    run.size_measured_at = measured_at
+
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.console", Console(file=buffer, width=200)
+    )
+
+    display_summary(run, OrderedDict())
+
+    rendered = buffer.getvalue()
+    assert "8MB of step output" in rendered
+    assert measured_at.astimezone().strftime("%Y-%m-%d %H:%M") in rendered
+
+
+def test_display_summary_caption_shows_hint_when_unmeasured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify an unmeasured run's caption points at `cstar workplan status --size`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for dummy run paths.
+    monkeypatch : pytest.MonkeyPatch
+        The active monkeypatch fixture.
+    """
+    run = make_workplan_run("run-1", tmp_path)
+
+    buffer = io.StringIO()
+    monkeypatch.setattr(
+        "cstar.cli.workplan.shared.console", Console(file=buffer, width=200)
+    )
+
+    display_summary(run, OrderedDict())
+
+    rendered = buffer.getvalue()
+    assert "Disk usage not measured" in rendered
+    assert "cstar workplan status run-1 --size" in rendered

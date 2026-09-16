@@ -1,5 +1,9 @@
 import asyncio
+import logging
 import os
+import threading
+import time
+import typing as t
 import unittest.mock as mock
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,7 +15,12 @@ from cstar.base.env import ENV_CSTAR_STATE_HOME
 from cstar.base.utils import slugify
 from cstar.orchestration.models import Workplan
 from cstar.orchestration.serialization import deserialize, serialize
-from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
+from cstar.orchestration.tracking import (
+    UNKNOWN_SIZE,
+    TrackingRepository,
+    WorkplanRun,
+    measure_step_sizes,
+)
 
 
 @pytest.mark.asyncio
@@ -465,3 +474,214 @@ async def test_tracking_retrieve_mixed_case_runid(tmp_path: Path) -> None:
     found_sync = repo.get_workplan_run_sync(run_id="MIXED-Case-Run-ID")
     assert found_sync
     assert found_sync.run_id == "mixed-case-run-id"
+
+
+def _make_workplan_run(tmp_path: Path, run_id: str, **overrides) -> WorkplanRun:
+    """Build a minimal `WorkplanRun` for use in tests.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory used to build placeholder paths.
+    run_id : str
+        The run-id to assign to the record.
+    """
+    defaults: dict = {
+        "workplan_path": tmp_path / "fake_workplan.yaml",
+        "trx_workplan_path": tmp_path / "mock_transformed_workplan.yaml",
+        "output_path": tmp_path / "output",
+        "run_id": run_id,
+    }
+    defaults.update(overrides)
+    return WorkplanRun(**defaults)
+
+
+def test_workplanrun_size_mb_unknown_when_empty(tmp_path: Path) -> None:
+    """Verify `size_mb` reports `UNKNOWN_SIZE` when no steps have been measured."""
+    run = _make_workplan_run(tmp_path, "size-mb-empty")
+
+    assert run.size_mb == UNKNOWN_SIZE
+
+
+def test_workplanrun_size_mb_sums_step_sizes(tmp_path: Path) -> None:
+    """Verify `size_mb` sums all recorded per-step sizes."""
+    run = _make_workplan_run(
+        tmp_path, "size-mb-sum", step_sizes={"step-a": 3, "step-b": 5}
+    )
+
+    assert run.size_mb == 8
+
+
+@pytest.mark.asyncio
+async def test_measure_step_sizes_stores_successes_and_skips_failures(
+    tmp_path: Path,
+) -> None:
+    """Verify successful measurements are stored, failures leave prior values
+    untouched, and `size_measured_at` is set once measurement is attempted.
+    """
+    run = _make_workplan_run(
+        tmp_path, "measure-step-sizes", step_sizes={"stale-step": 99}
+    )
+    step_dirs = {
+        "step-a": tmp_path / "step-a",
+        "step-b": tmp_path / "step-b",
+        "stale-step": tmp_path / "stale-step",
+    }
+
+    async def fake_step_disk_usage(step_root: Path) -> int:
+        return UNKNOWN_SIZE if step_root.name != "step-a" else 7
+
+    with mock.patch(
+        "cstar.orchestration.tracking.step_disk_usage",
+        side_effect=fake_step_disk_usage,
+    ):
+        measured = await measure_step_sizes(run, step_dirs, asyncio.Semaphore(2))
+
+    assert measured == {"step-a": 7}
+    assert run.step_sizes["step-a"] == 7
+    assert "step-b" not in run.step_sizes
+    # a failed re-measurement leaves the previously recorded value intact
+    assert run.step_sizes["stale-step"] == 99
+    assert run.size_measured_at is not None
+
+
+@pytest.mark.asyncio
+async def test_measure_step_sizes_no_steps_leaves_measured_at_unset(
+    tmp_path: Path,
+) -> None:
+    """Verify that measuring an empty set of steps does not set `size_measured_at`."""
+    run = _make_workplan_run(tmp_path, "measure-step-sizes-empty")
+
+    await measure_step_sizes(run, {}, asyncio.Semaphore(2))
+
+    assert run.size_measured_at is None
+    assert run.step_sizes == {}
+
+
+@pytest.mark.asyncio
+async def test_tracking_list_latest_runs_skips_corrupt_record(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a corrupt run record is skipped, with exactly one collapsed warning.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    caplog : pytest.LogCaptureFixture
+        Fixture used to capture log output
+    """
+    state_dir = tmp_path / "state"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+
+        good_run = _make_workplan_run(tmp_path, "good-run")
+        await repo.put_workplan_run(good_run)
+
+        corrupt_path = repo.latest_dir / "corrupt-run.yaml"
+        corrupt_path.write_text("{}\n")
+
+        with caplog.at_level(logging.WARNING):
+            runs = await repo.list_latest_runs()
+
+    assert [r.run_id for r in runs] == ["good-run"]
+
+    warnings = [rec for rec in caplog.records if rec.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "corrupt-run.yaml" in warnings[0].message
+    assert "1 run record(s)" in warnings[0].message
+
+
+@pytest.mark.asyncio
+async def test_tracking_bound_caps_concurrency(tmp_path: Path) -> None:
+    """Verify that `bound(limit)` caps the number of concurrent reads performed
+    by `list_latest_runs`.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    """
+    limit = 2
+    lock = threading.Lock()
+    state = {"in_flight": 0, "peak": 0}
+
+    def fake_try_deserialize(path, klass, mode=None):
+        with lock:
+            state["in_flight"] += 1
+            state["peak"] = max(state["peak"], state["in_flight"])
+        time.sleep(0.05)
+        with lock:
+            state["in_flight"] -= 1
+        return None
+
+    state_dir = tmp_path / "state"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        async with TrackingRepository.bound(limit) as repo:
+            for i in range(6):
+                (repo.latest_dir / f"run-{i}.yaml").touch()
+
+            with mock.patch(
+                "cstar.orchestration.serialization.try_deserialize",
+                side_effect=fake_try_deserialize,
+            ):
+                await repo.list_latest_runs()
+
+    assert state["peak"] <= limit
+
+
+@pytest.mark.asyncio
+async def test_tracking_update_workplan_run_is_atomic_under_concurrency(
+    tmp_path: Path,
+) -> None:
+    """Verify concurrent updates to one run each land, instead of the last
+    writer discarding the others' changes.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        Temporary directory for test outputs
+    """
+    state_dir = tmp_path / "state"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+        run = _make_workplan_run(tmp_path, "atomic-update")
+        await repo.put_workplan_run(run)
+
+        def _add(name: str, size: int) -> t.Callable[[WorkplanRun], None]:
+            def _mutate(latest: WorkplanRun) -> None:
+                latest.record_step_sizes({name: size})
+                latest.sentinels.add(tmp_path / f"{name}.sentinel")
+
+            return _mutate
+
+        await asyncio.gather(
+            *(
+                repo.update_workplan_run("atomic-update", _add(f"step-{i}", i))
+                for i in range(8)
+            )
+        )
+
+        persisted = await repo.get_workplan_run("atomic-update")
+
+    assert persisted is not None
+    assert persisted.step_sizes == {f"step-{i}": i for i in range(8)}
+    assert len(persisted.sentinels) == 8
+
+
+@pytest.mark.asyncio
+async def test_tracking_update_workplan_run_unknown_run_returns_none(
+    tmp_path: Path,
+) -> None:
+    """Verify updating a run-id with no record returns `None` without writing."""
+    state_dir = tmp_path / "state"
+
+    with mock.patch.dict(os.environ, {ENV_CSTAR_STATE_HOME: state_dir.as_posix()}):
+        repo = TrackingRepository()
+        result = await repo.update_workplan_run("never-ran", lambda r: None)
+
+    assert result is None

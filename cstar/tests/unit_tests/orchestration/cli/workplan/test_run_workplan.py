@@ -34,7 +34,7 @@ from cstar.orchestration.models import (
     UserDefinedVariables,
     Workplan,
 )
-from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Status
+from cstar.orchestration.orchestration import LiveStep, LiveWorkplan, Planner, Status
 from cstar.orchestration.serialization import deserialize, serialize
 from cstar.orchestration.state import StateRepository
 from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
@@ -821,6 +821,64 @@ def test_workplan_run_invalid_file_content(
     assert "improper" in result.stderr
     assert "formatted" in result.stderr
     mock_build_and_run_dag.assert_not_awaited()
+
+
+def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the reload path (no workplan path argument, `--run-id` given)
+    calls `run_dag` with the original and transformed workplan paths
+    recovered by `handle_run_reloading`, instead of `build_and_run_dag`.
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+
+    fake_run_result = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=(wp_path, trx_path)),
+        ) as mock_reload,
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag",
+            mock.AsyncMock(return_value=fake_run_result),
+        ) as mock_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            wraps=fake_build_and_run_dag,
+        ) as mock_build_and_run_dag,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", run_id],
+            color=False,
+        )
+
+    assert result.exit_code == 0
+    mock_reload.assert_awaited_once_with(run_id)
+    mock_build_and_run_dag.assert_not_awaited()
+
+    mock_run_dag.assert_awaited_once()
+    assert mock_run_dag.await_args is not None
+    call_args = mock_run_dag.await_args.args
+    assert call_args[0] == wp_path
+    assert call_args[1] == trx_path
+    assert call_args[2] == run_id
+    assert isinstance(call_args[3], Planner)
 
 
 @pytest.mark.parametrize("status", [Status.Unsubmitted, Status.Submitted, Status.Done])
