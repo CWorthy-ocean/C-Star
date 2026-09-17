@@ -38,6 +38,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_RESUME,
+    ARG_RESUME_WORKPLAN_HELP,
     OPT_CLOBBER_ALL,
 )
 from cstar.execution.file_system import local_copy
@@ -45,8 +47,10 @@ from cstar.orchestration.dag_runner import (
     ExecutiveRunSummary,
     ExecutiveStepSummary,
     apply_clobber_overrides,
+    apply_resume_overrides,
     build_and_run_dag,
     check_clobber_targets,
+    get_launcher,
     run_dag,
 )
 from cstar.orchestration.models import BlueprintCore, Step, Workplan
@@ -74,6 +78,10 @@ HELP_LONG = f"""\
 Specify a previously used `run_id` to re-start (or reattach) to a prior run.
 
 If a path to a blueprint is supplied, it will be executed as a single-step workplan.
+
+Pass `--resume` alongside `--run-id` (and no workplan path) to re-enter a prior
+run and resume its failed steps in place, rather than re-running them from
+scratch.
 """
 
 CATEGORY_HEADER_COLOR: t.Final[str] = "white"
@@ -598,6 +606,10 @@ def run(
             callback=preprocess_clobber_steps,
         ),
     ] = [],
+    resume: t.Annotated[
+        bool,
+        typer.Option(ARG_RESUME, help=ARG_RESUME_WORKPLAN_HELP),
+    ] = False,
 ) -> None:
     """Execute a workplan.
 
@@ -606,6 +618,14 @@ def run(
     if user_variables is not None and user_variables_path is not None:
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
+
+    if resume and path:
+        msg = "--resume re-enters a prior run; pass --run-id without a workplan path"
+        raise typer.BadParameter(msg, param_hint=ARG_RESUME)
+
+    if resume and clobber:
+        msg = "--resume cannot be combined with --clobber"
+        raise typer.BadParameter(msg, param_hint=ARG_RESUME)
 
     reload = not path
 
@@ -621,6 +641,8 @@ def run(
             if reload:
                 wp = deserialize(wp_path, LiveWorkplan)
                 apply_clobber_overrides(wp, clobber)
+                if resume:
+                    asyncio.run(apply_resume_overrides(wp, run_id, get_launcher()))
                 planner = Planner(wp)
 
                 wp_run = asyncio.run(

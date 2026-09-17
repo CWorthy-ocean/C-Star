@@ -139,6 +139,12 @@ application identifier and the previously created `HelloWorldBlueprint` and `Hel
       runner = HelloWorldRunner
       blueprint = HelloWorldBlueprint
 
+An application that supports continuing a failed prior attempt in place, rather than
+starting fresh, sets ``resumable = True`` on its `ApplicationDefinition` and honours
+`RunnerRequest.resume` in its `BlueprintRunner`. Only then does ``--resume`` on
+``cstar blueprint run`` (or a workplan resume) reach that application; otherwise the
+CLI rejects the flag before the runner is ever started.
+
 Tying it Together
 -----------------
 

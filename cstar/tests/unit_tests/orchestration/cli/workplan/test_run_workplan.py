@@ -25,6 +25,7 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.cli.common import normalize_runid
 from cstar.cli.workplan.run import app, auto_compose
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_RESUME
 from cstar.orchestration.dag_runner import get_launcher
 from cstar.orchestration.launch.local import LocalHandle
 from cstar.orchestration.launch.slurm import SlurmHandle, SlurmLauncher
@@ -879,6 +880,109 @@ def test_workplan_run_reload_invokes_run_dag_not_build_and_run_dag(
     assert call_args[1] == trx_path
     assert call_args[2] == run_id
     assert isinstance(call_args[3], Planner)
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+def test_workplan_run_resume_with_path_fails_fast(
+    wp_templates_dir: Path,
+) -> None:
+    """Verify `--resume` combined with an explicit workplan path exits with a
+    usage error before `build_and_run_dag` is invoked: `--resume` re-enters a
+    prior run via `--run-id` alone.
+    """
+    wp_path = wp_templates_dir / "workplan.yaml"
+
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [ARG_RESUME, wp_path.as_posix()],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "--resume" in result.output
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+def test_workplan_run_resume_and_clobber_fails_fast() -> None:
+    """Verify `--resume` combined with `--clobber` exits with a usage error
+    before `build_and_run_dag` is invoked.
+    """
+    with mock.patch(
+        "cstar.cli.workplan.run.build_and_run_dag",
+        wraps=fake_build_and_run_dag,
+    ) as mock_build_and_run_dag:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", "12345", ARG_RESUME, ARG_CLOBBER, "some-step"],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    assert "--resume" in result.output
+    assert "--clobber" in result.output
+    mock_build_and_run_dag.assert_not_awaited()
+
+
+def test_workplan_run_resume_reload_invokes_apply_resume_overrides(
+    tmp_path: Path,
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `--run-id` with `--resume` (no workplan path) calls
+    `apply_resume_overrides` on the reloaded workplan, and never falls
+    through to `build_and_run_dag`.
+    """
+    run_id = mock_run_id
+    wp_path = wp_templates_dir / "workplan.yaml"
+    wp = deserialize(wp_path, Workplan)
+    live_steps = [LiveStep.from_step(step) for step in wp.steps]
+    lwp = LiveWorkplan(**wp.model_dump(exclude={"steps"}), steps=live_steps)
+    trx_path = tmp_path / f"live-{wp_path.name}"
+    assert serialize(trx_path, lwp), "serializing live workplan failed in test"
+
+    fake_run_result = WorkplanRun(
+        workplan_path=wp_path,
+        trx_workplan_path=trx_path,
+        output_path=tmp_path,
+        run_id=run_id,
+    )
+
+    with (
+        mock.patch(
+            "cstar.cli.workplan.run.handle_run_reloading",
+            mock.AsyncMock(return_value=(wp_path, trx_path)),
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.run_dag",
+            mock.AsyncMock(return_value=fake_run_result),
+        ),
+        mock.patch(
+            "cstar.cli.workplan.run.build_and_run_dag",
+            wraps=fake_build_and_run_dag,
+        ) as mock_build_and_run_dag,
+        mock.patch(
+            "cstar.cli.workplan.run.apply_resume_overrides",
+            mock.AsyncMock(return_value=[]),
+        ) as mock_apply_resume,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            ["--run-id", run_id, ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_build_and_run_dag.assert_not_awaited()
+    mock_apply_resume.assert_awaited_once()
+    assert mock_apply_resume.await_args is not None
+    assert mock_apply_resume.await_args.args[1] == run_id
 
 
 @pytest.mark.parametrize("status", [Status.Unsubmitted, Status.Submitted, Status.Done])

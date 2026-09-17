@@ -271,8 +271,19 @@ Execution
     .. tip::
         Executing the command again with the same :term:`run ID` will attach to the
         previous execution and continue to monitor status until terminated.
-        
+
         Specify a different :term:`run ID` to re-run the workplan from scratch.
+
+    Re-entering a prior run (``--run-id`` and no workplan path) accepts two
+    mutually-exclusive controls for handling failed or stale steps instead of
+    reusing them as-is:
+
+    - ``--clobber <step-name|all>`` clears the named step(s) (or every step,
+      with the literal value ``all``) and re-executes them from scratch.
+    - ``--resume`` continues every *failed* step in place, from its last usable
+      restart, instead of clearing it -- provided the step's application
+      declares itself resumable; other failed steps are re-run from scratch
+      with a warning, and completed steps are left untouched.
 
 
    .. tab-item:: Programmatic Execution
