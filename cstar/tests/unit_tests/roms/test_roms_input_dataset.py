@@ -230,6 +230,96 @@ class TestROMSInputDatasetGet:
                 dataset.get(local_dir=Path("some/local/dir"))
 
 
+class TestROMSInputDatasetAttach:
+    """Test class for the `ROMSInputDataset.attach` method."""
+
+    def test_attach_unpartitioned_source(
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        tmp_path: Path,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
+        """attach() adopts a single staged file when the source is not partitioned."""
+        dataset = romsinputdataset_local_netcdf
+        target = tmp_path / dataset.source.basename
+        target.write_text("data")
+
+        dataset.attach(tmp_path)
+
+        assert isinstance(dataset.working_copy, StagedFile)
+        assert dataset.working_copy.path == target
+
+    def test_attach_raises_when_unpartitioned_source_missing(
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        tmp_path: Path,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
+        """attach() raises FileNotFoundError when the expected file is absent."""
+        with pytest.raises(FileNotFoundError):
+            romsinputdataset_local_netcdf.attach(tmp_path)
+
+    def test_attach_partitioned_source_happy_path(
+        self,
+        romsinputdataset_remote_partitioned_source: ROMSInputDataset,
+        tmp_path: Path,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
+        """attach() adopts all pieces of a partitioned source when all are present."""
+        dataset = romsinputdataset_remote_partitioned_source
+        for s in dataset.partitioned_source.sources:
+            (tmp_path / s.basename).write_text("data")
+
+        dataset.attach(tmp_path)
+
+        assert isinstance(dataset.working_copy, StagedDataCollection)
+        expected_paths = [
+            tmp_path / s.basename for s in dataset.partitioned_source.sources
+        ]
+        assert dataset.working_copy.paths == expected_paths
+
+    def test_attach_partitioned_source_raises_and_lists_missing(
+        self,
+        romsinputdataset_remote_partitioned_source: ROMSInputDataset,
+        tmp_path: Path,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
+        """attach() raises a single FileNotFoundError naming every missing piece."""
+        dataset = romsinputdataset_remote_partitioned_source
+        sources = dataset.partitioned_source.sources
+        # Stage all but the last two pieces.
+        for s in sources[:-2]:
+            (tmp_path / s.basename).write_text("data")
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            dataset.attach(tmp_path)
+
+        message = str(exc_info.value)
+        assert str(tmp_path / sources[-1].basename) in message
+        assert str(tmp_path / sources[-2].basename) in message
+
+    def test_attach_relinks_when_linker_set(
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        tmp_path: Path,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
+        """attach() calls linker.validate_opt() and linker.link() against the
+        adopted working copy, exactly as get() does.
+        """
+        dataset = romsinputdataset_local_netcdf
+        target = tmp_path / dataset.source.basename
+        target.write_text("data")
+
+        mock_linker = mock.Mock(spec=DatasetLinker)
+        dataset.linker = mock_linker
+
+        dataset.attach(tmp_path)
+
+        mock_linker.validate_opt.assert_called_once()
+        mock_linker.link.assert_called_once_with(target)
+
+
 class TestROMSInputDatasetPartition:
     """Test class for the `ROMSInputDataset.partition` method."""
 
@@ -629,6 +719,105 @@ class TestROMSInputDatasetPartition:
         romsinputdataset_local_netcdf.partitionable = False
         romsinputdataset_local_netcdf.partition(np_xi=2, np_eta=3)
         mock_partition_netcdf.assert_not_called()
+
+
+class TestROMSInputDatasetAttachPartitions:
+    """Test class for the `ROMSInputDataset.attach_partitions` method."""
+
+    def _stage_local_file(self, dataset: ROMSInputDataset, tmp_path: Path) -> Path:
+        """Stage a single local file as this dataset's working copy."""
+        target = tmp_path / dataset.source.basename
+        target.write_text("data")
+        dataset._working_copy = StagedFile(dataset.source, target)
+        return target
+
+    def test_attach_partitions_happy_path(
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        tmp_path: Path,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
+        """attach_partitions() adopts an existing, complete set of partitioned
+        pieces and sets `partitioning` so `path_for_roms` works as after
+        `partition()`.
+        """
+        dataset = romsinputdataset_local_netcdf
+        target = self._stage_local_file(dataset, tmp_path)
+
+        np_xi, np_eta = 2, 3
+        n = np_xi * np_eta
+        for i in range(n):
+            piece = Path(f"{target.with_suffix('')}{ROMSPartitioning.suffix(i, n)}")
+            piece.write_text("piece")
+
+        dataset.attach_partitions(np_xi=np_xi, np_eta=np_eta)
+
+        assert dataset.partitioning is not None
+        assert dataset.partitioning.np_xi == np_xi
+        assert dataset.partitioning.np_eta == np_eta
+        assert len(dataset.partitioning.files) == n
+        assert dataset.path_for_roms == [target]
+
+    def test_attach_partitions_raises_and_lists_missing(
+        self,
+        romsinputdataset_local_netcdf: ROMSInputDataset,
+        tmp_path: Path,
+        mock_path_resolve: mock.MagicMock,
+    ) -> None:
+        """attach_partitions() raises a single FileNotFoundError naming every
+        missing piece, and does not set `partitioning`.
+        """
+        dataset = romsinputdataset_local_netcdf
+        target = self._stage_local_file(dataset, tmp_path)
+
+        np_xi, np_eta = 2, 3
+        n = np_xi * np_eta
+        # Only stage the first piece; the rest are left missing.
+        piece0 = Path(f"{target.with_suffix('')}{ROMSPartitioning.suffix(0, n)}")
+        piece0.write_text("piece")
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            dataset.attach_partitions(np_xi=np_xi, np_eta=np_eta)
+
+        message = str(exc_info.value)
+        missing_piece = Path(f"{target.with_suffix('')}{ROMSPartitioning.suffix(1, n)}")
+        assert str(missing_piece) in message
+        assert dataset.partitioning is None
+
+    def test_attach_partitions_raises_without_working_copy(
+        self, romsinputdataset_local_netcdf: ROMSInputDataset
+    ) -> None:
+        """attach_partitions() raises ValueError, like partition(), when there is no
+        working copy to partition.
+        """
+        with pytest.raises(ValueError, match="non-existent file"):
+            romsinputdataset_local_netcdf.attach_partitions(np_xi=2, np_eta=3)
+
+    def test_attach_partitions_noop_when_not_partitionable(
+        self, romsinputdataset_local_netcdf: ROMSInputDataset
+    ) -> None:
+        """attach_partitions() is a no-op when the dataset is not partitionable,
+        even without a working copy.
+        """
+        dataset = romsinputdataset_local_netcdf
+        dataset.partitionable = False
+
+        dataset.attach_partitions(np_xi=2, np_eta=3)
+
+        assert dataset.partitioning is None
+
+    def test_attach_partitions_noop_for_partitioned_source(
+        self, romsinputdataset_remote_partitioned_source: ROMSInputDataset
+    ) -> None:
+        """attach_partitions() is a no-op when the dataset's source is already
+        partitioned; `partitioning` is left as set at construction.
+        """
+        dataset = romsinputdataset_remote_partitioned_source
+        original_partitioning = dataset.partitioning
+
+        dataset.attach_partitions(np_xi=2, np_eta=3)
+
+        assert dataset.partitioning is original_partitioning
 
 
 def test_correction_cannot_be_yaml(

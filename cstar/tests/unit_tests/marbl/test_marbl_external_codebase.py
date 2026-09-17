@@ -60,6 +60,24 @@ class TestMARBLExternalCodeBaseInit:
         assert marbl_codebase.root_env_var == "MARBL_ROOT"
 
 
+class TestMARBLExternalCodeBaseExportEnv:
+    def test_export_env_sets_var_without_compiling(
+        self,
+        marblexternalcodebase_staged,
+        marbl_path: pathlib.Path,
+        monkeypatch,
+    ):
+        """Confirms `_export_env` alone sets MARBL_ROOT, without running `make`."""
+        mecb = marblexternalcodebase_staged
+        monkeypatch.delenv(mecb.root_env_var, raising=False)
+
+        with mock.patch("cstar.marbl.external_codebase._run_cmd") as mock_run_cmd:
+            mecb._export_env()
+
+        mock_run_cmd.assert_not_called()
+        assert os.environ[mecb.root_env_var] == str(mecb.working_copy.path)
+
+
 class TestMARBLExternalCodeBaseConfigure:
     def test_configure_success(
         self,

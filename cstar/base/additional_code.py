@@ -3,7 +3,7 @@ from pathlib import Path
 
 from cstar.base.log import LoggingMixin
 from cstar.io.source_data import SourceDataCollection
-from cstar.io.staged_data import StagedDataCollection
+from cstar.io.staged_data import StagedDataCollection, StagedFile
 
 
 class AdditionalCode(LoggingMixin):
@@ -25,6 +25,8 @@ class AdditionalCode(LoggingMixin):
     --------
     get(local_dir):
         Stage this InputDataset for local use by C-Star
+    attach(local_dir):
+        Adopt an existing, already-staged copy of this AdditionalCode at `local_dir`
     """
 
     files: Iterable[str]
@@ -96,6 +98,34 @@ class AdditionalCode(LoggingMixin):
             The local directory to stage the AdditionalCode in
         """
         self._working_copy = self.source.stage(local_dir)
+
+    def attach(self, local_dir: str | Path) -> None:
+        """Adopt an existing, already-staged copy of this AdditionalCode at `local_dir`.
+
+        Counterpart of `get()`: instead of (re-)staging the files, this verifies
+        that every file is already present at `local_dir` (e.g. staged by a
+        previous, interrupted attempt) and builds `working_copy` from them.
+
+        Parameters:
+        -----------
+        local_dir: str | Path
+            The local directory in which this AdditionalCode is expected to already exist.
+
+        Raises:
+        -------
+        FileNotFoundError
+            If any of the expected files are missing. Lists every missing path.
+        """
+        expected = [(s, Path(local_dir) / s.basename) for s in self.source.sources]
+        missing = [p for _, p in expected if not p.exists()]
+        if missing:
+            raise FileNotFoundError(
+                f"Cannot attach AdditionalCode: expected file(s) not found: {missing}"
+            )
+
+        self._working_copy = StagedDataCollection(
+            StagedFile(s, p, sha256=s.file_hash or None) for s, p in expected
+        )
 
     def to_dict(self) -> dict:
         return self._constructor_args

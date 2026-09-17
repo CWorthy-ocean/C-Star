@@ -36,12 +36,12 @@ class MARBLExternalCodeBase(ExternalCodeBase):
 
         This method compiles MARBL and adds necessary  variables to the environment.
         """
+        self._export_env()
+
         cstar_sysmgr = get_sysmgr()
 
         assert self.working_copy is not None  # Has been verified by `configure()``
         marbl_root = self.working_copy.path
-        # Set env var:
-        cstar_sysmgr.environment.set_env_var(self.root_env_var, str(marbl_root))
 
         # Compile
         _run_cmd(

@@ -58,11 +58,11 @@ class PIOExternalCodeBase(ExternalCodeBase):
             because the ROMS Makedefs.inc links against PnetCDF whenever PIO is
             enabled.
         """
+        self._export_env()
+
         assert self.working_copy is not None  # Has been verified by `configure()``
         pio_root = self.working_copy.path
-        # Set env var:
         cstar_sysmgr = get_sysmgr()
-        cstar_sysmgr.environment.set_env_var(self.root_env_var, str(pio_root))
 
         netcdf_home = self._get_dependency_root("NETCDFHOME")
         pnetcdf_home = self._get_dependency_root("PNETCDFHOME")

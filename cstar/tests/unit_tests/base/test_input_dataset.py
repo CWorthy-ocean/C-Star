@@ -2,7 +2,10 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from cstar.io.source_data import SourceData
+from cstar.io.staged_data import StagedFile
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeInputDataset
 
 
@@ -122,3 +125,71 @@ class TestInputDatasetGet:
         # Call the `get` method
         fakeinputdataset_local.get(local_dir_resolved)
         mock_stage.assert_not_called()
+
+
+class TestAttach:
+    """Test class for the `InputDataset.attach` method."""
+
+    def test_attach_happy_path(
+        self, fakeinputdataset_local, tmp_path, mock_path_resolve
+    ):
+        """Confirms `attach` sets `working_copy` when the expected file exists."""
+        target = tmp_path / fakeinputdataset_local.source.basename
+        target.write_text("data")
+
+        fakeinputdataset_local.attach(tmp_path)
+
+        assert isinstance(fakeinputdataset_local.working_copy, StagedFile)
+        assert fakeinputdataset_local.working_copy.path == target
+
+    def test_attach_happy_path_with_valid_symlink(
+        self, fakeinputdataset_local, tmp_path, mock_path_resolve
+    ):
+        """Confirms `attach` succeeds when the expected file is a symlink to a real
+        file.
+        """
+        real_file = tmp_path / "real_data.nc"
+        real_file.write_text("data")
+        target = tmp_path / fakeinputdataset_local.source.basename
+        target.symlink_to(real_file)
+
+        fakeinputdataset_local.attach(tmp_path)
+
+        assert fakeinputdataset_local.working_copy.path == target
+
+    def test_attach_raises_for_dangling_symlink(
+        self, fakeinputdataset_local, tmp_path, mock_path_resolve
+    ):
+        """Confirms `attach` raises FileNotFoundError for a dangling symlink."""
+        target = tmp_path / fakeinputdataset_local.source.basename
+        target.symlink_to(tmp_path / "does_not_exist.nc")
+
+        with pytest.raises(FileNotFoundError):
+            fakeinputdataset_local.attach(tmp_path)
+
+    def test_attach_raises_when_file_missing(
+        self, fakeinputdataset_local, tmp_path, mock_path_resolve
+    ):
+        """Confirms `attach` raises FileNotFoundError when the expected file is
+        entirely absent.
+        """
+        with pytest.raises(FileNotFoundError):
+            fakeinputdataset_local.attach(tmp_path)
+
+    def test_attach_passes_through_file_hash_as_sha256(
+        self, fakeinputdataset_remote, tmp_path, mock_path_resolve
+    ):
+        """Confirms `attach` passes `source.file_hash` through as the `StagedFile`
+        sha256.
+        """
+        target = tmp_path / fakeinputdataset_remote.source.basename
+        target.write_text("data")
+
+        with mock.patch("cstar.base.input_dataset.StagedFile") as mock_staged_file:
+            fakeinputdataset_remote.attach(tmp_path)
+
+        mock_staged_file.assert_called_once_with(
+            fakeinputdataset_remote.source,
+            target,
+            sha256=fakeinputdataset_remote.source.file_hash,
+        )

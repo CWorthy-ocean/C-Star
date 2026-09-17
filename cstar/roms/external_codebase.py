@@ -37,16 +37,23 @@ class ROMSExternalCodeBase(ExternalCodeBase):
     def root_env_var(self) -> str:
         return "ROMS_ROOT"
 
+    def _export_env(self) -> None:
+        """Set ROMS_ROOT and prepend Tools-Roms to PATH."""
+        super()._export_env()
+        assert self.working_copy is not None  # verified by ExternalCodeBase._export_env
+        roms_root = self.working_copy.path
+
+        cstar_sysmgr = get_sysmgr()
+        cstar_sysmgr.environment.set_env_var(
+            "PATH", f"{roms_root / 'Tools-Roms'}:{os.environ.get('PATH')}"
+        )
+
     def _configure(self) -> None:
-        # Set env vars:
+        self._export_env()
         assert self.working_copy is not None  # verified by ExternalCodeBase.configure()
         roms_root = self.working_copy.path
 
         cstar_sysmgr = get_sysmgr()
-        cstar_sysmgr.environment.set_env_var(self.root_env_var, str(roms_root))
-        cstar_sysmgr.environment.set_env_var(
-            "PATH", f"{roms_root / 'Tools-Roms'}:{os.environ.get('PATH')}"
-        )
 
         # Compile Tools-Roms
         mpi_wrapper = explicit_mpi_wrapper()

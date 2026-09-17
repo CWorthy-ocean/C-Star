@@ -62,6 +62,27 @@ class TestROMSExternalCodeBaseInit:
         )
 
 
+class TestROMSExternalCodeBaseExportEnv:
+    def test_export_env_sets_vars_without_compiling(
+        self,
+        romsexternalcodebase_staged,
+        roms_path: pathlib.Path,
+        monkeypatch,
+    ):
+        """Confirms `_export_env` alone sets ROMS_ROOT and prepends PATH, without
+        running `make`.
+        """
+        recb = romsexternalcodebase_staged
+        monkeypatch.delenv(recb.root_env_var, raising=False)
+
+        with mock.patch("cstar.roms.external_codebase._run_cmd") as mock_run_cmd:
+            recb._export_env()
+
+        mock_run_cmd.assert_not_called()
+        assert os.environ[recb.root_env_var] == str(recb.working_copy.path)
+        assert str(roms_path / "Tools-Roms") in os.environ["PATH"]
+
+
 class TestROMSExternalCodeBaseConfigure:
     @mock.patch("cstar.roms.external_codebase.rpath_link_flags", return_value=None)
     @mock.patch("cstar.roms.external_codebase.assert_single_toolchain_stack")

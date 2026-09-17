@@ -415,15 +415,12 @@ class CStarEnvironment:
         for module in (x.strip() for x in lmod_list):
             self._call_lmod(f"load {module}")
 
-    @staticmethod
-    def set_env_var(key: str, value: str) -> None:
+    def set_env_var(self, key: str, value: str) -> None:
         """Set value of an environment variable.
 
-        TODO: Remove unless new functionality is needed here.
-
-        Note: after removing the persisted user_env file, this method seems silly. Leaving it for the moment,
-        just so we don't have to update everywhere that uses it, and because we may want some other behavior
-        around config files or logging to be happening here in the future.
+        The value is exported to the process environment and recorded in
+        `environment_variables`, so a codebase configured (or attached) in this
+        process is visible to the `is_configured` checks that read that mapping.
 
         Parameters
         ----------
@@ -433,3 +430,4 @@ class CStarEnvironment:
             The value to set for the environment variable.
         """
         os.environ[key] = value
+        self._env_vars[key] = value
