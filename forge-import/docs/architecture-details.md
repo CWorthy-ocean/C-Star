@@ -265,7 +265,7 @@ don't change; only the `serialization_alias` to namelist names differs per
 version, and `nrpf_rst` (still present in the shared `OutputSpec/standard`) is
 silently ignored for 0.5.0+ models via `extra="ignore"`. One ModelSpec per
 tagged ucla-roms release: `roms-marbl-0.5-default` pins `0.5.0`,
-`roms-marbl-0.6-default` pins `0.6.0`, `roms-marbl-0.7-default` pins `0.7.0`; older specs stay
+`roms-marbl-0.6-default` pins `0.6.4`, `roms-marbl-0.7-default` pins `0.7.0`; older specs stay
 fixed and keep emitting byte-identical legacy namelists. `version_gated_
 section_names()` (namelist_model.py) collects every section modeled by at
 least one non-legacy tier (`pio_settings`, `cdr_tracer_output`,
