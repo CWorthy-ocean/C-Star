@@ -1,6 +1,7 @@
 import json
+import shutil
 import typing as t
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
 from unittest import mock
 
@@ -460,13 +461,23 @@ def test_blueprint_run_apply_directive_empty(
     assert "malformed" in result.stderr
 
 
-def test_blueprint_run_apply_directives(
+@pytest.fixture
+def directive_run_harness(
     tmp_path: Path,
     mocked_simulation_outputs: tuple[Path, Path, Path],
     package_path: Path,
-) -> None:
-    """Verify that a URL to a remote blueprint is handled properly and the
-    blueprint is executed.
+) -> Generator[tuple[str, LiveStep, Path, mock.Mock]]:
+    """Build a step with a `continue-from` directive, write its directive
+    file, and mock blueprint execution so `run` can be invoked against it.
+
+    Shared by tests that only differ in what happens to the directive file
+    (and how the recorded workplan is mocked) before the CLI is invoked.
+
+    Yields
+    ------
+    tuple[str, LiveStep, Path, mock.Mock]
+        The blueprint path, the step, its directive file path, and the mock
+        tracking calls to `RomsMarblRunner.execute`.
     """
     bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
     _, step_dir, _ = mocked_simulation_outputs
@@ -506,15 +517,26 @@ def test_blueprint_run_apply_directives(
             side_effect=modify_runner,
             autospec=True,
         ) as mock_exec_runner,
-        mock.patch(
-            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
-            mock.Mock(
-                return_value=LiveWorkplan(
-                    name="test-workplan",
-                    description="a live workplan used to create a `WorkplanRun` to test directives",
-                    steps=[temp_step],
-                )
-            ),
+    ):
+        yield bp_path, temp_step, directive_path, mock_exec_runner
+
+
+def test_blueprint_run_apply_directives(
+    directive_run_harness: tuple[str, LiveStep, Path, mock.Mock],
+) -> None:
+    """Verify that a URL to a remote blueprint is handled properly and the
+    blueprint is executed.
+    """
+    bp_path, temp_step, directive_path, mock_exec_runner = directive_run_harness
+
+    with mock.patch(
+        "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+        mock.Mock(
+            return_value=LiveWorkplan(
+                name="test-workplan",
+                description="a live workplan used to create a `WorkplanRun` to test directives",
+                steps=[temp_step],
+            )
         ),
     ):
         runner = CliRunner()
@@ -529,6 +551,84 @@ def test_blueprint_run_apply_directives(
         )
 
     mock_exec_runner.assert_called_once()
+
+
+def test_blueprint_run_restores_missing_directive_file(
+    directive_run_harness: tuple[str, LiveStep, Path, mock.Mock],
+    mock_run_id: str,
+) -> None:
+    """Verify the CLI restores a directive file missing at submit time from
+    the workplan recorded for the run, and the runner still executes.
+    """
+    bp_path, temp_step, directive_path, mock_exec_runner = directive_run_harness
+
+    # the work directory is cleaned while the step waits in the queue
+    shutil.rmtree(directive_path.parent)
+    assert not directive_path.exists()
+
+    with mock.patch(
+        "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+        mock.Mock(
+            return_value=LiveWorkplan(
+                name="test-workplan",
+                description="a live workplan used to restore a missing directive file",
+                steps=[temp_step],
+            )
+        ),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                bp_path,
+                ARG_DIRECTIVES_URI_LONG,
+                directive_path.as_posix(),
+            ],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_exec_runner.assert_called_once()
+    assert directive_path.exists()
+
+
+def test_blueprint_run_restore_directive_file_runtime_error_fails_cleanly(
+    tmp_path: Path,
+    package_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify the CLI fails cleanly, without executing the runner, when a
+    missing directive file cannot be restored from the recorded workplan.
+    """
+    bp_path = str(package_path / "docs/tutorials/wales_toy_blueprint.yaml")
+    missing_directive_path = tmp_path / "directives.yaml"
+    assert not missing_directive_path.exists()
+
+    with (
+        mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec,
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(side_effect=RuntimeError("no run context available")),
+        ),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                bp_path,
+                ARG_DIRECTIVES_URI_LONG,
+                missing_directive_path.as_posix(),
+            ],
+            color=False,
+        )
+
+    assert result.exit_code != 0
+    mock_exec.assert_not_called()
+
+    # rich wraps the message at the terminal width, so a line break may land
+    # inside the phrase; normalize whitespace before matching.
+    stderr_flat = " ".join(result.stderr.replace("│", " ").split())
+    assert "could not be restored" in stderr_flat
 
 
 def test_blueprint_run_deferred_blueprint(

@@ -12,6 +12,9 @@ from cstar.orchestration.orchestration import RunRequest, RunRequestCommandForma
 if t.TYPE_CHECKING:
     from cstar.orchestration.orchestration import LiveStep
 
+DIRECTIVES_FILENAME: t.Final[str] = "directives.yaml"
+"""The name of the directive file written into a step work directory."""
+
 
 def prepare_directive_file(step: "LiveStep") -> Path:
     """Create a directives file in the step work directory.
@@ -26,7 +29,7 @@ def prepare_directive_file(step: "LiveStep") -> Path:
     str
         The path to the directive file.
     """
-    directives_path = step.fsm.run_dir / "directives.yaml"
+    directives_path = step.fsm.run_dir / DIRECTIVES_FILENAME
     if not step.fsm.run_dir.exists():
         step.fsm.run_dir.mkdir(parents=True)
     with directives_path.open("w") as fp:

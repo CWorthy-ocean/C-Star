@@ -1,6 +1,7 @@
 # ruff: noqa: SLF001, S101
 import logging
 import os
+import shutil
 import typing as t
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
@@ -30,6 +31,7 @@ from cstar.applications.roms_marbl.transforms import (
 from cstar.base.env import ENV_CSTAR_RUNID, FLAG_OFF
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.feature import ENV_FF_ORCH_TRX_TIMESPLIT
+from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
 from cstar.orchestration.models import (
     Application,
     BlueprintState,
@@ -1879,6 +1881,202 @@ directives:
     # ...its intermediate blueprint landed there, and the raw dir was untouched
     assert Path(result).is_relative_to(override_dir.resolve())
     assert not raw_dir.exists()
+
+
+def test_restore_directive_file_recreates_missing_file(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `restore_directive_file` rewrites a directive file that has been
+    lost while its step waited in a scheduler queue, and that the restored
+    content deserializes back to the same directives as the original.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        Fixture exporting a run-id so restoration proceeds past the guard
+        that requires an active run.
+    """
+    step = LiveStep(
+        name="restore-me",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "restore-step",
+        directives={"continue-from": {"path": "somewhere"}},
+    )
+    original_path = prepare_directive_file(step)
+    original_directives = deserialize(original_path, DirectiveConfig).directives
+
+    # the work directory is cleaned while the step waits in the queue
+    shutil.rmtree(original_path.parent)
+    assert not original_path.exists()
+
+    live_plan = LiveWorkplan(
+        name="restore-workplan",
+        description="a live workplan used to restore a missing directive file",
+        steps=[step],
+    )
+
+    with mock.patch(
+        "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+        mock.Mock(return_value=live_plan),
+    ):
+        restored_path = DirectiveConfig.restore_directive_file(original_path)
+
+    assert restored_path == original_path
+    assert restored_path.exists()
+
+    restored_directives = deserialize(restored_path, DirectiveConfig).directives
+    assert restored_directives == original_directives
+
+
+def test_restore_directive_file_no_matching_step_raises(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify `restore_directive_file` raises `CstarError` when no step in the
+    run's recorded workplan writes its directives to the missing path.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        Fixture exporting a run-id so restoration proceeds past the guard
+        that requires an active run.
+    """
+    other_step = LiveStep(
+        name="unrelated-step",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "unrelated-step",
+    )
+    live_plan = LiveWorkplan(
+        name="restore-workplan",
+        description="a live workplan with no step matching the target path",
+        steps=[other_step],
+    )
+    missing_path = tmp_path / "orphaned" / "directives.yaml"
+
+    with (
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(return_value=live_plan),
+        ),
+        pytest.raises(CstarError, match="no step in the workplan"),
+    ):
+        DirectiveConfig.restore_directive_file(missing_path)
+
+
+def test_restore_directive_file_no_run_id_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify `restore_directive_file` raises `CstarError` naming
+    `CSTAR_RUNID` without ever loading the workplan when no run-id is set.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    monkeypatch : pytest.MonkeyPatch
+        Fixture used to clear the run-id environment variable.
+    """
+    monkeypatch.delenv(ENV_CSTAR_RUNID, raising=False)
+    mock_load_workplan = mock.Mock()
+
+    with (
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock_load_workplan,
+        ),
+        pytest.raises(CstarError, match=ENV_CSTAR_RUNID),
+    ):
+        DirectiveConfig.restore_directive_file(tmp_path / "directives.yaml")
+
+    mock_load_workplan.assert_not_called()
+
+
+def test_restore_directive_file_write_failure_wrapped(
+    tmp_path: Path,
+    hello_world_bp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify an `OSError` raised while writing the restored file (here, the
+    target path is occupied by a directory) is wrapped in a `CstarError`
+    naming the step whose file could not be written.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    hello_world_bp_path : Path
+        Fixture returning the path to a hello-world blueprint file.
+    mock_run_id : str
+        Fixture exporting a run-id so restoration proceeds past the guard
+        that requires an active run.
+    """
+    step = LiveStep(
+        name="oserror-step",
+        application="hello_world",
+        blueprint=hello_world_bp_path.as_posix(),
+        working_dir=tmp_path / "oserror-step",
+    )
+    # occupy the directive file's path with a directory so writing to it fails
+    directive_path = step.fsm.run_dir / DIRECTIVES_FILENAME
+    directive_path.mkdir(parents=True)
+
+    live_plan = LiveWorkplan(
+        name="restore-workplan",
+        description="a live workplan whose step's directive file cannot be written",
+        steps=[step],
+    )
+
+    with (
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(return_value=live_plan),
+        ),
+        pytest.raises(CstarError, match=f"step {step.name!r} could not be written"),
+    ):
+        DirectiveConfig.restore_directive_file(directive_path)
+
+
+def test_restore_directive_file_wraps_load_workplan_error(
+    tmp_path: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a failure loading the recorded workplan is wrapped in a
+    `CstarError` that chains the original exception as its cause.
+
+    Parameters
+    ----------
+    tmp_path : Path
+        The pytest-provided temporary directory.
+    mock_run_id : str
+        Fixture exporting a run-id so restoration proceeds past the guard
+        that requires an active run.
+    """
+    original = RuntimeError("no run context available")
+
+    with (
+        mock.patch(
+            "cstar.orchestration.transforms.DirectiveConfig.load_workplan",
+            mock.Mock(side_effect=original),
+        ),
+        pytest.raises(CstarError, match="could not be loaded") as exc_info,
+    ):
+        DirectiveConfig.restore_directive_file(tmp_path / "directives.yaml")
+
+    assert exc_info.value.__cause__ is original
 
 
 @pytest.fixture
