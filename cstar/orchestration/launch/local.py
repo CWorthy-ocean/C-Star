@@ -6,7 +6,7 @@ import typing as t
 from pathlib import Path
 from subprocess import run as sprun
 
-from psutil import NoSuchProcess
+from psutil import STATUS_ZOMBIE, AccessDenied, NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
@@ -365,6 +365,31 @@ class LocalLauncher(Launcher[LocalHandle]):
         raise RuntimeError(msg)
 
     @staticmethod
+    def _is_alive(handle: LocalHandle) -> bool:
+        """Return `True` if the OS process recorded on a handle is still running.
+
+        The creation time is compared with the recorded `start_at` so a
+        recycled PID belonging to an unrelated process is not mistaken for
+        the step.
+
+        Parameters
+        ----------
+        handle : LocalHandle
+            A deserialized handle with no live `Popen` attached.
+
+        Returns
+        -------
+        bool
+        """
+        try:
+            process = PsProcess(int(handle.pid))
+            if process.status() == STATUS_ZOMBIE:
+                return False
+            return abs(process.create_time() - handle.start_ts) <= 2.0
+        except (NoSuchProcess, AccessDenied, ValueError):
+            return False
+
+    @staticmethod
     async def _status(handle: LocalHandle) -> str:
         """Retrieve the status of a step running in local process.
 
@@ -379,16 +404,24 @@ class LocalLauncher(Launcher[LocalHandle]):
             The current status of the step.
         """
         if handle.is_expired:
-            # a reused (deserialized) handle from a prior attempt has no
-            # live process; report its persisted terminal outcome rather
-            # than collapsing every terminal status into COMPLETED
+            # a reused (deserialized) handle from a prior attempt has no live
+            # Popen: report its persisted terminal outcome, and treat a
+            # non-terminal status whose process is gone as a failure so a
+            # step killed before finalizing its sentinel is re-run, not adopted
             if handle.status == Status.Failed:
                 return "FAILED"
             if handle.status == Status.Cancelled:
                 return "CANCELLED"
-            if not Status.is_terminal(handle.status):
+            if Status.is_terminal(handle.status):
+                return "COMPLETED"
+            if LocalLauncher._is_alive(handle):
                 return "RUNNING"
-            return "COMPLETED"
+            msg = (
+                f"Process {handle.pid} for step {handle.name!r} is gone but its "
+                f"status was never finalized ({handle.status.name}); treating as failed."
+            )
+            log.warning(msg)
+            return "FAILED"
 
         # poll() reaps the child and records its exit code; reading
         # `returncode` alone never observes an exit the process made on

@@ -1614,11 +1614,13 @@ class ROMSSimulation(Simulation):
                 problems.append(str(e))
 
         if self.compile_time_code is not None and self.compile_time_code.working_copy:
-            exe_path = self.compile_time_code.working_copy.common_parent / "roms"
+            build_dir = self.compile_time_code.working_copy.common_parent
+            exe_path = build_dir / "roms"
             if not exe_path.exists():
                 problems.append(f"compiled ROMS executable {exe_path}")
             else:
                 try:
+                    self._validate_build_flags(build_dir)
                     verify_roms_linkage(exe_path)
                     self.exe_path = exe_path
                     self._exe_hash = _get_sha256_hash(exe_path)
@@ -1699,36 +1701,7 @@ class ROMSSimulation(Simulation):
             )
 
         build_dir = self.compile_time_code.working_copy.common_parent
-        cppdefs = build_dir / "cppdefs.opt"
-
-        self._validate_cppdef_flag(
-            build_dir,
-            define="PARALLEL_IO",
-            enabled=self.use_pio,
-            error_if_missing=(
-                "use_pio is True but 'PARALLEL_IO' is not defined in "
-                f"{cppdefs}. ROMS would run without ParallelIO and produce "
-                "partitioned outputs that post_run will not join. Either add "
-                "'#define PARALLEL_IO' to cppdefs.opt or set "
-                "partitioning.use_pio to false."
-            ),
-            error_if_defined_but_disabled=(
-                f"'PARALLEL_IO' is defined in {cppdefs} but use_pio is False, "
-                "so the ParallelIO library has not been built. Either set "
-                "partitioning.use_pio to true or remove '#define PARALLEL_IO' "
-                "from cppdefs.opt."
-            ),
-        )
-        self._validate_cppdef_flag(
-            build_dir,
-            define="MPI_MASKING",
-            enabled=self.auto_tiling,
-            error_if_missing=(
-                f"auto_tiling is True but 'MPI_MASKING' is not defined in "
-                f"{cppdefs}. Either add '#define MPI_MASKING' to cppdefs.opt or "
-                "set partitioning.auto_tiling to false."
-            ),
-        )
+        self._validate_build_flags(build_dir)
 
         exe_path = build_dir / "roms"
         if (
@@ -1783,6 +1756,54 @@ class ROMSSimulation(Simulation):
 
         self.exe_path = exe_path
         self._exe_hash = _get_sha256_hash(exe_path)
+
+    def _validate_build_flags(self, build_dir: Path) -> None:
+        """Ensure the staged `cppdefs.opt` agrees with `use_pio` and `auto_tiling`.
+
+        Shared by `build()` (before compiling) and `attach()` (before adopting
+        a previously compiled executable), so a resumed run fails as loudly
+        as a fresh build would on a mismatched configuration.
+
+        Parameters
+        ----------
+        build_dir : Path
+            The directory holding `cppdefs.opt`.
+
+        Raises
+        ------
+        ValueError
+            If a required define is missing or a defined feature is disabled.
+        """
+        cppdefs = build_dir / "cppdefs.opt"
+
+        self._validate_cppdef_flag(
+            build_dir,
+            define="PARALLEL_IO",
+            enabled=self.use_pio,
+            error_if_missing=(
+                "use_pio is True but 'PARALLEL_IO' is not defined in "
+                f"{cppdefs}. ROMS would run without ParallelIO and produce "
+                "partitioned outputs that post_run will not join. Either add "
+                "'#define PARALLEL_IO' to cppdefs.opt or set "
+                "partitioning.use_pio to false."
+            ),
+            error_if_defined_but_disabled=(
+                f"'PARALLEL_IO' is defined in {cppdefs} but use_pio is False, "
+                "so the ParallelIO library has not been built. Either set "
+                "partitioning.use_pio to true or remove '#define PARALLEL_IO' "
+                "from cppdefs.opt."
+            ),
+        )
+        self._validate_cppdef_flag(
+            build_dir,
+            define="MPI_MASKING",
+            enabled=self.auto_tiling,
+            error_if_missing=(
+                f"auto_tiling is True but 'MPI_MASKING' is not defined in "
+                f"{cppdefs}. Either add '#define MPI_MASKING' to cppdefs.opt or "
+                "set partitioning.auto_tiling to false."
+            ),
+        )
 
     # Fortran cppdef macro -> the lowercase key
     # `cstar.roms.precheck.check_output_streams_divide_rst` expects (its

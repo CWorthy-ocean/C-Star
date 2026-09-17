@@ -224,6 +224,31 @@ class RestartFile(BaseModel):
     """A unique suffix found in the name of restart files"""
 
     @classmethod
+    def candidates(cls, search_path: Path, *, partitioned: bool) -> list["RestartFile"]:
+        """Enumerate the restart files under a directory.
+
+        Parameters
+        ----------
+        search_path : Path
+            The directory to search recursively.
+        partitioned : bool
+            If True, match partition pieces (`*_rst.<ts>.<part>.nc`); otherwise
+            match whole files (`*_rst.<ts>.nc`).
+
+        Returns
+        -------
+        list[RestartFile]
+            Every matching file, in filesystem order.
+        """
+        parted_clause = ".*" if partitioned else ""
+        glob_pattern = f"*{cls.SUFFIX}.{cls.TS_GLOB}{parted_clause}.{cls.EXT}"
+        return [
+            RestartFile(path=match)
+            for match in search_path.rglob(glob_pattern)
+            if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
+        ]
+
+    @classmethod
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
@@ -260,15 +285,8 @@ class RestartFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        partitioned_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.*.{cls.EXT}"
-        joined_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.{cls.EXT}"
-
-        for glob_pattern in (partitioned_glob, joined_glob):
-            rst_files = [
-                RestartFile(path=match)
-                for match in search_path.rglob(glob_pattern)
-                if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
-            ]
+        for partitioned in (True, False):
+            rst_files = cls.candidates(search_path, partitioned=partitioned)
             if rst_files:
                 latest_ts = max(rst.timestamp for rst in rst_files)
                 return min(

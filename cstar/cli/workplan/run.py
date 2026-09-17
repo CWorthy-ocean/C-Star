@@ -619,13 +619,19 @@ def run(
         msg = "`--var` and `--varfile` must not be supplied together"
         raise typer.BadParameter(msg)
 
-    if resume and path:
-        msg = "--resume re-enters a prior run; pass --run-id without a workplan path"
-        raise typer.BadParameter(msg, param_hint=ARG_RESUME)
-
-    if resume and clobber:
-        msg = "--resume cannot be combined with --clobber"
-        raise typer.BadParameter(msg, param_hint=ARG_RESUME)
+    problems = [
+        msg
+        for condition, msg in (
+            (
+                resume and path,
+                f"{ARG_RESUME} re-enters a prior run; pass --run-id without a workplan path",
+            ),
+            (resume and clobber, f"{ARG_RESUME} cannot be combined with {ARG_CLOBBER}"),
+        )
+        if condition
+    ]
+    if problems:
+        raise typer.BadParameter("; ".join(problems), param_hint=ARG_RESUME)
 
     reload = not path
 

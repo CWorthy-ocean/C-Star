@@ -19,9 +19,7 @@ it, applies the located restart as an `OverrideTransform`, and writes the
 result to a new `<stem>.resume.yaml` file in the step's `work` directory.
 """
 
-import re
 import typing as t
-from collections.abc import Sequence
 from pathlib import Path
 
 import xarray as xr
@@ -42,39 +40,6 @@ log = get_logger(__name__)
 
 RESUME_SUFFIX: t.Final[str] = "resume"
 """Suffix appended to the stem of a derived, resume-ready blueprint file."""
-
-
-def _candidates(search_dir: Path) -> Sequence[RestartFile]:
-    """Enumerate restart-file candidates in a directory.
-
-    Mirrors the glob and naming-convention filtering `RestartFile.find` uses,
-    factored out here so both can share the same matching rules.
-
-    Parameters
-    ----------
-    search_dir : Path
-        The directory to search.
-
-    Returns
-    -------
-    Sequence[RestartFile]
-    """
-    if not search_dir.is_dir():
-        return ()
-
-    partitioned_glob = (
-        f"*{RestartFile.SUFFIX}.{RestartFile.TS_GLOB}.*.{RestartFile.EXT}"
-    )
-    joined_glob = f"*{RestartFile.SUFFIX}.{RestartFile.TS_GLOB}.{RestartFile.EXT}"
-
-    found: list[RestartFile] = []
-    for glob_pattern in (partitioned_glob, joined_glob):
-        found.extend(
-            RestartFile(path=match)
-            for match in search_dir.rglob(glob_pattern)
-            if re.fullmatch(RestartFile.PATTERN_RST, match.name, flags=re.ASCII)
-        )
-    return found
 
 
 def _opens_as_netcdf(path: Path) -> bool:
@@ -130,8 +95,12 @@ def find_resume_restart(
         restart, or `None` if no usable restart was found.
     """
     by_ts: dict[datetime, list[RestartFile]] = {}
-    for candidate in _candidates(search_dir):
-        by_ts.setdefault(candidate.timestamp, []).append(candidate)
+    if search_dir.is_dir():
+        for partitioned in (True, False):
+            for candidate in RestartFile.candidates(
+                search_dir, partitioned=partitioned
+            ):
+                by_ts.setdefault(candidate.timestamp, []).append(candidate)
 
     for ts in sorted(by_ts, reverse=True):
         pieces = by_ts[ts]

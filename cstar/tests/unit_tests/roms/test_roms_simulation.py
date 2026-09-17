@@ -2986,6 +2986,50 @@ class TestAttach:
         mock_partition.assert_called_once_with(np_xi=np_xi, np_eta=np_eta)
         assert sim.initial_conditions.source.location in caplog.text
 
+    @mock.patch.object(ROMSSimulation, "_validate_build_flags")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_rejects_executable_built_with_mismatched_cppdefs(
+        self,
+        mock_partition,
+        mock_get,
+        mock_marbl_attach,
+        mock_roms_attach,
+        mock_validate_flags,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """A previously compiled executable is adopted only if the staged
+        `cppdefs.opt` still agrees with the blueprint, exactly as `build()`
+        checks before compiling.
+        """
+        sim = stub_romssimulation
+        assert sim.compile_time_code
+        mock_validate_flags.side_effect = ValueError("PARALLEL_IO mismatch")
+
+        with (
+            mock.patch.object(AdditionalCode, "attach"),
+            mock.patch.object(ROMSInputDataset, "attach"),
+            mock.patch.object(ROMSInputDataset, "attach_partitions"),
+            mock.patch.object(
+                AdditionalCode,
+                "working_copy",
+                new_callable=mock.PropertyMock,
+                return_value=mock.Mock(
+                    common_parent=sim.fs_manager.compile_time_code_dir
+                ),
+            ),
+        ):
+            sim.fs_manager.compile_time_code_dir.mkdir(parents=True, exist_ok=True)
+            exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+            exe_path.write_text("a compiled binary")
+
+            with pytest.raises(CstarExpectationFailed, match="PARALLEL_IO mismatch"):
+                sim.attach()
+
+        assert sim.exe_path is None
+
     @mock.patch("cstar.roms.simulation.verify_roms_linkage")
     @mock.patch.object(ROMSExternalCodeBase, "attach")
     @mock.patch.object(MARBLExternalCodeBase, "attach")

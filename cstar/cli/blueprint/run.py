@@ -253,13 +253,19 @@ def run(
     bp_path = Path(uri)
     app_config = get_app_for_blueprint(bp_path)
 
-    if resume and clobber:
-        msg = "--resume cannot be combined with --clobber"
-        raise typer.BadParameter(msg, param_hint=ARG_RESUME)
-
-    if resume and not app_config.resumable:
-        msg = f"application {app_config.name!r} does not support {ARG_RESUME}"
-        raise typer.BadParameter(msg, param_hint=ARG_RESUME)
+    problems = [
+        msg
+        for condition, msg in (
+            (resume and clobber, f"{ARG_RESUME} cannot be combined with {ARG_CLOBBER}"),
+            (
+                resume and not app_config.resumable,
+                f"application {app_config.name!r} does not support {ARG_RESUME}",
+            ),
+        )
+        if condition
+    ]
+    if problems:
+        raise typer.BadParameter("; ".join(problems), param_hint=ARG_RESUME)
 
     name = f"{app_config.name}_runner"
     job_cfg = get_job_config()

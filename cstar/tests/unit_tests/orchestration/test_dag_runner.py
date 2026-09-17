@@ -214,7 +214,10 @@ async def test_dag_runner_load_run_state(
 
     launcher = LocalLauncher()
 
-    dag_status = await load_run_state(mock_run_id, launcher)
+    # the fake pids have no live process; an unfinalized handle is only
+    # treated as in progress while its process is alive
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=True):
+        dag_status = await load_run_state(mock_run_id, launcher)
 
     # verify that state is loaded for every step
     open_items = list(dag_status.open_items)

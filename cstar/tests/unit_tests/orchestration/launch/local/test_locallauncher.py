@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from psutil import NoSuchProcess
 
 from cstar.entrypoint.utils import ARG_RESUME
 from cstar.orchestration.launch.local import (
@@ -333,3 +334,62 @@ async def test_locallauncher_submit_rotates_prior_log(
 
     new_content = live_step.log_path.read_text()
     assert rotated.name in new_content.splitlines()[0]
+
+
+@pytest.mark.parametrize(
+    ("alive", "expected"),
+    [
+        pytest.param(True, "RUNNING", id="process_alive"),
+        pytest.param(False, "FAILED", id="process_gone"),
+    ],
+)
+async def test_status_expired_nonterminal_handle_checks_process_liveness(
+    mock_run_id: str, alive: bool, expected: str
+) -> None:
+    """A deserialized handle whose sentinel was never finalized is RUNNING only
+    while its OS process is alive; a dead process is reported as FAILED so the
+    step is re-run instead of adopted forever.
+    """
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Running,
+    )
+
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=alive):
+        assert await LocalLauncher._status(handle) == expected
+
+
+def test_is_alive_matches_pid_and_start_time(mock_run_id: str) -> None:
+    """`_is_alive` requires a live, non-zombie process whose creation time
+    matches the handle, so a recycled PID is not mistaken for the step.
+    """
+    start = datetime.datetime.now(tz=datetime.UTC)
+    handle = LocalHandle(
+        pid="12345",
+        name="step",
+        run_id=mock_run_id,
+        start_at=start,
+        status=Status.Running,
+    )
+
+    ps_process = mock.Mock()
+    ps_process.status.return_value = "running"
+    ps_process.create_time.return_value = start.timestamp()
+    with mock.patch(
+        "cstar.orchestration.launch.local.PsProcess", return_value=ps_process
+    ):
+        assert LocalLauncher._is_alive(handle) is True
+
+    ps_process.create_time.return_value = start.timestamp() + 3600
+    with mock.patch(
+        "cstar.orchestration.launch.local.PsProcess", return_value=ps_process
+    ):
+        assert LocalLauncher._is_alive(handle) is False
+
+    with mock.patch(
+        "cstar.orchestration.launch.local.PsProcess", side_effect=NoSuchProcess(12345)
+    ):
+        assert LocalLauncher._is_alive(handle) is False
