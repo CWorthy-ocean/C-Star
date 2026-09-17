@@ -31,6 +31,7 @@ from cstar.entrypoint.utils import (
     ARG_DIRECTIVES_URI_LONG,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_RESUME,
     ARG_URI_LONG,
     ARG_URI_SHORT,
 )
@@ -168,6 +169,22 @@ def test_create_parser_happy_path() -> None:
     # ruff: noqa: SLF001
     assert ARG_URI_LONG in parser._option_string_actions
     assert ARG_LOGLEVEL_LONG in parser._option_string_actions
+
+
+def test_create_parser_accepts_resume_flag() -> None:
+    """Verify the parser accepts `--resume` as a boolean flag, defaulting to
+    `False` when omitted.
+    """
+    parser = create_parser()
+
+    # ruff: noqa: SLF001
+    assert ARG_RESUME in parser._option_string_actions
+
+    parsed_default = parser.parse_args([ARG_URI_LONG, "blueprint.yaml"])
+    assert parsed_default.resume is False
+
+    parsed_resume = parser.parse_args([ARG_URI_LONG, "blueprint.yaml", ARG_RESUME])
+    assert parsed_resume.resume is True
 
 
 @pytest.mark.parametrize(
@@ -707,6 +724,64 @@ async def test_runner_on_start_user_unhandled_setup(
 
 
 @pytest.mark.asyncio
+async def test_runner_on_start_resume_attaches_instead_of_setup(
+    sim_runner: RomsMarblRunner,
+) -> None:
+    """A resumed runner adopts the existing working directory via `attach()`
+    and never stages, builds or partitions.
+    """
+    mock_handler = mock.Mock(spec=ExecutionHandler, status=ExecutionStatus.COMPLETED)
+    mock_simulation = mock.Mock(
+        run=mock.Mock(return_value=mock_handler), initial_conditions=None
+    )
+    sim_runner.request.resume = True
+
+    with (
+        mock.patch.object(sim_runner, "_on_shutdown", mock.Mock()),
+        mock.patch.object(sim_runner, "run", mock.AsyncMock()),
+        mock.patch.object(sim_runner, "simulation", mock_simulation),
+    ):
+        await sim_runner.execute()
+
+    mock_simulation.attach.assert_called_once_with()
+    mock_simulation.setup.assert_not_called()
+    mock_simulation.build.assert_not_called()
+    mock_simulation.pre_run.assert_not_called()
+    mock_simulation.run.assert_called_once()
+
+
+def test_runner_init_resume_builds_simulation_from_resume_blueprint(
+    blueprint_path: Path,
+    fake_job_config: JobConfig,
+) -> None:
+    """A resume request derives the blueprint through `prepare_resume_blueprint`
+    and builds the simulation from the derived path, not the original.
+    """
+    resumed_uri = str(blueprint_path.with_stem(f"{blueprint_path.stem}.resume"))
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "sim"
+    mock_sim_class = mock.Mock()
+    mock_sim_class.from_blueprint.return_value = mock_sim_instance
+    request = RunnerRequest(str(blueprint_path), RomsMarblBlueprint, resume=True)
+    service_config = ServiceConfiguration(
+        as_service=False, loop_delay=0, health_check_frequency=0, name="resume"
+    )
+
+    with (
+        mock.patch(
+            "cstar.applications.roms_marbl.app.prepare_resume_blueprint",
+            return_value=resumed_uri,
+        ) as mock_prepare,
+        mock.patch("cstar.roms.simulation.ROMSSimulation", mock_sim_class),
+    ):
+        RomsMarblRunner(request, service_config, fake_job_config)
+
+    mock_prepare.assert_called_once_with(str(blueprint_path))
+    mock_sim_class.from_blueprint.assert_called_once_with(resumed_uri)
+    assert request.blueprint_uri == str(blueprint_path)
+
+
+@pytest.mark.asyncio
 async def test_runner_on_start_user_unhandled_build(
     sim_runner: RomsMarblRunner,
 ) -> None:
@@ -910,6 +985,40 @@ def test_worker_main_exec(
 
     # Confirm the runner ran the simulation
     assert mock_execute.call_count == 1
+
+
+def test_worker_main_exec_passes_resume_flag(
+    blueprint_path: Path,
+) -> None:
+    """Verify `main()` passes `--resume` through to the `RunnerRequest` given
+    to `RomsMarblRunner`.
+    """
+    mock_execute = mock.AsyncMock(
+        return_value=RunnerResult(
+            RunnerRequest(blueprint_path.as_posix(), RomsMarblBlueprint),
+            RunnerState(ExecutionStatus.COMPLETED),
+        ),
+    )
+    args = [
+        "cstar.applications.roms_marbl",
+        ARG_URI_LONG,
+        str(blueprint_path),
+        ARG_RESUME,
+    ]
+
+    with (
+        mock.patch.object(RomsMarblRunner, "execute", mock_execute),
+        mock.patch.object(sys, "argv", args),
+        mock.patch(
+            "cstar.applications.roms_marbl.app.RunnerRequest",
+            wraps=RunnerRequest,
+        ) as mock_request_cls,
+    ):
+        return_code = main()
+
+    assert return_code == 0
+    mock_request_cls.assert_called_once()
+    assert mock_request_cls.call_args.kwargs["resume"] is True
 
 
 def test_worker_main_exec_continue_from(
