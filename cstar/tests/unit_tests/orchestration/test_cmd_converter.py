@@ -4,17 +4,18 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from pydantic import ValidationError
 
 from cstar.applications.roms_marbl.file_system import RomsFileSystemManager
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.applications.roms_marbl.transforms import ContinuanceDirective
 from cstar.base.env import ENV_CSTAR_CLOBBER_WORKING_DIR
-from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG, ARG_RESUME
 from cstar.orchestration.adapter import (
     StepToPlaceholderAdapter,
     StepToRunRequestAdapter,
 )
-from cstar.orchestration.models import KEY_CLOBBER, Application
+from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME, Application
 from cstar.orchestration.orchestration import LiveStep, RunRequestCommandFormatter
 from cstar.orchestration.serialization import deserialize
 
@@ -279,3 +280,60 @@ def test_adapt_omits_clobber_when_only_global_env_flag_set(
         request = StepToRunRequestAdapter().adapt(step)
 
     assert ARG_CLOBBER not in request.command
+
+
+def test_adapt_appends_resume_for_targeted_step(tmp_path: Path) -> None:
+    """Verify `--resume` is appended when the step's `workflow_overrides`
+    mark it for resume.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step = LiveStep(
+        name="test step",
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+        workflow_overrides={KEY_RESUME: True},
+    )
+
+    request = StepToRunRequestAdapter().adapt(step)
+
+    assert ARG_RESUME in request.command
+    assert ARG_CLOBBER not in request.command
+
+
+def test_adapt_omits_resume_for_untargeted_step(tmp_path: Path) -> None:
+    """Verify `--resume` is not appended when the step's `workflow_overrides`
+    do not mark it for resume.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    step = LiveStep(
+        name="test step",
+        application=Application.HELLO_WORLD,
+        blueprint=bp_path,
+        working_dir=tmp_path / "unit-test-work-dir",
+    )
+
+    request = StepToRunRequestAdapter().adapt(step)
+
+    assert ARG_RESUME not in request.command
+
+
+def test_clobber_and_resume_are_mutually_exclusive(tmp_path: Path) -> None:
+    """Verify a step cannot be marked for both clobber and resume, so the
+    generated command can never carry both `--clobber` and `--resume`.
+    """
+    bp_path = tmp_path / "blueprint.yaml"
+    bp_path.touch()
+
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        LiveStep(
+            name="test step",
+            application=Application.HELLO_WORLD,
+            blueprint=bp_path,
+            working_dir=tmp_path / "unit-test-work-dir",
+            workflow_overrides={KEY_CLOBBER: True, KEY_RESUME: True},
+        )

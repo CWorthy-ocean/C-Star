@@ -52,6 +52,10 @@ KEY_CLOBBER: t.Final[str] = "clobber"
 """The `workflow_overrides` key indicating a step's prior state should be
 cleared and re-executed."""
 
+KEY_RESUME: t.Final[str] = "resume"
+"""The `workflow_overrides` key indicating a step's failed prior attempt should
+be resumed in place (no clobber) by an application that supports it."""
+
 COMPUTE_OVERRIDE_NAMESPACES: t.Final[frozenset[str]] = frozenset({"local", "slurm"})
 """Launcher namespaces recognized as top-level `Step.compute_overrides` keys.
 
@@ -412,6 +416,17 @@ class Step(ConfiguredBaseModel):
     )
     """Configures the behavior of the pydantic model."""
 
+    @field_validator("workflow_overrides", mode="after")
+    @classmethod
+    def _exclusive_rerun_modes(cls, value: KeyValueStore) -> KeyValueStore:
+        """Reject a step marked both for clobber and for resume."""
+        if value.get(KEY_CLOBBER, False) and value.get(KEY_RESUME, False):
+            raise ValueError(
+                f"workflow_overrides {KEY_CLOBBER!r} and {KEY_RESUME!r} are "
+                "mutually exclusive: a step is either re-run from scratch or resumed"
+            )
+        return value
+
     @field_validator("compute_overrides", mode="after")
     @classmethod
     def _known_compute_namespaces(cls, value: KeyValueStore) -> KeyValueStore:
@@ -445,6 +460,17 @@ class Step(ConfiguredBaseModel):
         bool
         """
         return bool(self.workflow_overrides.get(KEY_CLOBBER, False))
+
+    @property
+    def resume(self) -> bool:
+        """Return `True` if this step's failed prior attempt should be resumed
+        in place instead of cleared and re-executed.
+
+        Returns
+        -------
+        bool
+        """
+        return bool(self.workflow_overrides.get(KEY_RESUME, False))
 
     @property
     def is_deferred(self) -> bool:

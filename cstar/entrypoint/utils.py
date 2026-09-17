@@ -11,6 +11,21 @@ ARG_CLOBBER_WORKPLAN_HELP: t.Final[str] = (
     "clobber control; the CSTAR_CLOBBER_WORKING_DIR environment variable is "
     "ignored (with a warning) by workplan runs."
 )
+ARG_RESUME: t.Final[str] = "--resume"
+ARG_RESUME_HELP: t.Final[str] = (
+    "Resume the prior attempt found in the blueprint's working directory instead "
+    "of starting fresh: previously staged inputs, cloned codebases and the compiled "
+    "executable are reused and the run continues from the last usable restart. "
+    "Only applications that declare themselves resumable accept this flag; it "
+    "cannot be combined with --clobber."
+)
+ARG_RESUME_WORKPLAN_HELP: t.Final[str] = (
+    "Re-enter a prior run (requires --run-id and no workplan path) and resume its "
+    "failed steps in place. Failed steps whose application supports resume continue "
+    "from their last usable restart; failed steps of other applications are re-run "
+    "from scratch with a warning; completed steps are reused. Cannot be combined "
+    "with --clobber."
+)
 OPT_CLOBBER_ALL: t.Final[str] = "all"
 """Reserved `--clobber` value that selects every step in the workplan. It
 shadows any step literally named `all`, which can therefore never be targeted

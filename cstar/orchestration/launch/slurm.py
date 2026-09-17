@@ -13,6 +13,7 @@ from cstar.base.env import (
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, _run_cmd
+from cstar.execution.file_system import rotate_file
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.scheduler_job import (
     SchedulerJob,
@@ -21,7 +22,11 @@ from cstar.execution.scheduler_job import (
     get_slurm_batches,
 )
 from cstar.orchestration.adapter import StepToRunRequestAdapter
-from cstar.orchestration.models import KEY_CLOBBER, KeyValueStore
+from cstar.orchestration.launch.common import (
+    build_attempt_log_header,
+    resolve_prior_attempt,
+)
+from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
     ProcessHandle,
@@ -328,7 +333,11 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         step.log_path.parent.mkdir(parents=True, exist_ok=True)
 
         run_id = os.getenv(ENV_CSTAR_RUNID, "")
-        step.log_path.write_text(f"ready for run {run_id!r} step {step.name!r}!\n")
+        rotated_log = rotate_file(step.log_path)
+        header = build_attempt_log_header(
+            step.name, run_id, rotated_log, resume=step.resume
+        )
+        step.log_path.write_text(header)
 
         job = SlurmLauncher.adapt_step(step, dependencies)
         short_command = job.commands.replace("\n", "")[:40]  # shorten and omit newlines
@@ -421,21 +430,7 @@ class SlurmLauncher(Launcher[SlurmHandle]):
         if prior_handle:
             # use persisted task as sentinel only; query SLURM for up-to-date status
             last_status = await SlurmLauncher.query_status(prior_handle)
-            name = prior_handle.name
-
-            if Status.is_failure(last_status):
-                # clear prior state and re-run any tasks that didn't succeed
-                log.debug(f"Prior run of {name!r} in fail state. Re-running.")
-                step.workflow_overrides[KEY_CLOBBER] = True
-            elif Status.is_terminal(last_status) or Status.is_in_progress(last_status):
-                # re-use the result from a run that terminated successfully, or
-                # adopt a job that is still queued/running instead of submitting
-                # a duplicate, unless the step is configured to be clobbered
-                reuse_prior = not step.clobber
-                log.debug(
-                    f"Prior run of {name!r} in {last_status.name!r} state. "
-                    f"Re-use: {reuse_prior}"
-                )
+            reuse_prior = resolve_prior_attempt(step, last_status)
 
         if not reuse_prior or not prior_handle:
             dependencies = await cls._prune_completed_dependencies(dependencies)

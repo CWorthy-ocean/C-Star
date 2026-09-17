@@ -2,14 +2,17 @@ import asyncio
 import datetime
 import subprocess
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from cstar.entrypoint.utils import ARG_RESUME
 from cstar.orchestration.launch.local import (
     LocalHandle,
     LocalLauncher,
     ProxiedRunRequestFormatter,
 )
+from cstar.orchestration.models import KEY_CLOBBER, KEY_RESUME
 from cstar.orchestration.orchestration import LiveStep, RunRequest, Status, Workplan
 from cstar.orchestration.serialization import deserialize
 from cstar.orchestration.state import StateRepository
@@ -201,3 +204,132 @@ def test_locallauncher_adapt_step_with_compute_overrides(
 
     # confirm that compute overrides are required to modify the command
     assert f"timeout {exp_timeout} -k {exp_fk_timeout}" in step_command
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_reuses_done_prior_handle(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a prior handle that terminated successfully is adopted instead
+    of resubmitting the step.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    prior_handle = LocalHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Done,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    with mock.patch.object(LocalLauncher, "_submit", mock.AsyncMock()) as mock_submit:
+        task = await LocalLauncher.launch(live_step, [])
+
+    mock_submit.assert_not_awaited()
+    assert task.handle.pid == prior_handle.pid
+    assert task.handle.status == Status.Done
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_resubmits_failed_prior_handle_with_clobber(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a failed prior handle causes a resubmission with clobber set,
+    when the step is not marked for resume.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    prior_handle = LocalHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Failed,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    fake_new_handle = LocalHandle(
+        pid="999",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Submitted,
+    )
+    with mock.patch.object(
+        LocalLauncher, "_submit", mock.AsyncMock(return_value=fake_new_handle)
+    ) as mock_submit:
+        task = await LocalLauncher.launch(live_step, [])
+
+    mock_submit.assert_awaited_once()
+    assert mock_submit.await_args is not None
+    submitted_step = mock_submit.await_args.args[0]
+    assert submitted_step.workflow_overrides.get(KEY_CLOBBER, False) is True
+    assert task.handle is fake_new_handle
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_launch_failed_prior_with_resume_no_clobber(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a failed prior handle for a step marked for resume is resubmitted
+    without clobber, and the rendered command includes `--resume`.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(
+        workplan.steps[0],
+        update={"workflow_overrides": {KEY_RESUME: True}},
+    )
+
+    prior_handle = LocalHandle(
+        pid="12345",
+        name=live_step.name,
+        run_id=mock_run_id,
+        start_at=datetime.datetime.now(tz=datetime.UTC),
+        status=Status.Failed,
+    )
+    await StateRepository().put_sentinel(prior_handle)
+
+    fake_process = mock.Mock(pid=999999)
+    with mock.patch.object(subprocess, "Popen", return_value=fake_process):
+        task = await LocalLauncher.launch(live_step, [])
+
+    submitted_step = task.step
+    assert submitted_step.workflow_overrides.get(KEY_CLOBBER, False) is False
+    assert ARG_RESUME in submitted_step.script_path.read_text()
+
+
+@pytest.mark.usefixtures("read_yaml_intercept")
+async def test_locallauncher_submit_rotates_prior_log(
+    wp_templates_dir: Path,
+    mock_run_id: str,
+) -> None:
+    """Verify a prior log is rotated to `.1` and the fresh log's first line
+    mentions it, when a step is (re)submitted.
+    """
+    wp_path = wp_templates_dir / "single_step.yaml"
+    workplan = deserialize(wp_path, Workplan)
+    live_step = LiveStep.from_step(workplan.steps[0])
+
+    live_step.fsm.prepare()
+    live_step.log_path.write_text("prior attempt output\n")
+
+    fake_process = mock.Mock(pid=888888)
+    with mock.patch.object(subprocess, "Popen", return_value=fake_process):
+        await LocalLauncher._submit(live_step, [])
+
+    rotated = live_step.log_path.with_name(f"{live_step.log_path.name}.1")
+    assert rotated.exists()
+    assert rotated.read_text() == "prior attempt output\n"
+
+    new_content = live_step.log_path.read_text()
+    assert rotated.name in new_content.splitlines()[0]

@@ -19,8 +19,13 @@ from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, additional_files_dir
+from cstar.execution.file_system import rotate_file
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import ModelFormatter
+from cstar.orchestration.launch.common import (
+    build_attempt_log_header,
+    resolve_prior_attempt,
+)
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -302,6 +307,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         log.debug(f"Created run script at path: {step.script_path}")
         log_file = step.log_path
 
+        run_id = str(os.getenv(ENV_CSTAR_RUNID, ""))
+        rotated_log = rotate_file(step.log_path)
+        header = build_attempt_log_header(
+            step.name, run_id, rotated_log, resume=step.resume
+        )
+        step.log_path.write_text(header)
+
         try:
             if not step.fsm.root_dir.exists():
                 step.fsm.prepare()
@@ -312,7 +324,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 cmd,
                 cwd=step.fsm.run_dir,
                 stdin=subprocess.PIPE,
-                stdout=step.log_path.open("w"),
+                stdout=step.log_path.open("a"),
                 stderr=subprocess.STDOUT,
             )
 
@@ -338,7 +350,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 handle = LocalHandle(
                     pid=str(pid),
                     name=step.name,
-                    run_id=str(os.getenv(ENV_CSTAR_RUNID, "")),
+                    run_id=run_id,
                     start_at=create_time,
                     status=Status.Submitted,
                 )
@@ -367,6 +379,13 @@ class LocalLauncher(Launcher[LocalHandle]):
             The current status of the step.
         """
         if handle.is_expired:
+            # a reused (deserialized) handle from a prior attempt has no
+            # live process; report its persisted terminal outcome rather
+            # than collapsing every terminal status into COMPLETED
+            if handle.status == Status.Failed:
+                return "FAILED"
+            if handle.status == Status.Cancelled:
+                return "CANCELLED"
             if not Status.is_terminal(handle.status):
                 return "RUNNING"
             return "COMPLETED"
@@ -420,7 +439,22 @@ class LocalLauncher(Launcher[LocalHandle]):
             raise CstarExpectationFailed(msg)
 
         live_step = LiveStep.from_step(step)
-        handle = await LocalLauncher._submit(live_step, dependencies)
+
+        state_repo = StateRepository()
+        prior_handle = await state_repo.get_sentinel(live_step.name, LocalHandle)
+        last_status: Status = Status.Unsubmitted
+        reuse_prior: bool = False
+
+        if prior_handle:
+            last_status = await LocalLauncher.query_status(prior_handle)
+            reuse_prior = resolve_prior_attempt(live_step, last_status)
+
+        if reuse_prior and prior_handle:
+            handle = prior_handle
+            handle.status = last_status
+        else:
+            handle = await LocalLauncher._submit(live_step, dependencies)
+
         return Task[LocalHandle](
             step=live_step,
             handle=handle,
@@ -496,9 +530,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         Task[LocalHandle]
             The task after the cancellation attempt has completed.
         """
-        process = item.handle.process
-
         if not item.handle.is_expired:  # wonky is-null check...
+            process = item.handle.process
             if process.returncode is not None:
                 msg = f"Unable to cancel a completed task `{process.pid}"
                 log.debug(msg)

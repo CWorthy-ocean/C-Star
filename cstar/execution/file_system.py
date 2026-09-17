@@ -582,6 +582,38 @@ async def step_disk_usage(step_root: Path) -> int:
     return UNKNOWN_SIZE if nested < 0 else max(total - nested, 0)
 
 
+def rotate_file(path: Path) -> Path | None:
+    """Rotate an existing file out of the way, logrotate-style.
+
+    If `path` exists, it is renamed to the lowest-numbered unused
+    `<name>.<i>` sibling (starting at `.1`), so a fresh file can be written
+    at `path` without discarding the previous attempt's content.
+
+    Parameters
+    ----------
+    path : Path
+        The file to rotate out of the way.
+
+    Returns
+    -------
+    Path | None
+        The path the existing file was renamed to, or `None` when `path`
+        did not exist and nothing was rotated.
+    """
+    if not path.exists():
+        return None
+
+    i = 1
+    rotated = path.with_name(f"{path.name}.{i}")
+    while rotated.exists():
+        i += 1
+        rotated = path.with_name(f"{path.name}.{i}")
+
+    path.rename(rotated)
+    log.debug("Rotated existing file `%s` to `%s`", path, rotated)
+    return rotated
+
+
 def get_backup_path(path: Path, backup_ext: str = ".bak") -> Path:
     """Identify a unique backup path for the input.
 
