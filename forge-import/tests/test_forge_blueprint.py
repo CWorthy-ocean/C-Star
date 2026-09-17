@@ -4594,6 +4594,39 @@ class TestForgeBlueprintWizard:
         assert w2.close_narrow_chk.value is True
         assert w2.mask_shapefile.value == "/tmp/mask.shp"
 
+    def test_default_forcing_spec_is_pinned_not_first_alphabetically(self, tmp_path):
+        """A newly bundled ForcingSpec that sorts first must not steal the default.
+
+        ``catalog.forcing_names`` is sorted, so seeding the dropdown with
+        ``names[0]`` silently repoints every user's default the moment someone
+        adds a spec whose name sorts earlier -- which is exactly what bundling
+        ``glorys-era5-esper`` did. The selection is pinned to
+        ``_DEFAULT_FORCING_SPEC`` instead (mirroring ``_DEFAULT_OUTPUT_SPEC``).
+        Build a catalog that provokes the regression rather than leaning on
+        whatever happens to be bundled today, so this keeps guarding the
+        invariant no matter how the shipped specs are renamed or extended.
+        """
+        pytest.importorskip("ipywidgets")
+        import shutil
+
+        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+        from cstar_forge.forge_blueprint_wizard import (
+            _DEFAULT_FORCING_SPEC,
+            ForgeBlueprintWizard,
+        )
+
+        root = tmp_path / "catalog"
+        shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+        cat = DomainCatalog(catalog_root=root)
+        if _DEFAULT_FORCING_SPEC not in cat.forcing_names:
+            pytest.skip(f"{_DEFAULT_FORCING_SPEC!r} not in the bundled catalog")
+        cat.register_forcing("aaa-sorts-first", cat.forcing_data(_DEFAULT_FORCING_SPEC))
+        # Without this the assertion below passes vacuously and guards nothing.
+        assert cat.forcing_names[0] == "aaa-sorts-first"
+
+        wiz = ForgeBlueprintWizard(catalog=cat)
+        assert wiz.forcing_dd.value == _DEFAULT_FORCING_SPEC
+
     def test_forcing_spec_selection_and_edit(self):
         w = self._wizard()
         # ForcingSpec must always be an explicit catalog selection now -- no more

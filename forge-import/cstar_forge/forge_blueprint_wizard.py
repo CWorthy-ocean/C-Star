@@ -3115,6 +3115,13 @@ _DEFAULT_MODEL = "pio-dev"
 # unchanged for blueprints that reference it.
 _DEFAULT_OUTPUT_SPEC = "daily-restarts"
 
+# Preselected in the Forcing dropdown when present in the catalog (falls back to
+# the first catalog spec otherwise). Named explicitly for the same reason as the
+# output default above: forcing_names is sorted alphabetically, so relying on
+# position would silently change every user's default whenever a newly bundled
+# ForcingSpec happens to sort first.
+_DEFAULT_FORCING_SPEC = "glorys-era5-unified"
+
 _GRID_INT = ("nx", "ny", "N")
 _GRID_FLOAT = ("size_x", "size_y", "center_lon", "center_lat", "rot")
 _SCOORD = ("theta_s", "theta_b", "hc")
@@ -3731,7 +3738,12 @@ class ForgeBlueprintWizard:
         _forcing_names = list(self.catalog.forcing_names)
         self.forcing_dd = W.Dropdown(
             options=self._dd_options(_forcing_names, "forcing"),
-            value=(_forcing_names[0] if _forcing_names else None),
+            # Prefer the bundled default explicitly -- see _DEFAULT_FORCING_SPEC.
+            value=(
+                _DEFAULT_FORCING_SPEC
+                if _DEFAULT_FORCING_SPEC in _forcing_names
+                else (_forcing_names[0] if _forcing_names else None)
+            ),
             description="Forcing:",
             style={"description_width": "110px"},
             tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
