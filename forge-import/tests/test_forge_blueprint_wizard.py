@@ -26,10 +26,13 @@ from cstar_forge.forge.namelist_model import (
     RunTimeSettingsV0_7_0,
 )
 from cstar_forge.forge_blueprint_wizard import (
+    _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
+    _OUTPUT_TABLES,
     ForgeBlueprintWizard,
     _drain_stream_buffer,
     _ForcingEditor,
+    _section_submodel,
     _SettingsEditor,
 )
 
@@ -72,6 +75,26 @@ def _find_section(w, title_fragment):
         if found is not None:
             return found
     return None
+
+
+def _find_card(root, key):
+    """Recursively find the ``components.card`` VBox tagged ``forge_key == key``
+    under ``root`` (see ``cstar_forge.ui.components.card``).
+    """
+    if getattr(root, "forge_key", None) == key:
+        return root
+    for c in getattr(root, "children", []):
+        found = _find_card(c, key)
+        if found is not None:
+            return found
+    return None
+
+
+def _descendants(w):
+    """Yield ``w`` and every widget nested under it (depth-first, pre-order)."""
+    yield w
+    for c in getattr(w, "children", []):
+        yield from _descendants(c)
 
 
 def test_surface_row_visibility_by_type(editor):
@@ -1035,25 +1058,28 @@ def test_topo_source_dropdown_includes_emod():
 
 
 def test_wizard_smoke_assembles_widget():
-    """Reordered sections (item 4b) and relocated dropdowns (item 5) assemble cleanly."""
+    """The redesigned Grid card assembles cleanly, with geometry, open
+    boundaries, and nesting appearing in the expected relative order (mirrors
+    the pre-redesign flat-``section()`` version of this smoke test).
+    """
     wiz = ForgeBlueprintWizard()
     root = wiz.widget  # must not raise
-    # crude structural check: section titles appear in the expected relative order
-    titles = []
+    grid_card = _find_card(root, "grid")
+    assert grid_card is not None
 
-    def walk(w):
-        html = getattr(w, "value", None)
-        if isinstance(html, str) and html.startswith("<b>"):
-            titles.append(html)
-        for c in getattr(w, "children", []):
-            walk(c)
+    texts = [
+        html
+        for w in _descendants(grid_card)
+        if isinstance((html := getattr(w, "value", None)), str)
+    ]
 
-    walk(root)
-    order = [t for t in titles]
-    grid_i = next(i for i, t in enumerate(order) if "Grid" in t and "Child" not in t)
-    obc_i = next(i for i, t in enumerate(order) if "Open boundaries" in t)
-    nest_i = next(i for i, t in enumerate(order) if "Child grid" in t)
-    assert grid_i < obc_i < nest_i
+    def _first_containing(fragment):
+        return next(i for i, t in enumerate(texts) if fragment in t)
+
+    geometry_i = _first_containing("Grid geometry")
+    obc_i = _first_containing("Open boundaries")
+    nest_i = _first_containing("Child grid")
+    assert geometry_i < obc_i < nest_i
 
 
 def test_load_catalog_dropdown_populated_from_catalog():
@@ -1099,28 +1125,28 @@ def test_load_from_catalog_no_selection_surfaces_error(monkeypatch):
 
 
 def test_specs_section_has_forcing_and_output_dropdowns():
-    """Item 5: Forcing/Output selectors live in the first 'Specs' box."""
+    """Item 5: Forcing/Output selectors live in the Model card."""
     wiz = ForgeBlueprintWizard()
-    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
-    assert specs_box is not None
-    assert wiz.forcing_dd in specs_box.children
-    assert wiz.output_dd in specs_box.children
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    descendants = list(_descendants(model_card))
+    assert wiz.forcing_dd in descendants
+    assert wiz.output_dd in descendants
 
 
 def test_roms_ref_prefilled_and_placed_next_to_model_dropdown():
-    """ucla-roms ref is prefilled from the selected model's pinned default (stays
-    editable) and lives right next to the Model dropdown in the Specs section.
+    """ucla-roms ref is prefilled from the selected model's pinned default
+    (stays editable) and lives in the Model card, in its own field row below
+    the Model dropdown (the card/field_row redesign no longer puts it
+    literally in the same row as Model -- see components.field_row).
     """
     wiz = ForgeBlueprintWizard()
     assert wiz.roms_ref.value == wiz._model_default_roms_ref()
     assert wiz.roms_ref.value  # this model.yaml pins a concrete commit
 
-    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
-    assert specs_box is not None
-    model_row = next(
-        c for c in specs_box.children if wiz.model_dd in getattr(c, "children", [])
-    )
-    assert wiz.roms_ref in model_row.children  # same row as the Model dropdown
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    assert wiz.roms_ref in _descendants(model_card)
 
 
 def test_roms_ref_repopulates_on_model_change(monkeypatch):
@@ -1133,20 +1159,20 @@ def test_roms_ref_repopulates_on_model_change(monkeypatch):
 
 def test_marbl_ref_prefilled_and_placed_next_to_model_dropdown():
     """MARBL ref mirrors the ucla-roms ref: prefilled from the selected model's
-    pinned default (stays editable) and lives in the Model row of the Specs section.
+    pinned default (stays editable) and lives in the Model card, after
+    (in document order) BGC mode's own row -- MARBL ref only matters once BGC
+    mode is "marbl".
     """
     wiz = ForgeBlueprintWizard()
     assert wiz.marbl_ref.value == wiz._model_default_marbl_ref()
     assert wiz.marbl_ref.value  # this model.yaml pins a concrete MARBL tag
 
-    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
-    assert specs_box is not None
-    model_row = next(
-        c for c in specs_box.children if wiz.model_dd in getattr(c, "children", [])
-    )
-    assert wiz.marbl_ref in model_row.children  # same row as the Model dropdown
-    children = list(model_row.children)
-    assert children.index(wiz.marbl_ref) == children.index(wiz.bgc_dd) + 1
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    descendants = list(_descendants(model_card))
+    assert wiz.marbl_ref in descendants
+    assert wiz.bgc_dd in descendants
+    assert descendants.index(wiz.marbl_ref) > descendants.index(wiz.bgc_dd)
 
 
 def test_marbl_ref_hidden_unless_bgc_is_marbl():
@@ -1281,17 +1307,14 @@ def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
 
 
 def test_bgc_dd_default_and_placement():
-    """BGC mode defaults to 'marbl' and lives in the same Specs row as Model."""
+    """BGC mode defaults to 'marbl' and lives in the Model card."""
     wiz = ForgeBlueprintWizard()
     assert wiz.bgc_dd.value == "marbl"
     assert set(wiz.bgc_dd.options) == {"marbl", "none"}
 
-    specs_box = _find_section(wiz.widget, "<b>Specs</b>")
-    assert specs_box is not None
-    model_row = next(
-        c for c in specs_box.children if wiz.model_dd in getattr(c, "children", [])
-    )
-    assert wiz.bgc_dd in model_row.children
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    assert wiz.bgc_dd in _descendants(model_card)
 
 
 def test_bgc_dd_marbl_gathers_into_cppdefs():
@@ -2417,6 +2440,93 @@ def test_forcing_modified_reflects_deviation_from_catalog_pick():
     assert wiz.config.composition.forcing.modified is False
 
 
+# ---------------------------------------------------------------------------
+# Advanced settings: output-stream tables / per-variable checkbox grids
+# (_SettingsEditor._build_section grouping -- see _OUTPUT_TABLES/_VARIABLE_GRIDS)
+# ---------------------------------------------------------------------------
+
+
+def _iter_widget_tree(widget):
+    """Depth-first walk of a widget and its ``.children`` (Box/GridBox/HBox/VBox)."""
+    yield widget
+    for child in getattr(widget, "children", ()):
+        yield from _iter_widget_tree(child)
+
+
+def _is_descendant_of_class(root, target, css_class: str) -> bool:
+    """True if ``target`` sits under some node in ``root``'s tree carrying
+    ``css_class`` (as added via ``add_class``).
+    """
+    for node in _iter_widget_tree(root):
+        if css_class in getattr(node, "_dom_classes", ()) and any(
+            t is target for t in _iter_widget_tree(node)
+        ):
+            return True
+    return False
+
+
+def test_ocean_vars_output_table_widgets_have_blank_description_and_live_in_table():
+    """The ocean_vars Write/Period/Records-per-file widgets for each output
+    stream row (see ``_OUTPUT_TABLES["ocean_vars"]``) render with a blank
+    ``description`` (the table's own header carries the column labels) and
+    sit inside a ``W.GridBox`` carrying the ``forge-out-table`` class.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    row = next(
+        r for r in _OUTPUT_TABLES["ocean_vars"] if r["label"] == "Instantaneous history"
+    )
+    for key in (row["write"], row["period"], row["records"]):
+        widget, _base = editor._widgets[("ocean_vars", key)]
+        assert widget.description == ""
+        assert _is_descendant_of_class(editor.accordion, widget, "forge-out-table")
+
+
+def test_ocean_vars_variable_checkbox_lives_in_grid_with_glossary_description():
+    """``wrt_z`` (one of ``_VARIABLE_GRIDS["ocean_vars"]``'s history-file
+    variables) renders inside a ``forge-var-grid`` GridBox and keeps its
+    normal glossary-derived (non-blank) checkbox description -- only the
+    output-stream table's write/period/records widgets get blanked.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    widget, _base = editor._widgets[("ocean_vars", "wrt_z")]
+    assert widget.description != ""
+    assert _is_descendant_of_class(editor.accordion, widget, "forge-var-grid")
+
+
+def test_ocean_vars_section_fields_unchanged_by_table_grid_layout():
+    """The table/grid layout is display-only: ``_section_fields["ocean_vars"]``
+    (which drives the pane-title "N settings" count) must still list every
+    field ``_build_section`` would have built as a plain flat list -- i.e.
+    every ``ocean_vars`` field on the active settings_cls's sub-model, minus
+    ``_ACCORDION_EXCLUDED_FIELDS``, in the same order.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    sub = _section_submodel("ocean_vars", wiz._editor_settings_cls)
+    excluded = _ACCORDION_EXCLUDED_FIELDS.get("ocean_vars", frozenset())
+    expected = [
+        key
+        for key in wiz.config.model_settings["ocean_vars"]
+        if key not in excluded and key in sub.model_fields
+    ]
+    assert expected  # sanity: the section isn't accidentally empty
+    assert editor._section_fields["ocean_vars"] == expected
+
+
+def test_ocean_vars_table_widget_read_reflects_edit():
+    """A value set directly on a table-rendered widget (same object as in the
+    ``_widgets`` registry -- the table only rearranges it) must read back via
+    ``editor.read()`` exactly like any other advanced-settings field.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    widget, _base = editor._widgets[("ocean_vars", "nrpf_his")]
+    widget.value = 77
+    assert editor.read("ocean_vars", "nrpf_his") == 77
+
+
 def test_model_and_output_modified_from_accordion_overrides():
     """Model/output share the accordion overrides layer; modified is derived per-
     spec by whether a deviating override key belongs to OUTPUT_SECTIONS/
@@ -2555,8 +2665,9 @@ def test_nest_plot_button_renders_parent_and_child_via_plot_nesting(monkeypatch)
     assert any(c[0] == "plot_nesting" for c in calls), wiz.nest_plot_status.value
     assert not any(c[0] == "plot" for c in calls)  # doesn't touch the parent plot
     assert len(wiz.nest_plot_img.value) > 0
-    # The parent plot/status are untouched by the nesting-section refresh.
-    assert wiz.plot_status.value == ""
+    # The parent plot/status are untouched by the nesting-section refresh
+    # (plot_status still carries its initial empty-state hint).
+    assert wiz.plot_status.value == "Click Refresh preview to draw the grid."
     assert wiz.plot_img.value == b""
 
 
@@ -3939,3 +4050,162 @@ class TestRiverCustomFileAttach:
         fe2 = wiz2._forcing_editor
         w2 = next(ws for ws in fe2._rows["river"] if ws["name"].value == "DAI")
         assert w2["path"].value == "/custom/river/source.nc"
+
+
+# ===========================================================================
+# WP2 (page layout) redesign: cards, sticky bar, chips, banners.
+# ===========================================================================
+
+
+def test_widget_root_has_forge_wizard_class():
+    """The redesigned root VBox carries the ``forge-wizard`` class (and
+    ``forge-app``, so ``components.WIZARD_CSS`` also matches outside AppShell).
+    """
+    wiz = ForgeBlueprintWizard()
+    assert "forge-wizard" in wiz.widget._dom_classes
+    assert "forge-app" in wiz.widget._dom_classes
+
+
+def test_every_card_key_is_findable():
+    """Every one of the seven cards (start/model/grid/forcing/run/advanced/
+    review) is reachable from the root via its ``forge_key``.
+    """
+    wiz = ForgeBlueprintWizard()
+    root = wiz.widget
+    for key in (
+        "start",
+        "model",
+        "grid",
+        "forcing",
+        "run",
+        "advanced",
+        "review",
+    ):
+        assert _find_card(root, key) is not None, f"missing card {key!r}"
+
+
+def test_sticky_bar_reflects_model_and_validity_after_rebuild():
+    """After a rebuild, the sticky bar names the selected model and shows a
+    "Valid" (not "Invalid") status chip for a config that resolves cleanly.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+    assert wiz.model_dd.value in wiz.sticky_bar.value
+    assert "● Valid" in wiz.sticky_bar.value
+
+
+def test_download_html_default_caption_is_the_full_filename():
+    """With no ``caption``, `_download_html` keeps the Review card's copy:
+    "Download <code>fname</code>", no ``title=``.
+    """
+    wiz = ForgeBlueprintWizard()
+    cfg = wiz.config
+    assert cfg is not None, wiz.derived.value
+    fname = f"{cfg.name}.forge_blueprint.yaml"
+    html = ForgeBlueprintWizard._download_html(cfg)
+    assert f"Download <code>{fname}</code>" in html
+    assert "title=" not in html
+
+
+def test_download_html_custom_caption_moves_filename_to_title():
+    """A ``caption`` becomes the link text verbatim; the filename moves to
+    ``title=`` instead (the sticky bar's compact "Download blueprint" copy).
+    """
+    wiz = ForgeBlueprintWizard()
+    cfg = wiz.config
+    assert cfg is not None, wiz.derived.value
+    fname = f"{cfg.name}.forge_blueprint.yaml"
+    html = ForgeBlueprintWizard._download_html(cfg, caption="x")
+    assert ">x<" in html
+    assert f'title="{fname}"' in html
+
+
+def test_grid_chip_shows_fields_to_check_initially():
+    """A freshly-built wizard hasn't derived or touched boundaries/v_sponge
+    yet, so the Grid card's chip reports outstanding fields.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert "fields to check" in wiz.card_chips["grid"].value
+
+
+def test_forcing_accordion_first_title_contains_ic_source_name():
+    """The forcing accordion's first pane (initial conditions) is retitled
+    with a live summary that names the current IC source.
+    """
+    wiz = ForgeBlueprintWizard()
+    title0 = wiz._forcing_editor._acc.get_title(0)
+    assert wiz._forcing_editor.ic_name.value in title0
+
+
+def test_set_grid_widgets_locked_toggles_grid_lock_banner():
+    wiz = ForgeBlueprintWizard()
+    assert wiz.grid_lock_banner.layout.display == "none"
+
+    wiz._set_grid_widgets_locked(True)
+    assert wiz.grid_lock_banner.layout.display == ""
+
+    wiz._set_grid_widgets_locked(False)
+    assert wiz.grid_lock_banner.layout.display == "none"
+
+
+def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
+    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+
+    app = ForgeBlueprintWizardApp()
+    assert app.widget is app._outer
+    assert app._bar.widget in app._outer.children
+    assert "forge-catalog-bar" in app._bar.widget._dom_classes
+
+
+def test_blueprint_app_from_shell_builds():
+    from cstar_forge.ui.shell import blueprint_app
+
+    shell = blueprint_app()
+    assert shell.stack.children  # must not raise, and must hold the page
+
+
+# ---------------------------------------------------------------------------
+# WP3 (inner editors): IC pane field_row/field_grid layout, forcing-row labels.
+# ---------------------------------------------------------------------------
+
+
+def test_ic_pane_first_field_row_is_ic_name(editor):
+    """The IC pane's first ``field_grid`` row is ``ic.ic_name`` (name, layout,
+    path, validate, in that order -- see ``_ForcingEditor.widget``).
+    """
+    acc = editor.widget
+    # `open_accordion` returns a VBox of single-pane Accordions (`.panes`).
+    ic_box = acc.panes[0].children[0]  # cat_order[0] == "initial_conditions"
+    ic_fields = ic_box.children[0]
+    first_row = ic_fields.children[0]
+    assert first_row.forge_key == "ic.ic_name"
+
+
+def test_ic_layout_display_none_hides_its_row(editor):
+    """``field_row`` mirrors ``widget.layout.display`` onto the row -- setting
+    ``ic_layout.layout.display = "none"`` (as ``_sync_ic_layout_visibility``
+    does for a non-GLORYS source) hides the whole row, not just the dropdown.
+    """
+    acc = editor.widget
+    ic_box = acc.panes[0].children[0]
+    ic_fields = ic_box.children[0]
+    layout_row = next(r for r in ic_fields.children if r.forge_key == "ic.ic_layout")
+    assert layout_row.layout.display == _display(editor.ic_layout)
+
+    editor.ic_layout.layout.display = "none"
+    assert layout_row.layout.display == "none"
+
+
+def test_surface_row_name_description_starts_with_glossary_label(editor):
+    """A per-row widget's description is sourced from the ``forcing.row.<key>``
+    glossary entry (``label_for``, see ``_row_desc``), not the old hardcoded
+    ``"src:"``/``"path:"``/etc. caption.
+    """
+    from cstar_forge.ui.labels import label_for
+
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
+    label = label_for("forcing.row.name", default="src").label
+    assert w["name"].description.startswith(label)

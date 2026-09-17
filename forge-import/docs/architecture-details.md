@@ -54,10 +54,17 @@ cstar-forge/
 │   ├── run.py                  # CLI entry point: python -m cstar_forge.run forge_blueprint.yaml
 │   ├── cli.py                  # 'cstar forge run'/'wizard'/'register-kernel' typer sub-app (cstar.cli entry point)
 │   ├── register_kernel.py      # Jupyter kernelspec + activation wrapper (backs 'cstar forge register-kernel')
-│   ├── ui/                     # Wizard presentation layer (Voilà app front-end)
+│   ├── ui/                     # Wizard presentation layer (shared UI kit + Voilà front-end)
 │   │   ├── _voila_app.ipynb    # Voilà app notebook — internal; served via
-│   │   │                       # run-wizard-app.sh / 'cstar forge wizard'
-│   │   ├── branding.py         # [C]Worthy header bar, favicon, page title
+│   │   │                       # run-wizard-app.sh / 'cstar forge wizard'; boots shell.blueprint_app()
+│   │   ├── shell.py            # AppShell: brand header + page nav (ToggleButtons↔Stack, hidden
+│   │   │                       # with one page) + page stack; blueprint_app() = one-page shell
+│   │   ├── components.py       # WIZARD_CSS (scoped under .forge-app) + card/field_row/field_grid/
+│   │   │                       # subsection/chip/banner/open_accordion helpers (all take `W`)
+│   │   ├── labels/             # Per-page label glossary: __init__.py loader (label_for/section_for,
+│   │   │   └── blueprint-wizard.yaml  # never raise) + the wizard page's sections/fields YAML
+│   │   ├── catalog_bar.py      # CatalogBar: catalog-location input + two-click Reload confirm
+│   │   ├── branding.py         # [C]Worthy palette tokens, header bar, favicon, page title
 │   │   └── assets/cworthy-logo.png  # bundled logo (embedded as a data URI)
 │   ├── forge/                  # The forge application (execution engine —
 │   │   │                       # relocates into C-Star as one unit)
@@ -214,6 +221,19 @@ relocation stays a later step.
    locations to build a new `LayeredCatalog`, keeping the previous wizard on failure).
    Saves (blueprints, workplans) and catalog registrations land in the stack's
    writable top layer — never inside the installed package.
+   *Presentation:* `ForgeBlueprintWizard.widget` lays the same widget objects out as
+   numbered section cards (`ui/components.card`), label/control field rows
+   (`field_row` — clears the widget's own `description`, mirrors its
+   `layout.display` so existing hide/show code still hides the whole row) and
+   independently collapsible panes (`open_accordion`). Every visible label, symbol,
+   unit and hint comes from `ui/labels/blueprint-wizard.yaml` via `label_for(key)`
+   (key namespaces: bare widget attr, `grid.<k>`, `forcing.row.<key>`, `ic.<attr>`,
+   `boundary.<attr>`, `settings.<section>[.<field>]`, `buttons.<name>`); a missing
+   key falls back to the raw name, and `tests/test_ui_labels.py` checks every key
+   names a real widget or namelist field. `_rebuild()` also refreshes the sticky
+   status bar, per-card chips and accordion titles (`_update_status`). The CSS travels
+   inside the widget tree so the plain-notebook path is styled too; only the Voilà
+   page column (`body[data-voila] .forge-shell`) is shell-specific.
 2. User picks a domain → `_on_domain()` prefills grid/boundaries/partitioning/dates from
    `catalog.domain_data(name)`.
 3. Every edit → `_rebuild()` → `build_forge_blueprint(**self._gather())`

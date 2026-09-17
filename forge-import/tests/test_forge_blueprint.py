@@ -4192,7 +4192,7 @@ class TestForgeBlueprintWizard:
 
     def test_validation_indicator_valid_by_default(self):
         w = self._wizard()
-        assert "settings valid" in w.validation.value
+        assert "Blueprint is valid" in w.validation.value
 
     def test_advanced_editor_groups_sections_into_modeler_categories(self):
         w = self._wizard()
@@ -5130,7 +5130,7 @@ class TestForgeBlueprintWizard:
         w2._on_load_path(None)
         assert "invalid settings value" in w2.load_status.value
         # the wizard re-derives valid settings from the inputs, so it ends valid
-        assert "settings valid" in w2.validation.value
+        assert "Blueprint is valid" in w2.validation.value
 
     def test_load_bad_input_shows_error_not_crash(self):
         w = self._wizard()
@@ -5229,25 +5229,26 @@ class TestForgeBlueprintWizardApp:
         assert isinstance(cat, LayeredCatalog)
         assert cat.catalog_root == user_catalog_root()
         assert cat.stores[-1].catalog_root == _DEFAULT_CATALOG_ROOT
-        assert "color:#2a2" in app._cat_status.value
+        assert "Loaded" in app._bar._cat_status.value
 
     def test_reload_with_bad_value_keeps_previous_wizard(self):
         # A nonexistent local path is no longer an error (it becomes an empty
         # writable layer over bundled, matching CSTAR_FORGE_CATALOG semantics),
-        # so a malformed GitHub URL is the failure case now.
+        # so a malformed GitHub URL is the failure case now. Calls `_load`
+        # directly -- the catalog bar's own reload button now requires a
+        # two-step confirm (see `cstar_forge.ui.catalog_bar.CatalogBar`),
+        # which isn't this test's concern.
         app = self._app()
         original_inner = app.inner
-        app._cat_input.value = "https://github.com/org-but-no-repo"
-        app._reload(None)
+        app._load("https://github.com/org-but-no-repo")
         assert app.inner is original_inner
-        assert "color:#b00" in app._cat_status.value
+        assert "Failed to load catalog" in app._bar._cat_status.value
 
     def test_single_local_path_builds_stack_with_bundled(self, tmp_path):
         from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, LayeredCatalog
 
         app = self._app()
-        app._cat_input.value = str(tmp_path / "my-catalog")
-        app._reload(None)
+        app._load(str(tmp_path / "my-catalog"))
         cat = app.inner.catalog
         # One local path routes through build_catalog_stack: writable top over
         # the read-only bundled layer, same as the env var would produce.
@@ -5255,14 +5256,13 @@ class TestForgeBlueprintWizardApp:
         assert cat.catalog_root == (tmp_path / "my-catalog").resolve()
         assert cat.stores[-1].catalog_root == _DEFAULT_CATALOG_ROOT
         assert cat.model_names  # bundled models visible through the stack
-        assert "color:#2a2" in app._cat_status.value
+        assert "Loaded" in app._bar._cat_status.value
 
     def test_single_local_literal_loads_readonly_store_with_warning(self):
         from cstar_forge.domain_catalog import DomainCatalog, LayeredCatalog
 
         app = self._app()
-        app._cat_input.value = "local"
-        app._reload(None)
+        app._load("local")
         cat = app.inner.catalog
         # "local" (the bundled catalog) can never be a writable top layer:
         # exactly one read-only store, and the status line warns that saves
@@ -5270,7 +5270,7 @@ class TestForgeBlueprintWizardApp:
         assert isinstance(cat, DomainCatalog)
         assert not isinstance(cat, LayeredCatalog)
         assert cat.read_only is True
-        assert "read-only catalog" in app._cat_status.value
+        assert "read-only catalog" in app._bar._cat_status.value
         assert app.inner._default_blueprint_path("x") == "x.forge_blueprint.yaml"
 
 
