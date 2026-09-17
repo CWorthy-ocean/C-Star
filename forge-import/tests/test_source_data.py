@@ -20,6 +20,7 @@ import pytest
 from cstar_forge.forge import source_data
 from cstar_forge.forge.source_data import (
     DATASET_REGISTRY,
+    GLOFAS_FILENAME,
     SOURCE_ALIAS,
     SRTM15_URL,
     SRTM15_VERSION,
@@ -715,7 +716,7 @@ class TestPrepareGlofas:
         """Existing GloFAS file is accepted and recorded in sd.paths."""
         glofas_dir = tmp_path / "GLOFAS"
         glofas_dir.mkdir(parents=True)
-        glofas_file = glofas_dir / "glofas_v4_rivers_daily.nc"
+        glofas_file = glofas_dir / GLOFAS_FILENAME
         glofas_file.touch()
 
         sd = SourceData(datasets=["GLOFAS"], source_data_dir=tmp_path)

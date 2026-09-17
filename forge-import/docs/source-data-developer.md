@@ -373,7 +373,7 @@ Required attributes are injected into `SourceData` and accessed by handlers via 
 
 ### Caching Strategy
 
-- Files are cached in `self.source_data_dir / {dataset_name} /`, where `source_data_dir` is injected by the caller (e.g. `ForgeExecutor`, from `HostPaths.source_data_cache`) — `source_data.py` no longer imports `cstar_forge.config` to resolve this path itself (some handlers nest one level deeper or use a fixed filename — e.g. `TPXO/TPXO10.v2a/`, `GLOFAS/glofas_v4_rivers_daily.nc`)
+- Files are cached in `self.source_data_dir / {dataset_name} /`, where `source_data_dir` is injected by the caller (e.g. `ForgeExecutor`, from `HostPaths.source_data_cache`) — `source_data.py` no longer imports `cstar_forge.config` to resolve this path itself (some handlers nest one level deeper or use a fixed filename — e.g. `TPXO/TPXO10.v2a/`, `GLOFAS/glofas_v4_rivers_daily_w_rivr2o.nc`)
 - Existence check: `if self.clobber or (not path.exists())`
 - Clobber mode: Remove existing file before download
 

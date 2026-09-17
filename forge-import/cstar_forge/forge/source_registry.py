@@ -70,7 +70,10 @@ UNIFIED_BGC_URL = "https://drive.google.com/uc?id=1NKbAe1ARtU68Np3bcwdd7nadeEUgd
 # every already-staged host silently on the old file.
 UNIFIED_BGC_FILENAME = f"BGCdataset_{UNIFIED_BGC_VERSION}.nc"
 GLOFAS_CDS_URL = "https://ewds.climate.copernicus.eu/datasets/cems-glofas-historical"
-GLOFAS_FILENAME = "glofas_v4_rivers_daily.nc"
+# Enriched with precomputed per-station RivR2O river-BGC concentrations (see
+# roms-tools' Rivr2oBgcSource "total_discharge" mode); produced by an external
+# preprocessing pipeline, not by GloFAS/Forge itself.
+GLOFAS_FILENAME = "glofas_v4_rivers_daily_w_rivr2o.nc"
 
 # --- logical source-name -> dataset key --------------------------------------
 SOURCE_ALIAS: dict[str, str] = {
