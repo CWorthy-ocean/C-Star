@@ -845,6 +845,12 @@ def _split_sources(value: t.Any, delimiter: str) -> list[str]:
     return [token for raw in str(value).split(delimiter) if (token := raw.strip())]
 
 
+SOURCE_KEY_PATH: t.Final[str] = "path"
+"""Directive config key naming a filesystem path as the content source."""
+SOURCE_KEY_STEP: t.Final[str] = "step"
+"""Directive config key naming another workplan step as the content source."""
+
+
 class ContinuanceDirective(OverrideDirective):
     """A transform that locates a restart file with an unknown path at the
     time the task was scheduled, and applies it as the step's initial
@@ -862,9 +868,9 @@ class ContinuanceDirective(OverrideDirective):
 
     REPLACE_LISTS = True
 
-    KEY_PATH: t.Final[str] = "path"
+    KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for continuance."""
-    KEY_STEP: t.Final[str] = "step"
+    KEY_STEP: t.Final[str] = SOURCE_KEY_STEP
     """Key used to specify a step name as the source for continuance."""
 
     @classmethod
@@ -998,9 +1004,9 @@ class NestingDirective(OverrideDirective):
 
     REPLACE_LISTS = True
 
-    KEY_PATH: t.Final[str] = ContinuanceDirective.KEY_PATH
+    KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for the boundary forcing."""
-    KEY_STEP: t.Final[str] = ContinuanceDirective.KEY_STEP
+    KEY_STEP: t.Final[str] = SOURCE_KEY_STEP
     """Key used to specify a step name as the source for the boundary forcing."""
     KEY_BRY_PATH: t.Final[str] = "bry_path"
     """Deprecated alias for `KEY_PATH`."""
