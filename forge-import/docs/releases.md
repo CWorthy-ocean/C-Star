@@ -1,5 +1,41 @@
 # Release notes
 
+## 0.8.1
+
+### Breaking Changes
+
+* `GLOFAS_FILENAME` (the single source of truth in `source_registry.py`) now expects `glofas_v4_rivers_daily_w_rivr2o.nc` at `self.source_data_dir / "GLOFAS" /`, not `glofas_v4_rivers_daily.nc`. Any host with only the old plain file staged will now fail `_prepare_glofas`'s existence check until the enriched file is staged under the new name. ([#172](https://github.com/CWorthy-ocean/cstar-forge/pull/172))
+
+### New Features
+
+* Improved wizard UI: ([#174](https://github.com/CWorthy-ocean/cstar-forge/pull/174))
+  * Wizard layout: numbered section cards with Required/Optional chips and live status chips (Complete, N fields to check, At preset defaults, N modified, Ready/Invalid); a sticky bar with step links, a model/domain/run summary, a Valid/Invalid chip and the Download button; a legend explaining that unmarked fields have model defaults.
+  * Field rows: every setting shows a plain-language label, its variable name in monospace underneath, a unit beside the input and a one-line hint (for example "Sponge viscosity · v_sponge · m²/s"). Required fields carry a red asterisk.
+  * Label glossary: `cstar_forge/ui/labels/blueprint-wizard.yaml` holds sections and fields (label, symbol, unit, hint, required) keyed by widget/grid/forcing-row/settings names; `cstar_forge.ui.labels.label_for()` never raises and falls back to the raw name; the loader rejects unknown keys so typos fail tests rather than silently.
+  * Forcing and Advanced-settings panels are independently collapsible: any number may stay open, and their titles summarise contents ("Initial conditions · GLORYS · default path · REQUIRED", "Physics & subgrid tuning · 23 settings · all defaults").
+  * Advanced settings render output-style namelist sections as stream tables (Write | Period (s) | Records / file | extras) for `ocean_vars`, `bgc`, `cdr_output`, `surf_flux`, `diagnostics`, `frc_output`, `upscale_output`, `random_output`, `zslice`, `sponge_tune`, `particles` and `extract_data`, plus checkbox grids for per-variable write flags; sections are separated by bold dividers. Fields a settings tier lacks (e.g. restart records on ucla-roms ≥ 0.5.0) show as a dash.
+  * App shell (`cstar_forge.ui.shell.AppShell`): brand header plus a page nav that appears once a second page exists, so future Configuration and Workplan pages slot in beside the blueprint page with shared kernel state.
+  * Catalog bar: Reload is a two-step confirm ("Confirm reload (discards edits)" for five seconds) instead of silently rebuilding the wizard and discarding input.
+  * Grid preview, nesting previews and the CDR plot start with an explanatory empty state instead of a broken-image icon.
+
+### Bug Fixes
+
+* Invalid-blueprint feedback showed only the exception class name ("Invalid: ValidationError"); it now shows the message in a banner. ([#174](https://github.com/CWorthy-ocean/cstar-forge/pull/174))
+* Hiding a widget (e.g. MARBL version when BGC is "none", GLORYS layout for non-GLORYS sources) left its label behind; field rows mirror the widget's visibility so the whole row hides. ([#174](https://github.com/CWorthy-ocean/cstar-forge/pull/174))
+* Wide forcing rows overflowed horizontally in notebooks; they now wrap onto further lines with dividers between rows. ([#174](https://github.com/CWorthy-ocean/cstar-forge/pull/174))
+
+### Improvements
+
+* New forcing specs show working solutions for tracer variable combinations among the multiple BGC sources. ([#171](https://github.com/CWorthy-ocean/cstar-forge/pull/171))
+* The specific roms tag for the bundled roms 0.6 spec is now 0.6.4 (was 0.6.1) ([#173](https://github.com/CWorthy-ocean/cstar-forge/pull/173))
+
+### Miscellaneous
+
+* `tests/test_source_data.py::TestPrepareGlofas::test_verified_when_file_present` now imports and asserts against the `GLOFAS_FILENAME` constant instead of hardcoding the old filename literal, so it can't silently drift from the registry again. ([#172](https://github.com/CWorthy-ocean/cstar-forge/pull/172))
+* Updated the one stale filename reference in `docs/source-data-developer.md`. ([#172](https://github.com/CWorthy-ocean/cstar-forge/pull/172))
+* Known follow-up, not addressed here: Forge's `_prepare_rivr2o` handler still unconditionally requires a separately-staged directory of RIVR2O yearly `.nc` files whenever `bgc_source: RIVR2O` has no explicit `path` — even when paired with GLOFAS, where `total_discharge` mode never reads them. Not a correctness bug (just an unnecessary staging step), but relaxing it would require threading the paired discharge-source name through the shared `_resolve_source_block`/`_build_input_args` path-resolution logic in `input_data.py`, which has no existing test coverage for this path and touches machinery shared by every dataset type Forge stages. Left for a separate PR. ([#172](https://github.com/CWorthy-ocean/cstar-forge/pull/172))
+* `pyproject.toml`: `ui/labels/*.yaml` added to package data. ([#174](https://github.com/CWorthy-ocean/cstar-forge/pull/174))
+
 ## 0.8.0
 
 ### Breaking Changes
