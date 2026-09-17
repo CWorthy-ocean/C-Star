@@ -1,9 +1,13 @@
+from pathlib import Path
 from unittest import mock
+
+import pytest
 
 import cstar
 from cstar.base.additional_code import AdditionalCode
 from cstar.io.constants import SourceClassification
 from cstar.io.source_data import SourceDataCollection
+from cstar.io.staged_data import StagedDataCollection
 
 
 class TestInit:
@@ -98,3 +102,58 @@ class TestExistsLocallyAndGet:
             ac.get("/some/local/dir")
             mock_stage.assert_called_once()
             assert ac.working_copy == staged
+
+
+class TestAttach:
+    """Test class for the `AdditionalCode.attach` method.
+
+    Uses real local directories under `tmp_path` (rather than the mocked
+    `additionalcode_local` fixture) so that `SourceData.file_hash` is `None`,
+    matching real local-file `AdditionalCode` usage where no checksum is
+    provided.
+    """
+
+    def _make_additional_code(
+        self, tmp_path: Path, files: list[str]
+    ) -> tuple[AdditionalCode, Path]:
+        source_dir = tmp_path / "source"
+        subdir = "subdir"
+        (source_dir / subdir).mkdir(parents=True)
+        for f in files:
+            (source_dir / subdir / f).write_text("source content")
+
+        ac = AdditionalCode(location=str(source_dir), subdir=subdir, files=files)
+        return ac, tmp_path / "staged"
+
+    def test_attach_happy_path(self, tmp_path):
+        """Confirms `attach` sets `working_copy` and `exists_locally` when all files
+        are already present at `local_dir`.
+        """
+        files = ["file1.opt", "file2.F"]
+        ac, target_dir = self._make_additional_code(tmp_path, files)
+        target_dir.mkdir()
+        for f in files:
+            (target_dir / f).write_text("staged content")
+
+        ac.attach(target_dir)
+
+        assert isinstance(ac.working_copy, StagedDataCollection)
+        assert ac.working_copy.paths == [target_dir / f for f in files]
+        assert ac.exists_locally
+
+    def test_attach_raises_and_lists_all_missing_files(self, tmp_path):
+        """Confirms `attach` raises a single FileNotFoundError naming every missing
+        file when more than one is absent.
+        """
+        files = ["file1.opt", "file2.F", "file3.py"]
+        ac, target_dir = self._make_additional_code(tmp_path, files)
+        target_dir.mkdir()
+        (target_dir / files[0]).write_text("staged content")
+        # files[1] and files[2] are left missing
+
+        with pytest.raises(FileNotFoundError) as exc_info:
+            ac.attach(target_dir)
+
+        message = str(exc_info.value)
+        assert str(target_dir / files[1]) in message
+        assert str(target_dir / files[2]) in message

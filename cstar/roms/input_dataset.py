@@ -249,28 +249,6 @@ class ROMSInputDataset(InputDataset, ABC):
                 raise ValueError(msg)
             return True
 
-        def list_files_to_partition() -> list[Path]:
-            """Helper function to obtain a list of files associated with this ROMSInputDataset to partition."""
-            if not self.working_copy:
-                return []
-            if isinstance(self.working_copy, StagedDataCollection):
-                # if single InputDataset corresponds to many files, check they're colocated
-                if not all(
-                    d.parent == self.working_copy.common_parent
-                    for d in self.working_copy.paths
-                ):
-                    msg = f"A single input dataset exists in multiple directories: {self.working_copy.paths}."
-                    raise ValueError(msg)
-
-                # If they are, we want to partition them all in the same place
-                id_files_to_partition = self.working_copy.paths
-
-            else:
-                id_files_to_partition = [
-                    self.working_copy.path,
-                ]
-            return id_files_to_partition
-
         def partition_files(files: list[Path]) -> list[Path]:
             """Helper function that wraps the actual roms_tools.partition_netcdf
             call.
@@ -339,7 +317,7 @@ class ROMSInputDataset(InputDataset, ABC):
         if not validate_partitioning_request():
             return
 
-        id_files_to_partition = list_files_to_partition()
+        id_files_to_partition = self._working_copy_files()
         existing_files = self.partitioning.files if self.partitioning else None
         tempdir_obj, backupdir, partitioning_succeeded = None, None, False
 
@@ -386,13 +364,138 @@ class ROMSInputDataset(InputDataset, ABC):
         else:
             super().get(local_dir=local_dir)
 
-        if self.linker:
-            self.linker.validate_opt()
-            working_copy = self.working_copy
-            if not isinstance(working_copy, StagedFile):
-                msg = "Cannot use a linker for non-file datasets"
-                raise CstarExpectationFailed(msg)
-            self.linker.link(working_copy.path)
+        self._apply_linker()
+
+    def attach(self, local_dir: str | Path) -> None:
+        """Adopt an existing, already-staged copy of this ROMSInputDataset.
+
+        Counterpart of `get()`: instead of (re-)staging the file(s), this
+        verifies that they are already present at `local_dir` (e.g. staged by
+        a previous, interrupted attempt) and builds `working_copy` from them.
+        If a `linker` is set, its symlink is (re-)created against the adopted
+        working copy, exactly as `get()` does.
+
+        Parameters:
+        -----------
+        local_dir (str or Path):
+            Directory in which the dataset files are expected to already exist.
+
+        Raises:
+        -------
+        FileNotFoundError
+            If any expected file is missing. Lists every missing path.
+        """
+        local_dir = Path(local_dir).expanduser().resolve()
+
+        if self.source_partitioning:
+            expected = [local_dir / s.basename for s in self.partitioned_source.sources]
+            missing = [p for p in expected if not p.exists()]
+            if missing:
+                raise FileNotFoundError(
+                    f"Cannot attach {self.__class__.__name__}: expected partitioned "
+                    f"source file(s) not found: {missing}"
+                )
+            self._working_copy = StagedDataCollection(
+                StagedFile(s, p)
+                for s, p in zip(self.partitioned_source.sources, expected)
+            )
+        else:
+            super().attach(local_dir)
+
+        self._apply_linker()
+
+    def _apply_linker(self) -> None:
+        """(Re-)create the `linker` symlink against the current working copy, if set."""
+        if not self.linker:
+            return
+        self.linker.validate_opt()
+        working_copy = self.working_copy
+        if not isinstance(working_copy, StagedFile):
+            msg = "Cannot use a linker for non-file datasets"
+            raise CstarExpectationFailed(msg)
+        self.linker.link(working_copy.path)
+
+    def _working_copy_files(self) -> list[Path]:
+        """Return the file(s) that make up this dataset's current working copy.
+
+        Used by both `partition()` and `attach_partitions()` to obtain a flat
+        list of paths to operate on, regardless of whether the dataset is
+        backed by a single `StagedFile` or a `StagedDataCollection`.
+        """
+        if not self.working_copy:
+            return []
+        if isinstance(self.working_copy, StagedDataCollection):
+            # if single InputDataset corresponds to many files, check they're colocated
+            if not all(
+                d.parent == self.working_copy.common_parent
+                for d in self.working_copy.paths
+            ):
+                msg = f"A single input dataset exists in multiple directories: {self.working_copy.paths}."
+                raise ValueError(msg)
+            # If they are, we want to treat them all together
+            return self.working_copy.paths
+
+        return [self.working_copy.path]
+
+    def attach_partitions(self, np_xi: int, np_eta: int) -> None:
+        """Adopt existing partitioned pieces of this dataset's working copy.
+
+        Counterpart of `partition()`: instead of invoking roms-tools to create
+        partitioned pieces, this verifies that every expected
+        `<stem>.<index>.nc` piece is already present beside each working-copy
+        file (e.g. from a previous, interrupted attempt) and sets
+        `partitioning` accordingly.
+
+        Parameters:
+        -----------
+        np_xi (int):
+           The number of tiles in the x direction
+        np_eta (int):
+           The number of tiles in the y direction
+
+        Raises:
+        -------
+        ValueError
+            If this dataset has no working copy (call `get()` or `attach()` first).
+        FileNotFoundError
+            If any expected partitioned piece is missing. Lists every missing path.
+        """
+        if (not self.partitionable) or self.source_partitioning:
+            self.log.debug(
+                f"⏭️  {self.__class__.__name__} does not need to be partitioned, "
+                "skipping attach_partitions"
+            )
+            return
+
+        if not self.working_copy:
+            msg = (
+                f"local path(s) to InputDataset \n {self._local}, "
+                "refers to a non-existent file(s)"
+                "\n call ROMSInputDataset.get() or .attach() and try again."
+            )
+            raise ValueError(msg)
+
+        n_partitions = np_xi * np_eta
+        pieces: list[Path] = []
+        missing: list[Path] = []
+        for f in self._working_copy_files():
+            for i in range(n_partitions):
+                piece = Path(
+                    f"{f.with_suffix('')}{ROMSPartitioning.suffix(i, n_partitions)}"
+                ).resolve()
+                pieces.append(piece)
+                if not piece.exists():
+                    missing.append(piece)
+
+        if missing:
+            raise FileNotFoundError(
+                f"Cannot attach partitions for {self.__class__.__name__}: expected "
+                f"partitioned file(s) not found: {missing}"
+            )
+
+        self._update_partitioning_attribute(
+            new_np_xi=np_xi, new_np_eta=np_eta, parted_files=pieces
+        )
 
     def _get_from_partitioned_source(self, local_dir: Path) -> None:
         """Stages partitioned source files, checking pre-existence individually."""

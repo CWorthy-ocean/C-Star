@@ -16,7 +16,7 @@ from cstar.applications.core import (
     RunnerState,
     get_application,
 )
-from cstar.applications.roms_marbl.app import RomsMarblRunner
+from cstar.applications.roms_marbl.app import RomsMarblApplication, RomsMarblRunner
 from cstar.applications.roms_marbl.models import RomsMarblBlueprint
 from cstar.base.env import (
     ENV_CSTAR_DISABLE_MIGRATION,
@@ -25,7 +25,7 @@ from cstar.base.env import (
 )
 from cstar.cli.blueprint.run import app
 from cstar.entrypoint.runner import BlueprintRunner
-from cstar.entrypoint.utils import ARG_DIRECTIVES_URI_LONG
+from cstar.entrypoint.utils import ARG_CLOBBER, ARG_DIRECTIVES_URI_LONG, ARG_RESUME
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.adapter import prepare_directive_file
 from cstar.orchestration.models import Application, Blueprint
@@ -739,3 +739,97 @@ def test_blueprint_run_deferred_blueprint_unresolvable(
 
     assert result.exit_code == 1
     assert "Unable to resolve deferred blueprint" in result.stdout
+
+
+def test_blueprint_run_resume_non_resumable_app_fails_fast(
+    complete_blueprint_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify `--resume` against an application that does not declare itself
+    resumable fails fast with a usage error naming the application, and the
+    runner is never invoked.
+    """
+    with (
+        mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec,
+        mock.patch.object(RomsMarblApplication, "resumable", False),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    stderr_flat = flatten_cli_output(result.stderr)
+    assert "roms_marbl" in stderr_flat
+    assert "does not support" in stderr_flat
+    mock_exec.assert_not_called()
+
+
+def test_blueprint_run_resume_and_clobber_fails_fast(
+    complete_blueprint_path: Path,
+    flatten_cli_output: Callable[[str], str],
+) -> None:
+    """Verify `--resume` combined with `--clobber` fails fast with a usage
+    error, and the runner is never invoked.
+    """
+    with mock.patch.object(RomsMarblRunner, "execute", mock.AsyncMock()) as mock_exec:
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), ARG_RESUME, ARG_CLOBBER],
+            color=False,
+        )
+
+    assert result.exit_code == 2
+    stderr_flat = flatten_cli_output(result.stderr)
+    assert "--resume" in stderr_flat
+    assert "--clobber" in stderr_flat
+    mock_exec.assert_not_called()
+
+
+def test_blueprint_run_resume_reaches_runner_request(
+    complete_blueprint_path: Path,
+) -> None:
+    """Verify `--resume` against an application patched to declare itself
+    resumable reaches the runner via a `RunnerRequest` with `resume=True`.
+    """
+    mock_sim_instance = mock.Mock()
+    mock_sim_instance.name = "test simulation"
+
+    async def modify_runner(
+        self: BlueprintRunner[RomsMarblBlueprint],
+    ) -> RunnerResult[RomsMarblBlueprint]:
+        self.add_state(ExecutionStatus.COMPLETED)
+        return self.result
+
+    with (
+        mock.patch.object(RomsMarblApplication, "resumable", True),
+        mock.patch.object(
+            ROMSSimulation,
+            "from_blueprint",
+            return_value=mock_sim_instance,
+        ),
+        mock.patch.object(
+            RomsMarblRunner,
+            "execute",
+            side_effect=modify_runner,
+            autospec=True,
+        ) as mock_exec_runner,
+        mock.patch(
+            "cstar.cli.blueprint.run.RunnerRequest",
+            wraps=RunnerRequest,
+        ) as mock_request_cls,
+    ):
+        runner = CliRunner()
+        result = runner.invoke(
+            app,
+            [complete_blueprint_path.as_posix(), ARG_RESUME],
+            color=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    mock_exec_runner.assert_called_once()
+    mock_request_cls.assert_called_once()
+    assert mock_request_cls.call_args.kwargs["resume"] is True

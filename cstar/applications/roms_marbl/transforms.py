@@ -224,6 +224,31 @@ class RestartFile(BaseModel):
     """A unique suffix found in the name of restart files"""
 
     @classmethod
+    def candidates(cls, search_path: Path, *, partitioned: bool) -> list["RestartFile"]:
+        """Enumerate the restart files under a directory.
+
+        Parameters
+        ----------
+        search_path : Path
+            The directory to search recursively.
+        partitioned : bool
+            If True, match partition pieces (`*_rst.<ts>.<part>.nc`); otherwise
+            match whole files (`*_rst.<ts>.nc`).
+
+        Returns
+        -------
+        list[RestartFile]
+            Every matching file, in filesystem order.
+        """
+        parted_clause = ".*" if partitioned else ""
+        glob_pattern = f"*{cls.SUFFIX}.{cls.TS_GLOB}{parted_clause}.{cls.EXT}"
+        return [
+            RestartFile(path=match)
+            for match in search_path.rglob(glob_pattern)
+            if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
+        ]
+
+    @classmethod
     def find(cls, search_path: Path, notfound_ok: bool = True) -> "RestartFile | None":
         """Search for a restart file in the specified location.
 
@@ -260,15 +285,8 @@ class RestartFile(BaseModel):
             msg = f"No directory or file found at path: {search_path!r}"
             raise ValueError(msg)
 
-        partitioned_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.*.{cls.EXT}"
-        joined_glob = f"*{cls.SUFFIX}.{cls.TS_GLOB}.{cls.EXT}"
-
-        for glob_pattern in (partitioned_glob, joined_glob):
-            rst_files = [
-                RestartFile(path=match)
-                for match in search_path.rglob(glob_pattern)
-                if re.fullmatch(cls.PATTERN_RST, match.name, flags=re.ASCII)
-            ]
+        for partitioned in (True, False):
+            rst_files = cls.candidates(search_path, partitioned=partitioned)
             if rst_files:
                 latest_ts = max(rst.timestamp for rst in rst_files)
                 return min(
@@ -827,6 +845,12 @@ def _split_sources(value: t.Any, delimiter: str) -> list[str]:
     return [token for raw in str(value).split(delimiter) if (token := raw.strip())]
 
 
+SOURCE_KEY_PATH: t.Final[str] = "path"
+"""Directive config key naming a filesystem path as the content source."""
+SOURCE_KEY_STEP: t.Final[str] = "step"
+"""Directive config key naming another workplan step as the content source."""
+
+
 class ContinuanceDirective(OverrideDirective):
     """A transform that locates a restart file with an unknown path at the
     time the task was scheduled, and applies it as the step's initial
@@ -844,9 +868,9 @@ class ContinuanceDirective(OverrideDirective):
 
     REPLACE_LISTS = True
 
-    KEY_PATH: t.Final[str] = "path"
+    KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for continuance."""
-    KEY_STEP: t.Final[str] = "step"
+    KEY_STEP: t.Final[str] = SOURCE_KEY_STEP
     """Key used to specify a step name as the source for continuance."""
 
     @classmethod
@@ -980,9 +1004,9 @@ class NestingDirective(OverrideDirective):
 
     REPLACE_LISTS = True
 
-    KEY_PATH: t.Final[str] = ContinuanceDirective.KEY_PATH
+    KEY_PATH: t.Final[str] = SOURCE_KEY_PATH
     """Key used to specify a path as the source for the boundary forcing."""
-    KEY_STEP: t.Final[str] = ContinuanceDirective.KEY_STEP
+    KEY_STEP: t.Final[str] = SOURCE_KEY_STEP
     """Key used to specify a step name as the source for the boundary forcing."""
     KEY_BRY_PATH: t.Final[str] = "bry_path"
     """Deprecated alias for `KEY_PATH`."""

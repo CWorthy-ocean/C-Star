@@ -21,9 +21,11 @@ from cstar.execution.file_system import (
     StateDirectoryManager,
 )
 from cstar.orchestration.dag_runner import (
+    DagStatus,
     ExecutiveRunSummary,
     _ignore_ambient_clobber_env,
     apply_clobber_overrides,
+    apply_resume_overrides,
     check_clobber_dependents,
     check_clobber_targets,
     get_status_detail_map,
@@ -34,6 +36,7 @@ from cstar.orchestration.dag_runner import (
 from cstar.orchestration.launch.local import LocalHandle, LocalLauncher
 from cstar.orchestration.models import (
     KEY_CLOBBER,
+    KEY_RESUME,
     Application,
     BlueprintState,
     Step,
@@ -211,7 +214,10 @@ async def test_dag_runner_load_run_state(
 
     launcher = LocalLauncher()
 
-    dag_status = await load_run_state(mock_run_id, launcher)
+    # the fake pids have no live process; an unfinalized handle is only
+    # treated as in progress while its process is alive
+    with mock.patch.object(LocalLauncher, "_is_alive", return_value=True):
+        dag_status = await load_run_state(mock_run_id, launcher)
 
     # verify that state is loaded for every step
     open_items = list(dag_status.open_items)
@@ -330,13 +336,14 @@ def _make_step(
     tmp_path: Path,
     name: str,
     depends_on: list[str] | None = None,
+    application: Application = Application.HELLO_WORLD,
 ) -> Step:
     """Build a minimal `Step` for use in `_apply_clobber_overrides` tests."""
     bp_path = tmp_path / f"{name}.yaml"
     bp_path.touch()
     return Step(
         name=name,
-        application=Application.HELLO_WORLD,
+        application=application,
         blueprint=bp_path,
         depends_on=depends_on or [],
     )
@@ -513,6 +520,87 @@ def test_check_clobber_dependents_reports_untargeted_dependents(
     assert check_clobber_dependents(wp, [step_a.safe_name]) == [step_b.name]
     assert check_clobber_dependents(wp, [step_c.name]) == []
     assert check_clobber_dependents(wp, [step_a.name, step_b.name, step_c.name]) == []
+
+
+@pytest.mark.asyncio
+async def test_apply_resume_overrides_marks_resumable_failed_steps(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a failed step whose application is resumable is marked for
+    resume, a failed step whose application is not resumable is left
+    unmarked and named in a warning, and a `Done` step is untouched.
+    """
+    step_resumable = _make_step(
+        tmp_path, "Resumable Step", application=Application.HELLO_WORLD
+    )
+    step_unresumable = _make_step(
+        tmp_path, "Unresumable Step", application=Application.ROMS_MARBL
+    )
+    step_done = _make_step(tmp_path, "Done Step")
+    wp = _make_workplan([step_resumable, step_unresumable, step_done])
+
+    status = DagStatus(
+        {
+            step_resumable.name: Status.Failed,
+            step_unresumable.name: Status.Cancelled,
+            step_done.name: Status.Done,
+        }
+    )
+
+    def fake_get_application(name: str) -> mock.Mock:
+        return mock.Mock(resumable=name == step_resumable.application)
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=status),
+        ),
+        mock.patch(
+            "cstar.orchestration.dag_runner.get_application",
+            side_effect=fake_get_application,
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        resumed = await apply_resume_overrides(wp, "some-run-id", mock.Mock())
+
+    by_name = {step.name: step for step in wp.steps}
+
+    assert resumed == [step_resumable.name]
+    assert by_name[step_resumable.name].workflow_overrides[KEY_RESUME] is True
+    assert not by_name[step_unresumable.name].workflow_overrides.get(KEY_RESUME, False)
+    assert by_name[step_done.name].workflow_overrides == {}
+
+    assert step_unresumable.name in caplog.text
+    assert step_unresumable.application in caplog.text
+    assert "do not support resume" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_apply_resume_overrides_no_failed_steps_logs_info(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify a run with no failed steps logs a single informational message
+    and marks nothing for resume.
+    """
+    step_done = _make_step(tmp_path, "Done Step")
+    wp = _make_workplan([step_done])
+
+    status = DagStatus({step_done.name: Status.Done})
+
+    with (
+        mock.patch(
+            "cstar.orchestration.dag_runner.load_run_state",
+            mock.AsyncMock(return_value=status),
+        ),
+        caplog.at_level("INFO"),
+    ):
+        resumed = await apply_resume_overrides(wp, "some-run-id", mock.Mock())
+
+    assert resumed == []
+    assert step_done.workflow_overrides == {}
+    assert "no failed steps" in caplog.text.lower()
 
 
 @pytest.mark.usefixtures("read_yaml_intercept")

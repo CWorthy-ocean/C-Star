@@ -60,6 +60,24 @@ class TestPIOExternalCodeBaseInit:
         assert pio_codebase.key == "pio"
 
 
+class TestPIOExternalCodeBaseExportEnv:
+    def test_export_env_sets_var_without_compiling(
+        self,
+        pioexternalcodebase_staged,
+        pio_path: pathlib.Path,
+        monkeypatch,
+    ):
+        """Confirms `_export_env` alone sets PIO_ROOT, without running `cmake`."""
+        pecb = pioexternalcodebase_staged
+        monkeypatch.delenv(pecb.root_env_var, raising=False)
+
+        with mock.patch("cstar.pio.external_codebase._run_cmd") as mock_run_cmd:
+            pecb._export_env()
+
+        mock_run_cmd.assert_not_called()
+        assert os.environ[pecb.root_env_var] == str(pecb.working_copy.path)
+
+
 class TestPIOExternalCodeBaseConfigure:
     def test_configure_success(
         self,
@@ -304,7 +322,7 @@ class TestPIOExternalCodeBaseConfigure:
                 return_value=env_vars,
             ),
             mock.patch(
-                "cstar.pio.external_codebase._check_local_repo_changed_from_remote",
+                "cstar.base.external_codebase._check_local_repo_changed_from_remote",
                 return_value=repo_changed,
             ),
         ):

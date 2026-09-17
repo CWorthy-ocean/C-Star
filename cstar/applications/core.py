@@ -57,6 +57,10 @@ class RunnerRequest(t.Generic[TBlueprint]):
     """The type of blueprint that the URI will be deserialized into."""
     _bp: TBlueprint | None = None
     """The deserialized blueprint."""
+    resume: bool = False
+    """Whether the runner should continue a failed prior attempt in the
+    blueprint's working directory instead of starting fresh. Only honoured by
+    applications whose `ApplicationDefinition.resumable` is `True`."""
 
     def __init__(
         self,
@@ -64,6 +68,7 @@ class RunnerRequest(t.Generic[TBlueprint]):
         bp_type: type[TBlueprint],
         name: str = "",
         directive_uri: str = "",
+        resume: bool = False,
     ) -> None:
         """Initialize the request instance.
 
@@ -77,11 +82,16 @@ class RunnerRequest(t.Generic[TBlueprint]):
             The type of blueprint that the path will be deserialized into.
         directive_uri : str
             The URI of a file containing directive configuration for a runner.
+        resume : bool
+            Whether to continue a failed prior attempt in the blueprint's
+            working directory instead of starting fresh. Only meaningful for
+            applications whose `ApplicationDefinition.resumable` is `True`.
         """
         self.blueprint_uri = uri.strip()
         self.bp_type = bp_type
         self.name = name.strip() or RunnerRequest._generate_job_name()
         self.directive_uri = directive_uri.strip()
+        self.resume = resume
 
     @property
     def application(self) -> str:
@@ -343,6 +353,10 @@ class ApplicationDefinition(t.Protocol, t.Generic[TBlueprint, TRunner]):
     """Transforms that must be executed prior to execution."""
     migrations: Sequence[type[SchemaAdapter]] | None = None
     """The available adapters for performing schema migrations."""
+    resumable: bool = False
+    """Whether the runner honours `RunnerRequest.resume`, continuing a failed
+    prior attempt in the blueprint's working directory instead of starting
+    fresh."""
 
 
 _TAnyApp: t.TypeAlias = ApplicationDefinition[t.Any, t.Any]

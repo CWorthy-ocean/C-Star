@@ -125,3 +125,30 @@ class InputDataset(ABC, LoggingMixin):
             msg = f"Require StagedFile or StagedDataCollection; received {type(staged)}"
             raise TypeError(msg)
         self._working_copy = staged
+
+    def attach(self, local_dir: str | Path) -> None:
+        """Adopt an existing, already-staged copy of this InputDataset at `local_dir`.
+
+        Counterpart of `get()`: instead of (re-)staging the file, this verifies
+        that it is already present at `local_dir` (e.g. staged by a previous,
+        interrupted attempt) and builds `working_copy` from it, without touching
+        the filesystem.
+
+        Parameters:
+        -----------
+        local_dir: str
+            The local directory in which this input dataset is expected to already exist.
+
+        Raises:
+        -------
+        FileNotFoundError
+            If the expected local file is missing. A dangling symlink counts as missing.
+        """
+        p = Path(local_dir).expanduser().resolve() / self.source.basename
+        if not p.exists():
+            msg = f"Cannot attach InputDataset: expected file not found: {p}"
+            raise FileNotFoundError(msg)
+
+        self._working_copy = StagedFile(
+            self.source, p, sha256=self.source.file_hash or None
+        )

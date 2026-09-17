@@ -17,6 +17,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_RESUME,
+    ARG_RESUME_HELP,
     ARG_URI_LONG,
     ARG_URI_SHORT,
 )
@@ -215,5 +217,10 @@ def create_parser() -> argparse.ArgumentParser:
         type=str,
         required=False,
         help="The URI of a file containing directive configuration.",
+    )
+    parser.add_argument(
+        ARG_RESUME,
+        action="store_true",
+        help=ARG_RESUME_HELP,
     )
     return parser

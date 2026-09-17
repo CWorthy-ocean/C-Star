@@ -17,6 +17,7 @@ from cstar.execution.file_system import (
     local_copy,
     local_copy_async,
     remove_files,
+    rotate_file,
     step_disk_usage,
 )
 from cstar.orchestration.models import Step
@@ -487,6 +488,42 @@ def test_file_system_get_backup_path_custom_ext(
     backup_path = get_backup_path(source, backup_ext=backup_ext)
 
     assert backup_path == tmp_path / "blueprint.yaml.orig"
+
+
+def test_rotate_file_no_prior_file(tmp_path: Path) -> None:
+    """Verify nothing is rotated, and `None` is returned, when the target
+    file does not exist.
+    """
+    target = tmp_path / "step.out"
+
+    assert rotate_file(target) is None
+    assert not target.exists()
+
+
+def test_rotate_file_first_rotation(tmp_path: Path) -> None:
+    """Verify an existing file is renamed to `<name>.1` on first rotation."""
+    target = tmp_path / "step.out"
+    target.write_text("attempt 1")
+
+    rotated = rotate_file(target)
+
+    assert rotated == tmp_path / "step.out.1"
+    assert rotated.read_text() == "attempt 1"
+    assert not target.exists()
+
+
+def test_rotate_file_second_rotation_skips_existing(tmp_path: Path) -> None:
+    """Verify a prior `.1` rotation is preserved and the new one becomes `.2`."""
+    target = tmp_path / "step.out"
+    target.write_text("attempt 2")
+    (tmp_path / "step.out.1").write_text("attempt 1")
+
+    rotated = rotate_file(target)
+
+    assert rotated == tmp_path / "step.out.2"
+    assert rotated.read_text() == "attempt 2"
+    assert (tmp_path / "step.out.1").read_text() == "attempt 1"
+    assert not target.exists()
 
 
 async def test_step_disk_usage_missing_dir(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ import typing as t
 from pathlib import Path
 from subprocess import run as sprun
 
-from psutil import NoSuchProcess
+from psutil import STATUS_ZOMBIE, AccessDenied, NoSuchProcess
 from psutil import Process as PsProcess
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 
@@ -19,8 +19,13 @@ from cstar.base.env import ENV_CSTAR_ORCH_LOCAL_DELAY, ENV_CSTAR_RUNID, get_env_
 from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.log import get_logger
 from cstar.base.utils import WALLTIME_RE, additional_files_dir
+from cstar.execution.file_system import rotate_file
 from cstar.orchestration.adapter import StepToRunRequestAdapter
 from cstar.orchestration.formatting import ModelFormatter
+from cstar.orchestration.launch.common import (
+    build_attempt_log_header,
+    resolve_prior_attempt,
+)
 from cstar.orchestration.models import KeyValueStore
 from cstar.orchestration.orchestration import (
     Launcher,
@@ -302,6 +307,13 @@ class LocalLauncher(Launcher[LocalHandle]):
         log.debug(f"Created run script at path: {step.script_path}")
         log_file = step.log_path
 
+        run_id = str(os.getenv(ENV_CSTAR_RUNID, ""))
+        rotated_log = rotate_file(step.log_path)
+        header = build_attempt_log_header(
+            step.name, run_id, rotated_log, resume=step.resume
+        )
+        step.log_path.write_text(header)
+
         try:
             if not step.fsm.root_dir.exists():
                 step.fsm.prepare()
@@ -312,7 +324,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 cmd,
                 cwd=step.fsm.run_dir,
                 stdin=subprocess.PIPE,
-                stdout=step.log_path.open("w"),
+                stdout=step.log_path.open("a"),
                 stderr=subprocess.STDOUT,
             )
 
@@ -338,7 +350,7 @@ class LocalLauncher(Launcher[LocalHandle]):
                 handle = LocalHandle(
                     pid=str(pid),
                     name=step.name,
-                    run_id=str(os.getenv(ENV_CSTAR_RUNID, "")),
+                    run_id=run_id,
                     start_at=create_time,
                     status=Status.Submitted,
                 )
@@ -351,6 +363,31 @@ class LocalLauncher(Launcher[LocalHandle]):
 
         msg = "Unable to retrieve process ID for local process."
         raise RuntimeError(msg)
+
+    @staticmethod
+    def _is_alive(handle: LocalHandle) -> bool:
+        """Return `True` if the OS process recorded on a handle is still running.
+
+        The creation time is compared with the recorded `start_at` so a
+        recycled PID belonging to an unrelated process is not mistaken for
+        the step.
+
+        Parameters
+        ----------
+        handle : LocalHandle
+            A deserialized handle with no live `Popen` attached.
+
+        Returns
+        -------
+        bool
+        """
+        try:
+            process = PsProcess(int(handle.pid))
+            if process.status() == STATUS_ZOMBIE:
+                return False
+            return abs(process.create_time() - handle.start_ts) <= 2.0
+        except (NoSuchProcess, AccessDenied, ValueError):
+            return False
 
     @staticmethod
     async def _status(handle: LocalHandle) -> str:
@@ -367,9 +404,24 @@ class LocalLauncher(Launcher[LocalHandle]):
             The current status of the step.
         """
         if handle.is_expired:
-            if not Status.is_terminal(handle.status):
+            # a reused (deserialized) handle from a prior attempt has no live
+            # Popen: report its persisted terminal outcome, and treat a
+            # non-terminal status whose process is gone as a failure so a
+            # step killed before finalizing its sentinel is re-run, not adopted
+            if handle.status == Status.Failed:
+                return "FAILED"
+            if handle.status == Status.Cancelled:
+                return "CANCELLED"
+            if Status.is_terminal(handle.status):
+                return "COMPLETED"
+            if LocalLauncher._is_alive(handle):
                 return "RUNNING"
-            return "COMPLETED"
+            msg = (
+                f"Process {handle.pid} for step {handle.name!r} is gone but its "
+                f"status was never finalized ({handle.status.name}); treating as failed."
+            )
+            log.warning(msg)
+            return "FAILED"
 
         # poll() reaps the child and records its exit code; reading
         # `returncode` alone never observes an exit the process made on
@@ -420,7 +472,22 @@ class LocalLauncher(Launcher[LocalHandle]):
             raise CstarExpectationFailed(msg)
 
         live_step = LiveStep.from_step(step)
-        handle = await LocalLauncher._submit(live_step, dependencies)
+
+        state_repo = StateRepository()
+        prior_handle = await state_repo.get_sentinel(live_step.name, LocalHandle)
+        last_status: Status = Status.Unsubmitted
+        reuse_prior: bool = False
+
+        if prior_handle:
+            last_status = await LocalLauncher.query_status(prior_handle)
+            reuse_prior = resolve_prior_attempt(live_step, last_status)
+
+        if reuse_prior and prior_handle:
+            handle = prior_handle
+            handle.status = last_status
+        else:
+            handle = await LocalLauncher._submit(live_step, dependencies)
+
         return Task[LocalHandle](
             step=live_step,
             handle=handle,
@@ -496,9 +563,8 @@ class LocalLauncher(Launcher[LocalHandle]):
         Task[LocalHandle]
             The task after the cancellation attempt has completed.
         """
-        process = item.handle.process
-
         if not item.handle.is_expired:  # wonky is-null check...
+            process = item.handle.process
             if process.returncode is not None:
                 msg = f"Unable to cancel a completed task `{process.pid}"
                 log.debug(msg)

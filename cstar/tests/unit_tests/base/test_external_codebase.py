@@ -1,12 +1,36 @@
 ################################################################################
 import logging
+import os
+import subprocess
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
 import cstar.base.external_codebase as external_codebase
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.tests.unit_tests.fake_abc_subclasses import FakeExternalCodeBase
+
+
+def _init_git_repo(path: Path) -> None:
+    """Create a real, minimal git checkout at `path` with a single commit."""
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
 
 
 def test_codebase_str(fakeexternalcodebase):
@@ -188,3 +212,52 @@ class TestConfigure:
             fakeexternalcodebase_with_mock_get.setup(tmp_path)
         fake_get.assert_called_once_with(tmp_path)
         fake_conf.assert_called_once()
+
+
+class TestAttach:
+    """Test class for `ExternalCodeBase.attach()`."""
+
+    def test_attach_sets_working_copy_and_env_var_when_configured(
+        self, fakeexternalcodebase, tmp_path, monkeypatch
+    ):
+        """Confirms `attach` sets `working_copy` and exports the env var when configured."""
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        _init_git_repo(repo_dir)
+        monkeypatch.delenv(fakeexternalcodebase.root_env_var, raising=False)
+
+        fakeexternalcodebase._configured = True
+        fakeexternalcodebase.attach(repo_dir)
+
+        assert fakeexternalcodebase.working_copy.path == repo_dir
+        assert os.environ[fakeexternalcodebase.root_env_var] == str(repo_dir)
+
+    def test_attach_raises_filenotfounderror_without_git_checkout(
+        self, fakeexternalcodebase, tmp_path
+    ):
+        """Confirms `attach` raises FileNotFoundError if `target_dir` has no `.git`."""
+        non_repo_dir = tmp_path / "not_a_repo"
+        non_repo_dir.mkdir()
+
+        with pytest.raises(FileNotFoundError, match="no git checkout"):
+            fakeexternalcodebase.attach(non_repo_dir)
+
+    def test_attach_raises_and_never_configures_when_not_configured(
+        self, fakeexternalcodebase, tmp_path, monkeypatch
+    ):
+        """Confirms `attach` raises CstarExpectationFailed and never calls `_configure`
+        when the checkout is not configured.
+        """
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir()
+        _init_git_repo(repo_dir)
+        monkeypatch.delenv(fakeexternalcodebase.root_env_var, raising=False)
+
+        fakeexternalcodebase._configured = False
+        with mock.patch.object(fakeexternalcodebase, "_configure") as mock_configure:
+            with pytest.raises(CstarExpectationFailed, match="has not been configured"):
+                fakeexternalcodebase.attach(repo_dir)
+        mock_configure.assert_not_called()
+        # `working_copy` and the env var are still set: only configuration failed
+        assert fakeexternalcodebase.working_copy.path == repo_dir
+        assert os.environ[fakeexternalcodebase.root_env_var] == str(repo_dir)

@@ -44,6 +44,12 @@ class FakeExternalCodeBase(ExternalCodeBase):
     def is_configured(self):
         return self._configured
 
+    def _is_configured_at(self, root: Path) -> bool:
+        return self._configured
+
+    def _is_built_at(self, root: Path) -> bool:
+        return self._configured
+
 
 class FakeInputDataset(InputDataset):
     """Fake subclass of the InputDataset abstract base class.

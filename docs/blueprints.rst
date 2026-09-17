@@ -236,3 +236,18 @@ Use the ``run`` command from the ``cstar`` CLI to execute a blueprint.
 
         runner = RomsMarblRunner(request, service_cfg, job_cfg)
         await runner.execute()
+
+Resuming an interrupted run
+"""""""""""""""""""""""""""
+
+If a run is lost or interrupted mid-execution, pass ``--resume`` to continue it in
+place from the blueprint's working directory, rather than starting over:
+
+.. code-block:: console
+
+    cstar blueprint run my_blueprint.yaml --resume
+
+``--resume`` cannot be combined with ``--clobber``, and only applications that
+declare themselves resumable accept it -- the CLI rejects the flag for any other
+application before execution begins. No workplan or run-id is needed; this is a
+standalone alternative to running a blueprint fresh.

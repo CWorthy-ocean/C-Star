@@ -313,6 +313,36 @@ def test_broken_builtin_application_propagates_import_error(
         get_application(app_name)
 
 
+def test_runnerrequest_resume_defaults_false(tmp_path: Path) -> None:
+    """Verify `RunnerRequest.resume` defaults to `False` when not supplied."""
+    fake_bp_path = tmp_path / "fake.yaml"
+    fake_bp_path.touch()
+
+    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint)
+
+    assert request.resume is False
+
+
+def test_runnerrequest_resume_can_be_set_true(tmp_path: Path) -> None:
+    """Verify `RunnerRequest.resume` is stored when explicitly supplied."""
+    fake_bp_path = tmp_path / "fake.yaml"
+    fake_bp_path.touch()
+
+    request = RunnerRequest(fake_bp_path.as_posix(), RomsMarblBlueprint, resume=True)
+
+    assert request.resume is True
+
+
+def test_application_definition_resumable_defaults_false() -> None:
+    """Verify an `ApplicationDefinition` subclass that does not declare
+    `resumable` defaults to `False` (e.g. `hello_world`, which does not
+    support resume).
+    """
+    app_config = get_application("hello_world")
+
+    assert app_config.resumable is False
+
+
 def test_runnerresult_initial_state(tmp_path: Path) -> None:
     """Verify that the RunnerResult returns the initial status, as expected."""
     fake_bp_path = tmp_path / "fake.yaml"

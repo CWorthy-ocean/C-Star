@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.log import LoggingMixin
 from cstar.io.source_data import SourceData
 from cstar.io.staged_data import StagedRepository
@@ -29,6 +31,9 @@ class ExternalCodeBase(ABC, LoggingMixin):
         Perform any actions necessary to configure this codebase locally for use
     setup(target_dir: Path):
         Calls both `get()` and `configure()` in sequence
+    attach(target_dir: Path):
+        Adopt an existing, already-configured checkout at `target_dir` instead of
+        cloning and compiling it again
     """
 
     _working_copy: StagedRepository | None = None  # updated by self.get()
@@ -168,10 +173,71 @@ class ExternalCodeBase(ABC, LoggingMixin):
         assert isinstance(staged_repo, StagedRepository)
         self._working_copy = staged_repo
 
+    def attach(self, target_dir: Path) -> None:
+        """Adopt an existing, already-configured checkout of this ExternalCodeBase.
+
+        Counterpart of `setup()`: instead of cloning and compiling the codebase,
+        this verifies that a git checkout already exists at `target_dir` and that
+        it is correctly configured (e.g. by a previous, interrupted run), and sets
+        `working_copy` and the process environment accordingly. This method never
+        compiles anything.
+
+        Parameters
+        ----------
+        target_dir: Path
+            The directory where the codebase is expected to already be checked out.
+
+        Raises
+        ------
+        FileNotFoundError
+            If `target_dir` does not contain a git checkout.
+        CstarExpectationFailed
+            If the checkout at `target_dir` has not been configured for use.
+        """
+        if not (target_dir / ".git").is_dir():
+            raise FileNotFoundError(
+                f"Cannot attach {self.__class__.__name__}: no git checkout at {target_dir}"
+            )
+
+        self._working_copy = StagedRepository(self.source, target_dir)
+        self._export_env()
+
+        if not self._is_configured_at(target_dir):
+            raise CstarExpectationFailed(
+                f"{self.__class__.__name__} at {target_dir} has not been configured "
+                "(e.g. compiled) for use. Call setup() instead of attach()."
+            )
+
     @property
-    @abstractmethod
     def is_configured(self) -> bool:
-        """Returns True if this ExternalCodeBase exists locally and is correctly configured"""
+        """Returns True if this ExternalCodeBase is declared in the C-Star environment
+        (its `root_env_var` is set) and the checkout there is correctly configured.
+        """
+        root = get_sysmgr().environment.environment_variables.get(self.root_env_var)
+        if not root:
+            return False
+        return self._is_configured_at(Path(root))
+
+    def _is_configured_at(self, root: Path) -> bool:
+        """Returns True if the checkout at `root` matches `source` and holds this
+        codebase's build artifacts.
+
+        Path-based counterpart of `is_configured`: it never consults the
+        environment, so `attach()` can verify a checkout the current process has
+        not exported yet.
+        """
+        assert self.source.checkout_target is not None  # cannot be for ExternalCodeBase
+        if _check_local_repo_changed_from_remote(
+            remote_repo=self.source.location,
+            local_repo=root,
+            checkout_target=self.source.checkout_target,
+        ):
+            return False
+        return self._is_built_at(root)
+
+    @abstractmethod
+    def _is_built_at(self, root: Path) -> bool:
+        """Returns True if the build artifacts this codebase produces exist under `root`"""
 
     def configure(self) -> None:
         """Configure (set environment, compile, etc.) the external codebase on your local machine."""
@@ -185,6 +251,23 @@ class ExternalCodeBase(ABC, LoggingMixin):
             )
             return
         self._configure()
+
+    def _export_env(self) -> None:
+        """Set the environment variable(s) needed to use this codebase.
+
+        Called by both `_configure()` and `attach()`, before any subclass-specific
+        configuration/compilation happens, so the environment is exported the same
+        way whether the codebase is freshly configured or adopted from a previous
+        attempt. Subclasses that need more than `root_env_var` set (e.g. ROMS also
+        prepends to `PATH`) override this method.
+        """
+        assert (
+            self.working_copy is not None
+        )  # set by attach() or ExternalCodeBase.get()
+        cstar_sysmgr = get_sysmgr()
+        cstar_sysmgr.environment.set_env_var(
+            self.root_env_var, str(self.working_copy.path)
+        )
 
     @abstractmethod
     def _configure(self) -> None:

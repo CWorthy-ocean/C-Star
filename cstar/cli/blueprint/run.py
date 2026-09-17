@@ -37,6 +37,8 @@ from cstar.entrypoint.utils import (
     ARG_LOGLEVEL_HELP,
     ARG_LOGLEVEL_LONG,
     ARG_LOGLEVEL_SHORT,
+    ARG_RESUME,
+    ARG_RESUME_HELP,
     ARG_VERBOSE,
     ARG_VERBOSE_HELP,
 )
@@ -50,7 +52,11 @@ if t.TYPE_CHECKING:
 
 
 CMD_NAME: t.Final[str] = "run"
-CMD_HELP: t.Final[str] = "Execute a blueprint in a local worker service."
+CMD_HELP: t.Final[str] = (
+    "Execute a blueprint in a local worker service. Pass --resume to continue "
+    "a prior attempt lost or interrupted mid-run, in place, without needing a "
+    "workplan or run-id."
+)
 
 app = typer.Typer()
 log = get_logger(__name__)
@@ -230,12 +236,36 @@ def run(
             envvar=ENV_CSTAR_CLI_VERBOSE,
         ),
     ] = False,
+    resume: t.Annotated[
+        bool,
+        typer.Option(ARG_RESUME, help=ARG_RESUME_HELP),
+    ] = False,
 ) -> None:
-    """Execute a blueprint in a local worker service."""
+    """Execute a blueprint in a local worker service.
+
+    Pass `--resume` to continue a prior attempt lost or interrupted mid-run:
+    the run continues in place, from the blueprint's working directory,
+    without needing a workplan or run-id. Only applications that declare
+    themselves resumable accept the flag.
+    """
     _log_startup_versions()
 
     bp_path = Path(uri)
     app_config = get_app_for_blueprint(bp_path)
+
+    problems = [
+        msg
+        for condition, msg in (
+            (resume and clobber, f"{ARG_RESUME} cannot be combined with {ARG_CLOBBER}"),
+            (
+                resume and not app_config.resumable,
+                f"application {app_config.name!r} does not support {ARG_RESUME}",
+            ),
+        )
+        if condition
+    ]
+    if problems:
+        raise typer.BadParameter("; ".join(problems), param_hint=ARG_RESUME)
 
     name = f"{app_config.name}_runner"
     job_cfg = get_job_config()
@@ -252,7 +282,7 @@ def run(
     if directive_uri:
         uri = DirectiveConfig.apply_directives(directive_uri, uri)
 
-    request = RunnerRequest(uri, app_config.blueprint)
+    request = RunnerRequest(uri, app_config.blueprint, resume=resume)
 
     runner = app_config.runner(request, service_cfg, job_cfg)
     asyncio.run(runner.execute())

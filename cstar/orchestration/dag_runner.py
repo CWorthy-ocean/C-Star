@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, computed_field
 
+from cstar.applications.core import get_application
 from cstar.base.env import (
     ENV_CSTAR_CLI_DRY_RUN,
     ENV_CSTAR_CLOBBER_WORKING_DIR,
@@ -23,7 +24,13 @@ from cstar.base.utils import slugify
 from cstar.execution.file_system import StateDirectoryManager
 from cstar.orchestration.launch.local import LocalLauncher
 from cstar.orchestration.launch.slurm import SlurmLauncher
-from cstar.orchestration.models import KEY_CLOBBER, Step, UserDefinedVariables, Workplan
+from cstar.orchestration.models import (
+    KEY_CLOBBER,
+    KEY_RESUME,
+    Step,
+    UserDefinedVariables,
+    Workplan,
+)
 from cstar.orchestration.orchestration import (
     Launcher,
     LiveStep,
@@ -686,6 +693,69 @@ def apply_clobber_overrides(
             f"stale outputs. Review the following steps: {', '.join(stale)}"
         )
         log.warning(msg)
+
+
+async def apply_resume_overrides(
+    wp: Workplan, run_id: str, launcher: Launcher[ProcessHandle]
+) -> list[str]:
+    """Mark every resumable, failed step of a prior run for resume.
+
+    Loads the current status of `run_id` (refreshing sentinel statuses along
+    the way) and, for each step whose status is a failure, marks it in
+    `wp.steps` for resume when its application declares itself resumable
+    (`ApplicationDefinition.resumable`); a failed step whose application does
+    not support resume is left untouched and reported instead, so it re-runs
+    from scratch on this reload.
+
+    Like `apply_clobber_overrides`, this mutates the in-memory workplan only:
+    the caller must not persist `resume: true` on the step, or a later plain
+    reload (without `--resume`) would resume it instead of clobbering it.
+
+    Parameters
+    ----------
+    wp : Workplan
+        The workplan whose failed steps should be marked for resume.
+    run_id : str
+        The run-id of the prior run being re-entered.
+    launcher : Launcher[ProcessHandle]
+        The launcher used to refresh sentinel statuses before failures are
+        determined.
+
+    Returns
+    -------
+    list[str]
+        The names of the steps marked for resume.
+    """
+    status = await load_run_state(run_id, launcher)
+    by_name = {step.name: step for step in wp.steps}
+
+    resumed: list[str] = []
+    unsupported: list[str] = []
+    for name, step_status in status.details.items():
+        if not Status.is_failure(step_status) or name not in by_name:
+            continue
+
+        step = by_name[name]
+        if get_application(step.application).resumable:
+            step.workflow_overrides[KEY_RESUME] = True
+            resumed.append(name)
+        else:
+            unsupported.append(f"{name!r} ({step.application})")
+
+    if unsupported:
+        msg = (
+            f"Failed step(s) {', '.join(unsupported)} do not support resume "
+            "and will be re-run from scratch."
+        )
+        log.warning(msg)
+
+    if resumed:
+        msg = f"Resuming failed step(s): {', '.join(resumed)}"
+        log.info(msg)
+    elif not unsupported:
+        log.info("No failed steps to resume.")
+
+    return resumed
 
 
 async def on_status_changed(handle: ProcessHandle) -> None:

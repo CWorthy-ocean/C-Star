@@ -15,6 +15,7 @@ from cstar.applications.roms_marbl.migration import (
     RomsMarblSchemaAdapterV21V3,
 )
 from cstar.applications.roms_marbl.models import APP_NAME, RomsMarblBlueprint
+from cstar.applications.roms_marbl.resume import prepare_resume_blueprint
 from cstar.applications.roms_marbl.transforms import (
     RomsMarblTimeSplitter,
     warn_on_restart_start_date_mismatch,
@@ -77,7 +78,13 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
 
         from cstar.roms.simulation import ROMSSimulation
 
-        self.simulation = ROMSSimulation.from_blueprint(self.request.blueprint_uri)
+        # a resumed attempt runs from a derived blueprint that continues from
+        # the interrupted attempt's last usable restart; the original is kept
+        blueprint_uri = self.request.blueprint_uri
+        if self.request.resume:
+            blueprint_uri = prepare_resume_blueprint(blueprint_uri)
+
+        self.simulation = ROMSSimulation.from_blueprint(blueprint_uri)
         self.simulation.name = slugify(self.simulation.name)
 
     @override
@@ -94,12 +101,16 @@ class RomsMarblRunner(BlueprintRunner[RomsMarblBlueprint]):
                 ic.source.location, self.simulation.start_date, log=self.log
             )
 
-        self.log.trace("Setting up simulation")
-        self.simulation.setup()
-        self.log.trace("Building simulation")
-        self.simulation.build()
-        self.log.trace("Executing simulation pre-run")
-        self.simulation.pre_run()
+        if self.request.resume:
+            self.log.info("Resuming simulation from its existing working directory")
+            self.simulation.attach()
+        else:
+            self.log.trace("Setting up simulation")
+            self.simulation.setup()
+            self.log.trace("Building simulation")
+            self.simulation.build()
+            self.log.trace("Executing simulation pre-run")
+            self.simulation.pre_run()
 
         self.log.trace("Starting simulation.")
         self._handler = self.simulation.run(
@@ -149,6 +160,7 @@ class RomsMarblApplication(ApplicationDefinition[RomsMarblBlueprint, RomsMarblRu
     runner = RomsMarblRunner
     blueprint = RomsMarblBlueprint
     applicable_transforms = (RomsMarblTimeSplitter,)
+    resumable = True
     migrations = (
         RomsMarblSchemaAdapter2025v1,
         RomsMarblSchemaAdapterV2V21,
@@ -181,7 +193,7 @@ def main() -> int:
     if args.directives:
         blueprint_uri = DirectiveConfig.apply_directives(args.directives, blueprint_uri)
 
-    request = RunnerRequest(blueprint_uri, RomsMarblBlueprint)
+    request = RunnerRequest(blueprint_uri, RomsMarblBlueprint, resume=args.resume)
     runner = RomsMarblRunner(request, service_cfg, job_cfg)
 
     try:
