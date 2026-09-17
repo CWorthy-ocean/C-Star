@@ -3,7 +3,7 @@ import pickle
 import re
 import tempfile
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from unittest import mock
@@ -12,7 +12,9 @@ import pytest
 from pydantic import ValidationError
 
 from cstar.base.additional_code import AdditionalCode
+from cstar.base.exceptions import CstarExpectationFailed
 from cstar.base.external_codebase import ExternalCodeBase
+from cstar.base.input_dataset import InputDataset
 from cstar.execution.handler import ExecutionStatus
 from cstar.marbl.external_codebase import MARBLExternalCodeBase
 from cstar.pio.external_codebase import PIOExternalCodeBase
@@ -26,6 +28,7 @@ from cstar.roms.input_dataset import (
     ROMSInputDataset,
     ROMSModelGrid,
     ROMSNestingInfo,
+    ROMSPartitioning,
     ROMSSurfaceForcing,
     ROMSTidalForcing,
 )
@@ -2369,6 +2372,64 @@ class TestProcessingAndExecution:
 
         assert sim.fs_manager.temp_output_dir.exists() == expect_temp_output
 
+    @mock.patch.object(
+        ROMSSimulation, "roms_runtime_settings", new_callable=mock.PropertyMock
+    )
+    def test_run_rotates_previous_attempt_files(
+        self,
+        mock_runtime_settings,
+        stub_romssimulation: ROMSSimulation,
+        stageddatacollection_remote_files,
+    ):
+        """`run` rotates a previous attempt's namelist, job script, and ROMS
+        stdout out of the way (`.1`, `.2`, ...) instead of silently
+        overwriting them, and re-creates the exe symlink instead of raising
+        `FileExistsError` when one is already there from a previous attempt.
+        """
+        sim = stub_romssimulation
+
+        with (
+            mock.patch("cstar.roms.simulation.LocalProcess") as mock_local_process,
+            mock.patch(
+                "cstar.system.manager.CStarSystemManager.scheduler",
+                new_callable=mock.PropertyMock,
+                return_value=None,
+            ),
+        ):
+            sim.exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+            sim.exe_path.parent.mkdir(parents=True, exist_ok=True)
+            sim.exe_path.write_text("binary")
+            mock_local_process.return_value = mock.MagicMock()
+            runtime_code_dir = sim.fs_manager.runtime_code_dir
+            sim.runtime_code._working_copy = stageddatacollection_remote_files(
+                paths=[runtime_code_dir / f.basename for f in sim.runtime_code.source],
+                sources=sim.runtime_code.source,
+            )
+
+            run_dir = sim.fs_manager.run_dir
+            run_dir.mkdir(parents=True, exist_ok=True)
+            sim.fs_manager.logs_dir.mkdir(parents=True, exist_ok=True)
+
+            namelist_path = run_dir / "cstar_generated_roms.nml"
+            namelist_path.write_text("old namelist")
+
+            script_path = run_dir / "romstest.sh"
+            script_path.write_text("old script")
+
+            output_file = sim.fs_manager.logs_dir / "romstest.out"
+            output_file.write_text("old output")
+
+            symlink_path = run_dir / sim.exe_path.name
+            symlink_path.symlink_to(Path("old-roms-binary"))
+
+            sim.run()
+
+        assert (run_dir / "cstar_generated_roms.nml.1").read_text() == "old namelist"
+        assert (run_dir / "romstest.sh.1").read_text() == "old script"
+        assert (sim.fs_manager.logs_dir / "romstest.out.1").read_text() == "old output"
+        assert symlink_path.is_symlink()
+        assert symlink_path.resolve() == sim.exe_path.resolve()
+
     @pytest.mark.parametrize(
         "mock_system_name,exp_mpi_prefix",
         [
@@ -2706,6 +2767,321 @@ class TestProcessingAndExecution:
             text=True,
             shell=True,
         )
+
+
+class TestAttach:
+    """Tests for `ROMSSimulation.attach()`.
+
+    `attach()` resumes a simulation from a previously staged, built, and
+    (for non-PIO simulations) partitioned working directory -- the
+    counterpart of calling `setup()`, `build()`, and `pre_run()` in
+    sequence -- without staging, cloning, compiling, or partitioning
+    anything itself.
+    """
+
+    @staticmethod
+    def _stage_additional_code(
+        additional_code: AdditionalCode, target_dir: Path
+    ) -> None:
+        """Write a placeholder file for every source `additional_code` expects."""
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for f in additional_code.source:
+            (target_dir / f.basename).write_text("x")
+
+    @staticmethod
+    def _stage_input_dataset(
+        input_datasets_dir: Path, inp: ROMSInputDataset, np_xi: int, np_eta: int
+    ) -> Path:
+        """Write a placeholder file (and, if partitionable, its partition
+        pieces) for `inp` under `input_datasets_dir`.
+        """
+        input_datasets_dir.mkdir(parents=True, exist_ok=True)
+        path = input_datasets_dir / inp.source.basename
+        path.write_text("x")
+        if inp.partitionable:
+            n_partitions = np_xi * np_eta
+            for i in range(n_partitions):
+                piece = Path(
+                    f"{path.with_suffix('')}{ROMSPartitioning.suffix(i, n_partitions)}"
+                )
+                piece.write_text("x")
+        return path
+
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(
+        ROMSExternalCodeBase,
+        "is_configured",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(
+        MARBLExternalCodeBase,
+        "is_configured",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(
+        AdditionalCode,
+        "exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(
+        InputDataset,
+        "exists_locally",
+        new_callable=mock.PropertyMock,
+        return_value=True,
+    )
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_happy_path(
+        self,
+        mock_partition,
+        mock_get,
+        mock_input_exists,
+        mock_additionalcode_exists,
+        mock_marbl_configured,
+        mock_roms_configured,
+        mock_marbl_attach,
+        mock_roms_attach,
+        mock_verify_linkage,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """A fully staged, built, and partitioned working directory is
+        adopted without staging, cloning, compiling, or partitioning
+        anything, and leaves the simulation `is_setup`.
+        """
+        sim = stub_romssimulation
+        assert sim.compile_time_code
+        assert sim.marbl_codebase
+        assert sim.discretization.n_procs_x is not None
+        assert sim.discretization.n_procs_y is not None
+        self._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        self._stage_additional_code(sim.runtime_code, sim.fs_manager.runtime_code_dir)
+
+        np_xi, np_eta = sim.discretization.n_procs_x, sim.discretization.n_procs_y
+        for inp in sim.input_datasets:
+            self._stage_input_dataset(
+                sim.fs_manager.input_datasets_dir, inp, np_xi, np_eta
+            )
+
+        exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+        exe_path.write_text("a compiled binary")
+
+        sim.attach()
+
+        mock_roms_attach.assert_called_once_with(
+            sim.fs_manager.codebase_subdir(sim.codebase.key)
+        )
+        mock_marbl_attach.assert_called_once_with(
+            sim.fs_manager.codebase_subdir(sim.marbl_codebase.key)
+        )
+        mock_verify_linkage.assert_called_once_with(exe_path)
+        mock_get.assert_not_called()
+        mock_partition.assert_not_called()
+
+        assert sim.exe_path == exe_path
+        assert sim._exe_hash is not None
+        assert sim.is_setup is True
+
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_raises_once_naming_every_missing_component(
+        self,
+        mock_partition,
+        mock_get,
+        mock_marbl_attach,
+        mock_roms_attach,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """A missing executable and a missing, unstageable input dataset are
+        both reported by a single `CstarExpectationFailed`, and nothing is
+        partitioned.
+        """
+        sim = stub_romssimulation
+        assert sim.compile_time_code
+        assert sim.tidal_forcing
+        assert sim.discretization.n_procs_x is not None
+        assert sim.discretization.n_procs_y is not None
+        self._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        self._stage_additional_code(sim.runtime_code, sim.fs_manager.runtime_code_dir)
+
+        np_xi, np_eta = sim.discretization.n_procs_x, sim.discretization.n_procs_y
+        for inp in sim.input_datasets:
+            if inp is sim.tidal_forcing:
+                continue  # deliberately left un-staged
+            self._stage_input_dataset(
+                sim.fs_manager.input_datasets_dir, inp, np_xi, np_eta
+            )
+
+        # tidal_forcing has no local file and cannot be fetched either -- it
+        # is genuinely missing, not merely unstaged
+        mock_get.side_effect = FileNotFoundError(
+            f"cannot stage {sim.tidal_forcing.source.location}"
+        )
+
+        # exe_path is never created -- compile_time_code.working_copy exists
+        # but the compiled binary itself does not
+        exe_path = sim.fs_manager.compile_time_code_dir / "roms"
+
+        with pytest.raises(CstarExpectationFailed) as exc_info:
+            sim.attach()
+
+        msg = str(exc_info.value)
+        assert str(exe_path) in msg
+        assert sim.tidal_forcing.source.location in msg
+        mock_partition.assert_not_called()
+
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_stages_and_partitions_missing_initial_conditions(
+        self,
+        mock_partition,
+        mock_get,
+        mock_marbl_attach,
+        mock_roms_attach,
+        stub_romssimulation: ROMSSimulation,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """A restart file that a resumed run's `initial_conditions` points at
+        (never staged the way `setup()` would have) is fetched with `get()`
+        and partitioned with `partition()`, exactly as `setup()` and
+        `pre_run()` would have -- while every other dataset is merely
+        adopted with `attach_partitions()`.
+        """
+        sim = stub_romssimulation
+        assert sim.compile_time_code
+        assert sim.initial_conditions
+        assert sim.discretization.n_procs_x is not None
+        assert sim.discretization.n_procs_y is not None
+        self._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        self._stage_additional_code(sim.runtime_code, sim.fs_manager.runtime_code_dir)
+
+        np_xi, np_eta = sim.discretization.n_procs_x, sim.discretization.n_procs_y
+        for inp in sim.input_datasets:
+            if inp is sim.initial_conditions:
+                continue  # left un-staged; adopted via get()+partition() instead
+            self._stage_input_dataset(
+                sim.fs_manager.input_datasets_dir, inp, np_xi, np_eta
+            )
+
+        (sim.fs_manager.compile_time_code_dir / "roms").write_text("binary")
+
+        with caplog.at_level(logging.INFO, logger=sim.log.name):
+            sim.attach()
+
+        mock_get.assert_called_once_with(local_dir=sim.fs_manager.input_datasets_dir)
+        mock_partition.assert_called_once_with(np_xi=np_xi, np_eta=np_eta)
+        assert sim.initial_conditions.source.location in caplog.text
+
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(PIOExternalCodeBase, "attach")
+    @mock.patch.object(ROMSSimulation, "_validate_pio_inputs")
+    @mock.patch.object(ROMSInputDataset, "attach_partitions")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_pio_skips_partitioning(
+        self,
+        mock_partition,
+        mock_get,
+        mock_attach_partitions,
+        mock_validate_pio,
+        mock_pio_attach,
+        mock_marbl_attach,
+        mock_roms_attach,
+        mock_verify_linkage,
+        stub_romssimulation: ROMSSimulation,
+        pioexternalcodebase,
+    ):
+        """With ParallelIO, input datasets are adopted whole -- neither
+        partitioned nor checked for existing partitions -- and
+        `_validate_pio_inputs` (what `pre_run` runs for a PIO simulation) is
+        called instead.
+        """
+        sim = stub_romssimulation
+        assert sim.compile_time_code
+        sim.use_pio = True
+        sim.pio_codebase = pioexternalcodebase
+
+        self._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        self._stage_additional_code(sim.runtime_code, sim.fs_manager.runtime_code_dir)
+
+        input_datasets_dir = sim.fs_manager.input_datasets_dir
+        input_datasets_dir.mkdir(parents=True, exist_ok=True)
+        for inp in sim.input_datasets:
+            (input_datasets_dir / inp.source.basename).write_text("x")
+
+        (sim.fs_manager.compile_time_code_dir / "roms").write_text("binary")
+
+        sim.attach()
+
+        mock_attach_partitions.assert_not_called()
+        mock_partition.assert_not_called()
+        mock_get.assert_not_called()
+        mock_validate_pio.assert_called_once()
+
+    @mock.patch.object(ROMSExternalCodeBase, "attach")
+    @mock.patch.object(MARBLExternalCodeBase, "attach")
+    @mock.patch.object(ROMSInputDataset, "get")
+    @mock.patch.object(ROMSInputDataset, "partition")
+    def test_attach_skips_datasets_outside_simulation_dates(
+        self,
+        mock_partition,
+        mock_get,
+        mock_marbl_attach,
+        mock_roms_attach,
+        stub_romssimulation: ROMSSimulation,
+    ):
+        """A dataset whose date range falls entirely outside the
+        simulation's is skipped entirely by `attach` -- neither adopted nor
+        staged -- exactly as `setup` would never have fetched it.
+        """
+        sim = stub_romssimulation
+        assert sim.start_date is not None
+        assert sim.compile_time_code
+        assert sim.tidal_forcing
+        assert sim.discretization.n_procs_x is not None
+        assert sim.discretization.n_procs_y is not None
+        assert sim.end_date is not None
+        # starts after the simulation ends: neither setup() nor attach() wants it
+        sim.tidal_forcing.start_date = sim.end_date + timedelta(days=50)
+        sim.tidal_forcing.end_date = sim.end_date + timedelta(days=100)
+
+        self._stage_additional_code(
+            sim.compile_time_code, sim.fs_manager.compile_time_code_dir
+        )
+        self._stage_additional_code(sim.runtime_code, sim.fs_manager.runtime_code_dir)
+
+        np_xi, np_eta = sim.discretization.n_procs_x, sim.discretization.n_procs_y
+        for inp in sim.input_datasets:
+            if inp is sim.tidal_forcing:
+                continue  # out of range -- deliberately left un-staged
+            self._stage_input_dataset(
+                sim.fs_manager.input_datasets_dir, inp, np_xi, np_eta
+            )
+
+        (sim.fs_manager.compile_time_code_dir / "roms").write_text("binary")
+
+        sim.attach()  # does not raise, despite tidal_forcing never being staged
+
+        mock_get.assert_not_called()
+        mock_partition.assert_not_called()
 
 
 class TestROMSSimulationUsePIO:

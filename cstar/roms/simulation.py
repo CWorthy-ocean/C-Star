@@ -51,7 +51,7 @@ from cstar.base.utils import (
     deep_merge,
     slugify,
 )
-from cstar.execution.file_system import remove_files
+from cstar.execution.file_system import remove_files, rotate_file
 from cstar.execution.handler import ExecutionStatus
 from cstar.execution.local_process import LocalProcess
 from cstar.execution.scheduler_job import create_scheduler_job
@@ -234,6 +234,9 @@ class ROMSSimulation(Simulation):
     -------
     setup()
         Configures and prepares the ROMS simulation environment.
+    attach()
+        Adopts a previously staged, built, and partitioned working directory
+        instead of setting one up from scratch; used to resume an interrupted run.
     build(rebuild=False)
         Compiles the ROMS executable if necessary.
     pre_run()
@@ -1391,12 +1394,7 @@ class ROMSSimulation(Simulation):
         self.log.info("📦 Fetching input datasets...")
         for inp in self.input_datasets:
             # Download input dataset if its date range overlaps Simulation's date range
-            if (
-                ((inp.start_date is None) or (inp.end_date is None))
-                or ((self.start_date is None) or (self.end_date is None))
-                or (inp.start_date <= self.end_date)
-                and (self.end_date >= self.start_date)
-            ):
+            if self._overlaps_simulation_dates(inp):
                 self.log.debug(f"Fetching {inp.source.location}")
                 inp.get(local_dir=input_datasets_dir)
 
@@ -1461,6 +1459,193 @@ class ROMSSimulation(Simulation):
                 ):
                     return False
         return True
+
+    def _overlaps_simulation_dates(self, inp: ROMSInputDataset) -> bool:
+        """Determine whether `setup()` fetches an input dataset for this
+        simulation, so `attach()` adopts exactly the same set.
+
+        A dataset with unknown dates, or a simulation with unknown dates, is
+        always fetched; otherwise a dataset is fetched when it starts on or
+        before the simulation's `end_date`. This is `setup()`'s historical
+        rule verbatim (note `is_setup` applies a stricter, bidirectional
+        overlap when deciding whether a missing dataset matters).
+
+        Parameters
+        ----------
+        inp : ROMSInputDataset
+            The input dataset to compare against this simulation's date range.
+
+        Returns
+        -------
+        bool
+        """
+        return (
+            ((inp.start_date is None) or (inp.end_date is None))
+            or ((self.start_date is None) or (self.end_date is None))
+            or (inp.start_date <= self.end_date)
+            and (self.end_date >= self.start_date)
+        )
+
+    _ATTACH_COMPONENT_ERRORS: ClassVar[tuple[type[Exception], ...]] = (
+        FileNotFoundError,
+        CstarExpectationFailed,
+        ValueError,
+        RuntimeError,
+    )
+    """Exceptions raised by a component's `attach()`/`get()`/verification call
+    that `attach()` treats as "this component is not resumable", rather than
+    letting propagate -- collected into `problems` so every missing piece is
+    reported together instead of only the first.
+    """
+
+    def attach(self) -> None:
+        """Adopt a previously staged, built, and partitioned working directory.
+
+        Counterpart of calling `setup()`, `build()`, and `pre_run()` in
+        sequence: instead of staging, cloning, compiling, or partitioning
+        anything, this adopts the inputs, codebases, and executable already
+        present in this simulation's working directory (`self.directory`),
+        left behind by a previous, interrupted attempt, and leaves this
+        instance in the same state those three methods would have produced.
+        Used to resume an interrupted run without redoing the work it already
+        completed.
+
+        Every component (codebases, runtime/compile-time code, input
+        datasets and their partitions, the compiled executable) is attached
+        independently, and a problem with one does not stop the others from
+        being checked, so a single call reports everything the working
+        directory is missing at once.
+
+        The one exception is an input dataset that is not present where
+        `attach()` expects it: a resumed run's `initial_conditions` typically
+        points at a restart file the previous attempt itself wrote (via
+        `run()`), which was never staged ahead of time the way `setup()`
+        would have staged it. So rather than only ever adopting existing
+        files, a dataset that fails to attach is staged instead, with
+        `get()`, exactly as `setup()` would have staged it originally.
+
+        Raises
+        ------
+        CstarExpectationFailed
+            Listing every previously staged component that is missing,
+            unconfigured, or invalid -- e.g. a codebase without a checkout,
+            a missing input dataset or partition piece, or a missing or
+            broken executable.
+
+        See Also
+        --------
+        setup : Fetches and organizes necessary files for the simulation from scratch.
+        build : Compiles the ROMS model.
+        pre_run : Partitions locally available input datasets.
+        """
+        problems: list[str] = []
+        staged: list[str] = []
+
+        for codebase in (x for x in self.codebases if x is not None):
+            codebase_dir = self.fs_manager.codebase_subdir(codebase.key)
+            try:
+                codebase.attach(codebase_dir)
+                self.log.debug(
+                    f"Attached {codebase.__class__.__name__} at {codebase_dir}"
+                )
+            except self._ATTACH_COMPONENT_ERRORS as e:
+                problems.append(str(e))
+
+        for additional_code, target_dir, label in (
+            (
+                self.compile_time_code,
+                self.fs_manager.compile_time_code_dir,
+                "compile-time code",
+            ),
+            (self.runtime_code, self.fs_manager.runtime_code_dir, "runtime code"),
+        ):
+            if additional_code is None:
+                continue
+            try:
+                additional_code.attach(target_dir)
+                self.log.debug(f"Attached {label}")
+            except self._ATTACH_COMPONENT_ERRORS as e:
+                problems.append(str(e))
+
+        # Mirrors pre_run's own check -- recorded once, rather than once per
+        # dataset, so it appears in `problems` a single time.
+        partition_dims: tuple[int, int] | None = None
+        if not self.use_pio:
+            n_procs_x, n_procs_y = (
+                self.discretization.n_procs_x,
+                self.discretization.n_procs_y,
+            )
+            if n_procs_x is None or n_procs_y is None:
+                problems.append(
+                    "Cannot partition input datasets: discretization.n_procs_x "
+                    "and n_procs_y must both be set (e.g. auto_tiling is not "
+                    "yet supported outside of use_pio)."
+                )
+            else:
+                partition_dims = (n_procs_x, n_procs_y)
+
+        for inp in self.input_datasets:
+            if not self._overlaps_simulation_dates(inp):
+                continue
+
+            try:
+                just_staged = False
+                try:
+                    inp.attach(self.fs_manager.input_datasets_dir)
+                    self.log.debug(f"Attached {inp.source.location}")
+                except FileNotFoundError:
+                    # A resumed run's initial conditions typically point at a
+                    # restart file the previous attempt wrote, which was
+                    # never staged ahead of time -- this is the one
+                    # component `attach()` is allowed to stage rather than
+                    # merely adopt.
+                    inp.get(local_dir=self.fs_manager.input_datasets_dir)
+                    staged.append(inp.source.location)
+                    just_staged = True
+                    self.log.debug(f"Staged {inp.source.location}")
+
+                if inp.partitionable and partition_dims is not None:
+                    np_xi, np_eta = partition_dims
+                    if just_staged:
+                        inp.partition(np_xi=np_xi, np_eta=np_eta)
+                    else:
+                        inp.attach_partitions(np_xi, np_eta)
+            except self._ATTACH_COMPONENT_ERRORS as e:
+                problems.append(str(e))
+
+        if self.compile_time_code is not None and self.compile_time_code.working_copy:
+            exe_path = self.compile_time_code.working_copy.common_parent / "roms"
+            if not exe_path.exists():
+                problems.append(f"compiled ROMS executable {exe_path}")
+            else:
+                try:
+                    verify_roms_linkage(exe_path)
+                    self.exe_path = exe_path
+                    self._exe_hash = _get_sha256_hash(exe_path)
+                    self.log.debug(f"Attached ROMS executable at {exe_path}")
+                except self._ATTACH_COMPONENT_ERRORS as e:
+                    problems.append(f"compiled ROMS executable {exe_path}: {e}")
+
+        if not problems and self.use_pio:
+            try:
+                self._validate_pio_inputs()
+            except self._ATTACH_COMPONENT_ERRORS as e:
+                problems.append(str(e))
+
+        if problems:
+            problem_list = "\n".join(f"  - {p}" for p in problems)
+            msg = (
+                f"Cannot resume simulation {self.name!r}: the working "
+                f"directory {self.directory} is missing previously staged "
+                f"components:\n{problem_list}\n"
+                "Re-run the step with --clobber to start over."
+            )
+            raise CstarExpectationFailed(msg)
+
+        msg = f"Attached previously staged simulation {self.name!r}"
+        if staged:
+            msg += f"; newly staged: {', '.join(staged)}"
+        self.log.info(msg)
 
     def build(self, rebuild: bool = False) -> None:
         """Compile the ROMS executable from source code.
@@ -1902,8 +2087,10 @@ class ROMSSimulation(Simulation):
         run_path = self.fs_manager.run_dir
         runtime_settings_fname = "cstar_generated_roms.nml"
 
-        # save modified namelist in the work directory
+        # save modified namelist in the work directory, keeping a previous
+        # attempt's namelist around as `.1`, `.2`, ... rather than overwriting it
         final_runtime_settings_file = run_path / runtime_settings_fname
+        rotate_file(final_runtime_settings_file)
         self.roms_runtime_settings.write(final_runtime_settings_file)
 
         script_name = job_name or self.name
@@ -1911,8 +2098,14 @@ class ROMSSimulation(Simulation):
         script_path = run_path / f"{safe_name}.sh"
         output_file = self.fs_manager.logs_dir / f"{safe_name}.out"
 
+        # rotate out a previous attempt's job script and ROMS stdout, same as
+        # the namelist above, so they survive as `.1`, `.2`, ...
+        rotate_file(script_path)
+        rotate_file(output_file)
+
         # symlink roms exe into run dir to simplify running by hand for troubleshooting.
         roms_symlink_path = run_path / self.exe_path.name
+        roms_symlink_path.unlink(missing_ok=True)
         roms_symlink_path.symlink_to(self.exe_path)
 
         ## 2: RUN ROMS
