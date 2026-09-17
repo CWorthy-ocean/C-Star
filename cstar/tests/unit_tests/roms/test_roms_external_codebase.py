@@ -210,7 +210,7 @@ class TestROMSExternalCodeBaseConfigure:
                 return_value={"ROMS_ROOT": roms_path},
             ),
             mock.patch(
-                "cstar.roms.external_codebase._check_local_repo_changed_from_remote",
+                "cstar.base.external_codebase._check_local_repo_changed_from_remote",
                 return_value=False,
             ),
             mock.patch("pathlib.Path.exists", return_value=True),
@@ -264,7 +264,7 @@ class TestROMSExternalCodeBaseConfigure:
                 return_value=env_vars,
             ),
             mock.patch(
-                "cstar.roms.external_codebase._check_local_repo_changed_from_remote",
+                "cstar.base.external_codebase._check_local_repo_changed_from_remote",
                 return_value=repo_changed,
             ),
             mock.patch("pathlib.Path.exists", return_value=mpc_exists),

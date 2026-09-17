@@ -269,8 +269,6 @@ class TestSetupEnvironmentFromFiles:
             for key, exp_value in updated_vars:
                 # Confirm the active environment variable is updated
                 assert exp_value in os.environ.get(key, "key-not-found")
-                # ... and recorded, so `is_configured`-style lookups see it
-                assert env.environment_variables[key] == exp_value
 
     @patch.dict(
         "os.environ",

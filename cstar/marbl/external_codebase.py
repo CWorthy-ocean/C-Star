@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import get_sysmgr
 
@@ -53,40 +52,12 @@ class MARBLExternalCodeBase(ExternalCodeBase):
             raise_on_error=True,
         )
 
-    @property
-    def is_configured(self) -> bool:
-        """Determine whether MARBL is configured locally.
-
-        This method confirms that:
-        - Necessary environment variables are set
-        - The repository has not changed from that described by `source`.
-        - MARBL's `lib` and `inc` dirs exist and are populated
+    def _is_built_at(self, root: Path) -> bool:
+        """Confirm MARBL's library for the current compiler exists and its
+        include dir is populated.
         """
-        cstar_sysmgr = get_sysmgr()
-
-        # Check MARBL_ROOT env var is set:
-        marbl_root = cstar_sysmgr.environment.environment_variables.get(
-            self.root_env_var
-        )
-        if not marbl_root:
+        compiler = get_sysmgr().environment.compiler
+        if not (root / f"lib/libmarbl-{compiler}-mpi.a").exists():
             return False
-        # Check MARBL repo hasn't changed:
-        assert self.source.checkout_target is not None  # cannot be for ExternalCodeBase
-        # NOTE can't use self.working_copy.changed_from_source here as ExternalCodeBase uses this property to set `working_copy`
-        if _check_local_repo_changed_from_remote(
-            remote_repo=self.source.location,
-            local_repo=marbl_root,
-            checkout_target=self.source.checkout_target,
-        ):
-            return False
-        # Check library file exists for current compiler:
-        if not (
-            Path(marbl_root) / f"lib/libmarbl-{cstar_sysmgr.environment.compiler}-mpi.a"
-        ).exists():
-            return False
-        # Check include dir is not empty:
-        inc_dir = Path(marbl_root) / f"include/{cstar_sysmgr.environment.compiler}-mpi/"
-        if not any(inc_dir.iterdir()):
-            return False
-
-        return True
+        inc_dir = root / f"include/{compiler}-mpi/"
+        return inc_dir.exists() and any(inc_dir.iterdir())

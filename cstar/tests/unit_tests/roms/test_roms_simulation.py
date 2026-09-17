@@ -2944,8 +2944,10 @@ class TestAttach:
     @mock.patch.object(MARBLExternalCodeBase, "attach")
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(ROMSInputDataset, "partition")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
     def test_attach_stages_and_partitions_missing_initial_conditions(
         self,
+        mock_verify_linkage,
         mock_partition,
         mock_get,
         mock_marbl_attach,
@@ -2991,8 +2993,10 @@ class TestAttach:
     @mock.patch.object(MARBLExternalCodeBase, "attach")
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(ROMSInputDataset, "partition")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
     def test_attach_rejects_executable_built_with_mismatched_cppdefs(
         self,
+        mock_verify_linkage,
         mock_partition,
         mock_get,
         mock_marbl_attach,
@@ -3084,8 +3088,10 @@ class TestAttach:
     @mock.patch.object(MARBLExternalCodeBase, "attach")
     @mock.patch.object(ROMSInputDataset, "get")
     @mock.patch.object(ROMSInputDataset, "partition")
+    @mock.patch("cstar.roms.simulation.verify_roms_linkage")
     def test_attach_skips_datasets_outside_simulation_dates(
         self,
+        mock_verify_linkage,
         mock_partition,
         mock_get,
         mock_marbl_attach,

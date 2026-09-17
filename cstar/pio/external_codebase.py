@@ -4,7 +4,6 @@ import typing as t
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
 from cstar.system.manager import get_sysmgr
 
@@ -145,31 +144,9 @@ class PIOExternalCodeBase(ExternalCodeBase):
             raise_on_error=True,
         )
 
-    @property
-    def is_configured(self) -> bool:
-        """Determine whether PIO is configured locally.
-
-        This method confirms that:
-        - Necessary environment variables are set
-        - The repository has not changed from that described by `source`.
-        - PIO's C and Fortran libraries exist in the in-tree build directory
-        """
-        # Check PIO_ROOT env var is set:
-        pio_root = get_sysmgr().environment.environment_variables.get(self.root_env_var)
-        if not pio_root:
-            return False
-        # Check PIO repo hasn't changed:
-        assert self.source.checkout_target is not None  # cannot be for ExternalCodeBase
-        # NOTE can't use self.working_copy.changed_from_source here as ExternalCodeBase uses this property to set `working_copy`
-        if _check_local_repo_changed_from_remote(
-            remote_repo=self.source.location,
-            local_repo=pio_root,
-            checkout_target=self.source.checkout_target,
-        ):
-            return False
-        # Check library files exist:
-        for lib in ("build/src/clib/libpioc.a", "build/src/flib/libpiof.a"):
-            if not (Path(pio_root) / lib).exists():
-                return False
-
-        return True
+    def _is_built_at(self, root: Path) -> bool:
+        """Confirm PIO's C and Fortran libraries exist in the in-tree build directory."""
+        return all(
+            (root / lib).exists()
+            for lib in ("build/src/clib/libpioc.a", "build/src/flib/libpiof.a")
+        )

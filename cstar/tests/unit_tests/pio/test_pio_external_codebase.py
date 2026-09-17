@@ -322,7 +322,7 @@ class TestPIOExternalCodeBaseConfigure:
                 return_value=env_vars,
             ),
             mock.patch(
-                "cstar.pio.external_codebase._check_local_repo_changed_from_remote",
+                "cstar.base.external_codebase._check_local_repo_changed_from_remote",
                 return_value=repo_changed,
             ),
         ):

@@ -154,7 +154,7 @@ class TestMARBLExternalCodeBaseConfigure:
                 return_value={"MARBL_ROOT": tmp_path},
             ),
             mock.patch(
-                "cstar.marbl.external_codebase._check_local_repo_changed_from_remote",
+                "cstar.base.external_codebase._check_local_repo_changed_from_remote",
                 return_value=False,
             ),
             mock.patch("pathlib.Path.exists", return_value=True),
@@ -213,7 +213,7 @@ class TestMARBLExternalCodeBaseConfigure:
                 return_value=env_vars,
             ),
             mock.patch(
-                "cstar.marbl.external_codebase._check_local_repo_changed_from_remote",
+                "cstar.base.external_codebase._check_local_repo_changed_from_remote",
                 return_value=repo_changed,
             ),
             mock.patch("pathlib.Path.exists", return_value=lib_exists),

@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from cstar.base.exceptions import CstarExpectationFailed
+from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.log import LoggingMixin
 from cstar.io.source_data import SourceData
 from cstar.io.staged_data import StagedRepository
@@ -201,16 +202,42 @@ class ExternalCodeBase(ABC, LoggingMixin):
         self._working_copy = StagedRepository(self.source, target_dir)
         self._export_env()
 
-        if not self.is_configured:
+        if not self._is_configured_at(target_dir):
             raise CstarExpectationFailed(
                 f"{self.__class__.__name__} at {target_dir} has not been configured "
                 "(e.g. compiled) for use. Call setup() instead of attach()."
             )
 
     @property
-    @abstractmethod
     def is_configured(self) -> bool:
-        """Returns True if this ExternalCodeBase exists locally and is correctly configured"""
+        """Returns True if this ExternalCodeBase is declared in the C-Star environment
+        (its `root_env_var` is set) and the checkout there is correctly configured.
+        """
+        root = get_sysmgr().environment.environment_variables.get(self.root_env_var)
+        if not root:
+            return False
+        return self._is_configured_at(Path(root))
+
+    def _is_configured_at(self, root: Path) -> bool:
+        """Returns True if the checkout at `root` matches `source` and holds this
+        codebase's build artifacts.
+
+        Path-based counterpart of `is_configured`: it never consults the
+        environment, so `attach()` can verify a checkout the current process has
+        not exported yet.
+        """
+        assert self.source.checkout_target is not None  # cannot be for ExternalCodeBase
+        if _check_local_repo_changed_from_remote(
+            remote_repo=self.source.location,
+            local_repo=root,
+            checkout_target=self.source.checkout_target,
+        ):
+            return False
+        return self._is_built_at(root)
+
+    @abstractmethod
+    def _is_built_at(self, root: Path) -> bool:
+        """Returns True if the build artifacts this codebase produces exist under `root`"""
 
     def configure(self) -> None:
         """Configure (set environment, compile, etc.) the external codebase on your local machine."""

@@ -2,7 +2,6 @@ import os
 from pathlib import Path
 
 from cstar.base.external_codebase import ExternalCodeBase
-from cstar.base.gitutils import _check_local_repo_changed_from_remote
 from cstar.base.utils import _run_cmd
 from cstar.roms.build_verification import (
     assert_single_toolchain_stack,
@@ -73,25 +72,6 @@ class ROMSExternalCodeBase(ExternalCodeBase):
             raise_on_error=True,
         )
 
-    @property
-    def is_configured(self) -> bool:
-        # Check ROMS_ROOT env var is set:
-        cstar_sysmgr = get_sysmgr()
-        roms_root = cstar_sysmgr.environment.environment_variables.get(
-            self.root_env_var
-        )
-        if not roms_root:
-            return False
-        assert self.source.checkout_target is not None  # Cannot be for ExternalCodeBase
-        #
-        if _check_local_repo_changed_from_remote(
-            remote_repo=self.source.location,
-            local_repo=roms_root,
-            checkout_target=self.source.checkout_target,
-        ):
-            return False
-
+    def _is_built_at(self, root: Path) -> bool:
         # Check fundamental Tools-Roms programs compiled
-        if not (Path(roms_root) / "Tools-Roms/mpc").exists():
-            return False
-        return True
+        return (root / "Tools-Roms/mpc").exists()
