@@ -22,9 +22,10 @@ from cstar.applications.core import (
 )
 from cstar.base.env import ENV_CSTAR_RUNID
 from cstar.base.exceptions import CstarError, CstarExpectationFailed
-from cstar.base.log import LoggingMixin
+from cstar.base.log import LoggingMixin, get_logger
 from cstar.base.utils import deep_merge
 from cstar.execution.file_system import JobFileSystemManager, local_copy
+from cstar.orchestration.adapter import DIRECTIVES_FILENAME, prepare_directive_file
 from cstar.orchestration.models import (
     Blueprint,
     DeferredBlueprintRef,
@@ -37,6 +38,8 @@ from cstar.orchestration.tracking import TrackingRepository, WorkplanRun
 
 if t.TYPE_CHECKING:
     from cstar.entrypoint.runner import BlueprintRunner
+
+log = get_logger(__name__)
 
 TRANSFORMS: dict[str, list[Transform[LiveStep]]] = defaultdict(list)
 """Storage for transform registrations."""
@@ -1204,6 +1207,70 @@ class DirectiveConfig(BaseModel):
         except (FileNotFoundError, ValueError, yaml.YAMLError) as ex:
             msg = f"Unable to load workplan for run-id {run_id!r} from {str(wp_path)!r}: {ex}"
             raise RuntimeError(msg) from ex
+
+    @classmethod
+    def restore_directive_file(cls, path: str | Path) -> Path:
+        """Rewrite a missing directive file from the workplan recorded for the run.
+
+        A step's directive file is written into its work directory when the
+        step is submitted, so it can be lost while the step waits in a
+        scheduler queue. The directives are also recorded in the transformed
+        workplan persisted for the run, which is used here to restore the file
+        at the path the step was submitted with.
+
+        Parameters
+        ----------
+        path : str | Path
+            The path to the missing directive file.
+
+        Returns
+        -------
+        Path
+            The path to the restored directive file.
+
+        Raises
+        ------
+        CstarError
+            If the file cannot be restored: no run is active, the workplan
+            recorded for the run cannot be loaded, no step in it writes its
+            directives to `path`, or the file cannot be written.
+        """
+        if not os.getenv(ENV_CSTAR_RUNID, ""):
+            msg = (
+                f"no run-id is set in {ENV_CSTAR_RUNID}; directives are only "
+                "restored for a step running as part of a workplan"
+            )
+            raise CstarError(msg)
+
+        target = Path(path).expanduser().resolve()
+
+        try:
+            workplan = cls.load_workplan()
+        except (RuntimeError, ValueError) as ex:
+            msg = f"the workplan recorded for this run could not be loaded: {ex}"
+            raise CstarError(msg) from ex
+
+        for step in workplan.steps:
+            if step.fsm.run_dir / DIRECTIVES_FILENAME != target:
+                continue
+
+            try:
+                restored = prepare_directive_file(step)
+            except OSError as ex:
+                msg = f"the directive file for step {step.name!r} could not be written: {ex}"
+                raise CstarError(msg) from ex
+
+            msg = (
+                f"Restored missing directive file for step {step.name!r} from "
+                f"the workplan recorded for this run: {str(restored)!r}"
+            )
+            log.warning(msg)
+            return restored
+
+        msg = (
+            f"no step in the workplan for this run writes directives to {str(target)!r}"
+        )
+        raise CstarError(msg)
 
     @classmethod
     def register(cls, key: str, directive: type[Directive]) -> None:

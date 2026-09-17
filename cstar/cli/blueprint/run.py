@@ -120,8 +120,33 @@ def path_callback(
         raise typer.BadParameter(msg) from ex
 
 
+def _validate_directive_file(path: str) -> None:
+    """Confirm the directive file exists and contains valid directive content.
+
+    Parameters
+    ----------
+    path : str
+        The path to the directive file to validate.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no file exists at the supplied path.
+    ValueError | ValidationError
+        If the file does not contain valid directive content.
+    """
+    with local_copy(path) as local_path:
+        # deserialize content to validate
+        _ = deserialize(local_path, DirectiveConfig)
+
+
 def directives_callback(path: str | None) -> str | None:
     """Validate the directive content after typer has parsed the path.
+
+    A step's directive file is written when the step is submitted, so it can
+    be lost while the step waits in a scheduler queue. A missing file is
+    restored from the workplan recorded for the run before the content is
+    validated.
 
     Parameters
     ----------
@@ -136,14 +161,18 @@ def directives_callback(path: str | None) -> str | None:
         return path
 
     try:
-        with local_copy(path) as local_path:
-            if not local_path.exists():
-                msg = f"Directive file not found at path: {path}"
-                raise typer.BadParameter(msg)
+        try:
+            _validate_directive_file(path)
+        except FileNotFoundError:
+            try:
+                DirectiveConfig.restore_directive_file(path)
+            except CstarError as ex:
+                msg = (
+                    f"Directive file not found: {path}. It could not be restored: {ex}"
+                )
+                raise typer.BadParameter(msg) from ex
 
-            # deserialize content to validate
-            _ = deserialize(path, DirectiveConfig)
-
+            _validate_directive_file(path)
     except FileNotFoundError as ex:
         msg = f"Directive file not found: {path}"
         raise typer.BadParameter(msg) from ex
