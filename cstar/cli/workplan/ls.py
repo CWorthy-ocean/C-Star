@@ -28,7 +28,10 @@ from cstar.orchestration.tracking import (
 log = get_logger(__name__)
 app = typer.Typer()
 
+ALIAS = "list"
+"""Alternate name under which the `ls` command is also registered."""
 HELP_SHORT = "List runs started by a user."
+HELP_ALIASED = f"{HELP_SHORT} (alias: {ALIAS})"
 FIELD_NAMES: t.TypeAlias = t.Literal[
     "run-id",
     "name",
@@ -360,7 +363,7 @@ formatters = {
 }
 
 
-@app.command(name="ls", help=HELP_SHORT)
+@app.command(name="ls", help=HELP_ALIASED)
 def ls_runs(
     context: typer.Context,
     sort: t.Annotated[
@@ -444,6 +447,11 @@ def ls_runs(
     content = formatters[format](sorted_views)
 
     console.print(content)
+
+
+# `list` is an alias for `ls`: the same command under a second name, hidden
+# from `--help` so the listing shows a single entry.
+app.command(name=ALIAS, hidden=True, help=HELP_SHORT)(ls_runs)
 
 
 if __name__ == "__main__":

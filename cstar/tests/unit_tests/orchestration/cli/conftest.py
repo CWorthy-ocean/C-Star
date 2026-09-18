@@ -17,6 +17,21 @@ from cstar.base.env import (
 _ANSI_CODES = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
+class FakeEntryPoint:
+    """Stand-in for importlib.metadata.EntryPoint with a controllable load()."""
+
+    def __init__(self, name, loaded=None, error=None):
+        self.name = name
+        self.value = f"fake_pkg.cli:{name}"
+        self._loaded = loaded
+        self._error = error
+
+    def load(self):
+        if self._error is not None:
+            raise self._error
+        return self._loaded
+
+
 @pytest.fixture(autouse=True)
 def disable_cli_color() -> Generator[None]:
     """Force plain-text CLI output from typer/rich for every CLI test.
