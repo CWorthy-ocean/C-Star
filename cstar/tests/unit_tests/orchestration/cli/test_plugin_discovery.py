@@ -5,21 +5,7 @@ from unittest.mock import patch
 import typer
 
 from cstar.cli.cli import attach_plugin_subcommands
-
-
-class FakeEntryPoint:
-    """Stand-in for importlib.metadata.EntryPoint with a controllable load()."""
-
-    def __init__(self, name, loaded=None, error=None):
-        self.name = name
-        self.value = f"fake_pkg.cli:{name}"
-        self._loaded = loaded
-        self._error = error
-
-    def load(self):
-        if self._error is not None:
-            raise self._error
-        return self._loaded
+from cstar.tests.unit_tests.orchestration.cli.conftest import FakeEntryPoint
 
 
 def registered_names(app: typer.Typer) -> set[str]:

@@ -6,10 +6,12 @@ import typer
 
 from cstar.applications import *  # noqa: F403
 from cstar.cli.admin import app as app_admin
+from cstar.cli.blueprint import ALIAS as ALIAS_BLUEPRINT
 from cstar.cli.blueprint import app as app_blueprint
 from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
 from cstar.cli.template import app as app_template
+from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import app as app_workplan
 
 CLI_PLUGIN_GROUP = "cstar.cli"
@@ -24,26 +26,36 @@ def attach_subcommands(app: typer.Typer) -> None:
 
     Core subcommands are attached first, then any third-party plugins
     discovered via the ``cstar.cli`` entry-point group.
+
+    A subcommand's aliases are attached as additional names for the same app,
+    hidden from ``--help`` (each sub-app advertises its own alias in its help
+    text) but reserved against plugin names just like the primary name.
     """
-    subcommands: list[tuple[typer.Typer, str]] = [
-        (app_blueprint, "blueprint"),
-        (app_env, "env"),
-        (app_template, "template"),
-        (app_workplan, "workplan"),
-        (app_admin, "admin"),
+    subcommands: list[tuple[typer.Typer, str, tuple[str, ...]]] = [
+        (app_blueprint, "blueprint", (ALIAS_BLUEPRINT,)),
+        (app_env, "env", ()),
+        (app_template, "template", ()),
+        (app_workplan, "workplan", (ALIAS_WORKPLAN,)),
+        (app_admin, "admin", ()),
     ]
 
     try:
-        for command_app, command_name in subcommands:
+        for command_app, command_name, aliases in subcommands:
             if command_app.registered_groups or command_app.registered_commands:
                 app.add_typer(
                     command_app,
                     name=command_name,
                 )
+                for alias in aliases:
+                    app.add_typer(command_app, name=alias, hidden=True)
     except Exception as ex:
         print(f"An error occurred while handling request: {ex}")
 
-    attach_plugin_subcommands(app, taken={name for _, name in subcommands})
+    attach_plugin_subcommands(
+        app,
+        taken={name for _, name, _ in subcommands}
+        | {alias for _, _, aliases in subcommands for alias in aliases},
+    )
 
 
 def attach_plugin_subcommands(app: typer.Typer, taken: set[str]) -> None:

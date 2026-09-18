@@ -8,9 +8,12 @@ from cstar.cli.blueprint.check import app as app_check
 from cstar.cli.blueprint.migrate import app as app_migrate
 from cstar.cli.blueprint.run import app as app_run
 
+ALIAS = "bp"
+"""Short alias under which this subcommand tree is also attached."""
+
 app = typer.Typer(
     name="blueprint",
-    help="Perform the validation and execution of blueprints.",
+    help=f"Perform the validation and execution of blueprints. (alias: {ALIAS})",
 )
 
 app.add_typer(app_run)

@@ -13,9 +13,12 @@ from cstar.cli.workplan.ls import app as app_ls
 from cstar.cli.workplan.run import app as app_run
 from cstar.cli.workplan.status import app as app_status
 
+ALIAS = "wp"
+"""Short alias under which this subcommand tree is also attached."""
+
 app = typer.Typer(
     name="workplan",
-    help="Perform validation and execution of workplans.",
+    help=f"Perform validation and execution of workplans. (alias: {ALIAS})",
 )
 
 app.add_typer(app_check)
