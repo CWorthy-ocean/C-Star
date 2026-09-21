@@ -190,8 +190,20 @@
 ! Usage notes: Overrides the default 3rd-order upstream advection
 #undef AKIMA
 
+! Drop the UPSTREAM_TS curvature (3rd-order) correction at tracer faces whose 3-point difference stencil touches land
+! Usage notes: ucla-roms >= 0.8.0 (earlier releases ignore this key). Masked differences are zero, which otherwise inflates curvature at the first wet point and produces large overshoots; those faces fall back to 2nd-order centered. Only active with UPSTREAM_TS and MASKING.
+{% if cppdefs.upstream_ts_land_curv %}#define UPSTREAM_TS_LAND_CURV
+{% else %}#undef UPSTREAM_TS_LAND_CURV
+{% endif %}
+
+! Use parabolic splines for vertical tracer advection
+! Usage notes: ucla-roms >= 0.8.0, where the default is thickness-aware U3 (C4 predictor, U3 corrector); define to restore the pre-0.8 spline reconstruction. Earlier releases always use splines and ignore this key.
+{% if cppdefs.parabolic_splines %}#define PARABOLIC_SPLINES
+{% else %}#undef PARABOLIC_SPLINES
+{% endif %}
+
 ! Use the fourth-order Akima scheme for vertical advection
-! Usage notes: Overrides the default piecewise parabolic reconstruction
+! Usage notes: Overrides the default piecewise parabolic reconstruction before ucla-roms 0.8.0; unused from 0.8.0 on (vertical fluxes come from module advection)
 #undef AKIMA_V
 
 

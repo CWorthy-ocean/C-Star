@@ -515,6 +515,40 @@ class TestCppdefsTemplate:
         assert "#undef MPI_MASKING\n" in text
         assert "#define MPI_MASKING\n" not in text
 
+    # ucla-roms >= 0.8.0 vertical/horizontal tracer-advection switches (PR #361).
+    # Both are opt-in: a ModelSpec that predates them (no cppdefs key at all) must
+    # keep rendering #undef, so older templates_commit pins stay byte-identical.
+    def test_parabolic_splines_true_defines_key(self, tmp_path):
+        text = self._render(tmp_path, {"parabolic_splines": True})
+        assert "#define PARABOLIC_SPLINES\n" in text
+        assert "#undef PARABOLIC_SPLINES\n" not in text
+
+    def test_parabolic_splines_false_undefs_key(self, tmp_path):
+        text = self._render(tmp_path, {"parabolic_splines": False})
+        assert "#undef PARABOLIC_SPLINES\n" in text
+        assert "#define PARABOLIC_SPLINES\n" not in text
+
+    def test_upstream_ts_land_curv_true_defines_key(self, tmp_path):
+        text = self._render(tmp_path, {"upstream_ts_land_curv": True})
+        assert "#define UPSTREAM_TS_LAND_CURV\n" in text
+        assert "#undef UPSTREAM_TS_LAND_CURV\n" not in text
+
+    def test_upstream_ts_land_curv_false_undefs_key(self, tmp_path):
+        text = self._render(tmp_path, {"upstream_ts_land_curv": False})
+        assert "#undef UPSTREAM_TS_LAND_CURV\n" in text
+        assert "#define UPSTREAM_TS_LAND_CURV\n" not in text
+
+    def test_advection_keys_absent_from_settings_render_undef(self, tmp_path):
+        """A cppdefs dict without either key (every ModelSpec pinned to ucla-roms
+        < 0.8.0) renders both as #undef -- the template may reference attrs the
+        settings lack (undefined -> falsy), so older specs are unaffected.
+        """
+        text = self._render(tmp_path, {"use_pio": True})
+        assert "#undef PARABOLIC_SPLINES\n" in text
+        assert "#undef UPSTREAM_TS_LAND_CURV\n" in text
+        assert "#define PARABOLIC_SPLINES\n" not in text
+        assert "#define UPSTREAM_TS_LAND_CURV\n" not in text
+
 
 class TestROMSTemplateRenderer:
     """Tests for ROMSTemplateRenderer class."""
