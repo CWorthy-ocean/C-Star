@@ -65,11 +65,22 @@ def wizard(
     # MPI without spinning. setdefault so an explicit user choice wins; batch
     # ROMS runs launched outside this command keep their own default.
     os.environ.setdefault("FI_PROVIDER", "tcp")
+    # Hide notebook 7.x's JupyterLab extension from voila's frontend. Voila
+    # 0.5.12 bundles JupyterLab core 4.2.5, but @jupyter-notebook/lab-extension
+    # as shipped by notebook >=7.3 is built against JupyterLab 4.4+/4.6 APIs.
+    # Module federation then fails to construct it ("The getter for the shared
+    # module is not a function"), killing the whole frontend bundle before it
+    # attaches the kernel websocket -- the symptom is a blank page plus a
+    # stream of "Kernel does not exist" 404s in the server log. The extension
+    # is useless under voila anyway. Denylist goes before ctx.args so a caller
+    # can still pass their own. Revisit once voila ships a JupyterLab 4.4+
+    # frontend.
     argv = [
         "voila",
         str(notebook),
         f"--port={port}",
         '--Voila.tornado_settings={"allow_origin": "*"}',
+        '--VoilaConfiguration.extension_denylist=["@jupyter-notebook/lab-extension"]',
         *ctx.args,
     ]
     _exec_voila(argv)

@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-import cstar_forge.cli as cli
+from cstar_forge import cli
 
 runner = CliRunner()
 
@@ -42,6 +42,20 @@ class TestWizard:
         assert argv[0] == "voila"
         assert argv[1].endswith("ui/_voila_app.ipynb")
         assert "--port=8866" in argv
+
+    def test_denies_notebook_labextension(self):
+        # voila 0.5.12 bundles JupyterLab 4.2.5; notebook 7.x's labextension is
+        # built against 4.4+/4.6, and loading it crashes voila's frontend
+        # bundle (blank page + kernel-websocket 404s). It must stay denied, and
+        # must come before the pass-through args so a caller can override it.
+        with patch.object(cli, "_exec_voila") as mock_exec:
+            result = runner.invoke(cli.app, ["wizard"])
+        assert result.exit_code == 0
+        argv = mock_exec.call_args.args[0]
+        denylist = [a for a in argv if "extension_denylist" in a]
+        assert denylist == [
+            '--VoilaConfiguration.extension_denylist=["@jupyter-notebook/lab-extension"]'
+        ]
 
     def test_port_option_and_extra_args_forwarded(self):
         with patch.object(cli, "_exec_voila") as mock_exec:
