@@ -60,6 +60,11 @@ model_settings:
     nhy_forcing: true
     nox_forcing: true
 ```
+`parabolic_splines`/`upstream_ts_land_curv` (ucla-roms >= 0.8.0, PR #361) are the
+same kind of model-level default, but only declared by specs whose ucla-roms
+version knows them (`roms-marbl-0.8-default`, `pio-dev`); the template renders
+`#undef` for either key when a spec omits it, so older specs are unaffected.
+
 (`cppdefs.obc_*`/`marbl`/`co2_tvarying`/`sal_restore`/`tides`/`cdr_forcing`/`use_pio` are resolver-derived
 from the Domain/Forcing selection and the model's `bgc_mode`/`use_pio` toggles, so they're intentionally
 absent from `model.yaml`. `cdr_forcing` is also raised to true whenever CDR output is enabled —

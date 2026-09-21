@@ -556,18 +556,25 @@ def _namelist_description_and_tooltip(
 ) -> tuple[str, str]:
     """The widget ``description``/``tooltip`` pair for one namelist field.
 
-    Starts from :func:`_namelist_label` and the schema-derived ``tooltip``. If
+    Starts from :func:`_namelist_label` and the schema-derived ``tooltip``. A
+    field with no schema description (every ``cppdefs`` flag -- compile-time,
+    never modeled by RomsNamelist -- and version-gated groups the active tier
+    lacks) falls back to the glossary ``hint``, so caveats such as "ignored by
+    ucla-roms < 0.8.0" reach the widget instead of living only in the YAML. If
     the glossary (or :data:`LABEL_TEXT`) overrides the label away from the raw
     ``field_name``, the raw name is kept discoverable by prefixing it onto the
     tooltip, and a glossary ``unit``, if present, is appended to the
     description (e.g. ``"Horizontal viscosity (m²/s)"``).
     """
+    glossary_key = f"settings.{section}.{field_name}"
+    in_glossary = glossary_key in known_keys()
+    if not tooltip and in_glossary:
+        tooltip = label_for(glossary_key).hint or ""
     label = _namelist_label(section, field_name)
     if label == field_name:
         return label, tooltip
     combined_tooltip = f"{field_name} — {tooltip}" if tooltip else field_name
-    glossary_key = f"settings.{section}.{field_name}"
-    unit = label_for(glossary_key).unit if glossary_key in known_keys() else None
+    unit = label_for(glossary_key).unit if in_glossary else None
     description = f"{label} ({unit})" if unit else label
     return description, combined_tooltip
 
@@ -969,9 +976,13 @@ _ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
 #
 # ``cppdefs`` is almost entirely resolver-derived (obc_*/marbl/use_pio/cdr_forcing/
 # co2_tvarying/sal_restore/tides) and stays out of the accordion for those fields --
-# only the handful with no other UI (``sponge_tune``, ``nhy_forcing``/``nox_forcing``)
-# are opted in, via ``_CPPDEFS_PANE_FIELDS``, so a user override can never collide
-# with a resolver-owned flag.
+# only the handful with no other UI (``sponge_tune``, ``nhy_forcing``/``nox_forcing``,
+# and the ucla-roms >= 0.8.0 advection switches ``parabolic_splines``/
+# ``upstream_ts_land_curv``, PR #361) are opted in, via ``_CPPDEFS_PANE_FIELDS``, so
+# a user override can never collide with a resolver-owned flag. The two advection
+# fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
+# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a
+# spec that omits the key shows no widget for it.
 #
 # ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
 # ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
@@ -1423,7 +1434,9 @@ _VERSION_GATED_SECTIONS = version_gated_section_names()
 # has no widget anywhere; leaving it out of both sets keeps it that way even if a
 # future pane adds "cppdefs" without remembering to scope it down.
 _CPPDEFS_PANE_FIELDS: dict[str, frozenset[str]] = {
-    "Physics & subgrid tuning": frozenset({"sponge_tune"}),
+    "Physics & subgrid tuning": frozenset(
+        {"sponge_tune", "parabolic_splines", "upstream_ts_land_curv"}
+    ),
     "Biogeochemistry (BGC / MARBL)": frozenset({"nhy_forcing", "nox_forcing"}),
 }
 
@@ -3640,8 +3653,10 @@ class _ForcingEditor:
 
 
 # Preselected in the Model dropdown when present in the catalog (falls back to
-# the first catalog model otherwise).
-_DEFAULT_MODEL = "pio-dev"
+# the first catalog model otherwise): it's the newest tagged-release ModelSpec
+# (ucla-roms 0.8.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# catalog but is no longer the default.
+_DEFAULT_MODEL = "roms-marbl-0.8-default"
 
 # Preselected in the Output dropdown when present in the catalog (falls back to
 # the first catalog spec otherwise). 'daily-restarts' conforms to the

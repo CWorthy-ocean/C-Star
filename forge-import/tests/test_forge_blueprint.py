@@ -22,6 +22,7 @@ import cstar_forge
 import cstar_forge.forge.namelist_model as _nm
 from cstar_forge.domain_catalog import default_catalog as _CATALOG
 from cstar_forge.forge.forge_blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
+from cstar_forge.forge.settings import render_roms_settings
 from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
 _MODEL_DIR = (
@@ -50,6 +51,16 @@ _MODEL_DIR_ROMS070 = (
     / "catalog"
     / "ModelSpec"
     / "roms-marbl-0.7-default"
+)
+# ucla-roms >= 0.8.0 ModelSpec (adds the PARABOLIC_SPLINES/UPSTREAM_TS_LAND_CURV
+# advection cppdefs switches, PR #361) -- no namelist-schema change from 0.7.0, so
+# there is no versioned-namelist golden fixture for this tier (unlike 0.5.0-0.7.0
+# above).
+_MODEL_DIR_ROMS080 = (
+    Path(cstar_forge.__file__).parent
+    / "catalog"
+    / "ModelSpec"
+    / "roms-marbl-0.8-default"
 )
 _GRID_KWARGS = dict(
     nx=6,
@@ -1817,6 +1828,43 @@ def test_golden_model_settings_test_tiny_roms070():
     )
 
 
+def test_roms080_model_spec_declares_advection_cppdefs_and_renders(tmp_path):
+    """``roms-marbl-0.8-default`` (ucla-roms 0.8.0, PR #361) declares the two new
+    advection cppdefs keys both off (the 0.8.0 defaults), and pins the ucla-roms
+    ref to "0.8.0" -- no namelist-schema change, so unlike the 0.5.0-0.7.0 tiers
+    there is no versioned-namelist golden fixture to snapshot here. Instead this
+    end-to-end renders the *working-tree* ``cppdefs.opt.j2`` from the resolved
+    settings, proving the spec's declared cppdefs keys and the current template
+    agree (render_roms_settings rejects a settings key the template never
+    references). It deliberately does NOT fetch the template at the spec's
+    ``templates_commit`` pin -- that pin must be repointed by hand whenever the
+    template gains a key (see the TODO in the spec's model.yaml); this test
+    cannot catch a stale pin. See TestCppdefsTemplate in tests/test_settings.py
+    for the synthetic-settings coverage of the same two keys.
+    """
+    cfg = _build(model_dir=_MODEL_DIR_ROMS080)  # test-tiny, dt=7200
+    assert cfg.model_settings["cppdefs"]["parabolic_splines"] is False
+    assert cfg.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
+    assert cfg.code.roms.commit == "0.8.0"
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    template_dir = Path(cstar_forge.__file__).parents[1] / "templates" / "compile-time"
+    render_roms_settings(
+        template_files=["cppdefs.opt.j2"],
+        template_dir=template_dir,
+        settings_dict={
+            "cppdefs": cfg.model_settings["cppdefs"],
+            "upscale_output": cfg.model_settings.get("upscale_output", {}),
+            "cdr_frc": cfg.model_settings.get("cdr_frc", {}),
+        },
+        code_output_dir=output_dir,
+    )
+    text = (output_dir / "cppdefs.opt").read_text()
+    assert "#undef PARABOLIC_SPLINES" in text
+    assert "#undef UPSTREAM_TS_LAND_CURV" in text
+
+
 def test_resolver_nesting_enables_extract_data():
     cfg = _build(
         grid_kwargs_child=dict(
@@ -2590,7 +2638,8 @@ def test_bundled_output_specs_satisfy_roms_divides_rst_precheck(spec_name):
 
 @pytest.mark.parametrize("spec_name", ["daily-restarts", "weekly-restarts"])
 @pytest.mark.parametrize(
-    "model_spec_name", ["roms-marbl-0.5-default", "roms-marbl-0.7-default"]
+    "model_spec_name",
+    ["roms-marbl-0.5-default", "roms-marbl-0.7-default", "roms-marbl-0.8-default"],
 )
 def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
     model_spec_name, spec_name
@@ -3183,8 +3232,6 @@ def test_cdr_output_toggle_renders_cdr_forcing_cppdef(tmp_path, do_cdr_output):
     forcing, no generation step) must drive ``#define``/``#undef CDR_FORCING`` in the
     real ``cppdefs.opt.j2`` -- the cppdef gates compiling ucla-roms' cdr_output.F90.
     """
-    from cstar_forge.forge.settings import render_roms_settings
-
     overrides = {"cdr_output": {"do_cdr_output": True}} if do_cdr_output else {}
     cfg = _build(run_time_overrides=overrides)
     param = cfg.model_settings["param"]

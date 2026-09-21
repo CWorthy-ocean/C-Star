@@ -1348,11 +1348,11 @@ def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
 
 def test_use_pio_chk_default_seeded_from_model_spec():
     """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
-    top-level use_pio (True for pio-dev, the wizard's default model; False for
-    cson_roms-marbl_v0.1), and reseeded on a model switch.
+    top-level use_pio (True for roms-marbl-0.8-default, the wizard's default
+    model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
     """
     wiz = ForgeBlueprintWizard()
-    assert wiz.model_dd.value == "pio-dev"
+    assert wiz.model_dd.value == "roms-marbl-0.8-default"
     assert wiz.use_pio_chk.value is True
     assert wiz._model_default_use_pio() is True
 
@@ -1370,9 +1370,9 @@ def test_use_pio_chk_emit_is_unconditional():
     wiz = ForgeBlueprintWizard()
     wiz.start.value = date(2012, 1, 1)
     wiz.end.value = date(2012, 1, 2)
-    # pio-dev (the default model) declares use_pio: true -- exactly the
-    # ModelSpec this test guards against: unchecking must emit an explicit
-    # False, not fall back to the ModelSpec default.
+    # roms-marbl-0.8-default (the default model) declares use_pio: true --
+    # exactly the ModelSpec this test guards against: unchecking must emit an
+    # explicit False, not fall back to the ModelSpec default.
     assert wiz.use_pio_chk.value is True
     wiz.use_pio_chk.value = False
     wiz._rebuild()
@@ -2172,11 +2172,12 @@ def test_output_spec_defaults_to_daily_restarts():
     assert "standard" in wiz.catalog.output_names
 
 
-def test_default_model_pinned_to_main_uses_latest_settings_schema():
-    """The default (first) catalog model is pinned to ucla-roms branch ``main``
-    (see ModelSpec ``pio-dev``) -- a non-semver ref, which both the wizard and
-    the executor (``write_roms_namelist`` -> ``run_time_settings_for_ref``)
-    resolve to the *latest* known schema (currently ``RunTimeSettingsV0_7_0``),
+def test_default_model_uses_latest_settings_schema():
+    """The default catalog model (``roms-marbl-0.8-default``) is pinned to
+    ucla-roms ``0.8.0`` -- a semver ref above every registered schema boundary,
+    which both the wizard and the executor (``write_roms_namelist`` ->
+    ``run_time_settings_for_ref``) resolve to the *latest* known schema
+    (currently ``RunTimeSettingsV0_7_0``, since 0.8.0 adds no namelist groups),
     not the legacy one. This is an intentional behavior change from before this
     ref-awareness was added (the editor used to hardcode legacy
     ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
@@ -2190,6 +2191,70 @@ def test_default_model_pinned_to_main_uses_latest_settings_schema():
     wiz._rebuild()
     assert wiz._editor_settings_cls is RunTimeSettingsV0_7_0
     assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+
+def test_advection_cppdefs_editable_only_for_models_that_declare_them():
+    """``parabolic_splines``/``upstream_ts_land_curv`` (ucla-roms >= 0.8.0,
+    PR #361) are opted into the "Physics & subgrid tuning" pane via
+    ``_CPPDEFS_PANE_FIELDS``, like ``sponge_tune``. Unlike ``sponge_tune``
+    (declared by every ModelSpec), these two keys are absent from ModelSpecs
+    pinned below 0.8.0 -- the editor type-infers a widget from the composed
+    dict, so a spec that omits the key must show no widget for it at all.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["parabolic_splines"] is False
+    assert wiz.config.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
+    assert ("cppdefs", "parabolic_splines") in wiz.editor._widgets
+    assert ("cppdefs", "upstream_ts_land_curv") in wiz.editor._widgets
+    assert wiz.editor._widgets[("cppdefs", "parabolic_splines")][0].value is False
+    assert wiz.editor._widgets[("cppdefs", "upstream_ts_land_curv")][0].value is False
+    # cppdefs is never modeled by RomsNamelist, so the schema tooltip is empty;
+    # the glossary hint (the "< 0.8.0 ignores this" caveat) must reach the widget.
+    for key in ("parabolic_splines", "upstream_ts_land_curv"):
+        assert "0.8.0" in wiz.editor._widgets[("cppdefs", key)][0].tooltip
+
+    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz._rebuild()
+    assert "parabolic_splines" not in wiz.config.model_settings["cppdefs"]
+    assert "upstream_ts_land_curv" not in wiz.config.model_settings["cppdefs"]
+    assert ("cppdefs", "parabolic_splines") not in wiz.editor._widgets
+    assert ("cppdefs", "upstream_ts_land_curv") not in wiz.editor._widgets
+
+
+def test_advection_cppdefs_editable_via_advanced_settings_accordion(tmp_path):
+    """Mirrors ``test_sponge_tune_editable_via_advanced_settings_accordion``:
+    toggling the ``parabolic_splines`` widget records an override (leaving the
+    sibling ``upstream_ts_land_curv`` flag untouched), and the override
+    survives a save/load round trip.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is False
+
+    widget, _ = wiz.editor._widgets[("cppdefs", "parabolic_splines")]
+    widget.value = True  # fires _on_editor_edit -> records the override
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["parabolic_splines"] is True
+    assert wiz.config.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
+    assert wiz.config.composition.model.modified is True
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.config is not None
+    assert wiz2.config.model_settings["cppdefs"]["parabolic_splines"] is True
+    assert wiz2.config.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
+    assert wiz2.config.composition.model.modified is True
+    assert wiz2.editor._widgets[("cppdefs", "parabolic_splines")][0].value is True
 
 
 @pytest.mark.parametrize(

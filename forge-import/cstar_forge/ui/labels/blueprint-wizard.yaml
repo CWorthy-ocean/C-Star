@@ -1043,6 +1043,14 @@ fields:
   settings.cppdefs.nox_forcing:
     label: NOx deposition forcing
     symbol: nox_forcing
+  settings.cppdefs.parabolic_splines:
+    label: Parabolic-spline vertical tracer advection
+    symbol: parabolic_splines
+    hint: 'ucla-roms >= 0.8.0: restores the pre-0.8 spline reconstruction (PARABOLIC_SPLINES). Off = the 0.8 default thickness-aware C4/U3 scheme. Earlier releases always use splines and ignore this switch.'
+  settings.cppdefs.upstream_ts_land_curv:
+    label: Drop UPSTREAM_TS curvature at land faces
+    symbol: upstream_ts_land_curv
+    hint: 'ucla-roms >= 0.8.0: zero the 3rd-order curvature term on tracer faces whose stencil touches land (UPSTREAM_TS_LAND_CURV), avoiding overshoots at the first wet point. Ignored by earlier releases.'
   settings.ocean_vars.wrt_avg_z:
     label: Sea surface height (zeta)
     symbol: wrt_avg_z
