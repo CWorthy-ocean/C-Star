@@ -1,5 +1,21 @@
 # Release notes
 
+## 0.8.2
+
+### Breaking Changes
+
+* The wizard's default model is now `roms-marbl-0.8-default` (ucla-roms `0.8.0`) instead of `pio-dev` (ucla-roms `main`). `pio-dev` remains in the catalog. Note ucla-roms 0.8.0 itself changes the default vertical tracer advection scheme, so tracer solutions differ from 0.7.x-pinned specs unless `parabolic_splines` is enabled. ([#178](https://github.com/CWorthy-ocean/cstar-forge/pull/178))
+
+### New Features
+
+* `cppdefs.opt.j2` gates `PARABOLIC_SPLINES` on `cppdefs.parabolic_splines` and `UPSTREAM_TS_LAND_CURV` on `cppdefs.upstream_ts_land_curv` (ucla-roms ≥ 0.8.0; earlier releases ignore both keys). Neither key is declared by any bundled ModelSpec yet, so rendered output is unchanged. ([#177](https://github.com/CWorthy-ocean/cstar-forge/pull/177))
+* New `roms-marbl-0.8-default` ModelSpec (ucla-roms `0.8.0`, `use_pio: true`, MARBL); same settings as the 0.7 spec plus `cppdefs.parabolic_splines: false` and `cppdefs.upstream_ts_land_curv: false`. `pio-dev` (ucla-roms `main`) declares the same two keys. ([#178](https://github.com/CWorthy-ocean/cstar-forge/pull/178))
+* Wizard: `parabolic_splines` and `upstream_ts_land_curv` are editable under Advanced settings → "Physics & subgrid tuning" for ModelSpecs that declare them, with glossary labels and hints noting they are ignored by ucla-roms < 0.8.0. Overrides round-trip through save/load like `sponge_tune`. ([#178](https://github.com/CWorthy-ocean/cstar-forge/pull/178))
+
+### Bug Fixes
+
+* Fix a bug where the Voila app failed to render due to a conflicting JupyterLab extension ([#176](https://github.com/CWorthy-ocean/cstar-forge/pull/176))
+
 ## 0.8.1
 
 ### Breaking Changes
