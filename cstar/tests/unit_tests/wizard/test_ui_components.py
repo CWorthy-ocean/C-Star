@@ -1,4 +1,4 @@
-"""Tests for the wizard's reusable ipywidgets building blocks (cstar_forge.ui.components)."""
+"""Tests for the wizard's reusable ipywidgets building blocks (cstar.wizard.ui.components)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ pytest.importorskip("ipywidgets")
 
 import ipywidgets as W
 
-from cstar_forge.ui import components as C
+from cstar.wizard.ui import components as C
 
 
 def test_wizard_css_contains_every_documented_class():

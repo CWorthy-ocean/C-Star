@@ -1,18 +1,20 @@
 """C-Star Forge subcommands for the ``cstar`` CLI.
 
-Registered under C-Star's ``cstar.cli`` entry-point group (see
-``[project.entry-points."cstar.cli"]`` in pyproject.toml), so when both
-packages are installed the commands appear as::
+Attached as a core subcommand of the root ``cstar`` app (see
+``attach_subcommands`` in ``cstar/cli/cli.py``), so the commands are always
+available::
 
     cstar forge run <forge_blueprint.yaml> [executor options...]
     cstar forge wizard [--port 8866] [voila options...]
     cstar forge copy-notebook [--dest ...] [--force]
-    cstar forge register-kernel [--clean] [--name ...]
     cstar forge show-paths [--json]
+
+(``cstar forge register-kernel`` moved to ``cstar env register-kernel``; see
+``cstar/cli/environment/register_kernel.py``.)
 
 ``forge run`` exposes the full executor option set (stage selection, dask
 tuning, diagnostics) — per-invocation by design, not blueprint content — and
-calls ``cstar_forge.run.run_blueprint``. The no-frills alternative, ``cstar
+calls ``cstar.applications.forge.runtime.run_blueprint``. The no-frills alternative, ``cstar
 blueprint run``, executes a forge blueprint through the C-Star application
 framework with defaults.
 """
@@ -98,8 +100,8 @@ def run(
             "--subchunk/--no-subchunk",
             help="just-in-time build a kerchunk-subchunked reference for "
             "multi-file GLORYS sources and read from it instead of the raw "
-            "per-day files (see cstar_forge/forge/glorys_subchunk.py). On by "
-            "default; disable with --no-subchunk",
+            "per-day files (see cstar/applications/forge/glorys_subchunk.py). "
+            "On by default; disable with --no-subchunk",
         ),
     ] = True,
     only_inputs: Annotated[
@@ -186,7 +188,7 @@ def run(
     ] = None,
 ) -> None:
     """Process a forge blueprint with the full executor option set."""
-    from cstar_forge.run import run_blueprint
+    from cstar.applications.forge.runtime import run_blueprint
 
     code = run_blueprint(
         forge_blueprint=forge_blueprint,
@@ -223,7 +225,7 @@ def wizard(
 
     Extra arguments are passed through to voila.
     """
-    notebook = files("cstar_forge.ui") / "_voila_app.ipynb"
+    notebook = files("cstar.wizard") / "_voila_app.ipynb"
     # Steer MPI's libfabric away from the default "sockets" provider before
     # exec'ing voila (the kernel inherits our environment): the first xESMF
     # regrid in a wizard kernel initializes ESMF/MPI, and the sockets
@@ -269,10 +271,10 @@ def copy_notebook(
     copy of ``forge-blueprint-wizard.ipynb`` outside the installed package so
     it can be opened in Jupyter. A copy rather than a symlink on purpose --
     Jupyter autosaves executed output back into the file, which must never
-    land in site-packages. Re-run with --force after upgrading cstar-forge to
+    land in site-packages. Re-run with --force after upgrading cstar-ocean to
     refresh the copy.
     """
-    with as_file(files("cstar_forge") / "forge-blueprint-wizard.ipynb") as src:
+    with as_file(files("cstar.wizard") / "forge-blueprint-wizard.ipynb") as src:
         payload = src.read_bytes()
     target = dest.expanduser()
     if target.is_dir():
@@ -298,48 +300,6 @@ def copy_notebook(
 
 
 @app.command()
-def register_kernel(
-    name: str | None = typer.Option(
-        None, help="kernel name (default: the active env's name)"
-    ),
-    display_name: str | None = typer.Option(
-        None, help="display name shown in Jupyter (default: the kernel name)"
-    ),
-    clean: bool = typer.Option(
-        False, "--clean", help="remove an existing kernelspec of this name first"
-    ),
-    package_manager: str = typer.Option(
-        "auto", help="tool the wrapper activates with: micromamba, conda, or auto"
-    ),
-    micromamba_bin: str = typer.Option(
-        "micromamba", help="micromamba binary the wrapper should invoke"
-    ),
-) -> None:
-    """Register this env's Jupyter kernel, launched via an activation wrapper.
-
-    Makes the env usable from a Jupyter server hosted outside it (e.g. an HPC
-    OnDemand portal): the kernelspec launches through a wrapper that activates
-    the env first, so shell magics and activate.d-dependent packages work
-    inside notebooks.
-    """
-    from cstar_forge.register_kernel import RegisterKernelError
-    from cstar_forge.register_kernel import register_kernel as _register_kernel
-
-    try:
-        _register_kernel(
-            name=name,
-            display_name=display_name,
-            clean=clean,
-            package_manager=package_manager,
-            micromamba_bin=micromamba_bin,
-            log=typer.echo,
-        )
-    except RegisterKernelError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(1) from exc
-
-
-@app.command()
 def show_paths(
     json_output: bool = typer.Option(
         False,
@@ -349,9 +309,9 @@ def show_paths(
 ) -> None:
     """Show the detected compute system and configured data paths.
 
-    A warning-free replacement for ``python -m cstar_forge.config show-paths``.
+    A warning-free replacement for ``python -m cstar.applications.forge.config show-paths``.
     """
-    from cstar_forge.config import format_paths
+    from cstar.applications.forge.config import format_paths
 
     typer.echo(format_paths(as_json=json_output))
 
@@ -360,9 +320,9 @@ def _exec_voila(argv: list[str]) -> None:
     """Replace this process with voila (signals/Ctrl-C flow to the server)."""
     if shutil.which("voila") is None:
         typer.echo(
-            "voila is not installed in this environment. It ships with the "
-            "conda-forge `cstar-forge` package and with `pip install "
-            "'cstar-forge[app]'`.",
+            "voila is not installed in this environment. It is a core "
+            "dependency of cstar-ocean; reinstall or upgrade cstar-ocean to "
+            "get it.",
             err=True,
         )
         raise typer.Exit(1)
@@ -370,7 +330,7 @@ def _exec_voila(argv: list[str]) -> None:
 
 
 def main() -> None:  # pragma: no cover - thin standalone hook, exercised manually
-    """Allow ``python -m cstar_forge.cli`` as a cstar-independent fallback."""
+    """Allow ``python -m cstar.cli.forge`` as a cstar-independent fallback."""
     app()
 
 

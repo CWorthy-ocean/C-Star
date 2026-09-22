@@ -20,6 +20,12 @@ dependencies:
   - ujson
   - fastparquet
   - xarray
+  # wizard (cstar.wizard) runtime dependencies
+  - ipywidgets
+  - voila
+  - jupyterlab
+  - matplotlib-base
+  - ipython
   # toolchain: provided by modules on HPC
   - compilers
   - cmake

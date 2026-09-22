@@ -1,6 +1,6 @@
 # Label glossary for the blueprint-wizard page (the wizard UI, not the blueprint schema).
 #
-# See cstar_forge/ui/labels/__init__.py for the schema and namespace rules.
+# See cstar/wizard/ui/labels/__init__.py for the schema and namespace rules.
 # `forcing.row.*`, `settings.*`, and `buttons.*` are only lightly seeded here
 # (a few examples per namespace) -- a later pass fills them in fully.
 

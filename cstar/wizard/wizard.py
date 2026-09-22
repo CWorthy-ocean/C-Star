@@ -1,13 +1,13 @@
 """An ``ipywidgets`` wizard for assembling and reviewing a :class:`ForgeBlueprint`.
 
-This is a thin UI shell over :func:`cstar_forge.forge_blueprint_resolve.build_forge_blueprint`:
+This is a thin UI shell over :func:`cstar.applications.forge.resolve.build_forge_blueprint`:
 the widgets only *collect inputs and display the resolved result* — all resolution
 and validation stay in the resolver. That keeps the notebook UI interchangeable with
 any future app/WASM front-end and lets the logic be tested without rendering.
 
 Usage (in a Jupyter notebook)::
 
-    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+    from cstar.wizard.wizard import ForgeBlueprintWizard
     wiz = ForgeBlueprintWizard()
     wiz.display()
     # ... pick a model + domain, tweak fields, review the live YAML, Save ...
@@ -35,7 +35,7 @@ from typing import Any, get_args, get_origin
 import yaml
 from pydantic import BaseModel
 
-from cstar_forge.forge.forge_blueprint import (
+from cstar.applications.forge.blueprint import (
     BgcBoundarySource,
     BgcInitialConditionsSource,
     BgcInterpMethod,
@@ -66,14 +66,13 @@ from cstar_forge.forge.forge_blueprint import (
     TidalSource,
     migrate_forcing_inputs,
 )
-from cstar_forge.forge.namelist_model import (
+from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
     run_time_settings_for_ref,
     validate_run_time_sections,
     version_gated_section_names,
 )
-from cstar_forge.forge.user_files import hash_netcdf_contents
-from cstar_forge.forge_blueprint_resolve import (
+from cstar.applications.forge.resolve import (
     OUTPUT_SECTIONS,
     PARTIAL_OUTPUT_SECTIONS,
     build_forge_blueprint,
@@ -81,9 +80,10 @@ from cstar_forge.forge_blueprint_resolve import (
     load_model_spec_data,
     read_cdr_forcing_yaml,
 )
-from cstar_forge.ui import components
-from cstar_forge.ui.catalog_bar import CatalogBar
-from cstar_forge.ui.labels import known_keys, label_for, section_for
+from cstar.applications.forge.user_files import hash_netcdf_contents
+from cstar.wizard.ui import components
+from cstar.wizard.ui.catalog_bar import CatalogBar
+from cstar.wizard.ui.labels import known_keys, label_for, section_for
 
 # ===========================================================================
 # Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
@@ -542,7 +542,7 @@ def _namelist_label(section: str, field_name: str) -> str:
     """Look up the display label override for a namelist field, else field_name.
 
     Prefers the glossary entry ``settings.<section>.<field_name>`` (see
-    :mod:`cstar_forge.ui.labels`); falls back to the legacy :data:`LABEL_TEXT`
+    :mod:`cstar.wizard.ui.labels`); falls back to the legacy :data:`LABEL_TEXT`
     override, then to the raw ``field_name``.
     """
     key = f"settings.{section}.{field_name}"
@@ -3633,7 +3633,7 @@ class _ForcingEditor:
 
     def retitle(self, summary_for) -> None:
         """Refresh each pane's accordion title with a live summary and a
-        REQUIRED/optional chip (see :func:`cstar_forge.ui.components.accordion_title`).
+        REQUIRED/optional chip (see :func:`cstar.wizard.ui.components.accordion_title`).
 
         ``summary_for(cat)`` returns the short (<= 60 char) summary text for
         category ``cat``; a no-op before ``widget`` has been built.
@@ -3692,12 +3692,12 @@ _DEFAULT_GRID = dict(
 def _get_catalog():
     """Return the default catalog stack for spec discovery.
 
-    A layered stack: the user's writable catalog layer (``~/cstar-forge-data/
-    catalog`` by default, or ``CSTAR_FORGE_CATALOG``) over the read-only
-    bundled in-repo catalog. Reads resolve top-first; writes (``register_*``)
-    land in the user layer.
+    A layered stack: the user's writable catalog layer (``~/cstar/catalog``
+    by default, or ``CSTAR_CATALOG``) over the read-only bundled in-repo
+    catalog. Reads resolve top-first; writes (``register_*``) land in the
+    user layer.
     """
-    from cstar_forge.domain_catalog import default_catalog
+    from cstar.catalog.domain_catalog import default_catalog
 
     return default_catalog
 
@@ -3705,7 +3705,7 @@ def _get_catalog():
 def _schedule_coroutine(coro):
     """Schedule a coroutine on the running loop (returns a Task), or run it to
     completion directly if there is no running loop. Mirrors
-    ``cstar_forge.forge.executor._schedule_coroutine`` -- needed for seamless
+    ``cstar.applications.forge.executor._schedule_coroutine`` -- needed for seamless
     execution of async code (like streaming a subprocess) from a synchronous
     ipywidgets ``on_click`` handler, both inside and outside Jupyter.
     """
@@ -4673,7 +4673,7 @@ class ForgeBlueprintWizard:
         )
 
         # --- run (invokes the C-Star CLI on the just-saved blueprint) ---
-        from cstar_forge.config import system as _detected_system
+        from cstar.applications.forge.config import system as _detected_system
 
         self.run_warning = W.HTML(
             "<b style='color:#b58900'>⚠ Processing a blueprint can use substantial "
@@ -4684,7 +4684,7 @@ class ForgeBlueprintWizard:
         self.run_later_note = W.HTML(
             "<span style='color:#666'>ℹ To run this later, or on a different "
             "machine, save the blueprint above and then (from the "
-            "<code>cstar-forge</code> environment) call: "
+            "<code>cstar-env</code> environment) call: "
             "<code>cstar blueprint run &lt;path/to/forge_blueprint.yaml&gt;</code>. "
             "</span>"
         )
@@ -7377,7 +7377,7 @@ class ForgeBlueprintWizard:
         """
         from roms_tools.setup.utils import check_and_set_boundaries
 
-        from cstar_forge.forge.util import compute_v_sponge_from_grid
+        from cstar.applications.forge.util import compute_v_sponge_from_grid
 
         mask = grid.ds.get("mask_rho")
         if mask is None:
@@ -7916,21 +7916,22 @@ class ForgeBlueprintWizard:
         the emitted ``roms_marbl`` blueprint is run with -- the button exposes no
         per-run flags, so the full-option ``cstar forge run`` passthrough buys it
         nothing. Resolving ``application: forge`` this way goes through C-Star's
-        registry, which finds the app through cstar-forge's ``cstar.applications``
-        entry point.
+        registry, which finds the app as the in-tree
+        ``cstar.applications.forge`` module -- no separate install required.
 
         Uses the ``cstar`` console script installed alongside the running
         interpreter, so the subprocess stays in this environment rather than
-        taking whatever is first on PATH. Where that script is absent (C-Star's
-        CLI not installed), falls back to ``python -m cstar_forge.cli run``,
-        forge's own typer entry onto the same executor.
+        taking whatever is first on PATH. Where that script is absent (the
+        ``cstar`` entry point not installed), falls back to
+        ``python -m cstar.cli.cli forge run``, the same unified CLI's ``forge``
+        subcommand invoked as a module.
         """
         import sys
 
         cstar_exe = Path(sys.executable).with_name("cstar")
         if cstar_exe.exists():
             return [str(cstar_exe), "blueprint", "run", blueprint_path]
-        return [sys.executable, "-m", "cstar_forge.cli", "run", blueprint_path]
+        return [sys.executable, "-m", "cstar.cli.cli", "forge", "run", blueprint_path]
 
     def _on_run(self, _):
         if not self._ensure_boundaries_derived():
@@ -8121,10 +8122,10 @@ class ForgeBlueprintWizard:
             from cstar.orchestration.serialization import serialize
 
             serialize(wp_path, workplan)
-            # No env-var prefix: an installed cstar-forge registers the forge app
-            # through its ``cstar.applications`` entry point, so C-Star's registry
-            # resolves ``application: forge`` in the scheduling process and in the
-            # jobs it spawns, without anything being propagated by hand.
+            # No env-var prefix needed: forge is an in-tree C-Star application
+            # (``cstar.applications.forge``), so the registry resolves
+            # ``application: forge`` in the scheduling process and in the jobs
+            # it spawns, without anything being propagated by hand.
             cmd = f"cstar workplan run {wp_path}"
             self.workplan_status.value = (
                 f"<span style='color:#080'>Saved {bp_path} and {wp_path}</span><br>"
@@ -8588,12 +8589,12 @@ class ForgeBlueprintWizard:
 class ForgeBlueprintWizardApp:
     """Thin wrapper around :class:`ForgeBlueprintWizard` that adds a catalog-location
     bar above it. Blank input loads the default layered stack (your writable
-    ``~/cstar-forge-data/catalog`` -- or ``CSTAR_FORGE_CATALOG`` -- layer over the
+    ``~/cstar/catalog`` -- or ``CSTAR_CATALOG`` -- layer over the
     read-only bundled in-repo catalog, see
-    :func:`~cstar_forge.domain_catalog.default_catalog_stack`). Entering one or more
+    :func:`~cstar.catalog.domain_catalog.default_catalog_stack`). Entering one or more
     ``os.pathsep``-separated local paths builds a
-    :class:`~cstar_forge.domain_catalog.LayeredCatalog` exactly like the same value
-    in ``CSTAR_FORGE_CATALOG`` would (first = writable top, rest read-only, bundled
+    :class:`~cstar.catalog.domain_catalog.LayeredCatalog` exactly like the same value
+    in ``CSTAR_CATALOG`` would (first = writable top, rest read-only, bundled
     catalog appended at the bottom). Entering a single GitHub/http URL or the
     literal ``"local"`` loads exactly that one store, read-only, for browsing
     (saves then default to CWD-relative filenames, and the status line says so).
@@ -8601,7 +8602,7 @@ class ForgeBlueprintWizardApp:
 
     Usage (in a Jupyter notebook)::
 
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+        from cstar.wizard.wizard import ForgeBlueprintWizardApp
         app = ForgeBlueprintWizardApp()
         app.display()
         # ... optionally enter a different catalog path/URL above and click Reload ...
@@ -8627,7 +8628,7 @@ class ForgeBlueprintWizardApp:
     def _load(self, catalog_root_value: str | None) -> None:
         import os
 
-        from cstar_forge.domain_catalog import (
+        from cstar.catalog.domain_catalog import (
             DomainCatalog,
             LayeredCatalog,
             _is_github_catalog_url,
@@ -8654,7 +8655,7 @@ class ForgeBlueprintWizardApp:
                     # one read-only store for browsing.
                     cat = DomainCatalog(catalog_root=entries[0])
                 else:
-                    # Same builder as the CSTAR_FORGE_CATALOG env handling
+                    # Same builder as the CSTAR_CATALOG env handling
                     # (first entry writable top, rest read-only, bundled
                     # appended at the bottom) so the two paths cannot drift --
                     # a single local path gets the bundled layer underneath,

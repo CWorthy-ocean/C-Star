@@ -2,22 +2,22 @@
 
 Every helper that builds a widget takes the ``ipywidgets`` module as its
 first parameter, ``W`` -- the same lazy-import idiom
-``_make_field_widget(W, ...)`` uses in :mod:`cstar_forge.forge_blueprint_wizard`
+``_make_field_widget(W, ...)`` uses in :mod:`cstar.wizard.wizard`
 -- so this module itself never imports ``ipywidgets`` at module scope (it is
 an optional dependency of the package).
 
 :data:`WIZARD_CSS` is the single stylesheet for the redesigned wizard,
 scoped entirely under the ``.forge-app`` shell root class so it never leaks
 into the host JupyterLab/Voila page. It is built from the palette tokens in
-:mod:`cstar_forge.ui.branding`.
+:mod:`cstar.wizard.ui.branding`.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from cstar_forge.ui import branding
-from cstar_forge.ui.labels import label_for, section_for
+from cstar.wizard.ui import branding
+from cstar.wizard.ui.labels import label_for, section_for
 
 #: The wizard's stylesheet (no leading/trailing ``<style>`` tags -- wrap with
 #: :func:`style_widget` or ``f"<style>{WIZARD_CSS}</style>"`` yourself).
@@ -410,7 +410,7 @@ def field_row(
 
     ``widget.description`` is cleared (the label column replaces it). The
     label, symbol, unit, and required marker come from
-    :func:`cstar_forge.ui.labels.label_for`; ``hint`` falls back to
+    :func:`cstar.wizard.ui.labels.label_for`; ``hint`` falls back to
     ``default_hint`` when the glossary has none. ``widget.layout.display`` is
     mirrored onto the row's own layout (both now and on every future change),
     so existing code that hides ``widget`` (``widget.layout.display =
@@ -476,7 +476,7 @@ def subsection(
     trailing: Any = None,
     page: str = "blueprint-wizard",
 ) -> Any:
-    """A subsection header (``forge-sub``, from :func:`~cstar_forge.ui.labels.section_for`) plus ``children``."""
+    """A subsection header (``forge-sub``, from :func:`~cstar.wizard.ui.labels.section_for`) plus ``children``."""
     section = section_for(key, default_title, page=page)
     header_html = f"<span class='forge-sub-ttl'>{section.title}</span>"
     if symbols:

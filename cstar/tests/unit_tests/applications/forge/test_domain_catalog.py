@@ -589,7 +589,6 @@ class TestLayeredCatalog:
 
     def test_wizard_default_blueprint_path_under_user_layer(self):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import ForgeBlueprintWizard
 
         wiz = ForgeBlueprintWizard()
@@ -602,7 +601,6 @@ class TestLayeredCatalog:
 
     def test_wizard_dd_options_mixed_badges_are_all_tuples(self, tmp_path):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import ForgeBlueprintWizard
 
         top_root = tmp_path / "top"
@@ -652,7 +650,6 @@ class TestLayeredCatalog:
         and staying compatible with a plain sentinel prefix.
         """
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import ForgeBlueprintWizard
 
         root = tmp_path / "cat"

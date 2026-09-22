@@ -167,9 +167,8 @@ def version_callback(value: bool) -> bool:
     if value:
         typer.echo(f"cstar executable location: {Path(sys.argv[0]).resolve()}")
         typer.echo(f"C-Star version: {cstar.__version__}")
-        # cstar-forge / roms-tools are optional in a given environment -- show
-        # each only if installed.
-        for pkg in ("cstar-forge", "roms-tools"):
+        # roms-tools is optional in a given environment -- show it only if installed.
+        for pkg in ("roms-tools",):
             try:
                 typer.echo(f"{pkg} version: {_pkg_version(pkg)}")
             except PackageNotFoundError:

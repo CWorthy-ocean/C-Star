@@ -1,4 +1,4 @@
-"""Tests for the ipywidgets ForgeBlueprintWizard UI (cstar_forge.forge_blueprint_wizard).
+"""Tests for the ipywidgets ForgeBlueprintWizard UI (cstar.wizard.wizard).
 
 These target the wizard-feedback fixes: conditional field visibility, forcing-row
 option ordering, the ntides sync into model_settings, and the nesting-section
@@ -14,18 +14,18 @@ from typing import ClassVar
 
 import pytest
 
-from cstar_forge.forge.forge_blueprint import (
+from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     Forcing,
     SurfaceForcingItem,
 )
-from cstar_forge.forge.namelist_model import (
+from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
     RunTimeSettingsV0_5_0,
     RunTimeSettingsV0_6_0,
     RunTimeSettingsV0_7_0,
 )
-from cstar_forge.forge_blueprint_wizard import (
+from cstar.wizard.wizard import (
     _ACCORDION_EXCLUDED_FIELDS,
     _BOUNDARY_NONE,
     _OUTPUT_TABLES,
@@ -79,7 +79,7 @@ def _find_section(w, title_fragment):
 
 def _find_card(root, key):
     """Recursively find the ``components.card`` VBox tagged ``forge_key == key``
-    under ``root`` (see ``cstar_forge.ui.components.card``).
+    under ``root`` (see ``cstar.wizard.ui.components.card``).
     """
     if getattr(root, "forge_key", None) == key:
         return root
@@ -1464,7 +1464,13 @@ def test_auto_tiling_gathers_n_cores_partitioning():
     assert part.n_procs_y == wiz.npy.value
 
 
-_CDR_SAMPLE_YAML = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml"
+_CDR_SAMPLE_YAML = (
+    Path(__file__).parent.parent
+    / "applications"
+    / "forge"
+    / "fixtures"
+    / "cdr_forcing_sample.yaml"
+)
 
 
 def _upload_change(content: bytes):
@@ -1746,7 +1752,7 @@ def test_cdr_upscaled_mode_round_trips_through_populate_from():
 def test_composition_cdr_specref_provenance(tmp_path):
     import shutil
 
-    from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+    from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
     wiz = ForgeBlueprintWizard()
     assert wiz.config.composition.cdr.name is None
@@ -1944,7 +1950,7 @@ def test_cdr_forcing_from_netcdf_reconstructs_tracer_perturbation(tmp_path):
     import roms_tools as rt
     import xarray as xr
 
-    from cstar_forge.forge_blueprint_wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
 
     times = np.array(["2012-01-01", "2012-01-02", "2012-01-03"], dtype="datetime64[ns]")
     ds = xr.Dataset(
@@ -1986,7 +1992,7 @@ def test_cdr_forcing_from_netcdf_reconstructs_tracer_perturbation(tmp_path):
 
 
 def test_cdr_forcing_from_netcdf_wraps_errors_with_path(tmp_path):
-    from cstar_forge.forge_blueprint_wizard import _cdr_forcing_from_netcdf
+    from cstar.wizard.wizard import _cdr_forcing_from_netcdf
 
     path = tmp_path / "not_cdr.nc"
     import xarray as xr
@@ -2804,7 +2810,8 @@ def test_build_run_command_uses_cstar_blueprint_run_from_this_env():
         assert cmd == [
             sys.executable,
             "-m",
-            "cstar_forge.cli",
+            "cstar.cli.cli",
+            "forge",
             "run",
             "/tmp/some_blueprint.yaml",
         ]
@@ -2858,7 +2865,9 @@ def test_on_save_workplan_guards_on_invalid_config(tmp_path):
     wiz.save_path.value = str(tmp_path / "never.forge_blueprint.yaml")
     wiz._on_save_workplan(None)
     assert "invalid" in wiz.workplan_status.value
-    assert not list(tmp_path.iterdir())
+    # Nothing besides the autouse `mock_xdg_dirs` scaffold (see conftest.py)
+    # should have been written under tmp_path.
+    assert {p.name for p in tmp_path.iterdir()} <= {"xdg"}
 
 
 @requires_workplan_support
@@ -2868,10 +2877,9 @@ def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
     """
     import shutil
 
+    from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
     from cstar.orchestration.models import Workplan
     from cstar.orchestration.serialization import deserialize
-
-    from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
     root = tmp_path / "catalog"
     # Copy the BUNDLED catalog (not default_catalog.catalog_root, which is now
@@ -2894,8 +2902,9 @@ def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
     assert [s.name for s in wp.steps] == ["forge", "roms_marbl"]
     assert wp.steps[1].is_deferred
     assert "cstar workplan run" in wiz.workplan_status.value
-    # The printed command carries no env-var prefix: the forge app reaches C-Star's
-    # registry through cstar-forge's `cstar.applications` entry point.
+    # The printed command carries no env-var prefix: the forge app is an
+    # in-tree C-Star application (`cstar.applications.forge`), resolved by
+    # C-Star's registry without any separate install or entry point.
     assert "CSTAR_APP_MODULES" not in wiz.workplan_status.value
 
 
@@ -3056,7 +3065,7 @@ def test_on_run_survives_line_longer_than_stream_limit(monkeypatch, tmp_path):
     ``async for line in proc.stdout`` loop did -- the content still lands, split
     across multiple appends by the memory-bounding flush.
     """
-    from cstar_forge.forge_blueprint_wizard import _STREAM_MAX_LINE
+    from cstar.wizard.wizard import _STREAM_MAX_LINE
 
     giant = b"x" * (_STREAM_MAX_LINE * 3 + 17) + b"\ndone\n"
     # Read in chunks well below the flush threshold and unaligned to it, so the
@@ -3299,7 +3308,7 @@ class TestNestedTopographyWidgets:
         )
 
     def test_plot_topography_falls_back_when_file_not_local(self, tmp_path):
-        from cstar_forge.forge_blueprint_wizard import (
+        from cstar.wizard.wizard import (
             _effective_nested_topo,
             _plot_topography_source,
         )
@@ -3490,8 +3499,8 @@ class TestGridFileAttach:
         _rebuild() (triggered here by an unrelated widget edit) must reuse the
         cached dict, never recomputing the digest.
         """
-        import cstar_forge.forge.user_files as user_files_mod
-        import cstar_forge.forge_blueprint_wizard as wizard_mod
+        import cstar.applications.forge.user_files as user_files_mod
+        import cstar.wizard.wizard as wizard_mod
 
         calls = {"n": 0}
         real_hash = user_files_mod.hash_netcdf_contents
@@ -4218,7 +4227,7 @@ def test_set_grid_widgets_locked_toggles_grid_lock_banner():
 
 
 def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
-    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.wizard import ForgeBlueprintWizardApp
 
     app = ForgeBlueprintWizardApp()
     assert app.widget is app._outer
@@ -4227,7 +4236,7 @@ def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
 
 
 def test_blueprint_app_from_shell_builds():
-    from cstar_forge.ui.shell import blueprint_app
+    from cstar.wizard.ui.shell import blueprint_app
 
     shell = blueprint_app()
     assert shell.stack.children  # must not raise, and must hold the page
@@ -4270,7 +4279,7 @@ def test_surface_row_name_description_starts_with_glossary_label(editor):
     glossary entry (``label_for``, see ``_row_desc``), not the old hardcoded
     ``"src:"``/``"path:"``/etc. caption.
     """
-    from cstar_forge.ui.labels import label_for
+    from cstar.wizard.ui.labels import label_for
 
     w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
     label = label_for("forcing.row.name", default="src").label

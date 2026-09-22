@@ -20,5 +20,11 @@ dependencies:
   - ujson
   - fastparquet
   - xarray
+  # wizard (cstar.wizard) runtime dependencies
+  - ipywidgets
+  - voila
+  - jupyterlab
+  - matplotlib-base
+  - ipython
   # docs builds only
   - pandoc

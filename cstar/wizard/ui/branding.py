@@ -5,7 +5,7 @@ plus the neutral/tint scale used by the redesigned components) and emits the
 logo + title header bar (with the brand-red bottom rule), which in full-page
 Voila contexts also sets the browser tab's favicon and title. The wizard's own
 CSS (cards, chips, banners, fields, etc.) lives in
-:mod:`cstar_forge.ui.components`, built from the tokens defined here.
+:mod:`cstar.wizard.ui.components`, built from the tokens defined here.
 """
 
 import base64
@@ -117,9 +117,9 @@ def header_html(
 def branding_display() -> None:
     """Emit the header bar (and, in Voila, set the tab favicon and title).
 
-    The Voilà app gets its header from :class:`cstar_forge.ui.shell.AppShell`,
+    The Voilà app gets its header from :class:`cstar.wizard.ui.shell.AppShell`,
     which calls :func:`header_html` directly. This helper remains for notebook
-    users who display :class:`~cstar_forge.forge_blueprint_wizard.ForgeBlueprintWizardApp`
+    users who display :class:`~cstar.wizard.wizard.ForgeBlueprintWizardApp`
     on its own and want the same header above it: call it once, immediately
     before ``app.display()``.
     """

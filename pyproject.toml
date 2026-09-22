@@ -58,6 +58,14 @@ dependencies = [
     "ujson",
     "fastparquet",
     "xarray",
+    # -- the wizard (cstar.wizard) -- kitchen-sink decision: the wizard ships
+    # as a core dependency, not an optional extra, so `pip install cstar-ocean`
+    # is enough to run it --
+    "ipywidgets",
+    "voila",
+    "jupyterlab",
+    "matplotlib",
+    "ipython",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 

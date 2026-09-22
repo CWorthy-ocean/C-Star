@@ -33,7 +33,7 @@ def fake_pkg_version(installed: dict[str, str]):
 def test_version_all_packages_installed() -> None:
     """All lines appear, in order, when the companion packages are installed."""
     runner = CliRunner()
-    installed = {"cstar-forge": "1.2.3", "roms-tools": "4.5.6"}
+    installed = {"roms-tools": "4.5.6"}
 
     with mock.patch(
         "cstar.cli.common._pkg_version", side_effect=fake_pkg_version(installed)
@@ -44,8 +44,7 @@ def test_version_all_packages_installed() -> None:
     lines = result.stdout.strip().splitlines()
     assert lines[0].startswith("cstar executable location: ")
     assert lines[1] == f"C-Star version: {cstar.__version__}"
-    assert lines[2] == "cstar-forge version: 1.2.3"
-    assert lines[3] == "roms-tools version: 4.5.6"
+    assert lines[2] == "roms-tools version: 4.5.6"
 
 
 def test_version_companion_packages_missing() -> None:

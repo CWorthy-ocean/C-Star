@@ -1,4 +1,4 @@
-"""Tests for the `cstar forge` CLI sub-app (cstar_forge/cli.py)."""
+"""Tests for the `cstar forge` CLI sub-app (cstar/cli/forge/__init__.py)."""
 
 import re
 from unittest.mock import patch
@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from cstar_forge import cli
+import cstar.cli.forge as cli
 
 runner = CliRunner()
 
@@ -53,11 +53,11 @@ class TestRun:
             "--dask-dashboard-address",
         ):
             assert option in output, option
-        assert "python -m cstar_forge.run" not in output
+        assert "python -m cstar.applications.forge.runtime" not in output
 
     def test_options_map_to_run_blueprint_kwargs(self):
         with patch(
-            "cstar_forge.run.run_blueprint", return_value=0
+            "cstar.applications.forge.runtime.run_blueprint", return_value=0
         ) as mock_run_blueprint:
             result = runner.invoke(
                 cli.app,
@@ -98,14 +98,14 @@ class TestRun:
 
     def test_no_only_inputs_passes_none(self):
         with patch(
-            "cstar_forge.run.run_blueprint", return_value=0
+            "cstar.applications.forge.runtime.run_blueprint", return_value=0
         ) as mock_run_blueprint:
             result = runner.invoke(cli.app, ["run", "bp.yaml"])
         assert result.exit_code == 0, result.output
         assert mock_run_blueprint.call_args.kwargs["only_inputs"] is None
 
     def test_exit_code_is_propagated(self):
-        with patch("cstar_forge.run.run_blueprint", return_value=3):
+        with patch("cstar.applications.forge.runtime.run_blueprint", return_value=3):
             result = runner.invoke(cli.app, ["run", "bp.yaml"])
         assert result.exit_code == 3
 
@@ -117,7 +117,7 @@ class TestWizard:
         assert result.exit_code == 0
         argv = mock_exec.call_args.args[0]
         assert argv[0] == "voila"
-        assert argv[1].endswith("ui/_voila_app.ipynb")
+        assert argv[1].endswith("wizard/_voila_app.ipynb")
         assert "--port=8866" in argv
 
     def test_denies_notebook_labextension(self):
@@ -156,7 +156,7 @@ class TestCopyNotebook:
     def _packaged() -> bytes:
         from importlib.resources import files
 
-        return (files("cstar_forge") / "forge-blueprint-wizard.ipynb").read_bytes()
+        return (files("cstar.wizard") / "forge-blueprint-wizard.ipynb").read_bytes()
 
     def test_copies_packaged_notebook_to_dest(self, tmp_path):
         dest = tmp_path / "nested" / "wizard.ipynb"
@@ -221,51 +221,6 @@ class TestCopyNotebook:
         assert "~/cstar/forge-blueprint-wizard.ipynb" in result.output
 
 
-class TestRegisterKernel:
-    def test_options_map_to_register_kernel_kwargs(self):
-        with patch("cstar_forge.register_kernel.register_kernel") as mock_register:
-            result = runner.invoke(
-                cli.app,
-                [
-                    "register-kernel",
-                    "--name",
-                    "my-kernel",
-                    "--clean",
-                    "--package-manager",
-                    "micromamba",
-                    "--micromamba-bin",
-                    "/repo/bin/micromamba",
-                ],
-            )
-        assert result.exit_code == 0
-        kwargs = mock_register.call_args.kwargs
-        assert kwargs["name"] == "my-kernel"
-        assert kwargs["display_name"] is None
-        assert kwargs["clean"] is True
-        assert kwargs["package_manager"] == "micromamba"
-        assert kwargs["micromamba_bin"] == "/repo/bin/micromamba"
-
-    def test_defaults(self):
-        with patch("cstar_forge.register_kernel.register_kernel") as mock_register:
-            result = runner.invoke(cli.app, ["register-kernel"])
-        assert result.exit_code == 0
-        kwargs = mock_register.call_args.kwargs
-        assert kwargs["name"] is None
-        assert kwargs["clean"] is False
-        assert kwargs["package_manager"] == "auto"
-
-    def test_register_kernel_error_exits_nonzero_with_message(self):
-        from cstar_forge.register_kernel import RegisterKernelError
-
-        with patch(
-            "cstar_forge.register_kernel.register_kernel",
-            side_effect=RegisterKernelError("not inside a conda env"),
-        ):
-            result = runner.invoke(cli.app, ["register-kernel"])
-        assert result.exit_code == 1
-        assert "not inside a conda env" in result.output
-
-
 class TestShowPaths:
     def test_human_readable_output(self):
         result = runner.invoke(cli.app, ["show-paths"])
@@ -284,7 +239,7 @@ class TestShowPaths:
 
     def test_delegates_to_config_format_paths(self):
         with patch(
-            "cstar_forge.config.format_paths", return_value="SENTINEL"
+            "cstar.applications.forge.config.format_paths", return_value="SENTINEL"
         ) as mock_fmt:
             result = runner.invoke(cli.app, ["show-paths"])
         assert result.exit_code == 0
@@ -294,70 +249,58 @@ class TestShowPaths:
 
 class TestImportCost:
     def test_plugin_import_does_not_load_scientific_stack(self):
-        # C-Star ``ep.load()``s the ``cstar.cli`` plugin on *every* ``cstar``
-        # invocation, so importing ``cstar_forge.cli`` (and hence the package
-        # ``__init__``) must stay cheap: no roms-tools / xarray / dask. Those are
-        # resolved lazily via PEP 562 ``__getattr__`` in ``cstar_forge/__init__``.
+        # ``cstar.cli.cli`` imports ``cstar.cli.forge`` directly on *every*
+        # ``cstar`` invocation (it's a core subcommand now, not a lazily
+        # loaded ``cstar.cli`` entry-point plugin), so importing it must stay
+        # cheap: no roms-tools / xarray / dask. Those stay behind lazy,
+        # in-function imports in the command bodies (see ``run`` and
+        # ``show_paths`` above).
         # Run in a subprocess so this process's already-imported modules don't
         # mask a regression.
         import subprocess
         import sys
 
         code = (
-            "import sys, cstar_forge.cli; "
+            "import sys, cstar.cli.forge; "
             "heavy = sorted(m for m in ('roms_tools', 'xarray', 'dask', "
-            "'copernicusmarine', 'cstar_forge.forge.source_datasets', "
-            "'cstar_forge.forge.executor') if m in sys.modules); "
+            "'copernicusmarine', 'cstar.applications.forge.source_datasets', "
+            "'cstar.applications.forge.executor') if m in sys.modules); "
             "print(','.join(heavy))"
         )
         result = subprocess.run(
             [sys.executable, "-c", code], capture_output=True, text=True, check=True
         )
         assert result.stdout.strip() == "", (
-            f"importing cstar_forge.cli pulled in: {result.stdout.strip()}"
+            f"importing cstar.cli.forge pulled in: {result.stdout.strip()}"
         )
 
 
-class TestEntryPointRegistration:
-    def test_pyproject_registers_cstar_cli_entry_point(self):
-        # The metadata contract with C-Star's discovery hook: group cstar.cli,
-        # name forge, target cstar_forge.cli:app.
-        import pathlib
+class TestCoreSubcommandRegistration:
+    # Forge is in-tree now: both the `cstar forge` CLI group and the `forge`
+    # application register directly (no `cstar.cli` / `cstar.applications`
+    # entry points remain in pyproject.toml for either).
 
-        import cstar_forge
+    def test_forge_is_attached_as_a_core_subcommand(self):
+        from cstar.cli.cli import app as root_app
 
-        pyproject = pathlib.Path(cstar_forge.__file__).parents[1] / "pyproject.toml"
-        if not pyproject.is_file():
-            pytest.skip("no source checkout (installed package)")
-        text = pyproject.read_text()
-        assert '[project.entry-points."cstar.cli"]' in text
-        assert 'forge = "cstar_forge.cli:app"' in text
+        names = {g.name for g in root_app.registered_groups}
+        assert "forge" in names
 
-    def test_pyproject_registers_cstar_applications_entry_point(self):
-        # The metadata contract with C-Star's application registry: group
-        # cstar.applications, name forge (the blueprint's `application` value),
-        # target a bare module path C-Star imports so @register_application runs.
-        # This is the only mechanism C-Star offers for out-of-tree applications:
-        # without it, `cstar blueprint run <forge_blueprint.yaml>` cannot resolve
-        # `application: forge` at all.
-        import pathlib
+    def test_root_help_lists_forge(self):
+        from cstar.cli.cli import app as root_app
 
-        import cstar_forge
-
-        pyproject = pathlib.Path(cstar_forge.__file__).parents[1] / "pyproject.toml"
-        if not pyproject.is_file():
-            pytest.skip("no source checkout (installed package)")
-        text = pyproject.read_text()
-        assert '[project.entry-points."cstar.applications"]' in text
-        assert 'forge = "cstar_forge.forge.app"' in text
+        result = runner.invoke(root_app, ["--help"])
+        assert result.exit_code == 0
+        assert "forge" in _plain(result.output)
 
     def test_registered_app_module_registers_the_forge_application(self):
-        # The entry-point target must be a module whose import registers `forge`
-        # in C-Star's registry -- a valid module path that registers nothing (or
-        # under a different name) would satisfy the metadata check above while
-        # leaving `cstar blueprint run` unable to resolve a forge blueprint.
+        # `cstar blueprint run <forge_blueprint.yaml>` resolves `application:
+        # forge` by importing `cstar.applications.forge.app`, whose import
+        # runs `@register_application`. A module path that imports cleanly
+        # but registers nothing (or under a different name) would leave that
+        # resolution broken.
         import importlib
 
         core = pytest.importorskip("cstar.applications.core")
-        importlib.import_module("cstar_forge.forge.app")
+        importlib.import_module("cstar.applications.forge.app")
         assert "forge" in core._registry

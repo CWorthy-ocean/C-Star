@@ -3,3 +3,4 @@
 # git metadata complete.)
 recursive-include cstar/additional_files *
 recursive-include cstar/catalog/bundled *
+recursive-include cstar/wizard *.yaml *.ipynb *.png

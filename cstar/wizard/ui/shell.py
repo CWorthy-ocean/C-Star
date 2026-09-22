@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from cstar_forge.ui import branding, components
+from cstar.wizard.ui import branding, components
 
 
 def _carries_style(widgets: list[Any]) -> bool:
@@ -85,7 +85,7 @@ def blueprint_app(catalog_root: str | None = None) -> AppShell:
     Imports ``ForgeBlueprintWizardApp`` lazily (it, in turn, lazily imports
     ipywidgets).
     """
-    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+    from cstar.wizard.wizard import ForgeBlueprintWizardApp
 
     app = ForgeBlueprintWizardApp(catalog_root)
     return AppShell([("Blueprint", app)])

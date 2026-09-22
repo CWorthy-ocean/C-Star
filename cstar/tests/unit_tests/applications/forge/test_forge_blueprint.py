@@ -2424,10 +2424,8 @@ def test_regrid_options_survive_wizard_load_back():
     not cover this one.
     """
     pytest.importorskip("ipywidgets")
-    pytest.importorskip("cstar.wizard.wizard")
-    from cstar.wizard.wizard import ForgeBlueprintWizard
-
     from cstar.catalog.domain_catalog import default_catalog as cat
+    from cstar.wizard.wizard import ForgeBlueprintWizard
 
     fdata = cat.forcing_data("glorys-era5-unified")
     fdata["initial_conditions"]["prefill"] = "inverse_dist"
@@ -3993,7 +3991,6 @@ class _ReadOnlyValueGuard:
 class TestForgeBlueprintWizard:
     def _wizard(self):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import ForgeBlueprintWizard
 
         return ForgeBlueprintWizard()
@@ -4614,15 +4611,13 @@ class TestForgeBlueprintWizard:
         invariant no matter how the shipped specs are renamed or extended.
         """
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         import shutil
 
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
         from cstar.wizard.wizard import (
             _DEFAULT_FORCING_SPEC,
             ForgeBlueprintWizard,
         )
-
-        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
         root = tmp_path / "catalog"
         shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
@@ -5218,21 +5213,18 @@ class TestForgeBlueprintWizardApp:
 
     def _app(self, **kwargs):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import ForgeBlueprintWizardApp
 
         return ForgeBlueprintWizardApp(**kwargs)
 
     def test_default_auto_loads_layered_catalog(self):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
-        from cstar.wizard.wizard import ForgeBlueprintWizard
-
         from cstar.catalog.domain_catalog import (
             _DEFAULT_CATALOG_ROOT,
             LayeredCatalog,
             user_catalog_root,
         )
+        from cstar.wizard.wizard import ForgeBlueprintWizard
 
         app = self._app()
         assert isinstance(app.inner, ForgeBlueprintWizard)
@@ -5654,7 +5646,6 @@ class TestSaveModifiedSpecsToCatalog:
 
     def _wizard(self, catalog):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import ForgeBlueprintWizard
 
         return ForgeBlueprintWizard(catalog=catalog)
@@ -5743,7 +5734,6 @@ class TestSaveModifiedSpecsToCatalog:
         self, isolated_catalog
     ):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
@@ -5762,7 +5752,6 @@ class TestSaveModifiedSpecsToCatalog:
         self, isolated_catalog
     ):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
@@ -5845,7 +5834,6 @@ class TestSaveModifiedSpecsToCatalog:
         self, isolated_catalog
     ):
         pytest.importorskip("ipywidgets")
-        pytest.importorskip("cstar.wizard.wizard")
         from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)

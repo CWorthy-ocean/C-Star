@@ -2,7 +2,7 @@
 
 This is a pure extraction of the widgets and status-message formatting that
 ``ForgeBlueprintWizardApp.__init__``/``_load``/``_reload`` (see
-:mod:`cstar_forge.forge_blueprint_wizard`) build for choosing/reloading the
+:mod:`cstar.wizard.wizard`) build for choosing/reloading the
 domain catalog. It does not change catalog-loading behavior -- wiring
 :class:`CatalogBar` up to the App's actual ``_load`` is left to a later work
 package; ``on_reload`` here is simply invoked with the current input text.
@@ -16,7 +16,7 @@ import re
 import threading
 from typing import TYPE_CHECKING, Any
 
-from cstar_forge.ui import branding
+from cstar.wizard.ui import branding
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,7 +87,7 @@ class CatalogBar:
         stack, a single writable store, and a single read-only store (which
         adds an amber note that saves fall back to the current directory).
         """
-        from cstar_forge.domain_catalog import LayeredCatalog
+        from cstar.catalog.domain_catalog import LayeredCatalog
 
         if isinstance(cat, LayeredCatalog):
             layers = " over ".join(

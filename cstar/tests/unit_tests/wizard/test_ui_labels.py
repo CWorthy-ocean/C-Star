@@ -1,4 +1,4 @@
-"""Tests for the wizard label glossary (cstar_forge.ui.labels)."""
+"""Tests for the wizard label glossary (cstar.wizard.ui.labels)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ pytest.importorskip("ipywidgets")
 
 import ipywidgets as W
 
-from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard, _ForcingEditor
-from cstar_forge.ui import labels
+from cstar.wizard.ui import labels
+from cstar.wizard.wizard import ForgeBlueprintWizard, _ForcingEditor
 
 # The 11 grid kwargs shared by the main/child/parent grids (see
-# cstar_forge.forge_blueprint_wizard._GRID_INT/_GRID_FLOAT/_SCOORD).
+# cstar.wizard.wizard._GRID_INT/_GRID_FLOAT/_SCOORD).
 _GRID_KWARGS = (
     "nx",
     "ny",
@@ -212,7 +212,7 @@ def test_required_top_level_sections_flagged_required():
 # ---------------------------------------------------------------------------
 
 # The row categories _ForcingEditor._make_row's generic add/remove machinery
-# manages (see cstar_forge.forge_blueprint_wizard._ROW_CATEGORIES). "boundary"
+# manages (see cstar.wizard.wizard._ROW_CATEGORIES). "boundary"
 # itself is excluded -- boundary's physics source is a required scalar (the
 # boundary.* pane), not a row list; only "boundary_bgc" is row-based.
 _ROW_CATEGORY_SEEDS: dict[str, dict] = {
@@ -283,13 +283,13 @@ def _all_settings_section_field_names() -> dict[str, set[str]]:
     ``RunTimeSettings`` tier (a version-gated section like ``pio_settings``
     only exists on some tiers, e.g. ``RunTimeSettingsV0_6_0``).
     """
-    from cstar_forge.forge.namelist_model import (
+    from cstar.applications.forge.namelist_model import (
         RunTimeSettings,
         RunTimeSettingsV0_5_0,
         RunTimeSettingsV0_6_0,
         RunTimeSettingsV0_7_0,
     )
-    from cstar_forge.forge_blueprint_wizard import _unwrap_type
+    from cstar.wizard.wizard import _unwrap_type
 
     tiers = (
         RunTimeSettings,
@@ -338,13 +338,13 @@ def test_every_settings_field_key_names_a_real_namelist_field():
 
 
 def test_namelist_label_uses_glossary_override():
-    from cstar_forge.forge_blueprint_wizard import _namelist_label
+    from cstar.wizard.wizard import _namelist_label
 
     assert _namelist_label("lateral_visc", "visc2") == "Horizontal viscosity"
 
 
 def test_namelist_label_falls_back_to_field_name_when_unknown():
-    from cstar_forge.forge_blueprint_wizard import _namelist_label
+    from cstar.wizard.wizard import _namelist_label
 
     assert _namelist_label("lateral_visc", "not_a_real_field") == "not_a_real_field"
 
@@ -358,7 +358,7 @@ def test_output_table_and_variable_grid_fields_exist():
     ``test_every_settings_field_key_names_a_real_namelist_field``'s glossary
     check, but for the table/grid definitions rather than the label glossary.
     """
-    from cstar_forge.forge_blueprint_wizard import _OUTPUT_TABLES, _VARIABLE_GRIDS
+    from cstar.wizard.wizard import _OUTPUT_TABLES, _VARIABLE_GRIDS
 
     section_fields = _all_settings_section_field_names()
 

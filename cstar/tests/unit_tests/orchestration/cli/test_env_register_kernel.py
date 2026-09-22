@@ -1,4 +1,4 @@
-"""Tests for cstar_forge/register_kernel.py (`cstar forge register-kernel`)."""
+"""Tests for cstar/cli/environment/register_kernel.py (`cstar env register-kernel`)."""
 
 import json
 import os
@@ -7,8 +7,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from typer.testing import CliRunner
 
-from cstar_forge import register_kernel as rk
+from cstar.cli.environment import register_kernel as rk
 
 
 class TestDetectPackageManager:
@@ -184,3 +185,58 @@ class TestRegisterKernel:
         with patch.object(rk.sys, "prefix", str(tmp_path)):
             with pytest.raises(rk.RegisterKernelError, match="not inside a"):
                 rk.register_kernel(log=lambda m: None)
+
+
+class TestRegisterKernelCli:
+    """`cstar env register-kernel` (moved from `cstar forge register-kernel`)."""
+
+    runner = CliRunner()
+
+    def test_options_map_to_register_kernel_kwargs(self):
+        from cstar.cli.cli import app
+
+        with patch.object(rk, "register_kernel") as mock_register:
+            result = self.runner.invoke(
+                app,
+                [
+                    "env",
+                    "register-kernel",
+                    "--name",
+                    "my-kernel",
+                    "--clean",
+                    "--package-manager",
+                    "micromamba",
+                    "--micromamba-bin",
+                    "/repo/bin/micromamba",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        kwargs = mock_register.call_args.kwargs
+        assert kwargs["name"] == "my-kernel"
+        assert kwargs["display_name"] is None
+        assert kwargs["clean"] is True
+        assert kwargs["package_manager"] == "micromamba"
+        assert kwargs["micromamba_bin"] == "/repo/bin/micromamba"
+
+    def test_defaults(self):
+        from cstar.cli.cli import app
+
+        with patch.object(rk, "register_kernel") as mock_register:
+            result = self.runner.invoke(app, ["env", "register-kernel"])
+        assert result.exit_code == 0, result.output
+        kwargs = mock_register.call_args.kwargs
+        assert kwargs["name"] is None
+        assert kwargs["clean"] is False
+        assert kwargs["package_manager"] == "auto"
+
+    def test_register_kernel_error_exits_nonzero_with_message(self):
+        from cstar.cli.cli import app
+
+        with patch.object(
+            rk,
+            "register_kernel",
+            side_effect=rk.RegisterKernelError("not inside a conda env"),
+        ):
+            result = self.runner.invoke(app, ["env", "register-kernel"])
+        assert result.exit_code == 1
+        assert "not inside a conda env" in result.output

@@ -1,4 +1,4 @@
-"""Tests for the wizard's outer application shell (cstar_forge.ui.shell)."""
+"""Tests for the wizard's outer application shell (cstar.wizard.ui.shell)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ pytest.importorskip("ipywidgets")
 
 import ipywidgets as W
 
-from cstar_forge.ui.shell import AppShell, blueprint_app
+from cstar.wizard.ui.shell import AppShell, blueprint_app
 
 
 class _DummyPage:
@@ -84,8 +84,8 @@ def test_shell_skips_its_own_stylesheet_when_a_page_carries_one():
     """The wizard root embeds WIZARD_CSS itself; the shell must not add a duplicate."""
     import ipywidgets as W
 
-    from cstar_forge.ui import components
-    from cstar_forge.ui.shell import AppShell
+    from cstar.wizard.ui import components
+    from cstar.wizard.ui.shell import AppShell
 
     page = W.VBox([components.style_widget(W), W.HTML("body")])
     shell = AppShell([("Only", page)], W=W)

@@ -3651,14 +3651,10 @@ class TestSubchunkDefaults:
         )
         assert parser.parse_args([]).subchunk is True
         assert parser.parse_args(["--no-subchunk"]).subchunk is False
-        # And the real CLI no longer exposes the dropped experiment flag. The native
-        # `cstar forge run` typer command has not been wired up yet in this checkout
-        # (see cstar.applications.forge.runtime's module docstring: "arriving in a
-        # later commit") -- skip until it lands.
-        pytest.importorskip("cstar.applications.forge.cli")
+        # And the real CLI no longer exposes the dropped experiment flag.
         from typer.testing import CliRunner
 
-        from cstar.applications.forge import cli
+        import cstar.cli.forge as cli
 
         result = CliRunner().invoke(cli.app, ["run", "--help"])
         # Escape-stripped: rich colours the help under a colour-forcing CI environment.
