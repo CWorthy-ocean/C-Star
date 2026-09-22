@@ -6275,3 +6275,59 @@ class TestSaveModifiedSpecsToCatalog:
         assert wiz._overrides == before_overrides  # overrides untouched
         assert wiz.config.composition.output.modified is True  # still modified
         assert "differs" in wiz.save_output_status.value
+
+
+def _shipped_cppdefs_sources() -> list[tuple[str, dict]]:
+    """Every shipped cppdefs mapping: the docs example, the bundled example blueprints,
+    and the bundled ModelSpecs' ``model_settings.cppdefs``.
+    """
+    import cstar.catalog
+
+    repo_root = Path(cstar.__file__).parents[1]
+    bundled = Path(cstar.catalog.__file__).parent / "bundled"
+    out: list[tuple[str, dict]] = []
+    for path in [
+        repo_root / "docs" / "forge-blueprint-example.wio-toy.yaml",
+        *sorted((bundled / "blueprints").glob("*.y*ml")),
+    ]:
+        docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
+        bp = next(d for d in docs if "model_settings" in d)
+        out.append(
+            (str(path.relative_to(repo_root)), bp["model_settings"].get("cppdefs", {}))
+        )
+    for path in sorted((bundled / "ModelSpec").glob("*/model.yaml")):
+        spec = yaml.safe_load(path.read_text())
+        out.append(
+            (
+                str(path.relative_to(repo_root)),
+                spec["model_settings"].get("cppdefs", {}),
+            )
+        )
+    return out
+
+
+@pytest.mark.parametrize(
+    "source, cppdefs",
+    _shipped_cppdefs_sources(),
+    ids=lambda v: v if isinstance(v, str) else "",
+)
+def test_shipped_cppdefs_keys_are_referenced_by_the_bundled_template(source, cppdefs):
+    """Every cppdefs key a shipped blueprint or ModelSpec carries must be one the
+    bundled ``cppdefs.opt.j2`` references, or rendering rejects it
+    (``render_roms_settings`` fails on keys the template never reads). The docs
+    example shipped for weeks pinning a template that predated four of its keys;
+    tests never saw it because staging is redirected to the working tree.
+    """
+    from jinja2 import Environment
+
+    from cstar.applications.forge.settings import _static_nested_keys
+    from cstar.applications.forge.templates import bundled_template_dir
+
+    template = bundled_template_dir("templates/compile-time") / "cppdefs.opt.j2"
+    ast = Environment().parse(template.read_text())
+    referenced, dynamic = _static_nested_keys(ast, "cppdefs")
+    assert not dynamic, "template reads cppdefs dynamically; this check cannot apply"
+    unreferenced = sorted(set(cppdefs) - referenced)
+    assert not unreferenced, (
+        f"{source}: cppdefs keys the bundled template never references: {unreferenced}"
+    )
