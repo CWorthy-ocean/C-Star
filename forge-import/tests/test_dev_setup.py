@@ -1,0 +1,275 @@
+"""
+Test suite for dev-setup.sh script.
+
+Tests the functionality of the development environment setup script,
+including environment creation, package installation, and cleanup.
+"""
+
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+import pytest
+import yaml
+
+
+@pytest.fixture
+def test_dir():
+    """Create a temporary directory for testing."""
+    test_dir = tempfile.mkdtemp()
+    yield test_dir
+    shutil.rmtree(test_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def fixtures_dir():
+    """Path to test fixtures directory."""
+    return Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def dev_setup_script():
+    """Path to dev-setup.sh script."""
+    return Path(__file__).parent.parent / "dev-setup.sh"
+
+
+@pytest.fixture
+def harden_env_script():
+    """Path to scripts/harden-env.sh (PIP_USER/PYTHONNOUSERSITE hardening,
+    env-active helpers), extracted out of dev-setup.sh.
+    """
+    return Path(__file__).parent.parent / "scripts" / "harden-env.sh"
+
+
+@pytest.fixture
+def test_environment(test_dir, fixtures_dir):
+    """Set up a test environment with minimal files."""
+    # Copy environment.yml
+    env_file = fixtures_dir / "test-environment.yml"
+    shutil.copy(env_file, Path(test_dir) / "environment.yml")
+
+    # Create mock cstar_forge package
+    cstar_forge_dir = Path(test_dir) / "cstar_forge"
+    cstar_forge_dir.mkdir()
+    init_file = fixtures_dir / "cstar_forge" / "__init__.py"
+    shutil.copy(init_file, cstar_forge_dir / "__init__.py")
+
+    # Copy setup.py
+    setup_file = fixtures_dir / "setup.py"
+    shutil.copy(setup_file, Path(test_dir) / "setup.py")
+
+    # Copy dev-setup.sh
+    dev_setup = Path(__file__).parent.parent / "dev-setup.sh"
+    shutil.copy(dev_setup, Path(test_dir) / "dev-setup.sh")
+    os.chmod(Path(test_dir) / "dev-setup.sh", 0o755)
+
+    # Copy scripts/ (harden-env.sh) since dev-setup.sh sources it relative
+    # to its own directory.
+    scripts_src = Path(__file__).parent.parent / "scripts"
+    scripts_dst = Path(test_dir) / "scripts"
+    shutil.copytree(scripts_src, scripts_dst)
+
+    return test_dir
+
+
+class TestDevSetupScript:
+    """Tests for dev-setup.sh script."""
+
+    def test_script_exists(self, dev_setup_script):
+        """Test that dev-setup.sh exists and is executable."""
+        assert dev_setup_script.exists(), "dev-setup.sh does not exist"
+        assert os.access(dev_setup_script, os.X_OK), "dev-setup.sh is not executable"
+
+    def test_script_has_shebang(self, dev_setup_script):
+        """Test that script has correct shebang."""
+        with open(dev_setup_script) as f:
+            first_line = f.readline().strip()
+        assert first_line == "#!/bin/bash", "Script missing correct shebang"
+
+    def test_parse_environment_name(self, test_environment):
+        """Test that script can parse environment name from environment.yml."""
+        env_file = Path(test_environment) / "environment.yml"
+
+        # Read and parse environment.yml
+        with open(env_file) as f:
+            env_data = yaml.safe_load(f)
+
+        assert "name" in env_data, "environment.yml missing 'name' field"
+        assert env_data["name"] == "test-cstar-forge", "Environment name mismatch"
+
+    def test_environment_yml_structure(self, test_environment):
+        """Test that test environment.yml has correct structure."""
+        env_file = Path(test_environment) / "environment.yml"
+
+        with open(env_file) as f:
+            env_data = yaml.safe_load(f)
+
+        assert "name" in env_data
+        assert "channels" in env_data
+        assert "dependencies" in env_data
+        assert isinstance(env_data["dependencies"], list)
+
+    def test_mock_package_structure(self, test_environment):
+        """Test that mock cstar_forge package is set up correctly."""
+        cstar_forge_dir = Path(test_environment) / "cstar_forge"
+        init_file = cstar_forge_dir / "__init__.py"
+
+        assert cstar_forge_dir.exists(), "cstar_forge directory does not exist"
+        assert init_file.exists(), "cstar_forge/__init__.py does not exist"
+
+        # Check that __init__.py has version
+        with open(init_file) as f:
+            content = f.read()
+        assert "__version__" in content, "__init__.py missing __version__"
+
+    def test_setup_py_exists(self, test_environment):
+        """Test that setup.py exists for pip install."""
+        setup_file = Path(test_environment) / "setup.py"
+        assert setup_file.exists(), "setup.py does not exist"
+
+    def test_script_accepts_clean_flag(self, test_environment, dev_setup_script):
+        """Test that script accepts --clean flag."""
+        # Just check that --clean doesn't cause immediate syntax errors
+        # We can't fully test without actually running conda/micromamba
+        script_path = Path(test_environment) / "dev-setup.sh"
+
+        # Check that script contains --clean handling
+        with open(script_path) as f:
+            content = f.read()
+        assert "--clean" in content, "Script does not handle --clean flag"
+        assert "CLEAN_MODE" in content, "Script does not define CLEAN_MODE variable"
+
+    def test_script_detects_os(self, dev_setup_script):
+        """Test that script can detect OS type."""
+        with open(dev_setup_script) as f:
+            content = f.read()
+
+        # Check for OS detection logic
+        assert "uname" in content, "Script missing OS detection"
+        assert "Darwin" in content or "Linux" in content, "Script missing OS checks"
+
+    def test_script_handles_micromamba(self, dev_setup_script):
+        """Test that script handles micromamba detection."""
+        with open(dev_setup_script) as f:
+            content = f.read()
+
+        assert "micromamba" in content, "Script missing micromamba support"
+        assert "MICROMAMBA_CMD" in content, "Script missing MICROMAMBA_CMD variable"
+
+    def test_script_handles_conda_fallback(self, dev_setup_script):
+        """Test that script falls back to conda."""
+        with open(dev_setup_script) as f:
+            content = f.read()
+
+        assert "conda" in content, "Script missing conda fallback"
+        assert "PACKAGE_MANAGER" in content, "Script missing PACKAGE_MANAGER variable"
+
+    def test_script_installs_compilers_on_mac(self, dev_setup_script):
+        """Test that script installs compilers on macOS."""
+        with open(dev_setup_script) as f:
+            content = f.read()
+
+        assert "Darwin" in content, "Script missing macOS detection"
+        assert "compilers" in content, "Script missing compiler installation"
+
+    def test_dev_setup_sources_harden_env(self, dev_setup_script):
+        """Test that dev-setup.sh delegates HPC hardening to
+        scripts/harden-env.sh instead of inlining it.
+        """
+        with open(dev_setup_script) as f:
+            content = f.read()
+
+        assert "scripts/harden-env.sh" in content, (
+            "dev-setup.sh should source scripts/harden-env.sh"
+        )
+
+    def test_dev_setup_registers_kernel_via_cli(self, dev_setup_script):
+        """Test that dev-setup.sh registers the kernel through the CLI.
+
+        The kernel-registration logic (ipykernel install, activation wrapper,
+        kernel.json rewrite) lives in cstar_forge/register_kernel.py — covered
+        by tests/test_register_kernel.py — so dev-setup.sh must only translate
+        its variables into CLI flags and invoke `... cstar_forge.cli
+        register-kernel`.
+        """
+        with open(dev_setup_script) as f:
+            content = f.read()
+
+        assert "cstar_forge.cli" in content, (
+            "dev-setup.sh missing delegation to the cstar_forge CLI"
+        )
+        assert "register-kernel" in content, (
+            "dev-setup.sh missing the register-kernel CLI subcommand"
+        )
+        # Every variable of the registration interface must be forwarded.
+        for var, flag in [
+            ("KERNEL_NAME", "--name"),
+            ("CLEAN_MODE", "--clean"),
+            ("PACKAGE_MANAGER", "--package-manager"),
+            ("MICROMAMBA_CMD", "--micromamba-bin"),
+        ]:
+            assert var in content and flag in content, (
+                f"dev-setup.sh does not forward {var} via {flag}"
+            )
+
+    def test_harden_env_script_hardens_pip_and_env_checks(self, harden_env_script):
+        """Test that harden-env.sh carries the PIP_USER/PYTHONNOUSERSITE
+        exports and the env-active helper functions extracted from
+        dev-setup.sh.
+        """
+        with open(harden_env_script) as f:
+            content = f.read()
+
+        assert "PIP_USER=0" in content, "Script missing PIP_USER hardening"
+        assert "PYTHONNOUSERSITE=1" in content, (
+            "Script missing PYTHONNOUSERSITE hardening"
+        )
+        assert "_activate_env" in content, "Script missing _activate_env helper"
+        assert "_assert_env_active" in content, (
+            "Script missing _assert_env_active helper"
+        )
+        assert "_ensure_env_active" in content, (
+            "Script missing _ensure_env_active helper"
+        )
+        assert "activate.d" in content and "deactivate.d" in content, (
+            "Script missing persistent activate.d/deactivate.d hook installation"
+        )
+
+    def test_script_does_not_clone_cstar(self, dev_setup_script):
+        """Test that script does not clone C-Star (C-Star is installed via environment.yml)."""
+        with open(dev_setup_script) as f:
+            content = f.read()
+        assert "git clone" not in content, (
+            "dev-setup.sh should not clone C-Star; C-Star is installed via environment.yml pip section"
+        )
+
+    @pytest.mark.skipif(not shutil.which("bash"), reason="bash not available")
+    @pytest.mark.parametrize(
+        "script_fixture",
+        ["dev_setup_script", "harden_env_script"],
+    )
+    def test_script_syntax_valid(self, script_fixture, request):
+        """Test that dev-setup.sh and its extracted helper scripts have valid
+        bash syntax.
+        """
+        script_path = request.getfixturevalue(script_fixture)
+        result = subprocess.run(
+            ["bash", "-n", str(script_path)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"Script has syntax errors: {result.stderr}"
+
+    def test_environment_yml_has_required_packages(self, fixtures_dir):
+        """Test that test environment.yml has required packages."""
+        env_file = fixtures_dir / "test-environment.yml"
+
+        with open(env_file) as f:
+            env_data = yaml.safe_load(f)
+
+        deps = env_data.get("dependencies", [])
+        dep_names = [d if isinstance(d, str) else next(iter(d)) for d in deps]
+
+        assert "python" in str(deps), "Missing python dependency"
+        assert "ipykernel" in dep_names, "Missing ipykernel dependency"
+        assert "pip" in dep_names, "Missing pip dependency"

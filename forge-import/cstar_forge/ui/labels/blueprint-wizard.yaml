@@ -1,0 +1,1107 @@
+# Label glossary for the blueprint-wizard page (the wizard UI, not the blueprint schema).
+#
+# See cstar_forge/ui/labels/__init__.py for the schema and namespace rules.
+# `forcing.row.*`, `settings.*`, and `buttons.*` are only lightly seeded here
+# (a few examples per namespace) -- a later pass fills them in fully.
+
+sections:
+  # --- top-level cards ------------------------------------------------------
+  start:
+    title: Start from an existing blueprint
+    desc: Load a saved blueprint to edit it, or skip this to build one from scratch.
+    required: false
+  model:
+    title: Model
+    desc: Choose the ROMS-MARBL model preset, biogeochemistry mode, and code versions this blueprint builds against.
+    required: true
+  grid:
+    title: Domain and grid
+    desc: Where the model runs and how finely it is resolved.
+    required: true
+  forcing:
+    title: Boundaries and forcing
+    desc: Datasets that set the ocean state at the start and drive it at the edges.
+    required: true
+  run:
+    title: Run setup
+    desc: The simulation time window, time step, processor layout, and optional carbon dioxide removal forcing.
+    required: true
+  advanced:
+    title: Advanced settings
+    desc: Fine-tune individual ROMS-MARBL namelist settings beyond what the other cards expose.
+    required: false
+  review:
+    title: Review and export
+    desc: Check the resolved blueprint, then download it or save it to the catalog.
+    required: false
+
+  # --- grid subsections -------------------------------------------------------
+  grid.geometry:
+    title: Grid geometry
+    desc: Horizontal extent, resolution, and orientation of the grid.
+    required: false
+  grid.vertical:
+    title: Vertical coordinate
+    desc: Number of vertical levels and the s-coordinate stretching parameters.
+    required: false
+  grid.bathymetry:
+    title: Bathymetry and land mask
+    desc: Topography source and land-mask options used to build the grid.
+    required: false
+  grid.gridfile:
+    title: Pre-made grid file
+    desc: Attach a pre-made grid netCDF instead of generating one from the kwargs above.
+    required: false
+  grid.derived:
+    title: Derived from the grid
+    desc: Open boundaries, sponge viscosity and the time step are derived from the grid unless you override them.
+    required: false
+  grid.nesting:
+    title: Nesting
+    desc: Optional parent/child relationship between this grid and a coarser or finer neighboring domain.
+    required: false
+
+  # --- forcing subsections -----------------------------------------------------
+  forcing.ic.interpolation:
+    title: Interpolation
+    desc: How the source data is mapped onto the model grid.
+    required: false
+  forcing.boundary.interpolation:
+    title: Interpolation
+    desc: How the source data is mapped onto the model grid.
+    required: false
+
+  # --- run subsections ---------------------------------------------------------
+  run.window:
+    title: Run window
+    desc: Start and end dates and the model reference date for the simulation.
+    required: false
+  run.partitioning:
+    title: Partitioning
+    desc: MPI processor layout and PIO/tiling options for the run.
+    required: false
+  run.cdr:
+    title: Carbon dioxide removal (CDR)
+    desc: Optional carbon dioxide removal forcing, imported or hand-authored.
+    required: false
+
+  # --- review subsections --------------------------------------------------------
+  review.save_specs:
+    title: Save specs to catalog
+    desc: Save any modified model, domain, forcing, output, or CDR spec as a new named catalog entry.
+    required: false
+  review.run:
+    title: Run
+    desc: Invoke the C-Star CLI on the saved blueprint.
+    required: false
+  review.workplan:
+    title: Workplan (experimental)
+    desc: Save a deferred workplan that runs this blueprint later.
+    required: false
+
+  # --- example: an Advanced-settings section (namespace exercised, not exhaustive) ---
+  settings.bgc:
+    title: Biogeochemistry settings
+    desc: MARBL biogeochemistry namelist options.
+    required: false
+
+  # --- Advanced settings: section headers (forge RunTimeSettings sections) ---
+  settings.lateral_visc:
+    title: Lateral viscosity
+    required: false
+  settings.vertical_mixing:
+    title: Vertical mixing
+    required: false
+  settings.tracer_diff2:
+    title: Tracer diffusion
+    required: false
+  settings.bottom_drag:
+    title: Bottom drag
+    required: false
+  settings.sponge_tune:
+    title: Sponge tuning
+    required: false
+  settings.gamma2:
+    title: Lateral boundary slipperiness
+    required: false
+  settings.ubind:
+    title: Open-boundary binding velocity
+    required: false
+  settings.lin_rho_eos:
+    title: Linear equation of state
+    required: false
+  settings.pio_settings:
+    title: Parallel I/O
+    required: false
+  settings.cppdefs:
+    title: Compile-time options
+    required: false
+  settings.blk_frc:
+    title: Bulk surface forcing
+    required: false
+  settings.flux_frc:
+    title: Flux surface forcing
+    required: false
+  settings.tides:
+    title: Tides
+    required: false
+  settings.pipe_frc:
+    title: Pipe sources
+    required: false
+  settings.sss_correction:
+    title: Sea-surface salinity correction
+    required: false
+  settings.sst_correction:
+    title: Sea-surface temperature correction
+    required: false
+  settings.marbl_bgc:
+    title: MARBL
+    required: false
+  settings.dic_alk_correction:
+    title: DIC and alkalinity correction
+    required: false
+  settings.cdr_frc:
+    title: CDR forcing
+    required: false
+  settings.cdr_output:
+    title: CDR output
+    required: false
+  settings.ocean_vars:
+    title: Physical state output
+    required: false
+  settings.surf_flux:
+    title: Surface flux output
+    required: false
+  settings.diagnostics:
+    title: Diagnostics output
+    required: false
+  settings.stdout_diag:
+    title: Runtime diagnostics
+    required: false
+  settings.ts_output:
+    title: Temperature and salinity output
+    required: false
+  settings.frc_output:
+    title: Forcing output
+    required: false
+  settings.upscale_output:
+    title: Upscaled output
+    required: false
+  settings.zslice:
+    title: Depth-slice output
+    required: false
+  settings.random_output:
+    title: Random output
+    required: false
+  settings.calc_pflx:
+    title: Pressure-flux calculation
+    required: false
+  settings.particles:
+    title: Particle tracking
+    required: false
+  settings.extract_data:
+    title: Child-grid boundary extraction
+    required: false
+fields:
+  # ===========================================================================
+  # bare wizard attributes (ForgeBlueprintWizard widgets with a description=)
+  # ===========================================================================
+  load_catalog_dd:
+    label: From the catalog
+  load_path:
+    label: From a file
+  upload:
+    label: Upload blueprint file
+  model_dd:
+    label: Model preset
+    required: true
+  bgc_dd:
+    label: Biogeochemistry
+    hint: MARBL couples biogeochemistry to the physics; “none” runs physics only.
+  domain_dd:
+    label: Domain preset
+    required: true
+  grid_name:
+    label: Grid name
+    required: true
+    hint: Short name for this grid; it becomes part of the domain and blueprint names.
+  scoord_chk:
+    label: Set the s-coordinate stretching explicitly
+    hint: When checked, surface stretching, bottom stretching, and critical depth are passed to roms-tools to set the vertical stretching.
+  v_sponge:
+    label: Sponge viscosity
+    symbol: v_sponge
+    unit: m²/s
+    hint: Maximum viscosity applied in the boundary sponge layer.
+  npx:
+    label: Processors, east–west
+    symbol: n_procs_x
+    required: true
+    hint: Number of MPI tiles in the x-direction (east–west).
+  npy:
+    label: Processors, north–south
+    symbol: n_procs_y
+    required: true
+    hint: Number of MPI tiles in the y-direction (north–south).
+  use_pio_chk:
+    label: Write output with ParallelIO (PIO)
+    hint: 'Builds ROMS against the ParallelIO library: inputs are written as classic-format (CDF-5) netCDF and ROMS reads/writes joined files.'
+  auto_tiling_chk:
+    label: Automatic tiling
+    hint: Picks the MPI tiling at runtime from the land mask (ucla-roms >= 0.5.0).
+  n_cores:
+    label: Total processors
+    symbol: n_cores
+    hint: Total MPI ranks.
+  roms_ref:
+    label: ucla-roms version
+    symbol: ucla_roms_ref
+    hint: ucla-roms checkout target (commit hash, tag, or branch).
+  marbl_ref:
+    label: MARBL version
+    symbol: marbl_ref
+    hint: MARBL checkout target (commit hash, tag, or branch).
+  nest_enable:
+    label: Enable child domain
+    hint: 'Enables a child (nested) domain: generates nesting.nc to supply boundary conditions for the inner domain from this (outer) model.'
+  nest_domain_dd:
+    label: Child domain preset
+    hint: Optionally prefill the child grid kwargs from a cataloged domain.
+  child_topo_source:
+    label: Child topography source
+    hint: Topography dataset the child grid is built with when extracting nesting data.
+  child_topo_path:
+    label: Child topography file
+    hint: Explicit topography file for the child grid.
+  nest_period:
+    label: Nesting extract period
+    unit: s
+    hint: How often boundary values are written to nesting.nc.
+  nest_pressure_fluxes:
+    label: Include pressure fluxes
+    hint: Includes baroclinic pressure flux variables in nesting.nc.
+  parent_enable:
+    label: Enable parent domain
+    hint: Declares that this grid is nested inside a coarser parent grid.
+  parent_domain_dd:
+    label: Parent domain preset
+    hint: Optionally prefill the parent grid kwargs from a cataloged domain.
+  parent_topo_source:
+    label: Parent topography source
+    hint: Topography dataset the parent grid is rebuilt with.
+  parent_topo_path:
+    label: Parent topography file
+    hint: Explicit topography file for the parent grid.
+  start:
+    label: Start date
+    required: true
+    hint: Start date of the simulation run window.
+  end:
+    label: End date
+    required: true
+    hint: End date of the simulation run window.
+  model_ref_date:
+    label: Model reference date
+    symbol: model_reference_date
+    hint: ROMS model t=0 reference date.
+  description:
+    label: Description
+    hint: Human-readable description of this blueprint.
+  hmin:
+    label: Minimum depth
+    symbol: hmin
+    unit: m
+    hint: Minimum allowable ocean depth.
+  close_narrow_chk:
+    label: Close narrow channels
+    symbol: close_narrow_channels
+    hint: If checked, narrow water channels (width less than one grid cell) in the land mask are closed after the mask is generated.
+  mask_shapefile:
+    label: Land-mask shapefile
+    symbol: mask_shapefile
+    hint: Path to a custom shapefile used to determine the land/sea mask instead of the default NaturalEarth 10 m coastlines.
+  bnd:
+    label: Open boundaries
+    hint: Sides that exchange water with the parent dataset.
+  topo_source:
+    label: Topography source
+    symbol: topography_source
+  topo_path:
+    label: Topography file
+    symbol: topo_path
+    hint: Path to a custom topography file.
+  grid_file_path:
+    label: Grid file
+    symbol: grid_file
+    hint: Replaces the grid fields above; the file must exist at this path on the machine that runs the processing step.
+  grid_file_upload:
+    label: Upload grid file
+  dt:
+    label: Baroclinic time step
+    symbol: dt
+    unit: s
+    hint: Set it directly, or click “Compute from CFL” to derive it from the grid.
+  forcing_dd:
+    label: Forcing preset
+    required: true
+    hint: Selects a named forcing spec from the catalog to seed all forcing fields.
+  cdr_dd:
+    label: CDR preset
+    hint: Selects a named CDR spec from the catalog to seed the CDR mode and fields below, or leave as custom to author one by hand.
+  cdr_mode_dd:
+    label: CDR mode
+  cdr_simple_name:
+    label: CDR release name
+  cdr_simple_start:
+    label: CDR release start
+  cdr_simple_end:
+    label: CDR release end
+  cdr_upload:
+    label: Upload CDR YAML
+    hint: A roms-tools CDRForcing.to_yaml() dump.
+  cdr_file_path:
+    label: CDR file
+    hint: Attach a pre-made CDR-forcing netCDF instead of building one from the uploaded roms-tools YAML.
+  cdr_file_upload:
+    label: Upload CDR file
+  cdr_plot_type_dd:
+    label: CDR plot type
+  cdr_plot_release_dd:
+    label: CDR release
+  output_dd:
+    label: Output preset
+    hint: Selects an output-settings spec from the catalog to seed the output sections.
+  save_path:
+    label: Save path
+  name:
+    label: Blueprint name
+    hint: Drives the save filename, working directory and case name; edit to override the derived default.
+
+  # ===========================================================================
+  # grid.<k> -- the 11 grid kwargs, shared by main/child/parent grids
+  # ===========================================================================
+  grid.nx:
+    label: Grid cells, east–west
+    symbol: nx
+    required: true
+  grid.ny:
+    label: Grid cells, north–south
+    symbol: ny
+    required: true
+  grid.N:
+    label: Vertical levels
+    symbol: N
+    required: true
+  grid.size_x:
+    label: Domain length, east–west
+    symbol: size_x
+    unit: km
+    required: true
+  grid.size_y:
+    label: Domain length, north–south
+    symbol: size_y
+    unit: km
+    required: true
+  grid.center_lon:
+    label: Center longitude
+    symbol: center_lon
+    unit: ° E
+    required: true
+  grid.center_lat:
+    label: Center latitude
+    symbol: center_lat
+    unit: ° N
+    required: true
+  grid.rot:
+    label: Rotation
+    symbol: rot
+    unit: °
+    required: false
+    hint: Counter-clockwise from due east.
+  grid.theta_s:
+    label: Surface stretching
+    symbol: theta_s
+    required: false
+    hint: S-coordinate surface stretching parameter (0 < θs ≤ 10).
+  grid.theta_b:
+    label: Bottom stretching
+    symbol: theta_b
+    required: false
+    hint: S-coordinate bottom stretching parameter (0 < θb ≤ 4).
+  grid.hc:
+    label: Critical depth
+    symbol: hc
+    unit: m
+    required: false
+    hint: S-coordinate critical depth.
+
+  # ===========================================================================
+  # ic.* -- _ForcingEditor's initial-conditions scalar pane
+  # ===========================================================================
+  ic.ic_name:
+    label: Initial conditions
+    required: true
+    hint: Logical source name for physics initial conditions, e.g.
+  ic.ic_layout:
+    label: Initial conditions layout
+    symbol: glorys_layout
+    hint: 'GLORYS spatial layout override: regional (default) or global.'
+  ic.ic_path:
+    label: Initial conditions path
+    hint: Explicit path to a custom dataset file for this source.
+  ic.ic_bgc_interp:
+    label: Biogeochemistry interpolation
+    symbol: bgc_interpolation_method
+    hint: 'Vertical interpolation for BGC tracer initial conditions: depth (default), density (isopycnal space), or density_mld (anchored to the mixed-layer depth).'
+  ic.ic_flex_time:
+    label: Flexible start time
+    symbol: allow_flex_time
+    hint: Allows a ±24-hour search window when looking for the requested initial time in the source dataset.
+  ic.ic_validate:
+    label: Validate initial conditions
+    hint: Runs roms-tools' post-construction validation (NaN-at-wet-point checks).
+  ic.ic_prefill:
+    label: Source prefill
+    symbol: prefill
+    hint: Fills NaN (land/void) source cells before regridding.
+  ic.ic_regrid_method:
+    label: Regrid method
+    symbol: regrid_method
+    hint: Horizontal regrid engine.
+  ic.ic_extrap_method:
+    label: Extrapolation method
+    symbol: extrap_method
+    hint: Destination extrapolation on the default (no-prefill) path to guarantee NaN-free output.
+  ic.ic_options:
+    label: Additional options
+
+  # ===========================================================================
+  # boundary.* -- _ForcingEditor's boundary-forcing scalar pane (mirrors ic.*)
+  # ===========================================================================
+  boundary.boundary_name:
+    label: Boundary conditions
+    required: true
+    hint: Logical source name for boundary conditions, e.g.
+  boundary.boundary_layout:
+    label: Boundary layout
+    symbol: glorys_layout
+    hint: 'GLORYS spatial layout: regional or global.'
+  boundary.boundary_path:
+    label: Boundary path
+    hint: Explicit path to a custom dataset file for this source.
+  boundary.boundary_bgc_interp:
+    label: Biogeochemistry interpolation
+    symbol: bgc_interpolation_method
+    hint: 'Vertical interpolation for BGC boundary tracers: depth (default), density (isopycnal space), or density_mld (mixed-layer-depth anchored).'
+  boundary.boundary_prefill:
+    label: Source prefill
+    symbol: prefill
+    hint: Fills NaN (land/void) source cells before regridding.
+  boundary.boundary_regrid_method:
+    label: Regrid method
+    symbol: regrid_method
+    hint: Horizontal regrid engine.
+  boundary.boundary_extrap_method:
+    label: Extrapolation method
+    symbol: extrap_method
+    hint: Destination extrapolation on the default (no-prefill) path to guarantee NaN-free boundaries.
+  boundary.boundary_validate:
+    label: Validate boundary conditions
+    hint: Runs roms-tools' post-construction validation (NaN-at-wet-point checks).
+  boundary.boundary_options:
+    label: Additional options
+
+  # ===========================================================================
+  # forcing.row.* -- per-row forcing widgets (examples only; filled in later)
+  # ===========================================================================
+  forcing.row.name:
+    label: Source
+    symbol: name
+  forcing.row.type:
+    label: Type
+    symbol: type
+  forcing.row.climatology:
+    label: Climatology
+    symbol: climatology
+
+  # ===========================================================================
+  # settings.<section>.<field> -- Advanced settings (examples only; filled in later)
+  # ===========================================================================
+  settings.bgc.xco2air_default:
+    label: Static xco2air
+    symbol: xco2air_default
+    hint: Used when co2_tvarying is False.
+
+  # ===========================================================================
+  # buttons.<name> -- button captions (examples only; filled in later)
+  # ===========================================================================
+  buttons.save:
+    label: Save to disk
+    symbol: save
+  buttons.run:
+    label: Run
+    symbol: run
+  buttons.reload:
+    label: Reload catalog
+    symbol: reload
+
+  # ===========================================================================
+  # forcing rows, buttons, Advanced settings fields (coordinator glossary pass)
+  # ===========================================================================
+  forcing.row.path:
+    label: Path
+    hint: Local directory or URL.
+  forcing.row.glorys_layout:
+    label: GLORYS layout
+  forcing.row.correct_radiation:
+    label: Correct radiation
+  forcing.row.wind_dropoff:
+    label: Coastal wind drop-off
+  forcing.row.coarse_grid_mode:
+    label: Coarse grid
+  forcing.row.restoring_forces:
+    label: Restore variables
+  forcing.row.use_vars:
+    label: Variables to read
+  forcing.row.bgc_interpolation_method:
+    label: BGC interpolation
+  forcing.row.constants:
+    label: Constant values
+  forcing.row.esper_method:
+    label: ESPER method
+  forcing.row.esper_equation:
+    label: ESPER equation
+  forcing.row.prefill:
+    label: Prefill
+  forcing.row.regrid_method:
+    label: Regrid method
+  forcing.row.extrap_method:
+    label: Extrapolation
+  forcing.row.ntides:
+    label: Tidal constituents
+    symbol: ntides
+  forcing.row.include_bgc:
+    label: Include biogeochemistry
+  forcing.row.convert_to_climatology:
+    label: Climatology mode
+  forcing.row.coast_snap_buffer_km:
+    label: Snap rivers to coast within
+    unit: km
+  forcing.row.domain_edge_buffer:
+    label: Edge buffer
+    unit: cells
+  forcing.row.bgc_source_name:
+    label: BGC source
+  forcing.row.bgc_source_path:
+    label: BGC path
+  forcing.row.custom_file_path:
+    label: File
+  forcing.row.options:
+    label: Advanced roms-tools options
+  forcing.row.surface_forcing_source_name:
+    label: Temperature source
+  forcing.row.surface_forcing_source_path:
+    label: Temperature path
+  forcing.row.river_temp_smoothing_window_days:
+    label: Temperature smoothing window
+    unit: days
+  buttons.refresh_plot:
+    label: Refresh preview
+  buttons.derive:
+    label: Derive from grid
+  buttons.compute_dt:
+    label: Compute from CFL
+  buttons.attach:
+    label: Attach file
+  buttons.detach:
+    label: Detach file
+  buttons.load:
+    label: Load
+  buttons.save_disk:
+    label: Save to disk
+  buttons.save_spec:
+    label: Save as new catalog entry
+  buttons.workplan:
+    label: Save workplan (experimental)
+  settings.lateral_visc.visc2:
+    label: Horizontal viscosity
+    symbol: visc2
+    unit: m²/s
+  settings.lateral_visc.rho0:
+    label: Reference density
+    symbol: rho0
+    unit: kg/m³
+  settings.vertical_mixing.akv:
+    label: Background vertical viscosity
+    symbol: akv
+    unit: m²/s
+  settings.vertical_mixing.akt_default:
+    label: Background vertical diffusivity
+    symbol: akt_default
+    unit: m²/s
+  settings.tracer_diff2.tnu2_default:
+    label: Horizontal tracer diffusivity
+    symbol: tnu2_default
+    unit: m²/s
+  settings.bottom_drag.rdrg:
+    label: Linear bottom drag
+    symbol: rdrg
+    unit: m/s
+  settings.bottom_drag.rdrg2:
+    label: Quadratic bottom drag
+    symbol: rdrg2
+  settings.bottom_drag.zob:
+    label: Bottom roughness length
+    symbol: zob
+    unit: m
+  settings.sponge_tune.ub_tune:
+    label: Tune barotropic sponge
+    symbol: ub_tune
+  settings.sponge_tune.spn_avg:
+    label: Write sponge averages
+    symbol: spn_avg
+  settings.sponge_tune.sp_timscale:
+    label: Sponge time scale
+    symbol: sp_timscale
+    unit: s
+  settings.sponge_tune.wrt_sponge:
+    label: Write sponge fields
+    symbol: wrt_sponge
+  settings.sponge_tune.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.sponge_tune.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.lin_rho_eos.tcoef:
+    label: Thermal expansion coefficient
+    symbol: tcoef
+  settings.lin_rho_eos.t0:
+    label: Reference temperature
+    symbol: t0
+    unit: °C
+  settings.lin_rho_eos.scoef:
+    label: Saline contraction coefficient
+    symbol: scoef
+  settings.lin_rho_eos.s0:
+    label: Reference salinity
+    symbol: s0
+    unit: PSU
+  settings.pio_settings.pio_stride:
+    label: PIO stride
+    symbol: pio_stride
+    hint: Number of MPI ranks per I/O task.
+  settings.blk_frc.interp_frc:
+    label: Interpolate from coarser grid
+    symbol: interp_frc
+  settings.blk_frc.check_bulk_frc_units:
+    label: Check forcing units
+    symbol: check_bulk_frc_units
+  settings.flux_frc.interp_flux_frc:
+    label: Interpolate from coarser grid
+    symbol: interp_flux_frc
+  settings.tides.bry_tides:
+    label: Barotropic tides at boundaries
+    symbol: bry_tides
+  settings.tides.pot_tides:
+    label: Tidal potential forcing
+    symbol: pot_tides
+  settings.tides.ana_tides:
+    label: Analytical tides
+    symbol: ana_tides
+  settings.tides.ntides:
+    label: Tidal constituents
+    symbol: ntides
+  settings.pipe_frc.pipe_source:
+    label: Enable pipe sources
+    symbol: pipe_source
+  settings.pipe_frc.p_analytical:
+    label: Analytical pipe sources
+    symbol: p_analytical
+  settings.pipe_frc.npip:
+    label: Number of pipes
+    symbol: npip
+  settings.sss_correction.dsssdt:
+    label: Salinity restoring rate
+    symbol: dsssdt
+  settings.sst_correction.dsstdt:
+    label: Temperature restoring rate
+    symbol: dsstdt
+  settings.dic_alk_correction.dcdt:
+    label: DIC and alkalinity restoring rate
+    symbol: dcdt
+  settings.bgc.interp_frc:
+    label: Interpolate BGC forcing
+    symbol: interp_frc
+  settings.bgc.wrt_his:
+    label: Write BGC history
+    symbol: wrt_his
+  settings.bgc.output_period_his:
+    label: BGC history period
+    symbol: output_period_his
+    unit: s
+  settings.bgc.nrpf_his:
+    label: BGC history records per file
+    symbol: nrpf_his
+  settings.bgc.wrt_avg:
+    label: Write BGC averages
+    symbol: wrt_avg
+  settings.bgc.output_period_avg:
+    label: BGC averaging period
+    symbol: output_period_avg
+    unit: s
+  settings.bgc.nrpf_avg:
+    label: BGC average records per file
+    symbol: nrpf_avg
+  settings.bgc.wrt_his_dia:
+    label: Write BGC diagnostics history
+    symbol: wrt_his_dia
+  settings.bgc.wrt_avg_dia:
+    label: Write BGC diagnostics averages
+    symbol: wrt_avg_dia
+  settings.marbl_bgc.marbl_config_file:
+    label: MARBL settings file
+    symbol: marbl_config_file
+  settings.marbl_bgc.marbl_timestep:
+    label: MARBL time step
+    symbol: marbl_timestep
+    unit: s
+  settings.marbl_bgc.marbl_tracers_to_write:
+    label: MARBL tracers to write
+    symbol: marbl_tracers_to_write
+  settings.marbl_bgc.marbl_diagnostics_to_write:
+    label: MARBL diagnostics to write
+    symbol: marbl_diagnostics_to_write
+  settings.cdr_output.do_cdr_output:
+    label: Write CDR output
+    symbol: do_cdr_output
+  settings.cdr_output.do_avg:
+    label: Averaging
+    symbol: do_avg
+  settings.cdr_output.monthly_averages:
+    label: Averaging cadence
+    symbol: monthly_averages
+  settings.cdr_output.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.cdr_output.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.ocean_vars.wrt_file_his:
+    label: Write instantaneous history files
+    symbol: wrt_file_his
+  settings.ocean_vars.output_period_his:
+    label: History output period
+    symbol: output_period_his
+    unit: s
+  settings.ocean_vars.nrpf_his:
+    label: History records per file
+    symbol: nrpf_his
+  settings.ocean_vars.wrt_file_avg:
+    label: Write averaged history files
+    symbol: wrt_file_avg
+  settings.ocean_vars.output_period_avg:
+    label: Averaging period
+    symbol: output_period_avg
+    unit: s
+  settings.ocean_vars.nrpf_avg:
+    label: Average records per file
+    symbol: nrpf_avg
+  settings.ocean_vars.wrt_file_rst:
+    label: Write restart files
+    symbol: wrt_file_rst
+  settings.ocean_vars.monthly_restarts:
+    label: Monthly restarts
+    symbol: monthly_restarts
+  settings.ocean_vars.output_period_rst:
+    label: Restart period
+    symbol: output_period_rst
+    unit: s
+  settings.ocean_vars.nrpf_rst:
+    label: Restart records per file
+    symbol: nrpf_rst
+  settings.ocean_vars.wrt_z:
+    label: Sea surface height (zeta)
+    symbol: wrt_z
+  settings.ocean_vars.wrt_ub:
+    label: Barotropic u (ubar)
+    symbol: wrt_ub
+  settings.ocean_vars.wrt_vb:
+    label: Barotropic v (vbar)
+    symbol: wrt_vb
+  settings.ocean_vars.wrt_u:
+    label: Velocity u
+    symbol: wrt_u
+  settings.ocean_vars.wrt_v:
+    label: Velocity v
+    symbol: wrt_v
+  settings.ocean_vars.wrt_r:
+    label: Density (rho)
+    symbol: wrt_r
+  settings.ocean_vars.wrt_o:
+    label: Vertical velocity (omega)
+    symbol: wrt_o
+  settings.ocean_vars.wrt_w:
+    label: Vertical velocity (w)
+    symbol: wrt_w
+  settings.ocean_vars.wrt_akv:
+    label: Vertical viscosity (Akv)
+    symbol: wrt_akv
+  settings.ocean_vars.wrt_akt:
+    label: Vertical diffusivity (Akt)
+    symbol: wrt_akt
+  settings.ocean_vars.wrt_aks:
+    label: Salinity diffusivity (Aks)
+    symbol: wrt_aks
+  settings.ocean_vars.wrt_hbls:
+    label: Surface boundary-layer depth (hbls)
+    symbol: wrt_hbls
+  settings.ocean_vars.wrt_hbbl:
+    label: Bottom boundary-layer depth (hbbl)
+    symbol: wrt_hbbl
+  settings.surf_flux.wrt_smflx:
+    label: Surface momentum flux
+    symbol: wrt_smflx
+  settings.surf_flux.wrt_stflx:
+    label: Surface tracer flux
+    symbol: wrt_stflx
+  settings.surf_flux.wrt_rstflx:
+    label: Restoring tracer flux
+    symbol: wrt_rstflx
+  settings.surf_flux.wrt_swflx:
+    label: Shortwave flux
+    symbol: wrt_swflx
+  settings.surf_flux.sflx_avg:
+    label: Write averages
+    symbol: sflx_avg
+  settings.surf_flux.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.surf_flux.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.diagnostics.diag_avg:
+    label: Write averaged diagnostics
+    symbol: diag_avg
+  settings.diagnostics.diag_uv:
+    label: Momentum diagnostics
+    symbol: diag_uv
+  settings.diagnostics.diag_trc:
+    label: Tracer diagnostics
+    symbol: diag_trc
+  settings.diagnostics.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.diagnostics.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.stdout_diag.code_check_mode:
+    label: Code-check mode
+    symbol: code_check_mode
+  settings.ts_output.wrt_temp:
+    label: Temperature
+    symbol: wrt_temp
+  settings.ts_output.wrt_salt:
+    label: Salinity
+    symbol: wrt_salt
+  settings.ts_output.wrt_temp_dia:
+    label: Temperature diagnostics
+    symbol: wrt_temp_dia
+  settings.ts_output.wrt_salt_dia:
+    label: Salinity diagnostics
+    symbol: wrt_salt_dia
+  settings.frc_output.wrt_frc:
+    label: Write forcing fields
+    symbol: wrt_frc
+  settings.frc_output.wrt_frc_avg:
+    label: Write forcing averages
+    symbol: wrt_frc_avg
+  settings.frc_output.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.frc_output.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.upscale_output.do_upscale:
+    label: Write upscaled output
+    symbol: do_upscale
+  settings.upscale_output.output_period_uscl:
+    label: Upscaled output period
+    symbol: output_period_uscl
+    unit: s
+  settings.upscale_output.nrpf_uscl:
+    label: Upscaled records per file
+    symbol: nrpf_uscl
+  settings.zslice.do_zslice:
+    label: Write depth slices
+    symbol: do_zslice
+  settings.zslice.zslice_avg:
+    label: Average depth slices
+    symbol: zslice_avg
+  settings.zslice.ndep:
+    label: Number of depths
+    symbol: ndep
+  settings.zslice.vecdep:
+    label: Slice depths
+    symbol: vecdep
+    unit: m
+  settings.zslice.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.zslice.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.random_output.do_random:
+    label: Enable random output
+    symbol: do_random
+  settings.random_output.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.random_output.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.calc_pflx.calc_pflx:
+    label: Calculate pressure fluxes
+    symbol: calc_pflx
+  settings.calc_pflx.timescale:
+    label: Time scale
+    symbol: timescale
+    unit: s
+  settings.particles.floats:
+    label: Enable floats
+    symbol: floats
+  settings.particles.np:
+    label: Number of particles
+    symbol: np
+  settings.particles.output_period:
+    label: Output period
+    symbol: output_period
+    unit: s
+  settings.particles.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.extract_data.do_extract:
+    label: Extract child-grid boundaries
+    symbol: do_extract
+  settings.extract_data.extract_file:
+    label: Extraction definition file
+    symbol: extract_file
+  settings.extract_data.extract_period:
+    label: Extraction period
+    symbol: extract_period
+    unit: s
+  settings.extract_data.extract_root_name:
+    label: Extraction file prefix
+    symbol: extract_root_name
+  settings.extract_data.n_chd:
+    label: Child vertical levels
+    symbol: n_chd
+  settings.extract_data.theta_s_chd:
+    label: Child surface stretching
+    symbol: theta_s_chd
+  settings.extract_data.theta_b_chd:
+    label: Child bottom stretching
+    symbol: theta_b_chd
+  settings.extract_data.hc_chd:
+    label: Child critical depth
+    symbol: hc_chd
+    unit: m
+  settings.extract_data.nrpf:
+    label: Records per file
+    symbol: nrpf
+  settings.cdr_frc.cdr_source:
+    label: Enable CDR forcing
+    symbol: cdr_source
+  settings.cdr_frc.cdr_file:
+    label: CDR forcing file
+    symbol: cdr_file
+  settings.cdr_frc.ncdr_parm:
+    label: Number of CDR parameters
+    symbol: ncdr_parm
+  settings.cdr_frc.cdr_volume:
+    label: Volume-type forcing
+    symbol: cdr_volume
+  settings.cdr_frc.relocate_to_wet_pts:
+    label: Relocate releases to wet points
+    symbol: relocate_to_wet_pts
+  settings.cdr_frc.time_interpolation:
+    label: Interpolate in time
+    symbol: time_interpolation
+  settings.cppdefs.sponge_tune:
+    label: Enable sponge tuning
+    symbol: sponge_tune
+  settings.cppdefs.nhy_forcing:
+    label: Hydrological forcing (NHY)
+    symbol: nhy_forcing
+  settings.cppdefs.nox_forcing:
+    label: NOx deposition forcing
+    symbol: nox_forcing
+  settings.cppdefs.parabolic_splines:
+    label: Parabolic-spline vertical tracer advection
+    symbol: parabolic_splines
+    hint: 'ucla-roms >= 0.8.0: restores the pre-0.8 spline reconstruction (PARABOLIC_SPLINES). Off = the 0.8 default thickness-aware C4/U3 scheme. Earlier releases always use splines and ignore this switch.'
+  settings.cppdefs.upstream_ts_land_curv:
+    label: Drop UPSTREAM_TS curvature at land faces
+    symbol: upstream_ts_land_curv
+    hint: 'ucla-roms >= 0.8.0: zero the 3rd-order curvature term on tracer faces whose stencil touches land (UPSTREAM_TS_LAND_CURV), avoiding overshoots at the first wet point. Ignored by earlier releases.'
+  settings.ocean_vars.wrt_avg_z:
+    label: Sea surface height (zeta)
+    symbol: wrt_avg_z
+  settings.ocean_vars.wrt_avg_ub:
+    label: Barotropic u (ubar)
+    symbol: wrt_avg_ub
+  settings.ocean_vars.wrt_avg_vb:
+    label: Barotropic v (vbar)
+    symbol: wrt_avg_vb
+  settings.ocean_vars.wrt_avg_u:
+    label: Velocity u
+    symbol: wrt_avg_u
+  settings.ocean_vars.wrt_avg_v:
+    label: Velocity v
+    symbol: wrt_avg_v
+  settings.ocean_vars.wrt_avg_r:
+    label: Density (rho)
+    symbol: wrt_avg_r
+  settings.ocean_vars.wrt_avg_o:
+    label: Vertical velocity (omega)
+    symbol: wrt_avg_o
+  settings.ocean_vars.wrt_avg_w:
+    label: Vertical velocity (w)
+    symbol: wrt_avg_w
+  settings.ocean_vars.wrt_avg_akv:
+    label: Vertical viscosity (Akv)
+    symbol: wrt_avg_akv
+  settings.ocean_vars.wrt_avg_akt:
+    label: Vertical diffusivity (Akt)
+    symbol: wrt_avg_akt
+  settings.ocean_vars.wrt_avg_aks:
+    label: Salinity diffusivity (Aks)
+    symbol: wrt_avg_aks
+  settings.ocean_vars.wrt_avg_hbls:
+    label: Surface boundary-layer depth (hbls)
+    symbol: wrt_avg_hbls
+  settings.ocean_vars.wrt_avg_hbbl:
+    label: Bottom boundary-layer depth (hbbl)
+    symbol: wrt_avg_hbbl
+  settings.zslice.wrt_t_zsl:
+    label: Temperature
+    symbol: wrt_t_zsl
+  settings.zslice.wrt_u_zsl:
+    label: Velocity u
+    symbol: wrt_u_zsl
+  settings.zslice.wrt_v_zsl:
+    label: Velocity v
+    symbol: wrt_v_zsl
+  settings.zslice.nt_z:
+    label: Number of tracers to slice
+    symbol: nt_z
+  settings.zslice.trc2zsc:
+    label: Tracer indices to slice
+    symbol: trc2zsc

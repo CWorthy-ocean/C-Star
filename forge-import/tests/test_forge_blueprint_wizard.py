@@ -1,0 +1,4277 @@
+"""Tests for the ipywidgets ForgeBlueprintWizard UI (cstar_forge.forge_blueprint_wizard).
+
+These target the wizard-feedback fixes: conditional field visibility, forcing-row
+option ordering, the ntides sync into model_settings, and the nesting-section
+plot_nesting wiring. Widget construction is lightweight (no grid/network I/O — the
+live preview resolves via ``dt``, never building a roms_tools.Grid), so these run
+as fast unit tests.
+"""
+
+from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
+from typing import ClassVar
+
+import pytest
+
+from cstar_forge.forge.forge_blueprint import (
+    BgcSourceItem,
+    Forcing,
+    SurfaceForcingItem,
+)
+from cstar_forge.forge.namelist_model import (
+    RunTimeSettings,
+    RunTimeSettingsV0_5_0,
+    RunTimeSettingsV0_6_0,
+    RunTimeSettingsV0_7_0,
+)
+from cstar_forge.forge_blueprint_wizard import (
+    _ACCORDION_EXCLUDED_FIELDS,
+    _BOUNDARY_NONE,
+    _OUTPUT_TABLES,
+    ForgeBlueprintWizard,
+    _drain_stream_buffer,
+    _ForcingEditor,
+    _section_submodel,
+    _SettingsEditor,
+)
+
+try:
+    from cstar.orchestration.models import DeferredBlueprintRef  # noqa: F401
+
+    _CSTAR_HAS_DEFERRED_BLUEPRINT = True
+except ImportError:
+    _CSTAR_HAS_DEFERRED_BLUEPRINT = False
+
+requires_workplan_support = pytest.mark.skipif(
+    not _CSTAR_HAS_DEFERRED_BLUEPRINT,
+    reason=(
+        "installed C-Star lacks workplan deferred-blueprint support "
+        "(DeferredBlueprintRef not in cstar.orchestration.models)"
+    ),
+)
+
+
+@pytest.fixture
+def editor():
+    import ipywidgets as W
+
+    return _ForcingEditor(W, {}, on_change=lambda: None)
+
+
+def _display(widget) -> str:
+    return getattr(widget.layout, "display", "") or ""
+
+
+def _find_section(w, title_fragment):
+    """Recursively find the VBox whose direct HTML title child contains the given
+    fragment (mirrors the wizard's ``section()`` layout helper).
+    """
+    for c in getattr(w, "children", []):
+        html = getattr(c, "value", None)
+        if isinstance(html, str) and title_fragment in html:
+            return w
+        found = _find_section(c, title_fragment)
+        if found is not None:
+            return found
+    return None
+
+
+def _find_card(root, key):
+    """Recursively find the ``components.card`` VBox tagged ``forge_key == key``
+    under ``root`` (see ``cstar_forge.ui.components.card``).
+    """
+    if getattr(root, "forge_key", None) == key:
+        return root
+    for c in getattr(root, "children", []):
+        found = _find_card(c, key)
+        if found is not None:
+            return found
+    return None
+
+
+def _descendants(w):
+    """Yield ``w`` and every widget nested under it (depth-first, pre-order)."""
+    yield w
+    for c in getattr(w, "children", []):
+        yield from _descendants(c)
+
+
+def test_surface_row_visibility_by_type(editor):
+    """Item 2/8: restore/corr_rad/wind_dropoff only show for their relevant type."""
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
+    assert _display(w["correct_radiation"]) == ""  # physics -> shown
+    assert _display(w["wind_dropoff"]) == ""
+    assert _display(w["restoring_forces"]) == "none"  # not restoring -> hidden
+
+    w["type"].value = "restoring"
+    assert _display(w["restoring_forces"]) == ""  # restoring -> shown
+    assert _display(w["correct_radiation"]) == "none"  # no longer physics -> hidden
+    assert _display(w["wind_dropoff"]) == "none"
+
+    w["type"].value = "bgc"
+    assert _display(w["restoring_forces"]) == "none"
+    assert _display(w["correct_radiation"]) == "none"
+    assert _display(w["wind_dropoff"]) == "none"
+
+
+def test_boundary_row_layout_visibility_by_source_name(editor):
+    """Item 7: glorys_layout only shows when the source name is GLORYS. Boundary's
+    physics source is a required scalar now (self.boundary_name/boundary_layout,
+    mirroring IC's), not a row -- see __init__/_ROW_CATEGORIES. BGC boundary
+    sources (UNIFIED/CESM_REGRIDDED/GLODAP/constants/ESPER) live in their own
+    "boundary_bgc" row-list/pane instead, which never offers GLORYS and has no
+    glorys_layout widget at all (not just hidden -- absent).
+    """
+    assert editor.boundary_name.value == "GLORYS"
+    assert _display(editor.boundary_layout) == ""
+
+    bgc_w = editor._make_row("boundary_bgc", {"source": {"name": "UNIFIED"}})
+    assert bgc_w["name"].value != "GLORYS"
+    assert "glorys_layout" not in bgc_w
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+@pytest.mark.parametrize("name", ["constants", "ESPER", "GLODAP"])
+def test_climatology_hidden_for_static_bgc_sources(editor, cat, name):
+    """None of these sources has a time axis of its own -- constants is inline
+    values, ESPER is derived from the physics T/S, and GLODAP is a single static
+    field -- so none can be a climatology, and roms-tools raises ValueError if one
+    is handed climatology=True. Hiding the checkbox keeps that unreachable.
+    """
+    w = editor._make_row(cat, {"source": {"name": name}})
+    assert _display(w["climatology"]) == "none"
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_climatology_shown_for_dataset_backed_bgc_sources(editor, cat):
+    """The gate is only about the static sources -- a regridded, time-varying
+    dataset still gets the checkbox.
+    """
+    for name in ("UNIFIED", "WOA_BGC"):
+        w = editor._make_row(cat, {"source": {"name": name}})
+        assert _display(w["climatology"]) == "", name
+
+
+def test_glodap_keeps_regrid_knobs_unlike_constants_and_esper(editor):
+    """GLODAP has a wider climatology gate than the regrid gate: it IS a regridded
+    dataset, so hiding its climatology must not sweep away the regrid knobs the way
+    the derived pseudo-sources do.
+    """
+    w = editor._make_row("boundary_bgc", {"source": {"name": "GLODAP"}})
+    assert _display(w["climatology"]) == "none"
+    assert _display(w["bgc_interpolation_method"]) == ""  # still regridded
+
+    w = editor._make_row("boundary_bgc", {"source": {"name": "constants"}})
+    assert _display(w["bgc_interpolation_method"]) == "none"  # not a dataset at all
+
+
+def test_stale_climatology_not_emitted_after_switch_to_static_source(editor):
+    """The checkbox is hidden rather than destroyed, so a tick left over from a
+    previously selected source would otherwise be gathered into the blueprint and
+    trip roms-tools' validation on a source that can never be a climatology.
+    """
+    w = editor._make_row(
+        "boundary_bgc", {"source": {"name": "UNIFIED", "climatology": True}}
+    )
+    assert editor._gather_item("boundary_bgc", w)["source"]["climatology"] is True
+
+    w["name"].value = "GLODAP"
+    editor._apply_row_visibility(w)
+    assert w["climatology"].value is True  # widget state survives the switch
+    assert "climatology" not in editor._gather_item("boundary_bgc", w)["source"]
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_esper_dropdown_is_labelled_experimental_but_stores_plain_name(editor, cat):
+    """PyESPER support is experimental, and the dropdown says so -- but the label is
+    presentation only: the blueprint must still carry the bare "ESPER" source name.
+    """
+    w = editor._make_row(cat, {"source": {"name": "ESPER"}})
+    assert ("ESPER (experimental)", "ESPER") in w["name"].options
+    assert w["name"].value == "ESPER"
+    assert editor._gather_item(cat, w)["source"]["name"] == "ESPER"
+
+
+def test_unlabelled_sources_keep_their_bare_name_in_the_dropdown(editor):
+    """Only ESPER carries a display label; every other source is its own label, so
+    `(label, value)` options must not change what the rest of the UI sees.
+    """
+    w = editor._make_row("boundary_bgc", {"source": {"name": "UNIFIED"}})
+    assert ("UNIFIED", "UNIFIED") in w["name"].options
+    assert [value for _label, value in w["name"].options] == [
+        "UNIFIED",
+        "CESM_REGRIDDED",
+        "GLODAP",
+        "WOA_BGC",
+        "constants",
+        "ESPER",
+    ]
+
+
+def test_type_switch_rebuilds_labelled_options(editor):
+    """Changing a surface row's type rewrites the source dropdown; membership there
+    has to be tested against the bare names, not the (label, value) pairs, or the
+    value reset would fire on every switch.
+    """
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
+    w["type"].value = "bgc"
+    assert [value for _label, value in w["name"].options] == [
+        "UNIFIED",
+        "CESM_REGRIDDED",
+        "MBL_co2",
+    ]
+    assert w["name"].value == "UNIFIED"
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+@pytest.mark.parametrize("name", ["ESPER", "UNIFIED"])
+def test_serialize_dask_is_not_offered_as_a_widget(editor, cat, name):
+    """`serialize_dask` is deliberately unexposed, for every source including ESPER.
+
+    PyESPER serialises entry into its own numba kernels with a per-process
+    semaphore, so the flag no longer buys the protection it was added for -- it
+    only forces the rest of that write onto the one-task-at-a-time path. It stays
+    a blueprint field and a CLI flag for manual troubleshooting.
+    """
+    w = editor._make_row(cat, {"source": {"name": name}})
+    assert "serialize_dask" not in w
+    item = editor._gather_item(cat, w)
+    assert "serialize_dask" not in item
+    assert "serialize_dask" not in item["source"]
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_serialize_dask_round_trips_when_the_blueprint_already_set_it(editor, cat):
+    """Loading a blueprint that sets it and re-saving must not drop it.
+
+    The wizard has no widget for it, but silently rewriting someone's blueprint on
+    an unrelated edit is worse than leaving a field they can delete deliberately --
+    and `_build_bgc_section` has already been bitten once by dropping exactly this
+    field. It lands at item level, never inside `source`, where roms-tools'
+    extra="forbid" validation would reject it.
+    """
+    w = editor._make_row(cat, {"source": {"name": "ESPER"}, "serialize_dask": True})
+    item = editor._gather_item(cat, w)
+    assert item["serialize_dask"] is True
+    assert "serialize_dask" not in item["source"]
+
+
+def test_serialize_dask_not_invented_for_rows_that_lacked_it(editor):
+    """An untouched row stays absent, so the source keeps inheriting the CLI flag
+    rather than pinning a hard value.
+    """
+    w = editor._make_row("ic_bgc", {"source": {"name": "ESPER"}})
+    assert "serialize_dask" not in editor._gather_item("ic_bgc", w)
+
+
+def test_serialize_dask_not_offered_on_surface_rows(editor):
+    """Surface bgc is not a BgcSourceItem -- its schema has no `serialize_dask`, and
+    `_Section` is extra="forbid", so emitting one there would fail validation.
+    """
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "UNIFIED"}})
+    assert "serialize_dask" not in w
+    assert "serialize_dask" not in editor._gather_item("surface", w)
+
+
+def test_surface_row_never_shows_layout(editor):
+    """Surface sources never include GLORYS, so the layout box is always hidden."""
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
+    assert _display(w["glorys_layout"]) == "none"
+
+
+def test_ic_layout_visibility_initial_state():
+    """Item 7 (IC side): glorys_layout is shown for the (currently sole) IC source,
+    GLORYS. InitialConditionsSource has only one member today, so the hidden branch
+    can't be exercised via the dropdown; this pins the visible/default case.
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {"initial_conditions": {"source": {"name": "GLORYS"}}},
+        on_change=lambda: None,
+    )
+    assert ed.ic_name.value == "GLORYS"
+    assert _display(ed.ic_layout) == ""
+
+
+def test_row_box_puts_remove_button_first_then_type(editor):
+    """The remove button is always left-most (never clipped off-screen by a wide
+    row -- see _row_box); `type` (when present) comes right after it.
+    """
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "ERA5"}})
+    box = editor._row_box(w)
+    assert box.children[0] is w["_remove_btn"]
+    assert box.children[1] is w["type"]
+
+
+def test_row_box_without_type_unaffected(editor):
+    """tidal/river rows have no `type`; ordering must not error or reorder oddly."""
+    w = editor._make_row("tidal", {"ntides": 15, "source": {"name": "TPXO"}})
+    box = editor._row_box(w)
+    assert w["ntides"] in box.children
+
+
+def test_boundary_bgc_add_and_remove_buttons_always_present(editor):
+    """The "boundary_bgc" row-list (the only boundary row-list now -- physics is a required
+    scalar, see __init__) keeps its add/remove buttons regardless of row count,
+    like every other bgc row-list ("ic_bgc").
+    """
+    assert editor._rows["boundary_bgc"] == []
+    editor._render("boundary_bgc")
+    assert any(
+        getattr(c, "description", "") == "add bgc source"
+        for c in editor._containers["boundary_bgc"].children
+    )
+
+    editor._add("boundary_bgc")
+    assert len(editor._rows["boundary_bgc"]) == 1
+    remove_btn = editor._rows["boundary_bgc"][0]["_remove_btn"]
+    assert remove_btn.layout.display == ""
+    assert any(
+        getattr(c, "description", "") == "add bgc source"
+        for c in editor._containers["boundary_bgc"].children
+    )
+
+
+@pytest.mark.parametrize("cat", ["surface", "tidal"])
+def test_regrid_widgets_present_and_gathered(editor, cat):
+    """prefill/regrid_method/extrap_method dropdowns (roms-tools >=4) are built for
+    surface, boundary, and tidal rows alike, and a non-blank selection round-trips
+    through ``_gather_item``.
+    """
+    seed = {"source": {"name": "TPXO" if cat == "tidal" else "ERA5"}}
+    if cat != "tidal":
+        seed["type"] = "physics"
+    w = editor._make_row(cat, seed)
+    assert w["prefill"].value == ""  # blank sentinel = leave unset
+    assert w["regrid_method"].value == ""
+    assert w["extrap_method"].value == ""
+
+    w["prefill"].value = "inverse_dist"
+    w["regrid_method"].value = "xesmf"
+    w["extrap_method"].value = "nearest_s2d"
+    item = editor._gather_item(cat, w)
+    assert item["prefill"] == "inverse_dist"
+    assert item["regrid_method"] == "xesmf"
+    assert item["extrap_method"] == "nearest_s2d"
+
+
+def test_ic_regrid_widgets_seed_gather_and_layout():
+    """IC prefill/regrid_method/extrap_method dropdowns seed from a loaded config,
+    gather back into the authored dict, and are actually placed in the displayed
+    ic_box (a widget built but never laid out renders invisibly).
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "prefill": "nearest_neighbor",
+                "regrid_method": "scipy",
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.ic_prefill.value == "nearest_neighbor"
+    assert ed.ic_regrid_method.value == "scipy"
+    assert ed.ic_extrap_method.value == ""
+
+    ed.ic_extrap_method.value = "nearest_s2d"
+    gathered = ed.gather()
+    ic = gathered["initial_conditions"]
+    assert ic["prefill"] == "nearest_neighbor"
+    assert ic["regrid_method"] == "scipy"
+    assert ic["extrap_method"] == "nearest_s2d"
+
+    # layout check: the widgets must actually be reachable from the rendered widget
+    all_children = []
+
+    def _walk(node):
+        all_children.append(node)
+        for c in getattr(node, "children", []):
+            _walk(c)
+
+    _walk(ed.widget)
+    assert ed.ic_prefill in all_children
+    assert ed.ic_regrid_method in all_children
+    assert ed.ic_extrap_method in all_children
+
+
+def test_boundary_regrid_widgets_seed_gather_and_layout():
+    """Boundary's prefill/regrid_method/extrap_method dropdowns (a scalar group,
+    mirroring IC's -- see __init__/gather()) seed from a loaded config, gather
+    back into the authored dict, and are actually placed in the rendered widget.
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "forcing": {
+                "boundary": {
+                    "source": {"name": "GLORYS"},
+                    "prefill": "nearest_neighbor",
+                    "regrid_method": "scipy",
+                }
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.boundary_prefill.value == "nearest_neighbor"
+    assert ed.boundary_regrid_method.value == "scipy"
+    assert ed.boundary_extrap_method.value == ""
+
+    ed.boundary_extrap_method.value = "nearest_s2d"
+    gathered = ed.gather()
+    boundary = gathered["forcing"]["boundary"]
+    assert boundary["prefill"] == "nearest_neighbor"
+    assert boundary["regrid_method"] == "scipy"
+    assert boundary["extrap_method"] == "nearest_s2d"
+
+    all_children = []
+
+    def _walk(node):
+        all_children.append(node)
+        for c in getattr(node, "children", []):
+            _walk(c)
+
+    _walk(ed.widget)
+    assert ed.boundary_prefill in all_children
+    assert ed.boundary_regrid_method in all_children
+    assert ed.boundary_extrap_method in all_children
+
+
+def test_ic_bypass_validation_round_trips_through_editor():
+    """Item 7: the "validate" checkbox is checked (validation on) by default;
+    unchecking it must round-trip as ``bypass_validation: True`` and reload
+    still unchecked.
+    """
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bypass_validation": True,
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.ic_validate.value is False
+    gathered = ed.gather()
+    assert gathered["initial_conditions"]["bypass_validation"] is True
+
+    ed2 = _ForcingEditor(W, gathered, on_change=lambda: None)
+    assert ed2.ic_validate.value is False
+
+
+def test_boundary_bypass_validation_round_trips_through_editor():
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "forcing": {
+                "boundary": {
+                    "source": {"name": "GLORYS"},
+                    "bypass_validation": True,
+                }
+            }
+        },
+        on_change=lambda: None,
+    )
+    assert ed.boundary_validate.value is False
+    gathered = ed.gather()
+    assert gathered["forcing"]["boundary"]["bypass_validation"] is True
+
+    ed2 = _ForcingEditor(W, gathered, on_change=lambda: None)
+    assert ed2.boundary_validate.value is False
+
+
+def test_remove_middle_row_preserves_order(editor):
+    """Nit: removing a middle row must not reorder or drop its neighbors."""
+    for name in ("UNIFIED", "GLODAP", "WOA_BGC"):
+        editor._rows["ic_bgc"].append(
+            editor._make_row("ic_bgc", {"source": {"name": name}})
+        )
+    editor._render("ic_bgc")
+    assert len(editor._rows["ic_bgc"]) == 3
+
+    editor._remove("ic_bgc", editor._rows["ic_bgc"][1])
+
+    gathered = editor.gather()
+    assert [
+        b["source"]["name"] for b in gathered["initial_conditions"]["bgc_sources"]
+    ] == ["UNIFIED", "WOA_BGC"]
+
+
+# ===========================================================================
+# F1: a surface bgc row must never offer/emit `use_vars`/`constants`/`esper_*`
+# (SurfaceForcingItem has no `use_vars` field at all, and BgcSurfaceSource
+# never offers "constants"/"ESPER").
+# ===========================================================================
+
+
+def test_surface_bgc_row_never_gets_use_vars_or_bgc_source_widgets(editor):
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "UNIFIED"}})
+    assert "use_vars" not in w
+    assert "constants" not in w
+    assert "esper_method" not in w
+    assert "esper_equation" not in w
+
+
+def test_surface_bgc_row_gathers_a_validating_surface_forcing_item(editor):
+    """A surface bgc row (even with use_vars unavailable to type into) must
+    still gather to a dict that validates as ``SurfaceForcingItem`` --
+    ``use_vars`` is not part of that schema (``extra='forbid'``), so it must
+    never be emitted for a surface row the way it correctly is for ic_bgc/
+    boundary_bgc rows.
+    """
+    w = editor._make_row("surface", {"type": "bgc", "source": {"name": "UNIFIED"}})
+    item = editor._gather_item("surface", w)
+    assert "use_vars" not in item
+    SurfaceForcingItem(**item)
+
+
+# ===========================================================================
+# F2: constants/esper_method/esper_equation/per-row bgc_interpolation_method
+# must never leak from a hidden widget after the row's source name switches
+# away from the source they belong to; a 'constants' source takes no `path`.
+# ===========================================================================
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_stale_constants_not_emitted_after_switch_to_static_source(editor, cat):
+    w = editor._make_row(
+        cat, {"source": {"name": "constants", "constants": {"Fe": 0.003}}}
+    )
+    assert editor._gather_item(cat, w)["source"]["constants"] == {"Fe": 0.003}
+
+    w["name"].value = "UNIFIED"
+    editor._apply_row_visibility(w)
+    item = editor._gather_item(cat, w)
+    assert "constants" not in item["source"]
+    BgcSourceItem(**item)
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_stale_esper_fields_not_emitted_after_switch_to_static_source(editor, cat):
+    w = editor._make_row(
+        cat,
+        {"source": {"name": "ESPER", "esper_method": "lir", "esper_equation": 16}},
+    )
+    item = editor._gather_item(cat, w)
+    assert item["source"]["esper_method"] == "lir"
+    assert item["source"]["esper_equation"] == 16
+
+    w["name"].value = "GLODAP"
+    editor._apply_row_visibility(w)
+    item = editor._gather_item(cat, w)
+    assert "esper_method" not in item["source"]
+    assert "esper_equation" not in item["source"]
+    BgcSourceItem(**item)
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_path_hidden_and_not_emitted_for_constants_source(editor, cat):
+    w = editor._make_row(cat, {"source": {"name": "UNIFIED", "path": "/x/y.nc"}})
+    assert _display(w["path"]) == ""
+    assert editor._gather_item(cat, w)["source"]["path"] == "/x/y.nc"
+
+    w["name"].value = "constants"
+    editor._apply_row_visibility(w)
+    assert _display(w["path"]) == "none"
+    w["constants"].value = "Fe=0.003"
+    item = editor._gather_item(cat, w)
+    assert "path" not in item["source"]
+    BgcSourceItem(**item)
+
+
+@pytest.mark.parametrize("cat", ["ic_bgc", "boundary_bgc"])
+def test_stale_per_row_interp_not_emitted_for_derived_bgc_sources(editor, cat):
+    """constants/ESPER are derived/inline, not a regridded dataset -- a per-row
+    ``bgc_interpolation_method`` left over from a previously selected dataset-
+    backed source must not leak through once the row switches to one of them.
+    """
+    w = editor._make_row(
+        cat, {"source": {"name": "UNIFIED"}, "bgc_interpolation_method": "density"}
+    )
+    assert editor._gather_item(cat, w)["bgc_interpolation_method"] == "density"
+
+    w["name"].value = "constants"
+    w["constants"].value = "Fe=0.003"
+    editor._apply_row_visibility(w)
+    item = editor._gather_item(cat, w)
+    assert "bgc_interpolation_method" not in item
+    BgcSourceItem(**item)
+
+
+# ===========================================================================
+# F4: a pre-v8 ("old-shaped") ForcingSpec dict must migrate cleanly instead of
+# crashing ``_ForcingEditor.__init__`` or silently dropping data.
+# ===========================================================================
+
+
+def test_forcing_editor_migrates_singular_ic_bgc_source():
+    import ipywidgets as W
+
+    old_shaped = {
+        "initial_conditions": {
+            "source": {"name": "GLORYS"},
+            "bgc_source": {"name": "UNIFIED"},
+        },
+        "forcing": {},
+    }
+    ed = _ForcingEditor(W, old_shaped, on_change=lambda: None)
+    assert len(ed._rows["ic_bgc"]) == 1
+    assert ed._rows["ic_bgc"][0]["name"].value == "UNIFIED"
+    gathered = ed.gather()
+    assert gathered["initial_conditions"]["bgc_sources"] == [
+        {"source": {"name": "UNIFIED"}}
+    ]
+    # migration deep-copies before mutating -- the caller's dict is untouched
+    assert old_shaped["initial_conditions"]["bgc_source"] == {"name": "UNIFIED"}
+    assert "bgc_sources" not in old_shaped["initial_conditions"]
+
+
+def test_forcing_editor_migrates_list_shaped_boundary():
+    import ipywidgets as W
+
+    old_shaped = {
+        "initial_conditions": {"source": {"name": "GLORYS"}},
+        "forcing": {
+            "boundary": [
+                {"type": "physics", "source": {"name": "GLORYS"}},
+                {"type": "bgc", "source": {"name": "UNIFIED"}, "use_vars": ["ALK"]},
+            ]
+        },
+    }
+    ed = _ForcingEditor(W, old_shaped, on_change=lambda: None)
+    assert ed.boundary_name.value == "GLORYS"
+    assert len(ed._rows["boundary_bgc"]) == 1
+    gathered = ed.gather()
+    boundary = gathered["forcing"]["boundary"]
+    assert boundary["source"] == {"name": "GLORYS"}
+    assert boundary["bgc_sources"] == [
+        {"source": {"name": "UNIFIED"}, "use_vars": ["ALK"]}
+    ]
+    # migration deep-copies before mutating -- the caller's dict is untouched
+    assert isinstance(old_shaped["forcing"]["boundary"], list)
+
+
+# ===========================================================================
+# F9: "(none)" boundary sentinel -- a non-child domain must be able to express
+# "no boundary forcing at all" (``Forcing.boundary is None``), mirroring the
+# existing IC "(none)" sentinel.
+# ===========================================================================
+
+
+def test_boundary_none_option_present_in_dropdown(editor):
+    assert _BOUNDARY_NONE in editor.boundary_name.options
+
+
+def test_boundary_none_sentinel_gathers_null_boundary_and_hides_widgets(editor):
+    editor.boundary_name.value = _BOUNDARY_NONE
+    gathered = editor.gather()
+    assert gathered["forcing"]["boundary"] is None
+    assert _display(editor.boundary_path) == "none"
+    assert _display(editor.boundary_bgc_interp) == "none"
+    assert _display(editor._containers["boundary_bgc"]) == "none"
+
+    # switching back to a real source restores both the gathered dict and the
+    # widgets' visibility
+    editor.boundary_name.value = "GLORYS"
+    gathered2 = editor.gather()
+    assert gathered2["forcing"]["boundary"]["source"]["name"] == "GLORYS"
+    assert _display(editor.boundary_path) == ""
+    assert _display(editor._containers["boundary_bgc"]) == ""
+
+
+def test_boundary_none_sentinel_preserves_boundary_bgc_rows_across_switch(editor):
+    """Rows are hidden, not destroyed -- switching "(none)" on and back off must
+    not lose whatever boundary_bgc rows were already configured.
+    """
+    editor._rows["boundary_bgc"] = [
+        editor._make_row("boundary_bgc", {"source": {"name": "UNIFIED"}})
+    ]
+    editor._render("boundary_bgc")
+
+    editor.boundary_name.value = _BOUNDARY_NONE
+    assert len(editor._rows["boundary_bgc"]) == 1
+
+    editor.boundary_name.value = "GLORYS"
+    gathered = editor.gather()
+    assert gathered["forcing"]["boundary"]["bgc_sources"] == [
+        {"source": {"name": "UNIFIED"}}
+    ]
+
+
+def test_boundary_none_seeded_from_explicit_null_forcing_input():
+    import ipywidgets as W
+
+    ed = _ForcingEditor(
+        W,
+        {
+            "initial_conditions": {"source": {"name": "GLORYS"}},
+            "forcing": {"boundary": None},
+        },
+        on_change=lambda: None,
+    )
+    assert ed.boundary_name.value == _BOUNDARY_NONE
+    assert ed.gather()["forcing"]["boundary"] is None
+
+
+def test_sources_to_inputs_seeds_boundary_none_sentinel_for_missing_boundary():
+    """`_sources_to_inputs` must emit an explicit ``forcing["boundary"] = None``
+    (not merely omit the key) so a resolved config with no boundary forcing at
+    all reloads with the "(none)" sentinel selected, instead of falling back to
+    the fresh-wizard GLORYS default.
+    """
+    forcing = Forcing.model_validate(
+        {"initial_conditions": {"source": {"name": "GLORYS"}}, "boundary": None}
+    )
+    cfg = SimpleNamespace(forcing=forcing)
+    seed = ForgeBlueprintWizard._sources_to_inputs(cfg)
+    assert "boundary" in seed["forcing"]
+    assert seed["forcing"]["boundary"] is None
+
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, seed, on_change=lambda: None)
+    assert ed.boundary_name.value == _BOUNDARY_NONE
+    assert ed.gather()["forcing"]["boundary"] is None
+
+
+# ===========================================================================
+# F7: "Copy IC bgc -> Boundary" / "Copy Boundary bgc -> IC" must also copy the
+# section-level default BGC interpolation method, not just the rows -- a
+# copied row's blank (inherit-the-default) per-row bgc_interpolation_method
+# would otherwise silently change meaning if the two panels' defaults differ.
+# ===========================================================================
+
+
+def test_sync_ic_to_boundary_copies_default_interp_alongside_rows(editor):
+    editor.ic_bgc_interp.value = "density"
+    editor._rows["ic_bgc"] = [
+        editor._make_row(
+            "ic_bgc",
+            {
+                "source": {"name": "UNIFIED", "climatology": True},
+                "use_vars": ["ALK"],
+                "serialize_dask": True,
+            },
+        )
+    ]
+    editor._render("ic_bgc")
+
+    editor._sync_bgc("ic_bgc", "boundary_bgc")
+    gathered = editor.gather()
+    assert gathered["forcing"]["boundary"]["bgc_interpolation_method"] == "density"
+    assert (
+        gathered["forcing"]["boundary"]["bgc_sources"]
+        == gathered["initial_conditions"]["bgc_sources"]
+    )
+
+
+def test_sync_boundary_to_ic_copies_default_interp_alongside_rows(editor):
+    editor.boundary_bgc_interp.value = "density_mld"
+    editor._rows["boundary_bgc"] = [
+        editor._make_row("boundary_bgc", {"source": {"name": "GLODAP"}})
+    ]
+    editor._render("boundary_bgc")
+
+    editor._sync_bgc("boundary_bgc", "ic_bgc")
+    gathered = editor.gather()
+    assert gathered["initial_conditions"]["bgc_interpolation_method"] == "density_mld"
+    assert (
+        gathered["initial_conditions"]["bgc_sources"]
+        == gathered["forcing"]["boundary"]["bgc_sources"]
+    )
+
+
+# ===========================================================================
+# F5: `_sources_to_inputs`'s `bgc_section()`/`src()` now build on the generic
+# `plain()` helper instead of a hand-listed field set -- must still round-trip
+# every field losslessly.
+# ===========================================================================
+
+
+def test_sources_to_inputs_round_trips_ic_bgc_sources_losslessly():
+    forcing = Forcing.model_validate(
+        {
+            "initial_conditions": {
+                "source": {"name": "GLORYS"},
+                "bgc_sources": [
+                    {
+                        "source": {"name": "UNIFIED", "climatology": True},
+                        "use_vars": ["ALK", "DIC"],
+                        "bgc_interpolation_method": "density",
+                    },
+                    {
+                        "source": {
+                            "name": "ESPER",
+                            "esper_method": "lir",
+                            "esper_equation": 16,
+                        },
+                        "use_vars": ["NO3"],
+                        "serialize_dask": True,
+                    },
+                    {
+                        "source": {
+                            "name": "constants",
+                            "constants": {"Fe": 0.003},
+                        },
+                        "use_vars": ["PO4"],
+                    },
+                ],
+                "bgc_interpolation_method": "density_mld",
+                "bypass_validation": True,
+            },
+            "boundary": None,
+        }
+    )
+    cfg = SimpleNamespace(forcing=forcing)
+    seed = ForgeBlueprintWizard._sources_to_inputs(cfg)
+
+    import ipywidgets as W
+
+    ed = _ForcingEditor(W, seed, on_change=lambda: None)
+    gathered = ed.gather()
+    assert gathered["initial_conditions"] == seed["initial_conditions"]
+
+
+def test_river_bgc_widgets_visible_only_when_include_bgc_checked(editor):
+    """The river-BGC source/path widgets only take effect when include_bgc=True
+    (roms-tools ignores bgc_source otherwise), so they stay hidden until checked.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    assert _display(w["bgc_source_name"]) == "none"
+    assert _display(w["bgc_source_path"]) == "none"
+
+    w["include_bgc"].value = True
+    assert _display(w["bgc_source_name"]) == ""
+    assert _display(w["bgc_source_path"]) == ""
+
+    w["include_bgc"].value = False
+    assert _display(w["bgc_source_name"]) == "none"
+    assert _display(w["bgc_source_path"]) == "none"
+
+
+def test_river_bgc_source_seeded_from_existing_item(editor):
+    """Loading an item with a pre-set bgc_source (e.g. RIVR2O) seeds the dropdown/path
+    and shows the widgets immediately (include_bgc already True).
+    """
+    w = editor._make_row(
+        "river",
+        {
+            "source": {"name": "DAI"},
+            "include_bgc": True,
+            "bgc_source": {"name": "RIVR2O", "path": "/data/rivr2o/*.nc"},
+        },
+    )
+    assert w["bgc_source_name"].value == "RIVR2O"
+    assert w["bgc_source_path"].value == "/data/rivr2o/*.nc"
+    assert _display(w["bgc_source_name"]) == ""
+    assert _display(w["bgc_source_path"]) == ""
+
+
+def test_gather_item_river_includes_bgc_source_only_when_include_bgc_checked(editor):
+    """_gather_item must not emit bgc_source when include_bgc is unchecked (matches
+    the RiverForcingItem validator, which rejects bgc_source without include_bgc).
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["bgc_source_name"].value = "RIVR2O"
+    w["bgc_source_path"].value = "/data/rivr2o/*.nc"
+
+    item = editor._gather_item("river", w)
+    assert "bgc_source" not in item
+
+    w["include_bgc"].value = True
+    item = editor._gather_item("river", w)
+    assert item["bgc_source"] == {"name": "RIVR2O", "path": "/data/rivr2o/*.nc"}
+
+
+def test_gather_item_river_bgc_source_omits_path_when_blank(editor):
+    """A blank bgc path means 'derive the default staged location' — omit the key
+    rather than emitting an empty string.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["include_bgc"].value = True
+    w["bgc_source_name"].value = "CONSTANTS"
+
+    item = editor._gather_item("river", w)
+    assert item["bgc_source"] == {"name": "CONSTANTS"}
+
+
+def test_river_temp_source_widgets_visible_only_when_source_selected(editor):
+    """The temperature-source path/smoothing-window widgets only matter once a
+    source (ERA5) is picked, so they stay hidden until then (mirrors the bgc pair).
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    assert _display(w["surface_forcing_source_path"]) == "none"
+    assert _display(w["river_temp_smoothing_window_days"]) == "none"
+
+    w["surface_forcing_source_name"].value = "ERA5"
+    assert _display(w["surface_forcing_source_path"]) == ""
+    assert _display(w["river_temp_smoothing_window_days"]) == ""
+
+    w["surface_forcing_source_name"].value = ""
+    assert _display(w["surface_forcing_source_path"]) == "none"
+    assert _display(w["river_temp_smoothing_window_days"]) == "none"
+
+
+def test_river_temp_source_seeded_from_existing_item(editor):
+    """Loading an item with a pre-set surface_forcing_source (ERA5) seeds the
+    dropdown/path/window and shows the widgets immediately.
+    """
+    w = editor._make_row(
+        "river",
+        {
+            "source": {"name": "DAI"},
+            "surface_forcing_source": {"name": "ERA5", "path": "/x/era5"},
+            "river_temp_smoothing_window_days": 7.0,
+        },
+    )
+    assert w["surface_forcing_source_name"].value == "ERA5"
+    assert w["surface_forcing_source_path"].value == "/x/era5"
+    assert w["river_temp_smoothing_window_days"].value == 7.0
+    assert _display(w["surface_forcing_source_path"]) == ""
+    assert _display(w["river_temp_smoothing_window_days"]) == ""
+
+
+def test_gather_item_river_omits_temp_source_when_blank(editor):
+    """_gather_item must not emit surface_forcing_source when no temperature
+    source is selected. The smoothing window follows the domain_edge_buffer rule
+    instead -- emitted whenever non-default, source or not -- so a loaded
+    blueprint carrying the value round-trips with an unchanged content_hash.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    item = editor._gather_item("river", w)
+    assert "surface_forcing_source" not in item
+    assert "river_temp_smoothing_window_days" not in item
+
+    w["river_temp_smoothing_window_days"].value = 45.0
+    item = editor._gather_item("river", w)
+    assert "surface_forcing_source" not in item
+    assert item["river_temp_smoothing_window_days"] == 45.0
+
+
+def test_gather_item_river_drops_stale_invalid_window_when_hidden(editor):
+    """Pick ERA5, type an invalid window, then blank the source again: the
+    hidden widget keeps the stale 0. Emitting it would make the schema's `> 0`
+    check reject the blueprint over a field the user can no longer see, so the
+    stale invalid value is dropped instead. With ERA5 still selected the value
+    is emitted as typed and validation reports it against a visible widget.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["surface_forcing_source_name"].value = "ERA5"
+    w["river_temp_smoothing_window_days"].value = 0.0
+    assert editor._gather_item("river", w)["river_temp_smoothing_window_days"] == 0.0
+
+    w["surface_forcing_source_name"].value = ""
+    item = editor._gather_item("river", w)
+    assert "surface_forcing_source" not in item
+    assert "river_temp_smoothing_window_days" not in item
+
+
+def test_river_temp_source_seed_normalizes_name_case(editor):
+    """RiverForcingItem accepts any case ("era5"); the dropdown options are
+    upper-case, so seeding must normalize or the source is silently dropped.
+    """
+    w = editor._make_row(
+        "river",
+        {"source": {"name": "DAI"}, "surface_forcing_source": {"name": "era5"}},
+    )
+    assert w["surface_forcing_source_name"].value == "ERA5"
+    assert editor._gather_item("river", w)["surface_forcing_source"] == {"name": "ERA5"}
+
+
+def test_gather_item_river_temp_source_omits_path_when_blank(editor):
+    """A blank ERA5 path means 'read the remote ARCO archive' — omit the key
+    rather than emitting an empty string. The window also stays omitted at its
+    30.0 default.
+    """
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["surface_forcing_source_name"].value = "ERA5"
+
+    item = editor._gather_item("river", w)
+    assert item["surface_forcing_source"] == {"name": "ERA5"}
+    assert "river_temp_smoothing_window_days" not in item
+
+
+def test_gather_item_river_temp_source_includes_path_and_changed_window(editor):
+    w = editor._make_row("river", {"source": {"name": "DAI"}})
+    w["surface_forcing_source_name"].value = "ERA5"
+    w["surface_forcing_source_path"].value = "/x/era5/*.nc"
+    w["river_temp_smoothing_window_days"].value = 14.0
+
+    item = editor._gather_item("river", w)
+    assert item["surface_forcing_source"] == {"name": "ERA5", "path": "/x/era5/*.nc"}
+    assert item["river_temp_smoothing_window_days"] == 14.0
+
+
+def test_river_temp_source_round_trips_through_yaml(tmp_path):
+    """Full round trip: build → to_yaml → load into a fresh wizard → gather.
+    Both fields must survive and the reloaded blueprint must hash identically.
+    """
+    wiz = _new_wizard()
+    fe = wiz._forcing_editor
+    w = fe._rows["river"][0]
+    w["surface_forcing_source_name"].value = "ERA5"
+    w["surface_forcing_source_path"].value = "/data/era5/*.nc"
+    w["river_temp_smoothing_window_days"].value = 10.0
+    assert wiz.config is not None, wiz.derived.value
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.config is not None
+    assert wiz2.config.content_hash() == wiz.config.content_hash()
+
+    fe2 = wiz2._forcing_editor
+    w2 = fe2._rows["river"][0]
+    assert w2["surface_forcing_source_name"].value == "ERA5"
+    assert w2["surface_forcing_source_path"].value == "/data/era5/*.nc"
+    assert w2["river_temp_smoothing_window_days"].value == 10.0
+
+    item = fe2._gather_item("river", w2)
+    assert item["surface_forcing_source"] == {
+        "name": "ERA5",
+        "path": "/data/era5/*.nc",
+    }
+    assert item["river_temp_smoothing_window_days"] == 10.0
+
+
+def test_topo_source_dropdown_includes_emod():
+    """The topography-source dropdown must offer EMOD alongside ETOPO5/SRTM15."""
+    wiz = ForgeBlueprintWizard()
+    assert "EMOD" in wiz.topo_source.options
+
+
+def test_wizard_smoke_assembles_widget():
+    """The redesigned Grid card assembles cleanly, with geometry, open
+    boundaries, and nesting appearing in the expected relative order (mirrors
+    the pre-redesign flat-``section()`` version of this smoke test).
+    """
+    wiz = ForgeBlueprintWizard()
+    root = wiz.widget  # must not raise
+    grid_card = _find_card(root, "grid")
+    assert grid_card is not None
+
+    texts = [
+        html
+        for w in _descendants(grid_card)
+        if isinstance((html := getattr(w, "value", None)), str)
+    ]
+
+    def _first_containing(fragment):
+        return next(i for i, t in enumerate(texts) if fragment in t)
+
+    geometry_i = _first_containing("Grid geometry")
+    obc_i = _first_containing("Open boundaries")
+    nest_i = _first_containing("Child grid")
+    assert geometry_i < obc_i < nest_i
+
+
+def test_load_catalog_dropdown_populated_from_catalog():
+    """The 'From catalog' picker offers the bundled forge blueprints and is enabled."""
+    wiz = ForgeBlueprintWizard()
+    values = wiz._dd_values(wiz.load_catalog_dd)
+    assert "wio-toy-simple" in values
+    # bundled catalog is non-empty, so the load button is not greyed out
+    assert wiz.load_catalog_btn.disabled is False
+
+
+def test_load_from_catalog_resolves_path_and_delegates(monkeypatch):
+    """Selecting a catalog blueprint resolves its path into ``load_path`` and reuses
+    the existing ``_on_load_path`` load path (identical parse/state handling).
+    """
+    wiz = ForgeBlueprintWizard()
+    called = []
+    monkeypatch.setattr(wiz, "_on_load_path", lambda _=None: called.append(True))
+
+    wiz.load_catalog_dd.value = "wio-toy-simple"
+    wiz._on_load_from_catalog(None)
+
+    assert called == [True]
+    assert wiz.load_path.value.endswith("wio-toy-simple.forge_blueprint.yaml")
+
+
+def test_load_from_catalog_no_selection_surfaces_error(monkeypatch):
+    """Defensive guard: if the dropdown ever holds no selection (e.g. an empty
+    catalog, where the button is also disabled), the handler reports an error and
+    does not load. On a populated catalog the dropdown auto-selects the first
+    name, so this state is not normally reachable by the user.
+    """
+    wiz = ForgeBlueprintWizard()
+    called = []
+    monkeypatch.setattr(wiz, "_on_load_path", lambda _=None: called.append(True))
+
+    wiz.load_catalog_dd.value = None
+    wiz._on_load_from_catalog(None)
+
+    assert called == []
+    assert wiz._load_status_is_error is True
+    assert "No catalog blueprint selected" in wiz.load_status.value
+
+
+def test_specs_section_has_forcing_and_output_dropdowns():
+    """Item 5: Forcing/Output selectors live in the Model card."""
+    wiz = ForgeBlueprintWizard()
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    descendants = list(_descendants(model_card))
+    assert wiz.forcing_dd in descendants
+    assert wiz.output_dd in descendants
+
+
+def test_roms_ref_prefilled_and_placed_next_to_model_dropdown():
+    """ucla-roms ref is prefilled from the selected model's pinned default
+    (stays editable) and lives in the Model card, in its own field row below
+    the Model dropdown (the card/field_row redesign no longer puts it
+    literally in the same row as Model -- see components.field_row).
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.roms_ref.value == wiz._model_default_roms_ref()
+    assert wiz.roms_ref.value  # this model.yaml pins a concrete commit
+
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    assert wiz.roms_ref in _descendants(model_card)
+
+
+def test_roms_ref_repopulates_on_model_change(monkeypatch):
+    """Switching models refreshes ucla-roms ref to the new model's pinned default."""
+    wiz = ForgeBlueprintWizard()
+    monkeypatch.setattr(wiz, "_model_default_roms_ref", lambda: "some-other-ref")
+    wiz._on_model_change(None)
+    assert wiz.roms_ref.value == "some-other-ref"
+
+
+def test_marbl_ref_prefilled_and_placed_next_to_model_dropdown():
+    """MARBL ref mirrors the ucla-roms ref: prefilled from the selected model's
+    pinned default (stays editable) and lives in the Model card, after
+    (in document order) BGC mode's own row -- MARBL ref only matters once BGC
+    mode is "marbl".
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.marbl_ref.value == wiz._model_default_marbl_ref()
+    assert wiz.marbl_ref.value  # this model.yaml pins a concrete MARBL tag
+
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    descendants = list(_descendants(model_card))
+    assert wiz.marbl_ref in descendants
+    assert wiz.bgc_dd in descendants
+    assert descendants.index(wiz.marbl_ref) > descendants.index(wiz.bgc_dd)
+
+
+def test_marbl_ref_hidden_unless_bgc_is_marbl():
+    """The MARBL ref field only shows when BGC mode is "marbl". Its value is
+    kept (not cleared) while hidden, so toggling BGC back restores the pin.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.bgc_dd.value == "marbl"
+    assert wiz.marbl_ref.layout.display != "none"
+    kept = wiz.marbl_ref.value
+
+    wiz.bgc_dd.value = "none"
+    assert wiz.marbl_ref.layout.display == "none"
+    assert wiz.marbl_ref.value == kept
+
+    wiz.bgc_dd.value = "marbl"
+    assert wiz.marbl_ref.layout.display != "none"
+
+
+def test_marbl_ref_repopulates_on_model_change(monkeypatch):
+    """Switching models refreshes the MARBL ref to the new model's pinned default."""
+    wiz = ForgeBlueprintWizard()
+    monkeypatch.setattr(wiz, "_model_default_marbl_ref", lambda: "some-other-marbl")
+    wiz._on_model_change(None)
+    assert wiz.marbl_ref.value == "some-other-marbl"
+
+
+def test_co2_tvarying_is_not_user_editable():
+    """co2_tvarying is controlled solely by the presence of an MBL_co2 bgc surface
+    source; the wizard must not expose a checkbox letting the user override it --
+    that derivation happens behind the scenes in the resolver/input_data.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert not hasattr(wiz, "co2_tvarying_chk")
+
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    # The default model's forcing includes an MBL_co2 bgc surface source, so the
+    # resolver still auto-derives co2_tvarying=True with no UI toggle involved.
+    assert wiz.config.model_settings["cppdefs"]["co2_tvarying"] is True
+
+
+def test_resolver_derived_cppdefs_fields_have_no_accordion_widget():
+    """obc_*/marbl/use_pio/cdr_forcing/co2_tvarying/sal_restore/tides are all fully
+    resolver-derived (like co2_tvarying above) -- the advanced settings accordion
+    must never expose a competing editor for any of them.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    for field in (
+        "obc_west",
+        "obc_east",
+        "obc_north",
+        "obc_south",
+        "marbl",
+        "use_pio",
+        "cdr_forcing",
+        "co2_tvarying",
+        "sal_restore",
+        "tides",
+    ):
+        assert ("cppdefs", field) not in wiz.editor._widgets
+
+
+def test_sponge_tune_editable_via_advanced_settings_accordion():
+    """Unlike co2_tvarying, SPONGE_TUNE has no resolver-side derivation -- it's a
+    plain ModelSpec default (False) reachable only through the advanced settings
+    accordion's generic (section, field) override mechanism.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is False
+    assert ("cppdefs", "sponge_tune") in wiz.editor._widgets
+
+    wiz._overrides[("cppdefs", "sponge_tune")] = True
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["sponge_tune"] is True
+
+
+def test_nhy_nox_forcing_editable_in_bgc_advanced_settings_pane():
+    """NHY_FORCING/NOX_FORCING default True from the ModelSpec and are editable as
+    checkboxes in the Biogeochemistry (BGC / MARBL) advanced settings pane.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is True
+    assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is True
+    assert ("cppdefs", "nhy_forcing") in wiz.editor._widgets
+    assert ("cppdefs", "nox_forcing") in wiz.editor._widgets
+
+    wiz._overrides[("cppdefs", "nhy_forcing")] = False
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
+    assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is True  # untouched
+
+
+def test_bgc_dd_none_forces_nhy_nox_forcing_off_in_the_wizard():
+    """Flipping BGC mode to 'none' in the wizard must force NHY_FORCING/NOX_FORCING
+    off through the real compose -> override -> sync pipeline, not just at the
+    resolver. Strip every BGC signal from the bundled ForcingSpec's widgets first
+    (mirrors _PHYSICS_ONLY_FORCING in test_forge_blueprint.py) so bgc_mode="none"
+    doesn't raise.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    fe = wiz._forcing_editor
+    for ws in list(fe._rows["surface"]):
+        if ws.get("type") is not None and ws["type"].value == "bgc":
+            fe._remove("surface", ws)
+    for ws in list(fe._rows["boundary_bgc"]):
+        fe._remove("boundary_bgc", ws)
+    for ws in list(fe._rows["river"]):
+        if "include_bgc" in ws:
+            ws["include_bgc"].value = False
+    for ws in list(fe._rows["ic_bgc"]):
+        fe._remove("ic_bgc", ws)
+
+    wiz.bgc_dd.value = "none"
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+    assert wiz.config.model_settings["cppdefs"]["nhy_forcing"] is False
+    assert wiz.config.model_settings["cppdefs"]["nox_forcing"] is False
+
+
+def test_bgc_dd_default_and_placement():
+    """BGC mode defaults to 'marbl' and lives in the Model card."""
+    wiz = ForgeBlueprintWizard()
+    assert wiz.bgc_dd.value == "marbl"
+    assert set(wiz.bgc_dd.options) == {"marbl", "none"}
+
+    model_card = _find_card(wiz.widget, "model")
+    assert model_card is not None
+    assert wiz.bgc_dd in _descendants(model_card)
+
+
+def test_bgc_dd_marbl_gathers_into_cppdefs():
+    """The default 'marbl' choice flows through _gather()/build_forge_blueprint into
+    cppdefs.marbl -- the happy path (the bundled ForcingSpec carries BGC forcing, so
+    switching to 'none' without changing forcing is expected to raise; that's
+    covered at the resolver level, see test_resolver_bgc_mode_none_raises_with_bgc_forcing).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cppdefs"]["marbl"] is True
+    assert wiz.config.code.marbl is not None
+
+
+def test_bgc_dd_none_with_default_bgc_forcing_surfaces_error_legibly():
+    """Flipping to 'none' while the bundled (BGC-carrying) ForcingSpec is still
+    selected must not crash the wizard -- _rebuild()'s existing exception handling
+    should catch the resolver's ValueError and surface it in the status area.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.bgc_dd.value = "none"
+    wiz._rebuild()
+    assert wiz.config is None
+    assert "Invalid" in wiz.derived.value
+
+
+def test_use_pio_chk_default_seeded_from_model_spec():
+    """use_pio_chk mirrors bgc_dd: it is seeded from the selected ModelSpec's
+    top-level use_pio (True for roms-marbl-0.8-default, the wizard's default
+    model; False for cson_roms-marbl_v0.1), and reseeded on a model switch.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.model_dd.value == "roms-marbl-0.8-default"
+    assert wiz.use_pio_chk.value is True
+    assert wiz._model_default_use_pio() is True
+
+    wiz.model_dd.value = "cson_roms-marbl_v0.1"
+    assert wiz.use_pio_chk.value is False
+    assert wiz._model_default_use_pio() is False
+
+
+def test_use_pio_chk_emit_is_unconditional():
+    """The wizard must send an explicit use_pio=False to the resolver when the
+    checkbox is unchecked (not simply omit the kwarg) -- otherwise a ModelSpec
+    that declares use_pio: true could never be turned off in the UI, since the
+    resolver's None fallback re-reads the ModelSpec default.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    # roms-marbl-0.8-default (the default model) declares use_pio: true --
+    # exactly the ModelSpec this test guards against: unchecking must emit an
+    # explicit False, not fall back to the ModelSpec default.
+    assert wiz.use_pio_chk.value is True
+    wiz.use_pio_chk.value = False
+    wiz._rebuild()
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cppdefs"]["use_pio"] is False
+    assert wiz.config.code.pio is None
+
+    wiz.use_pio_chk.value = True
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["use_pio"] is True
+    assert wiz.config.code.pio is not None
+
+
+def test_auto_tiling_chk_toggles_dependent_widget_state():
+    """Checking auto_tiling disables npx/npy, reveals n_cores, and force-locks
+    use_pio on; unchecking reverses all of it but leaves use_pio's value as-is.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.use_pio_chk.value = False
+    assert wiz.auto_tiling_chk.value is False
+    assert wiz.npx.disabled is False
+    assert wiz.npy.disabled is False
+    assert "none" in (wiz.n_cores.layout.display or "none")
+    assert wiz.use_pio_chk.disabled is False
+
+    wiz.auto_tiling_chk.value = True
+    assert wiz.npx.disabled is True
+    assert wiz.npy.disabled is True
+    assert (wiz.n_cores.layout.display or "") == ""
+    assert wiz.use_pio_chk.value is True
+    assert wiz.use_pio_chk.disabled is True
+
+    wiz.auto_tiling_chk.value = False
+    assert wiz.npx.disabled is False
+    assert wiz.npy.disabled is False
+    assert "none" in (wiz.n_cores.layout.display or "none")
+    assert wiz.use_pio_chk.disabled is False
+    assert wiz.use_pio_chk.value is True  # left as-is, not reset
+
+
+def test_auto_tiling_toggle_seeds_n_cores_from_n_procs():
+    """Checking the auto_tiling box seeds n_cores = npx * npy from the grid
+    already entered (or loaded), so the user doesn't multiply by hand; the
+    seed only happens on the off->on toggle, so a later manual n_cores edit
+    survives unrelated _sync_auto_tiling() calls.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.npx.value = 4
+    wiz.npy.value = 6
+
+    wiz.auto_tiling_chk.value = True
+    assert wiz.n_cores.value == 24
+
+    # A manual n_cores edit is not clobbered by direct sync calls.
+    wiz.n_cores.value = 30
+    wiz._sync_auto_tiling()
+    assert wiz.n_cores.value == 30
+
+    # Re-toggling recomputes from the (re-enabled, possibly edited) grid.
+    wiz.auto_tiling_chk.value = False
+    wiz.npx.value = 2
+    wiz.auto_tiling_chk.value = True
+    assert wiz.n_cores.value == 12
+
+
+def test_auto_tiling_gathers_n_cores_partitioning():
+    """_gather() (and so the resolved config) swaps to auto_tiling/n_cores
+    partitioning when checked, and back to n_procs_x/y when unchecked.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz.auto_tiling_chk.value = True
+    wiz.n_cores.value = 24
+    wiz._rebuild()
+    assert wiz.config is not None
+    part = wiz.config.domain.partitioning
+    assert part.auto_tiling is True
+    assert part.n_cores == 24
+    assert part.n_procs_x is None
+    assert part.n_procs_y is None
+
+    wiz.auto_tiling_chk.value = False
+    wiz._rebuild()
+    part = wiz.config.domain.partitioning
+    assert part.auto_tiling is False
+    assert part.n_procs_x == wiz.npx.value
+    assert part.n_procs_y == wiz.npy.value
+
+
+_CDR_SAMPLE_YAML = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml"
+
+
+def _upload_change(content: bytes):
+    """Build an ipywidgets FileUpload-style ``change`` dict for a single file."""
+    return {"new": ({"name": "cdr.yaml", "content": content},)}
+
+
+def test_cdr_upload_valid_yaml_gathers_into_config():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.cdr_mode_dd.value = "yaml"
+
+    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+
+    assert wiz._cdr_forcing is not None
+    assert "✓ CDR" in wiz.cdr_status.value
+    assert wiz._gather()["cdr"]["cdr_forcing"] is wiz._cdr_forcing
+    assert wiz.config is not None
+    assert wiz.config.model_settings["cppdefs"]["cdr_forcing"] is True
+    assert wiz.config.cdr.mode == "yaml"
+    assert wiz.config.cdr.cdr_forcing["releases"]
+
+
+def test_cdr_upload_invalid_yaml_surfaces_error_and_does_not_set_config():
+    """Not a roms-tools CDRForcing document at all -- caught by
+    ``read_cdr_forcing_yaml``'s own parse check, before roms-tools is ever imported.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz._on_cdr_upload(_upload_change(b"---\nSomeOtherThing:\n  foo: bar\n"))
+
+    assert wiz._cdr_forcing is None
+    assert "invalid" in wiz.cdr_status.value.lower()
+    # mode is still the default "none" (never touched by this test) -- no CDR
+    # was gathered, and the rest of the config still resolves fine.
+    assert wiz._gather()["cdr"] == {
+        "mode": "none",
+        "cdr_forcing": None,
+        "cdr_forcing_file": None,
+    }
+    assert wiz.config is not None
+
+
+def test_cdr_upload_semantically_broken_yaml_caught_by_eager_rt_construction():
+    """A structurally-valid CDRForcing document (parses fine, has the right keys)
+    but with start_time >= end_time. ``read_cdr_forcing_yaml`` has no opinion on
+    this -- only the eager ``rt.CDRForcing(**parsed)`` construction in
+    ``_on_cdr_upload`` catches it (roms-tools' own validator raises). This is the
+    scenario the eager-validation design exists for: without it, this would embed
+    silently into the blueprint and only fail much later, during blueprint processing.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    text = _CDR_SAMPLE_YAML.read_text()
+    # swap start_time/end_time so parsing succeeds but roms-tools' own
+    # `start_time < end_time` validator raises.
+    swapped = text.replace(
+        "start_time: '2012-01-01T00:00:00'\n  end_time: '2012-01-02T00:00:00'",
+        "start_time: '2012-01-02T00:00:00'\n  end_time: '2012-01-01T00:00:00'",
+    )
+    assert swapped != text, "fixture format changed -- update this test's replace()"
+
+    wiz._on_cdr_upload(_upload_change(swapped.encode("utf-8")))
+
+    assert wiz._cdr_forcing is None
+    assert "invalid" in wiz.cdr_status.value.lower()
+    assert wiz._gather()["cdr"]["cdr_forcing"] is None
+
+
+def test_cdr_clear_resets_state():
+    wiz = ForgeBlueprintWizard()
+    wiz.cdr_mode_dd.value = "yaml"
+    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+    assert wiz._cdr_forcing is not None
+
+    wiz._on_cdr_clear(None)
+
+    assert wiz._cdr_forcing is None
+    assert wiz.cdr_status.value == ""
+    assert wiz._gather()["cdr"]["cdr_forcing"] is None
+
+
+def test_cdr_mode_yaml_with_nothing_uploaded_invalidates_the_blueprint():
+    """Selecting "yaml" mode is itself a commitment to supplying a CDR forcing
+    -- with nothing uploaded yet, CdrSpec's own validator rejects
+    ``cdr_forcing=None``, and that (like any other resolver error) surfaces as
+    an Invalid preview rather than silently falling back to "no CDR".
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz.cdr_mode_dd.value = "yaml"
+
+    assert wiz.config is None
+    assert "Invalid" in wiz.derived.value
+
+
+def test_cdr_forcing_round_trips_through_load(tmp_path):
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.cdr_mode_dd.value = "yaml"
+    wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+    assert wiz.config is not None
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.cdr_mode_dd.value == "yaml"
+    assert wiz2._cdr_forcing is not None
+
+    # cdr_forcing is stored as a plain dict (no typed CDR model, by design -- see the
+    # plan's "no typed CDR Pydantic model" note), so a bare YAML timestamp parses to
+    # an in-memory datetime but re-serializes to an ISO string on the blueprint's own
+    # to_yaml/from_yaml round trip. Compare with that normalized away.
+    def _iso(t):
+        return t.isoformat() if hasattr(t, "isoformat") else str(t)
+
+    orig = [dict(r) for r in wiz._cdr_forcing["releases"]]
+    back = [dict(r) for r in wiz2._cdr_forcing["releases"]]
+    for r in (orig, back):
+        for release in r:
+            release["times"] = [_iso(t) for t in release["times"]]
+    assert back == orig
+    assert "✓ CDR loaded" in wiz2.cdr_status.value
+
+
+# ===========================================================================
+# CDR Overhaul WP5/WP6: mode dropdown, per-mode panels, plotting widget.
+# ===========================================================================
+
+
+def test_cdr_mode_switch_shows_and_hides_panels():
+    wiz = ForgeBlueprintWizard()
+    assert _display(wiz.cdr_simple_box) == "none"
+    assert _display(wiz.cdr_yaml_box) == "none"
+    assert _display(wiz.cdr_netcdf_box) == "none"
+    assert _display(wiz.cdr_upscaled_box) == "none"
+    assert _display(wiz.cdr_plot_box) == "none"
+
+    wiz.cdr_mode_dd.value = "simple"
+    assert _display(wiz.cdr_simple_box) == ""
+    assert _display(wiz.cdr_yaml_box) == "none"
+    assert _display(wiz.cdr_plot_box) == ""
+
+    wiz.cdr_mode_dd.value = "yaml"
+    assert _display(wiz.cdr_simple_box) == "none"
+    assert _display(wiz.cdr_yaml_box) == ""
+    assert _display(wiz.cdr_netcdf_box) == "none"
+    assert _display(wiz.cdr_plot_box) == ""
+
+    wiz.cdr_mode_dd.value = "netcdf"
+    assert _display(wiz.cdr_yaml_box) == "none"
+    assert _display(wiz.cdr_netcdf_box) == ""
+    assert _display(wiz.cdr_plot_box) == ""
+
+    wiz.cdr_mode_dd.value = "upscaled"
+    assert _display(wiz.cdr_netcdf_box) == "none"
+    assert _display(wiz.cdr_upscaled_box) == ""
+    assert _display(wiz.cdr_plot_box) == "none"  # no plots for upscaled
+
+    wiz.cdr_mode_dd.value = "none"
+    assert _display(wiz.cdr_upscaled_box) == "none"
+    assert _display(wiz.cdr_plot_box) == "none"
+
+
+def test_cdr_yaml_and_netcdf_panels_link_to_docs():
+    doc_url = "https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html"
+    wiz = ForgeBlueprintWizard()
+    assert doc_url in wiz.cdr_yaml_box.children[0].value
+    assert doc_url in wiz.cdr_netcdf_box.children[0].value
+
+
+def test_cdr_simple_mode_seeds_defaults_on_activation():
+    wiz = ForgeBlueprintWizard()
+    wiz.grid_w["center_lat"].value = 12.5
+    wiz.grid_w["center_lon"].value = -34.5
+    wiz.start.value = date(2015, 3, 1)
+    wiz.end.value = date(2015, 4, 1)
+
+    wiz.cdr_mode_dd.value = "simple"
+
+    assert wiz.cdr_simple_lat.value == 12.5
+    assert wiz.cdr_simple_lon.value == -34.5
+    assert wiz.cdr_simple_start.value == date(2015, 3, 1)
+    assert wiz.cdr_simple_end.value == date(2015, 4, 1)
+    assert wiz.cdr_simple_depth.value == 1.0
+    assert wiz.cdr_simple_hsc.value == 10.0
+    assert wiz.cdr_simple_vsc.value == 10.0
+    assert wiz.cdr_simple_flux.value == 2 * 10**6
+
+
+def test_cdr_simple_mode_compiles_flat_two_point_pulse():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 3)
+    wiz.cdr_mode_dd.value = "simple"
+    wiz.cdr_simple_name.value = "my_release"
+    wiz.cdr_simple_lat.value = 10.0
+    wiz.cdr_simple_lon.value = 20.0
+    wiz.cdr_simple_flux.value = 5.0
+
+    cdr = wiz._gather()["cdr"]
+
+    assert cdr["mode"] == "simple"
+    forcing = cdr["cdr_forcing"]
+    assert forcing["start_time"] == "2012-01-01T00:00:00"
+    assert forcing["end_time"] == "2012-01-03T00:00:00"
+    assert len(forcing["releases"]) == 1
+    release = forcing["releases"][0]
+    assert release["name"] == "my_release"
+    assert release["lat"] == 10.0
+    assert release["lon"] == 20.0
+    assert release["times"] == ["2012-01-01T00:00:00", "2012-01-03T00:00:00"]
+    assert release["tracer_fluxes"] == {"ALK": [5.0, 5.0]}
+    assert release["release_type"] == "tracer_perturbation"
+    assert isinstance(forcing["start_time"], str)  # ISO strings, not datetimes
+    assert wiz.config is not None
+    assert wiz.config.cdr.mode == "simple"
+    assert wiz.config.cdr.cdr_forcing["releases"][0]["lat"] == 10.0
+
+
+def test_cdr_simple_mode_round_trips_through_populate_from():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.cdr_mode_dd.value = "simple"
+    wiz.cdr_simple_name.value = "rt_release"
+    wiz.cdr_simple_lat.value = 5.0
+    wiz.cdr_simple_lon.value = 6.0
+    wiz.cdr_simple_depth.value = 2.0
+    wiz.cdr_simple_hsc.value = 15.0
+    wiz.cdr_simple_vsc.value = 25.0
+    wiz.cdr_simple_flux.value = 3.5e6
+    assert wiz.config is not None
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2._populate_from(wiz.config)
+
+    assert wiz2.cdr_mode_dd.value == "simple"
+    assert wiz2.cdr_simple_name.value == "rt_release"
+    assert wiz2.cdr_simple_lat.value == 5.0
+    assert wiz2.cdr_simple_lon.value == 6.0
+    assert wiz2.cdr_simple_depth.value == 2.0
+    assert wiz2.cdr_simple_hsc.value == 15.0
+    assert wiz2.cdr_simple_vsc.value == 25.0
+    assert wiz2.cdr_simple_flux.value == 3.5e6
+    assert wiz2.cdr_simple_start.value == date(2012, 1, 1)
+    assert wiz2.cdr_simple_end.value == date(2012, 1, 2)
+    assert wiz2.config.content_hash() == wiz.config.content_hash()
+
+
+def test_cdr_upscaled_mode_round_trips_through_populate_from():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.cdr_mode_dd.value = "upscaled"
+    assert wiz.config is not None
+    assert wiz.config.cdr.mode == "upscaled"
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2._populate_from(wiz.config)
+
+    assert wiz2.cdr_mode_dd.value == "upscaled"
+    assert wiz2._cdr_forcing is None
+    assert wiz2._cdr_forcing_file is None
+    assert wiz2.config.content_hash() == wiz.config.content_hash()
+
+
+def test_composition_cdr_specref_provenance(tmp_path):
+    import shutil
+
+    from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+    wiz = ForgeBlueprintWizard()
+    assert wiz.config.composition.cdr.name is None
+    assert wiz.config.composition.cdr.origin == "custom"
+    assert wiz.config.composition.cdr.modified is False
+
+    root = tmp_path / "catalog"
+    shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+    catalog = DomainCatalog(catalog_root=root)
+    catalog.register_cdr(
+        "prov-cdr",
+        mode="yaml",
+        cdr_forcing={
+            "start_time": "2012-01-01T00:00:00",
+            "end_time": "2012-01-02T00:00:00",
+            "releases": [],
+        },
+    )
+    wiz2 = ForgeBlueprintWizard(catalog=catalog)
+    wiz2.cdr_dd.value = "prov-cdr"
+
+    assert wiz2.config.composition.cdr.name == "prov-cdr"
+    assert wiz2.config.composition.cdr.origin == "catalog"
+    assert wiz2.config.composition.cdr.modified is False
+
+    # The other seed path: _populate_from seeds composition.cdr.modified from
+    # catalog.cdr_data(name) (minus "description"), while an authoring-time pick
+    # (_on_cdr_spec, just exercised above) seeds it from _cdr_snapshot(). Those
+    # must produce equal dicts for the same spec, or a save/load cycle would
+    # disagree with the picker about whether the spec is modified -- exactly the
+    # false-positive the forcing_seed comment in _populate_from exists to avoid.
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz2.config.to_yaml(saved)
+    wiz3 = ForgeBlueprintWizard(catalog=catalog)
+    wiz3.load_path.value = str(saved)
+    wiz3._on_load_path(None)
+
+    assert wiz3.cdr_dd.value == "prov-cdr"
+    assert wiz3.config.composition.cdr.modified is False
+
+
+def _fake_cdr_forcing_class(*, release_type="tracer_perturbation", names=("r1",)):
+    """A stand-in for ``roms_tools.CDRForcing`` whose plot_* methods render a
+    trivial figure (so plt.gcf()/savefig has something real to capture) without
+    needing an actual grid/dataset. ``build_calls`` records each construction --
+    tests assert on its length to prove the plot widget builds at most once per
+    Generate click and never again on a plot-type/release switch.
+    """
+    import matplotlib.pyplot as plt
+
+    build_calls: list[dict] = []
+
+    class _FakeRelease:
+        def __init__(self, name):
+            self.name = name
+
+    class _FakeCDRForcing:
+        def __init__(self, **kwargs):
+            build_calls.append(kwargs)
+            self.release_type = release_type
+            self.releases = [_FakeRelease(n) for n in names]
+
+        def __getitem__(self, name):
+            return next(r for r in self.releases if r.name == name)
+
+        def plot_locations(self, *a, **k):
+            plt.figure()
+
+        def plot_distribution(self, release_name, *a, **k):
+            plt.figure()
+
+        def plot_tracer_flux(self, tracer_name, *a, **k):
+            plt.figure()
+
+    return _FakeCDRForcing, build_calls
+
+
+def test_cdr_plot_generate_builds_once_and_switches_without_rebuild(monkeypatch):
+    """WP6 cache: Generate builds the rt.CDRForcing once; switching plot type or
+    release re-renders from the cached object/PNG WITHOUT rebuilding it (the
+    plan's requirement) -- verified here by asserting ``build_calls`` never
+    grows past 1 across two dropdown switches.
+    """
+    import roms_tools
+
+    fake_cls, build_calls = _fake_cdr_forcing_class(names=("r1", "r2"))
+    monkeypatch.setattr(roms_tools, "CDRForcing", fake_cls)
+
+    wiz = ForgeBlueprintWizard()
+    wiz.cdr_mode_dd.value = "yaml"
+    wiz._cdr_forcing = {
+        "start_time": "2012-01-01T00:00:00",
+        "end_time": "2012-01-02T00:00:00",
+        "releases": [],
+    }
+    wiz._rebuild()
+
+    wiz._on_cdr_plot_generate(None)
+
+    assert len(build_calls) == 1
+    assert wiz._cdr_plot_object is not None
+    # The "building…" marker must not stick around after a successful render.
+    assert "building" not in wiz.cdr_plot_status.value
+    assert "✓" in wiz.cdr_plot_status.value
+    assert list(wiz.cdr_plot_release_dd.options) == ["r1", "r2"]
+    assert _display(wiz.cdr_plot_release_dd) == ""  # >1 release -- shown
+    assert wiz.cdr_plot_img.value
+
+    wiz.cdr_plot_type_dd.value = "distribution"
+    assert len(build_calls) == 1  # no rebuild
+    assert wiz.cdr_plot_img.value
+
+    wiz.cdr_plot_release_dd.value = "r2"
+    assert len(build_calls) == 1  # still no rebuild
+    assert wiz.cdr_plot_img.value
+
+
+def test_cdr_plot_cache_invalidated_by_input_edit_and_mode_switch(monkeypatch):
+    import roms_tools
+
+    fake_cls, build_calls = _fake_cdr_forcing_class()
+    monkeypatch.setattr(roms_tools, "CDRForcing", fake_cls)
+
+    wiz = ForgeBlueprintWizard()
+    wiz.cdr_mode_dd.value = "yaml"
+    wiz._cdr_forcing = {
+        "start_time": "2012-01-01T00:00:00",
+        "end_time": "2012-01-02T00:00:00",
+        "releases": [],
+    }
+    wiz._rebuild()
+    wiz._on_cdr_plot_generate(None)
+    assert len(build_calls) == 1
+    assert wiz._cdr_plot_object is not None
+
+    # An unrelated watched-widget edit goes through _rebuild() (the one hook
+    # _invalidate_cdr_plot_cache is attached to), but the fingerprint check
+    # sees no plot-affecting change -- the rendered plot SURVIVES.
+    wiz.description.value = "something else"
+    assert wiz._cdr_plot_object is not None
+    assert wiz.cdr_plot_img.value != b""
+    assert len(build_calls) == 1
+
+    # A CDR-input edit changes the fingerprint and clears everything.
+    wiz._cdr_forcing = {**wiz._cdr_forcing, "end_time": "2012-01-03T00:00:00"}
+    wiz._rebuild()
+    assert wiz._cdr_plot_object is None
+    assert wiz._cdr_plot_cache == {}
+    assert wiz.cdr_plot_img.value == b""
+
+    wiz._on_cdr_plot_generate(None)
+    assert len(build_calls) == 2
+
+    # A grid-geometry edit also invalidates (the plot's grid is stale).
+    wiz.grid_w["center_lat"].value = wiz.grid_w["center_lat"].value + 1.0
+    assert wiz._cdr_plot_object is None
+    assert wiz._cdr_plot_cache == {}
+
+    wiz._on_cdr_plot_generate(None)
+    assert len(build_calls) == 3
+
+    # A mode switch also invalidates (leaving "yaml" clears _cdr_forcing too).
+    wiz.cdr_mode_dd.value = "none"
+    assert wiz._cdr_plot_object is None
+    assert wiz._cdr_plot_cache == {}
+
+
+def test_cdr_plot_hides_tracer_flux_for_volume_type_forcing(monkeypatch):
+    import roms_tools
+
+    fake_cls, _build_calls = _fake_cdr_forcing_class(release_type="volume")
+    monkeypatch.setattr(roms_tools, "CDRForcing", fake_cls)
+
+    wiz = ForgeBlueprintWizard()
+    wiz.cdr_mode_dd.value = "yaml"
+    wiz._cdr_forcing = {
+        "start_time": "2012-01-01T00:00:00",
+        "end_time": "2012-01-02T00:00:00",
+        "releases": [],
+    }
+    wiz._rebuild()
+
+    wiz._on_cdr_plot_generate(None)
+
+    option_values = dict(wiz.cdr_plot_type_dd.options).values()
+    assert "tracer_flux" not in option_values
+    assert "volume-type" in wiz.cdr_plot_status.value
+
+
+def test_cdr_forcing_from_netcdf_reconstructs_tracer_perturbation(tmp_path):
+    """Integration test (real roms_tools, no mocking) for the module-level
+    netcdf-reconstruction helper the plot widget's "netcdf" mode uses.
+    """
+    import numpy as np
+    import roms_tools as rt
+    import xarray as xr
+
+    from cstar_forge.forge_blueprint_wizard import _cdr_forcing_from_netcdf
+
+    times = np.array(["2012-01-01", "2012-01-02", "2012-01-03"], dtype="datetime64[ns]")
+    ds = xr.Dataset(
+        {
+            "cdr_time": ("time", [0.0, 1.0, 2.0]),
+            "cdr_lon": ("ncdr", [0.5]),
+            "cdr_lat": ("ncdr", [55.0]),
+            "cdr_dep": ("ncdr", [5.0]),
+            "cdr_hsc": ("ncdr", [15.0]),
+            "cdr_vsc": ("ncdr", [25.0]),
+            "cdr_trcflx": (
+                ("time", "ntracers", "ncdr"),
+                np.array([[[1.0], [10.0]], [[1.5], [11.0]], [[2.0], [12.0]]]),
+            ),
+        },
+        coords={
+            "time": times,
+            "release_name": ("ncdr", ["r1"]),
+            "tracer_name": ("ntracers", ["ALK", "DIC"]),
+        },
+    )
+    path = tmp_path / "cdr.nc"
+    ds.to_netcdf(path)
+    grid = rt.Grid(
+        nx=6, ny=2, size_x=500.0, size_y=1000.0, center_lon=0.0, center_lat=55.0, N=3
+    )
+
+    cdr = _cdr_forcing_from_netcdf(path, grid)
+
+    assert cdr.release_type == "tracer_perturbation"
+    assert [r.name for r in cdr.releases] == ["r1"]
+    release = cdr.releases["r1"]
+    assert release.lat == 55.0
+    assert release.lon == 0.5
+    assert release.depth == 5.0
+    assert release.hsc == 15.0
+    assert release.vsc == 25.0
+    assert [v for v in release.tracer_fluxes["ALK"].values] == [1.0, 1.5, 2.0]
+
+
+def test_cdr_forcing_from_netcdf_wraps_errors_with_path(tmp_path):
+    from cstar_forge.forge_blueprint_wizard import _cdr_forcing_from_netcdf
+
+    path = tmp_path / "not_cdr.nc"
+    import xarray as xr
+
+    xr.Dataset({"foo": ("x", [1, 2, 3])}).to_netcdf(path)
+
+    with pytest.raises(ValueError, match="could not reconstruct releases"):
+        _cdr_forcing_from_netcdf(path, grid=None)
+
+
+def test_ntides_syncs_from_tidal_forcing_into_model_settings():
+    """Item 6: the tidal forcing item's ntides drives model_settings['tides']['ntides'],
+    not just the run-time-defaults placeholder (10).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    tidal_rows = wiz._forcing_editor._rows["tidal"]
+    assert tidal_rows, "expected a default tidal row from the model's forcing inputs"
+    # Default model forcing sets ntides=15 -> must already have synced, not left at 10.
+    assert wiz.config.model_settings["tides"]["ntides"] == 15
+
+    tidal_rows[0]["ntides"].value = 8
+    wiz._rebuild()
+    assert wiz.config.model_settings["tides"]["ntides"] == 8
+
+    # A manual Advanced-settings override still wins over the tidal-forcing value.
+    wiz._overrides[("tides", "ntides")] = 42
+    wiz._rebuild()
+    assert wiz.config.model_settings["tides"]["ntides"] == 42
+
+
+def test_settings_editor_nrpf_rst_only_for_legacy_settings_cls():
+    """``ocean_vars.nrpf_rst`` was removed from ucla-roms 0.5.0 -- the editor must
+    generate a widget for it when introspecting the legacy ``RunTimeSettings``
+    class, and must NOT when introspecting ``RunTimeSettingsV0_5_0``, even
+    though the raw ``model_settings`` dict carries the key either way (e.g. a
+    stale value passed through from a hand-edited/legacy-authored blueprint).
+    """
+    import ipywidgets as W
+
+    model_settings = {"ocean_vars": {"nrpf_rst": 2, "wrt_file_rst": True}}
+
+    legacy_editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettings)
+    assert ("ocean_vars", "nrpf_rst") in legacy_editor._widgets
+
+    v0_5_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_5_0
+    )
+    assert ("ocean_vars", "nrpf_rst") not in v0_5_0_editor._widgets
+    # wrt_file_rst has no version-varying field set, so it's unaffected either way.
+    assert ("ocean_vars", "wrt_file_rst") in v0_5_0_editor._widgets
+
+    # Constructor default (no settings_cls passed) stays legacy, for back-compat.
+    default_editor = _SettingsEditor(W, model_settings)
+    assert ("ocean_vars", "nrpf_rst") in default_editor._widgets
+
+
+def test_settings_editor_skips_version_gated_section_not_in_active_schema():
+    """``pio_settings`` is version-gated: only ``RunTimeSettingsV0_6_0`` models
+    it. A ``model_settings`` dict can still carry the key under an older
+    ``settings_cls`` -- e.g. the ``pio-dev``/``roms-marbl-0.6-default``
+    ModelSpecs always include it, but a user can override ``roms_ref`` down to
+    "0.5.0" in the wizard while keeping that model selected. Regression: the
+    editor used to fall back to type-inference (like it does for a *never*
+    schema-modeled section, e.g. ``cppdefs``) and render an editable widget
+    anyway; ``RunTimeSettings``/``RunTimeSettingsV0_5_0`` are ``extra="ignore"``
+    at the top level, so any edit made there was silently discarded downstream
+    instead of taking effect or raising. No widget must be built for
+    ``pio_settings`` under a settings_cls that doesn't model it; a widget MUST
+    still be built once the settings_cls does. ``cppdefs`` (never modeled by
+    any tier) must keep rendering under both, guarding the distinction
+    ``version_gated_section_names()`` draws between "version-gated" and
+    "never schema-modeled".
+    """
+    import ipywidgets as W
+
+    model_settings = {
+        "pio_settings": {"pio_stride": 4},
+        "cppdefs": {"sponge_tune": True},
+    }
+
+    v0_5_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_5_0
+    )
+    assert ("pio_settings", "pio_stride") not in v0_5_0_editor._widgets
+    assert "pio_settings" not in v0_5_0_editor._pane_sections.get(
+        "Physics & subgrid tuning", []
+    )
+    assert ("cppdefs", "sponge_tune") in v0_5_0_editor._widgets
+
+    v0_6_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_6_0
+    )
+    assert ("pio_settings", "pio_stride") in v0_6_0_editor._widgets
+    assert "pio_settings" in v0_6_0_editor._pane_sections.get(
+        "Physics & subgrid tuning", []
+    )
+    assert ("cppdefs", "sponge_tune") in v0_6_0_editor._widgets
+
+    # A section with NOTHING else built for its pane under an older settings_cls
+    # must not leave a broken empty accordion pane (mirrors the "if not blocks:
+    # continue" guard in _SettingsEditor.__init__).
+    pio_only_editor = _SettingsEditor(
+        W, {"pio_settings": {"pio_stride": 4}}, settings_cls=RunTimeSettingsV0_5_0
+    )
+    assert "Physics & subgrid tuning" not in pio_only_editor._pane_sections
+    assert pio_only_editor._widgets == {}
+
+
+def test_wizard_editor_rebuilds_across_roms_ref_schema_boundary():
+    """Overriding the ``roms_ref`` box across the ucla-roms 0.5.0 line (with the
+    same ModelSpec selected) must regenerate the Advanced-settings editor
+    against the matching RunTimeSettings variant -- not just on a model switch.
+
+    Explicitly sets a pre-0.5.0 override throughout (rather than relying on the
+    default model's own pin, which is a "main" branch ref -- a non-semver ref
+    resolves to the *latest* schema, so it can't stand in for "legacy" here).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.roms_ref.value = "0.2.0"
+    wiz._rebuild()
+    assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
+
+    wiz.roms_ref.value = "0.5.0"
+    wiz._rebuild()
+    assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+    wiz.roms_ref.value = "0.2.0"  # back across the boundary
+    wiz._rebuild()
+    assert ("ocean_vars", "nrpf_rst") in wiz.editor._widgets
+
+
+def test_settings_editor_sync_preserves_in_progress_list_text():
+    """Typing a comma into a list field (e.g. ``marbl_bgc.marbl_tracers_to_write``)
+    must not be reverted. Every keystroke runs on_edit -> wizard._rebuild ->
+    editor.sync(effective); sync used to unconditionally re-join the parsed
+    list, so "a, b," was rewritten to "a, b" and a trailing comma could never
+    be typed (the reported workaround was pasting a finished list). sync() now
+    leaves the text alone when it already parses to the synced value, and
+    still re-renders when the value genuinely differs.
+    """
+    import ipywidgets as W
+
+    model_settings = {"marbl_bgc": {"marbl_tracers_to_write": ["ALK", "DIC"]}}
+    edits: list[tuple[str, str]] = []
+    editor = _SettingsEditor(
+        W, model_settings, on_edit=lambda s, f: edits.append((s, f))
+    )
+    widget, base = editor._widgets[("marbl_bgc", "marbl_tracers_to_write")]
+    assert base is list
+    assert widget.value == "ALK, DIC"
+
+    # Simulate the wizard's per-keystroke loop: the user types a trailing comma,
+    # on_edit fires, the wizard records editor.read() and syncs it back.
+    widget.value = "ALK, DIC,"
+    assert edits == [("marbl_bgc", "marbl_tracers_to_write")]
+    effective = editor.read("marbl_bgc", "marbl_tracers_to_write")
+    assert effective == ["ALK", "DIC"]
+    editor.sync({"marbl_bgc": {"marbl_tracers_to_write": effective}})
+    assert widget.value == "ALK, DIC,"  # trailing comma survives
+
+    widget.value = "ALK, DIC, "  # ...and so does a trailing separator + space
+    editor.sync({"marbl_bgc": {"marbl_tracers_to_write": ["ALK", "DIC"]}})
+    assert widget.value == "ALK, DIC, "
+
+    # A genuine external change (model switch / load / override reset) still
+    # re-renders the field.
+    editor.sync({"marbl_bgc": {"marbl_tracers_to_write": ["PO4"]}})
+    assert widget.value == "PO4"
+
+
+def test_output_spec_defaults_to_daily_restarts():
+    """The Output dropdown preselects the precheck-safe 'daily-restarts' spec
+    (explicitly, not by sort position); 'standard' stays available for
+    back-compat.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.output_dd.value == "daily-restarts"
+    assert "standard" in wiz.catalog.output_names
+
+
+def test_default_model_uses_latest_settings_schema():
+    """The default catalog model (``roms-marbl-0.8-default``) is pinned to
+    ucla-roms ``0.8.0`` -- a semver ref above every registered schema boundary,
+    which both the wizard and the executor (``write_roms_namelist`` ->
+    ``run_time_settings_for_ref``) resolve to the *latest* known schema
+    (currently ``RunTimeSettingsV0_7_0``, since 0.8.0 adds no namelist groups),
+    not the legacy one. This is an intentional behavior change from before this
+    ref-awareness was added (the editor used to hardcode legacy
+    ``RunTimeSettings``) -- it pins that the wizard now agrees with what the
+    executor will actually write. (The tests in tests/test_forge_blueprint.py
+    that exercise the ``nrpf_rst`` widget rules now pin a legacy ref
+    explicitly.)
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz._editor_settings_cls is RunTimeSettingsV0_7_0
+    assert ("ocean_vars", "nrpf_rst") not in wiz.editor._widgets
+
+
+def test_advection_cppdefs_editable_only_for_models_that_declare_them():
+    """``parabolic_splines``/``upstream_ts_land_curv`` (ucla-roms >= 0.8.0,
+    PR #361) are opted into the "Physics & subgrid tuning" pane via
+    ``_CPPDEFS_PANE_FIELDS``, like ``sponge_tune``. Unlike ``sponge_tune``
+    (declared by every ModelSpec), these two keys are absent from ModelSpecs
+    pinned below 0.8.0 -- the editor type-infers a widget from the composed
+    dict, so a spec that omits the key must show no widget for it at all.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["parabolic_splines"] is False
+    assert wiz.config.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
+    assert ("cppdefs", "parabolic_splines") in wiz.editor._widgets
+    assert ("cppdefs", "upstream_ts_land_curv") in wiz.editor._widgets
+    assert wiz.editor._widgets[("cppdefs", "parabolic_splines")][0].value is False
+    assert wiz.editor._widgets[("cppdefs", "upstream_ts_land_curv")][0].value is False
+    # cppdefs is never modeled by RomsNamelist, so the schema tooltip is empty;
+    # the glossary hint (the "< 0.8.0 ignores this" caveat) must reach the widget.
+    for key in ("parabolic_splines", "upstream_ts_land_curv"):
+        assert "0.8.0" in wiz.editor._widgets[("cppdefs", key)][0].tooltip
+
+    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz._rebuild()
+    assert "parabolic_splines" not in wiz.config.model_settings["cppdefs"]
+    assert "upstream_ts_land_curv" not in wiz.config.model_settings["cppdefs"]
+    assert ("cppdefs", "parabolic_splines") not in wiz.editor._widgets
+    assert ("cppdefs", "upstream_ts_land_curv") not in wiz.editor._widgets
+
+
+def test_advection_cppdefs_editable_via_advanced_settings_accordion(tmp_path):
+    """Mirrors ``test_sponge_tune_editable_via_advanced_settings_accordion``:
+    toggling the ``parabolic_splines`` widget records an override (leaving the
+    sibling ``upstream_ts_land_curv`` flag untouched), and the override
+    survives a save/load round trip.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is False
+
+    widget, _ = wiz.editor._widgets[("cppdefs", "parabolic_splines")]
+    widget.value = True  # fires _on_editor_edit -> records the override
+    wiz._rebuild()
+    assert wiz.config.model_settings["cppdefs"]["parabolic_splines"] is True
+    assert wiz.config.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
+    assert wiz.config.composition.model.modified is True
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.config is not None
+    assert wiz2.config.model_settings["cppdefs"]["parabolic_splines"] is True
+    assert wiz2.config.model_settings["cppdefs"]["upstream_ts_land_curv"] is False
+    assert wiz2.config.composition.model.modified is True
+    assert wiz2.editor._widgets[("cppdefs", "parabolic_splines")][0].value is True
+
+
+@pytest.mark.parametrize(
+    "section,master_flag",
+    [
+        ("cdr_tracer_output", "do_cdr_tracer_output"),
+        ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+    ],
+)
+def test_settings_editor_skips_cdr_output_streams_not_in_active_schema(
+    section, master_flag
+):
+    """``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms PR #351, >=
+    0.7.0) are version-gated exactly like ``pio_settings`` (see
+    ``test_settings_editor_skips_version_gated_section_not_in_active_schema``
+    above), one schema tier later: only ``RunTimeSettingsV0_7_0`` models them.
+    A ``model_settings`` dict can still carry the key under an older
+    ``settings_cls`` (e.g. a bundled OutputSpec's defaults survive a
+    ``roms_ref`` override down to "0.6.0" with the same ModelSpec selected),
+    so the editor must build no widget for it under
+    ``RunTimeSettingsV0_6_0`` and build one once the effective schema reaches
+    ``RunTimeSettingsV0_7_0``.
+    """
+    import ipywidgets as W
+
+    model_settings = {section: {master_flag: False, "do_avg": True}}
+
+    v0_6_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_6_0
+    )
+    assert (section, master_flag) not in v0_6_0_editor._widgets
+    assert section not in v0_6_0_editor._pane_sections.get(
+        "Carbon dioxide removal (CDR)", []
+    )
+
+    v0_7_0_editor = _SettingsEditor(
+        W, model_settings, settings_cls=RunTimeSettingsV0_7_0
+    )
+    assert (section, master_flag) in v0_7_0_editor._widgets
+    assert section in v0_7_0_editor._pane_sections.get(
+        "Carbon dioxide removal (CDR)", []
+    )
+
+
+def test_wizard_editor_cdr_output_streams_gated_by_model_spec_pin():
+    """End-to-end sibling of the two tests above, driven through the wizard's
+    model selector instead of ``_SettingsEditor`` directly: ``roms-marbl-0.6-
+    default`` pins ucla-roms 0.6.0, so the resolver's
+    ``_prune_version_gated_sections`` drops ``cdr_tracer_output``/
+    ``cdr_gas_exch_output`` from ``model_settings`` entirely (they're
+    OutputSpec-owned -- the default 'daily-restarts' OutputSpec carries them --
+    but this pin's schema can't model them), and the editor never sees the
+    section at all. Switching to ``roms-marbl-0.7-default`` (0.7.0) keeps both
+    sections and their widgets.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+
+    wiz.model_dd.value = "roms-marbl-0.6-default"
+    wiz._rebuild()
+    assert "cdr_tracer_output" not in wiz.config.model_settings
+    assert "cdr_gas_exch_output" not in wiz.config.model_settings
+    assert ("cdr_tracer_output", "do_cdr_tracer_output") not in wiz.editor._widgets
+    assert (
+        "cdr_gas_exch_output",
+        "do_cdr_gas_exch_output",
+    ) not in wiz.editor._widgets
+
+    wiz.model_dd.value = "roms-marbl-0.7-default"
+    wiz._rebuild()
+    assert "cdr_tracer_output" in wiz.config.model_settings
+    assert "cdr_gas_exch_output" in wiz.config.model_settings
+    assert ("cdr_tracer_output", "do_cdr_tracer_output") in wiz.editor._widgets
+    assert ("cdr_gas_exch_output", "do_cdr_gas_exch_output") in wiz.editor._widgets
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["cdr_output", "cdr_tracer_output", "cdr_gas_exch_output"],
+)
+def test_cdr_output_stream_do_avg_and_monthly_render_as_dropdowns(section):
+    """Every CDR output stream's ``do_avg``/``monthly_averages`` fields render
+    as a two-option mode dropdown, not a checkbox -- see
+    ``_BOOL_DROPDOWN_FIELDS``. ``cdr_output`` is the pre-existing stream;
+    ``cdr_tracer_output``/``cdr_gas_exch_output`` (ucla-roms >= 0.7.0) must
+    behave identically.
+    """
+    import ipywidgets as W
+
+    model_settings = {section: {"do_avg": True, "monthly_averages": False}}
+    editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_7_0)
+
+    do_avg_widget, _ = editor._widgets[(section, "do_avg")]
+    assert isinstance(do_avg_widget, W.Dropdown)
+    assert tuple(do_avg_widget.options) == ("averaged", "instantaneous")
+    assert do_avg_widget.value == "averaged"
+
+    monthly_widget, _ = editor._widgets[(section, "monthly_averages")]
+    assert isinstance(monthly_widget, W.Dropdown)
+    assert tuple(monthly_widget.options) == ("monthly", "periodic")
+    assert monthly_widget.value == "periodic"
+
+
+@pytest.mark.parametrize(
+    "section,master_flag",
+    [
+        ("cdr_output", "do_cdr_output"),
+        ("cdr_tracer_output", "do_cdr_tracer_output"),
+        ("cdr_gas_exch_output", "do_cdr_gas_exch_output"),
+    ],
+)
+def test_cdr_output_stream_field_rules_follow_master_switch(section, master_flag):
+    """Each CDR output stream's ``do_avg``/``monthly_averages``/
+    ``output_period``/``nrpf`` widgets are hidden while its master switch is
+    off and shown once it's turned on -- exercises the
+    ``_CDR_STREAM_MASTER_FLAGS``-driven loop in ``_apply_field_rules``/
+    ``_register_field_rule_observers`` identically across all three streams
+    (``cdr_output`` is the pre-existing behavior this generalization must
+    keep byte-for-byte). ``cdr_tracer_output`` additionally hides its six
+    ``wrt_*`` field-group toggles (every non-master field follows) under the
+    same condition, since they're meaningless while the stream itself is off.
+    Also exercises the averaged/monthly cascade: ``monthly_averages`` stays
+    hidden unless ``do_avg`` is "averaged", and ``output_period`` is disabled
+    only once both ``do_avg`` is "averaged" and ``monthly_averages`` is
+    "monthly" (a fixed monthly cadence makes the period moot).
+    """
+    import ipywidgets as W
+
+    wrt_fields = (
+        "wrt_tracers",
+        "wrt_vertical_integrals",
+        "wrt_thickness_weighted",
+        "wrt_sources",
+        "wrt_alk",
+        "wrt_dic",
+    )
+    section_settings = {
+        master_flag: False,
+        "do_avg": True,
+        "monthly_averages": False,
+        "output_period": 3600.0,
+        "nrpf": 4,
+    }
+    if section == "cdr_tracer_output":
+        section_settings.update(dict.fromkeys(wrt_fields, True))
+    model_settings = {section: section_settings}
+
+    editor = _SettingsEditor(W, model_settings, settings_cls=RunTimeSettingsV0_7_0)
+
+    def _visible(field: str) -> bool:
+        widget, _ = editor._widgets[(section, field)]
+        return widget.layout.display != "none"
+
+    # Master off: do_avg/monthly_averages/output_period/nrpf (and, for the
+    # tracer stream, every wrt_* toggle) are hidden.
+    assert not _visible("do_avg")
+    assert not _visible("monthly_averages")
+    assert not _visible("output_period")
+    assert not _visible("nrpf")
+    if section == "cdr_tracer_output":
+        for field in wrt_fields:
+            assert not _visible(field)
+
+    # Master on: they're shown again (do_avg starts "averaged" -> monthly_
+    # averages is shown too; monthly_averages starts "periodic" -> output_
+    # period stays enabled).
+    editor._widgets[(section, master_flag)][0].value = True
+    assert _visible("do_avg")
+    assert _visible("monthly_averages")
+    assert _visible("output_period")
+    assert _visible("nrpf")
+    if section == "cdr_tracer_output":
+        for field in wrt_fields:
+            assert _visible(field)
+    period_widget, _ = editor._widgets[(section, "output_period")]
+    assert period_widget.disabled is False
+
+    # do_avg -- Dropdown widgets, so set the mode label, not a bool -- see
+    # _BOOL_DROPDOWN_FIELDS. "instantaneous": monthly_averages is meaningless
+    # and hidden; output_period stays enabled (there's no fixed cadence to
+    # make it moot).
+    editor._widgets[(section, "do_avg")][0].value = "instantaneous"
+    assert not _visible("monthly_averages")
+    assert period_widget.disabled is False
+
+    # "averaged" + monthly_averages "monthly": output_period is disabled --
+    # the monthly cadence fixes it implicitly.
+    editor._widgets[(section, "do_avg")][0].value = "averaged"
+    editor._widgets[(section, "monthly_averages")][0].value = "monthly"
+    assert _visible("monthly_averages")
+    assert period_widget.disabled is True
+
+
+def test_domain_modified_reflects_deviation_from_catalog_pick():
+    """composition.domain.modified follows "deviate" semantics: editing a
+    domain-defining widget after a catalog Domain pick sets it True; reverting the
+    edit exactly clears it back to False (audit follow-up: domain never used to
+    track modification at all).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[
+        1
+    ]  # first real catalog domain
+    assert wiz.config.composition.domain.origin == "catalog"
+    assert wiz.config.composition.domain.modified is False
+
+    orig_npx = wiz.npx.value
+    wiz.npx.value = orig_npx + 1
+    assert wiz.config.composition.domain.modified is True
+    assert wiz.config.composition.domain.origin == "catalog"  # never flips to custom
+
+    wiz.npx.value = orig_npx  # revert exactly -> deviation clears
+    assert wiz.config.composition.domain.modified is False
+
+
+def test_domain_modified_false_when_hand_authored():
+    """A from-scratch (non-catalog) domain has nothing to deviate from -> never
+    modified, regardless of what its widgets hold.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert wiz.domain_dd.value == "<custom>"
+    wiz.npx.value = wiz.npx.value + 1
+    assert wiz.config.composition.domain.origin == "custom"
+    assert wiz.config.composition.domain.modified is False
+
+
+def test_forcing_modified_reflects_deviation_from_catalog_pick():
+    """composition.forcing.modified follows the same "deviate" semantics, and
+    (post-unification) origin no longer flips to "custom" on edit.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is False
+    assert wiz.config.composition.forcing.origin == "catalog"
+
+    tidal_rows = wiz._forcing_editor._rows["tidal"]
+    orig_ntides = tidal_rows[0]["ntides"].value
+    tidal_rows[0]["ntides"].value = orig_ntides + 1
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is True
+    assert wiz.config.composition.forcing.origin == "catalog"  # never flips to custom
+
+    tidal_rows[0]["ntides"].value = orig_ntides  # revert exactly -> deviation clears
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is False
+
+
+# ---------------------------------------------------------------------------
+# Advanced settings: output-stream tables / per-variable checkbox grids
+# (_SettingsEditor._build_section grouping -- see _OUTPUT_TABLES/_VARIABLE_GRIDS)
+# ---------------------------------------------------------------------------
+
+
+def _iter_widget_tree(widget):
+    """Depth-first walk of a widget and its ``.children`` (Box/GridBox/HBox/VBox)."""
+    yield widget
+    for child in getattr(widget, "children", ()):
+        yield from _iter_widget_tree(child)
+
+
+def _is_descendant_of_class(root, target, css_class: str) -> bool:
+    """True if ``target`` sits under some node in ``root``'s tree carrying
+    ``css_class`` (as added via ``add_class``).
+    """
+    for node in _iter_widget_tree(root):
+        if css_class in getattr(node, "_dom_classes", ()) and any(
+            t is target for t in _iter_widget_tree(node)
+        ):
+            return True
+    return False
+
+
+def test_ocean_vars_output_table_widgets_have_blank_description_and_live_in_table():
+    """The ocean_vars Write/Period/Records-per-file widgets for each output
+    stream row (see ``_OUTPUT_TABLES["ocean_vars"]``) render with a blank
+    ``description`` (the table's own header carries the column labels) and
+    sit inside a ``W.GridBox`` carrying the ``forge-out-table`` class.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    row = next(
+        r for r in _OUTPUT_TABLES["ocean_vars"] if r["label"] == "Instantaneous history"
+    )
+    for key in (row["write"], row["period"], row["records"]):
+        widget, _base = editor._widgets[("ocean_vars", key)]
+        assert widget.description == ""
+        assert _is_descendant_of_class(editor.accordion, widget, "forge-out-table")
+
+
+def test_ocean_vars_variable_checkbox_lives_in_grid_with_glossary_description():
+    """``wrt_z`` (one of ``_VARIABLE_GRIDS["ocean_vars"]``'s history-file
+    variables) renders inside a ``forge-var-grid`` GridBox and keeps its
+    normal glossary-derived (non-blank) checkbox description -- only the
+    output-stream table's write/period/records widgets get blanked.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    widget, _base = editor._widgets[("ocean_vars", "wrt_z")]
+    assert widget.description != ""
+    assert _is_descendant_of_class(editor.accordion, widget, "forge-var-grid")
+
+
+def test_ocean_vars_section_fields_unchanged_by_table_grid_layout():
+    """The table/grid layout is display-only: ``_section_fields["ocean_vars"]``
+    (which drives the pane-title "N settings" count) must still list every
+    field ``_build_section`` would have built as a plain flat list -- i.e.
+    every ``ocean_vars`` field on the active settings_cls's sub-model, minus
+    ``_ACCORDION_EXCLUDED_FIELDS``, in the same order.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    sub = _section_submodel("ocean_vars", wiz._editor_settings_cls)
+    excluded = _ACCORDION_EXCLUDED_FIELDS.get("ocean_vars", frozenset())
+    expected = [
+        key
+        for key in wiz.config.model_settings["ocean_vars"]
+        if key not in excluded and key in sub.model_fields
+    ]
+    assert expected  # sanity: the section isn't accidentally empty
+    assert editor._section_fields["ocean_vars"] == expected
+
+
+def test_ocean_vars_table_widget_read_reflects_edit():
+    """A value set directly on a table-rendered widget (same object as in the
+    ``_widgets`` registry -- the table only rearranges it) must read back via
+    ``editor.read()`` exactly like any other advanced-settings field.
+    """
+    wiz = ForgeBlueprintWizard()
+    editor = wiz.editor
+    widget, _base = editor._widgets[("ocean_vars", "nrpf_his")]
+    widget.value = 77
+    assert editor.read("ocean_vars", "nrpf_his") == 77
+
+
+def test_model_and_output_modified_from_accordion_overrides():
+    """Model/output share the accordion overrides layer; modified is derived per-
+    spec by whether a deviating override key belongs to OUTPUT_SECTIONS/
+    PARTIAL_OUTPUT_SECTIONS (audit follow-up: these two specs never set `modified`
+    at all before this fix).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is False
+    assert wiz.config.composition.output.modified is False
+
+    # A non-output section override -> model.modified only.
+    wiz._overrides[("lateral_visc", "visc2")] = 99.0
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is True
+    assert wiz.config.composition.output.modified is False
+
+    # An OUTPUT_SECTIONS override -> output.modified only.
+    del wiz._overrides[("lateral_visc", "visc2")]
+    wiz._overrides[("ocean_vars", "wrt_z")] = False
+    wiz._rebuild()
+    assert wiz.config.composition.model.modified is False
+    assert wiz.config.composition.output.modified is True
+
+
+def test_composition_modified_survives_save_and_load_round_trip(tmp_path):
+    """A saved deviation on model/output/domain/forcing must reload with the same
+    `modified` flags (composition is meant to reliably answer "did the user touch
+    this catalog spec" even after a save/load cycle).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[1]
+    wiz.npx.value = wiz.npx.value + 1  # deviate domain
+    wiz._overrides[("lateral_visc", "visc2")] = 99.0  # deviate model
+    wiz._rebuild()
+    assert wiz.config.composition.domain.modified is True
+    assert wiz.config.composition.model.modified is True
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    # Domain always loads as origin="custom" (the file, not a catalog entry, is
+    # authoritative) so domain.modified is moot on load; model.modified must survive
+    # via the reconstructed overrides layer.
+    assert wiz2.config.composition.domain.origin == "custom"
+    assert wiz2.config.composition.model.modified is True
+
+
+def test_composition_modified_all_false_on_pristine_save_and_load_round_trip(
+    tmp_path,
+):
+    """A file saved with no edits must reload with every spec unmodified -- the
+    forcing comparison in particular round-trips through `_sources_to_inputs` /
+    `build_forge_blueprint` before being re-gathered, so a lossy resolve/reconstruct
+    cycle (e.g. an omitted-vs-null field) could otherwise report a false positive
+    for a file the user never touched.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config.composition.forcing.modified is False
+    assert wiz.config.composition.model.modified is False
+    assert wiz.config.composition.output.modified is False
+
+    saved = tmp_path / "forge_blueprint.yaml"
+    wiz.config.to_yaml(saved)
+
+    wiz2 = ForgeBlueprintWizard()
+    wiz2.load_path.value = str(saved)
+    wiz2._on_load_path(None)
+
+    assert wiz2.config.composition.forcing.modified is False
+    assert wiz2.config.composition.model.modified is False
+    assert wiz2.config.composition.output.modified is False
+
+
+def test_parent_plot_is_always_grid_plot_only(monkeypatch):
+    """The Grid section's plot is parent-only regardless of nesting state -- the
+    parent+child overlay lives in its own Nesting-section plot (see _on_nest_plot).
+    """
+    import roms_tools
+
+    calls = []
+
+    class _FakeGrid:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def plot(self):
+            calls.append("plot")
+
+    monkeypatch.setattr(roms_tools, "Grid", _FakeGrid)
+
+    wiz = ForgeBlueprintWizard()
+    for nest_enabled in (False, True):
+        calls.clear()
+        wiz.nest_enable.value = nest_enabled
+        wiz._on_plot(None)
+        assert calls == ["plot"], (nest_enabled, wiz.plot_status.value)
+
+
+def test_nest_plot_button_renders_parent_and_child_via_plot_nesting(monkeypatch):
+    """Item 1 (revised): a dedicated 'Refresh plot' button in the Nesting section
+    builds both grids and renders them via plot_nesting, independent of the parent
+    Grid section's plot.
+    """
+    import roms_tools
+
+    calls = []
+
+    class _FakeGrid:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def plot(self):
+            calls.append(("plot", self.kwargs))
+
+    def _fake_plot_nesting(parent, child, **kw):
+        calls.append(("plot_nesting", parent.kwargs, child.kwargs))
+
+    monkeypatch.setattr(roms_tools, "Grid", _FakeGrid)
+    monkeypatch.setattr(roms_tools, "plot_nesting", _fake_plot_nesting, raising=False)
+
+    wiz = ForgeBlueprintWizard()
+    wiz._on_nest_plot(None)
+
+    assert any(c[0] == "plot_nesting" for c in calls), wiz.nest_plot_status.value
+    assert not any(c[0] == "plot" for c in calls)  # doesn't touch the parent plot
+    assert len(wiz.nest_plot_img.value) > 0
+    # The parent plot/status are untouched by the nesting-section refresh
+    # (plot_status still carries its initial empty-state hint).
+    assert wiz.plot_status.value == "Click Refresh preview to draw the grid."
+    assert wiz.plot_img.value == b""
+
+
+def test_nest_plot_figure_survives_inline_backend_show(monkeypatch):
+    """Regression: plot_nesting calls plt.show() internally (no way to suppress it,
+    no return value). Under Jupyter's inline backend, show() renders-and-closes the
+    current figure immediately, so a plain plt.gcf() call right after plot_nesting
+    returns would grab a fresh *blank* figure instead of the one just drawn -- the
+    bug report ("existing plot disappears"). _on_nest_plot must neutralize
+    plt.show for the duration of the plot_nesting call so the real figure survives
+    to be saved.
+    """
+    import matplotlib.pyplot as plt
+    import roms_tools
+
+    class _FakeGrid:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    def _fake_plot_nesting(parent, child, **kw):
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])  # something identifiable on the "real" figure
+        plt.show()  # exercises the real plt.show, patched below
+
+    def _inline_backend_show(*a, **kw):
+        # Mimic Jupyter's inline backend: render then close the current figure.
+        plt.close(plt.gcf())
+
+    captured = {}
+    real_savefig = plt.Figure.savefig
+
+    def _spy_savefig(self, *a, **kw):
+        captured["axes"] = list(self.axes)
+        return real_savefig(self, *a, **kw)
+
+    monkeypatch.setattr(roms_tools, "Grid", _FakeGrid)
+    monkeypatch.setattr(roms_tools, "plot_nesting", _fake_plot_nesting, raising=False)
+    monkeypatch.setattr(plt, "show", _inline_backend_show)
+    monkeypatch.setattr(plt.Figure, "savefig", _spy_savefig)
+
+    wiz = ForgeBlueprintWizard()
+    wiz._on_nest_plot(None)
+
+    assert not wiz.nest_plot_status.value.startswith("<span style='color:#b00'>"), (
+        wiz.nest_plot_status.value
+    )
+    # A blank new figure (created after a premature close) would have zero axes;
+    # the real drawn figure has one axis with the plotted line.
+    assert captured.get("axes"), "expected the drawn figure's axes, got a blank figure"
+    assert captured["axes"][0].lines, "the plotted line did not survive plt.show()"
+
+
+def test_build_run_command_uses_cstar_blueprint_run_from_this_env():
+    """The Run button invokes `cstar blueprint run <path>` -- the one command the docs
+    give for both pipeline steps -- via the `cstar` script installed next to the
+    interpreter already running the wizard's kernel, not a bare `cstar` from PATH or a
+    `conda run` invocation (avoids conda/micromamba env-discovery issues). Not
+    `cstar forge run`: the button exposes no per-run flags, so that passthrough's only
+    advantage does not apply here.
+    """
+    import sys
+
+    wiz = ForgeBlueprintWizard()
+    cmd = wiz._build_run_command("/tmp/some_blueprint.yaml")
+    cstar_exe = Path(sys.executable).with_name("cstar")
+    if cstar_exe.exists():
+        assert cmd == [str(cstar_exe), "blueprint", "run", "/tmp/some_blueprint.yaml"]
+    else:
+        assert cmd == [
+            sys.executable,
+            "-m",
+            "cstar_forge.cli",
+            "run",
+            "/tmp/some_blueprint.yaml",
+        ]
+
+
+def test_workplan_path_strips_forge_blueprint_suffix():
+    f = ForgeBlueprintWizard._workplan_path
+    assert f(Path("/x/foo.forge_blueprint.yaml")) == Path("/x/foo.workplan.yaml")
+    assert f(Path("/x/foo.yaml")) == Path("/x/foo.workplan.yaml")
+
+
+@requires_workplan_support
+def test_build_workplan_two_steps_with_deferred_blueprint(tmp_path):
+    """The workplan pairs a `forge` step (the saved blueprint) with a `roms_marbl`
+    step consuming the B_{name}.yaml that step 1 generates -- a deferred blueprint
+    reference, since the file does not exist until the forge step has run.
+    """
+    from cstar.orchestration.models import DeferredBlueprintRef
+
+    wiz = ForgeBlueprintWizard()
+    assert wiz.config is not None
+    bp_path = tmp_path / f"{wiz.config.name}.forge_blueprint.yaml"
+    bp_path.write_text("placeholder")  # Step's FilePath branch requires existence
+
+    wp = wiz._build_workplan(bp_path)
+
+    assert wp.name == wiz.config.name
+    forge_step, roms_step = wp.steps
+    assert (forge_step.name, forge_step.application) == ("forge", "forge")
+    assert Path(str(forge_step.blueprint_path)) == bp_path.resolve()
+    assert (roms_step.name, roms_step.application) == ("roms_marbl", "roms_marbl")
+    assert list(roms_step.depends_on) == ["forge"]
+    ref = roms_step.blueprint_path
+    assert isinstance(ref, DeferredBlueprintRef)
+    assert ref.from_step == "forge"
+    assert ref.filename == f"B_{wiz.config.name}.yaml"
+    # a deferred blueprint can't be inspected at submit time (SLURM would default
+    # to 1 CPU) -- the step must carry the partitioning size explicitly, nested
+    # under the launcher namespace C-Star's SLURM adapter reads
+    assert roms_step.compute_overrides["slurm"]["num_cpus"] == wiz.config.n_procs
+    # the forge step carries no cpus override: the scheduler falls back to
+    # ForgeBlueprint.cpus_needed, the grid-sized forge estimate
+    assert "slurm" not in forge_step.compute_overrides
+    assert wiz.config.cpus_needed >= 16
+
+
+def test_on_save_workplan_guards_on_invalid_config(tmp_path):
+    wiz = ForgeBlueprintWizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.config = None
+    wiz.save_path.value = str(tmp_path / "never.forge_blueprint.yaml")
+    wiz._on_save_workplan(None)
+    assert "invalid" in wiz.workplan_status.value
+    assert not list(tmp_path.iterdir())
+
+
+@requires_workplan_support
+def test_on_save_workplan_writes_to_catalog_workplans_dir(tmp_path):
+    """With a local catalog, the workplan lands in catalog/workplans/ (not next
+    to the blueprint in catalog/blueprints/).
+    """
+    import shutil
+
+    from cstar.orchestration.models import Workplan
+    from cstar.orchestration.serialization import deserialize
+
+    from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+
+    root = tmp_path / "catalog"
+    # Copy the BUNDLED catalog (not default_catalog.catalog_root, which is now
+    # the writable *user* layer -- empty/nonexistent in tests, see conftest.py).
+    shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
+    wiz = ForgeBlueprintWizard(catalog=DomainCatalog(catalog_root=root))
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    assert wiz.config is not None
+
+    wiz._on_save_workplan(None)
+
+    assert "color:#080" in wiz.workplan_status.value, wiz.workplan_status.value
+    bp_path = Path(wiz.save_path.value)
+    wp_path = root / "workplans" / f"{wiz.config.name}.workplan.yaml"
+    assert bp_path.exists() and wp_path.exists()
+    assert bp_path.parent == root / "blueprints"
+    # the saved YAML round-trips through C-Star's own workplan loader, including
+    # its producer-must-be-a-dependency validation of the deferred reference
+    wp = deserialize(wp_path, Workplan)
+    assert [s.name for s in wp.steps] == ["forge", "roms_marbl"]
+    assert wp.steps[1].is_deferred
+    assert "cstar workplan run" in wiz.workplan_status.value
+    # The printed command carries no env-var prefix: the forge app reaches C-Star's
+    # registry through cstar-forge's `cstar.applications` entry point.
+    assert "CSTAR_APP_MODULES" not in wiz.workplan_status.value
+
+
+@requires_workplan_support
+def test_on_save_workplan_falls_back_to_blueprint_sibling(tmp_path, monkeypatch):
+    """When the catalog isn't a writable local filesystem, the workplan is saved
+    next to the blueprint (mirroring the blueprint save-path fallback).
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    assert wiz.config is not None
+    monkeypatch.setattr(type(wiz.catalog), "_is_local", False)
+    wiz.save_path.value = str(tmp_path / f"{wiz.config.name}.forge_blueprint.yaml")
+
+    wiz._on_save_workplan(None)
+
+    assert "color:#080" in wiz.workplan_status.value, wiz.workplan_status.value
+    assert (tmp_path / f"{wiz.config.name}.workplan.yaml").exists()
+
+
+def test_on_run_guards_on_invalid_config(monkeypatch):
+    """Clicking Run with no resolved config shows an error and spawns nothing."""
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+    wiz.config = None
+
+    def _boom(*a, **kw):
+        raise AssertionError("must not spawn a subprocess for an invalid config")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
+    wiz._on_run(None)
+    assert "invalid" in wiz.run_status.value
+    assert wiz.run_output.outputs == ()
+
+
+class _FakeStdout:
+    """Minimal async stand-in for asyncio.StreamReader's ``read(n)``.
+
+    Serves a flat byte buffer in small, deliberately line-*un*aligned chunks (7
+    bytes by default), so a test exercises the wizard's chunk-to-line reassembly
+    rather than getting one whole line per read (which would prove nothing). Returns
+    ``b""`` at EOF, like the real reader.
+
+    Deliberately implements only ``read(n)`` and no ``__aiter__``: the wizard must
+    not go back to ``async for line in proc.stdout`` (StreamReader.readline), whose
+    64 KiB line limit is the bug this change removed -- doing so would fail here.
+    """
+
+    def __init__(self, data, chunk_size=7):
+        self._data = data if isinstance(data, bytes) else b"".join(data)
+        self._pos = 0
+        self._chunk_size = chunk_size
+
+    async def read(self, n=-1):
+        if self._pos >= len(self._data):
+            return b""
+        take = len(self._data) - self._pos if n < 0 else min(n, self._chunk_size)
+        chunk = self._data[self._pos : self._pos + take]
+        self._pos += len(chunk)
+        return chunk
+
+
+class _FakeProcess:
+    def __init__(self, data, returncode=0, chunk_size=7):
+        self.stdout = _FakeStdout(data, chunk_size=chunk_size)
+        self._returncode = returncode
+
+    async def wait(self):
+        return self._returncode
+
+
+def test_on_run_streams_subprocess_output_and_reports_success(monkeypatch, tmp_path):
+    """Run auto-saves the current blueprint, launches the built command with
+    stderr merged into stdout, and streams each line into run_output. There's no
+    running event loop in a plain test function, so _schedule_coroutine's
+    asyncio.run(...) fallback runs the whole thing to completion synchronously --
+    no pytest.mark.asyncio needed.
+    """
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+
+    captured_cmd = {}
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        captured_cmd["args"] = args
+        captured_cmd["kwargs"] = kwargs
+        return _FakeProcess([b"line one\n", b"line two\n"], returncode=0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+
+    wiz._on_run(None)
+
+    assert (tmp_path / "bp.yaml").exists()  # auto-saved before running
+    assert captured_cmd["kwargs"]["stderr"] == asyncio.subprocess.STDOUT
+    text = "".join(o["text"] for o in wiz.run_output.outputs)
+    assert "line one" in text
+    assert "line two" in text
+    assert "✓ finished" in wiz.run_status.value
+    # ...and the success message hands the user their next command, since the
+    # app-framework path prints no "run it with" trailer of its own
+    assert "cstar blueprint run" in wiz.run_status.value
+    assert wiz.run_btn.disabled is False
+
+
+def test_on_run_reports_nonzero_exit_code(monkeypatch, tmp_path):
+    """A failing subprocess is reported as an error status, not a silent success."""
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):
+        return _FakeProcess([b"uh oh\n"], returncode=1)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+
+    wiz._on_run(None)
+
+    assert "exited with code 1" in wiz.run_status.value
+    assert wiz.run_btn.disabled is False
+
+
+def _run_wiz_with_output(monkeypatch, tmp_path, data, *, returncode=0, chunk_size=7):
+    """Drive _on_run with a fake process emitting ``data`` (bytes); return the wizard."""
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True  # not exercising boundary derivation here
+
+    async def _fake(*args, **kwargs):
+        return _FakeProcess(data, returncode=returncode, chunk_size=chunk_size)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake)
+    wiz._on_run(None)
+    return wiz
+
+
+def test_on_run_survives_line_longer_than_stream_limit(monkeypatch, tmp_path):
+    r"""A child that emits far more than 64 KiB with no newline (the classic
+    \r-less/progress-less long line) must NOT raise the asyncio StreamReader
+    "Separator is not found, and chunk exceed the limit" ValueError that the old
+    ``async for line in proc.stdout`` loop did -- the content still lands, split
+    across multiple appends by the memory-bounding flush.
+    """
+    from cstar_forge.forge_blueprint_wizard import _STREAM_MAX_LINE
+
+    giant = b"x" * (_STREAM_MAX_LINE * 3 + 17) + b"\ndone\n"
+    # Read in chunks well below the flush threshold and unaligned to it, so the
+    # buffer must *accumulate across many reads* before each flush -- the real
+    # production path (asyncio read() returns whatever is buffered, usually far less
+    # than the threshold), not one oversized read that drains immediately.
+    wiz = _run_wiz_with_output(monkeypatch, tmp_path, giant, chunk_size=3000)
+
+    assert "✓ finished" in wiz.run_status.value  # no exception surfaced
+    text = "".join(o["text"] for o in wiz.run_output.outputs)
+    assert text.count("x") == _STREAM_MAX_LINE * 3 + 17  # every byte preserved
+    assert "done\n" in text
+    # bounded memory => the giant run was flushed as several appends, not held whole
+    assert len(wiz.run_output.outputs) > 3
+
+
+def test_on_run_splits_carriage_return_progress_into_lines(monkeypatch, tmp_path):
+    r"""\r-redrawn progress (git clone / tqdm) surfaces as successive log lines
+    instead of one accumulating line.
+    """
+    wiz = _run_wiz_with_output(monkeypatch, tmp_path, b"10%\r20%\r30%\n")
+
+    texts = [o["text"] for o in wiz.run_output.outputs]
+    assert texts == ["10%\n", "20%\n", "30%\n"]
+
+
+def test_on_run_error_status_names_the_command(monkeypatch, tmp_path):
+    """An exception during the run is reported WITH the command that was running,
+    not as a context-free error string.
+    """
+    import asyncio
+
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    wiz.save_path.value = str(tmp_path / "bp.yaml")
+    wiz._boundaries_touched = True
+
+    async def _boom(*args, **kwargs):
+        raise OSError("no such executable")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
+    wiz._on_run(None)
+
+    assert "OSError: no such executable" in wiz.run_status.value
+    assert "while running:" in wiz.run_status.value
+    assert "bp.yaml" in wiz.run_status.value  # the built command is named
+    assert wiz.run_btn.disabled is False
+
+
+def test_drain_stream_buffer_crlf_split_across_reads():
+    r"""A \r\n straddling a read boundary is one line break, not \r + blank line:
+    the trailing \r is held back for the next chunk.
+    """
+    lines, rem = _drain_stream_buffer(b"abc\ndef\r")
+    assert lines == ["abc\n"]
+    assert rem == b"def\r"  # \r held, not emitted as a terminator yet
+    lines2, rem2 = _drain_stream_buffer(rem + b"\nghi")
+    assert lines2 == ["def\n"]  # the held \r + \n = a single CRLF break
+    assert rem2 == b"ghi"
+
+
+def test_drain_stream_buffer_mixed_terminators_and_eof():
+    r"""\r, \n and \r\n all cut lines (normalised to \n); EOF flushes the
+    unterminated remainder.
+    """
+    lines, rem = _drain_stream_buffer(b"a\rb\nc\r\nd")
+    assert lines == ["a\n", "b\n", "c\n"]
+    assert rem == b"d"
+    flushed, rem2 = _drain_stream_buffer(rem, at_eof=True)
+    assert flushed == ["d"]  # no trailing newline added at EOF
+    assert rem2 == b""
+
+
+# ===========================================================================
+# User-provided-netCDF attach flows (grid / CDR forcing / river custom_file)
+# ===========================================================================
+#
+# Real (tiny) netCDFs are used wherever ``hash_netcdf_contents`` runs for real
+# (it opens the file with xarray) -- only ``roms_tools.Grid`` itself is stubbed
+# (real Grid *generation* is broken in this env; ``Grid(filename=...)`` loading
+# is also stubbed here for speed/determinism, mirroring
+# test_parent_plot_is_always_grid_plot_only's monkeypatch pattern).
+
+
+def _write_tiny_netcdf(path: Path) -> Path:
+    """A minimal real netCDF, just for ``hash_netcdf_contents`` to hash."""
+    import numpy as np
+    import xarray as xr
+
+    ds = xr.Dataset(
+        {"temp": (["y", "x"], np.zeros((2, 2), dtype=np.float64))},
+        attrs={"title": "tiny test file"},
+    )
+    ds.to_netcdf(path)
+    return path
+
+
+def _write_tiny_cdr_netcdf(path: Path, with_ncdr_dim: bool = True) -> Path:
+    """A minimal real netCDF with (or without) the ``ncdr`` dimension the CDR
+    attach flow's light validation checks for.
+    """
+    import numpy as np
+    import xarray as xr
+
+    dim = "ncdr" if with_ncdr_dim else "n_other"
+    ds = xr.Dataset({"cdr_volume": ([dim], np.zeros(3, dtype=np.float64))})
+    ds.to_netcdf(path)
+    return path
+
+
+class _FakeLoadedGrid:
+    """Stands in for ``rt.Grid(filename=...)``'s return value: only the
+    attributes the wizard/resolver actually read off a loaded grid file
+    (nx/ny/N/center_lon/center_lat/rot/size_x/size_y/theta_s/theta_b/hc).
+
+    Mirrors real roms-tools I/O behavior for a missing ``filename`` (raises)
+    rather than silently succeeding -- needed so a test simulating a
+    since-deleted grid_file also sees the resolver's own independent reload
+    attempt (``build_forge_blueprint``'s ``rt.Grid(filename=grid_file_obj.location)``
+    when no ``grid=`` is passed) fail the same way a real missing file would.
+    """
+
+    def __init__(self, **kwargs):
+        filename = kwargs.get("filename")
+        if filename is not None and not Path(filename).exists():
+            raise FileNotFoundError(f"no such file: {filename}")
+        self.kwargs = kwargs
+        self.nx = 10
+        self.ny = 8
+        self.N = 5
+        self.center_lon = 12.0
+        self.center_lat = 34.0
+        self.rot = 0.0
+        self.size_x = 300.0
+        self.size_y = 250.0
+        self.theta_s = 6.0
+        self.theta_b = 3.0
+        self.hc = 200.0
+
+
+@pytest.fixture
+def fake_grid(monkeypatch):
+    """Stub ``roms_tools.Grid`` for the duration of a test."""
+    import roms_tools
+
+    monkeypatch.setattr(roms_tools, "Grid", _FakeLoadedGrid)
+    return _FakeLoadedGrid
+
+
+def _new_wizard():
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    return wiz
+
+
+class TestNestedTopographyWidgets:
+    """Parent/child grids carry their own topography (see
+    ForgeExecutor._nested_topography_pair); the wizard's parent/child pick copies
+    the spec's topography, gather emits the keys, and load-back restores them.
+    """
+
+    _SPEC: ClassVar[dict] = {
+        "grid_kwargs": {"nx": 30, "ny": 40, "size_x": 300.0, "size_y": 400.0},
+        "topography_source": "SRTM15",
+        "topography_path": "/hpc/data/srtm15_west.nc",
+    }
+
+    def _pick_parent(self, wiz, monkeypatch, spec):
+        monkeypatch.setattr(wiz.catalog, "domain_data", lambda _name: dict(spec))
+        monkeypatch.setattr(wiz, "_on_parent_plot", lambda _b: None)
+        wiz.parent_domain_dd.value = wiz.parent_domain_dd.options[1]
+
+    def test_parent_pick_copies_spec_topography_and_gather_emits_it(self, monkeypatch):
+        wiz = _new_wizard()
+        assert wiz.parent_topo_source.value == "(same as this grid)"
+        self._pick_parent(wiz, monkeypatch, self._SPEC)
+
+        assert wiz.parent_enable.value is True
+        assert wiz.parent_w["nx"].value == 30
+        assert wiz.parent_topo_source.value == "SRTM15"
+        assert wiz.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
+
+        pk = wiz._gather()["grid_kwargs_parent"]
+        assert pk["topography_source"] == "SRTM15"
+        assert pk["topography_path"] == "/hpc/data/srtm15_west.nc"
+        assert wiz.config is not None, wiz.derived.value
+        assert wiz.config.domain.grid_kwargs_parent["topography_source"] == "SRTM15"
+        assert "SRTM15" in wiz.config.datasets
+
+    def test_parent_pick_with_default_topography_is_explicit_etopo5(self, monkeypatch):
+        """A parent spec built with the default dataset says so explicitly: the
+        parent must NOT silently inherit this grid's (e.g. EMOD) topography.
+        """
+        wiz = _new_wizard()
+        wiz.topo_source.value = "EMOD"
+        wiz.topo_path.value = "/hpc/data/EMODnet_C2.nc"
+        spec = {"grid_kwargs": self._SPEC["grid_kwargs"]}  # no topography keys
+        self._pick_parent(wiz, monkeypatch, spec)
+
+        assert wiz.parent_topo_source.value == "ETOPO5"
+        assert wiz.parent_topo_path.value == ""
+        pk = wiz._gather()["grid_kwargs_parent"]
+        assert pk["topography_source"] == "ETOPO5"
+        assert "topography_path" not in pk
+
+    def test_inherit_sentinel_emits_no_keys(self):
+        wiz = _new_wizard()
+        wiz.parent_enable.value = True
+        wiz.nest_enable.value = True
+        kw = wiz._gather()
+        for key in ("grid_kwargs_parent", "grid_kwargs_child"):
+            assert "topography_source" not in kw[key]
+            assert "topography_path" not in kw[key]
+
+    def test_round_trips_through_populate_from(self, monkeypatch):
+        wiz = _new_wizard()
+        self._pick_parent(wiz, monkeypatch, self._SPEC)
+        wiz.nest_enable.value = True
+        wiz.child_topo_path.value = "/hpc/data/child_tile.nc"  # path-only override
+        wiz._rebuild()
+        cfg = wiz.config
+        assert cfg is not None, wiz.derived.value
+        assert (
+            cfg.domain.grid_kwargs_child["topography_path"] == "/hpc/data/child_tile.nc"
+        )
+        assert "topography_source" not in cfg.domain.grid_kwargs_child
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2.parent_topo_source.value == "SRTM15"
+        assert wiz2.parent_topo_path.value == "/hpc/data/srtm15_west.nc"
+        assert wiz2.child_topo_source.value == "(same as this grid)"
+        assert wiz2.child_topo_path.value == "/hpc/data/child_tile.nc"
+        assert (
+            wiz2._gather()["grid_kwargs_parent"] == wiz._gather()["grid_kwargs_parent"]
+        )
+
+    def test_plot_topography_falls_back_when_file_not_local(self, tmp_path):
+        from cstar_forge.forge_blueprint_wizard import (
+            _effective_nested_topo,
+            _plot_topography_source,
+        )
+
+        assert _plot_topography_source("ETOPO5", "") == (None, "")
+        topo, note = _plot_topography_source("EMOD", "/hpc/only/EMODnet_C2.nc")
+        assert topo is None and "EMOD" in note and "not found here" in note
+        topo, note = _plot_topography_source("EMOD", "")
+        assert topo is None and "no local file" in note
+        local = _write_tiny_netcdf(tmp_path / "topo.nc")
+        assert _plot_topography_source("EMOD", str(local)) == (
+            {"name": "EMOD", "path": str(local)},
+            "",
+        )
+        # inherit: domain pair; source set: domain path is NOT inherited
+        assert _effective_nested_topo("(same as this grid)", "", "EMOD", "/d/e.nc") == (
+            "EMOD",
+            "/d/e.nc",
+        )
+        assert _effective_nested_topo("SRTM15", "", "EMOD", "/d/e.nc") == ("SRTM15", "")
+        assert _effective_nested_topo(
+            "(same as this grid)", "/p.nc", "EMOD", "/d/e.nc"
+        ) == (
+            "EMOD",
+            "/p.nc",
+        )
+
+    def test_parent_plot_builds_parent_with_its_own_topography(
+        self, monkeypatch, tmp_path
+    ):
+        """The parent plot builds the parent grid with the parent's topography
+        (when the file is available here) -- so a parent falling outside its
+        dataset's coverage fails in the preview, not only at executor time.
+        """
+        import roms_tools
+
+        calls: list[dict] = []
+
+        class _G:
+            def __init__(self, **kw):
+                calls.append(kw)
+
+        monkeypatch.setattr(roms_tools, "Grid", _G)
+        monkeypatch.setattr(roms_tools, "plot_nesting", lambda *a, **k: None)
+        wiz = _new_wizard()
+        local = _write_tiny_netcdf(tmp_path / "parent_topo.nc")
+        wiz.parent_enable.value = True
+        wiz.parent_topo_source.value = "EMOD"
+        wiz.parent_topo_path.value = str(local)
+        wiz.topo_source.value = "SRTM15"  # this grid: no local file -> fallback
+
+        wiz._on_parent_plot(None)
+
+        parent_kw, this_kw = calls[0], calls[1]
+        assert parent_kw["topography_source"] == {"name": "EMOD", "path": str(local)}
+        assert "topography_source" not in this_kw
+        assert "SRTM15" in wiz.parent_plot_status.value  # fallback note for this grid
+        assert "EMOD" not in wiz.parent_plot_status.value
+
+
+class TestGridFileAttach:
+    def test_attach_locks_and_populates_widgets(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+
+        assert wiz._grid_file == {
+            "location": str(p),
+            "content_hash": wiz._grid_file["content_hash"],
+        }
+        assert isinstance(wiz._grid_file_grid, _FakeLoadedGrid)
+        assert wiz._grid_file_grid.kwargs == {
+            "filename": str(p)
+        }  # loaded from this path
+        assert wiz.grid_w["nx"].value == 10
+        assert wiz.grid_w["center_lon"].value == 12.0
+        assert wiz.scoord_chk.value is True  # theta_s/theta_b/hc all present
+
+        for w in (
+            *wiz.grid_w.values(),
+            wiz.scoord_chk,
+            wiz.hmin,
+            wiz.close_narrow_chk,
+            wiz.mask_shapefile,
+            wiz.topo_source,
+            wiz.topo_path,
+            wiz.nest_enable,
+            wiz.parent_enable,
+        ):
+            assert w.disabled is True
+        assert "attached" in wiz.grid_file_status.value
+        assert "exact path" in wiz.grid_file_status.value  # persistent warning
+
+    def test_upload_fallback_stages_and_attaches(
+        self, fake_grid, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
+        wiz = _new_wizard()
+        src = _write_tiny_netcdf(tmp_path / "uploaded.nc")
+        change = {"new": ({"name": "uploaded.nc", "content": src.read_bytes()},)}
+
+        wiz._on_grid_file_upload(change)
+
+        staged = tmp_path / "forge_user_files" / "uploaded.nc"
+        assert staged.exists()
+        assert wiz._grid_file == {
+            "location": str(staged),
+            "content_hash": wiz._grid_file["content_hash"],
+        }
+        assert wiz.grid_w["nx"].disabled is True
+
+    def test_attach_error_shown_in_status_not_raised(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        wiz.grid_file_path.value = str(tmp_path / "does-not-exist.nc")
+
+        wiz._on_grid_file_attach(None)  # must not raise
+
+        assert wiz._grid_file is None
+        assert "FileNotFoundError" in wiz.grid_file_status.value
+
+    def test_detach_restores_widgets(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        pre_attach_nx = wiz.grid_w["nx"].value
+        pre_attach_center_lon = wiz.grid_w["center_lon"].value
+        assert pre_attach_nx != 10  # sanity: differs from _FakeLoadedGrid's nx
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        assert wiz.grid_w["nx"].disabled is True
+        assert wiz.grid_w["nx"].value == 10  # overwritten by the attached file
+
+        wiz._on_grid_file_detach(None)
+
+        assert wiz._grid_file is None
+        assert wiz._grid_file_grid is None
+        assert wiz.grid_file_status.value == ""
+        assert wiz.grid_file_path.value == ""
+        for w in (*wiz.grid_w.values(), wiz.scoord_chk, wiz.nest_enable):
+            assert w.disabled is False
+        # The user's own pre-attach geometry is restored, not left at the
+        # detached file's (now meaningless) values.
+        assert wiz.grid_w["nx"].value == pre_attach_nx
+        assert wiz.grid_w["center_lon"].value == pre_attach_center_lon
+
+    def test_reattach_and_detach_restores_original_pre_attach_geometry(
+        self, fake_grid, tmp_path
+    ):
+        """Re-attaching a second file without detaching first must not clobber
+        the snapshot with the first file's values -- Detach must still give
+        back the ORIGINAL pre-any-attach geometry.
+        """
+        wiz = _new_wizard()
+        pre_attach_nx = wiz.grid_w["nx"].value
+        p1 = _write_tiny_netcdf(tmp_path / "grid1.nc")
+        wiz.grid_file_path.value = str(p1)
+        wiz._on_grid_file_attach(None)
+        assert wiz.grid_w["nx"].value == 10
+
+        p2 = _write_tiny_netcdf(tmp_path / "grid2.nc")
+        wiz.grid_file_path.value = str(p2)
+        wiz._on_grid_file_attach(None)  # re-attach without detaching
+        assert wiz.grid_w["nx"].value == 10  # still the (only) fake grid's nx
+
+        wiz._on_grid_file_detach(None)
+
+        assert wiz.grid_w["nx"].value == pre_attach_nx
+
+    def test_gather_emits_grid_file_and_empty_grid_kwargs(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+
+        kw = wiz._gather()
+
+        assert kw["grid_file"] == wiz._grid_file
+        assert kw["grid"] is wiz._grid_file_grid
+        assert kw["grid_kwargs"] == {}
+        assert "grid_kwargs_child" not in kw
+        assert "grid_kwargs_parent" not in kw
+
+    def test_rebuild_does_not_rehash_after_attach(
+        self, fake_grid, tmp_path, monkeypatch
+    ):
+        """The one hash computation happens at Attach time; every subsequent
+        _rebuild() (triggered here by an unrelated widget edit) must reuse the
+        cached dict, never recomputing the digest.
+        """
+        import cstar_forge.forge.user_files as user_files_mod
+        import cstar_forge.forge_blueprint_wizard as wizard_mod
+
+        calls = {"n": 0}
+        real_hash = user_files_mod.hash_netcdf_contents
+
+        def _counting_hash(path):
+            calls["n"] += 1
+            return real_hash(path)
+
+        monkeypatch.setattr(wizard_mod, "hash_netcdf_contents", _counting_hash)
+        monkeypatch.setattr(user_files_mod, "hash_netcdf_contents", _counting_hash)
+
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)  # submit -> auto-attach (one hash)
+        assert calls["n"] == 1
+        assert wiz._grid_file is not None
+
+        wiz.description.value = "edited after attach"  # triggers _rebuild()
+        wiz._rebuild()
+
+        assert calls["n"] == 1  # never rehashed
+        assert wiz.config is not None
+
+        # Re-submitting the same path is a dedupe no-op; an explicit Attach click
+        # is the one deliberate re-hash (the file may have changed on disk).
+        wiz._maybe_attach_grid_file()
+        assert calls["n"] == 1
+        wiz._on_grid_file_attach(None)
+        assert calls["n"] == 2
+
+    def test_path_submit_auto_attaches_without_attach_click(self, fake_grid, tmp_path):
+        """Regression (same shape as the river CUSTOM_FILE report): a typed/pasted
+        grid path with no Attach click used to leave the wizard silently
+        building from the grid_kwargs widgets instead of the file.
+        """
+        wiz = _new_wizard()
+        assert wiz.grid_file_path.continuous_update is False
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+
+        wiz.grid_file_path.value = str(p)  # Enter / focus-out, no click
+
+        assert wiz._grid_file == {
+            "location": str(p),
+            "content_hash": wiz._grid_file["content_hash"],
+        }
+        assert wiz.grid_w["nx"].disabled  # locked, exactly like a click-attach
+        assert "attached" in wiz.grid_file_status.value.lower()
+        assert wiz._gather()["grid_file"] == wiz._grid_file
+
+    def test_config_round_trips_attached_and_locked_through_populate_from(
+        self, fake_grid, tmp_path
+    ):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        assert wiz.config is not None
+        cfg = wiz.config
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2._grid_file is not None
+        assert wiz2._grid_file["content_hash"] == wiz._grid_file["content_hash"]
+        assert wiz2.grid_w["nx"].disabled is True
+        assert wiz2.config is not None
+        assert "attached" in wiz2.grid_file_status.value
+
+    def test_reattach_failure_keeps_locked_and_surfaces_error(
+        self, fake_grid, tmp_path
+    ):
+        """A missing file at reload time must not silently fall back to the
+        default/generic grid_kwargs (which would gather a different blueprint) --
+        the grid_file dict + locked widgets stay in place, and _gather()/
+        _rebuild() surface the failure loudly (config goes Invalid).
+        """
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        cfg = wiz.config
+
+        p.unlink()  # the file is now missing at "reload" time
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2._grid_file is not None  # kept, not cleared
+        assert wiz2._grid_file_grid is None
+        assert wiz2.grid_w["nx"].disabled is True  # still locked
+        assert "could not re-attach" in wiz2.grid_file_status.value
+        assert wiz2.config is None  # surfaced loudly, not silently substituted
+
+        # Plot/Derive/the Save-Run safety net must likewise refuse to silently
+        # build a grid from the (locked, stale) grid_w values instead of the
+        # missing file -- not just build_forge_blueprint().
+        with pytest.raises(RuntimeError, match="failed to"):
+            wiz2._build_grid_from_widgets()
+        # _populate_from freezes a loaded file's boundaries as touched (a
+        # deliberate, already-resolved choice -- see _populate_from), which
+        # would short-circuit _ensure_boundaries_derived() before it ever
+        # reaches _build_grid_from_widgets(); force the untouched path here to
+        # actually exercise the safety net's own grid-build attempt.
+        wiz2._boundaries_touched = False
+        assert wiz2._ensure_boundaries_derived() is False
+        assert "failed to" in wiz2.derive_status.value
+
+    def test_domain_pick_detaches_attached_grid_file(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        assert wiz._grid_file is not None
+
+        wiz.domain_dd.value = ForgeBlueprintWizard._dd_values(wiz.domain_dd)[
+            1
+        ]  # first real catalog domain
+
+        assert wiz._grid_file is None
+        assert wiz.grid_w["nx"].disabled is False
+
+    def test_save_domain_guards_while_grid_file_attached(self, fake_grid, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_netcdf(tmp_path / "grid.nc")
+        wiz.grid_file_path.value = str(p)
+        wiz._on_grid_file_attach(None)
+        wiz.save_domain_name.value = "some-new-domain"
+
+        wiz._on_save_domain(None)
+
+        assert "Detach the grid file first" in wiz.save_domain_status.value
+
+
+class TestCdrFileAttach:
+    def test_attach_populates_and_clears_yaml_upload(self, tmp_path):
+        wiz = _new_wizard()
+        wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+        assert wiz._cdr_forcing is not None
+
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)  # submit -> auto-attach, no click needed
+
+        assert wiz._cdr_forcing_file == {
+            "location": str(p),
+            "content_hash": wiz._cdr_forcing_file["content_hash"],
+        }
+        assert wiz._cdr_forcing is None
+        assert "cleared" in wiz.cdr_file_status.value.lower()
+        assert "attached" in wiz.cdr_file_status.value.lower()
+
+    def test_netcdf_mode_shows_hint_until_attached(self, tmp_path):
+        """CdrSpec rejects mode='netcdf' without cdr_forcing_file; the status
+        slot says so (and what to do) instead of staying blank, and Clear
+        brings the hint back.
+        """
+        wiz = _new_wizard()
+        assert wiz.cdr_file_status.value == ""
+
+        wiz.cdr_mode_dd.value = "netcdf"
+        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+        assert wiz.config is None  # invalid until attached, as before
+
+        wiz.cdr_file_path.value = str(_write_tiny_cdr_netcdf(tmp_path / "cdr.nc"))
+        assert "attached" in wiz.cdr_file_status.value.lower()
+        assert "no file attached yet" not in wiz.cdr_file_status.value.lower()
+        assert wiz.config is not None, wiz.derived.value
+
+        wiz._on_cdr_file_clear(None)
+        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+
+        wiz.cdr_mode_dd.value = "none"  # leaving netcdf mode clears the slot
+        assert wiz.cdr_file_status.value == ""
+
+    def test_upload_fallback_stages_and_attaches(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
+        wiz = _new_wizard()
+        src = _write_tiny_cdr_netcdf(tmp_path / "uploaded_cdr.nc")
+        change = {"new": ({"name": "uploaded_cdr.nc", "content": src.read_bytes()},)}
+
+        wiz._on_cdr_file_upload(change)
+
+        staged = tmp_path / "forge_user_files" / "uploaded_cdr.nc"
+        assert staged.exists()
+        assert wiz._cdr_forcing_file == {
+            "location": str(staged),
+            "content_hash": wiz._cdr_forcing_file["content_hash"],
+        }
+
+    def test_yaml_upload_clears_attached_cdr_file(self, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+        assert wiz._cdr_forcing_file is not None
+
+        wiz._on_cdr_upload(_upload_change(_CDR_SAMPLE_YAML.read_bytes()))
+
+        assert wiz._cdr_forcing is not None
+        assert wiz._cdr_forcing_file is None
+        assert "cleared" in wiz.cdr_status.value.lower()
+
+    def test_attach_warns_but_does_not_block_when_ncdr_dim_missing(self, tmp_path):
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc", with_ncdr_dim=False)
+        wiz.cdr_file_path.value = str(p)
+
+        wiz._on_cdr_file_attach(None)
+
+        assert wiz._cdr_forcing_file is not None  # not blocked
+        assert "ncdr" in wiz.cdr_file_status.value.lower()
+
+    def test_gather_emits_cdr_forcing_file(self, tmp_path):
+        wiz = _new_wizard()
+        wiz.cdr_mode_dd.value = "netcdf"
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        kw = wiz._gather()
+
+        assert kw["cdr"]["cdr_forcing_file"] == wiz._cdr_forcing_file
+        assert kw["cdr"]["mode"] == "netcdf"
+        assert kw["cdr"]["cdr_forcing"] is None
+
+    def test_clear_resets_state(self, tmp_path):
+        wiz = _new_wizard()
+        wiz.cdr_mode_dd.value = "netcdf"
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+
+        wiz._on_cdr_file_clear(None)
+
+        assert wiz._cdr_forcing_file is None
+        assert wiz.cdr_file_path.value == ""
+        # Still in netcdf mode with nothing attached -> the not-attached hint.
+        assert "no file attached yet" in wiz.cdr_file_status.value.lower()
+        assert wiz._gather()["cdr"]["cdr_forcing_file"] is None
+
+    def test_round_trips_through_populate_from(self, tmp_path):
+        wiz = _new_wizard()
+        wiz.cdr_mode_dd.value = "netcdf"
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+        assert wiz.config is not None
+        cfg = wiz.config
+        assert cfg.cdr.mode == "netcdf"
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2.cdr_mode_dd.value == "netcdf"
+        assert wiz2._cdr_forcing_file == wiz._cdr_forcing_file
+        assert "attached" in wiz2.cdr_file_status.value.lower()
+        assert wiz2.config is not None
+
+    def test_round_trips_through_populate_from_with_missing_file(self, tmp_path):
+        """The missing-file warning: trusts the stored content_hash (never
+        rehashes) and surfaces a warning instead of blocking the load.
+        """
+        wiz = _new_wizard()
+        wiz.cdr_mode_dd.value = "netcdf"
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+        assert wiz.config is not None
+        cfg = wiz.config
+        original_file_dict = dict(wiz._cdr_forcing_file)
+
+        p.unlink()  # the file no longer exists at its recorded path
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(cfg)
+
+        assert wiz2.cdr_mode_dd.value == "netcdf"
+        # hash preserved from the blueprint, not recomputed (the file is gone --
+        # recomputing would raise or silently produce a different hash).
+        assert wiz2._cdr_forcing_file == original_file_dict
+        assert "not found" in wiz2.cdr_file_status.value.lower()
+
+    def test_mode_switch_away_from_netcdf_clears_attached_cdr_file(self, tmp_path):
+        """Leaving "netcdf" mode clears the attached file (see _apply_cdr_mode's
+        leaving-mode cleanup) -- the modern equivalent of the old
+        "a ForcingSpec carrying CDR forcing clears an attached CDR file" behavior,
+        which no longer applies now that CDR is its own independently composable
+        spec (a ForcingSpec pick never touches it, except the legacy-embed path
+        covered by test_legacy_forcing_spec_cdr_embed_routes_to_yaml_mode).
+        """
+        wiz = _new_wizard()
+        wiz.cdr_mode_dd.value = "netcdf"
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz._on_cdr_file_attach(None)
+        assert wiz._cdr_forcing_file is not None
+
+        wiz.cdr_mode_dd.value = "none"
+
+        assert wiz._cdr_forcing_file is None
+        assert wiz.cdr_file_path.value == ""
+        assert wiz.cdr_file_status.value == ""
+
+    def test_legacy_forcing_spec_cdr_embed_routes_to_yaml_mode(
+        self, tmp_path, monkeypatch
+    ):
+        """A ForcingSpec predating the CdrSpec split that still embeds a
+        ``cdr_forcing`` block (see ``_split_forcing_data``) is routed into the
+        CDR box as if uploaded as a YAML -- CDR is otherwise untouched by a
+        ForcingSpec pick (it's an independently composable spec, see
+        self.cdr_mode_dd).
+        """
+        wiz = _new_wizard()
+        p = _write_tiny_cdr_netcdf(tmp_path / "cdr.nc")
+        wiz.cdr_file_path.value = str(p)
+        wiz.cdr_mode_dd.value = "netcdf"
+        wiz._on_cdr_file_attach(None)
+        assert wiz._cdr_forcing_file is not None
+
+        fake_spec = dict(wiz.catalog.forcing_data(wiz.forcing_dd.value))
+        fake_spec["cdr_forcing"] = {"releases": []}
+        monkeypatch.setattr(wiz.catalog, "forcing_data", lambda _name: fake_spec)
+
+        wiz._on_forcing_spec(None)
+
+        assert wiz.cdr_mode_dd.value == "yaml"
+        assert wiz._cdr_forcing == {"releases": []}
+        assert wiz._cdr_forcing_file is None
+        assert "legacy ForcingSpec" in wiz.cdr_status.value
+
+
+class TestRiverCustomFileAttach:
+    def test_selecting_custom_file_toggles_visibility(self, editor):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        assert _display(w["custom_file_path"]) == "none"
+        assert _display(w["climatology"]) == ""
+        assert _display(w["path"]) == ""
+
+        w["name"].value = "CUSTOM_FILE"
+
+        assert _display(w["custom_file_path"]) == ""
+        assert _display(w["custom_file_attach_btn"]) == ""
+        assert _display(w["custom_file_upload"]) == ""
+        assert _display(w["custom_file_status"]) == ""
+        assert _display(w["climatology"]) == "none"
+        assert _display(w["include_bgc"]) == "none"
+        assert _display(w["convert_to_climatology"]) == "none"
+        assert _display(w["coast_snap_buffer_km"]) == "none"
+        assert _display(w["domain_edge_buffer"]) == "none"
+        assert _display(w["bgc_source_name"]) == "none"
+        assert _display(w["bgc_source_path"]) == "none"
+        assert _display(w["path"]) == "none"
+
+        w["name"].value = "DAI"
+        assert _display(w["custom_file_path"]) == "none"
+        assert _display(w["climatology"]) == ""
+        assert _display(w["path"]) == ""
+
+    def test_include_bgc_visibility_still_works_after_leaving_custom_file(self, editor):
+        """Switching CUSTOM_FILE -> DAI must hand bgc-widget visibility back to
+        include_bgc's own sync, not leave it stuck from the custom-file branch.
+        """
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["name"].value = "DAI"
+        assert _display(w["bgc_source_name"]) == "none"  # include_bgc still False
+
+        w["include_bgc"].value = True
+        assert _display(w["bgc_source_name"]) == ""
+
+    def test_selecting_custom_file_hides_temperature_source_widgets(self, editor):
+        """A custom-file river carries no surface_forcing_source either (see
+        RiverForcingItem._custom_file_excludes_surface_forcing_source) --
+        mirrors the bgc-widget assertions above.
+        """
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        assert _display(w["surface_forcing_source_name"]) == "none"
+        assert _display(w["surface_forcing_source_path"]) == "none"
+        assert _display(w["river_temp_smoothing_window_days"]) == "none"
+
+        w["name"].value = "DAI"
+        assert _display(w["surface_forcing_source_name"]) == ""
+
+    def test_attach_and_gather_emits_custom_file_omits_standard_fields(
+        self, editor, tmp_path
+    ):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["include_bgc"].value = True  # would-be leftover state; must be ignored
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+
+        w["custom_file_attach_btn"].click()
+
+        assert w["_custom_file"] == {
+            "location": str(p),
+            "content_hash": w["_custom_file"]["content_hash"],
+        }
+        assert "attached" in w["custom_file_status"].value.lower()
+
+        item = editor._gather_item("river", w)
+
+        assert item == {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": w["_custom_file"],
+        }
+
+    def test_attach_and_gather_emits_custom_file_omits_temperature_source(
+        self, editor, tmp_path
+    ):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["surface_forcing_source_name"].value = "ERA5"  # leftover state; ignored
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+
+        w["custom_file_attach_btn"].click()
+
+        item = editor._gather_item("river", w)
+
+        assert item == {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": w["_custom_file"],
+        }
+
+    def test_upload_fallback_stages_and_attaches(self, editor, tmp_path, monkeypatch):
+        """Unlike the grid/CDR upload-fallback tests (which call the wizard's
+        ``_on_*_upload`` handler directly, bypassing the widget), the river
+        row's upload handler is a closure with no externally-reachable name --
+        this must go through the real ``FileUpload.value`` trait, so the
+        change item needs every key ipywidgets' own (de)serializer requires
+        (name/type/size/content/last_modified), not just the two the handler
+        itself reads.
+        """
+        import datetime as dt
+
+        monkeypatch.chdir(tmp_path)  # forge_user_files/ lands under Path.cwd()
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        src = _write_tiny_netcdf(tmp_path / "uploaded_river.nc")
+        content = src.read_bytes()
+
+        w["custom_file_upload"].value = (
+            {
+                "name": "uploaded_river.nc",
+                "type": "application/x-netcdf",
+                "size": len(content),
+                "content": content,
+                "last_modified": dt.datetime.now(dt.UTC),
+            },
+        )
+
+        staged = tmp_path / "forge_user_files" / "uploaded_river.nc"
+        assert staged.exists()
+        assert w["_custom_file"] == {
+            "location": str(staged),
+            "content_hash": w["_custom_file"]["content_hash"],
+        }
+
+    def test_attach_error_shown_in_status(self, editor, tmp_path):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        w["custom_file_path"].value = str(tmp_path / "missing.nc")
+
+        w["custom_file_attach_btn"].click()  # must not raise
+
+        assert w["_custom_file"] is None
+        assert "FileNotFoundError" in w["custom_file_status"].value
+
+    def test_gather_item_hints_when_nothing_attached_yet(self, editor):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+
+        item = editor._gather_item("river", w)
+
+        assert item == {"source": {"name": "CUSTOM_FILE"}}  # no custom_file key
+
+    def test_path_submit_auto_attaches_without_attach_click(self, editor, tmp_path):
+        """Regression: a user who typed/pasted a path and moved on without
+        clicking Attach got ``RiverForcingItem`` "custom_file is not set" from
+        the blueprint build. Submitting the path Text (Enter / focus-out, i.e.
+        a ``value`` change with ``continuous_update=False``) now attaches.
+        """
+        changes: list[int] = []
+        editor.on_change = lambda: changes.append(1)
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        assert w["custom_file_path"].continuous_update is False
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        changes.clear()
+
+        w["custom_file_path"].value = str(p)  # no Attach click
+
+        assert w["_custom_file"] == {
+            "location": str(p),
+            "content_hash": w["_custom_file"]["content_hash"],
+        }
+        assert "attached" in w["custom_file_status"].value.lower()
+        assert changes == [1]  # attached exactly once, and notified the wizard
+        assert editor._gather_item("river", w) == {
+            "source": {"name": "CUSTOM_FILE"},
+            "custom_file": w["_custom_file"],
+        }
+
+        # Re-submitting the same path is a no-op (no re-hash, no extra notify).
+        w["_maybe_attach_custom_file"](w)
+        assert changes == [1]
+
+    def test_gather_item_attaches_typed_but_unsubmitted_path(self, editor, tmp_path):
+        """Last-resort path: the box holds a valid path but nothing attached it
+        yet (e.g. gather ran before the Text's submit event landed). gather
+        must attach on the fly -- silently, without on_change() (it's already
+        running inside the wizard's rebuild) -- rather than emit an item the
+        schema rejects.
+        """
+        changes: list[int] = []
+        editor.on_change = lambda: changes.append(1)
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        w["name"].value = "CUSTOM_FILE"
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+        w["_custom_file"] = None  # simulate "typed, never submitted"
+        changes.clear()
+
+        item = editor._gather_item("river", w)
+
+        assert item["custom_file"]["location"] == str(p)
+        assert w["_custom_file"] is not None
+        assert changes == []  # no on_change() from inside gather
+
+        # A bad path still leaves custom_file unset so the schema error surfaces
+        # (and the failure is shown in the row status).
+        w["custom_file_path"].value = str(tmp_path / "missing.nc")
+        w["_custom_file"] = None
+        assert editor._gather_item("river", w) == {"source": {"name": "CUSTOM_FILE"}}
+        assert "FileNotFoundError" in w["custom_file_status"].value
+
+    def test_selecting_custom_file_shows_hint_until_attached(self, editor, tmp_path):
+        w = editor._make_row("river", {"source": {"name": "DAI"}})
+        assert w["custom_file_status"].value == ""
+
+        w["name"].value = "CUSTOM_FILE"
+        assert "no file attached yet" in w["custom_file_status"].value.lower()
+
+        w["custom_file_path"].value = str(_write_tiny_netcdf(tmp_path / "r.nc"))
+        assert "attached" in w["custom_file_status"].value.lower()
+        assert "no file attached yet" not in w["custom_file_status"].value.lower()
+
+        # A row seeded with a custom_file (load-back) never shows the hint.
+        w2 = editor._make_row(
+            "river",
+            {
+                "source": {"name": "CUSTOM_FILE"},
+                "custom_file": {"location": "/x/r.nc", "content_hash": "abc" * 22},
+            },
+        )
+        assert "no file attached yet" not in w2["custom_file_status"].value.lower()
+
+    def test_wizard_builds_valid_config_after_path_submit_only(self, tmp_path):
+        """End-to-end shape of the bug report: pick CUSTOM_FILE, enter a path,
+        never click Attach -- the wizard's blueprint must still validate.
+        """
+        wiz = _new_wizard()
+        w = wiz._forcing_editor._rows["river"][0]
+        w["name"].value = "CUSTOM_FILE"
+        wiz._rebuild()
+        assert wiz.config is None  # nothing attached yet -> invalid, as before
+        assert "ValidationError" in wiz.derived.value
+
+        w["custom_file_path"].value = str(_write_tiny_netcdf(tmp_path / "river.nc"))
+        wiz._rebuild()
+
+        assert wiz.config is not None, wiz.derived.value
+        (river,) = [it for it in wiz.config.forcing.river if it.custom_file]
+        assert river.source.name == "CUSTOM_FILE"
+
+    def test_custom_file_round_trips_through_populate_from(self, tmp_path):
+        wiz = _new_wizard()
+        fe = wiz._forcing_editor
+        assert fe._rows["river"], "expected a default river row from ForcingSpec"
+        w = fe._rows["river"][0]
+        w["name"].value = "CUSTOM_FILE"
+        p = _write_tiny_netcdf(tmp_path / "river.nc")
+        w["custom_file_path"].value = str(p)
+        w["custom_file_attach_btn"].click()
+        wiz._rebuild()
+        assert wiz.config is not None, wiz.derived.value
+        assert any(it.source.name == "CUSTOM_FILE" for it in wiz.config.forcing.river)
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)  # must not raise ValueError
+
+        assert wiz2.config is not None
+        fe2 = wiz2._forcing_editor
+        custom_rows = [
+            ws for ws in fe2._rows["river"] if ws["name"].value == "CUSTOM_FILE"
+        ]
+        assert len(custom_rows) == 1
+        assert custom_rows[0]["_custom_file"]["location"] == str(p)
+        assert _display(custom_rows[0]["custom_file_path"]) == ""
+        assert _display(custom_rows[0]["climatology"]) == "none"
+
+    def test_generic_source_path_round_trips_through_populate_from(self):
+        """Non-custom river categories already carry SourceSpec.path (a WP3 fix);
+        this pins the wizard's load-back side: w["path"] must repopulate too.
+        """
+        wiz = _new_wizard()
+        fe = wiz._forcing_editor
+        w = fe._rows["river"][0]
+        w["name"].value = "DAI"
+        w["path"].value = "/custom/river/source.nc"
+        wiz._rebuild()
+        assert wiz.config is not None
+        dai_item = next(
+            it for it in wiz.config.forcing.river if it.source.name == "DAI"
+        )
+        assert dai_item.source.path == "/custom/river/source.nc"
+
+        wiz2 = ForgeBlueprintWizard()
+        wiz2._populate_from(wiz.config)
+
+        fe2 = wiz2._forcing_editor
+        w2 = next(ws for ws in fe2._rows["river"] if ws["name"].value == "DAI")
+        assert w2["path"].value == "/custom/river/source.nc"
+
+
+# ===========================================================================
+# WP2 (page layout) redesign: cards, sticky bar, chips, banners.
+# ===========================================================================
+
+
+def test_widget_root_has_forge_wizard_class():
+    """The redesigned root VBox carries the ``forge-wizard`` class (and
+    ``forge-app``, so ``components.WIZARD_CSS`` also matches outside AppShell).
+    """
+    wiz = ForgeBlueprintWizard()
+    assert "forge-wizard" in wiz.widget._dom_classes
+    assert "forge-app" in wiz.widget._dom_classes
+
+
+def test_every_card_key_is_findable():
+    """Every one of the seven cards (start/model/grid/forcing/run/advanced/
+    review) is reachable from the root via its ``forge_key``.
+    """
+    wiz = ForgeBlueprintWizard()
+    root = wiz.widget
+    for key in (
+        "start",
+        "model",
+        "grid",
+        "forcing",
+        "run",
+        "advanced",
+        "review",
+    ):
+        assert _find_card(root, key) is not None, f"missing card {key!r}"
+
+
+def test_sticky_bar_reflects_model_and_validity_after_rebuild():
+    """After a rebuild, the sticky bar names the selected model and shows a
+    "Valid" (not "Invalid") status chip for a config that resolves cleanly.
+    """
+    wiz = ForgeBlueprintWizard()
+    wiz.start.value = date(2012, 1, 1)
+    wiz.end.value = date(2012, 1, 2)
+    wiz._rebuild()
+    assert wiz.config is not None, wiz.derived.value
+    assert wiz.model_dd.value in wiz.sticky_bar.value
+    assert "● Valid" in wiz.sticky_bar.value
+
+
+def test_download_html_default_caption_is_the_full_filename():
+    """With no ``caption``, `_download_html` keeps the Review card's copy:
+    "Download <code>fname</code>", no ``title=``.
+    """
+    wiz = ForgeBlueprintWizard()
+    cfg = wiz.config
+    assert cfg is not None, wiz.derived.value
+    fname = f"{cfg.name}.forge_blueprint.yaml"
+    html = ForgeBlueprintWizard._download_html(cfg)
+    assert f"Download <code>{fname}</code>" in html
+    assert "title=" not in html
+
+
+def test_download_html_custom_caption_moves_filename_to_title():
+    """A ``caption`` becomes the link text verbatim; the filename moves to
+    ``title=`` instead (the sticky bar's compact "Download blueprint" copy).
+    """
+    wiz = ForgeBlueprintWizard()
+    cfg = wiz.config
+    assert cfg is not None, wiz.derived.value
+    fname = f"{cfg.name}.forge_blueprint.yaml"
+    html = ForgeBlueprintWizard._download_html(cfg, caption="x")
+    assert ">x<" in html
+    assert f'title="{fname}"' in html
+
+
+def test_grid_chip_shows_fields_to_check_initially():
+    """A freshly-built wizard hasn't derived or touched boundaries/v_sponge
+    yet, so the Grid card's chip reports outstanding fields.
+    """
+    wiz = ForgeBlueprintWizard()
+    assert "fields to check" in wiz.card_chips["grid"].value
+
+
+def test_forcing_accordion_first_title_contains_ic_source_name():
+    """The forcing accordion's first pane (initial conditions) is retitled
+    with a live summary that names the current IC source.
+    """
+    wiz = ForgeBlueprintWizard()
+    title0 = wiz._forcing_editor._acc.get_title(0)
+    assert wiz._forcing_editor.ic_name.value in title0
+
+
+def test_set_grid_widgets_locked_toggles_grid_lock_banner():
+    wiz = ForgeBlueprintWizard()
+    assert wiz.grid_lock_banner.layout.display == "none"
+
+    wiz._set_grid_widgets_locked(True)
+    assert wiz.grid_lock_banner.layout.display == ""
+
+    wiz._set_grid_widgets_locked(False)
+    assert wiz.grid_lock_banner.layout.display == "none"
+
+
+def test_wizard_app_widget_is_outer_and_holds_a_catalog_bar():
+    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+
+    app = ForgeBlueprintWizardApp()
+    assert app.widget is app._outer
+    assert app._bar.widget in app._outer.children
+    assert "forge-catalog-bar" in app._bar.widget._dom_classes
+
+
+def test_blueprint_app_from_shell_builds():
+    from cstar_forge.ui.shell import blueprint_app
+
+    shell = blueprint_app()
+    assert shell.stack.children  # must not raise, and must hold the page
+
+
+# ---------------------------------------------------------------------------
+# WP3 (inner editors): IC pane field_row/field_grid layout, forcing-row labels.
+# ---------------------------------------------------------------------------
+
+
+def test_ic_pane_first_field_row_is_ic_name(editor):
+    """The IC pane's first ``field_grid`` row is ``ic.ic_name`` (name, layout,
+    path, validate, in that order -- see ``_ForcingEditor.widget``).
+    """
+    acc = editor.widget
+    # `open_accordion` returns a VBox of single-pane Accordions (`.panes`).
+    ic_box = acc.panes[0].children[0]  # cat_order[0] == "initial_conditions"
+    ic_fields = ic_box.children[0]
+    first_row = ic_fields.children[0]
+    assert first_row.forge_key == "ic.ic_name"
+
+
+def test_ic_layout_display_none_hides_its_row(editor):
+    """``field_row`` mirrors ``widget.layout.display`` onto the row -- setting
+    ``ic_layout.layout.display = "none"`` (as ``_sync_ic_layout_visibility``
+    does for a non-GLORYS source) hides the whole row, not just the dropdown.
+    """
+    acc = editor.widget
+    ic_box = acc.panes[0].children[0]
+    ic_fields = ic_box.children[0]
+    layout_row = next(r for r in ic_fields.children if r.forge_key == "ic.ic_layout")
+    assert layout_row.layout.display == _display(editor.ic_layout)
+
+    editor.ic_layout.layout.display = "none"
+    assert layout_row.layout.display == "none"
+
+
+def test_surface_row_name_description_starts_with_glossary_label(editor):
+    """A per-row widget's description is sourced from the ``forcing.row.<key>``
+    glossary entry (``label_for``, see ``_row_desc``), not the old hardcoded
+    ``"src:"``/``"path:"``/etc. caption.
+    """
+    from cstar_forge.ui.labels import label_for
+
+    w = editor._make_row("surface", {"type": "physics", "source": {"name": "ERA5"}})
+    label = label_for("forcing.row.name", default="src").label
+    assert w["name"].description.startswith(label)

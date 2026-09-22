@@ -1,0 +1,8675 @@
+"""An ``ipywidgets`` wizard for assembling and reviewing a :class:`ForgeBlueprint`.
+
+This is a thin UI shell over :func:`cstar_forge.forge_blueprint_resolve.build_forge_blueprint`:
+the widgets only *collect inputs and display the resolved result* — all resolution
+and validation stay in the resolver. That keeps the notebook UI interchangeable with
+any future app/WASM front-end and lets the logic be tested without rendering.
+
+Usage (in a Jupyter notebook)::
+
+    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+    wiz = ForgeBlueprintWizard()
+    wiz.display()
+    # ... pick a model + domain, tweak fields, review the live YAML, Save ...
+    cfg = wiz.config            # the current resolved ForgeBlueprint (or None if invalid)
+
+The wizard discovers Models from ``catalog/ModelSpec/`` and Domains from
+``catalog/DomainSpec/``; selecting a cataloged Domain prefills the grid kwargs,
+boundaries, partitioning, and dates. The live preview re-resolves on every change
+(using the ``dt`` field, so it never builds a grid); the "Compute dt (CFL)" button
+is the only action that builds a grid (needs ``roms_tools``).
+"""
+
+from __future__ import annotations
+
+import base64
+import copy
+import json
+import re
+import typing
+import warnings
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any, get_args, get_origin
+
+import yaml
+from pydantic import BaseModel
+
+from cstar_forge.forge.forge_blueprint import (
+    BgcBoundarySource,
+    BgcInitialConditionsSource,
+    BgcInterpMethod,
+    BgcSourceItem,
+    BgcSurfaceSource,
+    BoundaryForcing,
+    ClimatologyMode,
+    CoarseGridMode,
+    Composition,
+    ExtrapMethod,
+    ForgeBlueprint,
+    InitialConditions,
+    InitialConditionsSource,
+    PhysicsBoundarySource,
+    PhysicsSurfaceSource,
+    Prefill,
+    RegridMethod,
+    RestoringSurfaceSource,
+    RiverBgcSource,
+    RiverForcingItem,
+    RiverSource,
+    RiverTemperatureSource,
+    SourceSpec,
+    SpecRef,
+    SurfaceForcingItem,
+    SurfaceType,
+    TidalForcingItem,
+    TidalSource,
+    migrate_forcing_inputs,
+)
+from cstar_forge.forge.namelist_model import (
+    RunTimeSettings,
+    run_time_settings_for_ref,
+    validate_run_time_sections,
+    version_gated_section_names,
+)
+from cstar_forge.forge.user_files import hash_netcdf_contents
+from cstar_forge.forge_blueprint_resolve import (
+    OUTPUT_SECTIONS,
+    PARTIAL_OUTPUT_SECTIONS,
+    build_forge_blueprint,
+    extract_output_settings,
+    load_model_spec_data,
+    read_cdr_forcing_yaml,
+)
+from cstar_forge.ui import components
+from cstar_forge.ui.catalog_bar import CatalogBar
+from cstar_forge.ui.labels import known_keys, label_for, section_for
+
+# ===========================================================================
+# Help text — shown as widget tooltips on hover (tooltip= kwarg, all widgets)
+#
+# Automated: namelist fields are looked up live from the cstar.roms.namelist
+# field descriptions (set in the RomsNamelist / group models).
+# Manual: forcing/grid/nesting/run-window knobs listed in HELP_TEXT below.
+# ===========================================================================
+
+# Keyed by (context, field_name). "context" is a category string: a forcing
+# category ("surface","boundary","tidal","river","ic"), a grid section ("grid"),
+# a nesting section ("nesting"), or a run-window field ("run").
+# Falls back to just field_name for unambiguous global names.
+HELP_TEXT: dict[str | tuple[str, str], str] = {
+    # ---- identity / run window ------------------------------------------------
+    (
+        "run",
+        "model_ref_date",
+    ): "ROMS model t=0 reference date. All time values in the output files are relative "
+    "to this date. Passed to every roms-tools object (InitialConditions, SurfaceForcing, "
+    "BoundaryForcing, TidalForcing, CDRForcing). Default: 2000-01-01.",
+    ("run", "start"): "Start date of the simulation run window.",
+    ("run", "end"): "End date of the simulation run window.",
+    (
+        "run",
+        "dt",
+    ): "Baroclinic time step in seconds. Leave blank to compute from the CFL criterion "
+    "(click 'Compute dt (CFL)' — requires roms_tools).",
+    ("run", "description"): "Human-readable description of this blueprint.",
+    ("export", "name"): "Canonical blueprint name. Drives the save filename, "
+    "working_dir, casename, and generated file stems. Defaults to a derived "
+    "name (model_grid_NprocsProcs); edit to override.",
+    # ---- grid ------------------------------------------------------------------
+    ("grid", "nx"): "Number of horizontal grid points in the x-direction (longitude).",
+    ("grid", "ny"): "Number of horizontal grid points in the y-direction (latitude).",
+    ("grid", "size_x"): "Domain extent in the x-direction in kilometers.",
+    ("grid", "size_y"): "Domain extent in the y-direction in kilometers.",
+    ("grid", "center_lon"): "Longitude of the domain center in degrees East.",
+    ("grid", "center_lat"): "Latitude of the domain center in degrees North.",
+    (
+        "grid",
+        "rot",
+    ): "Rotation of the grid x-axis from lines of constant latitude, in degrees "
+    "(positive = counterclockwise).",
+    ("grid", "N"): "Number of vertical sigma levels.",
+    ("grid", "theta_s"): "S-coordinate surface stretching parameter (0 < θs ≤ 10). "
+    "Larger values concentrate levels near the surface.",
+    ("grid", "theta_b"): "S-coordinate bottom stretching parameter (0 < θb ≤ 4). "
+    "Larger values concentrate levels near the bottom.",
+    (
+        "grid",
+        "hc",
+    ): "S-coordinate critical depth in meters. Controls the transition from "
+    "sigma to stretched coordinates near the surface.",
+    (
+        "grid",
+        "hmin",
+    ): "Minimum allowable ocean depth in meters (default 5.0). Grid cells shallower "
+    "than hmin are set to exactly hmin during grid generation.",
+    (
+        "grid",
+        "close_narrow_channels",
+    ): "If checked, narrow water channels (width < one grid cell) in the land mask "
+    "are closed after the mask is generated from NaturalEarth coastlines.",
+    (
+        "grid",
+        "mask_shapefile",
+    ): "Path to a custom shapefile used to determine the land/sea mask instead of the "
+    "default NaturalEarth 10 m coastlines. Leave blank to use the default.",
+    (
+        "grid",
+        "topography_path",
+    ): "Path to a custom topography file for the grid's topography source. Leave "
+    "blank to use the default: staged for non-ETOPO5 sources, fetched by roms-tools "
+    "for ETOPO5.",
+    (
+        "grid",
+        "grid_file",
+    ): "Attach a pre-made grid netCDF instead of generating one from the kwargs "
+    "above. Locks the grid/topography/nesting fields (their values are read from "
+    "the file); the file must exist at this exact path on the machine that runs "
+    "the executor.",
+    (
+        "cdr",
+        "cdr_file",
+    ): "Attach a pre-made CDR-forcing netCDF instead of building one from the "
+    "uploaded roms-tools YAML above. Mutually exclusive with it; the file must "
+    "exist at this exact path on the machine that runs the executor.",
+    # ---- nesting ---------------------------------------------------------------
+    (
+        "nesting",
+        "nest_enable",
+    ): "Enable a child (nested) domain. Generates nesting.nc to supply boundary "
+    "conditions for the inner domain from the outer model.",
+    (
+        "nesting",
+        "nest_domain_dd",
+    ): "Optionally prefill the child grid kwargs from a cataloged DomainSpec. "
+    "You can still edit any child-grid field after selecting.",
+    (
+        "nesting",
+        "nest_period",
+    ): "How often (seconds) boundary values are written to nesting.nc. "
+    "Must divide evenly into the parent model output interval.",
+    (
+        "nesting",
+        "nest_pressure_fluxes",
+    ): "Include baroclinic pressure flux variables in nesting.nc. Required when "
+    "the namelist calc_pflx setting is enabled in the child domain.",
+    (
+        "nesting",
+        "parent_enable",
+    ): "Declare that this grid is nested inside a coarser parent grid. The grid "
+    "is aligned to the parent (roms_tools.align_grids) and its boundary values "
+    "come from the parent's nesting.nc extraction rather than reanalysis "
+    "boundary forcing, which is cleared automatically.",
+    (
+        "nesting",
+        "parent_domain_dd",
+    ): "Optionally prefill the parent grid kwargs from a cataloged DomainSpec. "
+    "You can still edit any parent-grid field after selecting.",
+    (
+        "nesting",
+        "parent_topo_source",
+    ): "Topography dataset the PARENT grid is rebuilt with (for align_grids: this "
+    "grid's mask/bathymetry is blended toward the parent's along the nesting "
+    "boundaries), so it should match what the parent run was actually built "
+    "with. '(same as this grid)' inherits this grid's topo source AND path; "
+    "picking a dataset here uses that dataset at its default location unless a "
+    "parent topo path is also given. Prefilled from the parent DomainSpec.",
+    (
+        "nesting",
+        "parent_topo_path",
+    ): "Explicit topography file for the PARENT grid (on the executor machine). "
+    "Blank: the parent dataset's default location -- or, with '(same as this "
+    "grid)', this grid's topo path.",
+    (
+        "nesting",
+        "child_topo_source",
+    ): "Topography dataset the CHILD grid is built with when extracting nesting "
+    "data. '(same as this grid)' inherits this grid's topo source AND path.",
+    (
+        "nesting",
+        "child_topo_path",
+    ): "Explicit topography file for the CHILD grid (on the executor machine). "
+    "Blank: the child dataset's default location -- or, with '(same as this "
+    "grid)', this grid's topo path.",
+    # ---- partitioning ----------------------------------------------------------
+    (
+        "domain",
+        "npx",
+    ): "Number of MPI tiles in the x-direction (xi). Total MPI tasks = npx × npy.",
+    (
+        "domain",
+        "npy",
+    ): "Number of MPI tiles in the y-direction (eta). Total MPI tasks = npx × npy.",
+    # Generic (context-independent) fallback for any source's path box.
+    "path": "Explicit path to a custom dataset file for this source. "
+    "Leave blank to use the default derived path (staged/streamed location).",
+    # Generic (context-independent) fallbacks shared by IC-BGC/boundary/surface bgc
+    # rows -- SourceSpec.use_vars/constants/esper_method/esper_equation.
+    "use_vars": "Comma-separated list of BGC variables this source contributes "
+    "(bgc sources only), e.g. 'ALK,DIC'. Required when multiple bgc-type sources are "
+    "present so their variable sets don't overlap; the rest are derived/filled by MARBL.",
+    "constants": "Depth-invariant constant value(s) for a 'constants' source, as "
+    "comma- or newline-separated 'key=value' pairs (mmol/m^3), e.g. 'Fe=3.0e-3, ALK=2300'.",
+    "esper_method": "PyESPER estimation method for an 'ESPER' source: 'lir' "
+    "(locally interpolated regression), 'nn' (neural network, roms-tools default), "
+    "or 'mixed'.",
+    "esper_equation": "PyESPER predictor equation for an 'ESPER' source: 8 "
+    "(salinity + temperature) or 16 (salinity only). Blank = roms-tools default (8).",
+    # ---- IC BGC sources (row list) ----------------------------------------------
+    (
+        "ic_bgc",
+        "name",
+    ): "Logical BGC source name for this initial-conditions contributor, e.g. "
+    "'UNIFIED', 'GLODAP', 'WOA_BGC', 'constants', or 'ESPER'. Add multiple rows to "
+    "combine sources (down-select each via use_vars). 'WOA_BGC' supplies only "
+    "NO3/PO4/SiO3/O2, so pair it with a source for DIC/ALK/Fe.",
+    (
+        "ic_bgc",
+        "climatology",
+    ): "Use this BGC source as a climatology (annual-mean repeated each year) "
+    "rather than a time-varying dataset.",
+    # ---- IC --------------------------------------------------------------------
+    (
+        "ic",
+        "ic_name",
+    ): "Logical source name for physics initial conditions, e.g. 'GLORYS'. "
+    "The catalog alias map resolves this to the actual dataset registry key.",
+    (
+        "ic",
+        "ic_layout",
+    ): "GLORYS spatial layout override: 'regional' (default) or 'global'. "
+    "Leave blank for non-GLORYS sources.",
+    (
+        "ic",
+        "ic_bgc_interp",
+    ): "Vertical interpolation for BGC tracer initial conditions. 'depth' — linear in "
+    "depth (default). 'density' — linear in potential-density (isopycnal) space, "
+    "reducing errors across sloping isopycnals. 'density_mld' — density interpolation "
+    "anchored to the mixed-layer depth, preserving sub-mixed-layer feature depths.",
+    (
+        "ic",
+        "ic_flex_time",
+    ): "Allow a ±24-hour search window when looking for the requested ini_time in the "
+    "source dataset. Useful when the exact timestamp is absent.",
+    (
+        "ic",
+        "ic_validate",
+    ): "Run roms-tools' post-construction validation (NaN-at-wet-point checks across "
+    "physics and every bgc source). On by default; uncheck to skip validation "
+    "entirely (bypass_validation=True) -- a last-resort escape hatch, not a "
+    "recommended default.",
+    (
+        "boundary",
+        "boundary_validate",
+    ): "Run roms-tools' post-construction validation (NaN-at-wet-point checks across "
+    "physics and every bgc source). On by default; uncheck to skip validation "
+    "entirely (bypass_validation=True) -- a last-resort escape hatch, not a "
+    "recommended default.",
+    (
+        "ic",
+        "prefill",
+    ): "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+    "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+    "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+    "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    (
+        "ic",
+        "regrid_method",
+    ): "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+    "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    (
+        "ic",
+        "extrap_method",
+    ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+    "initial conditions. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+    "nearest source point. Ignored when a prefill is set.",
+    # ---- surface forcing -------------------------------------------------------
+    (
+        "surface",
+        "name",
+    ): "Logical source name, e.g. 'ERA5' for surface physics or 'UNIFIED' for BGC surface. "
+    "The catalog alias map resolves this to the actual dataset.",
+    (
+        "surface",
+        "type",
+    ): "Forcing type: 'physics' (u/v wind, heat, freshwater fluxes), 'bgc' (pCO₂ / "
+    "iron deposition), or 'restoring' (SST or SSS relaxation).",
+    (
+        "surface",
+        "climatology",
+    ): "Treat the source as a climatology repeated each year rather than interannual.",
+    (
+        "surface",
+        "glorys_layout",
+    ): "GLORYS spatial layout: 'regional' (default) or 'global'. Leave blank for ERA5/UNIFIED.",
+    (
+        "surface",
+        "correct_radiation",
+    ): "Apply shortwave and longwave radiation corrections to ERA5 fluxes using an "
+    "observational climatology. Recommended for most physics surface forcing.",
+    (
+        "surface",
+        "wind_dropoff",
+    ): "Apply exponential coastal wind-speed reduction with a 12.5 km e-folding "
+    "scale. Reduces spurious upwelling near the coast from gridded wind products.",
+    (
+        "surface",
+        "coarse_grid_mode",
+    ): "'auto' — interpolate onto a factor-2 coarsened grid only when roms-tools detects "
+    "the source is coarser than the ROMS grid (default). 'always' — always coarsen. "
+    "'never' — always use the full-resolution source.",
+    (
+        "surface",
+        "restoring_forces",
+    ): "Comma-separated list of variables to apply restoring forces to, e.g. 'sss' or "
+    "'sst,sss'. Only relevant for type='restoring'. Enables sal_restore/SST correction.",
+    (
+        "surface",
+        "prefill",
+    ): "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+    "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+    "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+    "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    (
+        "surface",
+        "regrid_method",
+    ): "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+    "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    (
+        "surface",
+        "extrap_method",
+    ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+    "surface forcing. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+    "nearest source point. Ignored when a prefill is set.",
+    # ---- boundary forcing ------------------------------------------------------
+    (
+        "boundary",
+        "name",
+    ): "Logical source name for boundary conditions, e.g. 'GLORYS' (physics) or "
+    "'UNIFIED' / 'WOA_BGC' (BGC). Resolved via the catalog alias map.",
+    (
+        "boundary",
+        "climatology",
+    ): "Treat as an annual climatology rather than interannual time series.",
+    (
+        "boundary",
+        "glorys_layout",
+    ): "GLORYS spatial layout: 'regional' or 'global'. Leave blank for non-GLORYS.",
+    (
+        "boundary",
+        "bgc_interpolation_method",
+    ): "Vertical interpolation for BGC boundary tracers (type='bgc'). 'depth' (default), "
+    "'density' (isopycnal space), or 'density_mld' (mixed-layer-depth anchored). "
+    "Density methods build a physics BoundaryForcing companion to supply the target T/S.",
+    (
+        "boundary",
+        "prefill",
+    ): "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+    "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+    "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+    "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    (
+        "boundary",
+        "regrid_method",
+    ): "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+    "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    (
+        "boundary",
+        "extrap_method",
+    ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+    "boundaries. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+    "nearest source point. Ignored when a prefill is set.",
+    # ---- tidal forcing ---------------------------------------------------------
+    (
+        "tidal",
+        "name",
+    ): "Tidal forcing dataset name. Currently 'TPXO' (TPXO10.v2, user-provided). "
+    "Files must exist under source_data/TPXO/TPXO10.v2/.",
+    (
+        "tidal",
+        "ntides",
+    ): "Number of tidal constituents to include (max 15). The TPXO atlas provides M2, "
+    "S2, N2, K2, K1, O1, P1, Q1, Mf, Mm, M4, MS4, MN4, Mtm, Mf. Default: 10.",
+    (
+        "tidal",
+        "prefill",
+    ): "Fill NaN (land/void) source cells before regridding. Blank = no source prefill "
+    "(NaN-aware regrid + extrapolation, recommended with xESMF). '2d_lateral_fill' = "
+    "legacy AMG Poisson fill; 'inverse_dist'/'nearest_s2d' = xESMF source fills; "
+    "'nearest_neighbor' = cheap scipy fill (also the fallback when xESMF is absent).",
+    (
+        "tidal",
+        "regrid_method",
+    ): "Horizontal regrid engine. Blank/'auto' = xESMF if installed else scipy. 'xesmf' = "
+    "force xESMF (errors if absent). 'scipy' = force scipy (byte-reproducible with prefill).",
+    (
+        "tidal",
+        "extrap_method",
+    ): "Destination extrapolation on the default (no-prefill) path to guarantee NaN-free "
+    "tidal fields. Blank = 'inverse_dist' (effective default). 'nearest_s2d' = single "
+    "nearest source point. Ignored when a prefill is set.",
+    # ---- river forcing ---------------------------------------------------------
+    (
+        "river",
+        "name",
+    ): "River dataset source name. 'DAI' uses the Dai-Trenberth global river discharge "
+    "climatology (streamable, no download required). 'GLOFAS' uses the GloFAS v4.0 "
+    "daily discharge dataset (higher resolution, more rivers); the preprocessed file "
+    "must be manually placed at source_data/GLOFAS/ (see Copernicus CDS).",
+    (
+        "river",
+        "climatology",
+    ): "Treat river data as an annual climatology repeated each year.",
+    (
+        "river",
+        "include_bgc",
+    ): "Include BGC tracer concentrations (e.g. nutrients) in the river forcing. "
+    "Select a 'bgc src' below to choose the tracer dataset (roms-tools ignores "
+    "bgc src unless this is checked).",
+    (
+        "river",
+        "convert_to_climatology",
+    ): "When to compute a river climatology from the raw data: "
+    "'if_any_missing' (default) — compute if any requested months are absent, "
+    "'never' — always use raw data, 'always' — always compute a climatology.",
+    (
+        "river",
+        "bgc_source_name",
+    ): "River BGC tracer dataset. 'CONSTANTS' uses fixed MARBL default concentrations "
+    "(auto-downloaded by roms-tools). 'RIVR2O' uses the RIVR2O river export product "
+    "(annual files, 1903-2024); the files must be manually placed at "
+    "source_data/RIVR2O/*.nc. Blank + include_bgc checked also falls back to CONSTANTS.",
+    (
+        "river",
+        "bgc_source_path",
+    ): "Optional explicit path/glob to the BGC dataset file(s) "
+    "(e.g. a custom RIVR2O location). Blank derives the default staged location.",
+    (
+        "river",
+        "coast_snap_buffer_km",
+    ): "Override the coastal snap buffer (km) used to move river mouths onto the coast. "
+    "Blank uses the dataset default (200 km for Dai, 50 km for GloFAS).",
+    (
+        "river",
+        "domain_edge_buffer",
+    ): "Number of grid cells beyond the domain edge kept in the bounding-box pre-filter "
+    "when selecting rivers. Default: 20.",
+    (
+        "river",
+        "surface_forcing_source_name",
+    ): "Derive river temperature from ERA5 air temperature sampled at each river "
+    "mouth (smoothed, floored at 0 °C) instead of roms-tools' flat constant "
+    "15.6 °C default. Blank keeps the constant.",
+    (
+        "river",
+        "surface_forcing_source_path",
+    ): "Optional explicit ERA5 path/glob. Blank reads the remote ARCO ERA5 archive "
+    "roms-tools defaults to -- no local staging required.",
+    (
+        "river",
+        "river_temp_smoothing_window_days",
+    ): "Rolling-mean window (days) applied to the sampled air temperature, a "
+    "deliberately simple stand-in for a river's thermal inertia. Default: 30.",
+    (
+        "river",
+        "custom_file",
+    ): "Attach a pre-made river-forcing netCDF instead of building one from a "
+    "DAI/GLOFAS source (selected via 'src: CUSTOM_FILE' above). The file must "
+    "exist at this exact path on the machine that runs the executor.",
+    # ---- output settings -------------------------------------------------------
+    (
+        "output",
+        "output_dd",
+    ): "Select an OutputSpec (named output-settings configuration) to seed the output "
+    "sections. Fine-tune any value under Advanced settings → the relevant section.",
+    # ---- timestep --------------------------------------------------------------
+    (
+        "timestep",
+        "dt_btn",
+    ): "Build the grid from the current grid kwargs and compute the barotropic "
+    "time step from the CFL criterion. Requires roms_tools to be installed.",
+}
+
+# Label overrides for namelist-section widgets built via _build_section /
+# _make_field_widget. Keyed the same way as HELP_TEXT: (section, field_name).
+# Falls back to the raw field name when no override is present.
+LABEL_TEXT: dict[tuple[str, str], str] = {
+    ("bgc", "xco2air_default"): "Static xco2air (if co2_tvarying is False)",
+}
+
+
+def _namelist_label(section: str, field_name: str) -> str:
+    """Look up the display label override for a namelist field, else field_name.
+
+    Prefers the glossary entry ``settings.<section>.<field_name>`` (see
+    :mod:`cstar_forge.ui.labels`); falls back to the legacy :data:`LABEL_TEXT`
+    override, then to the raw ``field_name``.
+    """
+    key = f"settings.{section}.{field_name}"
+    if key in known_keys():
+        return label_for(key).label
+    return LABEL_TEXT.get((section, field_name), field_name)
+
+
+def _namelist_description_and_tooltip(
+    section: str, field_name: str, tooltip: str
+) -> tuple[str, str]:
+    """The widget ``description``/``tooltip`` pair for one namelist field.
+
+    Starts from :func:`_namelist_label` and the schema-derived ``tooltip``. A
+    field with no schema description (every ``cppdefs`` flag -- compile-time,
+    never modeled by RomsNamelist -- and version-gated groups the active tier
+    lacks) falls back to the glossary ``hint``, so caveats such as "ignored by
+    ucla-roms < 0.8.0" reach the widget instead of living only in the YAML. If
+    the glossary (or :data:`LABEL_TEXT`) overrides the label away from the raw
+    ``field_name``, the raw name is kept discoverable by prefixing it onto the
+    tooltip, and a glossary ``unit``, if present, is appended to the
+    description (e.g. ``"Horizontal viscosity (m²/s)"``).
+    """
+    glossary_key = f"settings.{section}.{field_name}"
+    in_glossary = glossary_key in known_keys()
+    if not tooltip and in_glossary:
+        tooltip = label_for(glossary_key).hint or ""
+    label = _namelist_label(section, field_name)
+    if label == field_name:
+        return label, tooltip
+    combined_tooltip = f"{field_name} — {tooltip}" if tooltip else field_name
+    unit = label_for(glossary_key).unit if in_glossary else None
+    description = f"{label} ({unit})" if unit else label
+    return description, combined_tooltip
+
+
+def _namelist_tooltip(group_name: str, field_name: str) -> str:
+    """Look up the tooltip for a namelist field from the RomsNamelist schema.
+
+    Returns the field's ``description`` string if present, else an empty string.
+    Called when building the Advanced settings accordion so every namelist field
+    gets an automated tooltip from the ROMS namelist model docstrings.
+    """
+    try:
+        from cstar.roms.namelist import RomsNamelist
+
+        gf = RomsNamelist.model_fields.get(group_name)
+        if gf is None:
+            return ""
+        cls = gf.annotation
+        if not hasattr(cls, "model_fields"):
+            return ""
+        ff = cls.model_fields.get(field_name)
+        return ff.description or "" if ff is not None else ""
+    except Exception:
+        return ""
+
+
+def _tip(context: str, field: str) -> str:
+    """Return the help text for a (context, field) pair, falling back to ''."""
+    return HELP_TEXT.get((context, field), HELP_TEXT.get(field, ""))
+
+
+def _unwrap_type(ann):
+    """Reduce ``Optional[X]`` / ``Annotated[X, ...]`` / ``List[X]`` to a base type
+    (``bool``/``int``/``float``/``str``/``list``), best-effort.
+    """
+    if getattr(ann, "__metadata__", None) is not None:  # Annotated[...]
+        ann = get_args(ann)[0]
+    origin = get_origin(ann)
+    if origin is typing.Union:
+        non_none = [a for a in get_args(ann) if a is not type(None)]
+        if non_none:
+            return _unwrap_type(non_none[0])
+    if origin in (list, list):
+        return list
+    return ann
+
+
+def _base_type(ann, value):
+    """The widget type to use for a field: from the annotation if known, else
+    inferred from the current value.
+    """
+    if ann is not None:
+        base = _unwrap_type(ann)
+        if base in (bool, int, float, str, list):
+            return base
+    if isinstance(value, bool):
+        return bool
+    if isinstance(value, int):
+        return int
+    if isinstance(value, float):
+        return float
+    if isinstance(value, (list, tuple)):
+        return list
+    return str
+
+
+# Boolean fields that read better as a two-option mode dropdown than a checkbox.
+# ``base`` stays bool everywhere else (widgets dict, overrides layer) -- only the
+# rendering + read/sync string<->bool mapping is special-cased for these keys.
+_BOOL_DROPDOWN_FIELDS: dict[tuple[str, str], tuple[str, str]] = {
+    ("cdr_output", "do_avg"): ("averaged", "instantaneous"),
+    ("cdr_output", "monthly_averages"): ("monthly", "periodic"),
+    ("cdr_tracer_output", "do_avg"): ("averaged", "instantaneous"),
+    ("cdr_tracer_output", "monthly_averages"): ("monthly", "periodic"),
+    ("cdr_gas_exch_output", "do_avg"): ("averaged", "instantaneous"),
+    ("cdr_gas_exch_output", "monthly_averages"): ("monthly", "periodic"),
+}
+
+
+def _make_field_widget(
+    W,
+    name: str,
+    base: type,
+    value: Any,
+    tooltip: str = "",
+    bool_dropdown: tuple[str, str] | None = None,
+):
+    style = {"description_width": "260px"}
+    wide = W.Layout(width="560px")
+    num = W.Layout(width="380px")
+    kw = {"tooltip": tooltip} if tooltip else {}
+    if bool_dropdown is not None:
+        true_label, false_label = bool_dropdown
+        return W.Dropdown(
+            options=(true_label, false_label),
+            value=true_label if value else false_label,
+            description=name,
+            style=style,
+            layout=num,
+            **kw,
+        )
+    if base is bool:
+        return W.Checkbox(
+            value=bool(value) if value is not None else False,
+            description=name,
+            indent=False,
+            **kw,
+        )
+    if base is int:
+        return W.IntText(
+            value=int(value) if value is not None else 0,
+            description=name,
+            style=style,
+            layout=num,
+            **kw,
+        )
+    if base is float:
+        return W.FloatText(
+            value=float(value) if value is not None else 0.0,
+            description=name,
+            style=style,
+            layout=num,
+            **kw,
+        )
+    if base is list:
+        joined = ", ".join(str(x) for x in (value or []))
+        return W.Text(
+            value=joined,
+            description=name,
+            style=style,
+            layout=wide,
+            placeholder="comma-separated",
+            **kw,
+        )
+    return W.Text(
+        value="" if value is None else str(value),
+        description=name,
+        style=style,
+        layout=wide,
+        **kw,
+    )
+
+
+def _read_field_widget(
+    widget, base: type, original: Any = None, key: tuple[str, str] | None = None
+) -> Any:
+    v = widget.value
+    labels = _BOOL_DROPDOWN_FIELDS.get(key) if key is not None else None
+    if labels is not None:
+        true_label, _false_label = labels
+        return v == true_label
+    if base is bool:
+        return bool(v)
+    if base is int:
+        return int(v)
+    if base is float:
+        return float(v)
+    if base is list:
+        parts = [p.strip() for p in str(v).split(",") if p.strip()]
+        out: list[int | float | str] = []
+        for p in parts:
+            try:
+                out.append(int(p))
+            except ValueError:
+                try:
+                    out.append(float(p))
+                except ValueError:
+                    out.append(p)
+        return out
+    return v
+
+
+def _section_submodel(section: str, settings_cls: type[BaseModel] = RunTimeSettings):
+    """The ``settings_cls`` sub-model for a section, or None (scalar / unknown).
+
+    ``settings_cls`` defaults to the legacy :class:`RunTimeSettings` for
+    back-compat; callers that know the blueprint's ucla-roms ref should pass
+    the class picked by :func:`_wizard_settings_cls_for_ref` instead, so a
+    section that varies by ucla-roms version (e.g. ``ocean_vars``) is
+    introspected against the right field set.
+    """
+    field = settings_cls.model_fields.get(section)
+    if field is None:
+        return None
+    ann = field.annotation
+    return ann if isinstance(ann, type) and issubclass(ann, BaseModel) else None
+
+
+def _wizard_settings_cls_for_ref(roms_ref: str | None) -> type[BaseModel]:
+    """``run_time_settings_for_ref`` with the non-semver-ref ``UserWarning`` swallowed.
+
+    The wizard calls this on every live rebuild -- including every keystroke
+    typed into the ``roms_ref`` override text box -- so letting a branch-name
+    pin's warning (e.g. ``"main"``) through would spam the notebook output on
+    each edit; the schema selection itself is unaffected, only the warning is
+    dropped.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        return run_time_settings_for_ref(roms_ref)
+
+
+# --- overrides layer: effective = composed(specs) ⊕ overrides -----------------
+# overrides are keyed (section, field) with field=None for scalar sections.
+def _apply_overrides(
+    composed: dict[str, Any], overrides: dict[Any, Any]
+) -> dict[str, Any]:
+    import copy as _copy
+
+    eff = _copy.deepcopy(composed)
+    for (section, field), value in overrides.items():
+        if field is None:
+            eff[section] = value
+        else:
+            eff.setdefault(section, {})[field] = value
+    return eff
+
+
+def _overrides_nested(overrides: dict[Any, Any]) -> dict[str, Any]:
+    """Convert the sparse (section, field)->value map to nested {section:{field:value}}
+    (or {section: scalar}) for storage in composition.overrides.
+    """
+    out: dict[str, Any] = {}
+    for (section, field), value in overrides.items():
+        if field is None:
+            out[section] = value
+        else:
+            out.setdefault(section, {})[field] = value
+    return out
+
+
+# ---------------------------------------------------------------------------
+# "Save modified specs to catalog" -- per-spec extractors + round-trip verify
+# ---------------------------------------------------------------------------
+# Whole sections that are Domain/Forcing-owned or purely resolver-derived (never
+# a ModelSpec default) -- the exact inverse of the mutations build_forge_blueprint
+# applies on top of a ModelSpec's model_settings (forge_blueprint_resolve.py).
+_RESOLVER_DERIVED_SECTIONS = (
+    "time_stepping",
+    "v_sponge",
+    "river_frc",
+    "cdr_frc",
+    "extract_data",
+)
+# Leaves within a kept section that are still resolver-derived (grid/partitioning/
+# forcing/bgc-mode driven), so a saved ModelSpec must not bake in a stale value.
+_PARAM_DERIVED_LEAVES = frozenset(
+    {"llm", "mmm", "n", "np_xi", "np_eta", "nsub_x", "nsub_e"}
+)
+_CPPDEFS_DERIVED_LEAVES = frozenset(
+    {
+        "obc_west",
+        "obc_east",
+        "obc_north",
+        "obc_south",
+        "cdr_forcing",
+        "use_pio",
+        "marbl",
+        "co2_tvarying",
+        "sal_restore",
+        "tides",
+    }
+)
+_TIDES_DERIVED_LEAVES = frozenset({"ntides"})
+
+
+def _model_owned_settings(effective: dict[str, Any]) -> dict[str, Any]:
+    """The model-owned subset of a resolved ``model_settings`` dict.
+
+    The exact inverse of ``build_forge_blueprint``'s mutations (forge_blueprint_
+    resolve.py): drops whole Domain/Forcing-owned or resolver-derived sections,
+    every OUTPUT section/partial-output field (an OutputSpec's job), and the
+    resolver-derived leaves within otherwise-kept sections (``param``'s grid/
+    partitioning dims, ``cppdefs``'s domain/forcing/bgc-driven flags, ``tides``'s
+    ``ntides``). What remains is safe to bake into a new ModelSpec's
+    ``model_settings`` and reusable across domains/forcing/output selections.
+    """
+    out = copy.deepcopy(effective)
+    for sec in _RESOLVER_DERIVED_SECTIONS:
+        out.pop(sec, None)
+    for sec in OUTPUT_SECTIONS:
+        out.pop(sec, None)
+    if "param" in out:
+        for leaf in _PARAM_DERIVED_LEAVES:
+            out["param"].pop(leaf, None)
+    if "cppdefs" in out:
+        for leaf in _CPPDEFS_DERIVED_LEAVES:
+            out["cppdefs"].pop(leaf, None)
+    if "tides" in out:
+        for leaf in _TIDES_DERIVED_LEAVES:
+            out["tides"].pop(leaf, None)
+    for sec, fields in PARTIAL_OUTPUT_SECTIONS.items():
+        if sec in out:
+            for f in fields:
+                out[sec].pop(f, None)
+    return out
+
+
+def _split_forcing_data(
+    d: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Split a raw ForcingSpec dict (as read from ``Forcing.yaml``) into the
+    ``{initial_conditions, forcing}`` shape the forcing editor expects, plus the
+    optional embedded ``cdr_forcing`` block (``None`` if absent). Strips
+    ``description`` (not part of either). Shared by the round-trip verifier and
+    ``_on_forcing_spec``/``_populate_from`` so CDR routes consistently everywhere
+    a ForcingSpec is read.
+
+    Also migrates any pre-v8 forcing-input shapes in place (see
+    ``migrate_forcing_inputs``) -- a hand-authored or older catalog ``Forcing.yaml``
+    may still carry ``initial_conditions.bgc_source`` (singular) or a list-shaped
+    ``forcing.boundary``, neither of which the forcing editor understands; deep-
+    copied first so this never mutates the catalog's own parsed dict.
+    """
+    d = copy.deepcopy(d)
+    d.pop("description", None)
+    cdr = d.pop("cdr_forcing", None)
+    migrate_forcing_inputs(d.get("initial_conditions"), d.get("forcing"))
+    return d, cdr
+
+
+_SPEC_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _valid_spec_name(name: str) -> bool:
+    """A safe catalog entry name: non-empty, single path component."""
+    return bool(name) and _SPEC_NAME_RE.fullmatch(name) is not None
+
+
+def _is_output_key(section: str, field: Any) -> bool:
+    """True if an (section, field) override key belongs to the Output spec
+    (vs. the Model spec) -- shared by `_on_output_spec` (clearing stale overrides
+    on a fresh OutputSpec pick) and `_rebuild` (deriving `composition.output.modified`
+    / `composition.model.modified` from the same override map).
+    """
+    return section in OUTPUT_SECTIONS or (
+        section in PARTIAL_OUTPUT_SECTIONS and field in PARTIAL_OUTPUT_SECTIONS[section]
+    )
+
+
+def _diff_overrides(
+    effective: dict[str, Any], composed: dict[str, Any]
+) -> dict[Any, Any]:
+    """Every field in ``effective`` that differs from ``composed`` becomes an override
+    (used on load to reconstruct the layer from a saved/edited config).
+
+    Skips fields in ``_ACCORDION_EXCLUDED_FIELDS`` -- those have a dedicated widget
+    (or are resolver-derived with none), never an accordion override, so a stale or
+    hand-edited saved file must not silently reintroduce one with no widget to
+    display or clear it.
+    """
+    ov: dict[Any, Any] = {}
+    for section, val in effective.items():
+        cval = composed.get(section)
+        if isinstance(val, dict):
+            excluded = _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset())
+            for field, v in val.items():
+                if field in excluded:
+                    continue
+                if not isinstance(cval, dict) or cval.get(field) != v:
+                    ov[(section, field)] = v
+        elif cval != val:
+            ov[(section, None)] = val
+    return ov
+
+
+# Fields shown by dedicated wizard widgets elsewhere -> hidden from the generic
+# Advanced-settings accordion to avoid duplicate/competing editors (e.g. the PIO
+# checkbox and open-boundary checkboxes already edit these; letting the accordion
+# edit them too would silently record a competing override, see _diff_overrides).
+_ACCORDION_EXCLUDED_FIELDS: dict[str, frozenset[str]] = {
+    "cppdefs": frozenset(
+        {"use_pio", "obc_west", "obc_east", "obc_north", "obc_south", "marbl"}
+    ),
+    "param": frozenset({"llm", "mmm", "n", "np_xi", "np_eta"}),
+    "time_stepping": frozenset({"dt"}),
+    # v_sponge is a first-class domain property (self.v_sponge, in "Domain-derived
+    # properties") resolved via build_forge_blueprint's own v_sponge= param, not
+    # the generic overrides layer -- excluding it here keeps a loaded blueprint's
+    # domain.v_sponge from being reconstructed as a phantom accordion override.
+    "v_sponge": frozenset({"v_sponge"}),
+}
+
+
+# Modeler-facing consolidation of the raw namelist sections into a few
+# Advanced-settings panes, grouped the way an ocean modeler categorizes knobs
+# rather than by the exact namelist sub-groups. DISPLAY-ONLY: each widget stays
+# keyed by its real ``(section, field)``, so the overrides layer, ``_diff_overrides``,
+# and the output/model "modified" tracking are all unaffected by the grouping.
+#
+# Sections deliberately absent (time_stepping, reference_date_settings, grid,
+# s_coord, param, title, output_root_name, initial, forcing, river_frc) are filled
+# dynamically at resolve/run time (ntimes from the run duration, grid/IC/forcing
+# paths from generated files, river_frc entirely generation-derived) or edited by a
+# dedicated widget elsewhere in the wizard (theta_s/theta_b/hc, dt, np_xi/np_eta,
+# reference date, PIO/open-boundary checkboxes). Their resolver-composed value still
+# flows through untouched -- omitting the pane only removes an editor that would be
+# clobbered or duplicated, never the value.
+#
+# ``cppdefs`` is almost entirely resolver-derived (obc_*/marbl/use_pio/cdr_forcing/
+# co2_tvarying/sal_restore/tides) and stays out of the accordion for those fields --
+# only the handful with no other UI (``sponge_tune``, ``nhy_forcing``/``nox_forcing``,
+# and the ucla-roms >= 0.8.0 advection switches ``parabolic_splines``/
+# ``upstream_ts_land_curv``, PR #361) are opted in, via ``_CPPDEFS_PANE_FIELDS``, so
+# a user override can never collide with a resolver-owned flag. The two advection
+# fields only render for ModelSpecs that declare them (``roms-marbl-0.8-default``,
+# ``pio-dev``) -- the editor type-infers a checkbox from the composed bool, so a
+# spec that omits the key shows no widget for it.
+#
+# ``bgc``/``marbl_bgc`` are SPLIT at field granularity along the existing
+# ``PARTIAL_OUTPUT_SECTIONS`` seam (the same split the OutputSpec dropdown seeds):
+# their output write-controls live under Output, the rest under Biogeochemistry.
+_OUTPUT_CATEGORY = "Output & diagnostics"
+_ADVANCED_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Physics & subgrid tuning",
+        (
+            "lateral_visc",
+            "vertical_mixing",
+            "tracer_diff2",
+            "bottom_drag",
+            # v_sponge is deliberately absent: it's a first-class domain property
+            # with its own dedicated widget in "Domain-derived properties"
+            # (self.v_sponge), not a generic model-settings override -- see
+            # _ACCORDION_EXCLUDED_FIELDS.
+            "sponge_tune",
+            "gamma2",
+            "ubind",
+            "lin_rho_eos",
+            # pio_settings is ModelSpec-owned (like the rest of this pane), NOT an
+            # output section: edits here must land in composition.model / "Save
+            # Model spec", so keep it out of _OUTPUT_CATEGORY.
+            "pio_settings",
+            "cppdefs",
+        ),
+    ),
+    (
+        "Surface & lateral forcing",
+        (
+            "blk_frc",
+            "flux_frc",
+            "tides",
+            # river_frc is deliberately absent: all three of its typed fields
+            # (river_source/analytical/nriv) are generation-derived -- see
+            # GENERATION_DERIVED_LEAF_KEYS["river_frc"] in forge_blueprint_engine.py
+            # -- so the executor overwrites every one from the actual river forcing
+            # (nriv = the "nriver" dimension of the generated/attached dataset).
+            # An accordion editor here would only record overrides that generation
+            # discards. The resolver-composed value still flows through untouched.
+            "pipe_frc",
+            "sss_correction",
+            "sst_correction",
+        ),
+    ),
+    (
+        "Biogeochemistry (BGC / MARBL)",
+        ("bgc", "marbl_bgc", "dic_alk_correction", "cppdefs"),
+    ),
+    (
+        "Carbon dioxide removal (CDR)",
+        ("cdr_frc", "cdr_output", "cdr_tracer_output", "cdr_gas_exch_output"),
+    ),
+    (
+        _OUTPUT_CATEGORY,
+        (
+            "ocean_vars",
+            "surf_flux",
+            "diagnostics",
+            "stdout_diag",
+            "ts_output",
+            "frc_output",
+            "upscale_output",
+            "zslice",
+            "random_output",
+            "calc_pflx",
+            "particles",
+            "extract_data",
+            "bgc",
+            "marbl_bgc",
+        ),
+    ),
+)
+
+
+# Output-stream tables for the Advanced-settings panes: each namelist section
+# that models one-or-more "write this stream / how often / how many records
+# per file" triples renders those fields as a small table (see
+# _SettingsEditor._build_section) instead of 3-6 flat rows apiece. Row order
+# here is the table's row order. ``write``/``period``/``records`` are field
+# names on the section's sub-model (None when the section has no single
+# master write flag for that stream, e.g. surf_flux/diagnostics, whose
+# per-variable or per-mode flags render elsewhere); ``extra`` lists any other
+# small toggles for that stream (rendered as a checkbox/dropdown group in the
+# table's last column). A row only forms when every field it names was
+# actually built for the active settings_cls/include/exclude -- otherwise its
+# fields fall through to the plain flat list unchanged (see
+# test_ui_labels.py::test_output_table_fields_exist for schema coverage).
+_OUTPUT_TABLES: dict[str, list[dict[str, Any]]] = {
+    "ocean_vars": [
+        {
+            "label": "Instantaneous history",
+            "write": "wrt_file_his",
+            "period": "output_period_his",
+            "records": "nrpf_his",
+            "extra": [],
+        },
+        {
+            "label": "Averages",
+            "write": "wrt_file_avg",
+            "period": "output_period_avg",
+            "records": "nrpf_avg",
+            "extra": [],
+        },
+        {
+            "label": "Restarts",
+            "write": "wrt_file_rst",
+            "period": "output_period_rst",
+            "records": "nrpf_rst",
+            "extra": ["monthly_restarts"],
+        },
+    ],
+    "bgc": [
+        {
+            "label": "BGC history",
+            "write": "wrt_his",
+            "period": "output_period_his",
+            "records": "nrpf_his",
+            "extra": [],
+        },
+        {
+            "label": "BGC averages",
+            "write": "wrt_avg",
+            "period": "output_period_avg",
+            "records": "nrpf_avg",
+            "extra": [],
+        },
+        {
+            "label": "BGC diagnostics history",
+            "write": "wrt_his_dia",
+            "period": "output_period_his_dia",
+            "records": "nrpf_his_dia",
+            "extra": [],
+        },
+        {
+            "label": "BGC diagnostics averages",
+            "write": "wrt_avg_dia",
+            "period": "output_period_avg_dia",
+            "records": "nrpf_avg_dia",
+            "extra": [],
+        },
+    ],
+    "cdr_output": [
+        {
+            "label": "CDR output",
+            "write": "do_cdr_output",
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": ["do_avg", "monthly_averages"],
+        },
+    ],
+    "surf_flux": [
+        {
+            "label": "Surface fluxes",
+            "write": None,
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": ["sflx_avg"],
+        },
+    ],
+    "diagnostics": [
+        {
+            "label": "Diagnostics",
+            "write": None,
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": ["diag_avg", "diag_uv", "diag_trc"],
+        },
+    ],
+    "frc_output": [
+        {
+            "label": "Forcing fields",
+            "write": "wrt_frc",
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": ["wrt_frc_avg"],
+        },
+    ],
+    "upscale_output": [
+        {
+            "label": "Upscaled output",
+            "write": "do_upscale",
+            "period": "output_period_uscl",
+            "records": "nrpf_uscl",
+            "extra": [],
+        },
+    ],
+    "random_output": [
+        {
+            "label": "Random output",
+            "write": "do_random",
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": [],
+        },
+    ],
+    "zslice": [
+        {
+            "label": "Depth slices",
+            "write": "do_zslice",
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": ["zslice_avg"],
+        },
+    ],
+    "sponge_tune": [
+        {
+            "label": "Sponge fields",
+            "write": "wrt_sponge",
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": [],
+        },
+    ],
+    "particles": [
+        {
+            "label": "Particle output",
+            "write": "floats",
+            "period": "output_period",
+            "records": "nrpf",
+            "extra": [],
+        },
+    ],
+    "extract_data": [
+        {
+            "label": "Child-grid extraction",
+            "write": "do_extract",
+            "period": "extract_period",
+            "records": "nrpf",
+            "extra": [],
+        },
+    ],
+}
+
+# Per-variable write-flag checkbox grids for the Advanced-settings panes: a
+# (title, field_names) pair renders as a small header plus a 4-column grid of
+# checkboxes instead of one flat row per variable. As with _OUTPUT_TABLES, a
+# grid only consumes the fields that were actually built; any missing field is
+# simply omitted (a section can list more fields here than a given
+# settings_cls models).
+_VARIABLE_GRIDS: dict[str, list[tuple[str, list[str]]]] = {
+    "ocean_vars": [
+        (
+            "Variables in history files",
+            [
+                "wrt_z",
+                "wrt_ub",
+                "wrt_vb",
+                "wrt_u",
+                "wrt_v",
+                "wrt_r",
+                "wrt_o",
+                "wrt_w",
+                "wrt_akv",
+                "wrt_akt",
+                "wrt_aks",
+                "wrt_hbls",
+                "wrt_hbbl",
+            ],
+        ),
+        (
+            "Variables in average files",
+            [
+                "wrt_avg_z",
+                "wrt_avg_ub",
+                "wrt_avg_vb",
+                "wrt_avg_u",
+                "wrt_avg_v",
+                "wrt_avg_r",
+                "wrt_avg_o",
+                "wrt_avg_w",
+                "wrt_avg_akv",
+                "wrt_avg_akt",
+                "wrt_avg_aks",
+                "wrt_avg_hbls",
+                "wrt_avg_hbbl",
+            ],
+        ),
+    ],
+    "surf_flux": [
+        ("Fluxes written", ["wrt_smflx", "wrt_stflx", "wrt_rstflx", "wrt_swflx"]),
+    ],
+    "ts_output": [
+        ("Fields written", ["wrt_temp", "wrt_salt", "wrt_temp_dia", "wrt_salt_dia"]),
+    ],
+    "zslice": [
+        ("Fields written", ["wrt_t_zsl", "wrt_u_zsl", "wrt_v_zsl"]),
+    ],
+}
+
+
+def _as_table_cell(widget, *, width: str | None = None, css_class: str | None = None):
+    """Prepare an already-built settings widget for a table cell.
+
+    Clears its own ``description`` (the row label column names the stream) and
+    optionally pins a width / adds a CSS class -- one place for the tweak every
+    Write/Period/Records cell needs, so the columns cannot drift apart.
+    """
+    widget.description = ""
+    if width is not None:
+        widget.layout.width = width
+    if css_class is not None:
+        widget.add_class(css_class)
+    return widget
+
+
+def _build_output_table(
+    W, section: str, built: dict[str, Any], consumed: set[str]
+) -> Any | None:
+    """A ``W.GridBox`` (class ``forge-out-table``) collecting ``section``'s
+    eligible :data:`_OUTPUT_TABLES` rows into one Write / Period / Records
+    table, or ``None`` if no row qualifies.
+
+    A row qualifies when its ``period`` field (and its ``write`` flag, when
+    it names one) is present in ``built`` -- i.e. was actually constructed
+    for the active ``settings_cls``/include/exclude (see
+    ``_SettingsEditor._build_section``); a missing ``records``/``extra`` field
+    just leaves that cell empty.
+    Qualifying rows have their keys added to ``consumed`` so the caller's
+    plain flat-list fallback skips them. Widgets are REUSED, never rebuilt:
+    the write/period/records widget's ``description``/``layout.width`` are
+    tweaked in place (registry identity in ``self._widgets`` is untouched).
+    """
+    # A row qualifies when its period field (and its write flag, if it names
+    # one) was built; records/extra cells are optional because some fields
+    # only exist for certain settings tiers (e.g. ocean_vars.nrpf_rst is
+    # pre-0.5.0 only) -- a missing one leaves that cell empty.
+    rows = [
+        row
+        for row in _OUTPUT_TABLES.get(section, [])
+        if row["period"] in built and (row["write"] is None or row["write"] in built)
+    ]
+    if not rows:
+        return None
+
+    header_cells = [
+        W.HTML("&nbsp;"),
+        W.HTML("Write"),
+        W.HTML("Period (s)"),
+        W.HTML("Records / file"),
+        W.HTML("&nbsp;"),
+    ]
+    for cell in header_cells:
+        cell.add_class("forge-out-th")
+    header_cells[1].add_class("forge-out-center")
+    cells: list[Any] = list(header_cells)
+
+    for row in rows:
+        write_key, period_key, records_key, extra_keys = (
+            row["write"],
+            row["period"],
+            row["records"],
+            row["extra"],
+        )
+        symbols = " · ".join(
+            k for k in (write_key, period_key, records_key) if k and k in built
+        )
+        label_cell = W.HTML(f"{row['label']}<span class='sym'>{symbols}</span>")
+        label_cell.add_class("forge-out-label")
+        cells.append(label_cell)
+
+        present_extras = [k for k in extra_keys if k in built]
+        if write_key is not None:
+            write_widget = _as_table_cell(
+                built[write_key], css_class="forge-out-center"
+            )
+            cells.append(write_widget)
+            consumed.add(write_key)
+        else:
+            # No single write switch (surface fluxes, diagnostics): the row's
+            # labelled flags ARE the write column, stacked, so nothing lands
+            # in the unlabelled extras cell.
+            write_cell = W.VBox([built[k] for k in present_extras])
+            write_cell.add_class("forge-out-write-stack")
+            cells.append(write_cell)
+            consumed.update(present_extras)
+            present_extras = []
+
+        cells.append(_as_table_cell(built[period_key], width="120px"))
+        consumed.add(period_key)
+
+        if records_key is not None and records_key in built:
+            cells.append(_as_table_cell(built[records_key], width="120px"))
+            consumed.add(records_key)
+        else:
+            cells.append(W.HTML("<span class='sym'>—</span>"))
+
+        extras = [built[k] for k in present_extras]
+        consumed.update(present_extras)
+        cells.append(W.HBox(extras))
+
+    table = W.GridBox(
+        cells,
+        layout=W.Layout(
+            grid_template_columns=(
+                "minmax(200px, 1.4fr) minmax(70px, auto) 140px 140px minmax(0, 1.2fr)"
+            ),
+            grid_gap="4px 12px",
+            align_items="center",
+        ),
+    )
+    table.add_class("forge-out-table")
+    return table
+
+
+def _build_variable_grids(
+    W, section: str, built: dict[str, Any], consumed: set[str]
+) -> list[Any]:
+    """A title + ``W.GridBox`` (class ``forge-var-grid``) pair per
+    :data:`_VARIABLE_GRIDS` entry with at least one field present in
+    ``built``, as a flat ``[title, grid, title, grid, ...]`` list.
+
+    Only the fields actually present are rendered (a grid can list more
+    fields than a given ``settings_cls`` models); consumed keys are added to
+    ``consumed`` so the caller's flat-list fallback skips them. Checkboxes
+    keep their existing widget objects and glossary descriptions unchanged.
+    """
+    out: list[Any] = []
+    for title, keys in _VARIABLE_GRIDS.get(section, []):
+        present = [k for k in keys if k in built and k not in consumed]
+        if not present:
+            continue
+        out.append(W.HTML(f"<div class='forge-var-title'>{title}</div>"))
+        grid = W.GridBox(
+            [built[k] for k in present],
+            layout=W.Layout(
+                grid_template_columns="repeat(4, minmax(0, 1fr))",
+                grid_gap="2px 16px",
+            ),
+        )
+        grid.add_class("forge-var-grid")
+        out.append(grid)
+        consumed.update(present)
+    return out
+
+
+# Section names modeled by at least one registered run-time settings tier (e.g.
+# pio_settings, only on RunTimeSettingsV0_6_0) -- used by _SettingsEditor to skip
+# a section that's version-gated behind a namelist schema boundary but absent
+# from the *active* settings_cls, rather than rendering a type-inferred widget
+# whose edits an extra="ignore" top-level model would silently discard. A
+# section NEVER modeled by any tier (e.g. cppdefs) is not in this set and keeps
+# rendering via type-inference as before -- see version_gated_section_names().
+_VERSION_GATED_SECTIONS = version_gated_section_names()
+
+# cppdefs fields exposed per accordion pane -- everything else in cppdefs (obc_*/
+# marbl/use_pio/cdr_forcing/co2_tvarying/sal_restore/tides) is resolver-derived and
+# has no widget anywhere; leaving it out of both sets keeps it that way even if a
+# future pane adds "cppdefs" without remembering to scope it down.
+_CPPDEFS_PANE_FIELDS: dict[str, frozenset[str]] = {
+    "Physics & subgrid tuning": frozenset(
+        {"sponge_tune", "parabolic_splines", "upstream_ts_land_curv"}
+    ),
+    "Biogeochemistry (BGC / MARBL)": frozenset({"nhy_forcing", "nox_forcing"}),
+}
+
+
+def _split_fields(
+    category_title: str, section: str
+) -> tuple[frozenset | None, frozenset]:
+    """Field filter ``(include, exclude)`` for a section shown in ``category_title``.
+
+    ``include=None`` means "all fields"; otherwise only those in ``include`` are
+    shown. ``exclude`` is always dropped. Sections split across panes (``bgc`` /
+    ``marbl_bgc`` via :data:`PARTIAL_OUTPUT_SECTIONS`) keep their output write-
+    controls under Output and the rest under their feature pane. ``cppdefs`` is
+    split the same way via :data:`_CPPDEFS_PANE_FIELDS` -- each pane only sees the
+    handful of compile-time flags it owns.
+    """
+    if section == "cppdefs":
+        return _CPPDEFS_PANE_FIELDS.get(category_title, frozenset()), frozenset()
+    parts = PARTIAL_OUTPUT_SECTIONS.get(section)
+    if parts is None:
+        return None, frozenset()
+    if category_title == _OUTPUT_CATEGORY:
+        return frozenset(parts), frozenset()
+    return None, frozenset(parts)
+
+
+# Each CDR output stream's master enable flag -- section name -> the field that
+# turns the whole stream on/off. ``_apply_field_rules``/``_register_field_rule_
+# observers`` loop over this table so ``cdr_output`` (ucla-roms's original
+# stream), ``cdr_tracer_output``, and ``cdr_gas_exch_output`` (both added by
+# ucla-roms PR #351, >= 0.7.0) behave identically: every other field of the
+# section (do_avg/monthly_averages/output_period/nrpf, and any stream-specific
+# extras such as cdr_tracer_output's ``wrt_*`` field-group toggles) hides with
+# the master switch, so a new field on a Cfg model is covered without touching
+# this file. Extend here -- not by hand in either method -- when ucla-roms adds
+# another CDR output stream.
+_CDR_STREAM_MASTER_FLAGS: dict[str, str] = {
+    "cdr_output": "do_cdr_output",
+    "cdr_tracer_output": "do_cdr_tracer_output",
+    "cdr_gas_exch_output": "do_cdr_gas_exch_output",
+}
+
+
+class _SettingsEditor:
+    """A collapsible (Accordion) editor over the *editable* model_settings sections,
+    consolidated into modeler-facing category panes (see :data:`_ADVANCED_CATEGORIES`).
+
+    Each pane groups several namelist sections under a sub-header per section, so the
+    grouping reads by ocean-modeling concern (physics, forcing, BGC, CDR, output)
+    while every widget is still keyed by its real ``(section, field)``. Auto-generates
+    typed widgets per field using the ``settings_cls`` sub-model schema (falling
+    back to value-type inference). ``settings_cls`` defaults to the legacy
+    :class:`RunTimeSettings` for back-compat; pass the class matching the
+    blueprint's ucla-roms ref (see :func:`_wizard_settings_cls_for_ref`) so a
+    version-varying section (``ocean_vars``, ``particles``) is introspected
+    against the right field set -- e.g. ``ocean_vars.nrpf_rst`` only exists pre
+    ucla-roms 0.5.0, so a widget for it is only generated when `settings_cls`
+    is the legacy class. All panes are collapsed by default. ``sync()``
+    pushes values in (used on load); ``read()`` returns a single field. Fields listed
+    in ``_ACCORDION_EXCLUDED_FIELDS`` (and sections not named in a category) are
+    skipped -- their value still flows through from the resolver-composed settings
+    dict (this editor never authors that dict, only a sparse overrides layer), so
+    hiding the widget cannot drop or reset the value.
+    """
+
+    def __init__(
+        self,
+        W,
+        model_settings: dict[str, Any],
+        on_edit=None,
+        settings_cls: type[BaseModel] = RunTimeSettings,
+    ):
+        self.W = W
+        self._settings_cls = settings_cls
+        # (section, field|None) -> (widget, base_type)
+        self._widgets: dict[Any, Any] = {}
+        self._section_fields: dict[str, list[str | None]] = {}
+        # True while sync() is pushing composed values into widgets -- distinct from
+        # the wizard's own _syncing flag, which guards the *wizard-level* on_edit
+        # override recording. This one guards the editor-internal forcing rule (see
+        # _register_field_rule_observers) so a sync-driven value push never mutates
+        # a sibling widget the way a real user edit is allowed to.
+        self._syncing_internal = False
+        # category title -> sections shown under it (a section may appear under two
+        # panes when split along PARTIAL_OUTPUT_SECTIONS, e.g. bgc/marbl_bgc).
+        self._pane_sections: dict[str, list[str]] = {}
+        panes, titles = [], []
+        for title, members in _ADVANCED_CATEGORIES:
+            blocks = []
+            for section in members:
+                if section not in model_settings:
+                    continue
+                if (
+                    section not in self._settings_cls.model_fields
+                    and section in _VERSION_GATED_SECTIONS
+                ):
+                    # section is modeled by some registered settings tier (e.g.
+                    # pio_settings on RunTimeSettingsV0_6_0) but not by the
+                    # active settings_cls -- e.g. a pre-0.6.0 roms_ref override
+                    # with a ModelSpec whose model_settings still carries the
+                    # key. Rendering a type-inferred widget here would let the
+                    # user edit a value the active (extra="ignore") schema
+                    # silently discards downstream. cppdefs is NOT in
+                    # _VERSION_GATED_SECTIONS (no tier ever models it) and so
+                    # is unaffected -- it keeps rendering via type-inference.
+                    continue
+                include, exclude = _split_fields(title, section)
+                box, fields = self._build_section(
+                    section, model_settings[section], include, exclude
+                )
+                if not fields:
+                    continue
+                self._pane_sections.setdefault(title, []).append(section)
+                sec_meta = section_for(f"settings.{section}", default_title=section)
+                sec_header = W.HTML(
+                    "<div class='forge-settings-sec'>"
+                    f"<span class='ttl'>{sec_meta.title}</span> "
+                    f"<span class='sym'>{section}</span></div>"
+                )
+                # Widget-level class: the CSS draws a bold divider above every
+                # section header except the pane's first (:first-child).
+                sec_header.add_class("forge-settings-sec-w")
+                blocks.append(sec_header)
+                blocks.append(box)
+                self._section_fields[section] = fields
+            if not blocks:
+                continue
+            panes.append(W.VBox(blocks))
+            titles.append(title)
+        # Independently collapsible panes: opening one no longer closes another.
+        self.accordion = components.open_accordion(W, panes, titles)
+        if on_edit is not None:
+            for (section, field), (widget, _base) in self._widgets.items():
+                widget.observe(
+                    lambda _ch, s=section, f=field: on_edit(s, f), names="value"
+                )
+        self._register_field_rule_observers()
+        self._apply_field_rules()
+
+    def sync(self, model_settings: dict[str, Any]):
+        """Set every widget to the effective values (caller suspends edit tracking)."""
+        self._syncing_internal = True
+        try:
+            for (section, field), (widget, base) in self._widgets.items():
+                if section not in model_settings:
+                    continue
+                sec = model_settings[section]
+                value = (
+                    sec
+                    if field is None
+                    else (sec.get(field) if isinstance(sec, dict) else None)
+                )
+                try:
+                    labels = _BOOL_DROPDOWN_FIELDS.get((section, field))
+                    if labels is not None and value is not None:
+                        true_label, false_label = labels
+                        widget.value = true_label if bool(value) else false_label
+                    elif base is list:
+                        # Only rewrite the text when the *parsed* list actually
+                        # differs from the value being synced. A list field is a
+                        # free-text Text widget, and every keystroke round-trips
+                        # through on_edit -> _rebuild -> sync(); re-joining the
+                        # parsed list on each pass would rewrite "a, b," back to
+                        # "a, b" (the trailing separator parses to nothing),
+                        # making it impossible to type a comma at the end of
+                        # the field. Leaving the text alone when it already
+                        # parses to `value` keeps the in-progress text intact
+                        # while a genuine external change (model switch, load,
+                        # override reset) still re-renders the field.
+                        if _read_field_widget(widget, list) != list(value or []):
+                            widget.value = ", ".join(str(x) for x in (value or []))
+                    elif value is not None:
+                        widget.value = base(value)
+                except (ValueError, TypeError):
+                    pass
+        finally:
+            self._syncing_internal = False
+        self._apply_field_rules()
+
+    def read(self, section, field):
+        widget, base = self._widgets[(section, field)]
+        return _read_field_widget(widget, base, key=(section, field))
+
+    # ocean_vars/CDR output-stream cross-field rules -----------------------------
+    def _register_field_rule_observers(self) -> None:
+        """Wire the controlling widgets to `_apply_field_rules` for instant
+        show/hide + disable feedback, plus the one forcing rule (monthly
+        restarts implies file restarts) on its own dedicated handler.
+        """
+
+        def _rerun(_change=None):
+            self._apply_field_rules()
+
+        keys = [
+            ("ocean_vars", "wrt_file_rst"),
+            ("ocean_vars", "monthly_restarts"),
+        ]
+        for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
+            keys.append((section, master_flag))
+            keys.append((section, "do_avg"))
+            keys.append((section, "monthly_averages"))
+        for key in keys:
+            entry = self._widgets.get(key)
+            if entry is not None:
+                entry[0].observe(_rerun, names="value")
+
+        wrt_entry = self._widgets.get(("ocean_vars", "wrt_file_rst"))
+        monthly_entry = self._widgets.get(("ocean_vars", "monthly_restarts"))
+        if wrt_entry is not None and monthly_entry is not None:
+            wrt_widget = wrt_entry[0]
+
+            def _force_wrt_on_monthly(change) -> None:
+                # monthly_restarts is meaningless without wrt_file_rst -- a real
+                # user edit that turns it on pulls wrt_file_rst on too, so the
+                # setting isn't silently ignored downstream. Skipped during
+                # sync() (self._syncing_internal), which pushes both widgets'
+                # values independently and must not cross-mutate them.
+                if self._syncing_internal:
+                    return
+                if change["new"] and not wrt_widget.value:
+                    wrt_widget.value = True
+
+            monthly_entry[0].observe(_force_wrt_on_monthly, names="value")
+
+    def _apply_field_rules(self) -> None:
+        """Show/hide and enable/disable ocean_vars/CDR-output-stream widgets from
+        their CURRENT values -- never mutates a value, only visibility/``disabled``.
+
+        Rationale: the dependent fields are meaningless (and ignored by the
+        namelist) once their master switch is off, and `output_period_*` has no
+        effect once a "monthly" cadence fixes the period implicitly -- hiding/
+        disabling them keeps the form from offering a control with no effect.
+        Applies identically to every stream in :data:`_CDR_STREAM_MASTER_FLAGS`
+        (``cdr_output``, ``cdr_tracer_output``, ``cdr_gas_exch_output``): every
+        field of the section other than the master switch hides with it -- the
+        shared do_avg/monthly_averages/output_period/nrpf quartet and any
+        stream-specific extras (``cdr_tracer_output``'s ``wrt_*`` field-group
+        toggles), which are all meaningless once that stream is off.
+        """
+
+        def _show(entry, on: bool) -> None:
+            if entry is not None:
+                entry[0].layout.display = "" if on else "none"
+
+        wrt = self._widgets.get(("ocean_vars", "wrt_file_rst"))
+        monthly_r = self._widgets.get(("ocean_vars", "monthly_restarts"))
+        nrpf_r = self._widgets.get(("ocean_vars", "nrpf_rst"))
+        period_r = self._widgets.get(("ocean_vars", "output_period_rst"))
+        if wrt is not None:
+            wrt_on = bool(wrt[0].value)
+            _show(monthly_r, wrt_on)
+            _show(nrpf_r, wrt_on)
+            _show(period_r, wrt_on)
+            if monthly_r is not None and period_r is not None:
+                period_r[0].disabled = bool(monthly_r[0].value)
+
+        for section, master_flag in _CDR_STREAM_MASTER_FLAGS.items():
+            master = self._widgets.get((section, master_flag))
+            if master is None:
+                continue
+            do_avg = self._widgets.get((section, "do_avg"))
+            monthly_avg = self._widgets.get((section, "monthly_averages"))
+            period = self._widgets.get((section, "output_period"))
+            on = bool(master[0].value)
+            # Every non-master field of the stream follows the master switch --
+            # derived from the widgets actually built for the section (i.e. the
+            # Cfg model's fields), not a hardcoded list, so a field added to a
+            # stream's Cfg later is covered automatically.
+            for (sec, field), entry in self._widgets.items():
+                if sec == section and field != master_flag:
+                    _show(entry, on)
+            if on and do_avg is not None:
+                is_avg = self.read(section, "do_avg")
+                _show(monthly_avg, is_avg)
+                if period is not None:
+                    is_monthly = (
+                        self.read(section, "monthly_averages")
+                        if is_avg and monthly_avg is not None
+                        else False
+                    )
+                    period[0].disabled = bool(is_avg and is_monthly)
+
+    def _build_section(
+        self,
+        section: str,
+        value: Any,
+        include: frozenset | None = None,
+        exclude: frozenset = frozenset(),
+    ):
+        W = self.W
+        sub = _section_submodel(section, self._settings_cls)
+        if not isinstance(value, dict):  # scalar section (e.g. gamma2, ubind)
+            base = _base_type(None, value)
+            tip = _namelist_tooltip(section, section)
+            label, tip = _namelist_description_and_tooltip(section, section, tip)
+            w = _make_field_widget(W, label, base, value, tooltip=tip)
+            self._widgets[(section, None)] = (w, base)
+            return W.VBox([w]), [None]
+        excluded = _ACCORDION_EXCLUDED_FIELDS.get(section, frozenset())
+        built: dict[str, Any] = {}
+        fields: list[str] = []
+        for key, val in value.items():
+            if key in excluded or key in exclude:
+                continue
+            if include is not None and key not in include:
+                continue
+            # Skip metadata-name keys (*_vname/*_tname, cdb_min, ...): the settings
+            # sub-models are extra="ignore", so anything not a typed field is dropped
+            # by the namelist transform and has no business in the editor.
+            if sub is not None and key not in sub.model_fields:
+                continue
+            ann = (
+                sub.model_fields[key].annotation
+                if (sub and key in sub.model_fields)
+                else None
+            )
+            base = _base_type(ann, val)
+            tip = _namelist_tooltip(section, key)
+            label, tip = _namelist_description_and_tooltip(section, key, tip)
+            bool_dropdown = _BOOL_DROPDOWN_FIELDS.get((section, key))
+            w = _make_field_widget(
+                W, label, base, val, tooltip=tip, bool_dropdown=bool_dropdown
+            )
+            self._widgets[(section, key)] = (w, base)
+            built[key] = w
+            fields.append(key)
+
+        # Re-arrange (never re-build) the widgets just created: output-stream
+        # tables and per-variable checkbox grids consume the widgets they
+        # cover (by mutating only their description/layout, never their
+        # identity or registry entry -- see _build_output_table/
+        # _build_variable_grids), and whatever's left over renders as the
+        # plain flat list, exactly as before this pane grouping existed.
+        consumed: set[str] = set()
+        table = _build_output_table(W, section, built, consumed)
+        grids = _build_variable_grids(W, section, built, consumed)
+        rest = [w for key, w in built.items() if key not in consumed]
+        body: list[Any] = []
+        if table is not None:
+            body.append(table)
+        body.extend(grids)
+        body.extend(rest)
+        return W.VBox(body), fields
+
+
+# Dropdown option lists derived from the enums so the wizard and schema stay in sync.
+_SURFACE_TYPES = [e.value for e in SurfaceType]
+_COARSE_MODES = [e.value for e in CoarseGridMode]
+_BGC_INTERP_METHODS = [e.value for e in BgcInterpMethod]
+# Optional dropdowns include a blank sentinel meaning "leave unset (roms-tools default)"
+_PREFILL_OPTS = [""] + [e.value for e in Prefill]
+_REGRID_OPTS = [""] + [e.value for e in RegridMethod]
+_EXTRAP_OPTS = [""] + [e.value for e in ExtrapMethod]
+# Per-bgc-source interp-method override: blank = inherit the section's own default
+# (BgcSourceItem.bgc_interpolation_method=None) -- same blank-sentinel convention as
+# _PREFILL_OPTS/_REGRID_OPTS/_EXTRAP_OPTS above.
+_BGC_INTERP_OPTS_WITH_DEFAULT = ["", *_BGC_INTERP_METHODS]
+_FORCING_CATEGORIES = ("surface", "tidal", "river")
+# Row categories managed by _ForcingEditor's generic add/remove-row machinery
+# (_rows/_make_row/_add/_remove/_render). "ic_bgc" and "boundary_bgc" are pseudo-
+# categories: their rows feed `initial_conditions.bgc_sources` and
+# `forcing.boundary.bgc_sources` respectively, not their own `Forcing` list field,
+# so they're kept out of `_FORCING_CATEGORIES` (which drives the `forcing:` dict in
+# `gather()`) but still rendered/added/removed exactly like the others. Boundary's
+# physics source is a required scalar (like IC's), not a row list -- see the
+# `boundary_*` widgets built alongside `ic_*` in `__init__`, mirroring `ic_box`.
+_ROW_CATEGORIES = ("ic_bgc", "boundary_bgc", *_FORCING_CATEGORIES)
+# Section-level default-BGC-interpolation widget attr name for each bgc row
+# category -- shared by `_ForcingEditor._sync_bgc` so a "Copy ... bgc ->" click
+# can copy the section default alongside the rows themselves.
+_DEFAULT_INTERP_ATTR = {
+    "ic_bgc": "ic_bgc_interp",
+    "boundary_bgc": "boundary_bgc_interp",
+}
+_GLORYS_LAYOUT_OPTS = ["", "regional", "global"]  # "" = not specified
+
+# Display-only accordion titles for the forcing editor's category keys -- cosmetic,
+# the internal keys above (used as dict keys/lookups everywhere else) are unchanged.
+_CATEGORY_TITLES: dict[str, str] = {
+    "initial_conditions": "Initial conditions",
+    "ic_bgc": "BGC initial conditions",
+    "surface": "Surface forcing",
+    "boundary": "Boundary forcing",
+    "boundary_bgc": "BGC boundary forcing",
+    "tidal": "Tidal forcing",
+    "river": "River forcing",
+}
+
+# Forcing categories a blueprint cannot resolve without (the rest are optional
+# add-ons) -- drives the REQUIRED/optional chip in `_ForcingEditor.retitle`.
+_REQUIRED_FORCING_CATEGORIES = frozenset(
+    {"initial_conditions", "ic_bgc", "surface", "boundary", "boundary_bgc"}
+)
+
+# Sticky-bar step links (card key -> label), in the order the cards appear.
+_STICKY_STEPS = (
+    ("model", "Model"),
+    ("grid", "Grid"),
+    ("forcing", "Forcing"),
+    ("run", "Run"),
+    ("advanced", "Advanced"),
+    ("review", "Review"),
+)
+
+# Valid source names per (category, type).  Drives name dropdowns in the forcing editor.
+# "boundary"/"boundary_bgc" have no `type` dropdown of their own (physics is a
+# required scalar, bgc is its own row-list -- see BoundaryForcing), so both are keyed
+# by `None`, mirroring "ic_bgc" (also type-less: physics is IC's own scalar source).
+_SOURCE_OPTS: dict[Any, list[str]] = {
+    ("surface", SurfaceType.PHYSICS.value): [e.value for e in PhysicsSurfaceSource],
+    ("surface", SurfaceType.BGC.value): [e.value for e in BgcSurfaceSource],
+    ("surface", SurfaceType.RESTORING.value): [e.value for e in RestoringSurfaceSource],
+    ("boundary", None): [e.value for e in PhysicsBoundarySource],
+    ("boundary_bgc", None): [e.value for e in BgcBoundarySource],
+    ("tidal", None): [e.value for e in TidalSource],
+    ("river", None): [e.value for e in RiverSource],
+    ("ic_bgc", None): [e.value for e in BgcInitialConditionsSource],
+}
+# BGC sources that carry no time axis of their own: "constants" is inline values,
+# "ESPER" is derived from the physics T/S, and GLODAP ships a single static field.
+# None can be a "climatology" (a repeating annual cycle needs a year to repeat), and
+# roms-tools raises ValueError when one is handed climatology=True -- so the wizard
+# hides the checkbox for them and never writes the field (see `_apply_row_visibility`
+# and `_gather_item`).
+_STATIC_BGC_SOURCES = frozenset(
+    {
+        BgcBoundarySource.CONSTANTS.value,
+        BgcBoundarySource.ESPER.value,
+        BgcBoundarySource.GLODAP.value,
+    }
+)
+# Derived/inline pseudo-sources computed at generation time (no dataset, no
+# path, no regridding knobs): gates both which per-row widgets are shown
+# (`_apply_row_visibility`) and which keys `_gather_item` emits, so the two
+# can never disagree. Mirrors source_registry.DERIVED_BGC_SOURCES (upper-case).
+_DERIVED_BGC_SOURCES = frozenset(
+    {BgcBoundarySource.CONSTANTS.value, BgcBoundarySource.ESPER.value}
+)
+# Dropdown labels that differ from the stored source name. Blueprints always store
+# the plain enum value; only what the user sees changes.
+_SOURCE_LABELS: dict[str, str] = {
+    BgcBoundarySource.ESPER.value: "ESPER (experimental)",
+}
+
+
+def _source_dropdown_opts(names: list[str]) -> list[tuple[str, str]]:
+    """``(label, value)`` pairs for a source-name Dropdown, so a source can be shown
+    under a friendlier label while the widget's ``.value`` stays the blueprint's
+    source name. Compare/assign against the plain name list, not ``.options``.
+    """
+    return [(_SOURCE_LABELS.get(n, n), n) for n in names]
+
+
+# Sentinel dropdown value meaning "no initial conditions" -- valid only for a
+# child domain (state comes from the parent's nesting extraction instead).
+_IC_NONE = "(none)"
+_IC_SOURCE_OPTS = [e.value for e in InitialConditionsSource] + [_IC_NONE]
+# Sentinel dropdown value meaning "no boundary forcing" -- valid for any domain
+# (not just a child grid, which already gets this behavior unconditionally via
+# `_gather()`'s durable nesting-based clear, see `ForgeBlueprintWizard._gather`).
+# Mirrors `_IC_NONE`: `gather()` below emits `forcing["boundary"] = None` outright
+# instead of a sourceless dict, matching `Forcing.boundary: BoundaryForcing | None`.
+_BOUNDARY_NONE = "(none)"
+_RIVER_BGC_SOURCE_OPTS = [""] + [e.value for e in RiverBgcSource]
+_RIVER_TEMP_SOURCE_OPTS = [""] + [e.value for e in RiverTemperatureSource]
+# ESPER source fields (SourceSpec.esper_method/esper_equation); "" = unset (roms-tools
+# default: method="nn", equation=8).
+_ESPER_METHOD_OPTS = ["", "lir", "nn", "mixed"]
+_ESPER_EQUATION_OPTS = ["", "8", "16"]
+
+
+def _row_desc(key: str, default: str, *, colon: bool = True) -> str:
+    """Per-row widget description text: the glossary label for
+    ``forcing.row.<key>`` (falling back to ``default``, the historical
+    hardcoded caption), with a trailing colon for text/dropdown/number
+    widgets (``colon=True``, the default) or bare for checkboxes
+    (``colon=False``).
+    """
+    label = label_for(f"forcing.row.{key}", default=default).label
+    return f"{label}:" if colon else label
+
+
+def _add_regrid_widgets(W, w: dict[str, Any], cat: str, item: dict[str, Any], small):
+    """Build the shared prefill/regrid_method/extrap_method dropdowns onto row-widget
+    dict ``w``, tooltipped for ``cat``. Used by surface, boundary, and tidal forcing —
+    the three-of-five roms-tools >=4 regrid knobs with wizard UI (``prefill_kwargs``/
+    ``extrap_kwargs`` stay typed-but-UI-less, reachable via the ``options`` editor).
+    """
+    _prefill_val = str(item.get("prefill") or "")
+    if _prefill_val not in _PREFILL_OPTS:
+        _prefill_val = ""
+    w["prefill"] = W.Dropdown(
+        options=_PREFILL_OPTS,
+        value=_prefill_val,
+        description=_row_desc("prefill", "prefill"),
+        style=small,
+        layout=W.Layout(width="200px"),
+        tooltip=_tip(cat, "prefill"),
+    )
+    _regrid_val = str(item.get("regrid_method") or "")
+    if _regrid_val not in _REGRID_OPTS:
+        _regrid_val = ""
+    w["regrid_method"] = W.Dropdown(
+        options=_REGRID_OPTS,
+        value=_regrid_val,
+        description=_row_desc("regrid_method", "regrid"),
+        style=small,
+        layout=W.Layout(width="190px"),
+        tooltip=_tip(cat, "regrid_method"),
+    )
+    _extrap_val = str(item.get("extrap_method") or "")
+    if _extrap_val not in _EXTRAP_OPTS:
+        _extrap_val = ""
+    w["extrap_method"] = W.Dropdown(
+        options=_EXTRAP_OPTS,
+        value=_extrap_val,
+        description=_row_desc("extrap_method", "extrap"),
+        style=small,
+        layout=W.Layout(width="190px"),
+        tooltip=_tip(cat, "extrap_method"),
+    )
+
+
+def _source_opts_for(cat: str, type_val: str | None) -> list[str]:
+    """Return the valid source names for a given forcing category and type."""
+    return _SOURCE_OPTS.get((cat, type_val), _SOURCE_OPTS.get((cat, None), []))
+
+
+def _dump_constants(constants: Any) -> str:
+    """Serialize a ``SourceSpec.constants`` mapping into the compact textbox format
+    (``"key=value, key2=value2"``); empty/``None`` -> ``''``.
+    """
+    if not constants:
+        return ""
+    return ", ".join(f"{k}={v}" for k, v in constants.items())
+
+
+def _parse_constants(text: str) -> dict[str, float]:
+    """Parse the constants-mapping textbox: comma- or newline-separated ``key=value``
+    pairs (e.g. ``"Fe=3.0e-3, ALK=2300"``) into ``{"Fe": 0.003, "ALK": 2300.0}``.
+
+    Malformed/blank pairs are dropped silently (best-effort, matches ``_parse_options``
+    -- the raw text stays in the widget either way, nothing is lost until it's fixed).
+    """
+    out: dict[str, float] = {}
+    for part in re.split(r"[,\n]", text or ""):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        k, v = k.strip(), v.strip()
+        if not k or not v:
+            continue
+        try:
+            out[k] = float(v)
+        except ValueError:
+            continue
+    return out
+
+
+def _add_bgc_source_widgets(W, w: dict[str, Any], cat: str, src: dict[str, Any], small):
+    """Build the shared ``constants``-mapping textbox and ``esper_method``/
+    ``esper_equation`` dropdowns onto row-widget dict ``w`` (see ``SourceSpec.
+    constants``/``esper_method``/``esper_equation``). Used by IC-BGC, boundary, and
+    surface bgc rows -- ``_apply_row_visibility`` only shows the relevant widget when
+    the row's source name is ``"constants"``/``"ESPER"``, so this can be called
+    unconditionally even where the source enum doesn't (yet) offer those names (e.g.
+    surface's ``BgcSurfaceSource``, per roms-tools' ``SurfaceForcing`` not supporting
+    either) -- the widgets simply stay hidden there.
+    """
+    w["constants"] = W.Textarea(
+        value=_dump_constants(src.get("constants")),
+        description=_row_desc("constants", "constants"),
+        placeholder="key=value pairs, e.g. Fe=3.0e-3, ALK=2300",
+        style=small,
+        layout=W.Layout(width="320px", height="48px"),
+        tooltip=_tip(cat, "constants"),
+    )
+    _method_val = str(src.get("esper_method") or "")
+    if _method_val not in _ESPER_METHOD_OPTS:
+        _method_val = ""
+    w["esper_method"] = W.Dropdown(
+        options=_ESPER_METHOD_OPTS,
+        value=_method_val,
+        description=_row_desc("esper_method", "esper method"),
+        style=small,
+        layout=W.Layout(width="190px"),
+        tooltip=_tip(cat, "esper_method"),
+    )
+    _equation_val = str(src.get("esper_equation") or "")
+    if _equation_val not in _ESPER_EQUATION_OPTS:
+        _equation_val = ""
+    w["esper_equation"] = W.Dropdown(
+        options=_ESPER_EQUATION_OPTS,
+        value=_equation_val,
+        description=_row_desc("esper_equation", "esper eqn"),
+        style=small,
+        layout=W.Layout(width="170px"),
+        tooltip=_tip(cat, "esper_equation"),
+    )
+
+
+# The `options` passthrough (see forge_blueprint.py `_OPTIONS_HELP`) is a free-form dict of
+# raw roms-tools kwargs, so it can't be rendered as typed controls. We surface it as a
+# small JSON editor per item — visible and round-tripped — rather than hidden. This is
+# the advanced/transitional hatch; promoting a knob to a typed field gives it a proper
+# widget above.
+_OPTIONS_PLACEHOLDER = (
+    'advanced roms-tools kwargs (JSON object), e.g. {"chunks": {"time": 1}}'
+)
+
+
+def _parse_options(text: str) -> dict[str, Any]:
+    """Parse the per-item `options` JSON editor into a dict.
+
+    Empty/whitespace → ``{}``. Invalid JSON or a non-object → ``{}`` (the raw text
+    stays in the widget, so nothing is lost — it simply isn't emitted into the spec
+    until it parses to an object). Values are forwarded verbatim to the rt constructor.
+    """
+    text = (text or "").strip()
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _dump_options(options: Any) -> str:
+    """Serialize an item's `options` dict back into the editor (empty → '')."""
+    if not options:
+        return ""
+    try:
+        return json.dumps(options, indent=2, default=str)
+    except (TypeError, ValueError):
+        return ""
+
+
+def _options_editor(W, value: Any, description: str = "options:"):
+    """A compact JSON Textarea for an item's `options` passthrough dict."""
+    return W.Textarea(
+        value=_dump_options(value),
+        description=description,
+        placeholder=_OPTIONS_PLACEHOLDER,
+        style={"description_width": "initial"},
+        layout=W.Layout(width="420px", height="48px"),
+    )
+
+
+# ===========================================================================
+# User-provided-file attach flows (grid / CDR forcing / river custom_file):
+# shared status-HTML rendering and browser-upload staging, used by the grid
+# section, the CDR section, and each river row's custom-file widgets alike.
+# ===========================================================================
+
+
+def _user_file_status_html(file_dict: dict[str, Any] | None) -> str:
+    """Status HTML for an attached user-provided-file dict (``{"location",
+    "content_hash"}``): the attached filename, a short hash prefix, and the
+    persistent host-path warning (this file is host/transport, not shipped
+    with the blueprint -- see ``UserProvidedFile``). Empty string when nothing
+    is attached.
+    """
+    if not file_dict:
+        return ""
+    name = Path(file_dict["location"]).name
+    short = file_dict["content_hash"][:12]
+    return (
+        f"<span style='color:#080'>✓ attached {name} (sha256 {short}…)</span><br>"
+        "<span style='color:#b58900'>⚠ This file must exist at this exact path "
+        "on the machine where the executor runs.</span>"
+    )
+
+
+# Shown in a user-provided-file status slot until a file is attached, where the
+# blueprint is invalid without one (a CUSTOM_FILE river row; CDR mode "netcdf").
+_FILE_NOT_ATTACHED_HINT = (
+    "<span style='color:#b58900'>No file attached yet -- enter a path and press "
+    "Enter (or click Attach / upload a file). The blueprint is invalid until "
+    "a file is attached.</span>"
+)
+_RIVER_CUSTOM_FILE_HINT = _FILE_NOT_ATTACHED_HINT
+_CDR_FILE_HINT = _FILE_NOT_ATTACHED_HINT
+
+
+def _same_attached_file(attached: dict[str, Any] | None, path_str: str) -> bool:
+    """True when ``path_str`` resolves to the already-attached file dict's
+    location -- the dedupe every path-Text submit observer uses so re-submitting
+    (or programmatically re-setting) the same path doesn't re-hash/re-load.
+    """
+    if not attached:
+        return False
+    try:
+        return attached["location"] == str(Path(path_str).expanduser().resolve())
+    except (OSError, RuntimeError):
+        return False
+
+
+def _stage_uploaded_netcdf(filename: str, content: bytes) -> Path:
+    """Write browser-uploaded netCDF bytes to a stable server/kernel-filesystem
+    location, then treat it exactly like a server-side path Attach.
+
+    ``ipywidgets.FileUpload`` only hands over raw bytes (no filesystem path),
+    but every attach flow needs a real path to hash/load/pass through to the
+    resolver as ``UserProvidedFile.location``. Lands under
+    ``Path.cwd()/"forge_user_files"/<original filename>``; an existing file of
+    the same name is overwritten (last upload wins).
+    """
+    dest_dir = Path.cwd() / "forge_user_files"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / filename
+    dest.write_bytes(content)
+    return dest
+
+
+def _cdr_forcing_from_netcdf(path: str | Path, grid: Any) -> Any:
+    """Reconstruct a roms-tools ``CDRForcing`` from a pre-made CDR-forcing
+    netCDF, for the CDR plot widget's "netcdf" mode (there is no
+    ``CDRForcing.from_netcdf`` in roms-tools -- this is the wizard's own
+    best-effort inverse of ``CDRForcingDatasetBuilder.build()``, see
+    ``roms_tools.setup.cdr_forcing``).
+
+    Every variable is selected by dimension name (``ncdr``/``ntracers``/
+    ``time``), never by positional axis order, since the builder doesn't
+    guarantee one. Two things this can't recover exactly, both acceptable for
+    a plot-only reconstruction:
+
+    * The builder interpolates every release onto the *union* of all releases'
+      original times before writing the file, so the file carries one shared
+      ``time`` axis -- a reconstructed release's ``times`` is that shared
+      axis, not necessarily whatever the original release actually used.
+    * A tracer-perturbation file with no ``tracer_name`` coordinate at all
+      (unusual -- normal output always carries one) has no way to know which
+      tracer a flux series belongs to; it's arbitrarily labeled "ALK".
+
+    Raises a ``ValueError`` prefixed ``"could not reconstruct releases from
+    <path>: ..."`` for any failure, including the ones ``rt.CDRForcing``'s own
+    validators would otherwise raise a more confusing pydantic error for (e.g.
+    a single-time-point file, which fails its strict ``start_time <
+    end_time``).
+    """
+    import pandas as pd
+    import roms_tools as rt
+    import xarray as xr
+
+    path = Path(path)
+    try:
+        with xr.open_dataset(path) as ds:
+            if "release_name" not in ds.coords:
+                raise ValueError(
+                    "no 'release_name' coordinate found -- is this really a "
+                    "CDR-forcing file?"
+                )
+            release_names = [str(n) for n in ds["release_name"].values]
+            times = [t.to_pydatetime() for t in pd.to_datetime(ds["time"].values)]
+            if len(times) < 2 or times[0] >= times[-1]:
+                raise ValueError(
+                    "fewer than two distinct times on the shared 'time' axis -- "
+                    "a CDRForcing requires start_time < end_time"
+                )
+            tracer_names = (
+                [str(t) for t in ds["tracer_name"].values]
+                if "tracer_name" in ds.coords
+                else None
+            )
+            is_tracer_perturbation = "cdr_trcflx" in ds.data_vars
+            is_volume = "cdr_volume" in ds.data_vars
+            if not (is_tracer_perturbation or is_volume):
+                raise ValueError(
+                    "neither 'cdr_trcflx' nor 'cdr_volume' found -- "
+                    "unrecognized CDR-forcing layout"
+                )
+
+            releases: list[Any] = []
+            for i, name in enumerate(release_names):
+                common = {
+                    "name": name,
+                    "lat": float(ds["cdr_lat"].isel(ncdr=i).item()),
+                    "lon": float(ds["cdr_lon"].isel(ncdr=i).item()),
+                    "depth": float(ds["cdr_dep"].isel(ncdr=i).item()),
+                    "hsc": float(ds["cdr_hsc"].isel(ncdr=i).item()),
+                    "vsc": float(ds["cdr_vsc"].isel(ncdr=i).item()),
+                    "times": times,
+                }
+                if is_tracer_perturbation:
+                    var = ds["cdr_trcflx"].isel(ncdr=i)
+                    if tracer_names is not None and "ALK" in tracer_names:
+                        # ALK-only: this reconstruction only feeds the plot
+                        # widget's "Tracer flux (ALK)" option.
+                        idx = tracer_names.index("ALK")
+                        tracer_fluxes = {"ALK": var.isel(ntracers=idx).values.tolist()}
+                    elif tracer_names is not None:
+                        tracer_fluxes = {
+                            tn: var.isel(ntracers=j).values.tolist()
+                            for j, tn in enumerate(tracer_names)
+                        }
+                    elif "ntracers" in var.dims:
+                        # No tracer_name coordinate at all -- can't identify the
+                        # tracer(s); best-effort label the first as "ALK".
+                        tracer_fluxes = {"ALK": var.isel(ntracers=0).values.tolist()}
+                    else:
+                        tracer_fluxes = {"ALK": var.values.tolist()}
+                    releases.append(
+                        rt.TracerPerturbation(
+                            **common,
+                            tracer_fluxes=tracer_fluxes,
+                            release_type="tracer_perturbation",
+                        )
+                    )
+                else:
+                    volume_fluxes = ds["cdr_volume"].isel(ncdr=i).values.tolist()
+                    tracer_var = ds.get("cdr_tracer")
+                    if tracer_var is not None and tracer_names:
+                        tracer_concentrations = {
+                            tn: tracer_var.isel(ncdr=i, ntracers=j).values.tolist()
+                            for j, tn in enumerate(tracer_names)
+                        }
+                    else:
+                        tracer_concentrations = {}
+                    releases.append(
+                        rt.VolumeRelease(
+                            **common,
+                            volume_fluxes=volume_fluxes,
+                            tracer_concentrations=tracer_concentrations,
+                            release_type="volume",
+                        )
+                    )
+        return rt.CDRForcing(
+            grid=grid, start_time=times[0], end_time=times[-1], releases=releases
+        )
+    except Exception as exc:
+        raise ValueError(f"could not reconstruct releases from {path}: {exc}") from exc
+
+
+class _ForcingEditor:
+    """Editor for the forcing spec: initial conditions + per-category forcing items,
+    with add/remove. ``gather()`` returns an ``inputs``-shaped dict the resolver
+    accepts via ``forcing_inputs=``.
+    """
+
+    def __init__(self, W, forcing_inputs: dict[str, Any], on_change):
+        self.W = W
+        self.on_change = on_change
+        # Deep-copied so migration and every `.get(...)` below never mutate the
+        # caller's dict (a catalog-parsed ForcingSpec, or a resolved config's
+        # `_sources_to_inputs` reconstruction). `_split_forcing_data` already
+        # migrates a catalog Forcing.yaml before it reaches here, but a caller
+        # (e.g. the fresh-wizard-startup seed) may hand a raw catalog dict
+        # straight through -- migrating again is a no-op (idempotent) when it
+        # already has been.
+        fi = copy.deepcopy(forcing_inputs) if forcing_inputs else {}
+        migrate_forcing_inputs(fi.get("initial_conditions"), fi.get("forcing"))
+        # An explicit `None` (emitted by `_sources_to_inputs` for a loaded child
+        # blueprint with no IC) means "seed as (none)"; a plain missing key (fresh-
+        # wizard startup, which always supplies a real initial_conditions block)
+        # keeps the historical GLORYS default.
+        if "initial_conditions" in fi and fi["initial_conditions"] is None:
+            ic: dict[str, Any] = {}
+            _ic_default = _IC_NONE
+        else:
+            ic = fi.get("initial_conditions") or {}
+            _ic_default = _IC_SOURCE_OPTS[0]
+        forc = fi.get("forcing", {}) or {}
+
+        # initial conditions
+        _ic_name_val = str((ic.get("source") or {}).get("name", _ic_default))
+        if _ic_name_val not in _IC_SOURCE_OPTS:
+            _ic_name_val = _ic_default
+        self.ic_name = W.Dropdown(
+            options=_IC_SOURCE_OPTS,
+            value=_ic_name_val,
+            description="IC source:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "ic_name"),
+        )
+        _ic_layout_val = str((ic.get("source") or {}).get("glorys_layout") or "")
+        if _ic_layout_val not in _GLORYS_LAYOUT_OPTS:
+            _ic_layout_val = ""
+        self.ic_layout = W.Dropdown(
+            options=_GLORYS_LAYOUT_OPTS,
+            value=_ic_layout_val,
+            description="glorys_layout:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "ic_layout"),
+        )
+        self.ic_path = W.Text(
+            value=str((ic.get("source") or {}).get("path") or ""),
+            description="IC path:",
+            placeholder="(default)",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            tooltip=_tip("ic", "path"),
+        )
+        # IC BGC source(s): a row-list (see ``_make_row``/``_ROW_CATEGORIES``'s
+        # "ic_bgc" pseudo-category), not a fixed widget group -- ``InitialConditions.
+        # bgc_sources`` is a list (v6+), each row a source + use_vars down-select.
+        # ``bgc_interpolation_method``/``prefill``/etc. below stay scalar: they are
+        # shared across every bgc_sources row, not per-source.
+        _ic_bgc_interp = str(
+            ic.get("bgc_interpolation_method", BgcInterpMethod.DEPTH.value)
+        )
+        if _ic_bgc_interp not in _BGC_INTERP_METHODS:
+            _ic_bgc_interp = BgcInterpMethod.DEPTH.value
+        self.ic_bgc_interp = W.Dropdown(
+            options=_BGC_INTERP_METHODS,
+            value=_ic_bgc_interp,
+            description="Default BGC interpolation:",
+            style={"description_width": "180px"},
+            layout=W.Layout(width="320px"),
+            tooltip=_tip("ic", "ic_bgc_interp"),
+        )
+        self.ic_flex_time = W.Checkbox(
+            value=bool(ic.get("allow_flex_time", False)),
+            description="flex time",
+            indent=False,
+            tooltip=_tip("ic", "ic_flex_time"),
+        )
+        self.ic_validate = W.Checkbox(
+            value=not bool(ic.get("bypass_validation", False)),
+            description="validate",
+            indent=False,
+            tooltip=_tip("ic", "ic_validate"),
+        )
+        _ic_prefill_val = str(ic.get("prefill") or "")
+        if _ic_prefill_val not in _PREFILL_OPTS:
+            _ic_prefill_val = ""
+        self.ic_prefill = W.Dropdown(
+            options=_PREFILL_OPTS,
+            value=_ic_prefill_val,
+            description="prefill:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "prefill"),
+        )
+        _ic_regrid_val = str(ic.get("regrid_method") or "")
+        if _ic_regrid_val not in _REGRID_OPTS:
+            _ic_regrid_val = ""
+        self.ic_regrid_method = W.Dropdown(
+            options=_REGRID_OPTS,
+            value=_ic_regrid_val,
+            description="regrid:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "regrid_method"),
+        )
+        _ic_extrap_val = str(ic.get("extrap_method") or "")
+        if _ic_extrap_val not in _EXTRAP_OPTS:
+            _ic_extrap_val = ""
+        self.ic_extrap_method = W.Dropdown(
+            options=_EXTRAP_OPTS,
+            value=_ic_extrap_val,
+            description="extrap:",
+            style={"description_width": "110px"},
+            tooltip=_tip("ic", "extrap_method"),
+        )
+        self.ic_options = _options_editor(W, ic.get("options"))
+        for _w in (
+            self.ic_name,
+            self.ic_layout,
+            self.ic_path,
+            self.ic_bgc_interp,
+            self.ic_flex_time,
+            self.ic_validate,
+            self.ic_prefill,
+            self.ic_regrid_method,
+            self.ic_extrap_method,
+            self.ic_options,
+        ):
+            _w.observe(lambda _ch: on_change(), names="value")
+
+        # "glorys_layout" only applies to a GLORYS source (item 7). When "(none)"
+        # is selected, this domain carries no IC at all -- hide every other IC
+        # widget too so the UI doesn't imply they still apply.
+        def _sync_ic_layout_visibility(_change=None):
+            has_ic = self.ic_name.value != _IC_NONE
+            self.ic_layout.layout.display = (
+                "" if has_ic and self.ic_name.value == "GLORYS" else "none"
+            )
+            for w in (
+                self.ic_path,
+                self.ic_bgc_interp,
+                self.ic_flex_time,
+                self.ic_prefill,
+                self.ic_regrid_method,
+                self.ic_extrap_method,
+                self.ic_options,
+            ):
+                w.layout.display = "" if has_ic else "none"
+            # The pre-merge scalar ic_bgc_name/ic_bgc_clim/ic_bgc_path group is now
+            # the "ic_bgc" row list, so hide its whole pane instead. Guarded because
+            # the first call below runs before `_containers` is built.
+            ic_bgc_pane = getattr(self, "_containers", {}).get("ic_bgc")
+            if ic_bgc_pane is not None:
+                ic_bgc_pane.layout.display = "" if has_ic else "none"
+
+        self.ic_name.observe(_sync_ic_layout_visibility, names="value")
+        _sync_ic_layout_visibility()
+
+        # boundary forcing: a structural mirror of the IC widgets above --
+        # BoundaryForcing.source is a required scalar (like InitialConditions.source),
+        # not a row list, so it gets the same scalar-widget-group treatment as IC's
+        # physics source (only "boundary_bgc" below is a row-list, mirroring "ic_bgc").
+        # An explicit `None` (a resolved config with no boundary forcing at all,
+        # or the nesting-derived clear for a child grid) means "seed as (none)";
+        # a plain missing key (fresh-wizard startup) keeps the historical GLORYS
+        # default -- mirrors the IC "(none)" handling above.
+        _boundary_is_none = "boundary" in forc and forc["boundary"] is None
+        boundary_block = forc.get("boundary") or {}
+        _boundary_source = boundary_block.get("source") or {}
+        _boundary_opts = _source_opts_for("boundary", None)
+        if _boundary_is_none:
+            _boundary_name_val = _BOUNDARY_NONE
+        else:
+            _boundary_name_val = str(_boundary_source.get("name", _boundary_opts[0]))
+            if _boundary_name_val not in _boundary_opts:
+                _boundary_name_val = _boundary_opts[0]
+        self.boundary_name = W.Dropdown(
+            options=[*_boundary_opts, _BOUNDARY_NONE],
+            value=_boundary_name_val,
+            description="boundary source:",
+            style={"description_width": "110px"},
+            tooltip=_tip("boundary", "name"),
+        )
+        _boundary_layout_val = str(_boundary_source.get("glorys_layout") or "")
+        if _boundary_layout_val not in _GLORYS_LAYOUT_OPTS:
+            _boundary_layout_val = ""
+        self.boundary_layout = W.Dropdown(
+            options=_GLORYS_LAYOUT_OPTS,
+            value=_boundary_layout_val,
+            description="glorys_layout:",
+            style={"description_width": "110px"},
+            tooltip=_tip("boundary", "glorys_layout"),
+        )
+        self.boundary_path = W.Text(
+            value=str(_boundary_source.get("path") or ""),
+            description="boundary path:",
+            placeholder="(default)",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            tooltip=_tip("boundary", "path"),
+        )
+        # "boundary_bgc" (below) is a row-list of BgcSourceItem, each optionally
+        # overriding this default -- mirrors "ic_bgc"/self.ic_bgc_interp exactly.
+        _boundary_bgc_interp = str(
+            boundary_block.get("bgc_interpolation_method", BgcInterpMethod.DEPTH.value)
+        )
+        if _boundary_bgc_interp not in _BGC_INTERP_METHODS:
+            _boundary_bgc_interp = BgcInterpMethod.DEPTH.value
+        self.boundary_bgc_interp = W.Dropdown(
+            options=_BGC_INTERP_METHODS,
+            value=_boundary_bgc_interp,
+            description="Default BGC interpolation:",
+            style={"description_width": "180px"},
+            layout=W.Layout(width="320px"),
+            tooltip=_tip("boundary", "bgc_interpolation_method"),
+        )
+        _boundary_prefill_val = str(boundary_block.get("prefill") or "")
+        if _boundary_prefill_val not in _PREFILL_OPTS:
+            _boundary_prefill_val = ""
+        self.boundary_prefill = W.Dropdown(
+            options=_PREFILL_OPTS,
+            value=_boundary_prefill_val,
+            description="prefill:",
+            style={"description_width": "110px"},
+            tooltip=_tip("boundary", "prefill"),
+        )
+        _boundary_regrid_val = str(boundary_block.get("regrid_method") or "")
+        if _boundary_regrid_val not in _REGRID_OPTS:
+            _boundary_regrid_val = ""
+        self.boundary_regrid_method = W.Dropdown(
+            options=_REGRID_OPTS,
+            value=_boundary_regrid_val,
+            description="regrid:",
+            style={"description_width": "110px"},
+            tooltip=_tip("boundary", "regrid_method"),
+        )
+        _boundary_extrap_val = str(boundary_block.get("extrap_method") or "")
+        if _boundary_extrap_val not in _EXTRAP_OPTS:
+            _boundary_extrap_val = ""
+        self.boundary_extrap_method = W.Dropdown(
+            options=_EXTRAP_OPTS,
+            value=_boundary_extrap_val,
+            description="extrap:",
+            style={"description_width": "110px"},
+            tooltip=_tip("boundary", "extrap_method"),
+        )
+        self.boundary_options = _options_editor(W, boundary_block.get("options"))
+        self.boundary_validate = W.Checkbox(
+            value=not bool(boundary_block.get("bypass_validation", False)),
+            description="validate",
+            indent=False,
+            tooltip=_tip("boundary", "boundary_validate"),
+        )
+        for _w in (
+            self.boundary_name,
+            self.boundary_layout,
+            self.boundary_path,
+            self.boundary_bgc_interp,
+            self.boundary_validate,
+            self.boundary_prefill,
+            self.boundary_regrid_method,
+            self.boundary_extrap_method,
+            self.boundary_options,
+        ):
+            _w.observe(lambda _ch: on_change(), names="value")
+
+        def _sync_boundary_layout_visibility(_change=None):
+            has_boundary = self.boundary_name.value != _BOUNDARY_NONE
+            self.boundary_layout.layout.display = (
+                "" if has_boundary and self.boundary_name.value == "GLORYS" else "none"
+            )
+            for w in (
+                self.boundary_path,
+                self.boundary_bgc_interp,
+                self.boundary_validate,
+                self.boundary_prefill,
+                self.boundary_regrid_method,
+                self.boundary_extrap_method,
+                self.boundary_options,
+            ):
+                w.layout.display = "" if has_boundary else "none"
+            # "boundary_bgc" is a row list, not a scalar widget group -- hide its
+            # whole pane instead (rows are NOT cleared, so switching back to a
+            # real source restores them). Guarded because the first call below
+            # runs before `_containers` is built.
+            boundary_bgc_pane = getattr(self, "_containers", {}).get("boundary_bgc")
+            if boundary_bgc_pane is not None:
+                boundary_bgc_pane.layout.display = "" if has_boundary else "none"
+
+        self.boundary_name.observe(_sync_boundary_layout_visibility, names="value")
+        _sync_boundary_layout_visibility()
+
+        # per-category item rows: list of dicts of widgets. "ic_bgc"/"boundary_bgc"
+        # are pseudo-categories (not their own `Forcing` list field) -- their rows
+        # feed `initial_conditions.bgc_sources`/`forcing["boundary"]["bgc_sources"]`
+        # respectively, instead of `forcing[cat]` directly; handled specially here
+        # and in `gather()`.
+        # IC<->boundary bgc-source sync: the two panels are usually configured
+        # identically (same BGC datasets for initial conditions and boundaries), so
+        # a one-shot copy button beats re-entering every row by hand. Not a live
+        # link -- each click snapshots the source panel's current rows and replaces
+        # the target panel's rows with fresh copies. Each button lives at the
+        # bottom of the panel it copies *from* (rendered into that panel's own
+        # container by `_render`, not a standalone box above the accordion), so
+        # the rows being copied are visible right above the button that copies
+        # them. Built before the seeding loop below, which calls `_render` (and
+        # so needs these to already exist) for every row category.
+        self._sync_to_boundary_btn = W.Button(
+            description="Copy IC bgc → Boundary",
+            layout=W.Layout(width="200px"),
+            tooltip=(
+                "Replace the boundary bgc sources AND default BGC interpolation "
+                "with a copy of the IC bgc sources and default"
+            ),
+        )
+        self._sync_to_boundary_btn.on_click(
+            lambda _b: self._sync_bgc("ic_bgc", "boundary_bgc")
+        )
+        self._sync_to_ic_btn = W.Button(
+            description="Copy Boundary bgc → IC",
+            layout=W.Layout(width="200px"),
+            tooltip=(
+                "Replace the IC bgc sources AND default BGC interpolation with a "
+                "copy of the boundary bgc sources and default"
+            ),
+        )
+        self._sync_to_ic_btn.on_click(
+            lambda _b: self._sync_bgc("boundary_bgc", "ic_bgc")
+        )
+
+        self._rows: dict[str, list] = {c: [] for c in _ROW_CATEGORIES}
+        self._containers: dict[str, Any] = {}
+        for cat in _ROW_CATEGORIES:
+            container = W.VBox([])
+            self._containers[cat] = container
+            if cat == "ic_bgc":
+                seed_items = ic.get("bgc_sources") or []
+            elif cat == "boundary_bgc":
+                seed_items = boundary_block.get("bgc_sources") or []
+            else:
+                seed_items = forc.get(cat) or []
+            for item in seed_items:
+                self._rows[cat].append(self._make_row(cat, item))
+            self._render(cat)
+
+        # The panes now exist; re-run so a seeded "(none)" IC/boundary hides the
+        # ic_bgc/boundary_bgc pane (the call during widget construction above
+        # could not reach it yet).
+        _sync_ic_layout_visibility()
+        _sync_boundary_layout_visibility()
+
+    # ---- one item row --------------------------------------------------------
+    @staticmethod
+    def _apply_row_visibility(w: dict[str, Any]) -> None:
+        """Show/hide widgets whose relevance depends on the row's `type`/source name.
+
+        No field is ever removed from the gathered dict by this — it only toggles
+        display so the form doesn't show options that don't apply to the current
+        selection (e.g. "restore:" only for type=restoring, "layout:" only for a
+        GLORYS source, corr_rad/wind_dropoff only for type=physics surface rows).
+        """
+
+        def show(widget, on):
+            widget.layout.display = "" if on else "none"
+
+        t = w["type"].value if "type" in w else None
+        name = w["name"].value if "name" in w else None
+        if "restoring_forces" in w:
+            show(w["restoring_forces"], t == SurfaceType.RESTORING.value)
+        if "correct_radiation" in w:
+            show(w["correct_radiation"], t == SurfaceType.PHYSICS.value)
+        if "wind_dropoff" in w:
+            show(w["wind_dropoff"], t == SurfaceType.PHYSICS.value)
+        if "glorys_layout" in w:
+            show(w["glorys_layout"], name == "GLORYS")
+        # use_vars is only ever built for ic_bgc/boundary_bgc rows (see _make_row --
+        # SurfaceForcingItem has no such field), so it's always relevant when
+        # present; no type-based gating needed here.
+        if "use_vars" in w:
+            show(w["use_vars"], True)
+        # constants/ESPER fields (see _add_bgc_source_widgets) only apply to their
+        # matching source name.
+        if "constants" in w:
+            show(w["constants"], name == "constants")
+        if "esper_method" in w:
+            show(w["esper_method"], name == "ESPER")
+        if "esper_equation" in w:
+            show(w["esper_equation"], name == "ESPER")
+        # A 'constants' source takes no path (SourceSpec._constants_only_for_
+        # constants_source forbids pairing them) -- gated on the "constants" key's
+        # presence, which only ic_bgc/boundary_bgc rows carry, so this never
+        # touches surface/tidal/river rows' own `path` widget (river's is instead
+        # owned outright by `_sync_river_custom_visibility` in custom-file mode).
+        if "path" in w and "constants" in w:
+            show(w["path"], name != "constants")
+        # `_serialize_dask` (carried opaquely, see `_make_row`/`_gather_item` -- no
+        # widget to show/hide here) is only ever set on an ESPER source: it is the
+        # one bgc source whose per-chunk cost makes the concurrent write a memory
+        # risk. constants/ESPER are derived/inline pseudo-sources, not a regridded
+        # dataset: boundary's regridding knobs (prefill/regrid_method/extrap_method/
+        # bgc_interpolation_method) only make sense for a dataset-backed source being
+        # regridded onto the grid.
+        is_derived_bgc = name in _DERIVED_BGC_SOURCES
+        # A CUSTOM_FILE river row is owned by `_sync_river_custom_visibility`, which
+        # hides these outright (the attach flow replaces the standard-source row).
+        # Without this, the re-show below would undo that hide on every row rebuild.
+        hide_dataset_knobs = is_derived_bgc or name == RiverSource.CUSTOM_FILE.value
+        # "climatology" has a wider gate than the regrid knobs: GLODAP is a static
+        # field that can't be one either, but -- unlike the derived sources -- it is
+        # still regridded, so it keeps the knobs below.
+        if "climatology" in w:
+            show(
+                w["climatology"],
+                name not in _STATIC_BGC_SOURCES
+                and name != RiverSource.CUSTOM_FILE.value,
+            )
+        for key in (
+            "prefill",
+            "regrid_method",
+            "extrap_method",
+            "bgc_interpolation_method",
+        ):
+            if key in w:
+                show(w[key], not hide_dataset_knobs)
+
+    def _make_row(self, cat: str, item: dict[str, Any]):
+        W = self.W
+        src = item.get("source") or {}
+        w: dict[str, Any] = {}
+        small = {"description_width": "initial"}
+
+        # Source name: Dropdown driven by category + type (for surface, which still
+        # mixes physics/bgc/restoring in one list) or fixed. "boundary_bgc" (bgc-only
+        # row-list, mirroring "ic_bgc") has a fixed implied type -- no per-row type
+        # dropdown needed (boundary's physics source is its own scalar, see __init__).
+        if cat == "boundary_bgc":
+            _cur_type = None
+            _name_opts = _source_opts_for("boundary_bgc", None)
+        else:
+            _cur_type = item.get("type", "physics")
+            _name_opts = _source_opts_for(cat, _cur_type)
+        _name_val = str(src.get("name", ""))
+        if _name_val not in _name_opts and _name_opts:
+            _name_val = _name_opts[0]
+        w["name"] = W.Dropdown(
+            options=_source_dropdown_opts(_name_opts or [""]),
+            value=_name_val
+            if _name_val in (_name_opts or [""])
+            else (_name_opts or [""])[0],
+            description=_row_desc("name", "src"),
+            style=small,
+            layout=W.Layout(width="200px"),
+            tooltip=_tip(cat, "name"),
+        )
+
+        # Optional custom dataset path; blank -> backend derives the default path.
+        w["path"] = W.Text(
+            value=str(src.get("path") or ""),
+            description=_row_desc("path", "path"),
+            placeholder="(default)",
+            style=small,
+            layout=W.Layout(width="260px"),
+            tooltip=_tip(cat, "path"),
+        )
+
+        if cat == "surface":
+            # Surface still mixes physics/bgc/restoring in one list -- keep its
+            # 3-way type dropdown driving the name-options lookup.
+            _type_opts = _SURFACE_TYPES
+            _type_val = _cur_type if _cur_type in _type_opts else _type_opts[0]
+            w["type"] = W.Dropdown(
+                options=_type_opts,
+                value=_type_val,
+                description=_row_desc("type", "type"),
+                style=small,
+                layout=W.Layout(width="200px"),
+                tooltip=_tip(cat, "type"),
+            )
+
+            # When type changes → update the source name dropdown to the valid options.
+            def _on_type_change(change, name_dd=w["name"], c=cat, ws=w):
+                new_opts = _source_opts_for(c, change["new"]) or [""]
+                name_dd.options = _source_dropdown_opts(new_opts)
+                # `.options` now holds (label, value) pairs -- membership has to be
+                # tested against the bare names or it never matches.
+                if name_dd.value not in new_opts:
+                    name_dd.value = new_opts[0]
+                self._apply_row_visibility(ws)
+                self.on_change()
+
+            w["type"].observe(_on_type_change, names="value")
+
+        if cat in ("surface", "boundary_bgc", "ic_bgc"):
+            w["climatology"] = W.Checkbox(
+                value=bool(src.get("climatology", False)),
+                description=_row_desc("climatology", "climatology", colon=False),
+                indent=False,
+                # Wider than the default so the longer label isn't clipped.
+                layout=W.Layout(width="130px"),
+                # "boundary_bgc" has no own tooltip entry -- reuse "boundary"'s.
+                tooltip=_tip(
+                    "boundary" if cat == "boundary_bgc" else cat, "climatology"
+                ),
+            )
+
+            # When the source name changes → constants/ESPER fields only apply to
+            # their matching source name (and, for surface, "layout:" only applies
+            # to GLORYS).
+            def _on_name_change(_change, ws=w):
+                self._apply_row_visibility(ws)
+
+            w["name"].observe(_on_name_change, names="value")
+
+        if cat == "surface":
+            # glorys_layout only ever applies to a GLORYS source -- never offered by
+            # BgcBoundarySource/BgcSurfaceSource, so omitted from boundary_bgc/bgc rows
+            # (boundary's own physics glorys_layout is a scalar widget, see __init__).
+            _layout_val = str(src.get("glorys_layout") or "")
+            if _layout_val not in _GLORYS_LAYOUT_OPTS:
+                _layout_val = ""
+            w["glorys_layout"] = W.Dropdown(
+                options=_GLORYS_LAYOUT_OPTS,
+                value=_layout_val,
+                description=_row_desc("glorys_layout", "layout"),
+                style=small,
+                layout=W.Layout(width="190px"),
+                tooltip=_tip(cat, "glorys_layout"),
+            )
+
+        if cat in ("ic_bgc", "boundary_bgc"):
+            # BGC-only knobs: down-select which vars this source contributes, and
+            # constants/ESPER-specific fields (visibility gated to the matching
+            # source name by _apply_row_visibility). Only "ic_bgc"/"boundary_bgc"
+            # rows carry these -- unlike them, `SurfaceForcingItem` has no
+            # `use_vars` field at all (extra="forbid" would reject it), and
+            # `BgcSurfaceSource` offers neither "constants" nor "ESPER", so a
+            # surface bgc row never needs (and, for use_vars, must never emit)
+            # these widgets. "boundary_bgc" has no own tooltip entries -- reuse
+            # "boundary"'s (same underlying fields).
+            _tip_cat = "boundary" if cat == "boundary_bgc" else "ic_bgc"
+            w["use_vars"] = W.Text(
+                value=", ".join(item.get("use_vars") or []),
+                description=_row_desc("use_vars", "use_vars"),
+                style=small,
+                layout=W.Layout(width="260px"),
+                placeholder="ALK,DIC,...",
+                tooltip=_tip(_tip_cat, "use_vars"),
+            )
+            _add_bgc_source_widgets(W, w, _tip_cat, src, small)
+        if cat in ("ic_bgc", "boundary_bgc"):
+            # Per-source interp-method override (BgcSourceItem.bgc_interpolation_method):
+            # blank = inherit the section's own default (self.ic_bgc_interp /
+            # self.boundary_bgc_interp). Identical widget for both panels.
+            _interp_val = str(item.get("bgc_interpolation_method") or "")
+            if _interp_val not in _BGC_INTERP_OPTS_WITH_DEFAULT:
+                _interp_val = ""
+            w["bgc_interpolation_method"] = W.Dropdown(
+                options=_BGC_INTERP_OPTS_WITH_DEFAULT,
+                value=_interp_val,
+                description=_row_desc("bgc_interpolation_method", "bgc interp"),
+                style=small,
+                layout=W.Layout(width="200px"),
+                tooltip=_tip(
+                    "ic" if cat == "ic_bgc" else "boundary", "bgc_interpolation_method"
+                )
+                or _tip("ic", "ic_bgc_interp"),
+            )
+        if cat == "surface":
+            w["correct_radiation"] = W.Checkbox(
+                value=bool(item.get("correct_radiation", False)),
+                description=_row_desc("correct_radiation", "corr_rad", colon=False),
+                indent=False,
+                tooltip=_tip("surface", "correct_radiation"),
+            )
+            w["wind_dropoff"] = W.Checkbox(
+                value=bool(item.get("wind_dropoff", False)),
+                description=_row_desc("wind_dropoff", "wind_dropoff", colon=False),
+                indent=False,
+                tooltip=_tip("surface", "wind_dropoff"),
+            )
+            w["coarse_grid_mode"] = W.Dropdown(
+                options=_COARSE_MODES,
+                value=item.get("coarse_grid_mode", "auto"),
+                description=_row_desc("coarse_grid_mode", "coarse"),
+                style=small,
+                layout=W.Layout(width="190px"),
+                tooltip=_tip("surface", "coarse_grid_mode"),
+            )
+            w["restoring_forces"] = W.Text(
+                value=", ".join(item.get("restoring_forces") or []),
+                description=_row_desc("restoring_forces", "restore"),
+                style=small,
+                layout=W.Layout(width="220px"),
+                placeholder="sss,sst",
+                tooltip=_tip("surface", "restoring_forces"),
+            )
+            _add_regrid_widgets(W, w, "surface", item, small)
+        if cat == "tidal":
+            w["ntides"] = W.IntText(
+                value=int(item.get("ntides") or 0),
+                description=_row_desc("ntides", "ntides"),
+                style=small,
+                layout=W.Layout(width="220px"),
+                tooltip=_tip("tidal", "ntides"),
+            )
+            _add_regrid_widgets(W, w, "tidal", item, small)
+        if cat == "river":
+            w["climatology"] = W.Checkbox(
+                value=bool(src.get("climatology", False)),
+                description=_row_desc("climatology", "climatology", colon=False),
+                indent=False,
+                # Wider than the default so the longer label isn't clipped.
+                layout=W.Layout(width="130px"),
+                tooltip=_tip("river", "climatology"),
+            )
+            w["include_bgc"] = W.Checkbox(
+                value=bool(item.get("include_bgc", False)),
+                description=_row_desc("include_bgc", "bgc", colon=False),
+                indent=False,
+                tooltip=_tip("river", "include_bgc"),
+            )
+            _ctc_opts = [e.value for e in ClimatologyMode]
+            _ctc_val = item.get(
+                "convert_to_climatology", ClimatologyMode.IF_ANY_MISSING.value
+            )
+            w["convert_to_climatology"] = W.Dropdown(
+                options=_ctc_opts,
+                value=_ctc_val
+                if _ctc_val in _ctc_opts
+                else ClimatologyMode.IF_ANY_MISSING.value,
+                description=_row_desc("convert_to_climatology", "clim mode"),
+                style=small,
+                layout=W.Layout(width="210px"),
+                tooltip=_tip("river", "convert_to_climatology"),
+            )
+            w["coast_snap_buffer_km"] = W.FloatText(
+                value=float(item.get("coast_snap_buffer_km") or 0.0),
+                description=_row_desc("coast_snap_buffer_km", "coast snap km"),
+                style=small,
+                layout=W.Layout(width="260px"),
+                tooltip=_tip("river", "coast_snap_buffer_km"),
+            )
+            w["domain_edge_buffer"] = W.IntText(
+                value=int(item.get("domain_edge_buffer", 20)),
+                description=_row_desc("domain_edge_buffer", "edge buffer"),
+                style=small,
+                layout=W.Layout(width="180px"),
+                tooltip=_tip("river", "domain_edge_buffer"),
+            )
+            _bgc_src = item.get("bgc_source") or {}
+            _bgc_name_val = str(_bgc_src.get("name", "") or "")
+            if _bgc_name_val not in _RIVER_BGC_SOURCE_OPTS:
+                _bgc_name_val = ""
+            w["bgc_source_name"] = W.Dropdown(
+                options=_RIVER_BGC_SOURCE_OPTS,
+                value=_bgc_name_val,
+                description=_row_desc("bgc_source_name", "bgc src"),
+                style=small,
+                layout=W.Layout(width="170px"),
+                tooltip=_tip("river", "bgc_source_name"),
+            )
+            w["bgc_source_path"] = W.Text(
+                value=str(_bgc_src.get("path") or ""),
+                description=_row_desc("bgc_source_path", "bgc path"),
+                placeholder="(default)",
+                style=small,
+                layout=W.Layout(width="220px"),
+                tooltip=_tip("river", "bgc_source_path"),
+            )
+            _temp_src = item.get("surface_forcing_source") or {}
+            # Validator accepts any case ("era5"); the dropdown options are upper.
+            _temp_name_val = str(_temp_src.get("name") or "").upper()
+            if _temp_name_val not in _RIVER_TEMP_SOURCE_OPTS:
+                _temp_name_val = ""
+            w["surface_forcing_source_name"] = W.Dropdown(
+                options=_RIVER_TEMP_SOURCE_OPTS,
+                value=_temp_name_val,
+                description=_row_desc("surface_forcing_source_name", "temp. source"),
+                style=small,
+                layout=W.Layout(width="210px"),
+                tooltip=_tip("river", "surface_forcing_source_name"),
+            )
+            w["surface_forcing_source_path"] = W.Text(
+                value=str(_temp_src.get("path") or ""),
+                description=_row_desc("surface_forcing_source_path", "temp. path"),
+                placeholder="(default)",
+                style=small,
+                layout=W.Layout(width="240px"),
+                tooltip=_tip("river", "surface_forcing_source_path"),
+            )
+            w["river_temp_smoothing_window_days"] = W.FloatText(
+                value=float(item.get("river_temp_smoothing_window_days", 30.0)),
+                description=_row_desc(
+                    "river_temp_smoothing_window_days", "temp. smoothing (days)"
+                ),
+                style=small,
+                layout=W.Layout(width="260px"),
+                tooltip=_tip("river", "river_temp_smoothing_window_days"),
+            )
+
+            # bgc_source only takes effect when include_bgc is checked (roms-tools
+            # silently ignores it otherwise — see RiverForcingItem validation).
+            def _sync_river_bgc_visibility(_change=None, ws=w):
+                on = bool(ws["include_bgc"].value)
+                ws["bgc_source_name"].layout.display = "" if on else "none"
+                ws["bgc_source_path"].layout.display = "" if on else "none"
+
+            w["include_bgc"].observe(_sync_river_bgc_visibility, names="value")
+            _sync_river_bgc_visibility()
+
+            # The smoothing window/path only matter once a temperature source is
+            # picked (mirrors the bgc pair above).
+            def _sync_river_temp_visibility(_change=None, ws=w):
+                on = bool(ws["surface_forcing_source_name"].value)
+                ws["surface_forcing_source_path"].layout.display = "" if on else "none"
+                ws["river_temp_smoothing_window_days"].layout.display = (
+                    "" if on else "none"
+                )
+
+            w["surface_forcing_source_name"].observe(
+                _sync_river_temp_visibility, names="value"
+            )
+            _sync_river_temp_visibility()
+
+            # RiverSource.CUSTOM_FILE replaces this whole standard-source row
+            # (climatology/bgc/coast-snap/edge-buffer/generic path) with a
+            # single attach flow -- see _sync_river_custom_visibility below.
+            def _sync_river_custom_visibility(_change=None, ws=w):
+                is_custom = ws["name"].value == RiverSource.CUSTOM_FILE.value
+                for key in (
+                    "climatology",
+                    "include_bgc",
+                    "convert_to_climatology",
+                    "coast_snap_buffer_km",
+                    "domain_edge_buffer",
+                    "path",
+                    # Unlike bgc_source_name/surface_forcing_source_path below, the
+                    # temp-source dropdown itself has no other gate -- it's simply
+                    # unconditional on custom-mode, like domain_edge_buffer.
+                    "surface_forcing_source_name",
+                ):
+                    ws[key].layout.display = "none" if is_custom else ""
+                for key in (
+                    "custom_file_path",
+                    "custom_file_attach_btn",
+                    "custom_file_upload",
+                    "custom_file_status",
+                ):
+                    ws[key].layout.display = "" if is_custom else "none"
+                if is_custom:
+                    # Keep the bgc/temperature widgets hidden regardless of
+                    # include_bgc/surface_forcing_source_name -- a custom-file
+                    # river item carries neither (see
+                    # RiverForcingItem._custom_file_excludes_bgc_source and
+                    # ._custom_file_excludes_surface_forcing_source).
+                    ws["bgc_source_name"].layout.display = "none"
+                    ws["bgc_source_path"].layout.display = "none"
+                    ws["surface_forcing_source_path"].layout.display = "none"
+                    ws["river_temp_smoothing_window_days"].layout.display = "none"
+                    # Until a file is attached the gathered item fails
+                    # RiverForcingItem validation ("custom_file is not set");
+                    # say what to do rather than leave the blank status to be
+                    # explained only by the pydantic dump in the preview.
+                    if (
+                        not ws.get("_custom_file")
+                        and not ws["custom_file_status"].value
+                    ):
+                        ws["custom_file_status"].value = _RIVER_CUSTOM_FILE_HINT
+                else:
+                    # Restored from custom-file mode (or never in it): let each
+                    # field's own sync decide widget visibility again, rather
+                    # than unconditionally showing them here.
+                    _sync_river_bgc_visibility()
+                    _sync_river_temp_visibility()
+
+            w["name"].observe(_sync_river_custom_visibility, names="value")
+        # Advanced passthrough: raw roms-tools kwargs not (yet) typed above.
+        # BgcSourceItem (shared by "ic_bgc"/"boundary_bgc") has no `options` field
+        # (extra="forbid") -- it isn't its own roms-tools object, just a
+        # source+use_vars(+bgc_interpolation_method) contributor to its section's
+        # single `options` passthrough (already on the ic_*/boundary_* scalar
+        # widgets), so no per-row editor for either.
+        if cat not in ("ic_bgc", "boundary_bgc"):
+            w["options"] = _options_editor(
+                W, item.get("options"), description=_row_desc("options", "options")
+            )
+        remove = W.Button(
+            description="✕", layout=W.Layout(width="36px"), tooltip="Remove this item"
+        )
+        remove.on_click(lambda _b, c=cat, ws=w: self._remove(c, ws))
+        for widget in w.values():
+            widget.observe(lambda _ch: self.on_change(), names="value")
+        w["_remove_btn"] = remove
+        # `BgcSourceItem.serialize_dask` is deliberately NOT offered as a widget.
+        # PyESPER serialises entry into its own numba kernels with a per-process
+        # semaphore, which is the hazard this flag existed to avoid, so setting it
+        # no longer buys protection -- it just forces the rest of that write (a
+        # boundary's physics companion, or the whole merged IC dataset) onto the
+        # one-task-at-a-time path. It survives as a blueprint field and the
+        # `--serialize-dask-write` CLI flag for manual troubleshooting. Carried
+        # opaquely -- and, like `_remove_btn`, only after the loop above, since it
+        # is not a widget to observe -- so editing an existing blueprint in the
+        # wizard round-trips the field instead of silently dropping it.
+        if cat in ("ic_bgc", "boundary_bgc") and item.get("serialize_dask"):
+            w["_serialize_dask"] = True
+        if cat == "river":
+            # Custom-file attach row (RiverSource.CUSTOM_FILE): added after the
+            # generic per-widget on_change wiring above (mirrors _remove_btn) --
+            # the Text/Button/FileUpload here are wired to _attach_custom_file
+            # explicitly, which calls self.on_change() itself on a successful
+            # attach, so they don't need the generic per-keystroke wiring too.
+            # `_custom_file` is plain cached state (not a widget), also excluded
+            # from that loop and from _row_box below.
+            _cf = item.get("custom_file")
+            w["_custom_file"] = dict(_cf) if _cf else None
+            w["custom_file_path"] = W.Text(
+                value=str((_cf or {}).get("location") or ""),
+                description=_row_desc("custom_file_path", "file"),
+                placeholder="path to a pre-made river-forcing netCDF",
+                style=small,
+                layout=W.Layout(width="320px"),
+                tooltip=_tip("river", "custom_file"),
+                # Fire `value` only on Enter / focus-out, not per keystroke, so
+                # the observer below can auto-attach a finished path without
+                # hashing every partially-typed prefix.
+                continuous_update=False,
+            )
+            w["custom_file_attach_btn"] = W.Button(
+                description=label_for("buttons.attach", "Attach").label,
+                icon="link",
+                layout=W.Layout(width="90px"),
+            )
+            w["custom_file_upload"] = W.FileUpload(
+                accept=".nc", multiple=False, description="…or upload"
+            )
+            w["custom_file_status"] = W.HTML(_user_file_status_html(w["_custom_file"]))
+
+            def _attach_river_custom_file(
+                path_str: str, ws=w, *, notify: bool = True
+            ) -> None:
+                ws["custom_file_status"].value = "<i>attaching…</i>"
+                try:
+                    path = Path(path_str).expanduser().resolve()
+                    if not path.exists():
+                        raise FileNotFoundError(f"river custom file not found: {path}")
+                    content_hash = hash_netcdf_contents(path)
+                except Exception as exc:
+                    ws[
+                        "custom_file_status"
+                    ].value = (
+                        f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+                    )
+                    return
+                ws["_custom_file"] = {
+                    "location": str(path),
+                    "content_hash": content_hash,
+                }
+                ws["custom_file_status"].value = _user_file_status_html(
+                    ws["_custom_file"]
+                )
+                if notify:
+                    self.on_change()
+
+            def _maybe_attach_river_custom_file(ws=w, *, notify: bool = True) -> None:
+                """Attach whatever path is typed in the box, unless it's blank or
+                already the attached file. Called on Enter/focus-out of the path
+                Text and as a last-resort from `_gather_item`, so a user who
+                types (or uploads) a path and moves on without clicking Attach
+                still gets a valid CUSTOM_FILE item instead of a
+                RiverForcingItem validation error for a missing custom_file.
+                """
+                path_str = ws["custom_file_path"].value.strip()
+                if not path_str:
+                    return
+                if _same_attached_file(ws.get("_custom_file"), path_str):
+                    return
+                _attach_river_custom_file(path_str, notify=notify)
+
+            def _on_river_custom_file_attach_click(_btn, ws=w) -> None:
+                path_str = ws["custom_file_path"].value.strip()
+                if not path_str:
+                    ws[
+                        "custom_file_status"
+                    ].value = "<span style='color:#b00'>Enter a path first.</span>"
+                    return
+                # Explicit click always re-hashes (the file may have changed on
+                # disk since the last attach) -- no `_maybe_` dedupe here.
+                _attach_river_custom_file(path_str)
+
+            def _on_river_custom_file_path_submit(_change, ws=w) -> None:
+                _maybe_attach_river_custom_file(ws)
+
+            def _on_river_custom_file_upload(change, ws=w) -> None:
+                items = change["new"]
+                if not items:
+                    return
+                up_item = (
+                    items[0]
+                    if isinstance(items, (list, tuple))
+                    else next(iter(items.values()))
+                )
+                dest = _stage_uploaded_netcdf(
+                    up_item["name"], bytes(up_item["content"])
+                )
+                # Setting the Text value fires the path-submit observer, which
+                # attaches via `_maybe_`; the explicit call below covers the
+                # re-upload-same-name case where the value doesn't change (and
+                # is a no-op dedupe when the observer already attached it).
+                ws["custom_file_path"].value = str(dest)
+                _maybe_attach_river_custom_file(ws)
+
+            w["custom_file_attach_btn"].on_click(_on_river_custom_file_attach_click)
+            w["custom_file_path"].observe(
+                _on_river_custom_file_path_submit, names="value"
+            )
+            w["custom_file_upload"].observe(_on_river_custom_file_upload, names="value")
+            # Exposed (underscore-prefixed, so not a layout child -- see _row_box)
+            # for `_gather_item`'s last-resort attach; the closures above are
+            # otherwise unreachable from outside this row.
+            w["_maybe_attach_custom_file"] = _maybe_attach_river_custom_file
+            _sync_river_custom_visibility()
+        self._apply_row_visibility(w)
+        return w
+
+    def _row_box(self, w):
+        # `type` (when present) drives the other options in the row, so show it first.
+        # The remove button goes at the FRONT (not the end): a row can grow quite wide
+        # (name/path/climatology/constants/esper dropdowns/options editor), and a
+        # trailing button is easily clipped off-screen in a notebook without
+        # horizontal scrolling -- putting it first keeps it reachable regardless of
+        # how many fields are visible.
+        # Underscore-prefixed keys are not layout children: `_remove_btn` is
+        # placed explicitly below, and `_custom_file`/`_serialize_dask` are carried
+        # data rather than widgets. Filter by prefix so a future carry cannot be
+        # forgotten here and end up handed to HBox as a child.
+        keys = [k for k in w if not k.startswith("_")]
+        if "type" in keys:
+            keys = ["type", *[k for k in keys if k != "type"]]
+        w["_remove_btn"].layout.display = ""
+        # Wrap onto further lines instead of overflowing horizontally: a fully
+        # populated row (source, path, climatology, constants, ESPER, options…)
+        # is wider than any sensible page.
+        row = self.W.HBox(
+            [w["_remove_btn"], *(w[k] for k in keys)],
+            layout=self.W.Layout(flex_flow="row wrap", align_items="flex-start"),
+        )
+        row.add_class("forge-frow")  # divider + spacing between wrapped rows
+        return row
+
+    def _render(self, cat: str):
+        W = self.W
+        boxes = [self._row_box(w) for w in self._rows[cat]]
+        label = "add bgc source" if cat in ("ic_bgc", "boundary_bgc") else f"add {cat}"
+        add = W.Button(description=label, icon="plus", layout=W.Layout(width="150px"))
+        add.on_click(lambda _b, c=cat: self._add(c))
+        # The IC<->boundary sync button lives at the bottom of the panel it
+        # copies *from*, so the rows about to be copied are visible right above
+        # it -- rebuilt here (not set once) since `_render` fully replaces
+        # `.children` on every add/remove/sync.
+        extra = []
+        if cat == "ic_bgc":
+            extra = [self._sync_to_boundary_btn]
+        elif cat == "boundary_bgc":
+            extra = [self._sync_to_ic_btn]
+        self._containers[cat].children = [*boxes, add, *extra]
+
+    def clear_category(self, cat: str):
+        """Remove all rows for a row category (e.g. ``"boundary_bgc"`` for a
+        child/nested grid, which receives boundaries from the parent's
+        nesting.nc extraction instead of reanalysis boundary forcing).
+        """
+        self._rows[cat] = []
+        self._render(cat)
+        self.on_change()
+
+    def _sync_bgc(self, from_cat: str, to_cat: str):
+        """One-shot copy of every bgc-source row, AND the section-level default
+        BGC interpolation method, from ``from_cat`` to ``to_cat`` (``"ic_bgc"``/
+        ``"boundary_bgc"``) -- snapshots the source panel's current values and
+        replaces the target panel's rows/default with fresh copies built from
+        them; not a live link, so later edits to either panel don't affect the
+        other until the button is pressed again.
+
+        The default matters alongside the rows, not just the rows themselves: a
+        copied row with a blank (inherit-the-default) per-row
+        ``bgc_interpolation_method`` would silently change *meaning* if the
+        source and target panels' defaults differ (see ``self.ic_bgc_interp``/
+        ``self.boundary_bgc_interp``).
+        """
+        items = [self._gather_item(from_cat, w) for w in self._rows[from_cat]]
+        self._rows[to_cat] = [self._make_row(to_cat, item) for item in items]
+        self._render(to_cat)
+        from_attr = _DEFAULT_INTERP_ATTR[from_cat]
+        to_attr = _DEFAULT_INTERP_ATTR[to_cat]
+        getattr(self, to_attr).value = getattr(self, from_attr).value
+        self.on_change()
+
+    def _add(self, cat: str):
+        self._rows[cat].append(self._make_row(cat, {"source": {"name": ""}}))
+        self._render(cat)
+        self.on_change()
+
+    def _remove(self, cat: str, ws):
+        self._rows[cat] = [w for w in self._rows[cat] if w is not ws]
+        self._render(cat)
+        self.on_change()
+
+    # ---- gather --------------------------------------------------------------
+    def _gather_item(self, cat: str, w) -> dict[str, Any]:
+        if cat == "river" and w["name"].value == RiverSource.CUSTOM_FILE.value:
+            # A custom-file river item bypasses roms-tools' RiverForcing entirely
+            # (the executor stages the file directly -- see
+            # RiverForcingItem.custom_file) -- none of the standard-source fields
+            # (climatology/include_bgc/convert_to_climatology/coast_snap_buffer_km/
+            # domain_edge_buffer/bgc_source/surface_forcing_source/
+            # river_temp_smoothing_window_days/options) apply, and the schema
+            # forbids most of them from being paired with a source path.
+            item: dict[str, Any] = {"source": {"name": w["name"].value}}
+            if not w.get("_custom_file") and w.get("_maybe_attach_custom_file"):
+                # Last resort for a path that was typed but never submitted
+                # (no Enter / focus-out / Attach click before gather ran):
+                # attach it now, without on_change() -- gather is already
+                # running inside the wizard's rebuild. A blank box or a bad
+                # path leaves `_custom_file` unset and the item is emitted
+                # without custom_file, so the schema error still surfaces.
+                w["_maybe_attach_custom_file"](w, notify=False)
+            if w.get("_custom_file"):
+                item["custom_file"] = dict(w["_custom_file"])
+            return item
+        name_val = w["name"].value
+        # `constants`/`ESPER` are derived/inline pseudo-sources: SourceSpec's own
+        # validators reject `constants`/`esper_method`/`esper_equation` paired with
+        # any other source name, and reject `path` paired with `constants` -- so
+        # each is only ever emitted for its matching source name, never leaked in
+        # from a hidden widget that still holds a stale value from a previously
+        # selected source (see `_apply_row_visibility`).
+        is_derived_bgc = name_val in _DERIVED_BGC_SOURCES
+        src: dict[str, Any] = {"name": name_val}
+        # The checkbox is hidden rather than destroyed when a static source is
+        # picked, so a value left over from a previously selected source would
+        # otherwise leak into the blueprint and trip roms-tools' ValueError.
+        if (
+            "climatology" in w
+            and w["climatology"].value
+            and name_val not in _STATIC_BGC_SOURCES
+        ):
+            src["climatology"] = True
+        if "glorys_layout" in w and w["glorys_layout"].value:  # Dropdown: "" = omit
+            src["glorys_layout"] = w["glorys_layout"].value
+        if (
+            "path" in w and w["path"].value.strip() and name_val != "constants"
+        ):  # blank = derive default path; a 'constants' source takes no path
+            src["path"] = w["path"].value.strip()
+        if "constants" in w and name_val == "constants":  # {"key": float, ...}
+            constants = _parse_constants(w["constants"].value)
+            if constants:
+                src["constants"] = constants
+        if (
+            "esper_method" in w and w["esper_method"].value and name_val == "ESPER"
+        ):  # Dropdown: "" = unset
+            src["esper_method"] = w["esper_method"].value
+        if "esper_equation" in w and w["esper_equation"].value and name_val == "ESPER":
+            src["esper_equation"] = int(w["esper_equation"].value)
+        item = {"source": src}
+        if "type" in w:
+            item["type"] = w["type"].value
+        if "use_vars" in w and w["use_vars"].value.strip():
+            item["use_vars"] = [
+                p.strip() for p in w["use_vars"].value.split(",") if p.strip()
+            ]
+        if "correct_radiation" in w and w["correct_radiation"].value:
+            item["correct_radiation"] = True
+        if "wind_dropoff" in w and w["wind_dropoff"].value:
+            item["wind_dropoff"] = True
+        if "coarse_grid_mode" in w:
+            item["coarse_grid_mode"] = w["coarse_grid_mode"].value
+        if "restoring_forces" in w and w["restoring_forces"].value.strip():
+            item["restoring_forces"] = [
+                p.strip() for p in w["restoring_forces"].value.split(",") if p.strip()
+            ]
+        # Shared surface/tidal regrid knobs: only emit non-default values to keep
+        # specs clean. bgc_interpolation_method (ic_bgc/boundary_bgc rows) uses the
+        # blank-sentinel convention instead (blank = inherit the section default);
+        # constants/ESPER are derived/inline pseudo-sources, not a regridded
+        # dataset, so it never applies to them (mirrors the hidden-widget gate in
+        # `_apply_row_visibility`).
+        if (
+            "bgc_interpolation_method" in w
+            and w["bgc_interpolation_method"].value
+            and not is_derived_bgc
+        ):
+            item["bgc_interpolation_method"] = w["bgc_interpolation_method"].value
+        # Item level, not `src`: serialize_dask is a Forge write option, not a
+        # roms-tools source parameter. No longer editable here (see `_make_row`);
+        # re-emitted only when the loaded blueprint already carried it, so a
+        # round-trip through the wizard neither invents nor drops it.
+        if w.get("_serialize_dask"):
+            item["serialize_dask"] = True
+        if "prefill" in w and w["prefill"].value:  # Dropdown: "" = leave unset
+            item["prefill"] = w["prefill"].value
+        if "regrid_method" in w and w["regrid_method"].value:
+            item["regrid_method"] = w["regrid_method"].value
+        if "extrap_method" in w and w["extrap_method"].value:
+            item["extrap_method"] = w["extrap_method"].value
+        if "ntides" in w:
+            item["ntides"] = int(w["ntides"].value)
+        if "include_bgc" in w and w["include_bgc"].value:
+            item["include_bgc"] = True
+            if "bgc_source_name" in w and w["bgc_source_name"].value:
+                bgc_src: dict[str, Any] = {"name": w["bgc_source_name"].value}
+                if (
+                    "bgc_source_path" in w and w["bgc_source_path"].value.strip()
+                ):  # blank = derive default path
+                    bgc_src["path"] = w["bgc_source_path"].value.strip()
+                item["bgc_source"] = bgc_src
+        if (
+            "surface_forcing_source_name" in w
+            and w["surface_forcing_source_name"].value
+        ):
+            temp_src: dict[str, Any] = {"name": w["surface_forcing_source_name"].value}
+            if (
+                "surface_forcing_source_path" in w
+                and w["surface_forcing_source_path"].value.strip()
+            ):  # blank = the remote ARCO ERA5 archive
+                temp_src["path"] = w["surface_forcing_source_path"].value.strip()
+            item["surface_forcing_source"] = temp_src
+        # Emitted whenever non-default, even with no temperature source selected
+        # (roms-tools ignores it then): dropping it would silently change the
+        # content_hash of a loaded blueprint that carries the value -- same
+        # round-trip-fidelity rule as domain_edge_buffer. Exception: while the
+        # widget is hidden (no source), a stale non-positive value is dropped
+        # rather than emitted -- otherwise the schema's `> 0` check would reject
+        # the blueprint naming a field the user cannot see to fix.
+        if "river_temp_smoothing_window_days" in w:
+            window = float(w["river_temp_smoothing_window_days"].value)
+            visible = bool(
+                w.get("surface_forcing_source_name")
+                and w["surface_forcing_source_name"].value
+            )
+            if window != 30.0 and (visible or window > 0):
+                item["river_temp_smoothing_window_days"] = window
+        if "convert_to_climatology" in w:
+            item["convert_to_climatology"] = w["convert_to_climatology"].value
+        if (
+            "coast_snap_buffer_km" in w and w["coast_snap_buffer_km"].value
+        ):  # 0.0 = leave unset
+            item["coast_snap_buffer_km"] = float(w["coast_snap_buffer_km"].value)
+        if "domain_edge_buffer" in w and int(w["domain_edge_buffer"].value) != 20:
+            item["domain_edge_buffer"] = int(w["domain_edge_buffer"].value)
+        if "options" in w:  # advanced passthrough; omit when empty/unparseable
+            opts = _parse_options(w["options"].value)
+            if opts:
+                item["options"] = opts
+        return item
+
+    def gather(self) -> dict[str, Any]:
+        forcing: dict[str, list[dict[str, Any]] | dict[str, Any] | None] = {
+            cat: [self._gather_item(cat, w) for w in self._rows[cat]]
+            for cat in _FORCING_CATEGORIES
+        }
+        if self.ic_name.value == _IC_NONE:
+            # No IC for this domain -- omit the key entirely (the resolver
+            # requires a hard error for a non-child domain with no IC, and
+            # treats an omitted/sourceless block as "inherit from parent" for
+            # a child domain).
+            return {"forcing": forcing}
+
+        ic_source = {"name": self.ic_name.value}
+        if self.ic_layout.value:  # Dropdown: "" means not specified
+            ic_source["glorys_layout"] = self.ic_layout.value
+        if self.ic_path.value.strip():  # blank = derive default path
+            ic_source["path"] = self.ic_path.value.strip()
+        ic: dict[str, Any] = {"source": ic_source}
+        bgc_sources = [self._gather_item("ic_bgc", w) for w in self._rows["ic_bgc"]]
+        if bgc_sources:
+            ic["bgc_sources"] = bgc_sources
+        if (
+            self.ic_bgc_interp.value
+            and self.ic_bgc_interp.value != BgcInterpMethod.DEPTH.value
+        ):
+            ic["bgc_interpolation_method"] = self.ic_bgc_interp.value
+        if self.ic_flex_time.value:
+            ic["allow_flex_time"] = True
+        if not self.ic_validate.value:  # checked ("validate") is the default
+            ic["bypass_validation"] = True
+        if self.ic_prefill.value:  # Dropdown: "" = leave unset
+            ic["prefill"] = self.ic_prefill.value
+        if self.ic_regrid_method.value:
+            ic["regrid_method"] = self.ic_regrid_method.value
+        if self.ic_extrap_method.value:
+            ic["extrap_method"] = self.ic_extrap_method.value
+        ic_opts = _parse_options(self.ic_options.value)
+        if ic_opts:
+            ic["options"] = ic_opts
+
+        # Boundary: a structural mirror of the IC dict above -- BoundaryForcing has
+        # the identical source/bgc_sources/bgc_interpolation_method/prefill/etc.
+        # shape as InitialConditions (see forge_blueprint.BoundaryForcing) -- except
+        # boundary has no IC-style omit-the-key convention: `Forcing.boundary` is
+        # `BoundaryForcing | None`, so "(none)" emits an explicit `None`, not an
+        # omitted key (mirrors the durable child-grid clear in
+        # `ForgeBlueprintWizard._gather`, which forces this same field to `None`).
+        if self.boundary_name.value == _BOUNDARY_NONE:
+            boundary: dict[str, Any] | None = None
+        else:
+            boundary_source = {"name": self.boundary_name.value}
+            if self.boundary_layout.value:
+                boundary_source["glorys_layout"] = self.boundary_layout.value
+            if self.boundary_path.value.strip():
+                boundary_source["path"] = self.boundary_path.value.strip()
+            boundary = {"source": boundary_source}
+            boundary_bgc_sources = [
+                self._gather_item("boundary_bgc", w) for w in self._rows["boundary_bgc"]
+            ]
+            if boundary_bgc_sources:
+                boundary["bgc_sources"] = boundary_bgc_sources
+            if (
+                self.boundary_bgc_interp.value
+                and self.boundary_bgc_interp.value != BgcInterpMethod.DEPTH.value
+            ):
+                boundary["bgc_interpolation_method"] = self.boundary_bgc_interp.value
+            if not self.boundary_validate.value:  # checked ("validate") is default
+                boundary["bypass_validation"] = True
+            if self.boundary_prefill.value:
+                boundary["prefill"] = self.boundary_prefill.value
+            if self.boundary_regrid_method.value:
+                boundary["regrid_method"] = self.boundary_regrid_method.value
+            if self.boundary_extrap_method.value:
+                boundary["extrap_method"] = self.boundary_extrap_method.value
+            boundary_opts = _parse_options(self.boundary_options.value)
+            if boundary_opts:
+                boundary["options"] = boundary_opts
+
+        forcing = {
+            cat: [self._gather_item(cat, w) for w in self._rows[cat]]
+            for cat in _FORCING_CATEGORIES
+        }
+        forcing["boundary"] = boundary
+        return {
+            "initial_conditions": ic,
+            "forcing": forcing,
+        }
+
+    @property
+    def widget(self):
+        if getattr(self, "_acc", None) is not None:
+            return self._acc
+        W = self.W
+        ic_fields = components.field_grid(
+            W,
+            [
+                components.field_row(W, "ic.ic_name", self.ic_name),
+                components.field_row(W, "ic.ic_layout", self.ic_layout),
+                components.field_row(W, "ic.ic_path", self.ic_path),
+                components.field_row(W, "ic.ic_validate", self.ic_validate),
+            ],
+        )
+        ic_interp = components.subsection(
+            W,
+            "forcing.ic.interpolation",
+            components.field_grid(
+                W,
+                [
+                    components.field_row(W, "ic.ic_bgc_interp", self.ic_bgc_interp),
+                    components.field_row(W, "ic.ic_flex_time", self.ic_flex_time),
+                    components.field_row(W, "ic.ic_prefill", self.ic_prefill),
+                    components.field_row(
+                        W, "ic.ic_regrid_method", self.ic_regrid_method
+                    ),
+                    components.field_row(
+                        W, "ic.ic_extrap_method", self.ic_extrap_method
+                    ),
+                ],
+            ),
+        )
+        ic_box = W.VBox(
+            [
+                ic_fields,
+                ic_interp,
+                components.field_row(
+                    W, "ic.ic_options", self.ic_options, width="520px"
+                ),
+            ]
+        )
+        # Structural mirror of ic_box -- BoundaryForcing.source is a required
+        # scalar, just like InitialConditions.source (see gather()/__init__).
+        boundary_fields = components.field_grid(
+            W,
+            [
+                components.field_row(W, "boundary.boundary_name", self.boundary_name),
+                components.field_row(
+                    W, "boundary.boundary_layout", self.boundary_layout
+                ),
+                components.field_row(W, "boundary.boundary_path", self.boundary_path),
+                components.field_row(
+                    W, "boundary.boundary_validate", self.boundary_validate
+                ),
+            ],
+        )
+        boundary_interp = components.subsection(
+            W,
+            "forcing.boundary.interpolation",
+            components.field_grid(
+                W,
+                [
+                    components.field_row(
+                        W, "boundary.boundary_bgc_interp", self.boundary_bgc_interp
+                    ),
+                    components.field_row(
+                        W, "boundary.boundary_prefill", self.boundary_prefill
+                    ),
+                    components.field_row(
+                        W,
+                        "boundary.boundary_regrid_method",
+                        self.boundary_regrid_method,
+                    ),
+                    components.field_row(
+                        W,
+                        "boundary.boundary_extrap_method",
+                        self.boundary_extrap_method,
+                    ),
+                ],
+            ),
+        )
+        boundary_box = W.VBox(
+            [
+                boundary_fields,
+                boundary_interp,
+                components.field_row(
+                    W, "boundary.boundary_options", self.boundary_options, width="520px"
+                ),
+            ]
+        )
+        # "boundary_bgc" is inserted right after "boundary" for logical adjacency,
+        # mirroring how "ic_bgc" sits right after the IC physics section.
+        cat_order = [
+            "initial_conditions",
+            "ic_bgc",
+            "surface",
+            "boundary",
+            "boundary_bgc",
+            "tidal",
+            "river",
+        ]
+        pane_boxes = {"initial_conditions": ic_box, "boundary": boundary_box}
+        panes = [pane_boxes.get(cat, self._containers.get(cat)) for cat in cat_order]
+        acc = components.open_accordion(
+            W, panes, [_CATEGORY_TITLES.get(cat, cat) for cat in cat_order]
+        )
+        # The IC<->boundary bgc sync buttons now live at the bottom of the
+        # "ic_bgc"/"boundary_bgc" panes themselves (see `_render`), not here.
+        self._acc = acc
+        self._cat_order = cat_order
+        return acc
+
+    def retitle(self, summary_for) -> None:
+        """Refresh each pane's accordion title with a live summary and a
+        REQUIRED/optional chip (see :func:`cstar_forge.ui.components.accordion_title`).
+
+        ``summary_for(cat)`` returns the short (<= 60 char) summary text for
+        category ``cat``; a no-op before ``widget`` has been built.
+        """
+        if getattr(self, "_acc", None) is None:
+            return
+        for i, cat in enumerate(self._cat_order):
+            chip_text = (
+                "REQUIRED" if cat in _REQUIRED_FORCING_CATEGORIES else "optional"
+            )
+            self._acc.set_title(
+                i,
+                components.accordion_title(
+                    _CATEGORY_TITLES.get(cat, cat), summary_for(cat), chip_text
+                ),
+            )
+
+
+# Preselected in the Model dropdown when present in the catalog (falls back to
+# the first catalog model otherwise): it's the newest tagged-release ModelSpec
+# (ucla-roms 0.8.0). 'pio-dev' (ucla-roms branch `main`) remains available in the
+# catalog but is no longer the default.
+_DEFAULT_MODEL = "roms-marbl-0.8-default"
+
+# Preselected in the Output dropdown when present in the catalog (falls back to
+# the first catalog spec otherwise). 'daily-restarts' conforms to the
+# ucla-roms >= 0.5.0 check_output_divides_rst precheck; 'standard' is kept
+# unchanged for blueprints that reference it.
+_DEFAULT_OUTPUT_SPEC = "daily-restarts"
+
+# Preselected in the Forcing dropdown when present in the catalog (falls back to
+# the first catalog spec otherwise). Named explicitly for the same reason as the
+# output default above: forcing_names is sorted alphabetically, so relying on
+# position would silently change every user's default whenever a newly bundled
+# ForcingSpec happens to sort first.
+_DEFAULT_FORCING_SPEC = "glorys-era5-unified"
+
+_GRID_INT = ("nx", "ny", "N")
+_GRID_FLOAT = ("size_x", "size_y", "center_lon", "center_lat", "rot")
+_SCOORD = ("theta_s", "theta_b", "hc")
+_DEFAULT_GRID = dict(
+    nx=6,
+    ny=2,
+    size_x=500.0,
+    size_y=1000.0,
+    center_lon=0.0,
+    center_lat=55.0,
+    rot=10.0,
+    N=3,
+    theta_s=5.0,
+    theta_b=2.0,
+    hc=250.0,
+)
+
+
+def _get_catalog():
+    """Return the default catalog stack for spec discovery.
+
+    A layered stack: the user's writable catalog layer (``~/cstar-forge-data/
+    catalog`` by default, or ``CSTAR_FORGE_CATALOG``) over the read-only
+    bundled in-repo catalog. Reads resolve top-first; writes (``register_*``)
+    land in the user layer.
+    """
+    from cstar_forge.domain_catalog import default_catalog
+
+    return default_catalog
+
+
+def _schedule_coroutine(coro):
+    """Schedule a coroutine on the running loop (returns a Task), or run it to
+    completion directly if there is no running loop. Mirrors
+    ``cstar_forge.forge.executor._schedule_coroutine`` -- needed for seamless
+    execution of async code (like streaming a subprocess) from a synchronous
+    ipywidgets ``on_click`` handler, both inside and outside Jupyter.
+    """
+    import asyncio
+
+    try:
+        return asyncio.get_running_loop().create_task(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+_STREAM_READ_SIZE = 2**16  # bytes per subprocess read; also bounds the flush below
+# A run whose child never emits a newline for a long stretch -- classically a
+# ``\r``-redrawn progress bar (git clone, tqdm, download progress) -- would grow an
+# unbounded "line". Flush an unterminated run once it reaches this so memory stays
+# bounded and the log still updates. (This is also what a line-oriented reader could
+# not survive: asyncio's StreamReader.readline() raises ValueError, "Separator is not
+# found, and chunk exceed the limit", at its 64 KiB default -- the bug this avoids.)
+_STREAM_MAX_LINE = 2**16
+
+
+def _drain_stream_buffer(
+    buf: bytes, *, at_eof: bool = False
+) -> tuple[list[str], bytes]:
+    r"""Split accumulated subprocess bytes into display lines, returning
+    ``(lines, remainder)``.
+
+    Segments are cut on ``\r\n``, ``\r`` or ``\n`` and each terminator is normalised
+    to a single trailing ``\n``, so ``\r``-only progress redraws surface as successive
+    log lines instead of one ever-growing line. A lone trailing ``\r`` is held back in
+    the remainder (unless at EOF) so a ``\r\n`` split across two reads is not mistaken
+    for a bare ``\r`` plus a spurious blank line. When not at EOF, an unterminated
+    remainder that reaches ``_STREAM_MAX_LINE`` is emitted as a partial line to keep
+    memory bounded; at EOF any remainder is flushed.
+    """
+    held = b""
+    if not at_eof and buf.endswith(b"\r"):
+        buf, held = buf[:-1], b"\r"
+    tokens = re.split(rb"(\r\n|\r|\n)", buf)
+    remainder = tokens.pop() + held
+    lines = [
+        tokens[i].decode(errors="replace") + "\n" for i in range(0, len(tokens), 2)
+    ]
+    if at_eof:
+        if remainder:
+            lines.append(remainder.decode(errors="replace"))
+        remainder = b""
+    elif len(remainder) >= _STREAM_MAX_LINE:
+        lines.append(remainder.decode(errors="replace"))
+        remainder = b""
+    return lines, remainder
+
+
+# Nested-grid topography: the parent/child grid kwargs may carry their own
+# ``topography_source``/``topography_path`` (Forge inputs, popped before rt.Grid --
+# see ForgeExecutor._nested_topography_pair for the inheritance rule). The
+# dropdown's first entry is the "inherit this grid's pair" sentinel.
+_NESTED_TOPO_INHERIT = "(same as this grid)"
+_TOPO_SOURCES = ["ETOPO5", "SRTM15", "EMOD"]
+
+
+def _nested_topo_kwargs(source_value: str, path_value: str) -> dict[str, str]:
+    """The ``topography_source``/``topography_path`` keys a nested grid's
+    widgets contribute to its grid_kwargs dict (empty = inherit the domain's).
+    """
+    out: dict[str, str] = {}
+    if source_value and source_value != _NESTED_TOPO_INHERIT:
+        out["topography_source"] = source_value
+    if path_value.strip():
+        out["topography_path"] = path_value.strip()
+    return out
+
+
+def _effective_nested_topo(
+    source_value: str, path_value: str, domain_source: str, domain_path: str
+) -> tuple[str, str]:
+    """Mirror of ``ForgeExecutor._nested_topography_pair`` on widget values:
+    ``(name, path)`` a nested grid resolves to, with ``""`` for no path.
+    """
+    path = path_value.strip()
+    if source_value == _NESTED_TOPO_INHERIT:
+        return domain_source, (path or domain_path.strip())
+    return source_value, path
+
+
+def _plot_topography_source(name: str, path: str) -> tuple[dict[str, str] | None, str]:
+    """What a wizard-side grid build (plots / derive-from-grid) can use for
+    ``rt.Grid(topography_source=...)`` on THIS machine, plus a status note.
+
+    Returns ``(None, "")`` for default ETOPO5 (roms-tools fetches it itself) and
+    ``({'name','path'}, "")`` when ``path`` exists locally. A non-default dataset
+    whose file isn't available here (the common laptop case -- the path is an
+    executor-side path) falls back to ETOPO5 with a visible note, rather than
+    failing the plot: the executor is the hard gate, this is a preview.
+    """
+    path = (path or "").strip()
+    if path:
+        local = Path(path).expanduser()
+        if local.exists():
+            return {"name": name, "path": str(local)}, ""
+    if name == "ETOPO5" and not path:
+        return None, ""
+    why = f"file not found here: {path}" if path else "no local file"
+    return None, (
+        f" <span style='color:#b58900'>(plotted with default ETOPO5 topography; "
+        f"{name}: {why})</span>"
+    )
+
+
+class ForgeBlueprintWizard:
+    """Build/curate a :class:`ForgeBlueprint` interactively. ``self.config`` holds the
+    latest successfully-resolved config (``None`` while inputs are invalid).
+    """
+
+    def __init__(self, catalog: Any = None):
+        import ipywidgets as W  # imported here so the package doesn't require ipywidgets
+
+        self.W = W
+        self.catalog = catalog or _get_catalog()
+        self.config: ForgeBlueprint | None = None
+        # Cache for the `widget` property -- built once, see `widget`.
+        self._root: Any | None = None
+
+        models = list(self.catalog.model_names)
+        domains = list(self.catalog.domain_names)
+
+        # --- load / import an existing forge_blueprint.yaml ---
+        # Pick a forge blueprint straight from the catalog (sits above the
+        # free-text path box below); reuses the same load path once selected.
+        _fb_names = self.catalog.forge_blueprint_names
+        self.load_catalog_dd = W.Dropdown(
+            options=self._dd_options(_fb_names, "forge_blueprint"),
+            description="From catalog:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+        )
+        self.load_catalog_btn = W.Button(
+            description="Load selected",
+            icon="upload",
+            disabled=not _fb_names,
+        )
+        self.load_path = W.Text(
+            value="",
+            placeholder="path to forge_blueprint.yaml",
+            description="Load file:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+        )
+        self.load_btn = W.Button(description="Load", icon="upload")
+        self.upload = W.FileUpload(
+            accept=".yml,.yaml", multiple=False, description="…or upload"
+        )
+        self.load_status = W.HTML("")
+        # True only while load_status holds a load *failure* (an exception from
+        # _on_load_path/_load_bytes) -- distinguishes that from a load *success*
+        # message (_set_load_status, which may itself carry an amber "N invalid
+        # settings value(s)" warning that must NOT be swept away by _rebuild).
+        self._load_status_is_error = False
+
+        # --- spec selectors ---
+        self.model_dd = W.Dropdown(
+            options=self._dd_options(models, "model"),
+            description="Model:",
+            value=(
+                _DEFAULT_MODEL
+                if _DEFAULT_MODEL in models
+                else (models[0] if models else None)
+            ),
+            style={"description_width": "110px"},
+        )
+        self.bgc_dd = W.Dropdown(
+            options=["marbl", "none"],
+            value="marbl",
+            description="BGC:",
+            style={"description_width": "110px"},
+            tooltip=(
+                "Biogeochemistry mode. 'marbl' builds ROMS-MARBL and includes the "
+                "MARBL codebase; 'none' builds physics-only (no MARBL, no BGC forcing)."
+            ),
+        )
+        self.domain_dd = W.Dropdown(
+            options=self._dd_options(domains, "domain", prefix=["<custom>"]),
+            description="Domain:",
+            value="<custom>",
+            style={"description_width": "110px"},
+        )
+        self.grid_name = W.Text(
+            value="my-grid",
+            description="Grid name:",
+            style={"description_width": "110px"},
+            tooltip="Short name for this grid configuration. Used in the domain name.",
+        )
+
+        # --- grid kwargs ---
+        self.grid_w: dict[str, Any] = {}
+        for k in _GRID_INT:
+            self.grid_w[k] = W.IntText(
+                value=int(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k),
+            )
+        for k in _GRID_FLOAT + _SCOORD:
+            self.grid_w[k] = W.FloatText(
+                value=float(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k),
+            )
+        self.scoord_chk = W.Checkbox(
+            value=True,
+            description=label_for(
+                "scoord_chk", "specify s-coord (theta_s/theta_b/hc)"
+            ).label,
+            indent=False,
+            tooltip="When checked, theta_s, theta_b, and hc are passed to roms-tools "
+            "to set the vertical stretching. Required for ROMS simulations.",
+        )
+
+        # --- boundaries / partitioning ---
+        self.bnd = {
+            d: W.Checkbox(
+                value=(d in ("east", "north")),
+                description=d.capitalize(),
+                indent=False,
+                tooltip=f"Enable the {d} open boundary for ocean exchange.",
+            )
+            for d in ("north", "south", "east", "west")
+        }
+        # --- domain-derived properties: v_sponge + (the above) open boundaries.
+        # Both auto-derive from the grid unless touched by a manual edit or
+        # restored from a saved DomainSpec -- see _on_derive_domain_properties /
+        # _v_sponge_touched / _boundaries_touched / _boundaries_derived.
+        self.v_sponge = W.FloatText(
+            value=0.0,
+            description="v_sponge:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px"),
+            tooltip="Sponge-layer viscosity. Auto-derived from grid spacing "
+            "(spacing / 10) unless you edit it or it was saved into a DomainSpec.",
+        )
+        self.derive_btn = W.Button(
+            description=label_for("buttons.derive", "Derive from grid").label,
+            icon="refresh",
+            layout=W.Layout(width="160px"),
+            tooltip="Build the grid and set any untouched v_sponge/open-boundary "
+            "values from it (sponge = spacing/10; boundaries from the land mask).",
+        )
+        self.derive_status = W.HTML("")
+        self.npx = W.IntText(
+            value=1,
+            description="n_procs_x:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px"),
+            tooltip=_tip("domain", "npx"),
+        )
+        self.npy = W.IntText(
+            value=1,
+            description="n_procs_y:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px"),
+            tooltip=_tip("domain", "npy"),
+        )
+        self.use_pio_chk = W.Checkbox(
+            value=False,
+            description="use ParallelIO (PIO)",
+            indent=False,
+            tooltip="Build ROMS against the ParallelIO library: inputs are written as "
+            "classic-format (CDF-5) netCDF and ROMS reads/writes joined files.",
+        )
+        self.auto_tiling_chk = W.Checkbox(
+            value=False,
+            description="auto tiling",
+            indent=False,
+            tooltip="Pick the MPI tiling at runtime from the land mask "
+            "(ucla-roms >= 0.5.0 MPI_MASKING). Requires PIO -- forces it on and "
+            "locks it. In development.",
+        )
+        self.n_cores = W.IntText(
+            value=1,
+            description="n_cores:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px", display="none"),
+            tooltip="Total MPI ranks; the tiling itself is chosen at runtime "
+            "from the land mask when auto tiling is on.",
+        )
+        self.roms_ref = W.Text(
+            value="",  # populated from the selected Model's pinned default below
+            description="ucla-roms ref:",
+            style={"description_width": "120px"},
+            layout=W.Layout(width="260px"),
+            placeholder="commit / tag / branch",
+            tooltip="ucla-roms checkout target (commit hash, tag, or branch). "
+            "Prefilled from the selected Model's pinned default; edit to override.",
+        )
+        self.marbl_ref = W.Text(
+            value="",  # populated from the selected Model's pinned default below
+            description="MARBL ref:",
+            style={"description_width": "120px"},
+            layout=W.Layout(width="260px"),
+            placeholder="commit / tag / branch",
+            tooltip="MARBL checkout target (commit hash, tag, or branch). "
+            "Prefilled from the selected Model's pinned default; edit to override. "
+            'Only used when BGC mode is "marbl".',
+        )
+
+        # --- nesting (optional child grid) ---
+        self.nest_enable = W.Checkbox(
+            value=False,
+            description="This grid is a parent (enter child grid info below).",
+            indent=False,
+            tooltip=_tip("nesting", "nest_enable"),
+        )
+        self.nest_help = W.HTML(
+            "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
+            "This will enable the extract_data module and output boundary info "
+            "for your child grid.</div>"
+        )
+        self.nest_domain_dd = W.Dropdown(
+            options=["<custom>", *domains],
+            description="Child from:",
+            value="<custom>",
+            style={"description_width": "110px"},
+            tooltip=_tip("nesting", "nest_domain_dd"),
+        )
+        self.child_w: dict[str, Any] = {}
+        for k in _GRID_INT:
+            self.child_w[k] = W.IntText(
+                value=int(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k) + " (child/inner grid)",
+            )
+        for k in _GRID_FLOAT + _SCOORD:
+            self.child_w[k] = W.FloatText(
+                value=float(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k) + " (child/inner grid)",
+            )
+        self.child_topo_source = W.Dropdown(
+            options=[_NESTED_TOPO_INHERIT, *_TOPO_SOURCES],
+            value=_NESTED_TOPO_INHERIT,
+            description="child topo:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="260px"),
+            tooltip=_tip("nesting", "child_topo_source"),
+        )
+        self.child_topo_path = W.Text(
+            value="",
+            description="child topo path:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            placeholder="(default)",
+            tooltip=_tip("nesting", "child_topo_path"),
+        )
+        self.nest_period = W.FloatText(
+            value=3600.0,
+            description="extract period (s):",
+            style={"description_width": "130px"},
+            layout=W.Layout(width="260px"),
+            tooltip=_tip("nesting", "nest_period"),
+        )
+        self.nest_pressure_fluxes = W.Checkbox(
+            value=False,
+            description="include pressure fluxes",
+            indent=False,
+            tooltip=_tip("nesting", "nest_pressure_fluxes"),
+        )
+        # --- nesting plot (parent+child boundary overlay, separate from the Grid
+        # section's parent-only plot) ---
+        self.nest_plot_btn = W.Button(
+            description=label_for("buttons.refresh_plot", "Refresh plot").label,
+            icon="refresh",
+            tooltip="Build the parent and child grids from current settings and "
+            "render both via plot_nesting (parent+child boundary overlay).",
+        )
+        self.nest_plot_status = W.HTML("Click Refresh preview to draw the grids.")
+        self.nest_plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+        )
+
+        # --- parent (optional: this grid is a child nested inside a parent) ---
+        self.parent_enable = W.Checkbox(
+            value=False,
+            description="This is a child grid (enter parent grid info below).",
+            indent=False,
+            tooltip=_tip("nesting", "parent_enable"),
+        )
+        self.parent_help = W.HTML(
+            "<div style='font-style:italic;color:#777;margin:0 0 6px'>"
+            "This will align the mask and topography with the parent grid. It "
+            "will also disable boundary tides, switch sponge ub_tune to False, "
+            "and skip boundary forcing generation.</div>"
+        )
+        self.parent_domain_dd = W.Dropdown(
+            options=["<custom>", *domains],
+            description="Parent from:",
+            value="<custom>",
+            style={"description_width": "110px"},
+            tooltip=_tip("nesting", "parent_domain_dd"),
+        )
+        self.parent_w: dict[str, Any] = {}
+        for k in _GRID_INT:
+            self.parent_w[k] = W.IntText(
+                value=int(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k) + " (parent/outer grid)",
+            )
+        for k in _GRID_FLOAT + _SCOORD:
+            self.parent_w[k] = W.FloatText(
+                value=float(_DEFAULT_GRID[k]),
+                description=f"{k}:",
+                style={"description_width": "90px"},
+                layout=W.Layout(width="200px"),
+                tooltip=_tip("grid", k) + " (parent/outer grid)",
+            )
+        self.parent_topo_source = W.Dropdown(
+            options=[_NESTED_TOPO_INHERIT, *_TOPO_SOURCES],
+            value=_NESTED_TOPO_INHERIT,
+            description="parent topo:",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="260px"),
+            tooltip=_tip("nesting", "parent_topo_source"),
+        )
+        self.parent_topo_path = W.Text(
+            value="",
+            description="parent topo path:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="360px"),
+            placeholder="(default)",
+            tooltip=_tip("nesting", "parent_topo_path"),
+        )
+        # --- parent plot (this grid's boundary within its parent) ---
+        self.parent_plot_btn = W.Button(
+            description=label_for("buttons.refresh_plot", "Refresh plot").label,
+            icon="refresh",
+            tooltip="Build the parent grid and this grid from current settings and "
+            "render both via plot_nesting (parent+this-grid boundary overlay).",
+        )
+        self.parent_plot_status = W.HTML("Click Refresh preview to draw the grids.")
+        self.parent_plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+        )
+
+        # --- run window ---
+        self.start = W.DatePicker(
+            value=date(2012, 1, 1),
+            description="Start:",
+            style={"description_width": "110px"},
+            tooltip=_tip("run", "start"),
+        )
+        self.end = W.DatePicker(
+            value=date(2012, 1, 2),
+            description="End:",
+            style={"description_width": "110px"},
+            tooltip=_tip("run", "end"),
+        )
+        self.model_ref_date = W.DatePicker(
+            value=date(2000, 1, 1),
+            description="Model ref date:",
+            style={"description_width": "130px"},
+            tooltip=_tip("run", "model_ref_date"),
+        )
+        self.description = W.Text(
+            value="Generated blueprint",
+            description="Description:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            tooltip=_tip("run", "description"),
+        )
+        # --- grid extended options ---
+        self.hmin = W.FloatText(
+            value=5.0,
+            description="hmin (m):",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="200px"),
+            tooltip=_tip("grid", "hmin"),
+        )
+        self.close_narrow_chk = W.Checkbox(
+            value=False,
+            description="close narrow channels",
+            indent=False,
+            tooltip=_tip("grid", "close_narrow_channels"),
+        )
+        self.mask_shapefile = W.Text(
+            value="",
+            description="mask shapefile:",
+            style={"description_width": "120px"},
+            layout=W.Layout(width="380px"),
+            placeholder="path to custom land-mask shapefile (optional)",
+            tooltip=_tip("grid", "mask_shapefile"),
+        )
+        self.topo_source = W.Dropdown(
+            options=["ETOPO5", "SRTM15", "EMOD"],
+            value="ETOPO5",
+            description="topo source:",
+            style={"description_width": "120px"},
+            tooltip=_tip("grid", "topography_source"),
+        )
+        self.topo_path = W.Text(
+            value="",
+            description="topo path:",
+            style={"description_width": "120px"},
+            layout=W.Layout(width="380px"),
+            placeholder="(default)",
+            tooltip=_tip("grid", "topography_path"),
+        )
+
+        # --- user-provided grid file (attach a pre-made grid netCDF instead of
+        # generating one from the kwargs above) ---
+        # `_grid_file` = the cached {"location","content_hash"} dict emitted via
+        # grid_file=; `_grid_file_grid` = the loaded roms_tools.Grid, cached so
+        # _rebuild()/_gather() never reload or rehash the file (see
+        # _finish_grid_file_attach). Both None when detached.
+        self._grid_file: dict[str, Any] | None = None
+        self._grid_file_grid: Any | None = None
+        # Snapshot of grid_w/scoord_chk taken the moment an attach first
+        # overwrites them with the loaded file's own values (see
+        # _finish_grid_file_attach) -- restored by _on_grid_file_detach so the
+        # Detach button gives back the user's own pre-attach geometry instead
+        # of leaving the (unlocked, but now-wrong) file's values sitting there.
+        # None means "nothing to restore" (never attached, or already restored).
+        self._grid_widgets_snapshot: dict[str, Any] | None = None
+        self.grid_file_path = W.Text(
+            value="",
+            description="Grid file:",
+            placeholder="path to a pre-made grid netCDF",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            tooltip=_tip("grid", "grid_file"),
+            # Fire `value` on Enter / focus-out only (not per keystroke) so
+            # _on_grid_file_path_submit can auto-attach a finished path.
+            continuous_update=False,
+        )
+        self.grid_file_attach_btn = W.Button(
+            description=label_for("buttons.attach", "Attach").label, icon="link"
+        )
+        self.grid_file_detach_btn = W.Button(
+            description=label_for("buttons.detach", "Detach").label, icon="unlink"
+        )
+        self.grid_file_upload = W.FileUpload(
+            accept=".nc", multiple=False, description="…or upload"
+        )
+        self.grid_file_status = W.HTML("")
+
+        # --- timestep ---
+        self.dt = W.FloatText(
+            value=7200.0,
+            description="dt (s):",
+            style={"description_width": "90px"},
+            layout=W.Layout(width="220px"),
+            tooltip=_tip("run", "dt"),
+        )
+        self.dt_btn = W.Button(
+            description=label_for("buttons.compute_dt", "Compute dt (CFL)").label,
+            icon="calculator",
+            tooltip=_tip("timestep", "dt_btn"),
+        )
+        self.dt_status = W.HTML("")
+
+        # --- grid plot ---
+        self.plot_btn = W.Button(
+            description=label_for("buttons.refresh_plot", "Refresh plot").label,
+            icon="refresh",
+            tooltip="Build the grid from current settings and render it. Updates "
+            "automatically when a domain is selected from the catalog.",
+        )
+        self.plot_status = W.HTML("Click Refresh preview to draw the grid.")
+        self.plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+        )
+
+        # --- output / preview ---
+        # --- forcing spec (ForcingSpec selection + add/remove/edit editor) ---
+        # A ForcingSpec must always be explicitly selected -- ModelSpec no longer
+        # embeds a default forcing.
+        _forcing_names = list(self.catalog.forcing_names)
+        self.forcing_dd = W.Dropdown(
+            options=self._dd_options(_forcing_names, "forcing"),
+            # Prefer the bundled default explicitly -- see _DEFAULT_FORCING_SPEC.
+            value=(
+                _DEFAULT_FORCING_SPEC
+                if _DEFAULT_FORCING_SPEC in _forcing_names
+                else (_forcing_names[0] if _forcing_names else None)
+            ),
+            description="Forcing:",
+            style={"description_width": "110px"},
+            tooltip="Select a named ForcingSpec from the catalog to seed all forcing "
+            "fields. Edit individual items in the Forcing section below.",
+        )
+        self.forcing_box = W.VBox([])
+        self._forcing_editor: _ForcingEditor | None = None
+        # snapshot of the forcing editor's gather() at the last catalog pick;
+        # compared in _rebuild() to detect a deviation (composition.forcing.modified)
+        self._forcing_seed: dict[str, Any] | None = None
+
+        # --- CDR (Carbon Dioxide Removal) forcing -----------------------------
+        # A top-level, independently composable spec (CdrSpec/Composition.cdr) --
+        # NOT part of Forcing. ``cdr_dd`` picks a named CdrSpec from the catalog
+        # (mirrors forcing_dd/output_dd/domain_dd); ``cdr_mode_dd`` picks which of
+        # the five CdrSpec.mode variants is active and shows/hides the matching
+        # sub-panel below (see ``_apply_cdr_mode``). Picking a catalog CdrSpec
+        # loads its mode + fields; hand-editing anything afterward is reported via
+        # composition.cdr.modified (a snapshot diff against ``_cdr_seed``, mirroring
+        # domain/forcing -- the dropdown itself never auto-reverts to "<custom>").
+        _cdr_names = list(self.catalog.cdr_names)
+        self.cdr_dd = W.Dropdown(
+            options=self._dd_options(_cdr_names, "cdr", prefix=["<custom>"]),
+            value="<custom>",
+            description="CDR spec:",
+            style={"description_width": "110px"},
+            tooltip="Select a named CdrSpec from the catalog to seed the CDR mode "
+            "and fields below, or leave as <custom> to author one by hand.",
+        )
+        # snapshot of _cdr_snapshot() at the last catalog pick; None means no
+        # catalog CdrSpec is currently selected (mirrors _domain_seed/_forcing_seed).
+        self._cdr_seed: dict[str, Any] | None = None
+
+        self.cdr_mode_dd = W.Dropdown(
+            options=[
+                ("None", "none"),
+                ("Simple perturbation", "simple"),
+                ("Import ROMS-tools YAML", "yaml"),
+                ("Import netCDF", "netcdf"),
+                ("Upscaled CDR forcing", "upscaled"),
+            ],
+            value="none",
+            description="Mode:",
+            style={"description_width": "110px"},
+            tooltip=_tip("cdr", "mode"),
+        )
+        # The mode _apply_cdr_mode() last actually applied -- lets it detect a
+        # real transition (for leaving-mode cleanup) whether invoked via the
+        # dropdown's own .observe or a direct call (e.g. from _populate_from,
+        # which must call it explicitly since suspended observers are no-ops).
+        self._cdr_mode_active: str | None = None
+
+        def _cdr_field(value, desc, unit, *, width="300px"):
+            """A FloatText plus an adjacent units label -- ipywidgets' own
+            ``description`` has no room for a units suffix on top of a label.
+
+            ``width`` is the WHOLE widget (label + input): the 170px
+            description_width is carved out of it, so it must comfortably
+            exceed 170px or the input box collapses to zero width.
+            """
+            w = W.FloatText(
+                value=value,
+                description=desc,
+                style={"description_width": "170px"},
+                layout=W.Layout(width=width),
+            )
+            return w, W.HBox([w, W.HTML(f"<span style='color:#666'>{unit}</span>")])
+
+        # --- CDR mode "simple": a single hand-authored tracer-perturbation
+        # release, compiled into a roms-tools CDRForcing kwargs dict at gather
+        # time (see _simple_cdr_forcing_dict). ---
+        self.cdr_simple_name = W.Text(
+            value="my_cdr",
+            description="Name:",
+            style={"description_width": "170px"},
+            layout=W.Layout(width="340px"),
+        )
+        self.cdr_simple_lat, _cdr_lat_row = _cdr_field(0.0, "Latitude:", "°N")
+        self.cdr_simple_lon, _cdr_lon_row = _cdr_field(0.0, "Longitude:", "°E")
+        self.cdr_simple_depth, _cdr_depth_row = _cdr_field(1.0, "Depth:", "m")
+        self.cdr_simple_hsc, _cdr_hsc_row = _cdr_field(
+            10.0, "Gaussian Scale (horizontal):", "m"
+        )
+        self.cdr_simple_vsc, _cdr_vsc_row = _cdr_field(
+            10.0, "Gaussian Scale (vertical):", "m"
+        )
+        self.cdr_simple_flux, _cdr_flux_row = _cdr_field(
+            2 * 10**6, "ALK tracer flux:", "meq/s", width="320px"
+        )
+        self.cdr_simple_start = W.DatePicker(
+            description="Start:", style={"description_width": "170px"}
+        )
+        self.cdr_simple_end = W.DatePicker(
+            description="End:", style={"description_width": "170px"}
+        )
+        self.cdr_simple_box = W.VBox(
+            [
+                self.cdr_simple_name,
+                _cdr_lat_row,
+                _cdr_lon_row,
+                _cdr_depth_row,
+                _cdr_hsc_row,
+                _cdr_vsc_row,
+                _cdr_flux_row,
+                self.cdr_simple_start,
+                self.cdr_simple_end,
+            ]
+        )
+
+        # --- CDR mode "yaml": an uploaded roms-tools CDRForcing.to_yaml() dump.
+        # Parsed dict lives on the instance (not a widget) since FileUpload can't
+        # be repopulated with the original file on load; _gather()/_populate_from
+        # read and write this directly. ---
+        self._cdr_forcing: dict[str, Any] | None = None
+        self.cdr_upload = W.FileUpload(
+            accept=".yml,.yaml",
+            multiple=False,
+            description="Upload CDR YAML",
+            tooltip=(
+                "A roms-tools CDRForcing.to_yaml(...) dump. Validated immediately on "
+                "upload; toggles the CDR compile/run-time settings on when accepted."
+            ),
+        )
+        self.cdr_clear_btn = W.Button(description="Clear CDR", icon="times")
+        self.cdr_status = W.HTML("")
+        _cdr_yaml_help = W.HTML(
+            "<span style='color:#666'>Follow the <a href="
+            "'https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html' "
+            "target='_blank'>roms-tools CDR forcing documentation</a> to build a "
+            "<code>CDRForcing</code> and export it with <code>to_yaml()</code>, "
+            "then upload that file here.</span>"
+        )
+        self.cdr_yaml_box = W.VBox(
+            [
+                _cdr_yaml_help,
+                W.HBox([self.cdr_upload, self.cdr_clear_btn]),
+                self.cdr_status,
+            ]
+        )
+
+        # --- CDR mode "netcdf": a user-supplied pre-made CDR-forcing netCDF. ---
+        self._cdr_forcing_file: dict[str, Any] | None = None
+        self.cdr_file_path = W.Text(
+            value="",
+            description="CDR file:",
+            placeholder="path to a pre-made CDR-forcing netCDF",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="420px"),
+            tooltip=_tip("cdr", "cdr_file"),
+            continuous_update=False,  # see grid_file_path
+        )
+        self.cdr_file_attach_btn = W.Button(
+            description=label_for("buttons.attach", "Attach").label, icon="link"
+        )
+        # "Clear" removes the attached file exactly like "Detach" elsewhere (grid,
+        # river custom-file) -- same verb pair everywhere, not a distinct action.
+        self.cdr_file_clear_btn = W.Button(
+            description=label_for("buttons.detach", "Detach").label, icon="times"
+        )
+        self.cdr_file_upload = W.FileUpload(
+            accept=".nc", multiple=False, description="…or upload"
+        )
+        self.cdr_file_status = W.HTML("")
+        _cdr_netcdf_help = W.HTML(
+            "<span style='color:#666'>Follow the <a href="
+            "'https://roms-tools.readthedocs.io/en/latest/cdr_forcing.html' "
+            "target='_blank'>roms-tools CDR forcing documentation</a> to build and "
+            "<code>save()</code> the forcing as netCDF (or otherwise produce a "
+            "CDR-forcing netCDF), then attach or upload it here.</span>"
+        )
+        self.cdr_netcdf_box = W.VBox(
+            [
+                _cdr_netcdf_help,
+                W.HBox(
+                    [
+                        self.cdr_file_path,
+                        self.cdr_file_attach_btn,
+                        self.cdr_file_clear_btn,
+                    ]
+                ),
+                self.cdr_file_upload,
+                self.cdr_file_status,
+            ]
+        )
+
+        # --- CDR mode "upscaled": nothing to configure -- ROMS reads CDR forcing
+        # supplied at runtime from a child domain's upscaled signal; the blueprint
+        # carries a placeholder path C-Star's orchestrator replaces. No dataset
+        # exists at authoring time, so no plot either. ---
+        self.cdr_upscaled_box = W.VBox(
+            [
+                W.HTML(
+                    "<span style='color:#666'>ROMS will read CDR forcing supplied "
+                    "at runtime from a child domain's upscaled signal. The "
+                    "blueprint carries a placeholder path that C-Star's "
+                    "orchestrator replaces at run time -- nothing to configure "
+                    "here.</span>"
+                )
+            ]
+        )
+
+        # --- CDR plotting (WP6): visible for simple/yaml/netcdf only. The built
+        # roms-tools CDRForcing (plus the grid it was built against) and rendered
+        # PNGs are cached on the instance -- see _rebuild()'s cache-invalidation
+        # comment -- so switching plot type/release re-renders without rebuilding.
+        self._cdr_plot_object: Any = None  # last-built rt.CDRForcing, or None
+        self._cdr_plot_grid: Any = None  # the rt.Grid it was built against
+        self._cdr_plot_cache: dict[tuple[str, str | None], bytes] = {}
+        # snapshot of _cdr_plot_inputs_fingerprint() at the last cache clear --
+        # lets _invalidate_cdr_plot_cache skip clearing on rebuilds triggered by
+        # plot-unrelated edits (e.g. the description field).
+        self._cdr_plot_fingerprint: tuple | None = None
+        self.cdr_plot_btn = W.Button(
+            description=label_for("buttons.refresh_plot", "Refresh plot").label,
+            icon="area-chart",
+        )
+        self.cdr_plot_status = W.HTML("")
+        self.cdr_plot_type_dd = W.Dropdown(
+            options=[
+                ("Release locations", "locations"),
+                ("Distribution", "distribution"),
+                ("Tracer flux (ALK)", "tracer_flux"),
+            ],
+            value="locations",
+            description="Plot:",
+            style={"description_width": "110px"},
+        )
+        self.cdr_plot_release_dd = W.Dropdown(
+            options=[], description="Release:", style={"description_width": "110px"}
+        )
+        self.cdr_plot_release_dd.layout.display = "none"  # shown only if >1 release
+        self.cdr_plot_img = W.Image(
+            format="png",
+            layout=W.Layout(min_width="400px", max_width="600px", display="none"),
+        )
+        self.cdr_plot_box = W.VBox(
+            [
+                W.HTML("<b>Generate plots</b>"),
+                W.HBox([self.cdr_plot_btn, self.cdr_plot_status]),
+                W.HBox([self.cdr_plot_type_dd, self.cdr_plot_release_dd]),
+                self.cdr_plot_img,
+            ],
+            # Sits to the RIGHT of the per-mode panels (same side-by-side HBox
+            # arrangement as the grid plot) -- the padding separates the columns.
+            layout=W.Layout(padding="0 0 0 20px"),
+        )
+        self.cdr_plot_box.layout.display = "none"  # only for simple/yaml/netcdf
+
+        # --- output settings spec (OutputSpec selection) ---
+        # The output sections themselves are edited in the Advanced settings accordion;
+        # this dropdown selects a named OutputSpec that seeds those sections. An
+        # OutputSpec must always be explicitly selected -- ModelSpec no longer embeds
+        # default output settings.
+        _output_names = list(self.catalog.output_names)
+        self.output_dd = W.Dropdown(
+            options=self._dd_options(_output_names, "output"),
+            # Prefer the bundled default explicitly -- output_names is sorted
+            # alphabetically, so relying on position would silently change the
+            # default whenever a new spec sorts first.
+            value=(
+                _DEFAULT_OUTPUT_SPEC
+                if _DEFAULT_OUTPUT_SPEC in _output_names
+                else (_output_names[0] if _output_names else None)
+            ),
+            description="Output:",
+            style={"description_width": "110px"},
+            tooltip=_tip("output", "output_dd"),
+        )
+
+        # --- advanced settings editor (built lazily on first rebuild) ---
+        self.editor: _SettingsEditor | None = None
+        self._editor_model: str | None = None
+        # The RunTimeSettings variant the editor was last built against -- rebuilt
+        # not only on a model switch but also when the effective ucla-roms ref
+        # crosses a schema boundary (e.g. editing the roms_ref override across the
+        # 0.5.0 line while keeping the same ModelSpec selected).
+        self._editor_settings_cls: type[BaseModel] | None = None
+        self.editor_box = W.VBox([])  # placeholder; filled with the editor's accordion
+        # sparse manual overrides layer: (section, field|None) -> value
+        self._overrides: dict[Any, Any] = {}
+        self._syncing = False  # True while pushing composed values into editor widgets
+        # Reentrancy depth for _suspend()/_Suspender -- lets a programmatic backfill
+        # (e.g. _populate_grid_widgets_from_grid) nest inside an already-suspended
+        # block (e.g. _populate_from's outer _suspend()) without the inner
+        # context's __exit__ prematurely clearing the outer one's suspension.
+        self._suspend_depth = 0
+        # snapshot of the domain-defining widgets at the last catalog Domain pick;
+        # compared in _rebuild() to detect a deviation (composition.domain.modified).
+        # None means no catalog domain has been picked yet (or domain_dd == "<custom>").
+        self._domain_seed: dict[str, Any] | None = None
+        # Domain-derived properties (v_sponge, open boundaries): "touched" means a
+        # manual edit (or a value restored from a loaded blueprint/DomainSpec) has
+        # made this the user's authoritative value -- nothing auto-overwrites it
+        # again. v_sponge is cheap (pure arithmetic on grid spacing) and is kept
+        # live-derived in _rebuild() when untouched, so it needs no separate
+        # "derived" flag. Boundaries need a grid build (mask-based), so
+        # _boundaries_derived tracks whether that's happened since the last
+        # grid-affecting edit -- see _on_grid_kwarg_change/_on_derive_domain_properties.
+        self._v_sponge_touched = False
+        self._boundaries_touched = False
+        self._boundaries_derived = False
+
+        self.derived = W.HTML("")
+        self.validation = W.HTML("")
+        self.preview = W.Output(
+            layout=W.Layout(
+                border="1px solid #ccc",
+                padding="6px",
+                max_height="380px",
+                overflow="auto",
+            )
+        )
+        # Browser download (works in Voilà / JupyterLab without server file access)
+        self.download_link = W.HTML("")
+        # Save to the server/working-dir filesystem (handy for local or HPC use)
+        self.save_path = W.Text(
+            value="forge_blueprint.yaml",
+            description="Save to:",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="520px"),
+        )
+        self.save_btn = W.Button(description="Save to disk", icon="save")
+        self.save_status = W.HTML("")
+
+        # --- canonical blueprint name (also in the Export section) ---
+        # Defaults to the resolver's derived name and keeps tracking it until the user
+        # edits the field (self._name_touched flips True on their first real edit;
+        # programmatic backfills in _rebuild() happen under _suspend() so they don't
+        # themselves flip it). save_path tracks the derived name the same way.
+        self._name_touched = False
+        self.name = W.Text(
+            value="",
+            description="Name:",
+            placeholder="(derived from model/grid/procs)",
+            style={"description_width": "110px"},
+            layout=W.Layout(width="320px"),
+            tooltip=_tip("export", "name"),
+        )
+        self.name.observe(self._on_name_change, names="value")
+        self._save_path_touched = False
+        self.save_path.observe(self._on_save_path_change, names="value")
+
+        # --- save modified specs to catalog (name + button + status per spec) ---
+        def _spec_save_row(placeholder):
+            name_w = W.Text(
+                value="",
+                description="Name:",
+                placeholder=placeholder,
+                style={"description_width": "60px"},
+                layout=W.Layout(width="260px"),
+            )
+            btn = W.Button(description="Save as new spec", icon="save")
+            status = W.HTML("")
+            return name_w, btn, status
+
+        self.save_output_name, self.save_output_btn, self.save_output_status = (
+            _spec_save_row("(new OutputSpec name)")
+        )
+        self.save_model_name, self.save_model_btn, self.save_model_status = (
+            _spec_save_row("(new ModelSpec name)")
+        )
+        self.save_domain_name, self.save_domain_btn, self.save_domain_status = (
+            _spec_save_row("(new DomainSpec name)")
+        )
+        self.save_forcing_name, self.save_forcing_btn, self.save_forcing_status = (
+            _spec_save_row("(new ForcingSpec name)")
+        )
+        self.save_cdr_name, self.save_cdr_btn, self.save_cdr_status = _spec_save_row(
+            "(new CdrSpec name)"
+        )
+
+        # --- run (invokes the C-Star CLI on the just-saved blueprint) ---
+        from cstar_forge.config import system as _detected_system
+
+        self.run_warning = W.HTML(
+            "<b style='color:#b58900'>⚠ Processing a blueprint can use substantial "
+            "memory and CPU depending on grid size.</b> Run this from a compute node "
+            "(or another host) with resources appropriate for your domain — this is "
+            f"not checked automatically. Detected host: <code>{_detected_system}</code>."
+        )
+        self.run_later_note = W.HTML(
+            "<span style='color:#666'>ℹ To run this later, or on a different "
+            "machine, save the blueprint above and then (from the "
+            "<code>cstar-forge</code> environment) call: "
+            "<code>cstar blueprint run &lt;path/to/forge_blueprint.yaml&gt;</code>. "
+            "</span>"
+        )
+        self.run_btn = W.Button(description="Run", icon="play")
+        self.run_status = W.HTML("")
+
+        # --- workplan export (two-step C-Star workplan: forge -> roms_marbl) ---
+        self.workplan_note = W.HTML(
+            "<span style='color:#b00'>⚠ Experimental — workplan export does not "
+            "work yet; the saved workplan is not currently runnable.</span><br>"
+            "<span style='color:#666'>ℹ Saves the blueprint plus a two-step C-Star "
+            "workplan: step <code>forge</code> generates the ROMS-MARBL inputs and "
+            "blueprint, step <code>roms_marbl</code> runs the simulation from that "
+            "generated (deferred) blueprint. The workplan is saved only — run it "
+            "yourself with the printed command.</span>"
+        )
+        self.workplan_btn = W.Button(description="Save workplan", icon="sitemap")
+        self.workplan_status = W.HTML("")
+
+        # Keep the run log pinned to the LATEST lines instead of snapping to the
+        # top on every append. Two cooperating pieces (verified live in voila):
+        # 1. display=flex + column-reverse on this node anchors its scroll
+        #    position at the flex start, which column-reverse puts at the bottom.
+        # 2. The stylesheet below stops the inner .jp-OutputArea from being its
+        #    own scroll container: JupyterLab CSS bounds its height and gives it
+        #    overflow auto, so IT would do the scrolling (resetting to the top on
+        #    each append) while this node never overflows. flex: 0 0 auto lets it
+        #    grow to its content so the scrolling happens on this node instead.
+        #    (Layout can only style this node itself, hence a real stylesheet.)
+        # Safe because _run_async only ever calls append_stdout, and the frontend
+        # merges consecutive same-stream outputs into a single block -- a second
+        # output type (stderr, display_data) would render above it, reversed.
+        self.run_output = W.Output(
+            layout=W.Layout(
+                border="1px solid #ccc",
+                padding="6px",
+                max_height="380px",
+                overflow="auto",
+                display="flex",
+                flex_flow="column-reverse",
+            )
+        )
+        self.run_output.add_class("forge-run-log")
+        self._run_log_style = W.HTML(
+            "<style>.forge-run-log > .jp-OutputArea "
+            "{ flex: 0 0 auto; height: auto; max-height: none; }</style>"
+        )
+
+        # --- redesigned-UI status widgets (sticky bar, per-card chips, banners) ---
+        # Built eagerly, before anything below can trigger a `_rebuild` (via
+        # `_apply_cdr_mode`/`_build_forcing_editor`) -- `_rebuild` ->
+        # `_update_status` touches them on every edit, including from tests
+        # that never access `.widget` at all.
+        self.sticky_bar = W.HTML("")
+        self.sticky_bar.add_class("forge-sticky-html")
+        self.card_chips: dict[str, Any] = {
+            key: W.HTML("")
+            for key in ("model", "grid", "forcing", "run", "advanced", "review")
+        }
+        self.grid_lock_banner = components.banner_widget(
+            W,
+            "warn",
+            "<b>Grid fields are locked</b> because a pre-made grid file is "
+            "attached. Detach it to edit the grid here.",
+        )
+        self.grid_lock_banner.layout.display = "none"
+        self.forcing_banner = components.banner_widget(W, "info", "")
+        # A second, plain HTML mirror of `download_link` for the Review card --
+        # `download_link` itself lives once, in the sticky bar (see `widget`).
+        self.download_link_review = W.HTML("")
+
+        self.roms_ref.value = self._model_default_roms_ref()
+        self.marbl_ref.value = self._model_default_marbl_ref()
+        self.bgc_dd.value = self._model_default_bgc_mode()
+        self.use_pio_chk.value = self._model_default_use_pio()
+        self._sync_marbl_ref_visibility()
+        self._sync_auto_tiling()
+        self._build_forcing_editor(self.catalog.forcing_data(self.forcing_dd.value))
+        if self._forcing_editor is None:
+            raise RuntimeError("_build_forcing_editor did not set _forcing_editor")
+        self._forcing_seed = self._forcing_editor.gather()
+        self._apply_cdr_mode()
+        self._wire()
+        self._rebuild()
+
+    # ---- wiring --------------------------------------------------------------
+    def _wire(self):
+        self.domain_dd.observe(self._on_domain, names="value")
+        self.forcing_dd.observe(self._on_forcing_spec, names="value")
+        self.dt_btn.on_click(self._on_compute_dt)
+        self.plot_btn.on_click(self._on_plot)
+        self.nest_plot_btn.on_click(self._on_nest_plot)
+        self.save_btn.on_click(self._on_save)
+        self.save_output_btn.on_click(self._on_save_output)
+        self.save_model_btn.on_click(self._on_save_model)
+        self.save_domain_btn.on_click(self._on_save_domain)
+        self.save_forcing_btn.on_click(self._on_save_forcing)
+        self.save_cdr_btn.on_click(self._on_save_cdr)
+        self.run_btn.on_click(self._on_run)
+        self.workplan_btn.on_click(self._on_save_workplan)
+        self.load_btn.on_click(self._on_load_path)
+        self.load_catalog_btn.on_click(self._on_load_from_catalog)
+        self.upload.observe(self._on_upload, names="value")
+        self.cdr_dd.observe(self._on_cdr_spec, names="value")
+        self.cdr_mode_dd.observe(self._on_cdr_mode_change, names="value")
+        self.cdr_upload.observe(self._on_cdr_upload, names="value")
+        self.cdr_clear_btn.on_click(self._on_cdr_clear)
+        self.grid_file_attach_btn.on_click(self._on_grid_file_attach)
+        self.grid_file_detach_btn.on_click(self._on_grid_file_detach)
+        self.grid_file_path.observe(self._on_grid_file_path_submit, names="value")
+        self.grid_file_upload.observe(self._on_grid_file_upload, names="value")
+        self.cdr_file_attach_btn.on_click(self._on_cdr_file_attach)
+        self.cdr_file_clear_btn.on_click(self._on_cdr_file_clear)
+        self.cdr_file_path.observe(self._on_cdr_file_path_submit, names="value")
+        self.cdr_file_upload.observe(self._on_cdr_file_upload, names="value")
+        self.cdr_plot_btn.on_click(self._on_cdr_plot_generate)
+        self.cdr_plot_type_dd.observe(self._on_cdr_plot_option_change, names="value")
+        self.cdr_plot_release_dd.observe(self._on_cdr_plot_option_change, names="value")
+        for w in (
+            self.cdr_simple_name,
+            self.cdr_simple_lat,
+            self.cdr_simple_lon,
+            self.cdr_simple_depth,
+            self.cdr_simple_hsc,
+            self.cdr_simple_vsc,
+            self.cdr_simple_flux,
+            self.cdr_simple_start,
+            self.cdr_simple_end,
+        ):
+            w.observe(self._rebuild, names="value")
+        self.model_dd.observe(self._on_model_change, names="value")
+        self.bgc_dd.observe(self._sync_marbl_ref_visibility, names="value")
+        self.auto_tiling_chk.observe(self._sync_auto_tiling, names="value")
+        self.nest_domain_dd.observe(self._on_nest_domain, names="value")
+        self.parent_domain_dd.observe(self._on_parent_domain, names="value")
+        self.parent_plot_btn.on_click(self._on_parent_plot)
+        self.parent_enable.observe(self._on_parent_toggle, names="value")
+        self.output_dd.observe(self._on_output_spec, names="value")
+        self.derive_btn.on_click(self._on_derive_domain_properties)
+        watched = [
+            self.grid_name,
+            self.scoord_chk,
+            self.npx,
+            self.npy,
+            self.use_pio_chk,
+            self.auto_tiling_chk,
+            self.n_cores,
+            self.bgc_dd,
+            self.roms_ref,
+            self.marbl_ref,
+            self.start,
+            self.end,
+            self.model_ref_date,
+            self.description,
+            self.dt,
+            self.topo_source,
+            self.topo_path,
+            self.nest_enable,
+            self.nest_period,
+            self.nest_pressure_fluxes,
+            self.parent_enable,
+            *self.child_w.values(),
+            *self.parent_w.values(),
+            self.child_topo_source,
+            self.child_topo_path,
+            self.parent_topo_source,
+            self.parent_topo_path,
+        ]
+        for w in watched:
+            w.observe(self._rebuild, names="value")
+        # Grid-geometry/mask-affecting widgets: a change invalidates any prior
+        # mask-derived boundaries (a stale mask must never be silently reused),
+        # in addition to the plain rebuild every other watched widget gets.
+        for w in (
+            *self.grid_w.values(),
+            self.hmin,
+            self.close_narrow_chk,
+            self.mask_shapefile,
+        ):
+            w.observe(self._on_grid_kwarg_change, names="value")
+        # Domain-derived properties: a manual edit "touches" the property so
+        # nothing auto-overwrites it again (mirrors _on_editor_edit for the
+        # advanced-settings accordion).
+        for w in self.bnd.values():
+            w.observe(self._on_boundary_edit, names="value")
+        self.v_sponge.observe(self._on_v_sponge_edit, names="value")
+
+    def _on_name_change(self, _change):
+        # A programmatic backfill (see _rebuild) happens under _suspend() -- only a
+        # real user edit should "lock in" the field against further auto-updates.
+        if getattr(self, "_suspended", False):
+            return
+        self._name_touched = True
+        self._rebuild()
+
+    def _on_save_path_change(self, _change):
+        if getattr(self, "_suspended", False):
+            return
+        self._save_path_touched = True
+
+    def _dd_options(
+        self, names: list[str], kind: str, *, prefix: list[str] | None = None
+    ) -> list:
+        """Badge dropdown ``options`` with their source layer when it isn't the
+        top (writable) one -- ipywidgets-homogeneous.
+
+        ipywidgets' ``Dropdown`` requires ``options`` to be either ALL bare
+        values or ALL ``(label, value)`` 2-tuples: ``_make_options`` only takes
+        the "pairs" branch when *every* entry is a 2-tuple, so a mix silently
+        falls through to treating each element (tuples included) as a literal
+        value, and ``dd.value`` ends up holding a raw ``(label, value)`` tuple
+        instead of the bare name. So: if no *names* entry needs a badge, this
+        returns plain names unchanged (matching pre-layering behavior, safe to
+        mix with a plain sentinel like domain_dd's ``"<custom>"``); otherwise
+        *every* entry -- including any *prefix* sentinels -- is emitted as an
+        explicit ``(label, value)`` tuple so the whole list stays homogeneous.
+        ``dd.value`` is always the bare name/sentinel either way.
+
+        A ``KeyError`` from ``entry_source`` (name absent, shouldn't happen for
+        names drawn from the same catalog) is treated as "no badge".
+        """
+        prefix = prefix or []
+        entry_source = getattr(self.catalog, "entry_source", None)
+        top = getattr(self.catalog, "top", None)
+        top_label = top.label if top is not None else None
+
+        badges: dict[str, str] = {}
+        if entry_source is not None:
+            for name in names:
+                try:
+                    source = entry_source(kind, name)
+                except KeyError:
+                    continue
+                if source != top_label:
+                    badges[name] = source
+
+        if not badges:
+            return [*prefix, *names]
+
+        options: list[Any] = [(p, p) for p in prefix]
+        for name in names:
+            label = f"{name} ({badges[name]})" if name in badges else name
+            options.append((label, name))
+        return options
+
+    @staticmethod
+    def _dd_values(dd) -> list:
+        """Bare values of a dropdown's ``options``, whether badged
+        ``(label, value)`` tuples (see ``_dd_options``) or plain strings
+        (ipywidgets' label == value shorthand). Use this instead of reading
+        ``dd.options`` directly for membership tests / indexing.
+        """
+        return [o[1] if isinstance(o, tuple) else o for o in dd.options]
+
+    def _default_blueprint_path(self, name: str) -> str:
+        """Default "Save to:" path for a blueprint named *name*.
+
+        Prefers the active catalog's ``blueprints/`` directory so a save lands
+        where the wizard's other catalog-aware specs look; falls back to a
+        bare filename (CWD-relative) when the catalog isn't a local filesystem
+        (e.g. loaded from a GitHub/http URL) and so isn't writable.
+        """
+        fname = f"{name}.forge_blueprint.yaml"
+        cat = getattr(self, "catalog", None)
+        try:
+            # A read-only catalog (e.g. the bundled one loaded as a single
+            # store) must not be offered as a save destination.
+            if (
+                cat is not None
+                and getattr(cat, "_is_local", False)
+                and not getattr(cat, "read_only", False)
+            ):
+                return str(cat.roms_marbl_blueprints_dir / fname)
+        except Exception:
+            pass
+        return fname
+
+    def _on_grid_kwarg_change(self, _change):
+        # A geometry/mask-affecting edit invalidates any prior mask-derived
+        # boundaries -- a stale mask must never be silently reused. Only the
+        # "derived" freshness flag resets; an already-touched (manually set or
+        # loaded) value is never overwritten by this. Clearing derive_status lets
+        # _rebuild's "not derived yet" warning reappear instead of leaving a
+        # stale "✓ derived" message visible against the now-invalidated mask.
+        if not getattr(self, "_suspended", False):
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+        self._rebuild()
+
+    # ---- user-provided grid file ----------------------------------------------
+    def _set_grid_widgets_locked(self, locked: bool) -> None:
+        """Disable/re-enable every grid-generation widget a user-provided grid
+        file makes meaningless: geometry/vertical kwargs, mask/topography, and
+        nesting (custom grid + nesting is unsupported -- see
+        ``Domain._grid_file_excludes_generation_geometry``). Open boundaries and
+        v_sponge stay editable/derivable -- both work fine off a loaded grid.
+        """
+        for w in (
+            *self.grid_w.values(),
+            self.scoord_chk,
+            self.hmin,
+            self.close_narrow_chk,
+            self.mask_shapefile,
+            self.topo_source,
+            self.topo_path,
+            self.nest_enable,
+            self.parent_enable,
+        ):
+            w.disabled = locked
+        self.grid_lock_banner.layout.display = "" if locked else "none"
+
+    def _populate_grid_widgets_from_grid(self, grid: Any) -> None:
+        """Display a loaded grid file's own attributes on the (now-locked) grid
+        widgets, skipping any that are ``None`` (a hand-made file may lack
+        ``size_x``/``size_y`` -- see ``build_forge_blueprint``'s grid_file
+        docstring). Purely cosmetic here -- ``_gather()`` never reads these
+        widget values while a grid file is attached (``grid_kwargs`` is ``{}``).
+        """
+        with self._suspend():
+            for key in _GRID_INT + _GRID_FLOAT + _SCOORD:
+                val = getattr(grid, key, None)
+                if val is not None:
+                    self.grid_w[key].value = val
+            if all(
+                getattr(grid, a, None) is not None for a in ("theta_s", "theta_b", "hc")
+            ):
+                self.scoord_chk.value = True
+
+    def _finish_grid_file_attach(
+        self, file_dict: dict[str, Any], grid: Any, *, snapshot: bool = True
+    ) -> None:
+        """Common tail of a successful (or reused-hash) grid-file attach: cache
+        state, populate + lock widgets, invalidate any prior mask-derived
+        boundaries (a new grid means a new mask -- mirrors
+        ``_on_grid_kwarg_change``), and show the attach status.
+
+        ``snapshot=False`` skips capturing the pre-attach widget snapshot -- used
+        by ``_reattach_grid_file`` (blueprint load-back), where the widgets hold
+        leftover values from whatever was on screen before the load, not a
+        user-authored geometry worth restoring on Detach.
+        """
+        if snapshot and self._grid_widgets_snapshot is None:
+            # Capture the user's own pre-attach geometry exactly once per
+            # detached->attached transition -- a second attach while already
+            # attached (e.g. picking a different file without detaching first)
+            # must not overwrite the ORIGINAL values with the first file's.
+            self._grid_widgets_snapshot = {
+                **{k: w.value for k, w in self.grid_w.items()},
+                "scoord_chk": self.scoord_chk.value,
+            }
+        self._grid_file = file_dict
+        self._grid_file_grid = grid
+        self._populate_grid_widgets_from_grid(grid)
+        self._set_grid_widgets_locked(True)
+        self._boundaries_derived = False
+        self.derive_status.value = ""
+        self.grid_file_status.value = _user_file_status_html(file_dict)
+
+    def _attach_grid_file_from_path(self, path_str: str) -> None:
+        self.grid_file_status.value = "<i>attaching…</i>"
+        try:
+            path = Path(path_str).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"grid file not found: {path}")
+            import roms_tools as rt
+
+            grid = rt.Grid(filename=str(path))
+            content_hash = hash_netcdf_contents(path)
+        except Exception as exc:
+            self.grid_file_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        self._finish_grid_file_attach(
+            {"location": str(path), "content_hash": content_hash}, grid
+        )
+        self._rebuild()
+
+    def _on_grid_file_attach(self, _btn):
+        path_str = self.grid_file_path.value.strip()
+        if not path_str:
+            self.grid_file_status.value = (
+                "<span style='color:#b00'>Enter a path first.</span>"
+            )
+            return
+        # Explicit click always re-loads/re-hashes (the file may have changed on
+        # disk since the last attach) -- no dedupe here.
+        self._attach_grid_file_from_path(path_str)
+
+    def _maybe_attach_grid_file(self) -> None:
+        """Attach the path in the grid-file box unless it's blank or already the
+        attached file. Fired on Enter/focus-out of the Text (and after an
+        upload lands), so a user who types/pastes a path and moves on without
+        clicking Attach doesn't silently keep building from the grid_kwargs
+        widgets instead of the file they meant to use.
+        """
+        path_str = self.grid_file_path.value.strip()
+        if not path_str or _same_attached_file(self._grid_file, path_str):
+            return
+        self._attach_grid_file_from_path(path_str)
+
+    def _on_grid_file_path_submit(self, _change) -> None:
+        if getattr(self, "_suspended", False):
+            return
+        self._maybe_attach_grid_file()
+
+    def _on_grid_file_upload(self, change):
+        items = change["new"]
+        if not items:
+            return
+        item = (
+            items[0] if isinstance(items, (list, tuple)) else next(iter(items.values()))
+        )
+        dest = _stage_uploaded_netcdf(item["name"], bytes(item["content"]))
+        # Setting the Text fires _on_grid_file_path_submit (attach); the explicit
+        # call covers a same-name re-upload where the value doesn't change.
+        self.grid_file_path.value = str(dest)
+        self._maybe_attach_grid_file()
+
+    def _detach_grid_file(self) -> None:
+        """Pure state reset (no _rebuild(), no widget-value restore) -- shared
+        by the Detach button and _on_domain/_populate_from (a catalog Domain
+        pick or a freshly-loaded grid-kwargs blueprint both set grid_w to their
+        OWN authoritative values immediately after calling this, which must
+        win outright -- restoring the pre-attach snapshot here would clobber
+        them with stale values from a since-superseded attach). Only
+        _on_grid_file_detach (the explicit user action, with nothing else
+        about to overwrite grid_w) restores the snapshot -- see there.
+        """
+        self._grid_file = None
+        self._grid_file_grid = None
+        self._grid_widgets_snapshot = None
+        self._set_grid_widgets_locked(False)
+        self._boundaries_derived = False
+        self.derive_status.value = ""
+        self.grid_file_path.value = ""
+        self.grid_file_upload.value = ()
+        self.grid_file_status.value = ""
+
+    def _on_grid_file_detach(self, _btn):
+        snapshot = (
+            self._grid_widgets_snapshot
+        )  # read before _detach_grid_file clears it
+        self._detach_grid_file()
+        if snapshot is not None:
+            with self._suspend():
+                for k, v in snapshot.items():
+                    if k == "scoord_chk":
+                        self.scoord_chk.value = v
+                    elif k in self.grid_w:
+                        self.grid_w[k].value = v
+        self._rebuild()
+
+    def _reattach_grid_file(self, file_obj: Any) -> None:
+        """``_populate_from``'s grid_file restore: reload the grid but REUSE the
+        blueprint's recorded content_hash (never recompute it on load -- mirrors
+        the CDR-file restore). On a reload failure, keep the grid_file dict and
+        widgets locked (rather than silently falling back to the generic/default
+        grid_kwargs, which would gather a completely different blueprint) and
+        surface the error -- the resolver will raise the same "file not found"
+        on the next _gather()/_rebuild(), which is the loud failure this must
+        produce instead of a silent wrong answer.
+        """
+        file_dict = {
+            "location": file_obj.location,
+            "content_hash": file_obj.content_hash,
+        }
+        self._grid_file = file_dict
+        # Whatever sits in the grid widgets right now predates this load and is
+        # not a geometry worth restoring on Detach -- drop any stale snapshot.
+        self._grid_widgets_snapshot = None
+        self.grid_file_path.value = file_dict["location"]
+        self._set_grid_widgets_locked(True)
+        try:
+            path = Path(file_dict["location"]).expanduser()
+            if not path.exists():
+                raise FileNotFoundError(f"grid file not found: {path}")
+            import roms_tools as rt
+
+            grid = rt.Grid(filename=str(path))
+        except Exception as exc:
+            self._grid_file_grid = None
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+            self.grid_file_status.value = (
+                f"<span style='color:#b00'>⚠ could not re-attach grid_file: "
+                f"{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        self._finish_grid_file_attach(file_dict, grid, snapshot=False)
+
+    def _on_boundary_edit(self, _change):
+        # A programmatic backfill (see _apply_grid_derived_properties, _on_domain,
+        # _populate_from) happens under _suspend() -- only a real user edit should
+        # "touch" the property against further auto-derivation.
+        if getattr(self, "_suspended", False):
+            return
+        self._boundaries_touched = True
+        self.derive_status.value = ""
+        self._rebuild()
+
+    def _on_v_sponge_edit(self, _change):
+        if getattr(self, "_suspended", False):
+            return
+        self._v_sponge_touched = True
+        self._rebuild()
+
+    def _sync_marbl_ref_visibility(self, _change=None):
+        # MARBL ref is inert without MARBL, so hide it (value is kept, not cleared)
+        self.marbl_ref.layout.display = "" if self.bgc_dd.value == "marbl" else "none"
+
+    def _sync_auto_tiling(self, _change=None):
+        # Auto tiling picks n_procs_x/y at runtime from the land mask, so those
+        # boxes become meaningless (disabled) and n_cores takes over; it also
+        # requires PIO, so use_pio is forced on and locked while it's active.
+        on = self.auto_tiling_chk.value
+        if on and _change is not None and _change.get("old") is False:
+            # Real off->on toggle (user click, or a load path flipping the
+            # checkbox): seed n_cores from the explicit grid already entered,
+            # so the user doesn't multiply by hand. Load paths restore a saved
+            # n_cores AFTER setting the checkbox, so this seed never clobbers
+            # it; direct _sync_auto_tiling() calls (_change=None) never seed.
+            self.n_cores.value = int(self.npx.value) * int(self.npy.value)
+        self.npx.disabled = on
+        self.npy.disabled = on
+        self.n_cores.layout.display = "" if on else "none"
+        if on:
+            self.use_pio_chk.value = True
+        self.use_pio_chk.disabled = on
+
+    def _on_model_change(self, _change):
+        # a different model has different defaults -> existing overrides no longer apply.
+        # Forcing/Output are independent catalog dimensions from the model (a ForcingSpec/
+        # OutputSpec doesn't reference a model), so switching models never touches them.
+        if getattr(self, "_suspended", False):
+            return
+        self._overrides = {}
+        self.roms_ref.value = self._model_default_roms_ref()
+        self.marbl_ref.value = self._model_default_marbl_ref()
+        self.bgc_dd.value = self._model_default_bgc_mode()
+        self.use_pio_chk.value = self._model_default_use_pio()
+        self._rebuild()
+
+    def _on_editor_edit(self, section, field):
+        # a user edit in the advanced editor -> record as an override (vs composed)
+        if self._syncing or getattr(self, "_suspended", False):
+            return
+        self._overrides[(section, field)] = self.editor.read(section, field)
+        self._rebuild()
+
+    def _on_nest_domain(self, _change):
+        """Prefill the child grid from a selected DomainSpec (and enable nesting)."""
+        name = self.nest_domain_dd.value
+        if name == "<custom>":
+            return
+        data = self.catalog.domain_data(name)
+        gk = data.get("grid_kwargs", {}) or {}
+        with self._suspend():
+            self.nest_enable.value = True
+            for k, w in self.child_w.items():
+                if k in gk:
+                    w.value = gk[k]
+            # The child spec's own topography, not this grid's (see
+            # _on_parent_domain for why this matters).
+            self.child_topo_source.value = data.get("topography_source", "ETOPO5")
+            self.child_topo_path.value = data.get("topography_path", "") or ""
+        self._rebuild()
+        self._on_nest_plot(None)
+
+    def _on_parent_domain(self, _change):
+        """Prefill the parent grid from a selected DomainSpec (and enable it)."""
+        name = self.parent_domain_dd.value
+        if name == "<custom>":
+            return
+        data = self.catalog.domain_data(name)
+        gk = data.get("grid_kwargs", {}) or {}
+        with self._suspend():
+            self.parent_enable.value = True
+            for k, w in self.parent_w.items():
+                if k in gk:
+                    w.value = gk[k]
+            # Carry the parent spec's topography too: the parent is rebuilt so
+            # align_grids can blend this grid toward the parent's mask/bathymetry,
+            # so it must be built from what the PARENT run used -- not this grid's
+            # (typically finer, differently-tiled) dataset, which may not even
+            # cover the larger parent footprint. Explicit, never the inherit
+            # sentinel: the spec said what it was built with.
+            self.parent_topo_source.value = data.get("topography_source", "ETOPO5")
+            self.parent_topo_path.value = data.get("topography_path", "") or ""
+        self._clear_boundary_forcing()
+        self._clear_initial_conditions()
+        self._rebuild()
+        self._on_parent_plot(None)
+
+    def _on_parent_toggle(self, change):
+        """Enabling a parent clears boundary forcing: a child grid receives its
+        boundary values from the parent's nesting.nc extraction, not reanalysis
+        boundary forcing (open-boundary edge flags are left untouched -- the
+        edges stay open, just fed differently). It also clears IC to "(none)"
+        as a *default* -- unlike boundary, IC is widget-state-authoritative, so
+        the user can undo this by re-selecting a source.
+
+        Disabling a parent restores the IC default (if it's still "(none)")
+        so a non-child domain isn't stranded on the resolver's hard error for
+        a missing IC -- a user who had manually re-added an explicit IC while
+        parented is left alone.
+        """
+        if getattr(self, "_suspended", False):
+            return
+        if change["new"]:
+            self._clear_boundary_forcing()
+            self._clear_initial_conditions()
+        else:
+            self._restore_initial_conditions_default()
+
+    def _clear_boundary_forcing(self):
+        """Remove any boundary-bgc rows from the forcing editor (UX mirror of the
+        durable clear in ``_gather()``, which is the source of truth and forces
+        ``forcing.boundary`` to ``None`` outright regardless of this UI state).
+
+        Boundary's physics scalar widgets (``self.boundary_name``/etc., see
+        ``__init__``) are intentionally left as-is -- there's nothing meaningful to
+        reset them to, and ``_gather()`` ignores them entirely for a child grid.
+        """
+        if getattr(self, "_forcing_editor", None) is not None:
+            self._forcing_editor.clear_category("boundary_bgc")
+
+    def _clear_initial_conditions(self):
+        """Default a child domain's IC dropdown to "(none)" -- a child receives
+        state from the parent's nesting extraction, so IC is optional. Unlike
+        boundary forcing, this is only a default: the user can re-select a
+        source (e.g. GLORYS) to re-add an explicit IC for the child.
+        """
+        if getattr(self, "_forcing_editor", None) is not None:
+            self._forcing_editor.ic_name.value = _IC_NONE
+
+    def _restore_initial_conditions_default(self):
+        """Undo ``_clear_initial_conditions``'s default when a parent is turned
+        back off -- a non-child domain has no other source of state, so leaving
+        IC at "(none)" would strand the user on the resolver's hard error. Only
+        resets it when it's still at the "(none)" default; a user who manually
+        re-added an explicit IC while parented is left alone.
+        """
+        if (
+            getattr(self, "_forcing_editor", None) is not None
+            and self._forcing_editor.ic_name.value == _IC_NONE
+        ):
+            self._forcing_editor.ic_name.value = _IC_SOURCE_OPTS[0]
+
+    # ---- forcing spec -------------------------------------------------------
+    def _model_spec_declared(self) -> dict[str, Any]:
+        """The selected ModelSpec's declared ``roms_ref``/``marbl_ref``/``bgc_mode``/
+        ``use_pio``.
+
+        Single re-parse of ``model.yaml`` backing ``_model_default_*`` below and
+        the spec-deviation check in ``_rebuild`` -- both need the same
+        catalog-declared values to compare live widget state against.
+        """
+        try:
+            data = load_model_spec_data(self.catalog.model_dir(self.model_dd.value))
+            model = data["model"]
+            roms = model.get("code", {}).get("roms", {}) or {}
+            marbl = model.get("code", {}).get("marbl", {}) or {}
+            return {
+                "roms_ref": roms.get("commit") or roms.get("branch") or "",
+                "marbl_ref": marbl.get("commit") or marbl.get("branch") or "",
+                "bgc_mode": model.get("bgc_mode", "marbl"),
+                "use_pio": bool(model.get("use_pio", False)),
+            }
+        except Exception:
+            return {
+                "roms_ref": "",
+                "marbl_ref": "",
+                "bgc_mode": "marbl",
+                "use_pio": False,
+            }
+
+    def _model_default_roms_ref(self) -> str:
+        """The selected model's pinned ucla-roms checkout target (commit or branch)."""
+        return self._model_spec_declared()["roms_ref"]
+
+    def _model_default_marbl_ref(self) -> str:
+        """The selected model's pinned MARBL checkout target (commit or branch)."""
+        return self._model_spec_declared()["marbl_ref"]
+
+    def _model_default_bgc_mode(self) -> str:
+        """The selected model's ModelSpec-declared bgc_mode (prepopulates self.bgc_dd)."""
+        return self._model_spec_declared()["bgc_mode"]
+
+    def _model_default_use_pio(self) -> bool:
+        """The selected model's ModelSpec-declared use_pio (prepopulates self.use_pio_chk)."""
+        return self._model_spec_declared()["use_pio"]
+
+    def _effective_roms_ref(self) -> str | None:
+        """The ucla-roms ref that determines the run-time-settings schema.
+
+        Mirrors the resolver's own precedence for ``roms_ref`` (see
+        ``_gather()``): the live override in ``self.roms_ref`` when non-blank,
+        else the selected ModelSpec's pinned ``code.roms`` ref. ``None`` when
+        neither is set, so :func:`_wizard_settings_cls_for_ref`/
+        ``run_time_settings_for_ref`` fall back to the legacy schema instead of
+        warning on an empty ref.
+        """
+        return self.roms_ref.value.strip() or self._model_default_roms_ref() or None
+
+    def _build_forcing_editor(self, base_inputs: dict[str, Any]):
+        self._forcing_editor = _ForcingEditor(
+            self.W, base_inputs, on_change=self._on_forcing_change
+        )
+        self.forcing_box.children = [self._forcing_editor.widget]
+
+    def _on_forcing_spec(self, _change):
+        """Selecting a ForcingSpec reseeds the forcing editor. CDR is its own
+        independently composable spec (CdrSpec, see ``self.cdr_mode_dd``) and is
+        normally untouched by a ForcingSpec pick -- the one exception is a
+        *legacy* ForcingSpec predating the CdrSpec split that still embeds a
+        ``cdr_forcing`` block (see ``_split_forcing_data``); that embedded dict is
+        routed into the CDR box as if it had been uploaded as a YAML.
+        """
+        if getattr(self, "_suspended", False):
+            return
+        fi, legacy_cdr = _split_forcing_data(
+            self.catalog.forcing_data(self.forcing_dd.value)
+        )
+        self._build_forcing_editor(fi)
+        if self.parent_enable.value:
+            # A child grid (has a parent) gets its boundaries from the parent's
+            # nesting.nc extraction, not reanalysis boundary forcing -- strip any
+            # boundary items the freshly-built editor just reseeded from the spec.
+            self._clear_boundary_forcing()
+            # Same reasoning for IC: the freshly-built editor reseeds from the
+            # spec's real IC block, which would silently undo the "(none)"
+            # default a parent toggle already applied.
+            self._clear_initial_conditions()
+        if legacy_cdr:
+            self.cdr_mode_dd.value = "yaml"
+            self._apply_cdr_mode()
+            self._cdr_forcing = legacy_cdr
+            self.cdr_status.value = (
+                f"<span style='color:#080'>✓ CDR loaded from legacy ForcingSpec "
+                f"embed: {len(legacy_cdr.get('releases', []))} release(s)</span>"
+            )
+        self._forcing_seed = self._forcing_editor.gather()
+        self._rebuild()
+
+    def _on_forcing_change(self):
+        # composition.forcing.modified is derived in _rebuild() by comparing the
+        # current gather() to self._forcing_seed -- no flag to set here.
+        if getattr(self, "_suspended", False):
+            return
+        self._rebuild()
+
+    def _on_output_spec(self, _change):
+        """Selecting an OutputSpec seeds the output sections. Clear any manual
+        overrides on those sections/fields so the selection takes effect cleanly.
+        """
+        if getattr(self, "_suspended", False):
+            return
+        self._overrides = {
+            (s, f): v
+            for (s, f), v in self._overrides.items()
+            if not _is_output_key(s, f)
+        }
+        self._rebuild()
+
+    def _output_settings(self) -> dict[str, Any]:
+        """The selected OutputSpec's settings."""
+        return self.catalog.output_data(self.output_dd.value)
+
+    def _composition(self) -> Composition:
+        # Every spec keeps origin="catalog" when picked from the catalog (never
+        # flips to "custom" on edit) -- `modified` is what signals a deviation.
+        # `modified` itself is computed afterward in `_rebuild()`, where the
+        # composed baseline, effective settings, and per-spec seeds are all
+        # available; the base SpecRefs built here always start `modified=False`.
+        dom = (
+            SpecRef(name=self.domain_dd.value, origin="catalog")
+            if self.domain_dd.value != "<custom>"
+            else SpecRef(name=self.grid_name.value, origin="custom")
+        )
+        # forcing/output are always an explicit catalog selection now (no more
+        # "model_default" origin -- ModelSpec no longer provides either as a fallback).
+        forcing = SpecRef(name=self.forcing_dd.value, origin="catalog")
+        output = SpecRef(name=self.output_dd.value, origin="catalog")
+        # CDR is independently composable (CdrSpec) and, unlike domain, has no
+        # meaningful "custom name" of its own when unpicked -- <custom> just
+        # means "hand-authored, not saved as a spec" (name=None).
+        cdr = (
+            SpecRef(name=self.cdr_dd.value, origin="catalog")
+            if self.cdr_dd.value != "<custom>"
+            else SpecRef(name=None, origin="custom")
+        )
+        return Composition(
+            model=SpecRef(name=self.model_dd.value, origin="catalog"),
+            domain=dom,
+            forcing=forcing,
+            cdr=cdr,
+            output=output,
+        )
+
+    def _verify_spec_roundtrip(self, spec: str, new_name: str) -> bool:
+        """Side-effect-free check: does re-resolving with ``spec`` sourced from
+        its freshly-written catalog file (``new_name``) reproduce the exact same
+        resolved blueprint currently shown (``self.config``)?
+
+        Reads ``self._gather()``/``self._overrides``/``self.catalog`` only --
+        mutates nothing on the wizard. Compares ``content_hash()``, which covers
+        exactly the results-affecting data (excludes identity/composition/
+        provenance/working_dir -- see ``ForgeBlueprint._HASH_EXCLUDE``), so a
+        match proves the saved spec is a safe substitute for what's currently
+        composed/edited and the spec can be marked ``modified=False``.
+        """
+        if self.config is None:
+            return False
+        kw = self._gather()
+        overrides2 = dict(self._overrides)
+        try:
+            if spec == "output":
+                kw["output_settings"] = self.catalog.output_data(new_name)
+                overrides2 = {
+                    k: v for k, v in overrides2.items() if not _is_output_key(*k)
+                }
+            elif spec == "model":
+                kw["model_dir"] = self.catalog.model_dir(new_name)
+                # Let the saved spec speak for these: the resolver falls back to the
+                # ModelSpec when use_pio/bgc_mode are None (resolve.py:418-421) and to
+                # code.roms/code.marbl verbatim when roms_ref/marbl_ref are absent.
+                # Re-applying the live widget values here would apply them to BOTH
+                # sides and make the verifier structurally blind to a spec that
+                # dropped them.
+                for k in ("use_pio", "bgc_mode", "roms_ref", "marbl_ref"):
+                    kw.pop(k, None)
+                overrides2 = {k: v for k, v in overrides2.items() if _is_output_key(*k)}
+            elif spec == "forcing":
+                # CDR is its own independently composable spec (CdrSpec, see
+                # self.cdr_mode_dd) -- picking a ForcingSpec never touches it, so
+                # kw["cdr"] (already set by _gather()) is left as-is here.
+                fi, _legacy_cdr = _split_forcing_data(
+                    self.catalog.forcing_data(new_name)
+                )
+                if self.parent_enable.value:
+                    # Mirror the _gather() durable clear so re-verifying against a
+                    # freshly-picked ForcingSpec doesn't spuriously show "modified"
+                    # for a child grid whose boundary forcing is always stripped.
+                    fi.setdefault("forcing", {})["boundary"] = None
+                kw["forcing_inputs"] = fi
+            elif spec == "cdr":
+                # catalog.cdr_data() carries a "description" key CdrSpec forbids
+                # (extra="forbid") -- build_forge_blueprint's cdr= path pops it,
+                # same as the other catalog-dict-shaped kwargs above.
+                kw["cdr"] = self.catalog.cdr_data(new_name)
+            elif spec == "domain":
+                d = self.catalog.domain_data(new_name)
+                kw["grid_kwargs"] = d.get("grid_kwargs", {})
+                # open_boundaries/v_sponge: only override from the saved file
+                # when it actually carries them (touched at save time). Absence
+                # means "derive fresh" -- exactly what _on_domain would leave
+                # untouched on a real reload -- so kw already holds the right
+                # comparison value from _gather() (the live checkbox state /
+                # None-to-derive respectively); forcing a grid build here just
+                # to verify an intentionally-omitted value would be pointless.
+                if d.get("open_boundaries") is not None:
+                    kw["open_boundaries"] = d["open_boundaries"]
+                if d.get("v_sponge") is not None:
+                    kw["v_sponge"] = d["v_sponge"]
+                # dt is always saved (no touched gate, see _domain_spec_data),
+                # so an absent value here only happens for an older DomainSpec
+                # predating this field -- fall back to kw's existing _gather()
+                # value (the live widget dt) rather than force one in.
+                if d.get("dt") is not None:
+                    kw["dt"] = d["dt"]
+                kw["partitioning"] = d.get("partitioning", {})
+                kw["topography_source"] = d.get("topography_source", "ETOPO5")
+                kw.pop("topography_path", None)
+                if d.get("topography_path"):
+                    kw["topography_path"] = d["topography_path"]
+                for k in ("grid_kwargs_child", "grid_kwargs_parent", "metadata_child"):
+                    kw.pop(k, None)
+                    if d.get(k) is not None:
+                        kw[k] = d[k]
+                kw["nesting_include_pressure_fluxes"] = bool(
+                    d.get("nesting_include_pressure_fluxes", False)
+                )
+            else:
+                raise ValueError(f"unknown spec {spec!r}")
+            cfg2 = build_forge_blueprint(**kw)
+        except Exception:
+            return False
+        eff2 = _apply_overrides(cfg2.model_settings, overrides2)
+        cfg2 = cfg2.model_copy(update={"model_settings": eff2})
+        return cfg2.content_hash() == self.config.content_hash()
+
+    @staticmethod
+    def _sources_to_inputs(cfg: ForgeBlueprint) -> dict[str, Any]:
+        """Reconstruct an ``inputs``-shaped forcing dict from a ForgeBlueprint's sources
+        (reverse of the resolver) so a loaded config seeds the forcing editor.
+
+        The set of plain (non-``source``) fields to copy per item is derived from the
+        item model's own ``model_fields`` -- mirrors ``forge_blueprint_resolve.
+        _build_forcing``'s ``_items()`` helper, which replaced an equivalent hand-
+        maintained whitelist here after it was confirmed to silently drop fields added
+        to the schema but forgotten in the whitelist (``wind_dropoff``/``options``).
+        This fixes the reconstruction into the *seed dict* this function returns; note
+        that ``prefill_kwargs``/``extrap_kwargs`` still have no dedicated widget in
+        ``_make_row``, so they're correctly seeded here but then dropped again on the
+        very next ``gather()`` -- a pre-existing UI gap (no widget ever read them,
+        before or after this change), not something this fix resolves end-to-end. A
+        field is only emitted when it differs from the model's own default (an unset
+        optional, a false flag, an empty dict/list, or the type's default enum member)
+        -- matches the old hand-written checks and keeps a reloaded spec gathering back
+        to the same dict the resolver would have produced.
+        """
+
+        def src(spec) -> dict[str, Any]:
+            # SourceSpec's own fields (climatology/glorys_layout/path/constants/
+            # esper_method/esper_equation) -- generic `plain()` handles all of
+            # them uniformly (esper_method/esper_equation are plain Literal
+            # strings/ints, not Enum members, so no special-casing needed).
+            d: dict[str, Any] = {"name": spec.name}
+            d.update(plain(spec, SourceSpec, skip=("name",)))
+            return d
+
+        def plain(it, cls, skip=("source",)) -> dict[str, Any]:
+            """Copy every field ``cls`` declares (except ``skip``) that differs from
+            its schema default, normalizing Enum members to their plain value.
+            """
+            d: dict[str, Any] = {}
+            for name, finfo in cls.model_fields.items():
+                if name in skip:
+                    continue
+                v = getattr(it, name, None)
+                if v is None or v == finfo.default:
+                    continue
+                if isinstance(v, (list, dict)):
+                    if v:  # skip an explicit-but-empty list/dict (== "unset")
+                        d[name] = list(v) if isinstance(v, list) else dict(v)
+                    continue
+                d[name] = getattr(v, "value", v)
+            return d
+
+        def bgc_section(spec) -> dict[str, Any]:
+            """Reconstruct an InitialConditions/BoundaryForcing-shaped seed dict --
+            shared by IC and boundary, which have this identical shape (see
+            forge_blueprint.BgcSourceItem).
+            """
+            d: dict[str, Any] = {"source": src(spec.source)}
+            bgc_sources = []
+            for bs in spec.bgc_sources:
+                # BgcSourceItem's own fields (use_vars/bgc_interpolation_method/
+                # serialize_dask) -- carrying serialize_dask back into the seed
+                # matters: editing an existing blueprint in the wizard would
+                # otherwise silently drop it, and a large domain would go back
+                # to the write that fails.
+                bd: dict[str, Any] = {"source": src(bs.source)}
+                bd.update(plain(bs, BgcSourceItem))
+                bgc_sources.append(bd)
+            if bgc_sources:
+                d["bgc_sources"] = bgc_sources
+            return d
+
+        f = cfg.forcing
+        if f.initial_conditions is None:
+            # Explicit sentinel (as opposed to a plain missing key) so
+            # `_ForcingEditor.__init__` seeds the "(none)" dropdown option
+            # instead of falling back to the fresh-wizard GLORYS default.
+            ic: dict[str, Any] | None = None
+        else:
+            ic = bgc_section(f.initial_conditions)
+            ic.update(
+                plain(
+                    f.initial_conditions,
+                    InitialConditions,
+                    skip=("source", "bgc_sources"),
+                )
+            )
+
+        forcing: dict[str, Any] = {}
+        if f.boundary is None:
+            # Explicit sentinel (as opposed to an omitted key) so
+            # `_ForcingEditor.__init__` seeds the "(none)" dropdown option
+            # instead of falling back to the fresh-wizard default source.
+            forcing["boundary"] = None
+        else:
+            boundary = bgc_section(f.boundary)
+            boundary.update(
+                plain(f.boundary, BoundaryForcing, skip=("source", "bgc_sources"))
+            )
+            forcing["boundary"] = boundary
+        for cat, items, cls in (
+            ("surface", f.surface, SurfaceForcingItem),
+            ("tidal", f.tidal, TidalForcingItem),
+            ("river", f.river, RiverForcingItem),
+        ):
+            out = []
+            for it in items:
+                d: dict[str, Any] = {"source": src(it.source)}
+                _custom_file = getattr(it, "custom_file", None)
+                if _custom_file is not None:
+                    # A CUSTOM_FILE river item carries no other fields (see
+                    # RiverForcingItem's mutual-exclusion validators). Emit just the
+                    # file and skip the generic copy below, which would otherwise
+                    # embed the UserProvidedFile model object itself rather than the
+                    # plain location/content_hash dict the seed dict needs.
+                    d["custom_file"] = {
+                        "location": _custom_file.location,
+                        "content_hash": _custom_file.content_hash,
+                    }
+                    out.append(d)
+                    continue
+                d.update(plain(it, cls))
+                out.append(d)
+            forcing[cat] = out
+        return {
+            "initial_conditions": ic,
+            "forcing": forcing,
+        }
+
+    def _on_domain(self, _change):
+        """Prefill from a cataloged Domain.yaml when one is selected."""
+        name = self.domain_dd.value
+        if name == "<custom>":
+            self._domain_seed = None
+            return
+        if self._grid_file is not None:
+            # A catalog Domain pick replaces the grid wholesale via grid_kwargs,
+            # which a user-provided grid file forbids carrying alongside it
+            # (Domain._grid_file_excludes_generation_geometry) -- detach first so
+            # the catalog's grid_kwargs land on now-unlocked widgets instead of
+            # being silently discarded.
+            self._detach_grid_file()
+        data = self.catalog.domain_data(name)
+        gk = data.get("grid_kwargs", {}) or {}
+        with self._suspend():
+            self.grid_name.value = data.get("grid_name", name)
+            for k, w in self.grid_w.items():
+                if k in gk:
+                    w.value = gk[k]
+            self.scoord_chk.value = any(k in gk for k in _SCOORD)
+            # Domain-derived properties: a picked catalog Domain replaces the
+            # current grid entirely, so reset touched/derived state first, then
+            # restore only what the saved Domain.yaml actually carries --
+            # absence means "derive fresh from the grid" (click "Derive from
+            # grid", or the Save/Run safety net), mirroring
+            # _domain_spec_data's save-only-when-touched symmetry. Leaves the
+            # boundary checkboxes untouched (rather than resetting to False)
+            # when absent, since there's nothing to derive from without a grid
+            # build -- the derive_status warning surfaces that instead.
+            self._v_sponge_touched = False
+            self._boundaries_touched = False
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+            saved_v_sponge = data.get("v_sponge")
+            if saved_v_sponge is not None:
+                self.v_sponge.value = float(saved_v_sponge)
+                self._v_sponge_touched = True
+            saved_bnd = data.get("open_boundaries")
+            if saved_bnd is not None:
+                for d, w in self.bnd.items():
+                    if d in saved_bnd:
+                        w.value = bool(saved_bnd[d])
+                self._boundaries_touched = True
+            # dt has no touched flag (see _domain_spec_data) -- a saved
+            # DomainSpec always carries it, but an older file might not, so
+            # restore only if present; otherwise leave the widget's current
+            # value as-is (there's no live re-derive to fall back on for dt).
+            saved_dt = data.get("dt")
+            if saved_dt is not None:
+                self.dt.value = float(saved_dt)
+            part = data.get("partitioning", {}) or {}
+            saved_npx = part.get("n_procs_x")
+            if saved_npx is not None:
+                self.npx.value = int(saved_npx)
+            saved_npy = part.get("n_procs_y")
+            if saved_npy is not None:
+                self.npy.value = int(saved_npy)
+            self.auto_tiling_chk.value = bool(part.get("auto_tiling", False))
+            saved_n_cores = part.get("n_cores")
+            if saved_n_cores is not None:
+                self.n_cores.value = int(saved_n_cores)
+            self._sync_auto_tiling()
+            for key, picker in (("start_time", self.start), ("end_time", self.end)):
+                if data.get(key):
+                    picker.value = datetime.fromisoformat(str(data[key])).date()
+            # model_name in Domain.yaml is provenance (the model in use when the
+            # domain was saved), not a preference: picking a domain must not
+            # override the user's Model selection, so it is deliberately NOT
+            # restored here (unlike the load-a-full-blueprint path, where the
+            # blueprint's composition.model is authoritative).
+            self.topo_source.value = data.get("topography_source", "ETOPO5")
+            self.topo_path.value = data.get("topography_path", "") or ""
+            # Nesting: mirrors _populate_nesting (loaded-blueprint path) but reads
+            # from a DomainSpec's Domain.yaml (only present if the spec was saved
+            # via register_domain_from_dict with nesting active).
+            child = data.get("grid_kwargs_child")
+            self.nest_enable.value = child is not None
+            if child:
+                for k, w in self.child_w.items():
+                    if k in child:
+                        w.value = child[k]
+                self._set_nested_topo_widgets("child", child)
+                period = (data.get("metadata_child") or {}).get("period")
+                if period is not None:
+                    self.nest_period.value = float(period)
+                self.nest_pressure_fluxes.value = bool(
+                    data.get("nesting_include_pressure_fluxes", False)
+                )
+            # Parent: mirrors the child block above, reading grid_kwargs_parent
+            # (only present if the spec was saved with a parent grid active).
+            parent = data.get("grid_kwargs_parent")
+            self.parent_enable.value = parent is not None
+            if parent:
+                for k, w in self.parent_w.items():
+                    if k in parent:
+                        w.value = parent[k]
+                self._set_nested_topo_widgets("parent", parent)
+        # v_sponge (unlike every other snapshot field) isn't finalized by the
+        # widget writes above when untouched -- _rebuild() itself live-derives
+        # it from the new grid. Settle that first, then snapshot, then rebuild
+        # again so domain_modified is computed against the now-correct seed
+        # (otherwise the seed would capture the *previous* domain's v_sponge,
+        # spuriously flagging modified=True immediately after picking).
+        self._rebuild()
+        self._domain_seed = self._domain_snapshot()
+        self._rebuild()
+        self._on_plot(None)
+
+    def _domain_snapshot(self) -> dict[str, Any]:
+        """The domain-defining widget values at the moment of a catalog Domain pick.
+        Compared against the current values in `_rebuild()` to detect an edit made
+        after selection (`composition.domain.modified`).
+        """
+        return {
+            "grid_name": self.grid_name.value,
+            "grid_w": {k: w.value for k, w in self.grid_w.items()},
+            "scoord_chk": self.scoord_chk.value,
+            "bnd": {d: w.value for d, w in self.bnd.items()},
+            "v_sponge": self.v_sponge.value,
+            "dt": self.dt.value,
+            "npx": self.npx.value,
+            "npy": self.npy.value,
+            "auto_tiling": self.auto_tiling_chk.value,
+            "n_cores": self.n_cores.value,
+            "topo_source": self.topo_source.value,
+            "topo_path": self.topo_path.value,
+            "nest_enable": self.nest_enable.value,
+            "child_w": {k: w.value for k, w in self.child_w.items()},
+            "nest_period": self.nest_period.value,
+            "nest_pressure_fluxes": self.nest_pressure_fluxes.value,
+            "parent_enable": self.parent_enable.value,
+            "parent_w": {k: w.value for k, w in self.parent_w.items()},
+            "child_topo": (self.child_topo_source.value, self.child_topo_path.value),
+            "parent_topo": (
+                self.parent_topo_source.value,
+                self.parent_topo_path.value,
+            ),
+        }
+
+    def _set_nested_topo_widgets(self, which: str, gk: dict[str, Any]) -> None:
+        """Load a nested grid's optional ``topography_source``/``topography_path``
+        (from a blueprint or DomainSpec ``grid_kwargs_parent``/``_child`` dict)
+        into its widgets; absent keys mean "inherit this grid's" (the sentinel /
+        blank). Called inside a ``_suspend()`` block by the populate paths.
+        """
+        src_w = getattr(self, f"{which}_topo_source")
+        path_w = getattr(self, f"{which}_topo_path")
+        src = gk.get("topography_source")
+        if isinstance(src, dict):  # hand-authored roms-tools {'name','path'}
+            path_w.value = str(gk.get("topography_path") or src.get("path") or "")
+            src = src.get("name")
+        else:
+            path_w.value = str(gk.get("topography_path") or "")
+        src = getattr(src, "value", src)
+        src_w.value = str(src) if src in _TOPO_SOURCES else _NESTED_TOPO_INHERIT
+
+    def _domain_spec_data(self) -> dict[str, Any]:
+        """Build a ``Domain.yaml``-shaped dict from the current widget state (the
+        domain-spec extractor for "save modified specs to catalog"). Includes
+        topography and nesting -- both results-affecting -- so a saved DomainSpec
+        actually round-trips (see ``_verify_spec_roundtrip``); ``register_domain``
+        (the ForgeExecutor-driven path) predates these and omits them.
+        """
+        kw = self._gather()
+        data: dict[str, Any] = {
+            "description": self.description.value,
+            "model_name": self.model_dd.value,
+            "grid_name": self.grid_name.value,
+            "start_time": self.start.value.isoformat(),
+            "end_time": self.end.value.isoformat(),
+            "grid_kwargs": kw["grid_kwargs"],
+            "partitioning": kw["partitioning"],
+            "topography_source": self.topo_source.value,
+            # dt (unlike v_sponge/open_boundaries below) has no touched flag --
+            # the widget is always authoritative (default / CFL-computed / typed)
+            # and _gather() always passes it explicitly -- so it's always saved,
+            # not gated on a "was this edited" check.
+            "dt": kw["dt"],
+        }
+        # v_sponge/open_boundaries: included only when the user has touched
+        # them (a manual edit or a value restored from a prior save/load) --
+        # otherwise omitted so a reload re-derives fresh from the grid (see
+        # _on_domain's symmetric restore-only-if-present, and
+        # _ensure_boundaries_derived for the pre-save safety net that fills
+        # kw["open_boundaries"] with a real mask-derived value first).
+        if self._v_sponge_touched:
+            data["v_sponge"] = kw["v_sponge"]
+        if self._boundaries_touched:
+            data["open_boundaries"] = kw["open_boundaries"]
+        if self.topo_path.value.strip():
+            data["topography_path"] = self.topo_path.value.strip()
+        for k in (
+            "grid_kwargs_child",
+            "grid_kwargs_parent",
+            "metadata_child",
+            "nesting_include_pressure_fluxes",
+        ):
+            if k in kw:
+                data[k] = kw[k]
+        return data
+
+    class _Suspender:
+        """Reentrant: nesting ``with self._suspend():`` blocks (e.g. a grid-file
+        reattach's own suspend running inside ``_populate_from``'s outer suspend)
+        only clears ``_suspended`` once the outermost block exits -- a naive
+        unconditional ``False`` on ``__exit__`` would prematurely un-suspend the
+        outer block and let its remaining programmatic writes flip touched flags.
+        """
+
+        def __init__(self, wiz):
+            self.wiz = wiz
+
+        def __enter__(self):
+            self.wiz._suspend_depth = getattr(self.wiz, "_suspend_depth", 0) + 1
+            self.wiz._suspended = True
+
+        def __exit__(self, *a):
+            self.wiz._suspend_depth = max(0, getattr(self.wiz, "_suspend_depth", 1) - 1)
+            if self.wiz._suspend_depth == 0:
+                self.wiz._suspended = False
+
+    def _suspend(self):
+        return ForgeBlueprintWizard._Suspender(self)
+
+    # ---- load / import an existing config ------------------------------------
+    def _on_load_path(self, _):
+        path = self.load_path.value.strip()
+        if not path:
+            self.load_status.value = (
+                "<span style='color:#b00'>Enter a path first.</span>"
+            )
+            return
+        try:
+            cfg = ForgeBlueprint.from_yaml(path)
+        except Exception as exc:
+            self.load_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            self._load_status_is_error = True
+            return
+        self._set_load_status(cfg, self._populate_from(cfg))
+
+    def _on_load_from_catalog(self, _):
+        name = self.load_catalog_dd.value
+        if not name:
+            self.load_status.value = (
+                "<span style='color:#b00'>No catalog blueprint selected.</span>"
+            )
+            self._load_status_is_error = True
+            return
+        try:
+            path = self.catalog.forge_blueprint_path(name)
+        except Exception as exc:
+            self.load_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            self._load_status_is_error = True
+            return
+        # Surface the resolved path, then reuse the free-text load path so
+        # parsing, error handling, and state update stay identical.
+        self.load_path.value = str(path)
+        self._on_load_path(None)
+
+    def _on_upload(self, _change):
+        files = self.upload.value
+        if not files:
+            return
+        item = (
+            files[0] if isinstance(files, (list, tuple)) else next(iter(files.values()))
+        )
+        self._load_bytes(bytes(item["content"]))
+
+    def _load_bytes(self, content: bytes):
+        """Parse + load a forge_blueprint from raw YAML bytes (browser upload path)."""
+        try:
+            cfg = ForgeBlueprint.from_yaml_data(yaml.safe_load(content))
+        except Exception as exc:
+            self.load_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            self._load_status_is_error = True
+            return
+        self._set_load_status(cfg, self._populate_from(cfg))
+
+    def _set_load_status(self, cfg: ForgeBlueprint, loaded_problems):
+        msg = f"<span style='color:#080'>Loaded {cfg.casename}</span>"
+        if loaded_problems:
+            msg += (
+                f" &nbsp;<span style='color:#b00'>⚠ {len(loaded_problems)} invalid "
+                "settings value(s) in the file</span>"
+            )
+        self.load_status.value = msg
+        self._load_status_is_error = False
+
+    # ---- CDR spec selection + mode -------------------------------------------
+    def _on_cdr_spec(self, _change):
+        """Selecting a CdrSpec loads its mode + fields into the box."""
+        if getattr(self, "_suspended", False):
+            return
+        name = self.cdr_dd.value
+        if name == "<custom>":
+            self._cdr_seed = None
+            self._rebuild()
+            return
+        data = self.catalog.cdr_data(name)
+        # Set the mode under _suspend() (its observer would run _apply_cdr_mode
+        # itself) so the single explicit call below is the only apply -- and its
+        # "simple" seeding runs before _populate_cdr_simple overwrites it.
+        with self._suspend():
+            self.cdr_mode_dd.value = data.get("mode", "none")
+        self._apply_cdr_mode()
+        mode = data.get("mode", "none")
+        if mode == "simple":
+            self._populate_cdr_simple(data.get("cdr_forcing") or {})
+        elif mode == "yaml":
+            cdr = data.get("cdr_forcing")
+            self._cdr_forcing = cdr
+            self.cdr_status.value = (
+                f"<span style='color:#080'>✓ CDR loaded from spec '{name}': "
+                f"{len(cdr.get('releases', []))} release(s)</span>"
+                if cdr
+                else ""
+            )
+        elif mode == "netcdf":
+            cff = data.get("cdr_forcing_file")
+            self._cdr_forcing_file = cff
+            if cff:
+                self.cdr_file_path.value = cff.get("location", "")
+                self.cdr_file_status.value = _user_file_status_html(cff)
+        self._cdr_seed = self._cdr_snapshot()
+        self._rebuild()
+
+    def _cdr_snapshot(self) -> dict[str, Any]:
+        """The CDR-defining state at the moment of a catalog CdrSpec pick.
+        Compared against the current state in `_rebuild()` to detect an edit made
+        after selection (`composition.cdr.modified`) -- mirrors
+        `_domain_snapshot`/`_forcing_seed`.
+        """
+        return self._current_cdr_dict()
+
+    def _on_cdr_mode_change(self, _change):
+        if getattr(self, "_suspended", False):
+            return
+        self._apply_cdr_mode()
+
+    def _apply_cdr_mode(self) -> None:
+        """Show/hide the per-mode sub-panel for the current ``cdr_mode_dd`` value,
+        seed defaults on first activation of "simple", clear stale state left
+        over from whichever mode is being left, invalidate the plot cache (a
+        mode switch always changes what would be plotted), and rebuild.
+
+        Called both from ``cdr_mode_dd``'s own ``.observe`` (via
+        ``_on_cdr_mode_change``) and directly wherever ``cdr_mode_dd.value`` is
+        set programmatically under `_suspend()` (e.g. `_populate_from`,
+        `_on_cdr_spec`) -- suspended observers are no-ops, so those callers must
+        invoke this themselves.
+        """
+        old_mode = self._cdr_mode_active
+        mode = self.cdr_mode_dd.value
+        if old_mode == "yaml" and mode != "yaml":
+            self._cdr_forcing = None
+            self._clear_cdr_upload_value()
+            self.cdr_status.value = ""
+        if old_mode == "netcdf" and mode != "netcdf":
+            self._cdr_forcing_file = None
+            self.cdr_file_path.value = ""
+            self.cdr_file_upload.value = ()
+            self.cdr_file_status.value = ""
+        self._cdr_mode_active = mode
+
+        self.cdr_simple_box.layout.display = "" if mode == "simple" else "none"
+        self.cdr_yaml_box.layout.display = "" if mode == "yaml" else "none"
+        self.cdr_netcdf_box.layout.display = "" if mode == "netcdf" else "none"
+        self.cdr_upscaled_box.layout.display = "" if mode == "upscaled" else "none"
+        self.cdr_plot_box.layout.display = (
+            "" if mode in ("simple", "yaml", "netcdf") else "none"
+        )
+        if (
+            mode == "netcdf"
+            and self._cdr_forcing_file is None
+            and not self.cdr_file_status.value
+        ):
+            # CdrSpec rejects mode="netcdf" without cdr_forcing_file; say what to
+            # do here rather than leave only the pydantic dump in the preview.
+            self.cdr_file_status.value = _CDR_FILE_HINT
+
+        if mode == "simple" and old_mode != "simple":
+            # Seed from the grid center / run window at the moment of activation
+            # only -- no live re-sync afterward (see the "simple" panel spec).
+            with self._suspend():
+                self.cdr_simple_lat.value = float(self.grid_w["center_lat"].value)
+                self.cdr_simple_lon.value = float(self.grid_w["center_lon"].value)
+                if self.start.value is not None:
+                    self.cdr_simple_start.value = self.start.value
+                if self.end.value is not None:
+                    self.cdr_simple_end.value = self.end.value
+
+        self._invalidate_cdr_plot_cache()
+        self._rebuild()
+
+    def _cdr_plot_inputs_fingerprint(self) -> tuple[str, tuple]:
+        """A cheap, comparable snapshot of everything the CDR plot depends on:
+        the current CDR selection (mode + compiled/attached config) and the grid
+        geometry the ``rt.CDRForcing`` would be built against.
+        """
+        return (
+            repr(self._current_cdr_dict()),
+            tuple(sorted((k, repr(w.value)) for k, w in self.grid_w.items())),
+        )
+
+    def _invalidate_cdr_plot_cache(self) -> None:
+        """Drop the built ``rt.CDRForcing``/grid and every rendered plot PNG --
+        but only when a plot-affecting input actually changed.
+
+        Hooked into ``_rebuild()`` itself (see its own comment) rather than onto
+        each individual CDR/grid widget -- the file's least-invasive idiom for
+        "any of several unrelated inputs invalidates this": ``_rebuild()`` already
+        fires on every CDR-panel edit, every mode switch (via ``_apply_cdr_mode``),
+        and every grid-geometry edit (``watched``/``_on_grid_kwarg_change`` both
+        end in a rebuild). Because ``_rebuild()`` ALSO fires for edits that can't
+        affect the plot (e.g. the description field), the fingerprint check below
+        skips the clear when nothing plot-affecting changed -- an already-rendered
+        plot survives unrelated edits instead of silently blanking.
+        """
+        fingerprint = self._cdr_plot_inputs_fingerprint()
+        if fingerprint == getattr(self, "_cdr_plot_fingerprint", None):
+            return
+        self._cdr_plot_fingerprint = fingerprint
+        self._cdr_plot_object = None
+        self._cdr_plot_grid = None
+        self._cdr_plot_cache = {}
+        self.cdr_plot_img.value = b""
+        self.cdr_plot_img.layout.display = "none"
+        self.cdr_plot_status.value = ""
+        self.cdr_plot_release_dd.options = []
+        self.cdr_plot_release_dd.layout.display = "none"
+
+    def _current_cdr_dict(self) -> dict[str, Any]:
+        """The current CDR selection as a ``cdr=`` kwarg dict for
+        ``build_forge_blueprint`` (shape matches :class:`CdrSpec`, and --
+        ``cdr_forcing``/``cdr_forcing_file`` always both present, unused ones
+        ``None`` -- matches ``catalog.cdr_data()`` too, so ``_cdr_snapshot()``
+        can compare directly against a freshly-picked catalog entry). Used by
+        ``_gather()``, ``_cdr_snapshot()``, and the plot widget (simple/yaml
+        share this dict's ``cdr_forcing`` as the ``rt.CDRForcing`` kwargs).
+        """
+        mode = self.cdr_mode_dd.value
+        cdr_forcing = None
+        cdr_forcing_file = None
+        if mode == "simple":
+            cdr_forcing = self._simple_cdr_forcing_dict()
+        elif mode == "yaml":
+            cdr_forcing = self._cdr_forcing
+        elif mode == "netcdf":
+            cdr_forcing_file = self._cdr_forcing_file
+        return {
+            "mode": mode,
+            "cdr_forcing": cdr_forcing,
+            "cdr_forcing_file": cdr_forcing_file,
+        }
+
+    def _simple_cdr_forcing_dict(self) -> dict[str, Any]:
+        """Compile the "simple" panel into a roms-tools ``CDRForcing`` kwargs
+        dict: a single tracer-perturbation release, a flat two-point ALK pulse
+        (the same static flux at both the run's start and end) -- see the CDR
+        Overhaul plan's "simple mode compile" note. Values are ISO-8601 strings
+        (not ``datetime`` objects) so the dict stays YAML/JSON-serializable on
+        the blueprint; both ``rt.CDRForcing`` (pydantic) and ``CdrSpec`` parse
+        an ISO string back into a datetime on their own.
+        """
+        start = self.cdr_simple_start.value or self.start.value
+        end = self.cdr_simple_end.value or self.end.value
+        start_iso = (
+            datetime.combine(start, datetime.min.time()).isoformat()
+            if start is not None
+            else None
+        )
+        end_iso = (
+            datetime.combine(end, datetime.min.time()).isoformat()
+            if end is not None
+            else None
+        )
+        flux = float(self.cdr_simple_flux.value)
+        return {
+            "start_time": start_iso,
+            "end_time": end_iso,
+            "releases": [
+                {
+                    "name": self.cdr_simple_name.value,
+                    "lat": float(self.cdr_simple_lat.value),
+                    "lon": float(self.cdr_simple_lon.value),
+                    "depth": float(self.cdr_simple_depth.value),
+                    "hsc": float(self.cdr_simple_hsc.value),
+                    "vsc": float(self.cdr_simple_vsc.value),
+                    "times": [start_iso, end_iso],
+                    "tracer_fluxes": {"ALK": [flux, flux]},
+                    "release_type": "tracer_perturbation",
+                }
+            ],
+        }
+
+    def _populate_cdr_simple(self, cdr_forcing: dict[str, Any]) -> None:
+        """Reverse-derive the "simple" panel's widget values from a compiled CDR
+        forcing dict (the shape ``_simple_cdr_forcing_dict`` produces) -- the
+        load-back half of "simple" mode's round trip.
+        """
+        releases = cdr_forcing.get("releases") or []
+        release = releases[0] if releases else {}
+        with self._suspend():
+            self.cdr_simple_name.value = release.get("name", "my_cdr")
+            self.cdr_simple_lat.value = float(release.get("lat", 0.0))
+            self.cdr_simple_lon.value = float(release.get("lon", 0.0))
+            self.cdr_simple_depth.value = float(release.get("depth", 1.0))
+            self.cdr_simple_hsc.value = float(release.get("hsc", 10.0))
+            self.cdr_simple_vsc.value = float(release.get("vsc", 10.0))
+            fluxes = (release.get("tracer_fluxes") or {}).get("ALK")
+            flux = fluxes[0] if isinstance(fluxes, list) else fluxes
+            self.cdr_simple_flux.value = float(flux) if flux is not None else 2 * 10**6
+            times = release.get("times") or []
+            if times:
+                self.cdr_simple_start.value = datetime.fromisoformat(
+                    str(times[0])
+                ).date()
+                self.cdr_simple_end.value = datetime.fromisoformat(
+                    str(times[-1])
+                ).date()
+
+    # ---- CDR forcing upload ----------------------------------------------------
+    def _on_cdr_upload(self, change):
+        items = change["new"]
+        if not items:
+            return
+        item = (
+            items[0] if isinstance(items, (list, tuple)) else next(iter(items.values()))
+        )
+        content = bytes(item["content"])
+        try:
+            parsed = read_cdr_forcing_yaml(content.decode("utf-8"))
+            # Eager-validate against the real roms-tools class -- the resolver never
+            # constructs a CDRForcing, so a structurally-valid-but-semantically-broken
+            # upload (empty releases, bad time ordering, unknown tracer, an
+            # incompatible roms-tools version) would otherwise pass silently through
+            # _rebuild() and only fail much later, during blueprint processing.
+            import roms_tools as rt
+
+            cdr = rt.CDRForcing(**parsed)
+        except Exception as exc:
+            self._cdr_forcing = None
+            self.cdr_status.value = (
+                f"<span style='color:#b00'>CDR invalid: {type(exc).__name__}: "
+                f"{exc}</span>"
+            )
+            self._rebuild()
+            return
+        self._cdr_forcing = parsed
+        cleared_note = ""
+        if self._cdr_forcing_file is not None:
+            # Mutually exclusive with an attached CDR file (Forcing's own
+            # validator forbids both) -- the upload wins, matching the
+            # attach-clears-upload direction in _attach_cdr_file_from_path.
+            self._cdr_forcing_file = None
+            self.cdr_file_path.value = ""
+            self.cdr_file_upload.value = ()
+            self.cdr_file_status.value = ""
+            cleared_note = "<br><span style='color:#666'>(cleared the attached CDR file -- mutually exclusive)</span>"
+        self.cdr_status.value = (
+            f"<span style='color:#080'>✓ CDR: {len(cdr.releases)} release(s)</span>"
+            f"{cleared_note}"
+        )
+        self._rebuild()
+
+    def _clear_cdr_upload_value(self):
+        """Reset ``cdr_upload.value`` back to its empty state.
+
+        ``FileUpload.value`` is a read-only trait (traitlets raises ``TraitError`` on
+        a plain ``widget.value = ...`` assignment) -- ``set_trait`` is the sanctioned
+        way to write a read-only trait from outside the widget's own JS-driven update
+        path. The empty container's type also differs by ipywidgets major version:
+        a dict in 7.x, a tuple of dicts in 8.x (mirroring the tuple/dict duality
+        `_on_cdr_upload` already handles on read) -- match whatever the widget's
+        current value already is, so this works under either version.
+        """
+        empty = () if isinstance(self.cdr_upload.value, (list, tuple)) else {}
+        self.cdr_upload.set_trait("value", empty)
+
+    def _on_cdr_clear(self, _):
+        self._cdr_forcing = None
+        self._clear_cdr_upload_value()
+        self.cdr_status.value = ""
+        self._rebuild()
+
+    # ---- CDR forcing: user-provided pre-made netCDF ---------------------------
+    def _attach_cdr_file_from_path(self, path_str: str) -> None:
+        self.cdr_file_status.value = "<i>attaching…</i>"
+        try:
+            path = Path(path_str).expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"CDR-forcing file not found: {path}")
+            content_hash = hash_netcdf_contents(path)
+        except Exception as exc:
+            self.cdr_file_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        # Light validation only (never blocks the attach -- the executor is the
+        # hard gate): warn if the file doesn't even look like CDR forcing.
+        warning = ""
+        try:
+            import xarray as xr
+
+            with xr.open_dataset(path) as ds:
+                if "ncdr" not in ds.dims:
+                    warning = (
+                        "<br><span style='color:#b58900'>⚠ no 'ncdr' dimension "
+                        "found -- is this really a CDR-forcing file?</span>"
+                    )
+        except Exception:
+            pass
+        self._cdr_forcing_file = {"location": str(path), "content_hash": content_hash}
+        cleared_note = ""
+        if self._cdr_forcing is not None:
+            # Mutually exclusive with an uploaded CDR YAML (Forcing's own
+            # validator forbids both) -- the file attach wins here.
+            self._cdr_forcing = None
+            self._clear_cdr_upload_value()
+            self.cdr_status.value = ""
+            cleared_note = (
+                "<br><span style='color:#666'>(cleared the uploaded CDR "
+                "YAML -- mutually exclusive)</span>"
+            )
+        self.cdr_file_status.value = (
+            _user_file_status_html(self._cdr_forcing_file) + warning + cleared_note
+        )
+        self._rebuild()
+
+    def _on_cdr_file_attach(self, _btn):
+        path_str = self.cdr_file_path.value.strip()
+        if not path_str:
+            self.cdr_file_status.value = (
+                "<span style='color:#b00'>Enter a path first.</span>"
+            )
+            return
+        # Explicit click always re-hashes -- no dedupe here.
+        self._attach_cdr_file_from_path(path_str)
+
+    def _maybe_attach_cdr_file(self) -> None:
+        """CDR-file twin of `_maybe_attach_grid_file`: attach the typed path on
+        Enter/focus-out unless blank or already attached. CDR mode "netcdf"
+        requires cdr_forcing_file (CdrSpec), so a typed-but-unattached path
+        used to leave the blueprint invalid with no hint as to why.
+        """
+        path_str = self.cdr_file_path.value.strip()
+        if not path_str or _same_attached_file(self._cdr_forcing_file, path_str):
+            return
+        self._attach_cdr_file_from_path(path_str)
+
+    def _on_cdr_file_path_submit(self, _change) -> None:
+        if getattr(self, "_suspended", False):
+            return
+        self._maybe_attach_cdr_file()
+
+    def _on_cdr_file_upload(self, change):
+        items = change["new"]
+        if not items:
+            return
+        item = (
+            items[0] if isinstance(items, (list, tuple)) else next(iter(items.values()))
+        )
+        dest = _stage_uploaded_netcdf(item["name"], bytes(item["content"]))
+        self.cdr_file_path.value = str(dest)  # fires _on_cdr_file_path_submit
+        self._maybe_attach_cdr_file()  # same-name re-upload: value unchanged
+
+    def _on_cdr_file_clear(self, _btn):
+        self._cdr_forcing_file = None
+        self.cdr_file_path.value = ""
+        self.cdr_file_upload.value = ()
+        # Still in "netcdf" mode with nothing attached -> invalid until re-attached.
+        self.cdr_file_status.value = _CDR_FILE_HINT
+        self._rebuild()
+
+    # ---- CDR plotting (WP6) ----------------------------------------------------
+    # The built rt.CDRForcing/grid (self._cdr_plot_object/_cdr_plot_grid) and every
+    # rendered PNG (self._cdr_plot_cache, keyed by (plot_type, release_name)) are
+    # cached on the instance -- invalidated in one place, _rebuild() (see its own
+    # comment and _invalidate_cdr_plot_cache's docstring). Switching plot type or
+    # release therefore re-renders (or reuses a cached PNG) WITHOUT rebuilding --
+    # _on_cdr_plot_option_change/_render_cdr_plot below never call _rebuild().
+    def _build_cdr_forcing_for_plot(self) -> Any:
+        """Build (or return the cached) roms-tools ``CDRForcing`` for the
+        current CDR mode. Raises if the current mode has nothing plottable yet
+        (upscaled/none never reach here -- the plot panel is hidden for them)
+        or the current selection is incomplete (e.g. yaml mode with nothing
+        uploaded).
+        """
+        if self._cdr_plot_object is not None:
+            return self._cdr_plot_object
+        import roms_tools as rt
+
+        mode = self.cdr_mode_dd.value
+        current = self._current_cdr_dict()
+        grid = self._build_grid_from_widgets()
+        if mode == "simple":
+            cdr = rt.CDRForcing(grid=grid, **current["cdr_forcing"])
+        elif mode == "yaml":
+            if not current["cdr_forcing"]:
+                raise ValueError("No CDR forcing uploaded yet.")
+            cdr = rt.CDRForcing(grid=grid, **current["cdr_forcing"])
+        elif mode == "netcdf":
+            cff = current["cdr_forcing_file"]
+            if not cff:
+                raise ValueError("No CDR-forcing netCDF attached yet.")
+            cdr = _cdr_forcing_from_netcdf(cff["location"], grid)
+        else:
+            raise ValueError(f"CDR plotting is not available in mode {mode!r}.")
+        self._cdr_plot_object = cdr
+        self._cdr_plot_grid = grid
+        return cdr
+
+    def _sync_cdr_plot_release_options(self) -> None:
+        """After a (re)build, refresh the release dropdown (shown only when the
+        forcing has more than one release) and hide "Tracer flux (ALK)" for a
+        volume-type forcing (``plot_tracer_flux`` raises for those -- ALK-only
+        per the CDR Overhaul design brief).
+        """
+        cdr = self._cdr_plot_object
+        names = [r.name for r in cdr.releases]
+        is_volume = cdr.release_type == "volume"
+        options = [
+            ("Release locations", "locations"),
+            ("Distribution", "distribution"),
+            *([] if is_volume else [("Tracer flux (ALK)", "tracer_flux")]),
+        ]
+        with self._suspend():
+            self.cdr_plot_release_dd.options = names
+            if names:
+                self.cdr_plot_release_dd.value = names[0]
+            self.cdr_plot_release_dd.layout.display = "" if len(names) > 1 else "none"
+            old_type = self.cdr_plot_type_dd.value
+            self.cdr_plot_type_dd.options = options
+            self.cdr_plot_type_dd.value = (
+                old_type if old_type in dict(options).values() else options[0][1]
+            )
+        if is_volume:
+            self.cdr_plot_status.value = (
+                "<span style='color:#b58900'>⚠ volume-type CDR forcing -- "
+                "tracer flux plotting (ALK-only) isn't available.</span>"
+            )
+
+    def _render_cdr_plot(self) -> None:
+        """Render the current plot-type/release selection, from the cached
+        ``rt.CDRForcing`` and a cached PNG when one already exists for this
+        exact (plot_type, release) pair.
+        """
+        cdr = self._cdr_plot_object
+        if cdr is None:
+            return
+        plot_type = self.cdr_plot_type_dd.value
+        release_name = (
+            self.cdr_plot_release_dd.value if self.cdr_plot_release_dd.options else None
+        )
+        key = (plot_type, release_name if plot_type == "distribution" else None)
+        cached = self._cdr_plot_cache.get(key)
+        if cached is None:
+            import io
+
+            import matplotlib.pyplot as plt
+
+            plt.ioff()
+            # None of plot_locations/plot_distribution/plot_tracer_flux call
+            # plt.show() as of this roms-tools version, but neutralize it
+            # anyway (cheap insurance against a future version that does --
+            # see _on_nest_plot for why this matters under the inline backend).
+            _real_show, plt.show = plt.show, lambda *a, **k: None
+            try:
+                if plot_type == "locations":
+                    cdr.plot_locations()
+                elif plot_type == "distribution":
+                    if release_name is None:
+                        raise ValueError("No release to plot a distribution for.")
+                    cdr.plot_distribution(release_name)
+                elif plot_type == "tracer_flux":
+                    cdr.plot_tracer_flux("ALK")
+                else:
+                    raise ValueError(f"Unknown CDR plot type {plot_type!r}.")
+                fig = plt.gcf()
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+                plt.close(fig)
+            finally:
+                plt.show = _real_show
+                plt.ion()
+            cached = buf.getvalue()
+            self._cdr_plot_cache[key] = cached
+        self.cdr_plot_img.value = cached
+        self.cdr_plot_img.layout.display = ""
+
+    def _on_cdr_plot_generate(self, _btn):
+        self.cdr_plot_status.value = "<i>building…</i>"
+        try:
+            self._build_cdr_forcing_for_plot()
+            # Clear the building marker BEFORE the sync step: _sync may set a
+            # volume-type ⚠ that must survive, and the ✓ below only fills an
+            # empty status (leaving the marker in place would stick forever).
+            self.cdr_plot_status.value = ""
+            self._sync_cdr_plot_release_options()
+            self._render_cdr_plot()
+            if not self.cdr_plot_status.value:
+                self.cdr_plot_status.value = "<span style='color:#080'>✓</span>"
+        except Exception as exc:
+            self._cdr_plot_object = None
+            self._cdr_plot_grid = None
+            self.cdr_plot_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    def _on_cdr_plot_option_change(self, _change):
+        if getattr(self, "_suspended", False):
+            return
+        if self._cdr_plot_object is None:
+            return
+        self._render_cdr_plot()
+
+    def _populate_from(self, cfg: ForgeBlueprint):
+        """Set the widgets from a loaded ForgeBlueprint, then re-resolve once.
+
+        Round-trips the authoring inputs (name / description / run / domain /
+        partitioning / nesting / dt). Any value in the file that differs from what the composed specs
+        would produce is reconstructed as a manual override (so load is non-lossy and
+        the overrides layer is rebuilt), then applied on top in ``_rebuild``.
+
+        Returns any validation problems found in the *loaded file's* model_settings.
+        """
+        # The file's own pinned ucla-roms ref selects the schema variant it was
+        # authored against -- not the (possibly different) currently-selected
+        # model's default. Computed once here and reused below when seeding
+        # self.roms_ref, so the two never drift apart.
+        stored_ref = cfg.code.roms.commit or cfg.code.roms.branch or ""
+        loaded_problems = validate_run_time_sections(
+            cfg.model_settings, roms_ref=stored_ref or None
+        )
+        with self._suspend():
+            # domain dropdown -> custom (the file, not a catalog entry, is authoritative)
+            self.domain_dd.value = "<custom>"
+            if cfg.composition.model.name in self._dd_values(self.model_dd):
+                self.model_dd.value = cfg.composition.model.name
+            self.grid_name.value = cfg.domain.grid_name
+            self.description.value = cfg.description
+            self.name.value = cfg.name
+            self._name_touched = (
+                True  # a loaded name is a deliberate choice, not a default
+            )
+            self.save_path.value = self._default_blueprint_path(cfg.name)
+            self._save_path_touched = True
+            self.start.value = cfg.run.start_date.date()
+            self.end.value = cfg.run.end_date.date()
+            self.model_ref_date.value = cfg.run.model_reference_date.date()
+            gk = cfg.domain.grid_kwargs
+            for k, w in self.grid_w.items():
+                if k in gk:
+                    w.value = gk[k]
+            self.hmin.value = float(gk.get("hmin", 5.0))
+            self.close_narrow_chk.value = bool(gk.get("close_narrow_channels", False))
+            self.mask_shapefile.value = str(gk.get("mask_shapefile") or "")
+            self.scoord_chk.value = any(k in gk for k in _SCOORD)
+            for d, w in self.bnd.items():
+                w.value = bool(getattr(cfg.domain.open_boundaries, d))
+            # A loaded file's boundaries/v_sponge are a deliberate, already-resolved
+            # choice (mirrors _name_touched above), not a default to keep
+            # auto-deriving over -- freeze both as touched. v_sponge falls back to
+            # the model_settings leaf for a pre-domain.v_sponge file (backward
+            # compat: older blueprints only ever wrote it there).
+            self._boundaries_touched = True
+            self._boundaries_derived = False
+            self.derive_status.value = ""
+            loaded_v_sponge = cfg.domain.v_sponge
+            if loaded_v_sponge is None:
+                loaded_v_sponge = (cfg.model_settings.get("v_sponge") or {}).get(
+                    "v_sponge"
+                )
+            if loaded_v_sponge is not None:
+                self.v_sponge.value = float(loaded_v_sponge)
+            self._v_sponge_touched = loaded_v_sponge is not None
+            if cfg.domain.partitioning.n_procs_x is not None:
+                self.npx.value = cfg.domain.partitioning.n_procs_x
+            if cfg.domain.partitioning.n_procs_y is not None:
+                self.npy.value = cfg.domain.partitioning.n_procs_y
+            self.use_pio_chk.value = bool(
+                (cfg.model_settings.get("cppdefs") or {}).get("use_pio", False)
+            )
+            self.auto_tiling_chk.value = cfg.domain.partitioning.auto_tiling
+            loaded_n_cores = cfg.domain.partitioning.n_cores
+            if loaded_n_cores is not None:
+                self.n_cores.value = int(loaded_n_cores)
+            # auto_tiling_chk.observe fires synchronously above regardless of
+            # _suspend() (which only sets a flag other handlers check -- see
+            # _Suspender), so the disabled/visible state is already correct;
+            # call again explicitly for robustness in case that ever changes.
+            self._sync_auto_tiling()
+            self.bgc_dd.value = (
+                "marbl"
+                if bool((cfg.model_settings.get("cppdefs") or {}).get("marbl", True))
+                else "none"
+            )
+            # Show the file's actual pinned ref, falling back to the (now-selected)
+            # model's default when the file matches it exactly. (stored_ref was
+            # already computed above, before the suspend block, to feed the
+            # loaded-file validation with the right schema variant.)
+            default_ref = self._model_default_roms_ref()
+            self.roms_ref.value = (
+                default_ref if stored_ref == default_ref else stored_ref
+            )
+            # Same for MARBL -- code.marbl is absent when the file was saved with
+            # bgc_mode="none", in which case fall back to the model's default so
+            # re-enabling BGC picks the pinned ref back up.
+            stored_marbl = ""
+            if cfg.code.marbl is not None:
+                stored_marbl = cfg.code.marbl.commit or cfg.code.marbl.branch or ""
+            default_marbl = self._model_default_marbl_ref()
+            self.marbl_ref.value = (
+                stored_marbl
+                if stored_marbl and stored_marbl != default_marbl
+                else default_marbl
+            )
+            self.topo_source.value = getattr(
+                cfg.domain.topography_source, "value", cfg.domain.topography_source
+            )
+            self.topo_path.value = cfg.domain.topography_path or ""
+            # Grid file: re-attach from its recorded location (reusing the stored
+            # content_hash, never recomputing it) if the file still exists;
+            # missing/failed reload leaves the grid_file state + locked widgets in
+            # place with the error surfaced -- see _reattach_grid_file.
+            if cfg.domain.grid_file is not None:
+                self._reattach_grid_file(cfg.domain.grid_file)
+            else:
+                self._detach_grid_file()
+            # CDR: a top-level, independently composable section (CdrSpec) -- see
+            # ``self.cdr_mode_dd``/``_apply_cdr_mode``. FileUpload can't be
+            # repopulated with the original file, but the parsed dict persists on
+            # the instance and re-emits via _gather(), so load stays non-lossy.
+            self.cdr_mode_dd.value = cfg.cdr.mode
+            self._apply_cdr_mode()
+            if cfg.cdr.mode == "simple":
+                self._populate_cdr_simple(cfg.cdr.cdr_forcing or {})
+            elif cfg.cdr.mode == "yaml":
+                self._cdr_forcing = cfg.cdr.cdr_forcing or None
+                self._clear_cdr_upload_value()
+                self.cdr_status.value = (
+                    f"<span style='color:#080'>✓ CDR loaded: "
+                    f"{len(self._cdr_forcing.get('releases', []))} release(s)</span>"
+                    if self._cdr_forcing
+                    else ""
+                )
+            elif cfg.cdr.mode == "netcdf":
+                # Trust the stored hash (never recompute); a missing file is a
+                # warning, not a blocker -- Save must still round-trip losslessly.
+                cff = cfg.cdr.cdr_forcing_file
+                if cff is not None:
+                    self._cdr_forcing_file = {
+                        "location": cff.location,
+                        "content_hash": cff.content_hash,
+                    }
+                    self.cdr_file_path.value = cff.location
+                    missing = not Path(cff.location).expanduser().exists()
+                    self.cdr_file_status.value = _user_file_status_html(
+                        self._cdr_forcing_file
+                    ) + (
+                        "<br><span style='color:#b00'>⚠ file not found at this "
+                        "path</span>"
+                        if missing
+                        else ""
+                    )
+                else:
+                    self._cdr_forcing_file = None
+                    self.cdr_file_path.value = ""
+                    self.cdr_file_status.value = _CDR_FILE_HINT
+            # dt: prefer the first-class domain.dt field; fall back to the
+            # model_settings leaf for a pre-domain.dt file (backward compat --
+            # older blueprints only ever wrote it there).
+            loaded_dt = cfg.domain.dt
+            if loaded_dt is None:
+                loaded_dt = (cfg.model_settings.get("time_stepping") or {}).get("dt")
+            if loaded_dt is not None:
+                self.dt.value = float(loaded_dt)
+            self._populate_nesting(cfg)
+            # forcing: reconstruct the editor from the loaded sources. Forcing/output
+            # dropdowns always need a valid catalog selection (no more "model_default"
+            # fallback value); fall back to the first available option for an older
+            # file recorded with origin="model_default" or an unknown/missing name.
+            fname = cfg.composition.forcing.name
+            _forcing_values = self._dd_values(self.forcing_dd)
+            if fname in _forcing_values:
+                self.forcing_dd.value = fname
+            elif _forcing_values:
+                self.forcing_dd.value = _forcing_values[0]
+            self._build_forcing_editor(self._sources_to_inputs(cfg))
+            if self.parent_enable.value:
+                # A loaded file may (inconsistently) carry boundary forcing for a
+                # child grid -- _gather() strips it either way, but clear the
+                # visible rows too so the editor doesn't show stale entries.
+                self._clear_boundary_forcing()
+            # Seed forcing.modified against the *catalog* spec (not the just-loaded
+            # sources) so a deviation is detected the same way as during authoring --
+            # a file that matches its recorded catalog forcing loads as unmodified;
+            # one that was hand-edited before saving loads as modified.
+            try:
+                fi, _cdr = _split_forcing_data(
+                    self.catalog.forcing_data(self.forcing_dd.value)
+                )
+                self._forcing_seed = _ForcingEditor(
+                    self.W, fi, on_change=lambda: None
+                ).gather()
+            except Exception:
+                self._forcing_seed = None
+            # output spec selection
+            oname = cfg.composition.output.name
+            _output_values = self._dd_values(self.output_dd)
+            if oname in _output_values:
+                self.output_dd.value = oname
+            elif _output_values:
+                self.output_dd.value = _output_values[0]
+            # CDR spec selection: unlike forcing/output, "<custom>" (no catalog
+            # entry) is a normal, common state (mode="none" is the default) --
+            # fall back to "<custom>"/no seed rather than the first catalog
+            # entry. The mode/fields above already reflect the loaded file's
+            # actual CDR state; only the seed is (re)computed here, against the
+            # catalog spec (not the just-loaded values) so a file that matches
+            # its recorded CdrSpec loads as unmodified and a hand-edited one
+            # loads as modified -- mirrors the forcing_seed block above.
+            cname = cfg.composition.cdr.name
+            _cdr_values = self._dd_values(self.cdr_dd)
+            if cname is not None and cname in _cdr_values:
+                self.cdr_dd.value = cname
+                try:
+                    seed = self.catalog.cdr_data(cname)
+                    self._cdr_seed = {
+                        k: v for k, v in seed.items() if k != "description"
+                    }
+                except Exception:
+                    self._cdr_seed = None
+            else:
+                self.cdr_dd.value = "<custom>"
+                self._cdr_seed = None
+        # Reconstruct the overrides layer = diff(loaded model_settings, composed). This
+        # captures every manual deviation regardless of the file's recorded provenance,
+        # making load fully non-lossy.
+        try:
+            composed = build_forge_blueprint(**self._gather()).model_settings
+            self._overrides = _diff_overrides(cfg.model_settings, composed)
+        except Exception:
+            self._overrides = {}
+        self._rebuild()
+        return loaded_problems
+
+    # ---- gather + resolve ----------------------------------------------------
+    def _gather(self) -> dict[str, Any]:
+        gk: dict[str, Any] = {}
+        if self._grid_file is None:
+            for k in _GRID_INT:
+                gk[k] = int(self.grid_w[k].value)
+            for k in _GRID_FLOAT:
+                gk[k] = float(self.grid_w[k].value)
+            if self.scoord_chk.value:
+                for k in _SCOORD:
+                    gk[k] = float(self.grid_w[k].value)
+            # hmin + close_narrow_channels + mask_shapefile injected into grid_kwargs
+            if self.hmin.value != 5.0:
+                gk["hmin"] = float(self.hmin.value)
+            if self.close_narrow_chk.value:
+                gk["close_narrow_channels"] = True
+            if self.mask_shapefile.value.strip():
+                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        # else: a user-provided grid file forbids the generation-geometry keys
+        # above alongside it (Domain._grid_file_excludes_generation_geometry) --
+        # grid_kwargs stays {} and grid_file=/grid= (below) carry the grid instead.
+        kw = dict(
+            model_dir=self.catalog.model_dir(self.model_dd.value),
+            grid_name=self.grid_name.value,
+            grid_kwargs=gk,
+            open_boundaries={d: w.value for d, w in self.bnd.items()},
+            partitioning=(
+                {"auto_tiling": True, "n_cores": int(self.n_cores.value)}
+                if self.auto_tiling_chk.value
+                else {
+                    "n_procs_x": int(self.npx.value),
+                    "n_procs_y": int(self.npy.value),
+                }
+            ),
+            start_date=datetime.combine(self.start.value, datetime.min.time()),
+            end_date=datetime.combine(self.end.value, datetime.min.time()),
+            description=self.description.value,
+            # Untouched: always pass None so the resolver recomputes a fresh default
+            # (self.name.value may still hold the *previous* rebuild's backfilled
+            # default -- reusing it here would freeze it instead of tracking inputs).
+            name=(self.name.value.strip() or None) if self._name_touched else None,
+            dt=float(self.dt.value),
+            # Untouched: pass None so the resolver derives a fresh default from
+            # the current grid (see _rebuild, which mirrors it back into the
+            # widget for live display); touched: the user's/loaded value wins.
+            v_sponge=float(self.v_sponge.value) if self._v_sponge_touched else None,
+        )
+        if self.topo_path.value.strip():  # blank = derive default topography path
+            kw["topography_path"] = self.topo_path.value.strip()
+        kw["topography_source"] = self.topo_source.value
+        kw["use_pio"] = self.use_pio_chk.value
+        kw["bgc_mode"] = self.bgc_dd.value
+        if self.roms_ref.value.strip():
+            kw["roms_ref"] = self.roms_ref.value.strip()
+        if self.marbl_ref.value.strip():
+            kw["marbl_ref"] = self.marbl_ref.value.strip()
+        if self.model_ref_date.value and self.model_ref_date.value != date(2000, 1, 1):
+            kw["model_reference_date"] = datetime.combine(
+                self.model_ref_date.value, datetime.min.time()
+            )
+        if self._grid_file is not None:
+            kw["grid_file"] = self._grid_file
+            # Pass the already-loaded grid through to skip re-reading/re-hashing
+            # the file (the resolver accepts a pre-built `grid=` alongside
+            # `grid_file=` for exactly this -- see build_forge_blueprint). Omitted
+            # (not None) when a reattach failed to reload -- the resolver then
+            # reloads from `grid_file["location"]` itself and raises the same
+            # "file not found", surfacing loudly via _rebuild()'s Invalid status.
+            if self._grid_file_grid is not None:
+                kw["grid"] = self._grid_file_grid
+        # Nesting is unsupported alongside a user-provided grid file (see
+        # Domain._grid_file_excludes_generation_geometry) -- omit both blocks
+        # while attached even if the (now-disabled) checkboxes are still checked.
+        if self.nest_enable.value and self._grid_file is None:
+            ck: dict[str, Any] = {}
+            for k in _GRID_INT:
+                ck[k] = int(self.child_w[k].value)
+            for k in _GRID_FLOAT + _SCOORD:
+                ck[k] = float(self.child_w[k].value)
+            ck.update(
+                _nested_topo_kwargs(
+                    self.child_topo_source.value, self.child_topo_path.value
+                )
+            )
+            kw["grid_kwargs_child"] = ck
+            kw["metadata_child"] = {"period": float(self.nest_period.value)}
+            if self.nest_pressure_fluxes.value:
+                kw["nesting_include_pressure_fluxes"] = True
+        if self.parent_enable.value and self._grid_file is None:
+            pk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                pk[k] = int(self.parent_w[k].value)
+            for k in _GRID_FLOAT + _SCOORD:
+                pk[k] = float(self.parent_w[k].value)
+            pk.update(
+                _nested_topo_kwargs(
+                    self.parent_topo_source.value, self.parent_topo_path.value
+                )
+            )
+            kw["grid_kwargs_parent"] = pk
+        # forcing/output are always required now (no more model-default fallback).
+        if self._forcing_editor is None:
+            raise RuntimeError("_gather called before the forcing editor was built")
+        kw["forcing_inputs"] = self._forcing_editor.gather()
+        if self.parent_enable.value and self._grid_file is None:
+            # Durable guarantee (authoritative, independent of forcing-editor UI
+            # state): a child grid (has a parent) receives its boundary values
+            # from the parent's nesting.nc extraction, not reanalysis boundary
+            # forcing. Open-boundary edge flags are untouched -- the edges stay
+            # open, just fed differently. `None` (not `[]`) is "no boundary
+            # section at all" under the new singular BoundaryForcing schema.
+            kw["forcing_inputs"]["forcing"]["boundary"] = None
+        kw["output_settings"] = self._output_settings()
+        kw["composition"] = self._composition()
+        kw["cdr"] = self._current_cdr_dict()
+        return kw
+
+    def _populate_nesting(self, cfg: ForgeBlueprint):
+        """Set the nesting widgets from a loaded config (called inside _suspend)."""
+        child = cfg.domain.grid_kwargs_child
+        self.nest_enable.value = child is not None
+        if child:
+            for k, w in self.child_w.items():
+                if k in child:
+                    w.value = child[k]
+            self._set_nested_topo_widgets("child", child)
+            period = (cfg.domain.metadata_child or {}).get("period")
+            if period is not None:
+                self.nest_period.value = float(period)
+        self.nest_pressure_fluxes.value = bool(
+            cfg.domain.nesting_include_pressure_fluxes
+        )
+        parent = cfg.domain.grid_kwargs_parent
+        self.parent_enable.value = parent is not None
+        if parent:
+            for k, w in self.parent_w.items():
+                if k in parent:
+                    w.value = parent[k]
+            self._set_nested_topo_widgets("parent", parent)
+
+    def _rebuild(self, *_):
+        if getattr(self, "_suspended", False):
+            return
+        # CDR plot cache: _rebuild() is the one hook that reliably fires for
+        # every CDR-panel edit, every mode switch, and every grid-geometry edit
+        # (see _invalidate_cdr_plot_cache's own docstring for why this spot was
+        # chosen over a bespoke .observe on each CDR/grid widget).
+        self._invalidate_cdr_plot_cache()
+        # Captured before self.config is reassigned below -- used to detect a
+        # real rename (vs. an unrelated edit re-running _rebuild) for the
+        # save_path filename re-sync further down.
+        prev_name = self.config.name if self.config is not None else None
+        self.preview.clear_output(wait=True)
+        # self.validation reflects the *last successful* resolve; every early
+        # return below (missing dates, a build/validation exception) leaves a
+        # stale ✓/⚠ message sitting under self.derived's fresh error otherwise
+        # -- clear it once up front so only the success path below re-sets it.
+        self.validation.value = ""
+        if self.start.value is None or self.end.value is None:
+            self.config = None
+            self.derived.value = "<i>Set start and end dates…</i>"
+            self.download_link.value = ""
+            self.download_link_review.value = ""
+            self._update_status(None)
+            return
+        try:
+            cfg = build_forge_blueprint(**self._gather())
+        except Exception as exc:  # validation or input error → show, don't crash
+            self.config = None
+            self.download_link.value = ""
+            self.download_link_review.value = ""
+            with self.preview:
+                print(f"{type(exc).__name__}: {exc}")
+            error = f"{type(exc).__name__}: {exc}".splitlines()[0][:200]
+            self._update_status(None, error=error)
+            return
+
+        # v_sponge is cheap (pure arithmetic on grid spacing, no grid build) --
+        # keep it live-derived in the widget whenever untouched, by reading back
+        # what the resolver just computed. Under _suspend() so this programmatic
+        # write doesn't itself flip _v_sponge_touched (see _on_v_sponge_edit).
+        if not self._v_sponge_touched:
+            with self._suspend():
+                self.v_sponge.value = float(cfg.domain.v_sponge)
+
+        # Advanced settings editor: every section is editable. The resolver composes
+        # a baseline from the specs; the user's manual edits are a sparse overrides
+        # layer applied on top (effective = composed ⊕ overrides). The editor is
+        # rebuilt when the *model* changes (its field set depends on the model) or
+        # when the effective ucla-roms ref crosses a schema boundary (e.g. editing
+        # the roms_ref override across the 0.5.0, 0.6.0, or 0.7.0 line with the
+        # same model selected) -- see run_time_settings_for_ref /
+        # RunTimeSettingsV0_5_0 / RunTimeSettingsV0_6_0 / RunTimeSettingsV0_7_0.
+        composed = cfg.model_settings
+        # Computed once per rebuild (each call re-reads the ModelSpec YAML) and
+        # reused for the validation call below.
+        effective_roms_ref = self._effective_roms_ref()
+        settings_cls = _wizard_settings_cls_for_ref(effective_roms_ref)
+        if (
+            self.editor is None
+            or self._editor_model != self.model_dd.value
+            or self._editor_settings_cls is not settings_cls
+        ):
+            self.editor = _SettingsEditor(
+                self.W,
+                composed,
+                on_edit=self._on_editor_edit,
+                settings_cls=settings_cls,
+            )
+            self._editor_model = self.model_dd.value
+            self._editor_settings_cls = settings_cls
+            self.editor_box.children = [self.editor.accordion]
+
+        effective = _apply_overrides(composed, self._overrides)
+        self._syncing = True
+        try:
+            self.editor.sync(effective)  # display effective; don't re-record as edits
+        finally:
+            self._syncing = False
+
+        # composition.*.modified: "did the user deviate from what the catalog spec
+        # seeded" -- editing then reverting clears the flag. Model/output share the
+        # accordion overrides layer (a true value-diff via _diff_overrides, so a
+        # no-op edit never counts); domain/forcing are widget-based specs compared
+        # against a snapshot captured at the moment of the last catalog pick.
+        deviations = _diff_overrides(effective, composed)
+        # model_settings-level deviations (accordion overrides) plus the three
+        # per-run toggles that live outside model_settings entirely (use_pio,
+        # bgc_mode, roms_ref) -- these are resolver kwargs, not settings leaves, so
+        # _diff_overrides can never see them (see _model_owned_settings /
+        # _CPPDEFS_DERIVED_LEAVES). Without this, flipping PIO or editing the roms
+        # ref and saving the blueprint (without pressing "Save as new spec") would
+        # silently record composition.model.modified=False.
+        declared = self._model_spec_declared()
+        spec_deviation = (
+            self.use_pio_chk.value != declared["use_pio"]
+            or self.bgc_dd.value != declared["bgc_mode"]
+            or bool(
+                (ref := self.roms_ref.value.strip()) and ref != declared["roms_ref"]
+            )
+            or bool(
+                (mref := self.marbl_ref.value.strip()) and mref != declared["marbl_ref"]
+            )
+        )
+        model_modified = (
+            any(not _is_output_key(s, f) for s, f in deviations) or spec_deviation
+        )
+        output_modified = any(_is_output_key(s, f) for s, f in deviations)
+        domain_modified = (
+            self.domain_dd.value != "<custom>"
+            and self._domain_seed is not None
+            and self._domain_snapshot() != self._domain_seed
+        )
+        forcing_modified = (
+            self._forcing_seed is not None
+            and self._forcing_editor.gather() != self._forcing_seed
+        )
+        cdr_modified = (
+            self.cdr_dd.value != "<custom>"
+            and self._cdr_seed is not None
+            and self._cdr_snapshot() != self._cdr_seed
+        )
+
+        comp = cfg.composition.model_copy(
+            update={
+                "overrides": _overrides_nested(self._overrides),
+                "model": cfg.composition.model.model_copy(
+                    update={"modified": model_modified}
+                ),
+                "domain": cfg.composition.domain.model_copy(
+                    update={"modified": domain_modified}
+                ),
+                "forcing": cfg.composition.forcing.model_copy(
+                    update={"modified": forcing_modified}
+                ),
+                "cdr": cfg.composition.cdr.model_copy(
+                    update={"modified": cdr_modified}
+                ),
+                "output": cfg.composition.output.model_copy(
+                    update={"modified": output_modified}
+                ),
+            }
+        )
+        cfg = cfg.model_copy(update={"model_settings": effective, "composition": comp})
+
+        self.config = cfg
+        # A validly-resolving config means whatever state (fixed dropdowns, a
+        # corrected field, ...) got us here has superseded any earlier failed
+        # Load -- don't leave that stale red error sitting around forever. But
+        # load_status also carries a load *success* message (_set_load_status,
+        # possibly with an amber "N invalid settings value(s)" warning found
+        # nowhere else in the UI) -- only clear it when it's currently holding
+        # an error, never a success message.
+        if self._load_status_is_error:
+            self.load_status.value = ""
+            self._load_status_is_error = False
+        # Backfill the Export name/save-path fields with the current derived default
+        # until the user edits either -- their edit "locks in" that field (see
+        # _on_name_change/_on_save_path_change). Under _suspend() so these
+        # programmatic writes don't themselves flip the touched flags or recurse.
+        if not self._name_touched or not self._save_path_touched:
+            with self._suspend():
+                if not self._name_touched:
+                    self.name.value = cfg.name
+                if not self._save_path_touched:
+                    self.save_path.value = self._default_blueprint_path(cfg.name)
+        # Independent of the backfill above (and of _name_touched): the derived
+        # name can also change from a grid/procs/model edit with Name left on
+        # auto-derive but Save-to customized to a specific directory -- that
+        # combination skips the backfill (save_path IS touched) entirely, so
+        # without this the filename would never re-sync. Re-sync only on a
+        # genuine rename, and only when the current filename still exactly
+        # tracks the *previous* derived name (i.e. the user hasn't customized
+        # the filename itself) -- preserves the user's directory and any
+        # deliberately-custom filename. Under _suspend() so this doesn't
+        # itself flip _save_path_touched or recurse.
+        if (
+            self._save_path_touched
+            and prev_name is not None
+            and cfg.name != prev_name
+            and Path(self.save_path.value).name == f"{prev_name}.forge_blueprint.yaml"
+        ):
+            with self._suspend():
+                self.save_path.value = str(
+                    Path(self.save_path.value).parent
+                    / f"{cfg.name}.forge_blueprint.yaml"
+                )
+        self.download_link.value = self._download_html(
+            cfg, caption="Download blueprint"
+        )
+        self.download_link_review.value = self._download_html(cfg)
+        # Surface (never silently ship) provisional open-boundary defaults: the
+        # checkboxes currently reflect whatever's live, but that's only a real
+        # mask-derived value once _boundaries_derived is True or the user has
+        # touched them -- see _ensure_boundaries_derived for the Save/Run
+        # guarantee. Only fills a *blank* status -- an actual derive/error
+        # message (set by _on_derive_domain_properties) stays visible instead
+        # of being clobbered by this generic warning on every rebuild.
+        if (
+            not self._boundaries_touched
+            and not self._boundaries_derived
+            and not self.derive_status.value
+        ):
+            self.derive_status.value = (
+                "<span style='color:#b58900'>⚠ not derived yet</span>"
+            )
+        # Suppressed for the same reason as _wizard_settings_cls_for_ref above --
+        # _rebuild runs on every keystroke, including typing into the roms_ref
+        # override box, so a non-semver ref's UserWarning would otherwise spam.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            problems = validate_run_time_sections(
+                cfg.model_settings, roms_ref=effective_roms_ref
+            )
+        if problems:
+            self.validation.value = components.banner(
+                "err",
+                "<b>Settings validation:</b><br>"
+                + "<br>".join(f"&nbsp;&nbsp;{p}" for p in problems[:10]),
+            )
+        else:
+            self.validation.value = components.banner(
+                "ok", "<b>Blueprint is valid.</b> All settings pass validation."
+            )
+        comp = cfg.composition
+        self.derived.value = (
+            f"<b>name</b>: <code>{cfg.name}</code> &nbsp; "
+            f"<b>casename</b>: <code>{cfg.casename}</code><br>"
+            f"<b>composition</b>: model=<code>{comp.model.name}</code> ({comp.model.origin}), "
+            f"domain=<code>{comp.domain.name or '—'}</code> ({comp.domain.origin}), "
+            f"forcing ({comp.forcing.origin})"
+        )
+        with self.preview:
+            print(cfg.to_yaml_str())
+        self._update_status(cfg)
+
+    def _forcing_summary(self, cat: str) -> str:
+        """A short (<= 60 char) summary of the current state of forcing
+        category ``cat``, for its accordion title (see `_update_status`).
+        """
+        fe = self._forcing_editor
+        if fe is None:
+            return ""
+        if cat in ("initial_conditions", "boundary"):
+            is_ic = cat == "initial_conditions"
+            name_w = fe.ic_name if is_ic else fe.boundary_name
+            path_w = fe.ic_path if is_ic else fe.boundary_path
+            none_val = _IC_NONE if is_ic else _BOUNDARY_NONE
+            if name_w.value == none_val:
+                summary = "none"
+            else:
+                loc = "custom path" if path_w.value.strip() else "default path"
+                summary = f"{name_w.value} · {loc}"
+        else:
+            names = [row["name"].value for row in fe._rows.get(cat, [])]
+            summary = " · ".join(names) if names else "none"
+        return summary[:60]
+
+    def _retitle_advanced_editor(self) -> None:
+        """Refresh each Advanced-settings pane's accordion title with its field
+        count and how many of its fields carry a manual override (see
+        `_SettingsEditor._pane_sections`/`_section_fields`).
+        """
+        editor = self.editor
+        if editor is None:
+            return
+        for i, (title, sections) in enumerate(editor._pane_sections.items()):
+            fields_by_section = [editor._section_fields.get(s, []) for s in sections]
+            n_fields = sum(len(fields) for fields in fields_by_section)
+            pane_keys = {
+                (s, f) for s, fields in zip(sections, fields_by_section) for f in fields
+            }
+            n_mod = sum(1 for k in self._overrides if k in pane_keys)
+            editor.accordion.set_title(
+                i,
+                components.accordion_title(
+                    title,
+                    f"{n_fields} settings",
+                    f"{n_mod} modified" if n_mod else "all defaults",
+                ),
+            )
+
+    def _update_status(
+        self, cfg: ForgeBlueprint | None, error: str | None = None
+    ) -> None:
+        """Refresh the sticky bar, per-card status chips, and the forcing/advanced
+        accordion titles from the outcome of a `_rebuild` call.
+
+        Called at the end of every `_rebuild` path: on success with the
+        resolved ``cfg``; on a missing-dates or build/validation failure with
+        ``cfg=None`` (and, for a real exception, a one-line ``error``
+        description that becomes `derived`'s banner).
+        """
+        valid = cfg is not None
+        if error is not None:
+            self.derived.value = components.banner(
+                "err", f"<b>Invalid blueprint.</b> {error}"
+            )
+
+        model_name = self.model_dd.value or "—"
+        step_links = "".join(
+            f"<a class='step' href='#forge-sec-{key}'>{i} {title}</a>"
+            for i, (key, title) in enumerate(_STICKY_STEPS, start=1)
+        )
+        if cfg is not None:
+            domain_label = cfg.composition.domain.name or "custom"
+            summary = (
+                f"Model <b>{model_name}</b> &middot; "
+                f"Domain <b>{domain_label}</b> ({cfg.composition.domain.origin}) "
+                f"&middot; Run <b>{self.start.value} &rarr; {self.end.value}</b>"
+            )
+            status_chip = components.chip("● Valid", "ok")
+        else:
+            summary = f"Model <b>{model_name}</b>"
+            status_chip = components.chip("● Invalid", "warn")
+        # `sp` (flex:1, see WIZARD_CSS) eats the remaining width so the status
+        # chip sits at the row's true right edge, next to the download button.
+        self.sticky_bar.value = (
+            f"{step_links}<span class='summary'>{summary}</span>"
+            "<span class='sp'></span>"
+            f"{status_chip}"
+        )
+
+        chips = self.card_chips
+        complete_or_invalid = (
+            components.chip("● Complete", "ok")
+            if valid
+            else components.chip("● Invalid", "warn")
+        )
+        chips["model"].value = complete_or_invalid
+        chips["run"].value = complete_or_invalid
+        chips["review"].value = (
+            components.chip("● Ready", "ok")
+            if valid
+            else components.chip("● Invalid", "warn")
+        )
+        if not self._boundaries_derived and not self._boundaries_touched:
+            n = 1 + (1 if not self._v_sponge_touched else 0)
+            chips["grid"].value = components.chip(f"● {n} fields to check", "warn")
+        else:
+            chips["grid"].value = components.chip("● Complete", "ok")
+        forcing_modified = bool(cfg is not None and cfg.composition.forcing.modified)
+        chips["forcing"].value = (
+            components.chip("● Modified", "info")
+            if forcing_modified
+            else components.chip("At preset defaults", "def")
+        )
+        chips["advanced"].value = (
+            components.chip(f"● {len(self._overrides)} modified", "info")
+            if self._overrides
+            else components.chip("All defaults", "def")
+        )
+
+        preset_name = (
+            getattr(self.forcing_dd, "label", None) or self.forcing_dd.value or "—"
+        )
+        self.forcing_banner.value = components.banner(
+            "info",
+            f"Defaults come from the forcing preset <b>{preset_name}</b>. Expand "
+            "a section only to override its source or options; collapsed "
+            "sections show their current values.",
+        )
+        if self._forcing_editor is not None:
+            self._forcing_editor.retitle(self._forcing_summary)
+        self._retitle_advanced_editor()
+
+    @staticmethod
+    def _download_html(cfg: ForgeBlueprint, caption: str | None = None) -> str:
+        """A data-URI download link for the resolved YAML — works in the browser
+        (Voilà / JupyterLab) with no server-side file access.
+
+        ``caption`` overrides the link text with a fixed, short caption (the
+        filename moves into ``title=`` instead) -- used by the sticky bar,
+        which has no room for a full filename. The default keeps the Review
+        card's "Download <code>fname</code>" copy.
+        """
+        payload = cfg.to_yaml_str().encode("utf-8")
+        b64 = base64.b64encode(payload).decode("ascii")
+        fname = f"{cfg.name}.forge_blueprint.yaml"
+        if caption is None:
+            text, title_attr = f"Download <code>{fname}</code>", ""
+        else:
+            text, title_attr = caption, f' title="{fname}"'
+        return (
+            f'⬇ <a class="forge-dl-btn" download="{fname}"{title_attr} '
+            f'href="data:text/yaml;base64,{b64}">'
+            f"{text}</a>"
+        )
+
+    # ---- actions -------------------------------------------------------------
+    def _on_compute_dt(self, _):
+        self.dt_status.value = "<i>computing…</i>"
+        try:
+            kw = self._gather()
+            kw["dt"] = None  # force CFL computation (builds the grid via roms_tools)
+            cfg = build_forge_blueprint(**kw)
+            self.dt.value = float(cfg.model_settings["time_stepping"]["dt"])
+            self.dt_status.value = (
+                f"<span style='color:#080'>dt = {self.dt.value:g} s (CFL)</span>"
+            )
+        except Exception as exc:
+            self.dt_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    def _build_grid_from_widgets(self) -> Any:
+        """Build a ``roms_tools.Grid`` from the current (main-domain) grid kwargs
+        -- or return the already-loaded grid file's grid, when one is attached.
+
+        Shared by the plot button, "Derive from grid", and the export-time
+        safety net -- the only three places that pay the cost of an actual
+        grid build (the live preview / ``_rebuild`` never does, so typing in
+        the grid fields stays instant).
+        """
+        if self._grid_file_grid is not None:
+            return self._grid_file_grid
+        if self._grid_file is not None:
+            # Attached but not currently loaded (a reattach failed -- e.g. the
+            # file went missing since it was recorded -- see _reattach_grid_file).
+            # Must not silently fall through to building a grid from whatever
+            # stale/default values happen to be sitting in the (locked, but
+            # still holding old values) grid_w widgets -- that would plot/derive
+            # boundaries and v_sponge from a completely different, wrong grid
+            # with no indication anything is amiss.
+            raise RuntimeError(
+                "grid_file is attached but failed to (re)load -- see "
+                "grid_file_status; re-attach a valid file first."
+            )
+
+        from roms_tools import Grid
+
+        gk: dict[str, Any] = {}
+        for k in _GRID_INT:
+            gk[k] = int(self.grid_w[k].value)
+        for k in _GRID_FLOAT:
+            gk[k] = float(self.grid_w[k].value)
+        if self.scoord_chk.value:
+            for k in _SCOORD:
+                gk[k] = float(self.grid_w[k].value)
+        if self.hmin.value != 5.0:
+            gk["hmin"] = float(self.hmin.value)
+        if self.close_narrow_chk.value:
+            gk["close_narrow_channels"] = True
+        if self.mask_shapefile.value.strip():
+            gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+        topo, self._grid_build_topo_note = self._this_grid_plot_topography()
+        if topo is not None:
+            gk["topography_source"] = topo
+        return Grid(**gk)
+
+    def _this_grid_plot_topography(self) -> tuple[dict[str, str] | None, str]:
+        """This grid's ``topography_source`` for a wizard-side build, or the
+        ETOPO5 fallback + note when the file isn't available here.
+        """
+        return _plot_topography_source(self.topo_source.value, self.topo_path.value)
+
+    def _nested_plot_topography(self, which: str) -> tuple[dict[str, str] | None, str]:
+        """``which`` in ("parent", "child"): that grid's effective topography
+        (its own widgets, or this grid's when set to inherit) for a wizard-side
+        build, with the same local-availability fallback.
+        """
+        name, path = _effective_nested_topo(
+            getattr(self, f"{which}_topo_source").value,
+            getattr(self, f"{which}_topo_path").value,
+            self.topo_source.value,
+            self.topo_path.value,
+        )
+        topo, note = _plot_topography_source(name, path)
+        return topo, note.replace("(plotted", f"({which} grid plotted", 1)
+
+    def _apply_grid_derived_properties(self, grid: Any) -> None:
+        """Set any untouched v_sponge/open-boundary values from a built grid.
+
+        Boundaries come from roms-tools' own ``check_and_set_boundaries`` (the
+        same logic ``rt.Grid``/downstream tools use to infer active edges from
+        the land mask); v_sponge from the existing grid-spacing formula. Only
+        overwrites properties the user hasn't touched -- see the module-level
+        touched/derived state-machine notes on ``_v_sponge_touched`` etc.
+        """
+        from roms_tools.setup.utils import check_and_set_boundaries
+
+        from cstar_forge.forge.util import compute_v_sponge_from_grid
+
+        mask = grid.ds.get("mask_rho")
+        if mask is None:
+            raise ValueError(
+                "grid.ds has no 'mask_rho' -- cannot derive open boundaries from it"
+            )
+        boundaries = check_and_set_boundaries(None, mask)
+        with self._suspend():
+            if not self._boundaries_touched:
+                for d, w in self.bnd.items():
+                    if d in boundaries:
+                        w.value = bool(boundaries[d])
+            if not self._v_sponge_touched:
+                self.v_sponge.value = compute_v_sponge_from_grid(grid.size_x, grid.nx)
+        self._boundaries_derived = True
+
+    def _on_derive_domain_properties(self, _):
+        """Handle the "Derive from grid" button: build the grid once and
+        refresh any untouched v_sponge/open-boundary values from it.
+        """
+        self.derive_status.value = "<i>building grid…</i>"
+        try:
+            grid = self._build_grid_from_widgets()
+            self._apply_grid_derived_properties(grid)
+            self.derive_status.value = (
+                "<span style='color:#080'>✓ derived from grid</span>"
+            )
+        except Exception as exc:
+            self.derive_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+        self._rebuild()
+
+    def _ensure_boundaries_derived(self) -> bool:
+        """Export-time safety net for Save/Save-domain/Run: if boundaries are
+        untouched and have never been derived against the current grid, force
+        one grid build now so those actions can never ship the provisional
+        checkbox defaults (east+north) silently.
+
+        Returns True if boundaries are known-good (touched, already derived, or
+        just successfully derived here); False if an explicit derive was needed
+        and failed (see ``derive_status`` for the error) -- callers MUST abort
+        rather than proceed and silently persist the provisional defaults.
+
+        The passive browser download link (a plain data-URI anchor, regenerated
+        on every ``_rebuild``) has no click-time Python hook to apply this to --
+        forcing a grid build on every edit would reintroduce the UI-stall this
+        design explicitly avoids. Its freshness is only as good as the last
+        explicit derive/rebuild; ``derive_status`` surfaces that instead of
+        shipping it silently.
+        """
+        if self._boundaries_touched or self._boundaries_derived:
+            return True
+        self._on_derive_domain_properties(None)
+        return self._boundaries_derived
+
+    def _on_plot(self, _):
+        """Build a roms_tools.Grid from the current grid kwargs and render it."""
+        self.plot_status.value = "<i>building grid…</i>"
+        try:
+            import io
+
+            import matplotlib.pyplot as plt
+
+            plt.ioff()
+            try:
+                grid = self._build_grid_from_widgets()
+                grid.plot()
+                fig = plt.gcf()
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+                plt.close(fig)
+            finally:
+                plt.ion()
+
+            buf.seek(0)
+            self.plot_img.value = buf.read()
+            self.plot_img.layout.display = ""
+            self.plot_status.value = "<span style='color:#080'>✓</span>" + getattr(
+                self, "_grid_build_topo_note", ""
+            )
+        except Exception as exc:
+            self.plot_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    def _on_nest_plot(self, _):
+        """Build the parent+child roms_tools Grids and render ``plot_nesting``
+        (parent+child boundary overlay) into the Nesting section's own plot,
+        separate from the parent-only plot in the Grid section.
+        """
+        self.nest_plot_status.value = "<i>building grids…</i>"
+        try:
+            import io
+
+            import matplotlib.pyplot as plt
+            from roms_tools import Grid, plot_nesting
+
+            gk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                gk[k] = int(self.grid_w[k].value)
+            for k in _GRID_FLOAT:
+                gk[k] = float(self.grid_w[k].value)
+            if self.scoord_chk.value:
+                for k in _SCOORD:
+                    gk[k] = float(self.grid_w[k].value)
+            if self.hmin.value != 5.0:
+                gk["hmin"] = float(self.hmin.value)
+            if self.close_narrow_chk.value:
+                gk["close_narrow_channels"] = True
+            if self.mask_shapefile.value.strip():
+                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+
+            ck: dict[str, Any] = {}
+            for k in _GRID_INT:
+                ck[k] = int(self.child_w[k].value)
+            for k in _GRID_FLOAT + _SCOORD:
+                ck[k] = float(self.child_w[k].value)
+
+            gk_topo, note_self = self._this_grid_plot_topography()
+            if gk_topo is not None:
+                gk["topography_source"] = gk_topo
+            ck_topo, note_child = self._nested_plot_topography("child")
+            if ck_topo is not None:
+                ck["topography_source"] = ck_topo
+
+            plt.ioff()
+            try:
+                parent = Grid(**gk)
+                child = Grid(**ck)
+                # plot_nesting calls plt.show() internally (no way to suppress it,
+                # no return value); under Jupyter's inline backend that renders-
+                # and-closes the figure immediately, so plt.gcf() right after
+                # would return a fresh blank figure instead of the one just
+                # drawn. Neutralize show() for the duration so we can grab and
+                # save the actual figure ourselves.
+                _real_show, plt.show = plt.show, lambda *a, **k: None
+                try:
+                    plot_nesting(parent, child)
+                finally:
+                    plt.show = _real_show
+                fig = plt.gcf()
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+                plt.close(fig)
+            finally:
+                plt.ion()
+
+            buf.seek(0)
+            self.nest_plot_img.value = buf.read()
+            self.nest_plot_img.layout.display = ""
+            self.nest_plot_status.value = (
+                "<span style='color:#080'>✓</span>" + note_self + note_child
+            )
+        except Exception as exc:
+            self.nest_plot_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    def _on_parent_plot(self, _):
+        """Build the parent+this-grid roms_tools Grids and render ``plot_nesting``
+        (boundary overlay of this grid within its parent) into the Parent
+        section's own plot. This grid is the fine/inner grid; the parent is the
+        coarse/outer grid it's aligned into.
+        """
+        self.parent_plot_status.value = "<i>building grids…</i>"
+        try:
+            import io
+
+            import matplotlib.pyplot as plt
+            from roms_tools import Grid, plot_nesting
+
+            gk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                gk[k] = int(self.grid_w[k].value)
+            for k in _GRID_FLOAT:
+                gk[k] = float(self.grid_w[k].value)
+            if self.scoord_chk.value:
+                for k in _SCOORD:
+                    gk[k] = float(self.grid_w[k].value)
+            if self.hmin.value != 5.0:
+                gk["hmin"] = float(self.hmin.value)
+            if self.close_narrow_chk.value:
+                gk["close_narrow_channels"] = True
+            if self.mask_shapefile.value.strip():
+                gk["mask_shapefile"] = self.mask_shapefile.value.strip()
+
+            pk: dict[str, Any] = {}
+            for k in _GRID_INT:
+                pk[k] = int(self.parent_w[k].value)
+            for k in _GRID_FLOAT + _SCOORD:
+                pk[k] = float(self.parent_w[k].value)
+
+            # Each grid is built with ITS topography where the file is available
+            # on this machine (mirrors the executor's per-grid resolution), so a
+            # parent that falls outside its dataset's coverage fails here, in the
+            # preview, instead of only at executor time.
+            pk_topo, note_parent = self._nested_plot_topography("parent")
+            if pk_topo is not None:
+                pk["topography_source"] = pk_topo
+            gk_topo, note_self = self._this_grid_plot_topography()
+            if gk_topo is not None:
+                gk["topography_source"] = gk_topo
+
+            plt.ioff()
+            try:
+                parent = Grid(**pk)
+                this_grid = Grid(**gk)
+                # See _on_nest_plot for why plt.show() is neutralized here.
+                _real_show, plt.show = plt.show, lambda *a, **k: None
+                try:
+                    plot_nesting(parent, this_grid)
+                finally:
+                    plt.show = _real_show
+                fig = plt.gcf()
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+                plt.close(fig)
+            finally:
+                plt.ion()
+
+            buf.seek(0)
+            self.parent_plot_img.value = buf.read()
+            self.parent_plot_img.layout.display = ""
+            self.parent_plot_status.value = (
+                "<span style='color:#080'>✓</span>" + note_parent + note_self
+            )
+        except Exception as exc:
+            self.parent_plot_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    def _on_save(self, _):
+        if not self._ensure_boundaries_derived():
+            self.save_status.value = (
+                "<span style='color:#b00'>Save aborted — open boundaries could "
+                "not be derived from the grid (see the Domain-derived properties "
+                "status above). A save must never ship provisional defaults; fix "
+                "the grid or set boundaries manually, then retry.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_status.value = (
+                "<span style='color:#b00'>Nothing to save — config is invalid.</span>"
+            )
+            return
+        try:
+            save_path = Path(self.save_path.value)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            p = self.config.to_yaml(save_path)
+            self.save_status.value = f"<span style='color:#080'>Saved {p}</span>"
+        except Exception as exc:
+            self.save_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    # ---- save modified specs to catalog --------------------------------------
+    # Each handler: validate name -> extract that spec from current state ->
+    # write it to the catalog (durable) -> side-effect-free round-trip verify ->
+    # on match, commit the minimal state change (repoint the dropdown, drop that
+    # spec's overrides / reset its seed) under _suspend() + a single _rebuild();
+    # on mismatch, the file is still written but nothing else changes (options
+    # refreshed so the new name is selectable, but .value/overrides/seed untouched).
+    def _on_save_output(self, _):
+        name = self.save_output_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_output_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_output_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        try:
+            self.catalog.register_output(
+                name,
+                extract_output_settings(self.config.model_settings),
+                description=self.description.value,
+            )
+        except FileExistsError as exc:
+            # str(exc) names the owning layer (e.g. "...already exists in the
+            # 'bundled' catalog layer") -- a plain single-line message, no
+            # traceback, so it's rendered verbatim rather than genericized.
+            self.save_output_status.value = f"<span style='color:#b00'>{exc}</span>"
+            return
+        except Exception as exc:
+            self.save_output_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_spec_roundtrip("output", name)
+        with self._suspend():
+            # ipywidgets resets .value to the first option on a bare `.options =`
+            # reassignment even when the old value is still present -- restore it
+            # explicitly so a mismatch genuinely leaves the selection untouched.
+            old_value = self.output_dd.value
+            self.output_dd.options = self._dd_options(
+                list(self.catalog.output_names), "output"
+            )
+            self.output_dd.value = name if ok else old_value
+            if ok:
+                self._overrides = {
+                    k: v for k, v in self._overrides.items() if not _is_output_key(*k)
+                }
+        if ok:
+            self._rebuild()
+            self.save_output_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_output_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — spec kept as modified.</span>"
+            )
+
+    def _on_save_model(self, _):
+        name = self.save_model_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_model_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_model_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        try:
+            self.catalog.register_model_from_settings(
+                name,
+                _model_owned_settings(self.config.model_settings),
+                self.catalog.model_dir(self.model_dd.value),
+                description=self.description.value,
+                # Live widget values, using _gather()'s exact conventions (use_pio/
+                # bgc_mode unconditional, roms_ref/marbl_ref only when non-blank) --
+                # the round-trip verifier below compares against _gather()'s kw, so
+                # any divergence here would be a spurious mismatch.
+                bgc_mode=self.bgc_dd.value,
+                use_pio=self.use_pio_chk.value,
+                roms_ref=self.roms_ref.value.strip() or None,
+                marbl_ref=self.marbl_ref.value.strip() or None,
+            )
+        except FileExistsError as exc:
+            self.save_model_status.value = f"<span style='color:#b00'>{exc}</span>"
+            return
+        except Exception as exc:
+            self.save_model_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_spec_roundtrip("model", name)
+        with self._suspend():
+            old_value = self.model_dd.value
+            self.model_dd.options = self._dd_options(
+                list(self.catalog.model_names), "model"
+            )
+            self.model_dd.value = name if ok else old_value
+            if ok:
+                self._overrides = {
+                    k: v for k, v in self._overrides.items() if _is_output_key(*k)
+                }
+        if ok:
+            self._rebuild()
+            self.save_model_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_model_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — spec kept as modified.</span>"
+            )
+
+    def _on_save_domain(self, _):
+        name = self.save_domain_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_domain_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_domain_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        if self._grid_file is not None:
+            # DomainSpec (catalog/DomainSpec/*.yaml) has no grid_file field --
+            # saving now would silently produce a geometry-less entry (grid_kwargs
+            # is {} while attached). Detach first.
+            self.save_domain_status.value = (
+                "<span style='color:#b00'>Detach the grid file first — DomainSpec "
+                "has no grid_file field.</span>"
+            )
+            return
+        # Unlike _on_save/_on_run (which emit concrete boundaries into the
+        # blueprint right now), an untouched open_boundaries is deliberately
+        # OMITTED from a saved DomainSpec (see _domain_spec_data) so it can
+        # re-derive fresh on next load -- there's nothing here for a failed
+        # derive to protect, and forcing one would block a legitimate
+        # checkpoint-save of a domain whose grid can't build yet (e.g.
+        # topography not sorted out). No _ensure_boundaries_derived() call.
+        try:
+            self.catalog.register_domain_from_dict(name, self._domain_spec_data())
+        except FileExistsError as exc:
+            self.save_domain_status.value = f"<span style='color:#b00'>{exc}</span>"
+            return
+        except Exception as exc:
+            self.save_domain_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_spec_roundtrip("domain", name)
+        with self._suspend():
+            old_value = self.domain_dd.value
+            self.domain_dd.options = self._dd_options(
+                list(self.catalog.domain_names), "domain", prefix=["<custom>"]
+            )
+            self.domain_dd.value = name if ok else old_value
+            if ok:
+                self._domain_seed = self._domain_snapshot()
+        if ok:
+            self._rebuild()
+            self.save_domain_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_domain_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — spec kept as modified.</span>"
+            )
+
+    def _on_save_forcing(self, _):
+        name = self.save_forcing_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_forcing_status.value = (
+                "<span style='color:#b00'>Invalid name.</span>"
+            )
+            return
+        if self.config is None:
+            self.save_forcing_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        try:
+            self.catalog.register_forcing(
+                name,
+                self._forcing_editor.gather(),
+                description=self.description.value,
+            )
+        except FileExistsError as exc:
+            self.save_forcing_status.value = f"<span style='color:#b00'>{exc}</span>"
+            return
+        except Exception as exc:
+            self.save_forcing_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_spec_roundtrip("forcing", name)
+        with self._suspend():
+            old_value = self.forcing_dd.value
+            self.forcing_dd.options = self._dd_options(
+                list(self.catalog.forcing_names), "forcing"
+            )
+            self.forcing_dd.value = name if ok else old_value
+            if ok:
+                self._forcing_seed = self._forcing_editor.gather()
+        if ok:
+            self._rebuild()
+            self.save_forcing_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_forcing_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — spec kept as modified.</span>"
+            )
+
+    def _on_save_cdr(self, _):
+        name = self.save_cdr_name.value.strip()
+        if not _valid_spec_name(name):
+            self.save_cdr_status.value = "<span style='color:#b00'>Invalid name.</span>"
+            return
+        if self.config is None:
+            self.save_cdr_status.value = (
+                "<span style='color:#b00'>Config invalid — nothing to save.</span>"
+            )
+            return
+        mode = self.cdr_mode_dd.value
+        if mode == "none":
+            self.save_cdr_status.value = (
+                "<span style='color:#b58900'>Mode is 'None' — nothing to save.</span>"
+            )
+            return
+        current = self._current_cdr_dict()
+        try:
+            self.catalog.register_cdr(
+                name,
+                description=self.description.value,
+                mode=mode,
+                cdr_forcing=current["cdr_forcing"],
+                cdr_forcing_file=current["cdr_forcing_file"],
+            )
+        except FileExistsError as exc:
+            self.save_cdr_status.value = f"<span style='color:#b00'>{exc}</span>"
+            return
+        except Exception as exc:
+            self.save_cdr_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+            return
+        ok = self._verify_spec_roundtrip("cdr", name)
+        with self._suspend():
+            old_value = self.cdr_dd.value
+            self.cdr_dd.options = self._dd_options(
+                list(self.catalog.cdr_names), "cdr", prefix=["<custom>"]
+            )
+            self.cdr_dd.value = name if ok else old_value
+            if ok:
+                self._cdr_seed = self._cdr_snapshot()
+        if ok:
+            self._rebuild()
+            self.save_cdr_status.value = (
+                f"<span style='color:#080'>Saved '{name}' ✓ (now unmodified).</span>"
+            )
+        else:
+            self.save_cdr_status.value = (
+                f"<span style='color:#b58900'>Saved '{name}', but round-trip "
+                "differs — spec kept as modified.</span>"
+            )
+
+    def _build_run_command(self, blueprint_path: str) -> list[str]:
+        """Command the Run button invokes: ``cstar blueprint run <path>``.
+
+        The same command the docs give for both pipeline steps, and the same one
+        the emitted ``roms_marbl`` blueprint is run with -- the button exposes no
+        per-run flags, so the full-option ``cstar forge run`` passthrough buys it
+        nothing. Resolving ``application: forge`` this way goes through C-Star's
+        registry, which finds the app through cstar-forge's ``cstar.applications``
+        entry point.
+
+        Uses the ``cstar`` console script installed alongside the running
+        interpreter, so the subprocess stays in this environment rather than
+        taking whatever is first on PATH. Where that script is absent (C-Star's
+        CLI not installed), falls back to ``python -m cstar_forge.cli run``,
+        forge's own typer entry onto the same executor.
+        """
+        import sys
+
+        cstar_exe = Path(sys.executable).with_name("cstar")
+        if cstar_exe.exists():
+            return [str(cstar_exe), "blueprint", "run", blueprint_path]
+        return [sys.executable, "-m", "cstar_forge.cli", "run", blueprint_path]
+
+    def _on_run(self, _):
+        if not self._ensure_boundaries_derived():
+            self.run_status.value = (
+                "<span style='color:#b00'>Run aborted — open boundaries could "
+                "not be derived from the grid (see the Domain-derived properties "
+                "status above). Fix the grid or set boundaries manually, then "
+                "retry.</span>"
+            )
+            return
+        if self.config is None:
+            self.run_status.value = (
+                "<span style='color:#b00'>Nothing to run — config is invalid.</span>"
+            )
+            return
+        _schedule_coroutine(self._run_async())
+
+    async def _run_async(self):
+        """Save the current blueprint, then launch the C-Star CLI as a subprocess
+        and stream its combined stdout/stderr into ``run_output`` line by line as
+        it arrives (not all at once at the end).
+        """
+        import asyncio
+
+        self.run_btn.disabled = True
+        self.run_output.clear_output(wait=True)
+        self.run_status.value = "<i>saving blueprint…</i>"
+        cmd: list[str] | None = None
+        try:
+            save_path = Path(self.save_path.value)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            path = self.config.to_yaml(save_path)
+            cmd = self._build_run_command(str(path))
+            self.run_status.value = f"<i>running: {' '.join(cmd)}</i>"
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            # Read fixed-size chunks and reassemble lines ourselves rather than
+            # `async for line in proc.stdout` (StreamReader.readline), which raises
+            # ValueError, "Separator is not found, and chunk exceed the limit", when a
+            # child emits 64 KiB without a newline -- e.g. a \r-redrawn progress bar.
+            # append_stdout (not `with self.run_output: print(...)`) appends directly
+            # to the widget's output list, so lines land in the log whether or not a
+            # live Jupyter kernel is routing stdout via iopub messaging.
+            buf = b""
+            while True:
+                chunk = await proc.stdout.read(_STREAM_READ_SIZE)
+                if not chunk:
+                    break
+                lines, buf = _drain_stream_buffer(buf + chunk)
+                for line in lines:
+                    self.run_output.append_stdout(line)
+            lines, buf = _drain_stream_buffer(buf, at_eof=True)
+            for line in lines:
+                self.run_output.append_stdout(line)
+            code = await proc.wait()
+            # On success the log above names the emitted roms_marbl blueprint (the
+            # runner logs where it published it). Point at it rather than restating
+            # a path this widget would have to derive for itself.
+            self.run_status.value = (
+                "<span style='color:#080'>✓ finished</span> — run the emitted "
+                "ROMS-MARBL blueprint named in the log with <code>cstar blueprint "
+                "run &lt;path&gt;</code>"
+                if code == 0
+                else f"<span style='color:#b00'>exited with code {code}</span>"
+            )
+        except Exception as exc:
+            # Name the command in the status so a failure isn't a context-free
+            # error string (cmd is None only if saving the blueprint threw first).
+            where = f" while running: {' '.join(cmd)}" if cmd else ""
+            self.run_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}{where}</span>"
+            )
+        finally:
+            self.run_btn.disabled = False
+
+    # ---- workplan export -------------------------------------------------------
+    @staticmethod
+    def _workplan_path(blueprint_path: Path) -> Path:
+        """Sibling ``{name}.workplan.yaml`` for a saved blueprint path (stripping a
+        ``.forge_blueprint.yaml`` suffix when present, so the default save path
+        ``{name}.forge_blueprint.yaml`` yields ``{name}.workplan.yaml``).
+        """
+        name = blueprint_path.name
+        suffix = ".forge_blueprint.yaml"
+        stem = name[: -len(suffix)] if name.endswith(suffix) else blueprint_path.stem
+        return blueprint_path.with_name(f"{stem}.workplan.yaml")
+
+    def _workplan_dest(self, blueprint_path: Path) -> Path:
+        """Destination for a saved workplan: the active catalog's ``workplans/``
+        directory when the catalog is local (mirroring ``_default_blueprint_path``'s
+        preference for the catalog), else a sibling of the blueprint.
+        """
+        fname = self._workplan_path(blueprint_path).name
+        cat = getattr(self, "catalog", None)
+        try:
+            # Mirror _default_blueprint_path: never offer a read-only catalog.
+            if (
+                cat is not None
+                and getattr(cat, "_is_local", False)
+                and not getattr(cat, "read_only", False)
+            ):
+                return cat.workplans_dir / fname
+        except Exception:
+            pass
+        return blueprint_path.with_name(fname)
+
+    def _build_workplan(self, blueprint_path: Path):
+        """Build the two-step C-Star workplan for the current config: step ``forge``
+        runs the forge application on the saved blueprint; step ``roms_marbl`` runs
+        the ``B_{name}.yaml`` blueprint the forge step generates -- a *deferred*
+        blueprint (``from_step``), since it does not exist until step 1 has run.
+
+        Returns
+        -------
+        cstar.orchestration.models.Workplan
+
+        """
+        try:
+            from cstar.orchestration.models import (
+                DeferredBlueprintRef,
+                Step,
+                Workplan,
+            )
+        except ImportError as exc:
+            msg = (
+                "Workplan export requires a C-Star version with workplan and "
+                "deferred-blueprint support"
+            )
+            raise RuntimeError(msg) from exc
+
+        cfg = self.config
+        if cfg is None:
+            raise RuntimeError("_build_workplan called before a blueprint was resolved")
+        # No cpus override for the forge step: the scheduler falls back to
+        # ForgeBlueprint.cpus_needed (the grid-sized estimate), and because
+        # ForgeBlueprint.single_node is True, C-Star pins the step to one node
+        # and clamps that estimate to the partition's CPUs per node.
+        forge_step = Step(
+            name="forge",
+            application="forge",
+            blueprint=blueprint_path.expanduser().resolve(),
+        )
+        roms_step = Step(
+            name="roms_marbl",
+            application="roms_marbl",
+            depends_on=["forge"],
+            blueprint=DeferredBlueprintRef(
+                from_step="forge",
+                filename=f"B_{cfg.name}.yaml",
+            ),
+            # A deferred blueprint cannot be inspected at submit time, so the
+            # scheduler defaults the step to 1 CPU -- size it from the
+            # partitioning explicitly, nested under the launcher namespace
+            # C-Star's SLURM adapter reads.
+            compute_overrides={"slurm": {"num_cpus": cfg.n_procs}},
+        )
+        return Workplan(
+            name=cfg.name,
+            description=f"Forge inputs + ROMS-MARBL run for {cfg.name}",
+            steps=[forge_step, roms_step],
+        )
+
+    def _on_save_workplan(self, _):
+        if not self._ensure_boundaries_derived():
+            self.workplan_status.value = (
+                "<span style='color:#b00'>Save aborted — open boundaries could "
+                "not be derived from the grid (see the Domain-derived properties "
+                "status above). Fix the grid or set boundaries manually, then "
+                "retry.</span>"
+            )
+            return
+        if self.config is None:
+            self.workplan_status.value = (
+                "<span style='color:#b00'>Nothing to save — config is invalid.</span>"
+            )
+            return
+        try:
+            save_path = Path(self.save_path.value)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            bp_path = self.config.to_yaml(save_path)
+            workplan = self._build_workplan(Path(bp_path))
+            wp_path = self._workplan_dest(Path(bp_path))
+            wp_path.parent.mkdir(parents=True, exist_ok=True)
+
+            from cstar.orchestration.serialization import serialize
+
+            serialize(wp_path, workplan)
+            # No env-var prefix: an installed cstar-forge registers the forge app
+            # through its ``cstar.applications`` entry point, so C-Star's registry
+            # resolves ``application: forge`` in the scheduling process and in the
+            # jobs it spawns, without anything being propagated by hand.
+            cmd = f"cstar workplan run {wp_path}"
+            self.workplan_status.value = (
+                f"<span style='color:#080'>Saved {bp_path} and {wp_path}</span><br>"
+                f"Run it with: <code>{cmd}</code>"
+            )
+        except Exception as exc:
+            self.workplan_status.value = (
+                f"<span style='color:#b00'>{type(exc).__name__}: {exc}</span>"
+            )
+
+    # ---- layout / display ----------------------------------------------------
+    @property
+    def widget(self):
+        """The wizard's root widget: a ``forge-app``/``forge-wizard`` ``W.VBox``
+        of a sticky status bar, an intro line, and the seven cards (Start,
+        Model, Grid, Forcing, Run, Advanced, Review). Built once and cached in
+        ``self._root`` -- repeated access returns the same tree, so widgets
+        placed in it keep their identity across a rebuild.
+        """
+        if self._root is not None:
+            return self._root
+        W = self.W
+
+        # Danger-styled destructive actions.
+        self.grid_file_detach_btn.button_style = "danger"
+        self.cdr_clear_btn.button_style = "danger"
+        self.cdr_file_clear_btn.button_style = "danger"
+
+        sticky = W.HBox([self.sticky_bar, self.download_link])
+        sticky.add_class("forge-sticky")
+        # sticky_bar fills the remaining width (its own content -- step links,
+        # summary, spacer, status chip -- pushes the chip to its right edge,
+        # see _update_status); download_link stays sized to its fixed caption.
+        self.sticky_bar.layout.flex = "1 1 auto"
+        self.download_link.layout.flex = "0 0 auto"
+
+        intro = W.HTML(
+            "<p>Pick a model and a domain, adjust the grid, boundaries, "
+            "partitioning and run window, then review and download the "
+            "blueprint.</p>"
+            "<p><span class='req'>*</span> Required &middot; everything else "
+            "has a model default</p>"
+        )
+
+        start_card = components.card(
+            W,
+            "start",
+            components.field_row(
+                W,
+                "load_catalog_dd",
+                self.load_catalog_dd,
+                extra=(self.load_catalog_btn,),
+            ),
+            components.field_row(
+                W, "load_path", self.load_path, extra=(self.load_btn, self.upload)
+            ),
+            self.load_status,
+        )
+
+        model_card = components.card(
+            W,
+            "model",
+            components.field_row(W, "model_dd", self.model_dd),
+            # bgc_dd's grid is placed before roms_ref/marbl_ref's so marbl_ref
+            # (only relevant once bgc mode is "marbl") reads after bgc_dd.
+            components.field_grid(
+                W,
+                [
+                    components.field_row(W, "bgc_dd", self.bgc_dd),
+                    components.field_row(W, "output_dd", self.output_dd),
+                ],
+            ),
+            components.field_grid(
+                W,
+                [
+                    components.field_row(W, "roms_ref", self.roms_ref),
+                    components.field_row(W, "marbl_ref", self.marbl_ref),
+                ],
+            ),
+            components.field_row(W, "forcing_dd", self.forcing_dd),
+            num=1,
+            chips_widget=self.card_chips["model"],
+        )
+
+        # --- grid card ---
+        geometry_rows = [
+            components.field_row(
+                W, f"grid.{k}", self.grid_w[k], width="110px", label_width="170px"
+            )
+            for k in (_GRID_INT + _GRID_FLOAT)
+        ]
+        # Fixed-width preview column so the button caption and the empty-state
+        # hint never get squeezed by the two-column field grid beside them.
+        grid_plot_col = W.VBox(
+            [self.plot_btn, self.plot_status, self.plot_img],
+            layout=W.Layout(padding="0 0 0 20px", flex="0 0 380px"),
+        )
+        geometry_grid = components.field_grid(W, geometry_rows)
+        geometry_grid.layout.flex = "1 1 auto"
+        geometry_sub = components.subsection(
+            W,
+            "grid.geometry",
+            W.HBox([geometry_grid, grid_plot_col]),
+        )
+        vertical_sub = components.subsection(
+            W,
+            "grid.vertical",
+            self.scoord_chk,
+            components.field_grid(
+                W,
+                [
+                    components.field_row(W, f"grid.{k}", self.grid_w[k], width="110px")
+                    for k in _SCOORD
+                ],
+            ),
+        )
+        bathymetry_sub = components.subsection(
+            W,
+            "grid.bathymetry",
+            components.field_grid(
+                W,
+                [
+                    components.field_row(W, "topo_source", self.topo_source),
+                    components.field_row(W, "topo_path", self.topo_path),
+                    components.field_row(W, "hmin", self.hmin),
+                    components.field_row(W, "close_narrow_chk", self.close_narrow_chk),
+                ],
+            ),
+            components.field_row(W, "mask_shapefile", self.mask_shapefile),
+        )
+        self.gridfile_accordion = W.Accordion(
+            children=[
+                W.VBox(
+                    [
+                        W.HBox(
+                            [
+                                self.grid_file_path,
+                                self.grid_file_attach_btn,
+                                self.grid_file_detach_btn,
+                            ]
+                        ),
+                        self.grid_file_upload,
+                        self.grid_file_status,
+                    ]
+                )
+            ],
+            selected_index=None,
+        )
+        self.gridfile_accordion.set_title(0, section_for("grid.gridfile").title)
+        derived_sub = components.subsection(
+            W,
+            "grid.derived",
+            components.banner_widget(
+                W,
+                "info",
+                "Open boundaries, sponge viscosity and the time step are "
+                "derived from the grid when you save or run. Derive them now "
+                "to check or edit the values.",
+            ),
+            components.field_row(W, "bnd", W.HBox(list(self.bnd.values()))),
+            components.field_row(
+                W,
+                "v_sponge",
+                self.v_sponge,
+                extra=(self.derive_btn, self.derive_status),
+            ),
+            components.field_row(W, "dt", self.dt, extra=(self.dt_btn, self.dt_status)),
+        )
+
+        child_grid_rows = [
+            components.field_row(W, f"grid.{k}", self.child_w[k], width="110px")
+            for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)
+        ]
+        parent_grid_rows = [
+            components.field_row(W, f"grid.{k}", self.parent_w[k], width="110px")
+            for k in (_GRID_INT + _GRID_FLOAT + _SCOORD)
+        ]
+        child_plot_col = W.VBox(
+            [W.HBox([self.nest_plot_btn, self.nest_plot_status]), self.nest_plot_img],
+            layout=W.Layout(padding="0 0 0 20px"),
+        )
+        child_section = components.subsection(
+            W,
+            "grid.nesting.child",
+            self.nest_enable,
+            self.nest_help,
+            W.HBox(
+                [
+                    W.VBox(
+                        [
+                            components.field_row(
+                                W, "nest_domain_dd", self.nest_domain_dd
+                            ),
+                            components.field_grid(W, child_grid_rows),
+                            components.field_row(
+                                W, "child_topo_source", self.child_topo_source
+                            ),
+                            components.field_row(
+                                W, "child_topo_path", self.child_topo_path
+                            ),
+                            components.field_row(W, "nest_period", self.nest_period),
+                            components.field_row(
+                                W, "nest_pressure_fluxes", self.nest_pressure_fluxes
+                            ),
+                        ]
+                    ),
+                    child_plot_col,
+                ]
+            ),
+            default_title="Child grid",
+        )
+        parent_plot_col = W.VBox(
+            [
+                W.HBox([self.parent_plot_btn, self.parent_plot_status]),
+                self.parent_plot_img,
+            ],
+            layout=W.Layout(padding="0 0 0 20px"),
+        )
+        parent_section = components.subsection(
+            W,
+            "grid.nesting.parent",
+            self.parent_enable,
+            self.parent_help,
+            W.HBox(
+                [
+                    W.VBox(
+                        [
+                            components.field_row(
+                                W, "parent_domain_dd", self.parent_domain_dd
+                            ),
+                            components.field_grid(W, parent_grid_rows),
+                            components.field_row(
+                                W, "parent_topo_source", self.parent_topo_source
+                            ),
+                            components.field_row(
+                                W, "parent_topo_path", self.parent_topo_path
+                            ),
+                        ]
+                    ),
+                    parent_plot_col,
+                ]
+            ),
+            default_title="Parent grid",
+        )
+        nesting_accordion = W.Accordion(
+            children=[W.VBox([child_section, parent_section])],
+            selected_index=None,
+        )
+        nesting_accordion.set_title(0, section_for("grid.nesting").title)
+
+        grid_card = components.card(
+            W,
+            "grid",
+            components.field_grid(
+                W,
+                [
+                    components.field_row(W, "domain_dd", self.domain_dd),
+                    components.field_row(W, "grid_name", self.grid_name),
+                ],
+            ),
+            self.gridfile_accordion,
+            self.grid_lock_banner,
+            geometry_sub,
+            vertical_sub,
+            bathymetry_sub,
+            derived_sub,
+            nesting_accordion,
+            num=2,
+            chips_widget=self.card_chips["grid"],
+        )
+
+        forcing_card = components.card(
+            W,
+            "forcing",
+            self.forcing_banner,
+            self.forcing_box,
+            num=3,
+            chips_widget=self.card_chips["forcing"],
+        )
+
+        run_card = components.card(
+            W,
+            "run",
+            components.subsection(
+                W,
+                "run.window",
+                components.field_grid(
+                    W,
+                    [
+                        components.field_row(W, "start", self.start),
+                        components.field_row(W, "end", self.end),
+                        components.field_row(W, "model_ref_date", self.model_ref_date),
+                        components.field_row(W, "description", self.description),
+                    ],
+                ),
+            ),
+            components.subsection(
+                W,
+                "run.partitioning",
+                components.field_grid(
+                    W,
+                    [
+                        components.field_row(W, "npx", self.npx),
+                        components.field_row(W, "npy", self.npy),
+                        components.field_row(W, "n_cores", self.n_cores),
+                        components.field_row(
+                            W, "auto_tiling_chk", self.auto_tiling_chk
+                        ),
+                    ],
+                ),
+                components.field_row(W, "use_pio_chk", self.use_pio_chk),
+            ),
+            components.subsection(
+                W,
+                "run.cdr",
+                components.field_grid(
+                    W,
+                    [
+                        components.field_row(W, "cdr_dd", self.cdr_dd),
+                        components.field_row(W, "cdr_mode_dd", self.cdr_mode_dd),
+                    ],
+                ),
+                # Per-mode panels on the left, plot column on the right --
+                # the same side-by-side arrangement as the Grid card.
+                W.HBox(
+                    [
+                        W.VBox(
+                            [
+                                self.cdr_simple_box,
+                                self.cdr_yaml_box,
+                                self.cdr_netcdf_box,
+                                self.cdr_upscaled_box,
+                            ]
+                        ),
+                        self.cdr_plot_box,
+                    ]
+                ),
+            ),
+            num=4,
+            chips_widget=self.card_chips["run"],
+        )
+
+        advanced_card = components.card(
+            W,
+            "advanced",
+            self.editor_box,
+            num=5,
+            chips_widget=self.card_chips["advanced"],
+        )
+
+        self.save_specs_accordion = W.Accordion(
+            children=[
+                W.VBox(
+                    [
+                        W.HTML(
+                            "<i>Promote an edited spec to a new named catalog "
+                            "entry. Only marked unmodified if the saved file "
+                            "re-resolves to the identical blueprint.</i>"
+                        ),
+                        W.HBox(
+                            [
+                                self.save_output_name,
+                                self.save_output_btn,
+                                self.save_output_status,
+                            ]
+                        ),
+                        W.HBox(
+                            [
+                                self.save_model_name,
+                                self.save_model_btn,
+                                self.save_model_status,
+                            ]
+                        ),
+                        W.HBox(
+                            [
+                                self.save_domain_name,
+                                self.save_domain_btn,
+                                self.save_domain_status,
+                            ]
+                        ),
+                        W.HBox(
+                            [
+                                self.save_forcing_name,
+                                self.save_forcing_btn,
+                                self.save_forcing_status,
+                            ]
+                        ),
+                        W.HBox(
+                            [
+                                self.save_cdr_name,
+                                self.save_cdr_btn,
+                                self.save_cdr_status,
+                            ]
+                        ),
+                    ]
+                )
+            ],
+            selected_index=None,
+        )
+        self.save_specs_accordion.set_title(0, section_for("review.save_specs").title)
+
+        review_card = components.card(
+            W,
+            "review",
+            self.validation,
+            self.derived,
+            self.preview,
+            components.field_row(W, "name", self.name),
+            self.download_link_review,
+            components.field_row(
+                W, "save_path", self.save_path, extra=(self.save_btn,)
+            ),
+            self.save_status,
+            self.save_specs_accordion,
+            components.subsection(
+                W,
+                "review.run",
+                self.run_warning,
+                self.run_later_note,
+                W.HBox([self.run_btn, self.run_status]),
+                self._run_log_style,
+                self.run_output,
+            ),
+            components.subsection(
+                W,
+                "review.workplan",
+                self.workplan_note,
+                W.HBox([self.workplan_btn]),
+                self.workplan_status,
+            ),
+            num=6,
+            chips_widget=self.card_chips["review"],
+            required_chip=False,
+        )
+
+        root = W.VBox(
+            [
+                components.style_widget(W),
+                sticky,
+                intro,
+                start_card,
+                model_card,
+                grid_card,
+                forcing_card,
+                run_card,
+                advanced_card,
+                review_card,
+            ]
+        )
+        root.add_class("forge-app")
+        root.add_class("forge-wizard")
+        self._root = root
+        return root
+
+    def display(self):
+        from IPython.display import display
+
+        display(self.widget)
+
+
+class ForgeBlueprintWizardApp:
+    """Thin wrapper around :class:`ForgeBlueprintWizard` that adds a catalog-location
+    bar above it. Blank input loads the default layered stack (your writable
+    ``~/cstar-forge-data/catalog`` -- or ``CSTAR_FORGE_CATALOG`` -- layer over the
+    read-only bundled in-repo catalog, see
+    :func:`~cstar_forge.domain_catalog.default_catalog_stack`). Entering one or more
+    ``os.pathsep``-separated local paths builds a
+    :class:`~cstar_forge.domain_catalog.LayeredCatalog` exactly like the same value
+    in ``CSTAR_FORGE_CATALOG`` would (first = writable top, rest read-only, bundled
+    catalog appended at the bottom). Entering a single GitHub/http URL or the
+    literal ``"local"`` loads exactly that one store, read-only, for browsing
+    (saves then default to CWD-relative filenames, and the status line says so).
+    Clicking Reload rebuilds the wizard against the new catalog.
+
+    Usage (in a Jupyter notebook)::
+
+        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+        app = ForgeBlueprintWizardApp()
+        app.display()
+        # ... optionally enter a different catalog path/URL above and click Reload ...
+        cfg = app.inner.config       # the current resolved ForgeBlueprint (or None)
+    """
+
+    def __init__(self, catalog_root: str | None = None):
+        import ipywidgets as W
+
+        self.W = W
+        self.inner: ForgeBlueprintWizard | None = None
+
+        self._bar = CatalogBar(W, on_reload=self._load)
+
+        self._outer = W.VBox([])
+        self._load(catalog_root)
+
+    @property
+    def widget(self) -> Any:
+        """The app's root widget: the catalog bar above the wizard's own widget."""
+        return self._outer
+
+    def _load(self, catalog_root_value: str | None) -> None:
+        import os
+
+        from cstar_forge.domain_catalog import (
+            DomainCatalog,
+            LayeredCatalog,
+            _is_github_catalog_url,
+            build_catalog_stack,
+            default_catalog_stack,
+        )
+
+        val = (catalog_root_value or "").strip()
+        try:
+            cat: DomainCatalog | LayeredCatalog
+            if not val:
+                # Blank -> the default layered stack (writable user layer over
+                # the read-only bundled catalog), not the bundled catalog alone.
+                cat = default_catalog_stack()
+            else:
+                entries = [e for e in val.split(os.pathsep) if e]
+                if len(entries) == 1 and (
+                    _is_github_catalog_url(entries[0])
+                    or entries[0].startswith("http")
+                    or entries[0].strip().lower() == "local"
+                ):
+                    # A remote URL or the literal "local" (bundled catalog)
+                    # can never be a writable top layer, so load it as exactly
+                    # one read-only store for browsing.
+                    cat = DomainCatalog(catalog_root=entries[0])
+                else:
+                    # Same builder as the CSTAR_FORGE_CATALOG env handling
+                    # (first entry writable top, rest read-only, bundled
+                    # appended at the bottom) so the two paths cannot drift --
+                    # a single local path gets the bundled layer underneath,
+                    # exactly like the same value in the env var.
+                    cat = build_catalog_stack(entries)
+            inner = ForgeBlueprintWizard(catalog=cat)
+        except Exception as exc:
+            self._bar.set_error(val, exc)
+            return
+
+        self.inner = inner
+        self._bar.set_status_for(cat)
+        self._outer.children = [self._bar.widget, inner.widget]
+
+    def display(self):
+        from IPython.display import display
+
+        display(self._outer)
