@@ -1,0 +1,31 @@
+description: "Northeast Pacific 1/4 deg (nested)"
+model_name: "cson_roms-marbl_v0.1"
+grid_name: "NEP-4th_deg"
+start_time: "2012-01-01"
+end_time: "2012-01-02"
+grid_kwargs:
+  nx: 208
+  ny: 192
+  size_x: 4380
+  size_y: 6660
+  center_lon: -155
+  center_lat: 42
+  rot: -90
+  N: 10
+  theta_s: 6.0
+  theta_b: 3.0
+  hc: 250.0
+  metadata:
+    prefix: "child"
+    period: 3600.0
+    include_bgc: true
+open_boundaries:
+  south: true
+  east: false
+  north: true
+  west: true
+partitioning:
+  n_procs_x: 16
+  n_procs_y: 8
+_parent_grid_name: "PAC_2fth_deg"
+_child_grid_name: "GoA-10th_deg"

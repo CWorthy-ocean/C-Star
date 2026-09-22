@@ -20,11 +20,11 @@ def test_plugin_is_attached():
     def hello():  # pragma: no cover - registration is what matters
         pass
 
-    eps = [FakeEntryPoint("forge", loaded=plugin)]
+    eps = [FakeEntryPoint("widget", loaded=plugin)]
     with patch("cstar.cli.cli.entry_points", return_value=eps):
         attach_plugin_subcommands(app, taken={"blueprint"})
 
-    assert registered_names(app) == {"forge"}
+    assert registered_names(app) == {"widget"}
 
 
 def test_colliding_plugin_is_skipped():
@@ -32,6 +32,18 @@ def test_colliding_plugin_is_skipped():
     eps = [FakeEntryPoint("blueprint", loaded=typer.Typer())]
     with patch("cstar.cli.cli.entry_points", return_value=eps):
         attach_plugin_subcommands(app, taken={"blueprint"})
+
+    assert registered_names(app) == set()
+
+
+def test_forge_plugin_now_collides_with_the_core_command():
+    # `forge` moved from an entry-point plugin to a core subcommand (see
+    # `attach_subcommands`); a third-party plugin trying to claim the name
+    # must be skipped just like any other core-name collision.
+    app = typer.Typer()
+    eps = [FakeEntryPoint("forge", loaded=typer.Typer())]
+    with patch("cstar.cli.cli.entry_points", return_value=eps):
+        attach_plugin_subcommands(app, taken={"forge"})
 
     assert registered_names(app) == set()
 
@@ -64,8 +76,8 @@ def test_duplicate_plugin_names_both_dropped():
     app = typer.Typer()
     first, second = typer.Typer(), typer.Typer()
     eps = [
-        FakeEntryPoint("forge", loaded=first),
-        FakeEntryPoint("forge", loaded=second),
+        FakeEntryPoint("widget", loaded=first),
+        FakeEntryPoint("widget", loaded=second),
     ]
     with patch("cstar.cli.cli.entry_points", return_value=eps):
         attach_plugin_subcommands(app, taken=set())

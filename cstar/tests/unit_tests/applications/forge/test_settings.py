@@ -1,0 +1,656 @@
+"""
+Tests for the settings.py module.
+
+Tests cover:
+- render_roms_settings function
+- ROMSTemplateRenderer class
+- Template rendering
+- Validation and error handling
+"""
+
+import re
+from pathlib import Path
+
+import pytest
+
+import cstar
+from cstar.applications.forge.settings import (
+    ROMSTemplateRenderer,
+    _fortran_cdr_file_decl,
+    render_roms_settings,
+)
+
+
+class TestFortranCdrFileDecl:
+    """Tests for long-path Fortran cdr_file emission (fixed-form line length)."""
+
+    def test_short_path_single_line(self):
+        out = _fortran_cdr_file_decl("/a/b.nc")
+        assert "\n" not in out
+        assert len(out) <= 72
+        assert "character(len=8)" in out
+
+    def test_long_path_no_line_exceeds_72(self):
+        p = "/home/x-sbachman/" + "x" * 120 + "/c.nc"
+        out = _fortran_cdr_file_decl(p)
+        for line in out.splitlines():
+            assert len(line) <= 72, repr(line)
+
+    def test_long_path_first_line_opens_string_not_bare_ampersand(self):
+        """Avoid ``character(...) :: cdr_file = &`` with the literal starting next line."""
+        p = "/home/x-sbachman/" + "x" * 120 + "/c.nc"
+        out = _fortran_cdr_file_decl(p)
+        first = out.splitlines()[0]
+        assert "cdr_file = '" in first
+        assert not re.search(r"cdr_file\s*=\s*&\s*$", first)
+
+    def test_f77_concat_continuation_no_free_form_trailing_ampersand(self):
+        """F77 fixed form: ``//`` ends the line; next line uses column 6, not ``// &``."""
+        p = "/home/x-sbachman/" + "x" * 120 + "/c.nc"
+        out = _fortran_cdr_file_decl(p)
+        for line in out.splitlines():
+            assert not line.rstrip().endswith("// &"), line
+
+    def test_embedded_quote_doubled(self):
+        out = _fortran_cdr_file_decl("/tmp/O'Brien_cdr.nc")
+        assert "''" in out
+        for line in out.splitlines():
+            assert len(line) <= 72, repr(line)
+
+
+class TestRenderRomsSettings:
+    """Tests for render_roms_settings function."""
+
+    def test_render_basic_template(self, tmp_path):
+        """Test rendering a basic template."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test_template.j2").write_text(
+            "Hello {{ name }}, value is {{ value }}"
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"test_template": {"name": "World", "value": 42}}
+
+        result = render_roms_settings(
+            template_files=["test_template.j2"],
+            template_dir=template_dir,
+            settings_dict=settings_dict,
+            code_output_dir=output_dir,
+        )
+
+        assert result["location"] == str(output_dir.resolve())
+        assert "test_template" in result["filter"]["files"]
+        assert (output_dir / "test_template").exists()
+        assert (output_dir / "test_template").read_text() == "Hello World, value is 42"
+
+    def test_render_multiple_templates(self, tmp_path):
+        """Test rendering multiple templates."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "template1.j2").write_text("Content 1: {{ key1 }}")
+        (template_dir / "template2.j2").write_text("Content 2: {{ key2 }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {
+            "template1": {"key1": "value1"},
+            "template2": {"key2": "value2"},
+        }
+
+        result = render_roms_settings(
+            template_files=["template1.j2", "template2.j2"],
+            template_dir=template_dir,
+            settings_dict=settings_dict,
+            code_output_dir=output_dir,
+        )
+
+        assert len(result["filter"]["files"]) == 2
+        assert "template1" in result["filter"]["files"]
+        assert "template2" in result["filter"]["files"]
+        assert (output_dir / "template1").read_text() == "Content 1: value1"
+        assert (output_dir / "template2").read_text() == "Content 2: value2"
+
+    def test_render_with_n_tracers(self, tmp_path):
+        """Test rendering with n_tracers parameter."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test_template.j2").write_text("Number of tracers: {{ nt }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"test_template": {}}
+
+        render_roms_settings(
+            template_files=["test_template.j2"],
+            template_dir=template_dir,
+            settings_dict=settings_dict,
+            code_output_dir=output_dir,
+            n_tracers=34,
+        )
+
+        assert (output_dir / "test_template").read_text() == "Number of tracers: 34"
+
+    def test_copy_non_template_file(self, tmp_path):
+        """Test copying non-template files."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "Makefile").write_text("compile:\n\techo 'compiling'")
+        (template_dir / "template1.j2").write_text("{{ key1 }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"template1": {"key1": "value1"}}
+
+        result = render_roms_settings(
+            template_files=["Makefile", "template1.j2"],
+            template_dir=template_dir,
+            settings_dict=settings_dict,
+            code_output_dir=output_dir,
+        )
+
+        assert "Makefile" in result["filter"]["files"]
+        assert "template1" in result["filter"]["files"]
+        assert (output_dir / "Makefile").exists()
+        assert (output_dir / "Makefile").read_text() == "compile:\n\techo 'compiling'"
+
+    def test_render_with_full_match_key(self, tmp_path):
+        """Test rendering with full match key (e.g., namelist.nml.j2 -> namelist.nml)."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "namelist.nml.j2").write_text("Title: {{ title.casename }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"namelist.nml": {"title": {"casename": "test_case"}}}
+
+        render_roms_settings(
+            template_files=["namelist.nml.j2"],
+            template_dir=template_dir,
+            settings_dict=settings_dict,
+            code_output_dir=output_dir,
+        )
+
+        assert (output_dir / "namelist.nml").read_text() == "Title: test_case"
+
+    def test_render_with_partial_match_key(self, tmp_path):
+        """Test rendering with partial match key (e.g., bgc.opt.j2 -> bgc)."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "bgc.opt.j2").write_text("Output: {{ bgc.wrt_his }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"bgc": {"wrt_his": True}}
+
+        render_roms_settings(
+            template_files=["bgc.opt.j2"],
+            template_dir=template_dir,
+            settings_dict=settings_dict,
+            code_output_dir=output_dir,
+        )
+
+        assert (output_dir / "bgc.opt").read_text() == "Output: True"
+
+    def test_partial_match_unconsumed_settings_key_raises(self, tmp_path):
+        """A settings key the template never references must fail the render.
+
+        Regression: a stale staged cppdefs.opt.j2 (pinned templates commit
+        predating auto_tiling) silently dropped cppdefs.auto_tiling.
+        """
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "bgc.opt.j2").write_text("Output: {{ bgc.wrt_his }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"bgc": {"wrt_his": True, "auto_tiling": True}}
+
+        with pytest.raises(ValueError, match=r"never references: \['auto_tiling'\]"):
+            render_roms_settings(
+                template_files=["bgc.opt.j2"],
+                template_dir=template_dir,
+                settings_dict=settings_dict,
+                code_output_dir=output_dir,
+            )
+
+    def test_partial_match_missing_template_attr_is_allowed(self, tmp_path):
+        """Templates may reference attrs absent from settings (undefined -> falsy)."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "bgc.opt.j2").write_text(
+            "{% if bgc.extra_flag %}EXTRA{% endif %}Output: {{ bgc.wrt_his }}"
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        render_roms_settings(
+            template_files=["bgc.opt.j2"],
+            template_dir=template_dir,
+            settings_dict={"bgc": {"wrt_his": True}},
+            code_output_dir=output_dir,
+        )
+
+        assert (output_dir / "bgc.opt").read_text() == "Output: True"
+
+    def test_partial_match_dynamic_access_skips_consumption_check(self, tmp_path):
+        """Dynamic access to the section (bare iteration) disables the static check."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "bgc.opt.j2").write_text(
+            "{% for k in bgc %}{{ k }} {% endfor %}"
+        )
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        render_roms_settings(
+            template_files=["bgc.opt.j2"],
+            template_dir=template_dir,
+            settings_dict={"bgc": {"wrt_his": True, "unlisted": 1}},
+            code_output_dir=output_dir,
+        )
+
+        assert "wrt_his" in (output_dir / "bgc.opt").read_text()
+
+    def test_missing_template_directory(self, tmp_path):
+        """Test that missing template directory raises FileNotFoundError."""
+        template_dir = tmp_path / "nonexistent_templates"
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        with pytest.raises(
+            FileNotFoundError, match="Template directory does not exist"
+        ):
+            render_roms_settings(
+                template_files=["test.j2"],
+                template_dir=template_dir,
+                settings_dict={"test": {}},
+                code_output_dir=output_dir,
+            )
+
+    def test_template_directory_not_directory(self, tmp_path):
+        """Test that template path that is not a directory raises ValueError."""
+        template_file = tmp_path / "not_a_dir"
+        template_file.write_text("not a directory")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        with pytest.raises(ValueError, match="is not a directory"):
+            render_roms_settings(
+                template_files=["test.j2"],
+                template_dir=template_file,
+                settings_dict={"test": {}},
+                code_output_dir=output_dir,
+            )
+
+    def test_missing_output_directory(self, tmp_path):
+        """Test that missing output directory raises FileNotFoundError."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test.j2").write_text("test")
+
+        output_dir = tmp_path / "nonexistent_output"
+
+        with pytest.raises(FileNotFoundError, match="Output directory does not exist"):
+            render_roms_settings(
+                template_files=["test.j2"],
+                template_dir=template_dir,
+                settings_dict={"test": {}},
+                code_output_dir=output_dir,
+            )
+
+    def test_missing_template_file(self, tmp_path):
+        """Test that missing template file raises FileNotFoundError."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        with pytest.raises(FileNotFoundError, match="Template file not found"):
+            render_roms_settings(
+                template_files=["nonexistent.j2"],
+                template_dir=template_dir,
+                settings_dict={"nonexistent": {}},
+                code_output_dir=output_dir,
+            )
+
+    def test_template_without_settings_entry(self, tmp_path):
+        """Test that template without settings_dict entry raises ValueError."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test.j2").write_text("test")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        with pytest.raises(
+            ValueError, match="without corresponding settings_dict entries"
+        ):
+            render_roms_settings(
+                template_files=["test.j2"],
+                template_dir=template_dir,
+                settings_dict={},
+                code_output_dir=output_dir,
+            )
+
+    def test_template_variables_mismatch(self, tmp_path):
+        """Test that template variables not in settings_dict raise ValueError."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test.j2").write_text("Value: {{ missing_var }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"test": {"existing_var": "value"}}
+
+        with pytest.raises(
+            ValueError,
+            match="references variables without corresponding settings_dict entries",
+        ):
+            render_roms_settings(
+                template_files=["test.j2"],
+                template_dir=template_dir,
+                settings_dict=settings_dict,
+                code_output_dir=output_dir,
+            )
+
+    def test_settings_dict_not_dict(self, tmp_path):
+        """Test that settings_dict entry that is not a dict raises ValueError."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test.j2").write_text("Value: {{ var }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"test": "not a dict"}
+
+        with pytest.raises(ValueError, match="must be a dictionary"):
+            render_roms_settings(
+                template_files=["test.j2"],
+                template_dir=template_dir,
+                settings_dict=settings_dict,
+                code_output_dir=output_dir,
+            )
+
+    def test_template_parsing_error(self, tmp_path):
+        """Test that invalid template syntax raises ValueError."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test.j2").write_text("{{ unclosed")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"test": {"var": "value"}}
+
+        with pytest.raises(ValueError, match="Failed to parse template"):
+            render_roms_settings(
+                template_files=["test.j2"],
+                template_dir=template_dir,
+                settings_dict=settings_dict,
+                code_output_dir=output_dir,
+            )
+
+    def test_nt_variable_excluded(self, tmp_path):
+        """Test that 'nt' variable is excluded from template validation."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test.j2").write_text("Tracers: {{ nt }}, Value: {{ value }}")
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        settings_dict = {"test": {"value": 42}}
+
+        # Should not raise error even though 'nt' is not in settings_dict
+        render_roms_settings(
+            template_files=["test.j2"],
+            template_dir=template_dir,
+            settings_dict=settings_dict,
+            code_output_dir=output_dir,
+            n_tracers=34,
+        )
+
+        assert (output_dir / "test").read_text() == "Tracers: 34, Value: 42"
+
+
+class TestCppdefsTemplate:
+    """Render the real repo cppdefs.opt.j2 (templates/compile-time) and assert on
+    the flag-controlled CPP keys.
+    """
+
+    _TEMPLATE_DIR = (
+        Path(cstar.__file__).parent
+        / "additional_files"
+        / "templates"
+        / "forge"
+        / "compile-time"
+    )
+
+    def _render(self, tmp_path, cppdefs):
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        render_roms_settings(
+            template_files=["cppdefs.opt.j2"],
+            template_dir=self._TEMPLATE_DIR,
+            # upscale_output / cdr_frc are referenced at template top level; empty
+            # dicts let their |default(false) attribute lookups resolve to false.
+            settings_dict={"cppdefs": cppdefs, "upscale_output": {}, "cdr_frc": {}},
+            code_output_dir=output_dir,
+        )
+        return (output_dir / "cppdefs.opt").read_text()
+
+    def test_use_pio_true_defines_parallel_io(self, tmp_path):
+        text = self._render(tmp_path, {"use_pio": True})
+        assert "#define PARALLEL_IO" in text
+        assert "#undef PARALLEL_IO" not in text
+
+    def test_use_pio_false_undefs_parallel_io(self, tmp_path):
+        text = self._render(tmp_path, {"use_pio": False})
+        assert "#undef PARALLEL_IO" in text
+        assert "#define PARALLEL_IO" not in text
+
+    def test_marbl_true_defines_marbl_and_diags(self, tmp_path):
+        text = self._render(tmp_path, {"marbl": True})
+        assert "#define MARBL\n" in text
+        assert "#define MARBL_DIAGS" in text
+        assert "#undef MARBL\n" not in text
+        assert "#undef MARBL_DIAGS" not in text
+
+    def test_marbl_false_undefs_marbl_and_diags(self, tmp_path):
+        text = self._render(tmp_path, {"marbl": False})
+        assert "#undef MARBL\n" in text
+        assert "#undef MARBL_DIAGS" in text
+        assert "#define MARBL\n" not in text
+        assert "#define MARBL_DIAGS" not in text
+
+    def test_tides_true_defines_tides(self, tmp_path):
+        text = self._render(tmp_path, {"tides": True})
+        assert "#define TIDES" in text
+        assert "#undef TIDES" not in text
+
+    def test_tides_false_undefs_tides(self, tmp_path):
+        text = self._render(tmp_path, {"tides": False})
+        assert "#undef TIDES" in text
+        assert "#define TIDES" not in text
+
+    def test_sponge_tune_true_defines_sponge_tune(self, tmp_path):
+        text = self._render(tmp_path, {"sponge_tune": True})
+        assert "#define SPONGE_TUNE" in text
+        assert "#undef SPONGE_TUNE" not in text
+
+    def test_sponge_tune_false_undefs_sponge_tune(self, tmp_path):
+        text = self._render(tmp_path, {"sponge_tune": False})
+        assert "#undef SPONGE_TUNE" in text
+        assert "#define SPONGE_TUNE" not in text
+
+    def test_nhy_nox_forcing_true_defines_both(self, tmp_path):
+        text = self._render(tmp_path, {"nhy_forcing": True, "nox_forcing": True})
+        assert "#define NHY_FORCING" in text
+        assert "#define NOX_FORCING" in text
+        assert "#undef NHY_FORCING" not in text
+        assert "#undef NOX_FORCING" not in text
+
+    def test_nhy_nox_forcing_false_undefs_both(self, tmp_path):
+        text = self._render(tmp_path, {"nhy_forcing": False, "nox_forcing": False})
+        assert "#undef NHY_FORCING" in text
+        assert "#undef NOX_FORCING" in text
+        assert "#define NHY_FORCING" not in text
+        assert "#define NOX_FORCING" not in text
+
+    def test_auto_tiling_true_defines_mpi_masking(self, tmp_path):
+        text = self._render(tmp_path, {"auto_tiling": True})
+        assert "#define MPI_MASKING\n" in text
+        assert "#undef MPI_MASKING\n" not in text
+
+    def test_auto_tiling_false_undefs_mpi_masking(self, tmp_path):
+        text = self._render(tmp_path, {"auto_tiling": False})
+        assert "#undef MPI_MASKING\n" in text
+        assert "#define MPI_MASKING\n" not in text
+
+    # ucla-roms >= 0.8.0 vertical/horizontal tracer-advection switches (PR #361).
+    # Both are opt-in: a ModelSpec that predates them (no cppdefs key at all) must
+    # keep rendering #undef, so older templates_commit pins stay byte-identical.
+    def test_parabolic_splines_true_defines_key(self, tmp_path):
+        text = self._render(tmp_path, {"parabolic_splines": True})
+        assert "#define PARABOLIC_SPLINES\n" in text
+        assert "#undef PARABOLIC_SPLINES\n" not in text
+
+    def test_parabolic_splines_false_undefs_key(self, tmp_path):
+        text = self._render(tmp_path, {"parabolic_splines": False})
+        assert "#undef PARABOLIC_SPLINES\n" in text
+        assert "#define PARABOLIC_SPLINES\n" not in text
+
+    def test_upstream_ts_land_curv_true_defines_key(self, tmp_path):
+        text = self._render(tmp_path, {"upstream_ts_land_curv": True})
+        assert "#define UPSTREAM_TS_LAND_CURV\n" in text
+        assert "#undef UPSTREAM_TS_LAND_CURV\n" not in text
+
+    def test_upstream_ts_land_curv_false_undefs_key(self, tmp_path):
+        text = self._render(tmp_path, {"upstream_ts_land_curv": False})
+        assert "#undef UPSTREAM_TS_LAND_CURV\n" in text
+        assert "#define UPSTREAM_TS_LAND_CURV\n" not in text
+
+    def test_advection_keys_absent_from_settings_render_undef(self, tmp_path):
+        """A cppdefs dict without either key (every ModelSpec pinned to ucla-roms
+        < 0.8.0) renders both as #undef -- the template may reference attrs the
+        settings lack (undefined -> falsy), so older specs are unaffected.
+        """
+        text = self._render(tmp_path, {"use_pio": True})
+        assert "#undef PARABOLIC_SPLINES\n" in text
+        assert "#undef UPSTREAM_TS_LAND_CURV\n" in text
+        assert "#define PARABOLIC_SPLINES\n" not in text
+        assert "#define UPSTREAM_TS_LAND_CURV\n" not in text
+
+
+class TestROMSTemplateRenderer:
+    """Tests for ROMSTemplateRenderer class."""
+
+    def test_renderer_initialization(self, tmp_path):
+        """Test ROMSTemplateRenderer initialization."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+
+        renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
+
+        assert renderer.template_dir == template_dir
+        assert renderer.env is not None
+
+    def test_render_template(self, tmp_path):
+        """Test rendering a single template."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test_template.j2").write_text(
+            "Hello {{ name }}, value is {{ value }}"
+        )
+
+        renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
+        config = {"name": "World", "value": 42}
+
+        result = renderer.render_template("test_template.j2", config)
+
+        assert result == "Hello World, value is 42"
+
+    def test_render_template_without_j2_extension(self, tmp_path):
+        """Test rendering template without .j2 extension in name."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test_template.j2").write_text("Hello {{ name }}")
+
+        renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
+        config = {"name": "World"}
+
+        # Should work with .j2 extension
+        result = renderer.render_template("test_template.j2", config)
+        assert result == "Hello World"
+
+    def test_fortran_bool_filter(self, tmp_path):
+        """Test Fortran boolean filter."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test_template.j2").write_text("Flag: {{ flag | lower }}")
+
+        renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
+
+        config = {"flag": True}
+        result = renderer.render_template("test_template.j2", config)
+        assert result == "Flag: .true."
+
+        config = {"flag": False}
+        result = renderer.render_template("test_template.j2", config)
+        assert result == "Flag: .false."
+
+    def test_render_template_with_nested_context(self, tmp_path):
+        """Test rendering template with nested context."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test_template.j2").write_text(
+            "Title: {{ title.name }}, Value: {{ nested.value }}"
+        )
+
+        renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
+        config = {"title": {"name": "Test Case"}, "nested": {"value": 42}}
+
+        result = renderer.render_template("test_template.j2", config)
+
+        assert result == "Title: Test Case, Value: 42"
+
+    def test_render_template_missing_variable(self, tmp_path):
+        """Test that missing template variable renders as empty string (default Jinja2 behavior)."""
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+        (template_dir / "test_template.j2").write_text("Value: {{ missing_var }}")
+
+        renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
+        config = {}
+
+        # Jinja2 by default renders undefined variables as empty strings, not errors
+        result = renderer.render_template("test_template.j2", config)
+        assert result == "Value: "
+
+    def test_render_template_missing_template_file(self, tmp_path):
+        """Test that missing template file raises TemplateNotFound."""
+        from jinja2.exceptions import TemplateNotFound
+
+        template_dir = tmp_path / "templates"
+        template_dir.mkdir()
+
+        renderer = ROMSTemplateRenderer(template_dir=str(template_dir))
+        config = {}
+
+        with pytest.raises(TemplateNotFound):
+            renderer.render_template("nonexistent.j2", config)

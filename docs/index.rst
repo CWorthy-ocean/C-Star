@@ -40,6 +40,22 @@ A key strength of C-Star lies in its ability to run regional ocean simulations u
     blueprints
     workplans
 
+.. toctree::
+    :maxdepth: 1
+    :caption: Domain generation (Forge)
+
+    forge/index
+    forge/getting_started
+    forge/reference
+    forge/source_data
+    forge/input_data
+    forge/model_spec
+    forge/catalog
+    forge/internals
+    forge/installation_hpc
+    forge/machine_config
+    forge/installation_changes
+
 
 .. toctree::
     :maxdepth: 1

@@ -1,0 +1,27 @@
+description: "California Current System"
+model_name: "cson_roms-marbl_v0.1"
+grid_name: "ccs-12km"
+start_time: "2024-01-01"
+end_time: "2024-01-02"
+grid_kwargs:
+  nx: 224
+  ny: 440
+  size_x: 2688
+  size_y: 5280
+  center_lon: -134.5
+  center_lat: 39.6
+  rot: 33.3
+  N: 60
+  hc: 250.0
+  theta_s: 6.0
+  theta_b: 6.0
+  verbose: true
+  hmin: 5.0
+open_boundaries:
+  south: true
+  east: true
+  north: true
+  west: true
+partitioning:
+  n_procs_x: 16
+  n_procs_y: 20

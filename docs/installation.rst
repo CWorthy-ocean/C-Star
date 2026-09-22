@@ -142,3 +142,12 @@ Execute the following command to verify that ``C-Star`` is installed correctly:
    :caption: Verifying package installation
 
    cstar --version
+
+Forge domain generation
+------------------------
+
+``cstar-ocean`` bundles **Forge**, the application for generating new
+ROMS-MARBL domains -- no separate install is required. See
+:doc:`forge/getting_started` for the Forge-specific getting-started guide,
+including registering for GLORYS/TPXO data access and running the wizard, and
+:doc:`forge/installation_hpc` for HPC-specific notes carried over from Forge.

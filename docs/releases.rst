@@ -54,3 +54,5 @@ Release notes
 .. include:: releases/v0.0.3-alpha.rst
 
 .. include:: releases/v0.0.1-alpha.rst
+
+.. include:: releases/cstar-forge-history.rst

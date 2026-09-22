@@ -10,6 +10,7 @@ from cstar.cli.blueprint import ALIAS as ALIAS_BLUEPRINT
 from cstar.cli.blueprint import app as app_blueprint
 from cstar.cli.common import common_callback
 from cstar.cli.environment import app as app_env
+from cstar.cli.forge import app as app_forge
 from cstar.cli.template import app as app_template
 from cstar.cli.workplan import ALIAS as ALIAS_WORKPLAN
 from cstar.cli.workplan import app as app_workplan
@@ -34,6 +35,7 @@ def attach_subcommands(app: typer.Typer) -> None:
     subcommands: list[tuple[typer.Typer, str, tuple[str, ...]]] = [
         (app_blueprint, "blueprint", (ALIAS_BLUEPRINT,)),
         (app_env, "env", ()),
+        (app_forge, "forge", ()),
         (app_template, "template", ()),
         (app_workplan, "workplan", (ALIAS_WORKPLAN,)),
         (app_admin, "admin", ()),

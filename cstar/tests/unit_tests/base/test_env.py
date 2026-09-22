@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -62,10 +63,19 @@ def test_max_concurrency_falls_back_on_non_positive(
     assert "invalid" in caplog.text
 
 
-def test_catalog_defaults_under_data_home(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_catalog_defaults_under_home_not_data_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The catalog default is home-anchored, independent of CSTAR_DATA_HOME.
+
+    Catalog entries are durable, user-registered content that must survive HPC
+    scratch purges, so the default must not follow CSTAR_DATA_HOME (which
+    resolves onto scratch on HPC systems).
+    """
     monkeypatch.delenv(ENV_CSTAR_CATALOG, raising=False)
     monkeypatch.setenv(ENV_CSTAR_DATA_HOME, "/data/home")
-    assert get_env_item(ENV_CSTAR_CATALOG).value == "/data/home/catalog"
+    expected = (Path.home() / "cstar" / "catalog").as_posix()
+    assert get_env_item(ENV_CSTAR_CATALOG).value == expected
 
 
 def test_catalog_explicit_value_wins(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -298,12 +298,14 @@ ENV_CSTAR_DATA_HOME: t.Annotated[
 
 
 def default_catalog_root(env_var: EnvVar) -> str:
-    """Default catalog location: ``<CSTAR_DATA_HOME>/catalog``.
+    """Default catalog location: ``~/cstar/catalog``.
 
-    Catalog entries are durable, user-registered content, so they live under the
-    data home (scratch on HPC, ``~/cstar`` elsewhere) rather than the cache.
+    Deliberately home-anchored rather than derived from ``CSTAR_DATA_HOME``:
+    catalog entries are durable, user-registered content that must survive HPC
+    scratch purges, and ``CSTAR_DATA_HOME`` resolves onto scratch on HPC systems
+    (see :func:`hpc_data_directory`).
     """
-    return (Path(get_env_item(ENV_CSTAR_DATA_HOME).value) / "catalog").as_posix()
+    return (Path.home() / "cstar" / "catalog").as_posix()
 
 
 ENV_CSTAR_CATALOG: t.Annotated[

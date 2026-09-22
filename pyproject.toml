@@ -41,6 +41,31 @@ dependencies = [
     # core roms-tools dependency as of 4.0.1 (the [dask] extra is gone).
     "roms_tools>=5.0,<6",
     "typer<=0.25",
+    # -- direct imports in cstar.applications.forge (arrive with the forge
+    # application; psutil, pydantic, PyYAML, numpy, typer, and roms_tools above
+    # are already required, so are not repeated here) --
+    "jinja2",
+    "pandas",
+    "copernicusmarine",
+    "gdown",
+    "dask",
+    "distributed",
+    "threadpoolctl",
+    "numba",
+    "fsspec",
+    "kerchunk",
+    "nest-asyncio",
+    "ujson",
+    "fastparquet",
+    "xarray",
+    # -- the wizard (cstar.wizard) -- kitchen-sink decision: the wizard ships
+    # as a core dependency, not an optional extra, so `pip install cstar-ocean`
+    # is enough to run it --
+    "ipywidgets",
+    "voila",
+    "jupyterlab",
+    "matplotlib",
+    "ipython",
 ]
 keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 
@@ -48,6 +73,9 @@ keywords = ["MCDR", "CDR", "ocean carbon", "climate"]
 dev = [
     "coverage>=7.13",
     "mypy>=1.16.1",
+    # forge's test suite (cstar/tests/unit_tests/applications/forge/) reads/writes
+    # NetCDF fixtures directly via netCDF4, not only through xarray/roms_tools.
+    "netCDF4",
     "pooch>=1.8.1",
     "pre-commit==3.8.0",
     "pytest>=7.0",
@@ -121,6 +149,9 @@ ignore = [
     # and unused unpacked names document a tuple's shape.
     "RUF043",
     "RUF059",
+    # Ambiguous-unicode in strings: forge's user-facing messages use intentional
+    # glyphs (ℹ info markers, × in "npx × npy").
+    "RUF001",
 ]
 
 [tool.ruff.lint.pydocstyle]

@@ -1,0 +1,99 @@
+description: Generated blueprint
+initial_conditions:
+  source:
+    name: GLORYS
+    glorys_layout: global
+  bgc_sources:
+  - source:
+      name: ESPER
+      esper_method: nn
+      esper_equation: 8
+    use_vars:
+    - ALK
+    - DIC
+    - NO3
+    - PO4
+    - SiO3
+    - O2
+  - source:
+      name: UNIFIED
+      climatology: true
+    use_vars:
+    - CHL
+    - Fe
+    - NH4
+    - DOC
+    - DOCr
+    - DON
+    - DONr
+    - DOP
+    - DOPr
+    bgc_interpolation_method: density_mld
+  bypass_validation: true
+forcing:
+  surface:
+  - source:
+      name: ERA5
+    type: physics
+    correct_radiation: true
+    coarse_grid_mode: never
+  - source:
+      name: UNIFIED
+      climatology: true
+    type: bgc
+    coarse_grid_mode: never
+  - source:
+      name: MBL_co2
+    type: bgc
+    coarse_grid_mode: never
+  - source:
+      name: WOA
+      climatology: true
+    type: restoring
+    coarse_grid_mode: never
+    restoring_forces:
+    - sss
+  tidal:
+  - source:
+      name: TPXO
+    ntides: 15
+  river:
+  - source:
+      name: DAI
+    include_bgc: true
+    bgc_source:
+      name: RIVR2O
+    surface_forcing_source:
+      name: ERA5
+    convert_to_climatology: if_any_missing
+  boundary:
+    source:
+      name: GLORYS
+      glorys_layout: global
+    bgc_sources:
+    - source:
+        name: ESPER
+        esper_method: nn
+        esper_equation: 8
+      use_vars:
+      - ALK
+      - DIC
+      - NO3
+      - PO4
+      - SiO3
+      - O2
+    - source:
+        name: UNIFIED
+        climatology: true
+      use_vars:
+      - CHL
+      - Fe
+      - NH4
+      - DOC
+      - DOCr
+      - DON
+      - DONr
+      - DOP
+      - DOPr
+      bgc_interpolation_method: density_mld
+    bypass_validation: true

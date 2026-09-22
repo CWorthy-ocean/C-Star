@@ -1,0 +1,288 @@
+"""
+Pydantic models for the ModelSpec catalog format.
+
+A ModelSpec is a single YAML (``model.yaml``) with two top-level sections:
+``code`` (roms/marbl/pio source pins + template refs) and ``model_settings``
+(flat, mirrors ``ForgeBlueprint.model_settings`` 1:1). It intentionally holds
+nothing a Domain/Forcing/Output spec already provides -- no grid/initial-
+conditions/forcing source selection (a ForcingSpec's job) and no output-control
+sections (an OutputSpec's job). Both must always be explicitly selected; there
+is no more "model default" fallback embedded here.
+
+The forcing/IC item models (``SurfaceForcingItem``, ``BoundaryForcing``, etc.)
+are defined once in ``cstar.applications.forge.blueprint`` and re-exported here
+(single source of truth -- see ``docs/roms-tools-contributor-guide.md`` and
+``test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced``) for
+callers that import them from ``cstar.applications.forge.models``.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Literal
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from cstar.applications.forge.blueprint import (
+    CDR_MODES,
+    BgcSourceItem,
+    BoundaryForcing,
+    CdrSpec,
+    CodeRepo,
+    RiverForcingItem,
+    SourceSpec,
+    SurfaceForcingItem,
+    TidalForcingItem,
+    TopographySource,
+    UserProvidedFile,
+)
+from cstar.applications.forge.blueprint import (
+    InitialConditions as InitialConditionsInput,
+)
+from cstar.applications.forge.blueprint import (
+    OpenBoundaries as OpenBoundaries,
+)
+from cstar.applications.forge.templates import bundled_template_dir
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+__all__ = [
+    "CDR_MODES",
+    "BgcSourceItem",
+    "BoundaryForcing",
+    "CdrSpec",
+    "InitialConditionsInput",
+    "ModelCode",
+    "ModelSpec",
+    "ModelTemplates",
+    "OpenBoundaries",
+    "RiverForcingItem",
+    "SourceSpec",
+    "SurfaceForcingItem",
+    "TidalForcingItem",
+    "TopographySource",
+    "UserProvidedFile",
+    "load_models_yaml",
+]
+
+
+class ModelTemplates(BaseModel):
+    """A ModelSpec's compile/run-time template file references.
+
+    Deliberately has no ``location``: that's filled in later from the resolver's
+    ``templates_repo`` default (or a CLI override), since a ModelSpec doesn't pin
+    which fork/mirror of the forge repo serves its templates.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    directory: str
+    files: list[str] = Field(default_factory=list)
+    # sha256 hex digest of each of ``files``, *as they exist at the ModelSpec's own
+    # ``templates_commit`` pin* -- authored by hand (not computed from the bundled
+    # copy, which may be a newer commit -- see roms-marbl-0.8-default/model.yaml for
+    # the regeneration recipe), keyed by filename. ``resolve.py``'s ``_build_code``
+    # copies this straight into ``TemplateRepo.file_hashes``: the executor's local
+    # fast path only fires when the bundled copy matches these hashes exactly, so a
+    # ModelSpec pinned at an older commit than the bundled templates correctly
+    # falls back to fetching (and verifying against) the real pinned commit instead
+    # of silently substituting newer bundled content. Empty (the default) for a
+    # ModelSpec that hasn't authored hashes yet -- the executor then skips
+    # verification entirely, today's (pre-hash) behaviour.
+    file_hashes: dict[str, str] = Field(default_factory=dict)
+
+
+class ModelCode(BaseModel):
+    """Code repositories for a ModelSpec: source pins + template refs.
+
+    Mirrors ``forge.forge_blueprint.Code`` (roms/marbl/pio/templates_compile_time/
+    templates_run_time), but with the lighter ``ModelTemplates`` shape for the
+    template refs, since a ModelSpec only ever authors directory+files, never a
+    resolved ``location`` (that comes from the resolver's ``templates_repo``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    roms: CodeRepo
+    marbl: CodeRepo | None = None
+    pio: CodeRepo | None = None
+    templates_commit: str | None = None
+    templates_compile_time: ModelTemplates
+    templates_run_time: ModelTemplates
+
+
+class ModelSpec(BaseModel):
+    """Description of an ocean model configuration (e.g., ROMS/MARBL).
+
+    Parameters
+    ----------
+    name : str
+        Logical name of the model (e.g., "cson_roms-marbl_v0.1").
+    description : str, optional
+        Human-readable one-liner for catalogs/wizard display.
+    code : ModelCode
+        Code repository refs (roms/marbl/pio) + template refs.
+    bgc_mode : Literal["marbl", "none"]
+        Per-run BGC toggle. Prepopulates the wizard's BGC dropdown; the resolver
+        uses it to derive ``model_settings.cppdefs.marbl`` (and gate
+        ``nhy_forcing``/``nox_forcing``) and to decide whether ``code.marbl`` is
+        populated. Not part of ``model_settings`` -- it's a build mode, not a
+        namelist section.
+    use_pio : bool
+        Per-run ParallelIO (PIO) build toggle. Prepopulates the wizard's PIO
+        checkbox; the resolver uses it to derive ``model_settings.cppdefs.use_pio``
+        and to decide whether ``code.pio`` is populated (raising if PIO is
+        requested but the model has no ``code.pio`` pin). Not part of
+        ``model_settings`` -- it's a build mode, not a namelist section.
+    model_settings : dict[str, Any]
+        Flat model-specific physics/numerics defaults, mirroring
+        ``ForgeBlueprint.model_settings`` 1:1. Contains nothing a Domain/Forcing/
+        Output spec already provides.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    code: ModelCode
+    bgc_mode: Literal["marbl", "none"] = "marbl"
+    use_pio: bool = False
+    model_settings: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_settings_templates_cross_ref(self) -> ModelSpec:
+        """Cross-validate that compile-time template files have corresponding
+        model_settings keys.
+
+        Only files ending with ``.j2`` in ``code.templates_compile_time.files``
+        are validated. Each ``.j2`` template file should have a corresponding
+        top-level key in ``model_settings`` (e.g. ``cppdefs.opt.j2`` -> ``"cppdefs"``
+        -- this also guarantees ``cppdefs`` itself is present, since it's always
+        one of the compile-time template files).
+        """
+        template_files = self.code.templates_compile_time.files or []
+        template_base_names: set[str] = set()
+        for f in template_files:
+            if not f.endswith(".j2"):
+                continue
+            base_name = f[: -len(".j2")]
+            section_name = base_name.split(".")[0] if "." in base_name else base_name
+            template_base_names.add(section_name)
+
+        missing_keys = template_base_names - set(self.model_settings.keys())
+        if missing_keys:
+            raise ValueError(
+                f"Template files with sections {sorted(missing_keys)} do not have "
+                f"corresponding keys in model_settings. Available keys: "
+                f"{sorted(self.model_settings.keys())}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_template_files_exist(self) -> ModelSpec:
+        """Best-effort: check that template files exist in C-Star's own bundled
+        forge templates (``cstar/additional_files/templates/forge``), via the
+        single ``directory`` mapping in ``cstar.applications.forge.templates.
+        bundled_template_dir`` (also used by ``resolve.py`` and ``executor.py``).
+        Silently skipped if the bundled directory doesn't exist for this stage
+        (e.g. an installed-package-only environment) -- this is a
+        development-time nicety, not a runtime requirement.
+        """
+        for stage_name, stage in (
+            ("compile_time", self.code.templates_compile_time),
+            ("run_time", self.code.templates_run_time),
+        ):
+            template_dir = bundled_template_dir(stage.directory)
+            if template_dir is None:
+                continue
+            missing = [f for f in stage.files if not (template_dir / f).exists()]
+            if missing:
+                raise FileNotFoundError(
+                    f"{stage_name} template files listed in model spec do not "
+                    f"exist in {template_dir}:\n"
+                    f"  Missing files: {sorted(missing)}\n"
+                    f"  Available files: "
+                    f"{sorted(p.name for p in template_dir.iterdir() if p.is_file())}"
+                )
+        return self
+
+
+def load_models_yaml(path: Path, model_name: str) -> ModelSpec:
+    """Load a ModelSpec from a ``model.yaml`` file.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the model.yaml file.
+    model_name : str
+        Name of the model (used as ``ModelSpec.name``; either the multi-model
+        block key, or -- for a single-model file -- the directory/file's logical
+        name).
+
+    Returns
+    -------
+    ModelSpec
+
+    Raises
+    ------
+    KeyError
+        If the requested model is not present in a multi-model YAML file.
+    ValueError
+        If required fields are missing.
+    """
+    with path.open() as f:
+        data = yaml.safe_load(f) or {}
+
+    _SINGLE_MODEL_KEYS = frozenset({"code", "model_settings"})
+    if model_name in data:
+        block = data[model_name]  # multi-model file
+    elif _SINGLE_MODEL_KEYS.intersection(data.keys()):
+        block = data  # single-model file: content at top level, filename is model name
+    else:
+        raise KeyError(f"Model '{model_name}' not found in models YAML file: {path}")
+
+    if "code" not in block:
+        raise ValueError(f"Model '{model_name}' must specify 'code' in model.yaml")
+
+    code_block = block["code"]
+
+    def _repo(val: dict[str, Any] | None) -> CodeRepo | None:
+        if not val:
+            return None
+        commit = val.get("commit")
+        return CodeRepo(
+            location=val.get("location"),
+            commit=str(commit) if commit is not None else None,
+            branch=val.get("branch"),
+        )
+
+    roms = _repo(code_block.get("roms"))
+    if roms is None:
+        raise ValueError(f"Model '{model_name}' must include 'roms' in code")
+
+    def _templates(stage: str) -> ModelTemplates:
+        t = code_block.get(f"templates_{stage}", {}) or {}
+        return ModelTemplates(
+            directory=t.get("directory"),
+            files=t.get("files", []),
+            file_hashes=t.get("file_hashes", {}),
+        )
+
+    model_code = ModelCode(
+        roms=roms,
+        marbl=_repo(code_block.get("marbl")),
+        pio=_repo(code_block.get("pio")),
+        templates_commit=code_block.get("templates_commit"),
+        templates_compile_time=_templates("compile_time"),
+        templates_run_time=_templates("run_time"),
+    )
+
+    return ModelSpec(
+        name=model_name,
+        description=block.get("description"),
+        code=model_code,
+        bgc_mode=block.get("bgc_mode", "marbl"),
+        use_pio=block.get("use_pio", False),
+        model_settings=block.get("model_settings", {}) or {},
+    )

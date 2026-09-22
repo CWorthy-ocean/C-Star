@@ -40,7 +40,7 @@ Per-field docstrings are transcribed from the ucla-roms reference
 ``src/namelist.nml`` (``! ...`` comments).
 
 (C-Star Forge builds these from its settings dict — see
-``cstar_forge.namelist_model.build_namelist`` — and writes a ``namelist.nml``
+``cstar.applications.forge.namelist_model.build_namelist`` — and writes a ``namelist.nml``
 that this model reads back.)
 """
 
