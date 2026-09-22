@@ -16,8 +16,8 @@ steps:
     depends_on:
       - wales
     blueprint_overrides:
-      working_dir: "{{work_dir: wales_plotter}}/output"
-      input_dir: "{{work_dir: wales}}/output"
-      grid_file_path: "{{work_dir: wales}}/input/input_datasets/roms_grd.nc"
+      working_dir: "{{output_dir: wales_plotter}}"
+      input_dir: "{{output_dir: wales}}"
+      grid_file_path: "{{input_dir: wales}}/input_datasets/roms_grd.nc"
       time_indices:
         - "{{time_slice}}"
