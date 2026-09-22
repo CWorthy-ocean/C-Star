@@ -1,13 +1,10 @@
 .. _forge-internals:
 
-Developer guide
+Forge internals
 ==================
 
 The primary architecture reference for Forge, describing the current state
-of the code inside C-Star. Historical notes -- how the code arrived here from
-the standalone ``cstar-forge`` repository, resolved follow-ups, planning
-documents -- live in that repository's git history and in the ``claude-docs``
-design-rationale notes.
+of the code inside C-Star.
 
 1. The big picture
 ----------------------
@@ -70,7 +67,7 @@ blueprint" means producing that downstream artifact, not forge's own input.
     |   |                                  # already-parsed option values (called by cli/forge's 'run')
     |   +-- core.py                    # get_application() / register_application / ApplicationDefinition
     |   +-- roms_marbl/                # the roms_marbl application forge's output feeds into
-    +-- catalog/                       # Bundled + layered spec catalog (see docs/forge/catalog.rst)
+    +-- catalog/                       # Bundled + layered spec catalog (see docs/developers/catalog_design.rst)
     |   +-- bundled/
     |   |   +-- ModelSpec/{model}/model.yaml    # Code repos, templates, settings, defaults
     |   |   +-- DomainSpec/{grid}/Domain.yaml   # Grid definitions
@@ -163,7 +160,7 @@ filenames off it.
   load.
 
 Render templates: ``code.templates_compile_time``/``_run_time`` pin a git
-commit (``code.templates_commit``, see :doc:`model_spec`) and, per file, the
+commit (``code.templates_commit``, see :doc:`forge_templates`) and, per file, the
 sha256 of its content at that commit (``file_hashes``, authored in the bundled
 ModelSpecs). At ``configure_build`` the executor stages the copy bundled at
 ``cstar/additional_files/templates/forge/<stage>`` when every listed file
