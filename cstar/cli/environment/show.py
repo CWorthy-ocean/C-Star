@@ -3,7 +3,7 @@ import typing as t
 from enum import StrEnum, auto
 
 import typer
-from rich import print  # noqa: A004, ignore shadowing of built-in print
+from rich import print
 
 from cstar.base.env import NOT_SET, env_var_groups
 

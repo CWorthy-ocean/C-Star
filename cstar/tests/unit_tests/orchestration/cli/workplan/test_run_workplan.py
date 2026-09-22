@@ -1039,7 +1039,7 @@ def test_workplan_run_reload_prior_run(
     repo = TrackingRepository()
     repo.put_workplan_run_sync(fake_run)
 
-    def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
+    def typer_exit(*args, **kwargs) -> None:  # type: ignore
         raise typer.Exit(1)
 
     runner = CliRunner()
@@ -1127,7 +1127,7 @@ def test_workplan_run_reload_prior_run_in_progress(
     repo = TrackingRepository()
     repo.put_workplan_run_sync(fake_run)
 
-    def typer_exit(*args, **kwargs) -> None:  # type: ignore # noqa: ANN002, ANN003, ARG001
+    def typer_exit(*args, **kwargs) -> None:  # type: ignore
         raise typer.Exit(1)
 
     runner = CliRunner()

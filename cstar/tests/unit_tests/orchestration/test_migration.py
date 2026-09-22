@@ -148,7 +148,7 @@ def test_migration_simple_plan() -> None:
     type(mock_adapter).source = lambda _cls: APP_ROMS_MARBL_SCHEMA_1_0_0
     type(mock_adapter).target = lambda _cls: APP_ROMS_MARBL_SCHEMA_2_0_0
 
-    adapters: list[type[SchemaAdapter]] = [mock_adapter]  # type: ignore  # noqa: PGH003
+    adapters: list[type[SchemaAdapter]] = [mock_adapter]  # type: ignore
 
     bp0 = {KEY_SV: src_version_exp, KEY_APP: APP_ROMS}
     migrator = BlueprintMigration(adapters=adapters)  # , schema_bounds=schema_bounds)
@@ -190,7 +190,7 @@ def test_migration_identify_bounds() -> None:
         mock_adapter0,
         mock_adapter1,
         mock_adapter2,
-    ]  # type: ignore  # noqa: PGH003
+    ]  # type: ignore
 
     # do not pass bounds. BlueprintMigration should auto-discover them from adapters.
     migrator = BlueprintMigration(adapters=adapters)
@@ -234,7 +234,7 @@ def test_migration_identify_bounds_orders_versions_numerically() -> None:
     adapters: list[type[SchemaAdapter]] = [
         mock_adapter0,
         mock_adapter1,
-    ]  # type: ignore  # noqa: PGH003
+    ]  # type: ignore
 
     migrator = BlueprintMigration(adapters=adapters)
 
@@ -302,7 +302,7 @@ def test_migration_bounds_with_multiple_apps_in_adapters(
         mock_adapter3,
         mock_adapter4,
         mock_adapter5,
-    ]  # type: ignore  # noqa: PGH003
+    ]  # type: ignore
 
     # do not pass bounds. BlueprintMigration should auto-discover them from adapters.
     migrator = BlueprintMigration(adapters=adapters)

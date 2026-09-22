@@ -253,7 +253,7 @@ class Service(ABC, LoggingMixin):
             except Full:
                 # message was not acknowledged in expected timeframe
                 num_missed += 1
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # queue was shutdown on other side, exit HC loop
                 self._stop_event.set()
                 num_missed = 0

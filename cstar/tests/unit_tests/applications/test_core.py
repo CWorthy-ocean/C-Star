@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 import sys
 import textwrap
 from pathlib import Path

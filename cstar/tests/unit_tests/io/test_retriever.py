@@ -108,7 +108,7 @@ class TestRemoteTextFileRetriever:
         """Tests that RemoteTextFileRetriever.save takes `read` output and saves it to file"""
         fake_data = b"hello world"
 
-        # Patch .read so we don’t hit the network
+        # Patch .read so we don't hit the network
         with mock.patch.object(
             retriever.RemoteTextFileRetriever, "read", return_value=fake_data
         ) as mock_read:

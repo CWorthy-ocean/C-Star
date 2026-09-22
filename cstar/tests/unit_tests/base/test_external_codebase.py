@@ -63,7 +63,7 @@ def test_codebase_str(fakeexternalcodebase):
 
     # Compare the actual result with the expected result
     assert expected_str in str(fakeexternalcodebase), (
-        f"EXPECTED: \n{expected_str}, GOT: \n{str(fakeexternalcodebase)}"
+        f"EXPECTED: \n{expected_str}, GOT: \n{fakeexternalcodebase!s}"
     )
 
 

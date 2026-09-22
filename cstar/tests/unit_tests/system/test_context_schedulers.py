@@ -38,7 +38,7 @@ def test_context_registry(
 
     if exp_sched_type is not None:
         assert type(scheduler) is exp_sched_type
-        queues = getattr(scheduler, "queues")  # noqa: B009
+        queues = getattr(scheduler, "queues")
         assert {q.name for q in queues} == exp_queue_names
         if exp_sched_type == PerlmutterSystemContext:
             assert scheduler.global_max_cpus_per_node == 128

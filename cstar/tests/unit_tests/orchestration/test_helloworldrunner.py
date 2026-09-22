@@ -1,4 +1,3 @@
-# ruff: noqa: S101
 import os
 import typing as t
 import uuid

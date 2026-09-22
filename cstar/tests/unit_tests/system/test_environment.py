@@ -525,7 +525,7 @@ class TestExceptions:
         Mocks
         -----
         - subprocess.run: Simulates subprocess calls to avoid real system command execution.
-        - CStarEnvironment.uses_lmod: Patched to simulate environments that use or don’t use Lmod.
+        - CStarEnvironment.uses_lmod: Patched to simulate environments that use or don't use Lmod.
         - os.environ: Cleared and patched with specific values for test isolation.
         """
         self.subprocess_patcher = patch(
@@ -578,7 +578,7 @@ class TestExceptions:
 
         Mocks
         -----
-        - CStarEnvironment.uses_lmod: Returns False to simulate an environment that doesn’t use Lmod.
+        - CStarEnvironment.uses_lmod: Returns False to simulate an environment that doesn't use Lmod.
 
         Asserts
         -------
