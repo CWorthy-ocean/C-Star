@@ -1,5 +1,5 @@
 """
-Tests for the ForgeExecutor (cstar_forge.forge.executor).
+Tests for the ForgeExecutor (cstar.applications.forge.executor).
 
 The executor is now config/authoring-free: it is constructed the canonical way via
 ``ForgeExecutor.from_forge_blueprint(cfg, host=host)`` where ``cfg`` is a resolved
@@ -29,28 +29,28 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
-import cstar.applications.roms_marbl.models as cstar_models
 import numpy as np
 import pytest
 import xarray as xr
 import yaml
+from pydantic import ValidationError
+
+import cstar.applications.roms_marbl.models as cstar_models
+import cstar.catalog
 from cstar.applications.core import RunnerRequest
+from cstar.applications.forge import models as forge_models
+from cstar.applications.forge import runtime as forge_run
+from cstar.applications.forge.app import ForgeRunner
+from cstar.applications.forge.blueprint import ForgeBlueprint
+from cstar.applications.forge.engine import process_forge_blueprint
+from cstar.applications.forge.executor import ForgeExecutor, _deep_merge_settings_dict
+from cstar.applications.forge.host import HostPaths
+from cstar.applications.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
+from cstar.applications.forge.resolve import build_forge_blueprint
+from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 from cstar.entrypoint.config import get_job_config, get_service_config
 from cstar.execution.handler import ExecutionStatus
 from cstar.orchestration.models import Resource
-from pydantic import ValidationError
-
-import cstar_forge
-from cstar_forge import models as forge_models
-from cstar_forge import run as forge_run
-from cstar_forge.domain_catalog import default_catalog as _CATALOG
-from cstar_forge.forge.app import ForgeRunner
-from cstar_forge.forge.executor import ForgeExecutor, _deep_merge_settings_dict
-from cstar_forge.forge.forge_blueprint import ForgeBlueprint
-from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
-from cstar_forge.forge.host import HostPaths
-from cstar_forge.forge.input_data import CHILD_IC_PLACEHOLDER_LOCATION
-from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
 
 requires_cstar_pio = pytest.mark.skipif(
     "pio" not in cstar_models.ROMSCompositeCodeRepository.model_fields
@@ -61,33 +61,17 @@ requires_cstar_pio = pytest.mark.skipif(
     ),
 )
 
-_MODEL_DIR = (
-    Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
-)
+_BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
+_MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
 # ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
-_MODEL_DIR_ROMS050 = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "roms-marbl-0.5-default"
-)
+_MODEL_DIR_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default"
 # ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
 # golden test below.
-_MODEL_DIR_ROMS060 = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "roms-marbl-0.6-default"
-)
+_MODEL_DIR_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default"
 # ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
 # &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
 # test below.
-_MODEL_DIR_ROMS070 = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "roms-marbl-0.7-default"
-)
+_MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 # ModelSpec no longer embeds a default forcing/output selection -- these tests just
 # need a valid, representative pair from the bundled catalog.
 _FORCING_INPUTS = _CATALOG.forcing_data("glorys-era5-unified")
@@ -166,7 +150,7 @@ def mock_grid():
     """Autouse: the executor still builds the grid in model_post_init via rt.Grid,
     so keep it mocked. Tests that need the mock can request it by name.
     """
-    with patch("cstar_forge.forge.executor.rt.Grid") as mg:
+    with patch("cstar.applications.forge.executor.rt.Grid") as mg:
         mg.return_value = _create_grid_mock()
         yield mg
 
@@ -390,7 +374,7 @@ class TestForgeExecutorProperties:
             data=[Resource(location=str(ic_file), partitioned=False)]
         )
 
-        with patch("cstar_forge.forge.executor.xr.open_dataset") as mock_open:
+        with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds = MagicMock(spec=xr.Dataset)
             mock_open.return_value = mock_ds
 
@@ -468,7 +452,7 @@ class TestForgeExecutorModelPostInit:
         staged = tmp / "SRTM15" / "SRTM15_V2.7.nc"
         # Mock the staging download: prepare_all() is a no-op, path_for_source returns the path.
         with patch(
-            "cstar_forge.forge.executor.source_datasets.SourceDatasets"
+            "cstar.applications.forge.executor.source_datasets.SourceDatasets"
         ) as mock_sd:
             inst = mock_sd.return_value
             inst.prepare_all.return_value = inst
@@ -511,7 +495,7 @@ class TestForgeExecutorModelPostInit:
         host = HostPaths(working_dir=tmp, source_data_cache=tmp, system="test")
         # Staging must NOT be invoked when an explicit path is given.
         with patch(
-            "cstar_forge.forge.executor.source_datasets.SourceDatasets"
+            "cstar.applications.forge.executor.source_datasets.SourceDatasets"
         ) as mock_sd:
             builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
             mock_sd.assert_not_called()
@@ -542,8 +526,10 @@ class TestForgeExecutorModelPostInit:
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -609,8 +595,8 @@ class TestForgeExecutorModelPostInitGridFile:
     def test_grid_file_builds_via_filename(
         self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
     ):
-        from cstar_forge.forge.forge_blueprint import UserProvidedFile
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.blueprint import UserProvidedFile
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         grid_path = self._write_tiny_netcdf(tmp_path)
         gf = UserProvidedFile(
@@ -630,7 +616,7 @@ class TestForgeExecutorModelPostInitGridFile:
     def test_grid_file_missing_raises_file_not_found(
         self, minimal_cstar_spec_builder_args, tmp_path
     ):
-        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+        from cstar.applications.forge.blueprint import UserProvidedFile
 
         missing = tmp_path / "does-not-exist.nc"
         gf = UserProvidedFile(location=str(missing), content_hash="x" * 64)
@@ -644,7 +630,7 @@ class TestForgeExecutorModelPostInitGridFile:
     def test_grid_file_hash_mismatch_warns(
         self, minimal_cstar_spec_builder_args, mock_grid, tmp_path
     ):
-        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+        from cstar.applications.forge.blueprint import UserProvidedFile
 
         grid_path = self._write_tiny_netcdf(tmp_path)
         gf = UserProvidedFile(location=str(grid_path), content_hash="not-the-real-hash")
@@ -664,7 +650,7 @@ class TestForgeExecutorModelPostInitGridFile:
         raises too rather than silently building a nested grid from a
         user-supplied file.
         """
-        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+        from cstar.applications.forge.blueprint import UserProvidedFile
 
         grid_path = self._write_tiny_netcdf(tmp_path)
         gf = UserProvidedFile(location=str(grid_path), content_hash="x" * 64)
@@ -729,11 +715,11 @@ class TestNestedGridTopography:
         )
         with (
             patch(
-                "cstar_forge.forge.executor.rt.align_grids",
+                "cstar.applications.forge.executor.rt.align_grids",
                 return_value=_create_grid_mock(),
             ),
             patch(
-                "cstar_forge.forge.executor.source_datasets.SourceDatasets"
+                "cstar.applications.forge.executor.source_datasets.SourceDatasets"
             ) as mock_sd,
         ):
             inst = mock_sd.return_value
@@ -989,7 +975,7 @@ class TestForgeExecutorGetDs:
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
 
-        with patch("cstar_forge.forge.executor.xr.open_dataset") as mock_open:
+        with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds = MagicMock(spec=xr.Dataset)
             mock_open.return_value = mock_ds
 
@@ -1064,7 +1050,7 @@ class TestForgeExecutorGetDs:
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
 
-        with patch("cstar_forge.forge.executor.xr.open_dataset") as mock_open:
+        with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds = MagicMock(spec=xr.Dataset)
             mock_open.return_value = mock_ds
 
@@ -1095,7 +1081,7 @@ class TestForgeExecutorEnsureSourceData:
     ):
         """Test that ensure_source_data calls SourceDatasets.prepare_all."""
         with patch(
-            "cstar_forge.forge.executor.source_datasets.SourceDatasets"
+            "cstar.applications.forge.executor.source_datasets.SourceDatasets"
         ) as mock_source_data_class:
             mock_source_data_instance = MagicMock()
             mock_source_data_class.return_value = mock_source_data_instance
@@ -1138,8 +1124,10 @@ class TestForgeExecutorBuildAndRun:
         expected_location = str(expected_code_output_dir.resolve())
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": expected_location,
@@ -1167,8 +1155,10 @@ class TestForgeExecutorBuildAndRun:
         assert not builder.path_roms_marbl_blueprint().exists()
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1198,8 +1188,10 @@ class TestForgeExecutorBuildAndRun:
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1227,8 +1219,10 @@ class TestForgeExecutorBuildAndRun:
         builder = _make_builder(minimal_cstar_spec_builder_args)
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1264,8 +1258,10 @@ class TestForgeExecutorBuildAndRun:
         assert builder._use_pio is True
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1295,8 +1291,10 @@ class TestForgeExecutorBuildAndRun:
         assert builder._use_pio is False
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1334,8 +1332,10 @@ class TestForgeExecutorBuildAndRun:
         assert builder._use_pio is True
 
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1369,8 +1369,8 @@ class TestForgeExecutorBuildAndRun:
         ``_generate_tidal_forcing`` would) rather than actually downloading/generating
         real forcing data.
         """
-        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
-        from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
+        from cstar.applications.forge.engine import split_model_settings
+        from cstar.applications.forge.resolve import build_forge_blueprint
 
         cfg = build_forge_blueprint(
             model_dir=_MODEL_DIR,
@@ -1421,8 +1421,10 @@ class TestForgeExecutorBuildAndRun:
 
         run_ov, compile_ov = split_model_settings(cfg)
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1465,13 +1467,15 @@ class TestForgeExecutorBuildAndRun:
         return cfg, host
 
     def _run_configure_build(self, cfg, host):
-        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+        from cstar.applications.forge.engine import split_model_settings
 
         builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         run_ov, compile_ov = split_model_settings(cfg)
         with (
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
-            patch("cstar_forge.forge.executor.write_roms_namelist"),
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
+            patch("cstar.applications.forge.executor.write_roms_namelist"),
         ):
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
@@ -1494,7 +1498,7 @@ class TestForgeExecutorBuildAndRun:
         required MARBL diagnostics, while ``cdr_frc.cdr_source`` stays False (no
         forcing file exists for ROMS to open).
         """
-        from cstar_forge.forge.namelist_model import (
+        from cstar.applications.forge.namelist_model import (
             CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS,
         )
 
@@ -1648,7 +1652,7 @@ class TestForgeExecutorBuildAndRun:
         source-data machinery entirely) -- ``__post_init__`` only needs the
         constructor-time attributes, not a real grid or dataset.
         """
-        from cstar_forge.forge.input_data import (
+        from cstar.applications.forge.input_data import (
             UPSCALED_CDR_PLACEHOLDER_LOCATION,
             RomsMarblInputData,
         )
@@ -1737,7 +1741,7 @@ class TestForgeBlueprintToBuilderKwargsPartitioning:
             output_settings=_OUTPUT_SETTINGS,
         )
 
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             forge_blueprint_to_builder_kwargs,
         )
 
@@ -1765,7 +1769,7 @@ class TestForgeBlueprintToBuilderKwargsPartitioning:
             output_settings=_OUTPUT_SETTINGS,
         )
 
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             forge_blueprint_to_builder_kwargs,
         )
 
@@ -1995,7 +1999,7 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
         siblings sharing the run name, derived from DEFAULT_WORKING_ROOT and
         ROMS_RUN_SEGMENT -- this guards against those two constants drifting apart.
         """
-        from cstar_forge import config as forge_config
+        from cstar.applications.forge import config as forge_config
 
         merged = minimal_cstar_spec_builder_args
         cfg = build_forge_blueprint(
@@ -2031,13 +2035,13 @@ class TestForgeExecutorRomsBlueprintWorkingDir:
 
 
 class TestCaptureOutput:
-    """Tests for cstar_forge.run._capture_output (tees print + logging into
+    """Tests for cstar.applications.forge.runtime._capture_output (tees print + logging into
     <working_dir>/logs/forge_<timestamp>.log, in addition to the existing screen
     output).
     """
 
     def test_tees_print_and_logging_into_log_file(self, tmp_path, capsys):
-        test_logger = logging.getLogger("cstar_forge.test_capture_output")
+        test_logger = logging.getLogger("cstar.applications.forge.test_capture_output")
         with forge_run._capture_output(tmp_path, verbose=False) as log_path:
             print("hello from print")
             test_logger.info("hello from logging")
@@ -2053,30 +2057,39 @@ class TestCaptureOutput:
 
     def test_restores_streams_and_logger_levels_on_exit(self, tmp_path):
         old_out, old_err = sys.stdout, sys.stderr
-        prev_level = logging.getLogger("cstar_forge").level
+        prev_level = logging.getLogger("cstar").level
         root_handlers_before = list(logging.getLogger().handlers)
         try:
             with forge_run._capture_output(tmp_path):
                 assert sys.stdout is not old_out
                 assert sys.stderr is not old_err
         finally:
-            logging.getLogger("cstar_forge").setLevel(prev_level)
+            logging.getLogger("cstar").setLevel(prev_level)
 
         assert sys.stdout is old_out
         assert sys.stderr is old_err
-        assert logging.getLogger("cstar_forge").level == prev_level
+        assert logging.getLogger("cstar").level == prev_level
         # The file handler added for the run is removed again -- no leak onto root.
         assert logging.getLogger().handlers == root_handlers_before
 
     def test_lowers_info_level_so_app_path_logs_reach_the_file(self, tmp_path):
         """The C-Star app path never calls logging.basicConfig, so the whole
-        cstar_forge.* hierarchy sits at NOTSET and inherits root's default
-        (WARNING) -- _capture_output must lower the cstar_forge logger itself or
+        cstar.* hierarchy sits at NOTSET and inherits root's default
+        (WARNING) -- _capture_output must lower the cstar logger itself or
         an INFO message never reaches the file.
+
+        The root logger's own level is also forced back to WARNING for the
+        duration of the check: importing the heavy roms-tools/xarray/dask stack
+        (pulled in transitively via ForgeExecutor) can leave root at INFO as a
+        side effect of *their* import-time logging setup, which would otherwise
+        make the "unconfigured" sanity check flaky depending on import order.
         """
-        parent = logging.getLogger("cstar_forge")
-        child = logging.getLogger("cstar_forge.test_capture_output")
+        root = logging.getLogger()
+        parent = logging.getLogger("cstar")
+        child = logging.getLogger("cstar.applications.forge.test_capture_output")
+        prev_root_level = root.level
         prev_parent_level, prev_child_level = parent.level, child.level
+        root.setLevel(logging.WARNING)
         parent.setLevel(logging.NOTSET)
         child.setLevel(logging.NOTSET)
         try:
@@ -2085,6 +2098,7 @@ class TestCaptureOutput:
             with forge_run._capture_output(tmp_path, verbose=False) as log_path:
                 child.info("info-level message")
         finally:
+            root.setLevel(prev_root_level)
             parent.setLevel(prev_parent_level)
             child.setLevel(prev_child_level)
 
@@ -2127,7 +2141,7 @@ class TestCaptureOutput:
         the tee and must not error (as '--- Logging error ---' on stderr) when the
         logger is used again after the block exits.
         """
-        logger = logging.getLogger("cstar_forge.test_late_handler")
+        logger = logging.getLogger("cstar.applications.forge.test_late_handler")
         handler = None
         try:
             with forge_run._capture_output(tmp_path):
@@ -2144,7 +2158,7 @@ class TestCaptureOutput:
 
 
 class TestProcessCapturesRunOutput:
-    """Verifies cstar_forge.run.process wraps the engine call in _capture_output, so
+    """Verifies cstar.applications.forge.runtime.process wraps the engine call in _capture_output, so
     both entry points (CLI ``main()`` and the C-Star app's ``ForgeRunner`` -> process())
     get a per-run log under the resolved host's working_dir.
     """
@@ -2173,12 +2187,12 @@ class TestProcessCapturesRunOutput:
         captured_host = {}
 
         def fake_process_forge_blueprint(spec, *, host=None, **kwargs):
-            logging.getLogger("cstar_forge.fake_engine").info("engine ran")
+            logging.getLogger("cstar.applications.forge.fake_engine").info("engine ran")
             captured_host["host"] = host
             return object()
 
         with patch(
-            "cstar_forge.run.process_forge_blueprint",
+            "cstar.applications.forge.runtime.process_forge_blueprint",
             side_effect=fake_process_forge_blueprint,
         ):
             forge_run.process(cfg, working_dir=str(tmp_path))
@@ -2192,7 +2206,7 @@ class TestProcessCapturesRunOutput:
 class TestForgeExecutorGenerateInputsComprehensive:
     """Comprehensive tests for generate_inputs method covering full workflow."""
 
-    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_creates_input_data_instance(
         self,
         mock_input_data_class,
@@ -2232,7 +2246,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             # The minimal fixture is a marbl (BGC) model.
             assert call_kwargs["has_bgc"] is True
 
-    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
     @requires_cstar_pio
     def test_generate_inputs_use_pio_forwards_use_pio(
         self,
@@ -2258,7 +2272,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             call_kwargs = mock_input_data_class.call_args[1]
             assert call_kwargs["use_pio"] is True
 
-    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_does_not_persist(
         self,
         mock_input_data_class,
@@ -2283,13 +2297,13 @@ class TestForgeExecutorGenerateInputsComprehensive:
             builder = _make_builder(minimal_cstar_spec_builder_args)
 
             with patch(
-                "cstar_forge.forge.executor.ForgeExecutor.persist"
+                "cstar.applications.forge.executor.ForgeExecutor.persist"
             ) as mock_persist:
                 builder.generate_inputs(clobber=True, test=True)
 
                 mock_persist.assert_not_called()
 
-    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_raises_when_roms_marbl_blueprint_elements_none(
         self,
         mock_input_data_class,
@@ -2309,7 +2323,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
                 exc_info.value
             ) or "Blueprint mismatch" in str(exc_info.value)
 
-    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_nesting_info_serialized_to_roms_marbl_blueprint_dict(
         self,
         mock_input_data_class,
@@ -2340,7 +2354,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         mock_input_data_class.return_value = mock_input_data_instance
 
         with patch.object(ForgeExecutor, "ensure_source_data"):
-            with patch("cstar_forge.forge.executor.ForgeExecutor.persist"):
+            with patch("cstar.applications.forge.executor.ForgeExecutor.persist"):
                 builder = _make_builder(minimal_cstar_spec_builder_args)
                 # Manually set settings so the guard passes
                 builder._settings_compile_time = {"cppdefs": {}}
@@ -2354,7 +2368,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
             assert nesting_info is not None
             assert nesting_info["data"][0]["location"] == str(nesting_file)
 
-    @patch("cstar_forge.forge.executor.input_data.RomsMarblInputData")
+    @patch("cstar.applications.forge.executor.input_data.RomsMarblInputData")
     def test_generate_inputs_nesting_info_none_in_roms_marbl_blueprint_dict(
         self,
         mock_input_data_class,
@@ -2379,7 +2393,7 @@ class TestForgeExecutorGenerateInputsComprehensive:
         mock_input_data_class.return_value = mock_input_data_instance
 
         with patch.object(ForgeExecutor, "ensure_source_data"):
-            with patch("cstar_forge.forge.executor.ForgeExecutor.persist"):
+            with patch("cstar.applications.forge.executor.ForgeExecutor.persist"):
                 builder = _make_builder(minimal_cstar_spec_builder_args)
                 builder._settings_compile_time = {"cppdefs": {}}
                 builder._settings_run_time = {"time_stepping": {}}
@@ -2423,7 +2437,7 @@ class TestForgeExecutorGetDsComprehensive:
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
 
-        with patch("cstar_forge.forge.executor.xr.open_dataset") as mock_open:
+        with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds1 = MagicMock(spec=xr.Dataset)
             mock_open.return_value = mock_ds1
 
@@ -2467,7 +2481,7 @@ class TestForgeExecutorGetDsComprehensive:
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
 
-        with patch("cstar_forge.forge.executor.xr.open_dataset") as mock_open:
+        with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_open.side_effect = FileNotFoundError("File not found")
             with pytest.raises(FileNotFoundError):
                 builder.get_ds("grid", from_file=False)
@@ -2505,7 +2519,7 @@ class TestForgeExecutorGetDsComprehensive:
         )
         builder.roms_marbl_blueprint = roms_marbl_blueprint
 
-        with patch("cstar_forge.forge.executor.xr.open_dataset") as mock_open:
+        with patch("cstar.applications.forge.executor.xr.open_dataset") as mock_open:
             mock_ds = MagicMock(spec=xr.Dataset)
             mock_open.return_value = mock_ds
 
@@ -2705,14 +2719,20 @@ class TestGoldenNamelist:
         builder.src_data = self._mock_source_data(tmp_path)
 
         with (
-            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
-            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
-            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
-            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
-            patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
             patch(
-                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_data.rt.InitialConditions"
+            ) as mock_ic,
+            patch(
+                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+            ) as mock_surface,
+            patch(
+                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+            ) as mock_boundary,
+            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch(
+                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -2772,10 +2792,12 @@ class TestGoldenNamelist:
         assert builder._settings_run_time["cdr_frc"]["ncdr_parm"] == 2
         assert builder._settings_run_time["cdr_output"]["do_cdr_output"] is True
 
-        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+        from cstar.applications.forge.engine import split_model_settings
 
         run_ov, compile_ov = split_model_settings(cfg)
-        with patch("cstar_forge.forge.executor.render_roms_settings") as mock_render:
+        with patch(
+            "cstar.applications.forge.executor.render_roms_settings"
+        ) as mock_render:
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
                 "filter": {"files": ["cppdefs.opt"]},
@@ -2800,12 +2822,7 @@ class TestGoldenNamelist:
             str(run_dir), "<WORKDIR>"
         )
 
-        golden_path = (
-            Path(cstar_forge.__file__).parents[1]
-            / "tests"
-            / "fixtures"
-            / golden_filename
-        )
+        golden_path = Path(__file__).parent / "fixtures" / golden_filename
 
         if os.environ.get("UPDATE_GOLDEN"):
             golden_path.write_text(normalized)
@@ -2816,9 +2833,12 @@ class TestGoldenNamelist:
 
         golden = golden_path.read_text()
         assert normalized == golden, (
-            f"Rendered namelist.nml drifted from tests/fixtures/{golden_filename}. "
+            f"Rendered namelist.nml drifted from "
+            f"cstar/tests/unit_tests/applications/forge/fixtures/{golden_filename}. "
             "If this is an intentional schema/default/template change, regenerate "
-            f"with UPDATE_GOLDEN=1 pytest tests/test_core.py -k <this test name>, "
+            "with UPDATE_GOLDEN=1 pytest "
+            "cstar/tests/unit_tests/applications/forge/test_executor.py -k "
+            "<this test name>, "
             "review the diff, and commit the updated fixture; otherwise this is a "
             "regression."
         )
@@ -3024,18 +3044,26 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
         # build grid_parent + align this grid to it -- align_grids is a real
         # roms-tools function that expects real xarray Grid internals, which the
         # autouse rt.Grid mock doesn't provide, so it's stubbed too.
-        with patch("cstar_forge.forge.executor.rt.align_grids", return_value=grid_mock):
+        with patch(
+            "cstar.applications.forge.executor.rt.align_grids", return_value=grid_mock
+        ):
             builder = ForgeExecutor.from_forge_blueprint(cfg, host=host)
         builder.src_data = TestGoldenNamelist._mock_source_data(tmp_path)
 
         with (
-            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
-            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
-            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
-            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
             patch(
-                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_data.rt.InitialConditions"
+            ) as mock_ic,
+            patch(
+                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+            ) as mock_surface,
+            patch(
+                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+            ) as mock_boundary,
+            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch(
+                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -3081,10 +3109,12 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
             == CHILD_IC_PLACEHOLDER_LOCATION
         )
 
-        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+        from cstar.applications.forge.engine import split_model_settings
 
         run_ov, compile_ov = split_model_settings(cfg)
-        with patch("cstar_forge.forge.executor.render_roms_settings") as mock_render:
+        with patch(
+            "cstar.applications.forge.executor.render_roms_settings"
+        ) as mock_render:
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
                 "filter": {"files": ["cppdefs.opt"]},
@@ -3110,12 +3140,12 @@ class TestChildDomainNoInitialConditionsValidatesAtEmit:
 
 class TestForgeRunnerEndToEnd:
     """Proves forge is a real, C-Star-discoverable application (see
-    ``cstar_forge.forge.app.ForgeRunner``): drives ``ForgeRunner`` -- C-Star's own
+    ``cstar.applications.forge.app.ForgeRunner``): drives ``ForgeRunner`` -- C-Star's own
     ``BlueprintRunner``/``RunnerRequest`` machinery -- all the way down to real
     ``ForgeExecutor.generate_inputs()``/``configure_build()``, the same
     roms-tools-mocked chain ``TestGoldenNamelist`` exercises directly.
 
-    ``ForgeRunner.run()`` delegates to ``cstar_forge.run.process`` (the disposable
+    ``ForgeRunner.run()`` delegates to ``cstar.applications.forge.runtime.process`` (the disposable
     host-resolution glue), which this test intercepts to inject a fake ``HostPaths``
     and an ``executor_factory`` that stands in ``src_data`` (avoiding real dataset
     downloads) -- mirroring how ``TestGoldenNamelist`` swaps ``builder.src_data``
@@ -3183,18 +3213,26 @@ class TestForgeRunnerEndToEnd:
             )
 
         with (
-            patch("cstar_forge.run.process", side_effect=fake_process),
-            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
-            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
-            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
-            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
-            patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch("cstar.applications.forge.runtime.process", side_effect=fake_process),
             patch(
-                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_data.rt.InitialConditions"
+            ) as mock_ic,
+            patch(
+                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+            ) as mock_surface,
+            patch(
+                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+            ) as mock_boundary,
+            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch(
+                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
-            patch("cstar_forge.forge.executor.render_roms_settings") as mock_render,
+            patch(
+                "cstar.applications.forge.executor.render_roms_settings"
+            ) as mock_render,
         ):
             mock_ic_instance = MagicMock()
             mock_ic_instance.save.side_effect = TestGoldenNamelist._touch_save_list
@@ -3440,14 +3478,20 @@ class TestOnlyInputsReuseIsIdempotent:
         builder.src_data = self._mock_source_data(tmp_path)
 
         with (
-            patch("cstar_forge.forge.input_data.rt.InitialConditions") as mock_ic,
-            patch("cstar_forge.forge.input_data.rt.SurfaceForcing") as mock_surface,
-            patch("cstar_forge.forge.input_data.rt.BoundaryForcing") as mock_boundary,
-            patch("cstar_forge.forge.input_data.rt.TidalForcing") as mock_tidal,
-            patch("cstar_forge.forge.input_data.rt.RiverForcing") as mock_river,
-            patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr,
             patch(
-                "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+                "cstar.applications.forge.input_data.rt.InitialConditions"
+            ) as mock_ic,
+            patch(
+                "cstar.applications.forge.input_data.rt.SurfaceForcing"
+            ) as mock_surface,
+            patch(
+                "cstar.applications.forge.input_data.rt.BoundaryForcing"
+            ) as mock_boundary,
+            patch("cstar.applications.forge.input_data.rt.TidalForcing") as mock_tidal,
+            patch("cstar.applications.forge.input_data.rt.RiverForcing") as mock_river,
+            patch("cstar.applications.forge.input_data.rt.CDRForcing") as mock_cdr,
+            patch(
+                "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
                 {"ERA5"},
             ),
         ):
@@ -3496,10 +3540,12 @@ class TestOnlyInputsReuseIsIdempotent:
 
             builder.generate_inputs(clobber=False, use_dask=False, test=False)
 
-        from cstar_forge.forge.forge_blueprint_engine import split_model_settings
+        from cstar.applications.forge.engine import split_model_settings
 
         run_ov, compile_ov = split_model_settings(cfg)
-        with patch("cstar_forge.forge.executor.render_roms_settings") as mock_render:
+        with patch(
+            "cstar.applications.forge.executor.render_roms_settings"
+        ) as mock_render:
             mock_render.return_value = {
                 "location": str(builder.compile_time_code_dir),
                 "filter": {"files": ["cppdefs.opt"]},

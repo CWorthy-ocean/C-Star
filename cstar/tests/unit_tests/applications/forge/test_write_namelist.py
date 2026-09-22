@@ -1,5 +1,5 @@
 """
-Tests for ``cstar_forge.forge.settings.write_roms_namelist`` (the ``namelist.nml``
+Tests for ``cstar.applications.forge.settings.write_roms_namelist`` (the ``namelist.nml``
 writer) and its MARBL string-list helper / bounds guard.
 
 These exercise the heart of the namelist refactor end-to-end: a populated flat
@@ -14,6 +14,11 @@ from pathlib import Path
 import f90nml
 import pytest
 import yaml
+
+import cstar.catalog
+from cstar.applications.forge.resolve import load_model_spec_data
+from cstar.applications.forge.settings import write_roms_namelist
+from cstar.catalog.domain_catalog import default_catalog
 from cstar.roms.namelist import (
     MARBL_DIAGNOSTICS_TO_WRITE_MAX,
     MARBL_TRACERS_TO_WRITE_MAX,
@@ -21,13 +26,11 @@ from cstar.roms.namelist import (
     _namelist_str_list,
 )
 
-import cstar_forge
-from cstar_forge.domain_catalog import default_catalog
-from cstar_forge.forge.settings import write_roms_namelist
-from cstar_forge.forge_blueprint_resolve import load_model_spec_data
-
 _MODEL_DIR = (
-    Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
+    Path(cstar.catalog.__file__).parent
+    / "bundled"
+    / "ModelSpec"
+    / "cson_roms-marbl_v0.1"
 )
 
 

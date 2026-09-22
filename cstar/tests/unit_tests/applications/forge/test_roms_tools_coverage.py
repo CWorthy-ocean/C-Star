@@ -246,8 +246,8 @@ def test_bgc_marbl_process_bgc_fields_params_are_data_inputs():
 
 
 # ── single-source item models ──────────────────────────────────────
-# The forcing/IC item models are now defined ONCE in ``cstar_forge.forge.forge_blueprint``
-# and re-exported by ``cstar_forge.models`` (with ``InitialConditions`` aliased to the
+# The forcing/IC item models are now defined ONCE in ``cstar.applications.forge.blueprint``
+# and re-exported by ``cstar.applications.forge.models`` (with ``InitialConditions`` aliased to the
 # legacy name ``InitialConditionsInput``). This guard asserts they are literally the same
 # class, so the "two parallel schemas" duplication cannot silently re-appear — adding a
 # roms-tools option field is a one-place edit. See docs/roms-tools-contributor-guide.md.
@@ -263,15 +263,14 @@ _ITEM_MODEL_PAIRS = [
 
 @pytest.mark.parametrize("models_name,spec_name", _ITEM_MODEL_PAIRS)
 def test_forge_item_models_are_single_sourced(models_name, spec_name):
-    """``cstar_forge.models`` must re-export the exact ``forge.forge_blueprint`` item class
+    """``cstar.applications.forge.models`` must re-export the exact ``blueprint`` item class
     (single source of truth) — not a divergent copy. If someone re-introduces a separate
     definition in models.py, these stop being the same object and this guard fails.
     """
-    from cstar_forge import models
-    from cstar_forge.forge import forge_blueprint
+    from cstar.applications.forge import blueprint, models
 
-    assert getattr(models, models_name) is getattr(forge_blueprint, spec_name), (
-        f"models.{models_name} is not the same class as forge_blueprint.{spec_name} — "
-        "the item models must be single-sourced in forge/forge_blueprint.py and re-exported "
-        "by models.py. See docs/roms-tools-contributor-guide.md."
+    assert getattr(models, models_name) is getattr(blueprint, spec_name), (
+        f"models.{models_name} is not the same class as blueprint.{spec_name} — "
+        "the item models must be single-sourced in cstar/applications/forge/blueprint.py "
+        "and re-exported by models.py. See docs/roms-tools-contributor-guide.md."
     )

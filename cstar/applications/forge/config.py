@@ -5,7 +5,7 @@ A thin adapter over C-Star's own system layer (:mod:`cstar.system.manager`,
 C-Star who we're running on, and everything below it only maps that name onto
 the on-disk paths Forge has always used. When Forge relocates into C-Star this
 module is dropped and callers take C-Star's equivalent host resolution
-instead -- see :mod:`cstar_forge.forge.host`.
+instead -- see :mod:`cstar.applications.forge.host`.
 """
 
 from __future__ import annotations
@@ -20,9 +20,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from cstar.catalog.domain_catalog import user_catalog_root
 from cstar.system.manager import HostNameEvaluator
-
-from cstar_forge.domain_catalog import user_catalog_root
 
 logger = logging.getLogger(__name__)
 
@@ -251,7 +250,7 @@ def ensure_data_dirs(dp: DataPaths | None = None) -> DataPaths:
     """Create the on-disk directories for *dp* (default: the module-level ``paths``).
 
     Call this from entry points that actually write data (e.g. ``run.py``'s
-    ``main()``); importing :mod:`cstar_forge.config` must not create directories.
+    ``main()``); importing :mod:`cstar.applications.forge.config` must not create directories.
     """
     if dp is None:
         dp = paths
@@ -375,7 +374,7 @@ def resolve_host(working_dir):
     When the forge application relocates into C-Star, C-Star supplies an equivalent
     ``HostPaths`` from its own host resolution and this function is not carried over.
     """
-    from cstar_forge.forge.host import HostPaths
+    from cstar.applications.forge.host import HostPaths
 
     return HostPaths(
         working_dir=relocate_working_dir(working_dir),
@@ -401,7 +400,7 @@ def _hostname() -> str:
 def format_paths(*, as_json: bool = False) -> str:
     """Render the detected system and configured data paths as a string.
 
-    Backs the ``cstar forge show-paths`` CLI command (``cstar_forge/cli.py``).
+    Backs the ``cstar forge show-paths`` CLI command.
     """
     system_tag = detect_system()
     hostname = _hostname()

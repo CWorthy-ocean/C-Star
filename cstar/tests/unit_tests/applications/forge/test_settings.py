@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from cstar_forge.forge.settings import (
+import cstar
+from cstar.applications.forge.settings import (
     ROMSTemplateRenderer,
     _fortran_cdr_file_decl,
     render_roms_settings,
@@ -432,7 +433,13 @@ class TestCppdefsTemplate:
     the flag-controlled CPP keys.
     """
 
-    _TEMPLATE_DIR = Path(__file__).parent.parent / "templates" / "compile-time"
+    _TEMPLATE_DIR = (
+        Path(cstar.__file__).parent
+        / "additional_files"
+        / "templates"
+        / "forge"
+        / "compile-time"
+    )
 
     def _render(self, tmp_path, cppdefs):
         output_dir = tmp_path / "output"

@@ -1,6 +1,6 @@
 """
-Tests for the ForgeBlueprint schema (``cstar_forge.forge.forge_blueprint``) and the
-resolver (``cstar_forge.forge_blueprint_resolve.build_forge_blueprint``).
+Tests for the ForgeBlueprint schema (``cstar.applications.forge.blueprint``) and the
+resolver (``cstar.applications.forge.resolve.build_forge_blueprint``).
 
 These validate that the resolver reproduces the known ``test-tiny`` demo values,
 flattens settings, keeps naming/host values out of the stored config, resolves
@@ -18,49 +18,29 @@ from pathlib import Path
 import pytest
 import yaml
 
-import cstar_forge
-from cstar_forge.domain_catalog import default_catalog as _CATALOG
-from cstar_forge.forge.forge_blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
-from cstar_forge.forge.settings import render_roms_settings
-from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
+import cstar
+import cstar.catalog
+from cstar.applications.forge.blueprint import FORGE_BLUEPRINT_VERSION, ForgeBlueprint
+from cstar.applications.forge.resolve import build_forge_blueprint
+from cstar.applications.forge.settings import render_roms_settings
+from cstar.catalog.domain_catalog import default_catalog as _CATALOG
 
-_MODEL_DIR = (
-    Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
-)
+_BUNDLED_CATALOG = Path(cstar.catalog.__file__).parent / "bundled"
+_MODEL_DIR = _BUNDLED_CATALOG / "ModelSpec" / "cson_roms-marbl_v0.1"
 # ucla-roms >= 0.5.0 ModelSpec -- used by the versioned-namelist golden test below.
-_MODEL_DIR_ROMS050 = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "roms-marbl-0.5-default"
-)
+_MODEL_DIR_ROMS050 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.5-default"
 # ucla-roms >= 0.6.0 ModelSpec (adds &PIO_SETTINGS) -- used by the versioned-namelist
 # golden test below.
-_MODEL_DIR_ROMS060 = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "roms-marbl-0.6-default"
-)
+_MODEL_DIR_ROMS060 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.6-default"
 # ucla-roms >= 0.7.0 ModelSpec (adds &CDR_TRACER_OUTPUT_SETTINGS/
 # &CDR_GAS_EXCH_OUTPUT_SETTINGS, PR #351) -- used by the versioned-namelist golden
 # test below.
-_MODEL_DIR_ROMS070 = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "roms-marbl-0.7-default"
-)
+_MODEL_DIR_ROMS070 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.7-default"
 # ucla-roms >= 0.8.0 ModelSpec (adds the PARABOLIC_SPLINES/UPSTREAM_TS_LAND_CURV
 # advection cppdefs switches, PR #361) -- no namelist-schema change from 0.7.0, so
 # there is no versioned-namelist golden fixture for this tier (unlike 0.5.0-0.7.0
 # above).
-_MODEL_DIR_ROMS080 = (
-    Path(cstar_forge.__file__).parent
-    / "catalog"
-    / "ModelSpec"
-    / "roms-marbl-0.8-default"
-)
+_MODEL_DIR_ROMS080 = _BUNDLED_CATALOG / "ModelSpec" / "roms-marbl-0.8-default"
 _GRID_KWARGS = dict(
     nx=6,
     ny=2,
@@ -127,7 +107,7 @@ def test_naming_is_derived_not_stored():
 
 
 def test_partitioning_auto_tiling_with_n_cores_is_valid():
-    from cstar_forge.forge.forge_blueprint import Partitioning
+    from cstar.applications.forge.blueprint import Partitioning
 
     p = Partitioning(auto_tiling=True, n_cores=4)
     assert p.n_procs_x is None
@@ -136,28 +116,28 @@ def test_partitioning_auto_tiling_with_n_cores_is_valid():
 
 
 def test_partitioning_requires_n_procs_without_auto_tiling():
-    from cstar_forge.forge.forge_blueprint import Partitioning
+    from cstar.applications.forge.blueprint import Partitioning
 
     with pytest.raises(ValueError, match="n_procs_x and n_procs_y are required"):
         Partitioning()
 
 
 def test_partitioning_rejects_n_cores_without_auto_tiling():
-    from cstar_forge.forge.forge_blueprint import Partitioning
+    from cstar.applications.forge.blueprint import Partitioning
 
     with pytest.raises(ValueError, match="n_cores is only accepted with auto_tiling"):
         Partitioning(n_procs_x=1, n_procs_y=1, n_cores=4)
 
 
 def test_partitioning_rejects_auto_tiling_without_n_cores():
-    from cstar_forge.forge.forge_blueprint import Partitioning
+    from cstar.applications.forge.blueprint import Partitioning
 
     with pytest.raises(ValueError, match="auto_tiling requires n_cores"):
         Partitioning(auto_tiling=True)
 
 
 def test_partitioning_rejects_auto_tiling_combined_with_n_procs():
-    from cstar_forge.forge.forge_blueprint import Partitioning
+    from cstar.applications.forge.blueprint import Partitioning
 
     with pytest.raises(ValueError, match="must not be set when auto_tiling"):
         Partitioning(auto_tiling=True, n_cores=8, n_procs_x=4, n_procs_y=2)
@@ -216,7 +196,7 @@ def test_n_procs_property_raises_when_neither_available():
     elsewhere in this file (e.g. ``test_domain_grid_file_rejects_generation_geometry_keys``'s
     docstring) for exercising a validator-adjacent code path directly.
     """
-    from cstar_forge.forge.forge_blueprint import Partitioning
+    from cstar.applications.forge.blueprint import Partitioning
 
     cfg = _build()
     cfg.domain.partitioning = Partitioning.model_construct(
@@ -294,14 +274,14 @@ def test_forge_version_explicit_override_preserved():
 
 
 def test_default_working_dir_includes_run_name():
-    from cstar_forge.forge.forge_blueprint import DEFAULT_WORKING_ROOT
+    from cstar.applications.forge.blueprint import DEFAULT_WORKING_ROOT
 
     cfg = _build()
     assert cfg.working_dir == f"{DEFAULT_WORKING_ROOT}/{cfg.name}"
 
 
 def test_bare_default_working_dir_expands_and_explicit_survives():
-    from cstar_forge.forge.forge_blueprint import DEFAULT_WORKING_ROOT
+    from cstar.applications.forge.blueprint import DEFAULT_WORKING_ROOT
 
     cfg = _build()
     # an old file storing the bare default root gains the run-name layer on load
@@ -331,7 +311,7 @@ def test_estimate_forge_cpus_anchors_floor_and_no_cap():
     so the launcher clamps the request to the target partition's CPUs per node
     (which forge cannot know when authoring the blueprint).
     """
-    from cstar_forge.forge.forge_blueprint import estimate_forge_cpus
+    from cstar.applications.forge.blueprint import estimate_forge_cpus
 
     # toy domain (wio-toy) hits the 16 floor
     assert estimate_forge_cpus(20, 20, 10) == 16
@@ -356,7 +336,7 @@ def test_cpus_needed_is_grid_sized_forge_estimate():
     """cpus_needed sizes the forge run itself (scheduler fallback for the
     workplan's forge step) -- the grid estimate, not the ROMS partitioning.
     """
-    from cstar_forge.forge.forge_blueprint import estimate_forge_cpus
+    from cstar.applications.forge.blueprint import estimate_forge_cpus
 
     cfg = _build()
     gk = cfg.domain.grid_kwargs
@@ -364,15 +344,17 @@ def test_cpus_needed_is_grid_sized_forge_estimate():
 
 
 def test_forge_blueprint_is_portable_no_forge_or_heavy_cstar_imports():
-    """forge_blueprint.py is the C-Star-relocatable blueprint model: it must depend on
-    nothing from cstar_forge (only stdlib + pydantic + yaml), and the only ``cstar``
-    dependency it's allowed is the lightweight ``cstar.orchestration.models.Blueprint``
-    base (see ``cstar_forge.forge.app.ForgeApplication`` -- this is what makes forge a
+    """blueprint.py is the C-Star-relocatable blueprint model: it must depend on
+    nothing beyond stdlib + pydantic + yaml, and the only ``cstar`` dependency it's
+    allowed is the lightweight ``cstar.orchestration.models.Blueprint`` base (see
+    ``cstar.applications.forge.app.ForgeApplication`` -- this is what makes forge a
     real C-Star application). It must NOT reach into heavier cstar submodules (e.g.
     ``cstar.roms``, ``cstar.applications.roms_marbl``) that would drag in the
     ROMS/MARBL build + roms-tools stack.
     """
-    src = Path(cstar_forge.__file__).parent / "forge" / "forge_blueprint.py"
+    import cstar.applications.forge
+
+    src = Path(cstar.applications.forge.__file__).parent / "blueprint.py"
     text = src.read_text()
     import re
 
@@ -380,17 +362,17 @@ def test_forge_blueprint_is_portable_no_forge_or_heavy_cstar_imports():
     bad = [
         ln.strip()
         for ln in text.splitlines()
-        if re.match(r"\s*(from|import)\s+(cstar_forge|cstar|\.)", ln)
+        if re.match(r"\s*(from|import)\s+(cstar|\.)", ln)
         and ln.strip() != allowed_cstar_import
     ]
     assert not bad, (
-        "forge_blueprint.py must stay forge-free and depend on nothing beyond "
+        "blueprint.py must stay forge-free and depend on nothing beyond "
         f"{allowed_cstar_import!r} for cstar; found: {bad}"
     )
 
 
 def test_application_discriminator_default():
-    from cstar_forge.forge.forge_blueprint import DEFAULT_APPLICATION
+    from cstar.applications.forge.blueprint import DEFAULT_APPLICATION
 
     cfg = _build()
     assert cfg.application == DEFAULT_APPLICATION
@@ -434,7 +416,7 @@ def test_migrate_v4_cdr_output_migration_is_idempotent(tmp_path):
     """Already-current (do_cdr_output-shaped) data passes through unchanged --
     calling the migration on already-migrated data must not error or re-rename.
     """
-    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
     cfg = _build()
     p = cfg.to_yaml(tmp_path / "forge_blueprint.yaml")
@@ -450,7 +432,7 @@ def test_migrate_tolerates_missing_cdr_output_section():
     """No ``model_settings``/``cdr_output`` section at all -- the v4->v5 step must
     not KeyError.
     """
-    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
     migrated = migrate_forge_blueprint_data({"forge_blueprint_version": 4})
     assert migrated["forge_blueprint_version"] == FORGE_BLUEPRINT_VERSION
@@ -460,7 +442,7 @@ def test_migrate_v5_ic_bgc_source_becomes_bgc_sources_list():
     """v6 -> v7: a pre-v7 singular ``initial_conditions.bgc_source`` is
     rewrapped as a one-item ``bgc_sources`` list; the old key is gone.
     """
-    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 5,
@@ -482,7 +464,7 @@ def test_migrate_v5_ic_bgc_source_none_becomes_empty_list():
     """v6 -> v7: an absent/``None`` ``bgc_source`` becomes an empty list, not
     a list containing ``None``.
     """
-    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 5,
@@ -496,7 +478,7 @@ def test_migrate_v5_ic_bgc_source_none_becomes_empty_list():
 
 def test_migrate_v5_ic_bgc_source_migration_is_idempotent():
     """Already-current (bgc_sources-shaped) data passes through unchanged."""
-    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 7,
@@ -518,7 +500,7 @@ def test_migrate_v5_ic_bgc_source_and_bgc_sources_both_present_raises():
     inconsistent (likely hand-edited) shape -- must raise, not silently discard
     `bgc_source`.
     """
-    from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+    from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
     data = {
         "forge_blueprint_version": 5,
@@ -559,7 +541,7 @@ class TestMigrateV6ToV7CdrRelocation:
     """
 
     def _v6_data(self, **forcing_overrides):
-        from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+        from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
         cfg = _build()
         data = yaml.safe_load(cfg.to_yaml_str())
@@ -609,7 +591,7 @@ class TestMigrateV6ToV7CdrRelocation:
         """Running the migration twice (or on data that already declares an
         explicit ``cdr``) must not clobber the explicit value.
         """
-        from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+        from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
         data, _ = self._v6_data(cdr_forcing={"releases": []})
         once = migrate_forge_blueprint_data(data)
@@ -627,7 +609,7 @@ class TestMigrateV6ToV7CdrRelocation:
         """Direct keyword construction (``version is None``) must not let the
         v6->v7 step clobber an explicitly-passed ``cdr=`` with an inferred one.
         """
-        from cstar_forge.forge.forge_blueprint import migrate_forge_blueprint_data
+        from cstar.applications.forge.blueprint import migrate_forge_blueprint_data
 
         data = {"forcing": {}, "cdr": {"mode": "upscaled"}}
         migrated = migrate_forge_blueprint_data(data)
@@ -638,7 +620,7 @@ _USER_FILE_KWARGS = dict(location="/data/staged/grid.nc", content_hash="a" * 64)
 
 
 def test_domain_grid_file_round_trips_through_yaml(tmp_path):
-    from cstar_forge.forge.forge_blueprint import UserProvidedFile
+    from cstar.applications.forge.blueprint import UserProvidedFile
 
     cfg = _build()
     vertical_only = {
@@ -665,7 +647,7 @@ def test_domain_grid_file_rejects_generation_geometry_keys():
     # ``model_copy`` (used elsewhere in this file for hash-only comparisons) does
     # NOT re-run validators, so this constructs ``Domain`` directly through its
     # constructor to actually exercise ``_grid_file_excludes_generation_geometry``.
-    from cstar_forge.forge.forge_blueprint import (
+    from cstar.applications.forge.blueprint import (
         Domain,
         OpenBoundaries,
         Partitioning,
@@ -686,7 +668,7 @@ def test_domain_grid_file_allows_vertical_coord_kwargs():
     """theta_s/theta_b/hc/N remain allowed alongside a supplied grid file --
     roms-tools accepts them alongside ``filename``.
     """
-    from cstar_forge.forge.forge_blueprint import (
+    from cstar.applications.forge.blueprint import (
         Domain,
         OpenBoundaries,
         Partitioning,
@@ -704,7 +686,7 @@ def test_domain_grid_file_allows_vertical_coord_kwargs():
 
 
 def test_domain_grid_file_rejects_nesting():
-    from cstar_forge.forge.forge_blueprint import (
+    from cstar.applications.forge.blueprint import (
         Domain,
         OpenBoundaries,
         Partitioning,
@@ -723,14 +705,14 @@ def test_domain_grid_file_rejects_nesting():
 
 
 def test_river_custom_file_required_when_source_is_custom_file():
-    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+    from cstar.applications.forge.blueprint import RiverForcingItem, SourceSpec
 
     with pytest.raises(ValueError, match="custom_file is not set"):
         RiverForcingItem(source=SourceSpec(name="CUSTOM_FILE"))
 
 
 def test_river_custom_file_forbidden_when_source_is_not_custom_file():
-    from cstar_forge.forge.forge_blueprint import (
+    from cstar.applications.forge.blueprint import (
         RiverForcingItem,
         SourceSpec,
         UserProvidedFile,
@@ -744,7 +726,7 @@ def test_river_custom_file_forbidden_when_source_is_not_custom_file():
 
 
 def test_river_custom_file_round_trips_and_is_valid():
-    from cstar_forge.forge.forge_blueprint import (
+    from cstar.applications.forge.blueprint import (
         RiverForcingItem,
         SourceSpec,
         UserProvidedFile,
@@ -758,7 +740,7 @@ def test_river_custom_file_round_trips_and_is_valid():
 
 
 def test_river_custom_file_excludes_bgc_source():
-    from cstar_forge.forge.forge_blueprint import (
+    from cstar.applications.forge.blueprint import (
         RiverForcingItem,
         SourceSpec,
         UserProvidedFile,
@@ -774,7 +756,7 @@ def test_river_custom_file_excludes_bgc_source():
 
 
 def test_river_surface_forcing_source_defaults():
-    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+    from cstar.applications.forge.blueprint import RiverForcingItem, SourceSpec
 
     river = RiverForcingItem(source=SourceSpec(name="DAI"))
     assert river.surface_forcing_source is None
@@ -783,7 +765,7 @@ def test_river_surface_forcing_source_defaults():
 
 @pytest.mark.parametrize("name", ["ERA5", "era5"])
 def test_river_surface_forcing_source_accepts_era5(name):
-    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+    from cstar.applications.forge.blueprint import RiverForcingItem, SourceSpec
 
     river = RiverForcingItem(
         source=SourceSpec(name="DAI"),
@@ -794,7 +776,7 @@ def test_river_surface_forcing_source_accepts_era5(name):
 
 
 def test_river_surface_forcing_source_rejects_unsupported_name():
-    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+    from cstar.applications.forge.blueprint import RiverForcingItem, SourceSpec
 
     with pytest.raises(ValueError, match="is not one of"):
         RiverForcingItem(
@@ -804,7 +786,7 @@ def test_river_surface_forcing_source_rejects_unsupported_name():
 
 
 def test_river_surface_forcing_source_requires_name():
-    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+    from cstar.applications.forge.blueprint import RiverForcingItem, SourceSpec
 
     with pytest.raises(ValueError, match="is not one of"):
         RiverForcingItem(
@@ -814,7 +796,7 @@ def test_river_surface_forcing_source_requires_name():
 
 
 def test_river_custom_file_excludes_surface_forcing_source():
-    from cstar_forge.forge.forge_blueprint import (
+    from cstar.applications.forge.blueprint import (
         RiverForcingItem,
         SourceSpec,
         UserProvidedFile,
@@ -830,7 +812,7 @@ def test_river_custom_file_excludes_surface_forcing_source():
 
 @pytest.mark.parametrize("window", [0, -1.0])
 def test_river_temp_smoothing_window_days_rejects_non_positive(window):
-    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+    from cstar.applications.forge.blueprint import RiverForcingItem, SourceSpec
 
     with pytest.raises(ValueError, match="must be > 0"):
         RiverForcingItem(
@@ -841,7 +823,7 @@ def test_river_temp_smoothing_window_days_rejects_non_positive(window):
 
 
 def test_river_surface_forcing_source_round_trips_through_yaml(tmp_path):
-    from cstar_forge.forge.forge_blueprint import RiverForcingItem, SourceSpec
+    from cstar.applications.forge.blueprint import RiverForcingItem, SourceSpec
 
     cfg = _build()
     river = RiverForcingItem(
@@ -867,13 +849,13 @@ class TestCdrSpecValidatorMatrix:
     """
 
     def _file(self):
-        from cstar_forge.forge.forge_blueprint import UserProvidedFile
+        from cstar.applications.forge.blueprint import UserProvidedFile
 
         return UserProvidedFile(**_USER_FILE_KWARGS)
 
     @pytest.mark.parametrize("mode", ["none", "upscaled"])
     def test_none_and_upscaled_accept_no_fields(self, mode):
-        from cstar_forge.forge.forge_blueprint import CdrSpec
+        from cstar.applications.forge.blueprint import CdrSpec
 
         spec = CdrSpec(mode=mode)
         assert spec.cdr_forcing is None
@@ -881,21 +863,21 @@ class TestCdrSpecValidatorMatrix:
 
     @pytest.mark.parametrize("mode", ["none", "upscaled"])
     def test_none_and_upscaled_reject_cdr_forcing(self, mode):
-        from cstar_forge.forge.forge_blueprint import CdrSpec
+        from cstar.applications.forge.blueprint import CdrSpec
 
         with pytest.raises(ValueError, match="requires both cdr_forcing"):
             CdrSpec(mode=mode, cdr_forcing={"some": "config"})
 
     @pytest.mark.parametrize("mode", ["none", "upscaled"])
     def test_none_and_upscaled_reject_cdr_forcing_file(self, mode):
-        from cstar_forge.forge.forge_blueprint import CdrSpec
+        from cstar.applications.forge.blueprint import CdrSpec
 
         with pytest.raises(ValueError, match="requires both cdr_forcing"):
             CdrSpec(mode=mode, cdr_forcing_file=self._file())
 
     @pytest.mark.parametrize("mode", ["simple", "yaml"])
     def test_simple_and_yaml_require_cdr_forcing(self, mode):
-        from cstar_forge.forge.forge_blueprint import CdrSpec
+        from cstar.applications.forge.blueprint import CdrSpec
 
         spec = CdrSpec(mode=mode, cdr_forcing={"some": "config"})
         assert spec.cdr_forcing == {"some": "config"}
@@ -905,7 +887,7 @@ class TestCdrSpecValidatorMatrix:
 
     @pytest.mark.parametrize("mode", ["simple", "yaml"])
     def test_simple_and_yaml_reject_cdr_forcing_file(self, mode):
-        from cstar_forge.forge.forge_blueprint import CdrSpec
+        from cstar.applications.forge.blueprint import CdrSpec
 
         with pytest.raises(ValueError, match="requires cdr_forcing_file to be unset"):
             CdrSpec(
@@ -915,7 +897,7 @@ class TestCdrSpecValidatorMatrix:
             )
 
     def test_netcdf_requires_cdr_forcing_file(self):
-        from cstar_forge.forge.forge_blueprint import CdrSpec
+        from cstar.applications.forge.blueprint import CdrSpec
 
         spec = CdrSpec(mode="netcdf", cdr_forcing_file=self._file())
         assert spec.cdr_forcing_file is not None
@@ -924,7 +906,7 @@ class TestCdrSpecValidatorMatrix:
             CdrSpec(mode="netcdf")
 
     def test_netcdf_rejects_cdr_forcing(self):
-        from cstar_forge.forge.forge_blueprint import CdrSpec
+        from cstar.applications.forge.blueprint import CdrSpec
 
         with pytest.raises(ValueError, match="requires cdr_forcing to be unset"):
             CdrSpec(
@@ -939,7 +921,7 @@ def test_content_hash_ignores_user_file_location_but_not_content_hash():
     host/transport and must not perturb the content hash, but its ``content_hash``
     leaf (the pin on the file's actual data) is results-affecting.
     """
-    from cstar_forge.forge.forge_blueprint import UserProvidedFile
+    from cstar.applications.forge.blueprint import UserProvidedFile
 
     cfg = _build()
     vertical_only = {
@@ -1041,7 +1023,7 @@ def _write_tiny_netcdf(tmp_path, name="grid.nc"):
 def test_build_forge_blueprint_grid_file_derives_dims_dt_v_sponge(
     monkeypatch, tmp_path
 ):
-    from cstar_forge.forge.user_files import hash_netcdf_contents
+    from cstar.applications.forge.user_files import hash_netcdf_contents
 
     grid_path = _write_tiny_netcdf(tmp_path)
     captured = {}
@@ -1176,7 +1158,7 @@ def test_build_forge_blueprint_grid_file_trusted_dict_skips_rehash(
 def test_build_forge_blueprint_grid_file_accepts_user_provided_file_instance(
     monkeypatch, tmp_path
 ):
-    from cstar_forge.forge.forge_blueprint import UserProvidedFile
+    from cstar.applications.forge.blueprint import UserProvidedFile
 
     grid_path = _write_tiny_netcdf(tmp_path)
     fake_grid = _FakeLoadedGrid(nx=5, ny=5, N=3, size_x=100.0, size_y=100.0)
@@ -1188,7 +1170,7 @@ def test_build_forge_blueprint_grid_file_accepts_user_provided_file_instance(
 
 
 def test_cpus_needed_falls_back_to_param_dims_for_grid_file(monkeypatch, tmp_path):
-    from cstar_forge.forge.forge_blueprint import estimate_forge_cpus
+    from cstar.applications.forge.blueprint import estimate_forge_cpus
 
     grid_path = _write_tiny_netcdf(tmp_path)
     fake_grid = _FakeLoadedGrid(nx=50, ny=60, N=10, size_x=500.0, size_y=600.0)
@@ -1205,7 +1187,7 @@ def test_cpus_needed_falls_back_to_param_dims_for_grid_file(monkeypatch, tmp_pat
 def test_build_forge_blueprint_river_custom_file_carries_hash(tmp_path):
     import copy
 
-    from cstar_forge.forge.user_files import hash_netcdf_contents
+    from cstar.applications.forge.user_files import hash_netcdf_contents
 
     river_path = _write_tiny_netcdf(tmp_path, name="river.nc")
     fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
@@ -1267,7 +1249,7 @@ def test_build_forge_blueprint_river_custom_file_missing_raises(tmp_path):
 def test_build_forge_blueprint_cdr_forcing_file_carries_hash_and_forces_output(
     tmp_path,
 ):
-    from cstar_forge.forge.user_files import hash_netcdf_contents
+    from cstar.applications.forge.user_files import hash_netcdf_contents
 
     cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
 
@@ -1397,7 +1379,7 @@ def test_build_forge_blueprint_cdr_kwarg_yaml_mode_strips_tracer_metadata():
 
 
 def test_build_forge_blueprint_cdr_kwarg_netcdf_mode(tmp_path):
-    from cstar_forge.forge.user_files import hash_netcdf_contents
+    from cstar.applications.forge.user_files import hash_netcdf_contents
 
     cdr_path = _write_tiny_netcdf(tmp_path, name="cdr.nc")
     cfg = _build(cdr={"mode": "netcdf", "cdr_forcing_file": str(cdr_path)})
@@ -1454,7 +1436,7 @@ def test_build_forge_blueprint_cdr_kwarg_upscaled_requires_marbl():
 
 
 def test_build_forge_blueprint_cdr_kwarg_accepts_cdrspec_instance():
-    from cstar_forge.forge.forge_blueprint import CdrSpec
+    from cstar.applications.forge.blueprint import CdrSpec
 
     cfg = _build(cdr=CdrSpec(mode="yaml", cdr_forcing={"releases": []}))
     assert cfg.cdr.mode == "yaml"
@@ -1520,7 +1502,7 @@ def test_build_forge_blueprint_source_path_skips_dataset_noting():
 def test_sources_to_forcing_override_carries_source_path():
     import copy
 
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
 
     fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
     fdata["forcing"]["surface"][0]["source"]["path"] = "/custom/era5.nc"
@@ -1541,7 +1523,7 @@ def test_schema_round_trip_identity(tmp_path):
 
 
 def test_content_hash_ignores_excluded_sections():
-    from cstar_forge.forge.forge_blueprint import _HASH_EXCLUDE, SpecRef
+    from cstar.applications.forge.blueprint import _HASH_EXCLUDE, SpecRef
 
     cfg = _build()
     h = cfg.content_hash()
@@ -1659,7 +1641,7 @@ def test_content_hash_round_trips_through_yaml(tmp_path):
 
 
 def test_engine_warns_on_hash_mismatch(tmp_path):
-    from cstar_forge.forge.forge_blueprint_engine import (
+    from cstar.applications.forge.engine import (
         process_forge_blueprint,
         verify_content_hash,
     )
@@ -1714,10 +1696,7 @@ def test_golden_model_settings_test_tiny():
     import json
 
     golden_path = (
-        Path(cstar_forge.__file__).parents[1]
-        / "tests"
-        / "fixtures"
-        / "golden_model_settings_test-tiny.json"
+        Path(__file__).parent / "fixtures" / "golden_model_settings_test-tiny.json"
     )
     golden = json.loads(golden_path.read_text())
     cfg = _build()  # test-tiny, dt=7200 (matches how the golden was captured)
@@ -1748,8 +1727,7 @@ def test_golden_model_settings_test_tiny_roms050():
     import json
 
     golden_path = (
-        Path(cstar_forge.__file__).parents[1]
-        / "tests"
+        Path(__file__).parent
         / "fixtures"
         / "golden_model_settings_test-tiny-roms050.json"
     )
@@ -1778,8 +1756,7 @@ def test_golden_model_settings_test_tiny_roms060():
     import json
 
     golden_path = (
-        Path(cstar_forge.__file__).parents[1]
-        / "tests"
+        Path(__file__).parent
         / "fixtures"
         / "golden_model_settings_test-tiny-roms060.json"
     )
@@ -1810,8 +1787,7 @@ def test_golden_model_settings_test_tiny_roms070():
     import json
 
     golden_path = (
-        Path(cstar_forge.__file__).parents[1]
-        / "tests"
+        Path(__file__).parent
         / "fixtures"
         / "golden_model_settings_test-tiny-roms070.json"
     )
@@ -1848,7 +1824,13 @@ def test_roms080_model_spec_declares_advection_cppdefs_and_renders(tmp_path):
 
     output_dir = tmp_path / "output"
     output_dir.mkdir()
-    template_dir = Path(cstar_forge.__file__).parents[1] / "templates" / "compile-time"
+    template_dir = (
+        Path(cstar.__file__).parent
+        / "additional_files"
+        / "templates"
+        / "forge"
+        / "compile-time"
+    )
     render_roms_settings(
         template_files=["cppdefs.opt.j2"],
         template_dir=template_dir,
@@ -2039,7 +2021,7 @@ def test_resolver_threads_river_bgc_source_and_climatology():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["forcing"]["river"][0]["bgc_source"] = {"name": "RIVR2O"}
@@ -2064,7 +2046,7 @@ def test_resolver_river_bgc_source_with_path_not_noted():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["forcing"]["river"][0]["bgc_source"] = {
@@ -2091,7 +2073,7 @@ def test_resolver_threads_river_surface_forcing_source():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     # Drop the catalog's own ERA5 surface-physics entry so the assertion below
@@ -2119,7 +2101,7 @@ def test_resolver_river_surface_forcing_source_with_path_not_noted():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     # Drop the catalog's own ERA5 surface-physics entry so the assertion below
@@ -2151,7 +2133,7 @@ def test_resolver_ic_bgc_esper_source_excluded_from_datasets():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["initial_conditions"]["bgc_sources"] = [
@@ -2169,7 +2151,7 @@ def test_resolver_boundary_bgc_esper_source_excluded_from_datasets():
     """Same regression as above, for an ESPER-named boundary bgc source."""
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["forcing"]["boundary"]["bgc_sources"][-1]["source"] = {
@@ -2191,7 +2173,7 @@ def test_resolver_ic_bgc_constants_source_excluded_from_datasets():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["initial_conditions"]["bgc_sources"] = [
@@ -2223,11 +2205,11 @@ def test_sources_to_forcing_override_carries_river_bgc_source():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge.forge_blueprint_engine import (
+    from cstar.applications.forge.engine import (
         forge_blueprint_to_builder_kwargs,
         sources_to_forcing_override,
     )
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     # No explicit path: that is the Forge-staged case in which RIVR2O must be
@@ -2256,8 +2238,8 @@ def test_sources_to_forcing_override_carries_river_surface_forcing_source():
     """
     import copy
 
-    from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = copy.deepcopy(cat.forcing_data("glorys-era5-unified"))
     fdata["forcing"]["river"][0]["surface_forcing_source"] = {
@@ -2287,7 +2269,7 @@ def test_sources_to_forcing_override_carries_river_custom_file():
     """
     import copy
 
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
 
     fdata = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
     fdata["forcing"]["river"] = [
@@ -2317,7 +2299,7 @@ def test_sources_to_forcing_override_omits_initial_conditions_for_child_no_ic():
     """
     import copy
 
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
 
     fi = copy.deepcopy(_CATALOG.forcing_data("glorys-era5-unified"))
     del fi["initial_conditions"]
@@ -2335,7 +2317,7 @@ def test_forge_blueprint_to_builder_kwargs_carries_cdr_forcing_file(tmp_path):
     ``sources_to_forcing_override`` (which only ever carries initial_conditions/
     surface/boundary/tidal/river -- cdr_forcing itself is never in there either).
     """
-    from cstar_forge.forge.forge_blueprint_engine import (
+    from cstar.applications.forge.engine import (
         forge_blueprint_to_builder_kwargs,
         sources_to_forcing_override,
     )
@@ -2354,7 +2336,7 @@ def test_forge_blueprint_to_builder_kwargs_carries_cdr_forcing_file(tmp_path):
 
 
 def test_catalog_scans_forcingspec():
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     assert "glorys-era5-unified" in cat.forcing_names
     data = cat.forcing_data("glorys-era5-unified")
@@ -2362,7 +2344,7 @@ def test_catalog_scans_forcingspec():
 
 
 def test_sources_to_forcing_override_returns_dict_by_default():
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
 
     cfg = _build()
     # ModelSpec no longer provides a default forcing -- _build()'s own default
@@ -2376,8 +2358,8 @@ def test_sources_to_forcing_override_returns_dict_by_default():
 
 
 def test_sources_to_forcing_override_converts_custom_forcing():
-    from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
@@ -2403,8 +2385,8 @@ def test_regrid_options_survive_resolve_and_override_round_trip():
     lockstep with the typed model fields (see forge_blueprint_resolve._build_forcing
     and forge_blueprint_engine.sources_to_forcing_override).
     """
-    from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = cat.forcing_data("glorys-era5-unified")
     fdata["initial_conditions"]["prefill"] = "inverse_dist"
@@ -2441,8 +2423,11 @@ def test_regrid_options_survive_wizard_load_back():
     sources_to_forcing_override (tested above) is a different code path and does
     not cover this one.
     """
-    from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+    pytest.importorskip("ipywidgets")
+    pytest.importorskip("cstar.wizard.wizard")
+    from cstar.wizard.wizard import ForgeBlueprintWizard
+
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = cat.forcing_data("glorys-era5-unified")
     fdata["initial_conditions"]["prefill"] = "inverse_dist"
@@ -2467,8 +2452,8 @@ def test_forcing_override_coerces_enums_to_strings():
     """
     import enum
 
-    from cstar_forge.domain_catalog import default_catalog as cat
-    from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
+    from cstar.applications.forge.engine import sources_to_forcing_override
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     cfg = _build(forcing_inputs=cat.forcing_data("glorys-era5-unified"))
     ov = sources_to_forcing_override(cfg)
@@ -2491,12 +2476,12 @@ def test_forcing_override_coerces_enums_to_strings():
 
 
 def test_global_enum_representer_handles_safedumper_subclass():
-    """Insurance: importing cstar_forge.forge registers a global Enum representer so any
+    """Insurance: importing cstar.applications.forge registers a global Enum representer so any
     Forge enum reaching a SafeDumper (or a subclass, as roms-tools' NoAliasDumper is)
     serializes as its value rather than raising 'cannot represent an object'.
     """
-    import cstar_forge.forge  # noqa: F401  (side effect: registers the representer)
-    from cstar_forge.forge.forge_blueprint import SurfaceType
+    import cstar.applications.forge  # noqa: F401  (side effect: registers the representer)
+    from cstar.applications.forge.blueprint import SurfaceType
 
     class _NoAliasDumper(yaml.SafeDumper):  # mirrors roms-tools' dumper shape
         pass
@@ -2513,7 +2498,7 @@ def test_forcing_override_used_by_input_data(tmp_path):
     """
     from unittest.mock import MagicMock, patch
 
-    from cstar_forge.forge import input_data as id_mod
+    from cstar.applications.forge import input_data as id_mod
 
     override = {
         "initial_conditions": {"source": {"name": "GLORYS", "climatology": False}},
@@ -2565,7 +2550,7 @@ def test_forcing_override_used_by_input_data(tmp_path):
 
 
 def test_catalog_scans_outputspec():
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     assert "standard" in cat.output_names
     data = cat.output_data("standard")
@@ -2648,13 +2633,7 @@ def test_model_spec_streams_satisfy_roms_divides_rst_precheck(
     since a resolved blueprint combines the two.
     """
     model_settings = yaml.safe_load(
-        (
-            Path(cstar_forge.__file__).parent
-            / "catalog"
-            / "ModelSpec"
-            / model_spec_name
-            / "model.yaml"
-        ).read_text()
+        (_BUNDLED_CATALOG / "ModelSpec" / model_spec_name / "model.yaml").read_text()
     )["model_settings"]
     rst = _CATALOG.output_data(spec_name)["ocean_vars"]["output_period_rst"]
     _assert_streams_divide_rst(
@@ -2756,7 +2735,7 @@ def test_resolver_non_extract_stream_check_gated_off_for_legacy_roms():
 
 
 def test_resolver_output_settings_override():
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     odata = cat.output_data("standard")
     cfg = _build(output_settings=odata)
@@ -2776,7 +2755,7 @@ def test_resolver_output_settings_override():
 
 
 def test_extract_output_settings_helper():
-    from cstar_forge.forge_blueprint_resolve import (
+    from cstar.applications.forge.resolve import (
         OUTPUT_BGC_FIELDS,
         OUTPUT_SECTIONS,
         extract_output_settings,
@@ -2797,7 +2776,7 @@ def test_extract_output_settings_helper():
 
 
 def test_resolver_forcing_inputs_override():
-    from cstar_forge.domain_catalog import default_catalog as cat
+    from cstar.catalog.domain_catalog import default_catalog as cat
 
     fdata = cat.forcing_data("glorys-era5-unified")
     cfg = _build(forcing_inputs=fdata)
@@ -2860,7 +2839,7 @@ _CDR_SAMPLE_YAML = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml
 
 
 def test_read_cdr_forcing_yaml_from_sample():
-    from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+    from cstar.applications.forge.resolve import read_cdr_forcing_yaml
 
     block = read_cdr_forcing_yaml(_CDR_SAMPLE_YAML)
     assert block["releases"], "sample must carry at least one release"
@@ -2869,7 +2848,7 @@ def test_read_cdr_forcing_yaml_from_sample():
 
 
 def test_read_cdr_forcing_yaml_accepts_raw_text():
-    from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+    from cstar.applications.forge.resolve import read_cdr_forcing_yaml
 
     text = _CDR_SAMPLE_YAML.read_text()
     block = read_cdr_forcing_yaml(text)
@@ -2878,7 +2857,7 @@ def test_read_cdr_forcing_yaml_accepts_raw_text():
 
 
 def test_read_cdr_forcing_yaml_rejects_non_cdr():
-    from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+    from cstar.applications.forge.resolve import read_cdr_forcing_yaml
 
     with pytest.raises(ValueError, match="CDRForcing"):
         read_cdr_forcing_yaml("---\nSomeOtherThing:\n  foo: bar\n")
@@ -3151,7 +3130,7 @@ def test_bgc_source_item_serialize_dask_roundtrips():
     """
     from pydantic import ValidationError
 
-    from cstar_forge.forge.forge_blueprint import BgcSourceItem
+    from cstar.applications.forge.blueprint import BgcSourceItem
 
     item = BgcSourceItem(
         source={"name": "ESPER"}, use_vars=["ALK", "DIC"], serialize_dask=True
@@ -3174,7 +3153,7 @@ def test_bgc_source_item_serialize_dask_roundtrips():
 
 class TestEnsureCdrOutputMarblDiagnostics:
     def test_none_input_returns_all_required(self):
-        from cstar_forge.forge.namelist_model import (
+        from cstar.applications.forge.namelist_model import (
             CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS,
             ensure_cdr_output_marbl_diagnostics,
         )
@@ -3184,7 +3163,7 @@ class TestEnsureCdrOutputMarblDiagnostics:
         )
 
     def test_empty_list_returns_all_required(self):
-        from cstar_forge.forge.namelist_model import (
+        from cstar.applications.forge.namelist_model import (
             CDR_OUTPUT_REQUIRED_MARBL_DIAGNOSTICS,
             ensure_cdr_output_marbl_diagnostics,
         )
@@ -3194,7 +3173,7 @@ class TestEnsureCdrOutputMarblDiagnostics:
         )
 
     def test_partial_overlap_no_duplicates_order_preserved(self):
-        from cstar_forge.forge.namelist_model import (
+        from cstar.applications.forge.namelist_model import (
             ensure_cdr_output_marbl_diagnostics,
         )
 
@@ -3217,8 +3196,10 @@ def test_cdr_output_toggle_renders_cdr_forcing_cppdef(tmp_path, do_cdr_output):
     n_tracers = 2 + int(param.get("ntrc_bio", 0)) + int(param.get("nt_passive", 0))
     render_roms_settings(
         template_files=["cppdefs.opt.j2"],
-        template_dir=Path(cstar_forge.__file__).parents[1]
+        template_dir=Path(cstar.__file__).parent
+        / "additional_files"
         / "templates"
+        / "forge"
         / "compile-time",
         settings_dict=dict(cfg.model_settings),
         code_output_dir=tmp_path,
@@ -3268,8 +3249,8 @@ def test_resolver_use_pio_defaults_from_model_spec(tmp_path):
 
 
 def test_resolver_use_pio_requires_model_yml_pin():
-    from cstar_forge.forge.forge_blueprint import CodeRepo
-    from cstar_forge.forge_blueprint_resolve import _build_code
+    from cstar.applications.forge.blueprint import CodeRepo
+    from cstar.applications.forge.resolve import _build_code
 
     model = {
         "code": {"roms": {"location": "https://example.com/roms.git", "commit": "x"}},
@@ -3387,8 +3368,8 @@ def test_cppdefs_nhy_nox_forcing_default_true_and_off_when_bgc_mode_none():
 
 
 def test_resolver_bgc_mode_marbl_requires_model_yml_pin():
-    from cstar_forge.forge.forge_blueprint import CodeRepo
-    from cstar_forge.forge_blueprint_resolve import _build_code
+    from cstar.applications.forge.blueprint import CodeRepo
+    from cstar.applications.forge.resolve import _build_code
 
     model = {
         "code": {"roms": {"location": "https://example.com/roms.git", "commit": "x"}},
@@ -3417,8 +3398,8 @@ def test_build_code_coerces_numeric_commit_to_string():
     as an int) must be coerced to str -- CodeRepo.commit is str-typed and rejects
     an int outright.
     """
-    from cstar_forge.forge.forge_blueprint import CodeRepo
-    from cstar_forge.forge_blueprint_resolve import _build_code
+    from cstar.applications.forge.blueprint import CodeRepo
+    from cstar.applications.forge.resolve import _build_code
 
     model = {
         "code": {
@@ -3505,7 +3486,7 @@ def test_settings_is_flat_and_omits_processing_filled_sections():
 
 
 def test_sources_resolved_from_modelspec():
-    from cstar_forge.forge.source_registry import resolve_dataset_key
+    from cstar.applications.forge.source_registry import resolve_dataset_key
 
     cfg = _build()
     s = cfg.forcing
@@ -3568,7 +3549,7 @@ def test_yaml_round_trip(tmp_path):
 def test_committed_example_validates():
     """The checked-in example must remain a valid ForgeBlueprint."""
     example = (
-        Path(cstar_forge.__file__).parents[1]
+        Path(cstar.__file__).parents[1]
         / "docs"
         / "forge-blueprint-example.wio-toy.yaml"
     )
@@ -3585,7 +3566,7 @@ def test_committed_example_validates():
 # ---------------------------------------------------------------------------
 class TestBgcSourcesUseVarsPartitioning:
     def _two_sources(self, use_vars=(None, None)):
-        from cstar_forge.forge.forge_blueprint import BgcSourceItem
+        from cstar.applications.forge.blueprint import BgcSourceItem
 
         return [
             BgcSourceItem(source={"name": "UNIFIED"}, use_vars=use_vars[0]),
@@ -3599,7 +3580,7 @@ class TestBgcSourcesUseVarsPartitioning:
         """Control: a single bgc source is never ambiguous, so use_vars stays
         optional -- the shipped blueprints all have exactly one.
         """
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         cls = getattr(fb, section_cls_name)
         section = cls(
@@ -3614,7 +3595,7 @@ class TestBgcSourcesUseVarsPartitioning:
     def test_multiple_bgc_sources_require_use_vars_on_every_item(
         self, section_cls_name
     ):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         cls = getattr(fb, section_cls_name)
         with pytest.raises(ValueError, match="partition with use_vars"):
@@ -3627,7 +3608,7 @@ class TestBgcSourcesUseVarsPartitioning:
         "section_cls_name", ["InitialConditions", "BoundaryForcing"]
     )
     def test_multiple_bgc_sources_reject_overlapping_use_vars(self, section_cls_name):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         cls = getattr(fb, section_cls_name)
         with pytest.raises(ValueError, match="partition with use_vars"):
@@ -3640,7 +3621,7 @@ class TestBgcSourcesUseVarsPartitioning:
         "section_cls_name", ["InitialConditions", "BoundaryForcing"]
     )
     def test_multiple_bgc_sources_accept_disjoint_use_vars(self, section_cls_name):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         cls = getattr(fb, section_cls_name)
         section = cls(
@@ -3671,7 +3652,7 @@ class TestBgcSourcesUseVarsPartitioning:
 # ---------------------------------------------------------------------------
 class TestMigrateForcingInputsHardening:
     def test_dropped_bgc_item_keys_warn_with_index_and_source_name(self):
-        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.blueprint import migrate_forcing_inputs
 
         forcing = {
             "boundary": [
@@ -3692,7 +3673,7 @@ class TestMigrateForcingInputsHardening:
     def test_no_warning_when_no_extra_keys_dropped(self):
         import warnings
 
-        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.blueprint import migrate_forcing_inputs
 
         forcing = {
             "boundary": [
@@ -3706,7 +3687,7 @@ class TestMigrateForcingInputsHardening:
         assert not w
 
     def test_non_dict_boundary_entry_raises(self):
-        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.blueprint import migrate_forcing_inputs
 
         with pytest.raises(ValueError, match="non-dict entr"):
             migrate_forcing_inputs(
@@ -3718,7 +3699,7 @@ class TestMigrateForcingInputsHardening:
         """Previously an all-non-dict list silently became `None` (boundary
         forcing quietly vanishing); it must now raise instead.
         """
-        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.blueprint import migrate_forcing_inputs
 
         with pytest.raises(ValueError, match="non-dict entr"):
             migrate_forcing_inputs(None, {"boundary": [None, "not-a-dict"]})
@@ -3730,7 +3711,7 @@ class TestMigrateForcingInputsHardening:
         accept exactly that shape, since it's the wizard's ForcingSpec loader's
         real call signature.
         """
-        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.blueprint import migrate_forcing_inputs
 
         ic = {"bgc_source": {"name": "UNIFIED"}}
         forcing = {
@@ -3747,7 +3728,7 @@ class TestMigrateForcingInputsHardening:
     def test_already_migrated_pair_is_a_no_op(self):
         import copy
 
-        from cstar_forge.forge.forge_blueprint import migrate_forcing_inputs
+        from cstar.applications.forge.blueprint import migrate_forcing_inputs
 
         ic = {"bgc_sources": [{"source": {"name": "UNIFIED"}}]}
         forcing = {"boundary": {"source": {"name": "GLORYS"}, "bgc_sources": []}}
@@ -3762,9 +3743,8 @@ class TestMigrateForcingInputsHardening:
 # hash-consistent with its own content, and load with no warnings.
 # ---------------------------------------------------------------------------
 def _shipped_blueprint_paths() -> list[Path]:
-    pkg_root = Path(cstar_forge.__file__).parent
-    repo_root = pkg_root.parent
-    paths = sorted((pkg_root / "catalog" / "blueprints").glob("*.forge_blueprint.yaml"))
+    repo_root = Path(cstar.__file__).parents[1]
+    paths = sorted((_BUNDLED_CATALOG / "blueprints").glob("*.forge_blueprint.yaml"))
     example = repo_root / "docs" / "forge-blueprint-example.wio-toy.yaml"
     if example.exists():
         paths.append(example)
@@ -3808,7 +3788,7 @@ class TestForgeVersion:
     """
 
     def test_uses_git_describe_when_repo_present(self, monkeypatch, tmp_path):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         (tmp_path / ".git").mkdir()
         monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
@@ -3819,14 +3799,14 @@ class TestForgeVersion:
         assert fb._forge_version() == "abc1234-dirty"
 
     def test_falls_back_to_package_version_when_no_git_dir(self, monkeypatch, tmp_path):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)  # no .git subdir
         monkeypatch.setattr(fb, "_pkg_version", lambda name: "0.1.0")
         assert fb._forge_version() == "cstar-forge==0.1.0"
 
     def test_falls_back_to_package_version_when_git_fails(self, monkeypatch, tmp_path):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         (tmp_path / ".git").mkdir()
         monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
@@ -3851,7 +3831,7 @@ class TestForgeVersion:
         (``check=True``) must fall back like a missing git binary -- both
         ``TimeoutExpired`` and ``CalledProcessError`` are ``SubprocessError``.
         """
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         (tmp_path / ".git").mkdir()
         monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)
@@ -3868,7 +3848,7 @@ class TestForgeVersion:
     ):
         from importlib.metadata import PackageNotFoundError
 
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         monkeypatch.setattr(fb, "_REPO_ROOT", tmp_path)  # no .git subdir
 
@@ -3887,7 +3867,7 @@ class TestInstalledVersion:
     """
 
     def test_returns_formatted_version_when_installed(self, monkeypatch):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         monkeypatch.setattr(fb, "_pkg_version", lambda name: "4.0.0")
         assert fb._installed_version("roms-tools") == "roms-tools==4.0.0"
@@ -3895,7 +3875,7 @@ class TestInstalledVersion:
     def test_returns_none_when_not_installed(self, monkeypatch):
         from importlib.metadata import PackageNotFoundError
 
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         def _raise(name):
             raise PackageNotFoundError(name)
@@ -3912,7 +3892,7 @@ class TestProvenanceStamping:
     """
 
     def _patched_fb(self, monkeypatch):
-        from cstar_forge.forge import forge_blueprint as fb
+        from cstar.applications.forge import blueprint as fb
 
         monkeypatch.setattr(fb, "_forge_version", lambda: "abc1234")
         monkeypatch.setattr(
@@ -4013,7 +3993,8 @@ class _ReadOnlyValueGuard:
 class TestForgeBlueprintWizard:
     def _wizard(self):
         pytest.importorskip("ipywidgets")
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import ForgeBlueprintWizard
 
         return ForgeBlueprintWizard()
 
@@ -4633,13 +4614,15 @@ class TestForgeBlueprintWizard:
         invariant no matter how the shipped specs are renamed or extended.
         """
         pytest.importorskip("ipywidgets")
+        pytest.importorskip("cstar.wizard.wizard")
         import shutil
 
-        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
-        from cstar_forge.forge_blueprint_wizard import (
+        from cstar.wizard.wizard import (
             _DEFAULT_FORCING_SPEC,
             ForgeBlueprintWizard,
         )
+
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
         root = tmp_path / "catalog"
         shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
@@ -4847,7 +4830,7 @@ class TestForgeBlueprintWizard:
         bgc_sources = w2.config.forcing.initial_conditions.bgc_sources
         assert bgc_sources[0].source.name == "constants"
         assert bgc_sources[0].source.constants == {"Fe": 3.0e-3, "ALK": 2300.0}
-        from cstar_forge.forge_blueprint_wizard import _parse_constants
+        from cstar.wizard.wizard import _parse_constants
 
         fe2 = w2._forcing_editor
         assert _parse_constants(fe2._rows["ic_bgc"][0]["constants"].value) == {
@@ -5235,17 +5218,21 @@ class TestForgeBlueprintWizardApp:
 
     def _app(self, **kwargs):
         pytest.importorskip("ipywidgets")
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizardApp
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import ForgeBlueprintWizardApp
 
         return ForgeBlueprintWizardApp(**kwargs)
 
     def test_default_auto_loads_layered_catalog(self):
-        from cstar_forge.domain_catalog import (
+        pytest.importorskip("ipywidgets")
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import ForgeBlueprintWizard
+
+        from cstar.catalog.domain_catalog import (
             _DEFAULT_CATALOG_ROOT,
             LayeredCatalog,
             user_catalog_root,
         )
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
 
         app = self._app()
         assert isinstance(app.inner, ForgeBlueprintWizard)
@@ -5259,10 +5246,10 @@ class TestForgeBlueprintWizardApp:
 
     def test_reload_with_bad_value_keeps_previous_wizard(self):
         # A nonexistent local path is no longer an error (it becomes an empty
-        # writable layer over bundled, matching CSTAR_FORGE_CATALOG semantics),
+        # writable layer over bundled, matching CSTAR_CATALOG semantics),
         # so a malformed GitHub URL is the failure case now. Calls `_load`
         # directly -- the catalog bar's own reload button now requires a
-        # two-step confirm (see `cstar_forge.ui.catalog_bar.CatalogBar`),
+        # two-step confirm (see `cstar.wizard.wizard.CatalogBar`),
         # which isn't this test's concern.
         app = self._app()
         original_inner = app.inner
@@ -5271,7 +5258,7 @@ class TestForgeBlueprintWizardApp:
         assert "Failed to load catalog" in app._bar._cat_status.value
 
     def test_single_local_path_builds_stack_with_bundled(self, tmp_path):
-        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, LayeredCatalog
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, LayeredCatalog
 
         app = self._app()
         app._load(str(tmp_path / "my-catalog"))
@@ -5285,7 +5272,7 @@ class TestForgeBlueprintWizardApp:
         assert "Loaded" in app._bar._cat_status.value
 
     def test_single_local_literal_loads_readonly_store_with_warning(self):
-        from cstar_forge.domain_catalog import DomainCatalog, LayeredCatalog
+        from cstar.catalog.domain_catalog import DomainCatalog, LayeredCatalog
 
         app = self._app()
         app._load("local")
@@ -5329,7 +5316,7 @@ class TestForgeBlueprintEngine:
         return _build()
 
     def test_builder_kwargs_carry_atomic_inputs_not_host(self):
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             forge_blueprint_to_builder_kwargs,
         )
 
@@ -5353,11 +5340,11 @@ class TestForgeBlueprintEngine:
         forcing.resolved_datasets snapshot must actually reach the executor, not
         just be accepted as a same-named kwarg.
         """
-        from cstar_forge.forge.executor import ForgeExecutor
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             forge_blueprint_to_builder_kwargs,
         )
-        from cstar_forge.forge.host import HostPaths
+        from cstar.applications.forge.executor import ForgeExecutor
+        from cstar.applications.forge.host import HostPaths
 
         cfg = self._cfg()
         assert cfg.forcing.resolved_datasets, (
@@ -5380,7 +5367,7 @@ class TestForgeBlueprintEngine:
         assert ex.resolved_datasets["GLORYS"]["dataset_key"] == "GLORYS_REGIONAL"
 
     def test_split_model_settings(self):
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             PROCESSING_FILLED_SECTIONS,
             split_model_settings,
         )
@@ -5399,7 +5386,7 @@ class TestForgeBlueprintEngine:
         otherwise it silently reverts a correctly-generated configuration back to the
         resolver's pre-generation placeholder/declared value.
         """
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             GENERATION_DERIVED_LEAF_KEYS,
             split_model_settings,
         )
@@ -5425,7 +5412,7 @@ class TestForgeBlueprintEngine:
         assert run_ov["cdr_frc"]["relocate_to_wet_pts"] is True
 
     def test_process_orchestration_order_and_overlay(self):
-        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+        from cstar.applications.forge.engine import process_forge_blueprint
 
         b = process_forge_blueprint(
             self._cfg(), clobber=True, use_dask=False, executor_factory=_FakeBuilder
@@ -5439,7 +5426,7 @@ class TestForgeBlueprintEngine:
         assert "grid" not in cfgk["run_time_settings"]
 
     def test_process_skip_flags(self):
-        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+        from cstar.applications.forge.engine import process_forge_blueprint
 
         b = process_forge_blueprint(
             self._cfg(),
@@ -5454,7 +5441,7 @@ class TestForgeBlueprintEngine:
         there, so this is what guarantees an only_inputs run can't clobber an
         existing complete blueprint from a prior full run.
         """
-        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+        from cstar.applications.forge.engine import process_forge_blueprint
 
         b = process_forge_blueprint(
             self._cfg(),
@@ -5466,7 +5453,7 @@ class TestForgeBlueprintEngine:
         assert gen["only"] == {"forcing.boundary"}
 
     def test_only_inputs_wins_even_if_configure_true(self):
-        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+        from cstar.applications.forge.engine import process_forge_blueprint
 
         b = process_forge_blueprint(
             self._cfg(),
@@ -5477,7 +5464,7 @@ class TestForgeBlueprintEngine:
         assert "configure" not in [c[0] for c in b.calls]
 
     def test_only_inputs_unknown_name_fails_fast_before_any_call(self):
-        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+        from cstar.applications.forge.engine import process_forge_blueprint
 
         with pytest.raises(ValueError, match="bogus"):
             process_forge_blueprint(
@@ -5485,7 +5472,7 @@ class TestForgeBlueprintEngine:
             )
 
     def test_executor_must_implement_interface(self):
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             ForgeBlueprintExecutor,
             process_forge_blueprint,
         )
@@ -5501,7 +5488,7 @@ class TestForgeBlueprintEngine:
             process_forge_blueprint(self._cfg(), executor_factory=_Bad)
 
     def test_invalid_model_settings_fail_fast(self):
-        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+        from cstar.applications.forge.engine import process_forge_blueprint
 
         cfg = self._cfg()
         cfg.model_settings["param"]["np_xi"] = "not-an-int"  # corrupt a value
@@ -5514,8 +5501,8 @@ class TestForgeBlueprintEngine:
         # Forge's disposable host provider builds a HostPaths from auto-detected config;
         # the host is NOT read from the spec file. (The app receives this HostPaths via
         # process_forge_blueprint(host=...); C-Star supplies its own equivalent on relocation.)
-        from cstar_forge import config
-        from cstar_forge.forge.host import HostPaths
+        from cstar.applications.forge import config
+        from cstar.applications.forge.host import HostPaths
 
         cfg = self._cfg()
         h = config.resolve_host(cfg.working_dir)
@@ -5600,9 +5587,9 @@ class TestResolverBuilderParity:
         pytest.importorskip("roms_tools")
         from datetime import datetime
 
-        from cstar_forge.forge.executor import ForgeExecutor
-        from cstar_forge.forge.host import HostPaths
-        from cstar_forge.forge_blueprint_resolve import build_forge_blueprint
+        from cstar.applications.forge.executor import ForgeExecutor
+        from cstar.applications.forge.host import HostPaths
+        from cstar.applications.forge.resolve import build_forge_blueprint
 
         start, end = datetime(2012, 1, 1), datetime(2012, 1, 2)
 
@@ -5657,7 +5644,7 @@ class TestSaveModifiedSpecsToCatalog:
     def isolated_catalog(self, tmp_path):
         import shutil
 
-        from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
+        from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT, DomainCatalog
 
         root = tmp_path / "catalog"
         # Copy the BUNDLED catalog (not _CATALOG.catalog_root, which is now the
@@ -5667,7 +5654,8 @@ class TestSaveModifiedSpecsToCatalog:
 
     def _wizard(self, catalog):
         pytest.importorskip("ipywidgets")
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import ForgeBlueprintWizard
 
         return ForgeBlueprintWizard(catalog=catalog)
 
@@ -5716,7 +5704,7 @@ class TestSaveModifiedSpecsToCatalog:
 
     def test_save_model_spec_persists_use_pio_and_roms_ref(self, isolated_catalog):
         # Name deliberately distinct from the bundled "pio-dev" ModelSpec
-        # (cstar_forge/catalog/ModelSpec/pio-dev) -- register_model_from_settings
+        # (cstar/catalog/bundled/ModelSpec/pio-dev) -- register_model_from_settings
         # refuses to overwrite an existing entry, and isolated_catalog copies the
         # bundled catalog verbatim, so reusing that name here would collide.
         spec_name = "pio-dev-test"
@@ -5754,7 +5742,9 @@ class TestSaveModifiedSpecsToCatalog:
     def test_verify_model_roundtrip_false_when_spec_loses_use_pio(
         self, isolated_catalog
     ):
-        from cstar_forge.forge_blueprint_wizard import _model_owned_settings
+        pytest.importorskip("ipywidgets")
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
         wiz.use_pio_chk.value = True
@@ -5771,7 +5761,9 @@ class TestSaveModifiedSpecsToCatalog:
     def test_verify_model_roundtrip_false_when_spec_loses_roms_ref(
         self, isolated_catalog
     ):
-        from cstar_forge.forge_blueprint_wizard import _model_owned_settings
+        pytest.importorskip("ipywidgets")
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
         # Pin a spec whose base pin is NOT "main", so a spec that drops the
@@ -5852,7 +5844,9 @@ class TestSaveModifiedSpecsToCatalog:
     def test_verify_model_roundtrip_false_when_spec_loses_marbl_ref(
         self, isolated_catalog
     ):
-        from cstar_forge.forge_blueprint_wizard import _model_owned_settings
+        pytest.importorskip("ipywidgets")
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import _model_owned_settings
 
         wiz = self._wizard(isolated_catalog)
         wiz.model_dd.value = "cson_roms-marbl_v0.1"

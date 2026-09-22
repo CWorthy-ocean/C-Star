@@ -4,7 +4,7 @@ Processing engine: ingest a :class:`ForgeBlueprint` and run the heavy work
 
 This is the counterpart to the resolver (``forge_blueprint_resolve``). It runs
 on the user's machine of choice, where the **host** (machine config + data paths) is
-resolved from :mod:`cstar_forge.config` — nothing host-specific is read from the
+resolved from :mod:`cstar.applications.forge.config` — nothing host-specific is read from the
 config file. The reviewed, host-independent ``ForgeBlueprint`` provides everything else.
 
 Strategy (see ``docs/dev-notes/forge-blueprint-inventory.md`` §3): the existing
@@ -40,9 +40,9 @@ from typing import (
     runtime_checkable,
 )
 
-from cstar_forge.forge.forge_blueprint import ForgeBlueprint
-from cstar_forge.forge.host import HostPaths
-from cstar_forge.forge.namelist_model import validate_run_time_sections
+from cstar.applications.forge.blueprint import ForgeBlueprint
+from cstar.applications.forge.host import HostPaths
+from cstar.applications.forge.namelist_model import validate_run_time_sections
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,7 +54,7 @@ class ForgeBlueprintExecutor(Protocol):
 
     This is the seam between the host-independent ``ForgeBlueprint`` and whatever
     actually generates inputs / configures the build on the run machine. Today
-    ``cstar_forge.forge.executor.ForgeExecutor`` satisfies it; when the engine moves into
+    ``cstar.applications.forge.executor.ForgeExecutor`` satisfies it; when the engine moves into
     C-Star as an application, that app provides its own implementation and the only
     change here is the default factory.
 
@@ -232,7 +232,7 @@ def forge_blueprint_to_builder_kwargs(cfg: ForgeBlueprint) -> dict[str, Any]:
     """Map a ``ForgeBlueprint``'s atomic inputs to ``ForgeExecutor`` constructor kwargs.
 
     Host/machine/path values are intentionally NOT passed — the builder resolves
-    those from :mod:`cstar_forge.config` on the run host.
+    those from :mod:`cstar.applications.forge.config` on the run host.
     """
     kwargs = dict(
         description=cfg.description,
@@ -342,7 +342,7 @@ def _default_executor_factory(
     atomic inputs + the injected host. Imported lazily so the lightweight bits above
     (settings split) stay importable without the full forge stack.
     """
-    from cstar_forge.forge.executor import ForgeExecutor
+    from cstar.applications.forge.executor import ForgeExecutor
 
     return ForgeExecutor.from_forge_blueprint(cfg, host=host, verbose=verbose)
 
@@ -378,8 +378,8 @@ def process_forge_blueprint(
     host :
         The resolved ``HostPaths`` (data dirs + machine identity), *injected* by the
         caller — this module does not resolve the host itself, so it carries no
-        ``cstar_forge.config`` dependency and relocates cleanly into C-Star. Forge's
-        entry points (``cstar_forge.run``) supply it via ``config.resolve_host()``;
+        ``cstar.applications.forge.config`` dependency and relocates cleanly into C-Star. Forge's
+        entry points (``cstar.applications.forge.runtime``) supply it via ``config.resolve_host()``;
         C-Star will supply its own. Only used here for logging; the executor resolves
         its own paths. When ``None``, the host line is not logged.
     validate :
@@ -449,7 +449,7 @@ def process_forge_blueprint(
 
     resolved_only = None
     if only_inputs is not None:
-        from cstar_forge.forge.input_data import resolve_input_selection
+        from cstar.applications.forge.input_data import resolve_input_selection
 
         resolved_only = resolve_input_selection(only_inputs)
         if configure:

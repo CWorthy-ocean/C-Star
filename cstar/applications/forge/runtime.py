@@ -1,13 +1,13 @@
 """Forge-side entry point for running the forge application on this machine.
 
 This is the **disposable host-resolution glue**: it auto-detects the host via
-``cstar_forge.config`` and injects a ``HostPaths`` into the host-independent
+``cstar.applications.forge.config`` and injects a ``HostPaths`` into the host-independent
 ``process_forge_blueprint``. Users run this (or its CLI); paths are auto-detected, never
-typed. When the forge application relocates into C-Star, C-Star provides its own entry
-point + host resolution, and this module is not carried over.
+typed.
 
-CLI:  ``cstar forge run <forge_blueprint.yaml> [options]`` (``cstar_forge.cli``
-parses the options and calls ``run_blueprint`` below).
+CLI:  ``cstar forge run <forge_blueprint.yaml> [options]`` -- a native ``cstar forge
+run`` typer command parses the options and calls ``run_blueprint`` below. That command
+is not wired up yet as of this commit; it arrives in a later commit.
 """
 
 from __future__ import annotations
@@ -20,17 +20,18 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from cstar_forge import config
-from cstar_forge.forge.forge_blueprint import (
+from cstar.applications.forge import config
+from cstar.applications.forge.blueprint import (
     ForgeBlueprint,
     _forge_version,
     _installed_version,
 )
-from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+from cstar.applications.forge.engine import process_forge_blueprint
 
 # Loggers whose level gets lowered while capturing, so the file actually receives
 # useful content on the C-Star app path (which never calls logging.basicConfig).
-_CAPTURED_LOGGER_NAMES = ("cstar_forge", "roms_tools", "cstar")
+# Forge's own loggers now live under "cstar.applications.forge.*", covered by "cstar".
+_CAPTURED_LOGGER_NAMES = ("cstar", "roms_tools")
 
 
 class _Tee:
@@ -261,10 +262,11 @@ def run_blueprint(
 ) -> int:
     """Process a forge blueprint given already-parsed option values.
 
-    Body of the former ``main()`` after argument parsing -- ``cstar_forge.cli``'s
-    typer ``run`` command parses ``sys.argv`` and calls this with one keyword
-    argument per option, so the argument surface (names, types, defaults) lives
-    once, in the typer command, and this function only executes it.
+    Body of the former ``main()`` after argument parsing -- the ``cstar forge run``
+    typer command (not yet wired up as of this commit; see the module docstring)
+    parses ``sys.argv`` and calls this with one keyword argument per option, so the
+    argument surface (names, types, defaults) lives once, in the typer command, and
+    this function only executes it.
     """
     if verbose:
         logging.basicConfig(
@@ -272,7 +274,7 @@ def run_blueprint(
             format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
             force=True,
         )
-        for name in ("cstar_forge", "roms_tools", "cstar"):
+        for name in _CAPTURED_LOGGER_NAMES:
             logging.getLogger(name).setLevel(logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
@@ -329,6 +331,6 @@ def run_blueprint(
 
 if __name__ == "__main__":  # pragma: no cover - retired entry point
     raise SystemExit(
-        "cstar_forge.run is no longer a command; use `cstar forge run <blueprint>` "
-        "(or `python -m cstar_forge.cli run <blueprint>` without C-Star's CLI)."
+        "cstar.applications.forge.runtime is not a command; use `cstar forge run "
+        "<blueprint>` (a native typer command arriving in a later commit)."
     )

@@ -10,7 +10,7 @@ Tests cover:
 
 from xarray.backends.locks import CombinedLock, SerializableLock
 
-from cstar_forge.forge.xarray_lockfix import apply_combinedlock_leak_fix
+from cstar.applications.forge.xarray_lockfix import apply_combinedlock_leak_fix
 
 
 def _fresh_combined_lock() -> CombinedLock:

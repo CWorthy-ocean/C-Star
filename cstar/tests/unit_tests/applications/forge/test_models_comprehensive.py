@@ -2,7 +2,7 @@
 Comprehensive tests for the models.py module.
 
 Tests cover:
-- OpenBoundaries (re-exported from forge.forge_blueprint)
+- OpenBoundaries (re-exported from cstar.applications.forge.blueprint)
 - ModelTemplates / ModelCode (the ModelSpec's code+template-ref shape)
 - ModelSpec validation (cross-ref + template-file-existence validators)
 - load_models_yaml (the heavy Pydantic ModelSpec loader)
@@ -10,7 +10,8 @@ Tests cover:
 
 ModelSpec was consolidated into a single YAML (code + flat model_settings, no more
 inputs/split templates-settings/placeholder code repos) -- see
-docs/architecture-details.md and cstar_forge/models.py's module docstring.
+docs/architecture-details.md and cstar/applications/forge/models.py's module
+docstring.
 """
 
 from pathlib import Path
@@ -19,8 +20,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cstar_forge.forge.forge_blueprint import CodeRepo
-from cstar_forge.models import (
+from cstar.applications.forge.blueprint import CodeRepo
+from cstar.applications.forge.models import (
     ModelCode,
     ModelSpec,
     ModelTemplates,
@@ -470,7 +471,7 @@ class TestLoadModelsYaml:
         """Load the bundled cson_roms-marbl_v0.1 ModelSpec end-to-end (both the
         lightweight resolver reader and this heavy Pydantic path must agree).
         """
-        from cstar_forge.domain_catalog import default_catalog
+        from cstar.catalog.domain_catalog import default_catalog
 
         spec = load_models_yaml(
             default_catalog.model_path("cson_roms-marbl_v0.1"), "cson_roms-marbl_v0.1"
@@ -488,7 +489,7 @@ class TestLoadModelsYaml:
         """domain_catalog.load_model_spec() is the production entry point into this
         heavy path (catalog-registration-time validation).
         """
-        from cstar_forge.domain_catalog import default_catalog
+        from cstar.catalog.domain_catalog import default_catalog
 
         spec = default_catalog.load_model_spec("cson_roms-marbl_v0.1")
         assert isinstance(spec, ModelSpec)
@@ -497,10 +498,16 @@ class TestLoadModelsYaml:
 
 def test_repo_root_templates_dir_matches_models_py_assumption():
     """Sanity check for the best-effort file-existence validator: models.py assumes
-    the forge repo root is one level up from cstar_forge/. Pin that assumption.
+    its bundled templates root is ``parents[2]`` (the ``cstar`` package dir) +
+    ``additional_files/templates/forge``. Pin that assumption.
     """
-    import cstar_forge.models as models_module
+    import cstar.applications.forge.models as models_module
 
-    repo_root = Path(models_module.__file__).resolve().parents[1]
-    assert (repo_root / "templates" / "compile-time" / "cppdefs.opt.j2").exists()
-    assert (repo_root / "templates" / "run-time" / "marbl_in").exists()
+    bundled_templates_root = (
+        Path(models_module.__file__).resolve().parents[2]
+        / "additional_files"
+        / "templates"
+        / "forge"
+    )
+    assert (bundled_templates_root / "compile-time" / "cppdefs.opt.j2").exists()
+    assert (bundled_templates_root / "run-time" / "marbl_in").exists()

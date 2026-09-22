@@ -1,5 +1,5 @@
 """
-Tests for the Pydantic namelist/settings models (``cstar_forge.forge.namelist_model``):
+Tests for the Pydantic namelist/settings models (``cstar.applications.forge.namelist_model``):
 
 * settings dict -> RunTimeSettings -> build_namelist -> write
 * the read -> edit -> write round-trip (reusable by other repos)
@@ -11,12 +11,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from cstar.roms.namelist import RomsNamelist, RomsNamelistV0_5_0, RomsNamelistV0_7_0
 from pydantic import ValidationError
 
-import cstar_forge
-from cstar_forge.domain_catalog import default_catalog
-from cstar_forge.forge.namelist_model import (
+import cstar.catalog
+from cstar.applications.forge.namelist_model import (
     CdrGasExchOutputCfg,
     CdrTracerOutputCfg,
     RunTimeSettings,
@@ -28,11 +26,16 @@ from cstar_forge.forge.namelist_model import (
     run_time_settings_for_ref,
     validate_run_time_sections,
 )
-from cstar_forge.forge.settings import write_roms_namelist
-from cstar_forge.forge_blueprint_resolve import load_model_spec_data
+from cstar.applications.forge.resolve import load_model_spec_data
+from cstar.applications.forge.settings import write_roms_namelist
+from cstar.catalog.domain_catalog import default_catalog
+from cstar.roms.namelist import RomsNamelist, RomsNamelistV0_5_0, RomsNamelistV0_7_0
 
 _MODEL_DIR = (
-    Path(cstar_forge.__file__).parent / "catalog" / "ModelSpec" / "cson_roms-marbl_v0.1"
+    Path(cstar.catalog.__file__).parent
+    / "bundled"
+    / "ModelSpec"
+    / "cson_roms-marbl_v0.1"
 )
 
 
@@ -544,7 +547,7 @@ def test_run_time_settings_for_ref_unknown_schema_raises_actionable_error(
         pass
 
     monkeypatch.setattr(
-        "cstar_forge.forge.namelist_model.namelist_schema_for_ref",
+        "cstar.applications.forge.namelist_model.namelist_schema_for_ref",
         lambda ref: _FutureSchema,
     )
     with pytest.raises(ValueError, match="no matching\\s+run-time settings model"):

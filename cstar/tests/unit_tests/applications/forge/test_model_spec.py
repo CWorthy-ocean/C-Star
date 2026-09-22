@@ -16,7 +16,7 @@ the current ModelSpec/ModelCode/ModelTemplates coverage.)
 import pytest
 from pydantic import ValidationError
 
-from cstar_forge.models import (
+from cstar.applications.forge.models import (
     BgcSourceItem,
     BoundaryForcing,
     InitialConditionsInput,

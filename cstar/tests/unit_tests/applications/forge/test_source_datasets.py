@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cstar_forge.forge import source_datasets
-from cstar_forge.forge.source_datasets import (
+from cstar.applications.forge import source_datasets
+from cstar.applications.forge.source_datasets import (
     DATASET_REGISTRY,
     GLOFAS_FILENAME,
     SOURCE_ALIAS,
@@ -257,7 +257,7 @@ class TestSourceDataMethods:
         one case that intentionally always resolves live (see
         SourceDatasets.dataset_key_for_source's docstring).
         """
-        import cstar_forge.forge.source_registry as reg
+        import cstar.applications.forge.source_registry as reg
 
         monkeypatch.setitem(reg.SOURCE_ALIAS, "UNIFIED", "WRONG_KEY")
 
@@ -954,7 +954,7 @@ class TestWOABGCHandler:
         """T/S must be staged: without them roms-tools cannot convert umol/kg to
         mmol/m3, and density / density_mld interpolation silently degrades to depth.
         """
-        from cstar_forge.forge.source_registry import (
+        from cstar.applications.forge.source_registry import (
             WOA23_BGC_VARIABLES,
             WOA23_PERIODS,
         )
@@ -977,7 +977,7 @@ class TestWOABGCHandler:
         Nutrients and oxygen are published only under "all"; T/S under "decav".
         Getting these backwards yields 404s for every file.
         """
-        from cstar_forge.forge.source_registry import WOA23_BGC_VARIABLES
+        from cstar.applications.forge.source_registry import WOA23_BGC_VARIABLES
 
         assert WOA23_BGC_VARIABLES["NO3"] == ("nitrate", "all", "n")
         assert WOA23_BGC_VARIABLES["O2"] == ("oxygen", "all", "o")
@@ -990,7 +990,7 @@ class TestWOABGCHandler:
         woa_dir = tmp_path / "WOA"
         woa_dir.mkdir()
         # Pre-create every expected file so the handler short-circuits the download.
-        from cstar_forge.forge.source_registry import (
+        from cstar.applications.forge.source_registry import (
             WOA23_BGC_VARIABLES,
             WOA23_GRID,
             WOA23_PERIODS,
@@ -1013,7 +1013,7 @@ class TestWOABGCHandler:
         sd = SourceDatasets(datasets=["WOA_BGC"], source_data_dir=tmp_path)
         woa_dir = tmp_path / "WOA"
         woa_dir.mkdir()
-        from cstar_forge.forge.source_registry import (
+        from cstar.applications.forge.source_registry import (
             WOA23_BGC_VARIABLES,
             WOA23_GRID,
             WOA23_PERIODS,

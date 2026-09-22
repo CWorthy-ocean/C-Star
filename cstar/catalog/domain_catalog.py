@@ -12,41 +12,75 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import fsspec
 import yaml
 
+from cstar.base.env import ENV_CSTAR_CATALOG, default_catalog_root, get_env_item
+
 if TYPE_CHECKING:
     import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CATALOG_ROOT = Path(__file__).parent / "catalog"
+_DEFAULT_CATALOG_ROOT = Path(__file__).parent / "bundled"
+
+# Pre-move (cstar-forge repo) catalog location. Never written to or read from
+# automatically -- only checked for a one-time hint, see ``user_catalog_root``.
+_LEGACY_CATALOG_ROOT = Path.home() / "cstar-forge-data" / "catalog"
+
+# Set once ``user_catalog_root`` has logged its legacy-location hint, so a process
+# that calls it repeatedly (it has no other caching) logs the hint only once.
+_legacy_catalog_hint_logged = False
 
 
 def user_catalog_root() -> Path:
     """Return the root of the user-writable catalog layer.
 
-    Deliberately home-anchored (``~/cstar-forge-data/catalog``), NOT the
-    ``$SCRATCH``-rebased layouts used elsewhere (see ``config.py``): catalog
-    entries are durable, user-registered content, not job-scoped working
-    data, and must survive HPC scratch purges.
+    Deliberately home-anchored (``~/cstar/catalog`` by default -- see
+    ``cstar.base.env.default_catalog_root``), NOT the ``$SCRATCH``-rebased
+    layouts used elsewhere (see ``config.py``): catalog entries are durable,
+    user-registered content, not job-scoped working data, and must survive HPC
+    scratch purges.
 
-    If ``CSTAR_FORGE_CATALOG`` is set and non-empty, the first
-    ``os.pathsep``-separated entry is used instead (expanded and resolved).
-    Does not create the directory.
+    If ``CSTAR_CATALOG`` (C-Star's registered env var, see ``cstar.base.env``)
+    is set and non-empty, the first ``os.pathsep``-separated entry is used
+    instead (expanded and resolved). Does not create the directory.
     """
     entries = _env_catalog_entries()
     if entries:
         first = entries[0]
         if first.strip().lower() == "local":
             raise ValueError(
-                "CSTAR_FORGE_CATALOG: the bundled catalog ('local') is read-only "
+                f"{ENV_CSTAR_CATALOG}: the bundled catalog ('local') is read-only "
                 "and cannot be the writable top layer; list it after your own "
                 "catalog root instead (e.g. '/path/to/mine:local')."
             )
         return Path(first).expanduser().resolve()
-    return Path.home() / "cstar-forge-data" / "catalog"
+
+    root = (
+        Path(default_catalog_root(get_env_item(ENV_CSTAR_CATALOG)))
+        .expanduser()
+        .resolve()
+    )
+    global _legacy_catalog_hint_logged
+    if (
+        not _legacy_catalog_hint_logged
+        and ENV_CSTAR_CATALOG not in os.environ
+        and not root.exists()
+        and _LEGACY_CATALOG_ROOT.exists()
+    ):
+        logger.info(
+            "No catalog found at %s (the default location). A catalog from a "
+            "previous cstar-forge install exists at %s -- it is not used "
+            "automatically; move it to %s, or set %s to point at it.",
+            root,
+            _LEGACY_CATALOG_ROOT,
+            root,
+            ENV_CSTAR_CATALOG,
+        )
+        _legacy_catalog_hint_logged = True
+    return root
 
 
 def _env_catalog_entries() -> list[str]:
-    """Non-empty ``os.pathsep``-separated entries of ``CSTAR_FORGE_CATALOG``, in order.
+    """Non-empty ``os.pathsep``-separated entries of ``CSTAR_CATALOG``, in order.
 
     The single parser for the env var: ``user_catalog_root``,
     ``default_catalog_stack``, and the wizard's catalog bar must all agree on
@@ -54,7 +88,7 @@ def _env_catalog_entries() -> list[str]:
     or doubled separators (e.g. ``"$UNSET:/opt/shared"`` expanding to
     ``":/opt/shared"``).
     """
-    return [e for e in os.environ.get("CSTAR_FORGE_CATALOG", "").split(os.pathsep) if e]
+    return [e for e in os.environ.get(ENV_CSTAR_CATALOG, "").split(os.pathsep) if e]
 
 
 def _extract_model_and_grid(
@@ -150,7 +184,7 @@ class DomainCatalog:
     ----------
     catalog_root : str or Path or None
         Root of the catalog (inner directory containing ModelSpec/, etc.).
-        Defaults to the package-bundled catalog at ``<cstar_forge>/catalog``.
+        Defaults to the package-bundled catalog at ``cstar/catalog/bundled``.
         Pass a github URL string for remote catalogs.
     read_only : bool
         Mark this store non-writable. Non-local stores (remote/github/http)
@@ -481,7 +515,7 @@ class DomainCatalog:
         ----------
         source : str or Path
             Inner catalog directory to merge from, or ``'local'`` to use the
-            package-bundled catalog (``cstar_forge/catalog``).
+            package-bundled catalog (``cstar/catalog/bundled``).
         clobber : bool
             Whether to overwrite conflicting destination files.
         """
@@ -811,7 +845,7 @@ class DomainCatalog:
         ModelSpec
             Parsed Pydantic ModelSpec instance.
         """
-        from cstar_forge.models import load_models_yaml
+        from cstar.applications.forge.models import load_models_yaml
 
         path = self.model_path(model_name)
         return load_models_yaml(path, model_name)
@@ -1024,7 +1058,7 @@ class DomainCatalog:
         self._check_writable()
         # Deferred import, mirroring load_models_yaml below -- keeps the catalog
         # module import-light for callers that never register.
-        from cstar_forge.models import CDR_MODES, CdrSpec
+        from cstar.applications.forge.models import CDR_MODES, CdrSpec
 
         if mode not in CDR_MODES:
             raise ValueError(f"mode must be one of {sorted(CDR_MODES)}, got {mode!r}")
@@ -1770,14 +1804,14 @@ class LayeredCatalog:
 def default_catalog_stack() -> LayeredCatalog:
     """Build the default layered catalog: the user layer over the packaged catalog.
 
-    If ``CSTAR_FORGE_CATALOG`` is set, it is split on ``os.pathsep`` into an
+    If ``CSTAR_CATALOG`` is set, it is split on ``os.pathsep`` into an
     ordered list of catalog roots; the first is the writable top (label
     ``"user"``), every subsequent entry is a read-only store (a literal
     ``"local"`` entry resolves to the packaged catalog via
     ``DomainCatalog``'s own constructor logic, and is only valid after the
     first position -- the bundled catalog is never writable). Otherwise the
     top store is
-    ``user_catalog_root()`` (``~/cstar-forge-data/catalog`` by default, may
+    ``user_catalog_root()`` (``~/cstar/catalog`` by default, may
     not exist yet -- constructing it here creates nothing).
 
     The packaged catalog is always appended at the bottom (label
@@ -1838,9 +1872,9 @@ _default_catalog: LayeredCatalog | None = None
 def __getattr__(name: str) -> Any:
     """Lazily construct the module-level ``default_catalog`` singleton (PEP 562).
 
-    ``from cstar_forge.domain_catalog import default_catalog`` still triggers
+    ``from cstar.catalog.domain_catalog import default_catalog`` still triggers
     construction at import of the *importing* module -- this only protects
-    ``import cstar_forge`` itself from an eager filesystem scan.
+    ``import cstar.catalog`` itself from an eager filesystem scan.
     """
     global _default_catalog
     if name == "default_catalog":

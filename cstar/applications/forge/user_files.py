@@ -3,7 +3,7 @@ User-provided-netCDF contract: hashing, verification, and staging for pre-made
 grid / river / CDR-forcing files a user supplies instead of letting Forge
 generate them.
 
-A :class:`~cstar_forge.forge.forge_blueprint.UserProvidedFile` records two
+A :class:`~cstar.applications.forge.blueprint.UserProvidedFile` records two
 things about such a file: ``location`` (a path on the machine that will run
 the executor -- host/transport, excluded from ``ForgeBlueprint.content_hash``)
 and ``content_hash`` (a digest of the file's *data content*, pinned into the
@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cstar_forge.forge.forge_blueprint import UserProvidedFile
+    from cstar.applications.forge.blueprint import UserProvidedFile
 
 logger = logging.getLogger(__name__)
 

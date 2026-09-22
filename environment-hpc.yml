@@ -5,5 +5,20 @@ dependencies:
   - python>=3.12,<3.14
   - pip
   - roms-tools>=5.0,<6
+  # forge application runtime dependencies
+  - jinja2
+  - pandas
+  - copernicusmarine
+  - gdown
+  - dask
+  - distributed
+  - threadpoolctl
+  - numba
+  - fsspec
+  - kerchunk
+  - nest-asyncio
+  - ujson
+  - fastparquet
+  - xarray
   # docs builds only
   - pandoc

@@ -5,9 +5,9 @@ download URL), and the resolution helpers.
 
 This module holds ONLY pure data + functions (stdlib/typing) so it can be imported
 by both:
-  * ``cstar_forge.forge.source_datasets`` (the heavy acquisition layer — copernicusmarine /
+  * ``cstar.applications.forge.source_datasets`` (the heavy acquisition layer — copernicusmarine /
     gdown / roms_tools), which re-exports these names for its existing consumers, and
-  * ``cstar_forge.forge_blueprint_resolve`` (the dependency-light resolver),
+  * ``cstar.applications.forge.resolve`` (the dependency-light resolver),
     which previously carried a hand-copied duplicate of this table.
 
 Single source of truth: edit dataset identifiers / URLs / aliases here. When the

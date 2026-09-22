@@ -1,13 +1,13 @@
 """
 ``ForgeBlueprint``: the single authoritative, fully-resolved input to processing — the
 forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
-``cstar_forge.forge.executor.ForgeExecutor.from_forge_blueprint`` and
-``cstar_forge.forge.forge_blueprint_engine.process_forge_blueprint``), split into two phases
+``cstar.applications.forge.executor.ForgeExecutor.from_forge_blueprint`` and
+``cstar.applications.forge.engine.process_forge_blueprint``), split into two phases
 (see ``docs/architecture-details.md``):
 
 1. **Collection / curation** — assemble every option from its source (constructor
    args, the ModelSpec, and the *pure* derived values), validate it, and write one
-   reviewable ``forge_blueprint.yaml`` (``cstar_forge.forge_blueprint_resolve.build_forge_blueprint``).
+   reviewable ``forge_blueprint.yaml`` (``cstar.applications.forge.resolve.build_forge_blueprint``).
 2. **Processing** — ingest that file on any machine and run the heavy work
    (``generate_inputs`` + ``configure_build``).
 
@@ -16,7 +16,7 @@ forge application's blueprint. It is fully wired into ``ForgeExecutor`` (see
 
 ``ForgeBlueprint`` subclasses ``cstar.orchestration.models.Blueprint`` (see
 ``cstar/applications/hello_world.py`` for the minimal shape of this contract), which is
-what makes forge a real C-Star application: ``cstar_forge.forge.app.ForgeRunner`` +
+what makes forge a real C-Star application: ``cstar.applications.forge.app.ForgeRunner`` +
 ``ForgeApplication`` (registered through the ``cstar.applications`` entry point
 cstar-forge declares) let C-Star's own entrypoint (``cstar blueprint run``) discover
 and drive it directly.
@@ -28,7 +28,7 @@ mechanically derivable is computed at **processing** time, never stored:
 
 * **Host/machine** — the machine tag, account, queues, ``pes_per_node``, and every
   data path (source_data / input_data / scratch / catalog) are resolved at
-  processing time from ``cstar_forge.config`` on the machine that runs the work.
+  processing time from ``cstar.applications.forge.config`` on the machine that runs the work.
   ``run_output_dir`` and the namelist ``output_root_name`` (which embed the scratch
   path) are therefore derived there too.
 * **Naming** — the canonical ``name`` is a user-editable atomic input (required by the
@@ -66,12 +66,13 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 import yaml
-from cstar.orchestration.models import Blueprint
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-# Repo root anchor for ``_forge_version()`` -- three levels up from this file
-# (cstar_forge/forge/forge_blueprint.py -> forge/ -> cstar_forge/ -> repo root).
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+from cstar.orchestration.models import Blueprint
+
+# Repo root anchor for ``_forge_version()`` -- four levels up from this file
+# (cstar/applications/forge/blueprint.py -> forge/ -> applications/ -> cstar/ -> repo root).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _forge_version() -> str | None:
@@ -674,11 +675,11 @@ class UserProvidedFile(_Section):
 
     ``location`` is a path on the machine that will run the executor -- it must
     exist there at processing time (a hard error if not: see
-    ``cstar_forge.forge.user_files.verify_user_file``). It is host/transport, not
+    ``cstar.applications.forge.user_files.verify_user_file``). It is host/transport, not
     results-affecting content, so it is excluded from :meth:`ForgeBlueprint.content_hash`.
 
     ``content_hash`` pins the file's *data content* (via
-    ``cstar_forge.forge.user_files.hash_netcdf_contents``) as it was when the
+    ``cstar.applications.forge.user_files.hash_netcdf_contents``) as it was when the
     blueprint was authored. It IS results-affecting and stays in the content hash;
     a mismatch at processing time is a warning (the file may have been
     legitimately regenerated), not an error.
@@ -840,13 +841,13 @@ class Domain(_Section):
     v_sponge: float | None = None
     """Sponge-layer viscosity. A first-class, domain-owned property (mirrors
     ``open_boundaries``): the resolver derives it from grid spacing
-    (``cstar_forge.forge.util.compute_v_sponge_from_grid``) when not explicitly
+    (``cstar.applications.forge.util.compute_v_sponge_from_grid``) when not explicitly
     supplied, and is the sole writer of both this field and the identical
     ``model_settings["v_sponge"]["v_sponge"]`` leaf -- the two must never diverge."""
     dt: float | None = None
     """Baroclinic timestep (seconds). A first-class, domain-owned property (mirrors
     ``v_sponge``): the resolver derives it from the CFL criterion
-    (``cstar_forge.forge.util``, via a grid build) when not explicitly supplied, and
+    (``cstar.applications.forge.util``, via a grid build) when not explicitly supplied, and
     is the sole writer of both this field and the identical
     ``model_settings["time_stepping"]["dt"]`` leaf -- the two must never diverge."""
     grid_file: UserProvidedFile | None = None
@@ -903,7 +904,7 @@ class SourceSpec(_Section):
     ``name`` is the logical/friendly name (e.g. ``"GLORYS"``, ``"ERA5"``,
     ``"UNIFIED"``). The resolved registry key (``"GLORYS_REGIONAL"``,
     ``"UNIFIED_BGC"``, …) is derivable at any time via
-    :func:`cstar_forge.forge.source_registry.resolve_dataset_key(name, glorys_layout)`
+    :func:`cstar.applications.forge.source_registry.resolve_dataset_key(name, glorys_layout)`
     and is not stored here — the necessary disambiguation is already carried by
     ``glorys_layout``. The canonical registry snapshot lives in
     ``Forcing.resolved_datasets`` (keyed by logical name → ``ResolvedDataset``).
@@ -972,7 +973,7 @@ class SourceSpec(_Section):
 # ``RomsMarblInputData._build_input_args`` AFTER the typed defaults and BEFORE the
 # run-time injections (``extra``). Lets a new roms-tools parameter be operated
 # end-to-end with no schema change; promote it to a typed field later for validation,
-# UI, and discoverability. ``cstar_forge.models`` re-exports these item models rather
+# UI, and discoverability. ``cstar.applications.forge.models`` re-exports these item models rather
 # than redefining them; single-sourcing here is enforced by
 # ``tests/test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced``.
 _OPTIONS_HELP = (
@@ -1518,7 +1519,7 @@ class Provenance(_Section):
 class ForgeBlueprint(Blueprint):
     """The complete, sufficient, reviewable input to processing -- and the forge
     C-Star application's own blueprint (see ``cstar.orchestration.models.Blueprint``,
-    ``cstar_forge.forge.app.ForgeApplication``).
+    ``cstar.applications.forge.app.ForgeApplication``).
 
     Round-trips to a single ``forge_blueprint.yaml`` via :meth:`to_yaml` / :meth:`from_yaml`.
 
@@ -1529,7 +1530,7 @@ class ForgeBlueprint(Blueprint):
     ``title`` and ``output_root_name`` (derived from name + host scratch path),
     ``s_coord`` (read from the generated grid), and ``grid`` / ``initial`` /
     ``forcing`` (artifact file paths). Validate ``model_settings`` through
-    ``cstar_forge.forge.namelist_model.RunTimeSettings`` (after the processing step fills
+    ``cstar.applications.forge.namelist_model.RunTimeSettings`` (after the processing step fills
     the omitted sections) before writing the namelist.
     """
 
@@ -1562,8 +1563,10 @@ class ForgeBlueprint(Blueprint):
     #
     # Redeclared (``str``, not the base's ``Path``) to keep this sentinel behavior --
     # see ``_resolve_out_dir`` below, which overrides the base's eager
-    # expanduser()/resolve() so the sentinel stays recognizable until then.
-    working_dir: str = DEFAULT_WORKING_ROOT
+    # expanduser()/resolve() so the sentinel stays recognizable until then. mypy sees
+    # this as narrowing the base class's ``Path`` annotation; the deliberate widening
+    # (Pydantic re-validates the field on this subclass, so it's safe at runtime).
+    working_dir: str = DEFAULT_WORKING_ROOT  # type: ignore[assignment]
     run: RunWindow
     domain: Domain
     forcing: Forcing

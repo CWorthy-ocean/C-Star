@@ -16,14 +16,14 @@ from pathlib import Path
 
 import pytest
 
-import cstar_forge.config as config_module
-from cstar_forge.config import (
+import cstar.applications.forge.config as config_module
+from cstar.applications.forge.config import (
     SYSTEM_LAYOUT_REGISTRY,
     DataPaths,
     get_data_paths,
     register_system,
 )
-from cstar_forge.domain_catalog import user_catalog_root
+from cstar.catalog.domain_catalog import user_catalog_root
 
 # The env vars C-Star's hpc_data_directory() searches (CSTAR_SCRATCH_DIRS' default),
 # plus CSTAR_SCRATCH_DIRS itself. Cleared in tests that exercise _hpc_scratch_root /
@@ -73,25 +73,25 @@ class TestUserCatalogRoot:
 
         first = tmp_path / "first-catalog"
         second = tmp_path / "second-catalog"
-        monkeypatch.setenv(
-            "CSTAR_FORGE_CATALOG", os.pathsep.join([str(first), str(second)])
-        )
+        monkeypatch.setenv("CSTAR_CATALOG", os.pathsep.join([str(first), str(second)]))
         assert user_catalog_root() == first.expanduser().resolve()
 
     def test_env_override_single_entry(self, monkeypatch, tmp_path):
         entry = tmp_path / "only-catalog"
-        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(entry))
+        monkeypatch.setenv("CSTAR_CATALOG", str(entry))
         assert user_catalog_root() == entry.expanduser().resolve()
 
     def test_default_is_home_anchored_when_env_unset(self, monkeypatch, tmp_path):
-        # conftest.py forces CSTAR_FORGE_CATALOG globally for test isolation, so
+        # conftest.py forces CSTAR_CATALOG globally for test isolation, so
         # this test must monkeypatch (auto-undone), never delete it globally.
-        monkeypatch.delenv("CSTAR_FORGE_CATALOG", raising=False)
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        assert user_catalog_root() == tmp_path / "cstar-forge-data" / "catalog"
+        # The default is computed via Path("~/cstar/catalog").expanduser(), which
+        # resolves through os.path.expanduser (the HOME env var), not Path.home().
+        monkeypatch.delenv("CSTAR_CATALOG", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        assert user_catalog_root() == tmp_path / "cstar" / "catalog"
 
     def test_does_not_create_the_directory(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
+        monkeypatch.setenv("CSTAR_CATALOG", str(tmp_path / "not-yet-created"))
         result = user_catalog_root()
         assert not result.exists()
 
@@ -270,7 +270,7 @@ class TestBouchetScratchRoot:
     """Tests for _bouchet_scratch_root (the scratch_pi_* glob heuristic)."""
 
     def test_picks_sorted_first_scratch_pi_dir(self, tmp_path, monkeypatch):
-        from cstar_forge.config import _bouchet_scratch_root
+        from cstar.applications.forge.config import _bouchet_scratch_root
 
         monkeypatch.setattr(config_module, "USER", "testuser")
         (tmp_path / "scratch_pi_zeta").mkdir()
@@ -281,7 +281,7 @@ class TestBouchetScratchRoot:
         assert result == tmp_path / "scratch_pi_alpha" / "testuser"
 
     def test_skips_non_directory_matches(self, tmp_path, monkeypatch):
-        from cstar_forge.config import _bouchet_scratch_root
+        from cstar.applications.forge.config import _bouchet_scratch_root
 
         monkeypatch.setattr(config_module, "USER", "testuser")
         (tmp_path / "scratch_pi_notadir").write_text("not a directory")
@@ -291,7 +291,7 @@ class TestBouchetScratchRoot:
         assert result == tmp_path / "scratch_pi_real" / "testuser"
 
     def test_returns_none_when_no_matches(self, tmp_path, monkeypatch):
-        from cstar_forge.config import _bouchet_scratch_root
+        from cstar.applications.forge.config import _bouchet_scratch_root
 
         monkeypatch.setattr(config_module, "USER", "testuser")
         result = _bouchet_scratch_root(tmp_path)
@@ -299,7 +299,7 @@ class TestBouchetScratchRoot:
 
     def test_returns_none_on_oserror(self, tmp_path, monkeypatch, caplog):
         """A failed scan (e.g. stale mount) degrades to None instead of raising."""
-        from cstar_forge.config import _bouchet_scratch_root
+        from cstar.applications.forge.config import _bouchet_scratch_root
 
         monkeypatch.setattr(config_module, "USER", "testuser")
 
@@ -307,7 +307,7 @@ class TestBouchetScratchRoot:
             raise OSError("stale NFS handle")
 
         monkeypatch.setattr(Path, "glob", _boom)
-        with caplog.at_level("WARNING", logger="cstar_forge.config"):
+        with caplog.at_level("WARNING", logger="cstar.applications.forge.config"):
             result = _bouchet_scratch_root(tmp_path)
         assert result is None
         assert "scratch_pi_*" in caplog.text
@@ -383,7 +383,7 @@ class TestRelocateWorkingDir:
     def test_default_path_rebases_to_scratch_on_perlmutter(
         self, tmp_path, monkeypatch, clean_scratch_env
     ):
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         wd = relocate_working_dir(
@@ -397,7 +397,7 @@ class TestRelocateWorkingDir:
     def test_default_path_rebases_to_scratch_on_anvil(
         self, tmp_path, monkeypatch, clean_scratch_env
     ):
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         wd = relocate_working_dir(
@@ -415,7 +415,7 @@ class TestRelocateWorkingDir:
         self, tmp_path, monkeypatch, clean_scratch_env
     ):
         """No $SCRATCH: the fallback derives from $PROJECT; $WORK is ignored."""
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         env = {"PROJECT": str(tmp_path / "proj"), "WORK": str(tmp_path / "work")}
@@ -436,7 +436,7 @@ class TestRelocateWorkingDir:
         rename) rebases onto the *current* scratch working root, so old
         blueprints no longer write into the old sibling location on HPC.
         """
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         wd = relocate_working_dir(
@@ -448,7 +448,7 @@ class TestRelocateWorkingDir:
         assert wd == tmp_path / "scratch" / "cstar" / "_forge_bp_runs" / "my-run"
 
     def test_non_hpc_leaves_path_alone(self, tmp_path, monkeypatch, clean_scratch_env):
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         wd = relocate_working_dir(
@@ -462,7 +462,7 @@ class TestRelocateWorkingDir:
     def test_custom_path_passes_through_on_hpc(
         self, tmp_path, monkeypatch, clean_scratch_env
     ):
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
@@ -482,7 +482,7 @@ class TestRelocateWorkingDir:
         authored before the default was renamed) rebases onto the *current* scratch
         working root, so old blueprints no longer write into home on HPC.
         """
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         wd = relocate_working_dir(
@@ -501,7 +501,7 @@ class TestRelocateWorkingDir:
         ``~/cstar-forge-data`` (which is also the mac/dev source_data cache base)
         is a user choice and passes through untouched.
         """
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
@@ -520,12 +520,12 @@ class TestRelocateWorkingDir:
         """A home-rooted path that matches no default root is left in home on HPC;
         warn so an unrelocated (e.g. very old default) run doesn't go unnoticed.
         """
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
         custom = home / "cstar-forge-data" / "my-hand-picked-run"
-        with caplog.at_level(logging.WARNING, logger="cstar_forge.config"):
+        with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.config"):
             wd = relocate_working_dir(
                 custom,
                 system_tag="perlmutter",
@@ -539,12 +539,12 @@ class TestRelocateWorkingDir:
         self, tmp_path, monkeypatch, clean_scratch_env, caplog
     ):
         """A deliberate path outside home is normal and must not warn."""
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
         custom = tmp_path / "elsewhere" / "my-run"
-        with caplog.at_level(logging.WARNING, logger="cstar_forge.config"):
+        with caplog.at_level(logging.WARNING, logger="cstar.applications.forge.config"):
             wd = relocate_working_dir(
                 custom,
                 system_tag="perlmutter",
@@ -557,7 +557,7 @@ class TestRelocateWorkingDir:
     def test_default_path_rebases_to_scratch_on_bouchet(
         self, tmp_path, monkeypatch, clean_scratch_env
     ):
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         monkeypatch.setattr(config_module, "USER", "testuser")
         home = tmp_path / "home"
@@ -586,7 +586,7 @@ class TestRelocateWorkingDir:
         HPC system with no resolvable scratch root -- no warning in this branch,
         since the function returns before the home-rooted-warning check).
         """
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         monkeypatch.setattr(config_module, "USER", "testuser")
         home = tmp_path / "home"
@@ -603,7 +603,7 @@ class TestRelocateWorkingDir:
     def test_tilde_default_expands_then_rebases(
         self, tmp_path, monkeypatch, clean_scratch_env
     ):
-        from cstar_forge.config import relocate_working_dir
+        from cstar.applications.forge.config import relocate_working_dir
 
         home = tmp_path / "home"
         monkeypatch.setenv("HOME", str(home))
@@ -622,17 +622,17 @@ class TestGetDataPaths:
     def test_get_data_paths(self, monkeypatch, tmp_path):
         """Test get_data_paths returns DataPaths object without creating directories.
 
-        Importing cstar_forge.config must not have filesystem side effects, so the
+        Importing cstar.applications.forge.config must not have filesystem side effects, so the
         default (``create=False``) only builds Path objects.
         """
         monkeypatch.setattr(config_module, "detect_system", lambda: "darwin_arm64")
 
-        # conftest.py forces CSTAR_FORGE_CATALOG to an already-created temp dir
+        # conftest.py forces CSTAR_CATALOG to an already-created temp dir
         # (for global test isolation), which would make the "not exists()"
         # assertion below meaningless -- point it at a not-yet-created path
         # instead so this test still checks that get_data_paths() itself
         # creates nothing.
-        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
+        monkeypatch.setenv("CSTAR_CATALOG", str(tmp_path / "not-yet-created"))
         # Use a real home directory that exists for the test
         monkeypatch.setenv("HOME", str(tmp_path))
         paths = get_data_paths()
@@ -649,7 +649,7 @@ class TestGetDataPaths:
 
         # See test_get_data_paths above: repoint the catalog at a not-yet-created
         # path so this test actually exercises directory creation for it too.
-        monkeypatch.setenv("CSTAR_FORGE_CATALOG", str(tmp_path / "not-yet-created"))
+        monkeypatch.setenv("CSTAR_CATALOG", str(tmp_path / "not-yet-created"))
         monkeypatch.setenv("HOME", str(tmp_path))
         paths = get_data_paths(create=True)
 

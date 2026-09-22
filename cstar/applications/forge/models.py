@@ -10,10 +10,10 @@ sections (an OutputSpec's job). Both must always be explicitly selected; there
 is no more "model default" fallback embedded here.
 
 The forcing/IC item models (``SurfaceForcingItem``, ``BoundaryForcing``, etc.)
-are defined once in ``cstar_forge.forge.forge_blueprint`` and re-exported here
+are defined once in ``cstar.applications.forge.blueprint`` and re-exported here
 (single source of truth -- see ``docs/roms-tools-contributor-guide.md`` and
 ``test_roms_tools_coverage.py::test_forge_item_models_are_single_sourced``) for
-callers that import them from ``cstar_forge.models``.
+callers that import them from ``cstar.applications.forge.models``.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from cstar_forge.forge.forge_blueprint import (
+from cstar.applications.forge.blueprint import (
     CDR_MODES,
     BgcSourceItem,
     BoundaryForcing,
@@ -37,10 +37,10 @@ from cstar_forge.forge.forge_blueprint import (
     TopographySource,
     UserProvidedFile,
 )
-from cstar_forge.forge.forge_blueprint import (
+from cstar.applications.forge.blueprint import (
     InitialConditions as InitialConditionsInput,
 )
-from cstar_forge.forge.forge_blueprint import (
+from cstar.applications.forge.blueprint import (
     OpenBoundaries as OpenBoundaries,
 )
 
@@ -166,18 +166,32 @@ class ModelSpec(BaseModel):
 
     @model_validator(mode="after")
     def _validate_template_files_exist(self) -> ModelSpec:
-        """Best-effort: check that template files exist at the forge repo root
-        (each stage's ``directory`` is repo-root-relative). Silently skipped if
-        the repo root can't be found (e.g. an installed-package-only environment,
-        where the checked-out forge repo's ``templates/`` tree isn't necessarily
-        present) -- this is a development-time nicety, not a runtime requirement.
+        """Best-effort: check that template files exist in C-Star's own bundled
+        forge templates (``cstar/additional_files/templates/forge``). Each
+        stage's ``directory`` (e.g. ``templates/compile-time``) is written
+        relative to the standalone cstar-forge repo root, which is where
+        ``DEFAULT_TEMPLATE_REPO`` (see ``resolve.py``) still serves templates
+        from at runtime -- the leading ``templates/`` segment is stripped so the
+        rest resolves under the bundled copy instead. Silently skipped if the
+        bundled directory doesn't exist for this stage (e.g. an
+        installed-package-only environment, or once template resolution
+        switches over to the bundled copy and directory naming is revisited) --
+        this is a development-time nicety, not a runtime requirement.
         """
-        repo_root = Path(__file__).resolve().parents[1]
+        bundled_templates_root = (
+            Path(__file__).resolve().parents[2]
+            / "additional_files"
+            / "templates"
+            / "forge"
+        )
         for stage_name, stage in (
             ("compile_time", self.code.templates_compile_time),
             ("run_time", self.code.templates_run_time),
         ):
-            template_dir = repo_root / stage.directory
+            stage_dir_parts = Path(stage.directory).parts
+            if stage_dir_parts and stage_dir_parts[0] == "templates":
+                stage_dir_parts = stage_dir_parts[1:]
+            template_dir = bundled_templates_root.joinpath(*stage_dir_parts)
             if not template_dir.exists():
                 continue
             missing = [f for f in stage.files if not (template_dir / f).exists()]

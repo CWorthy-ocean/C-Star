@@ -12,7 +12,7 @@ dependency of this package regardless, see ``pyproject.toml``, so this doesn't a
 new heavy install; it's the ROMS/MARBL build + roms_tools stack this stays free of).
 The only value that needs a grid (``dt`` via the CFL criterion, which needs the grid
 spacing ``ds``) is optional: pass ``dt=`` to stay fully lightweight, or leave it
-``None`` to have it computed (lazily importing ``roms_tools`` + ``cstar_forge.forge.util``).
+``None`` to have it computed (lazily importing ``roms_tools`` + ``cstar.applications.forge.util``).
 
 What this does NOT do (by design — it is host- and artifact-independent):
 * no machine / path resolution (done at processing time, on the run host),
@@ -20,7 +20,7 @@ What this does NOT do (by design — it is host- and artifact-independent):
 * no ``s_coord`` / file paths / ``title`` / ``output_root_name`` (filled at
   processing or derived from the blueprint's own ``name``).
 
-NOTE: the dataset registry below is a *snapshot* of ``cstar_forge.forge.source_datasets``
+NOTE: the dataset registry below is a *snapshot* of ``cstar.applications.forge.source_datasets``
 mappings, duplicated here to keep this module importable without the heavy stack.
 It should be unified with ``source_datasets.py`` once the two-phase refactor lands.
 """
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import yaml
 
-from cstar_forge.forge.forge_blueprint import (
+from cstar.applications.forge.blueprint import (
     BgcSourceItem,
     BoundaryForcing,
     CdrSpec,
@@ -65,7 +65,7 @@ from cstar_forge.forge.forge_blueprint import (
 
 # Canonical CDR-output diagnostics helper lives in namelist_model (forge side) so
 # the executor can share it.
-from cstar_forge.forge.namelist_model import (
+from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
     _RunTimeSettingsCommon,
     canonical_output_sections_for_precheck,
@@ -80,7 +80,7 @@ from cstar_forge.forge.namelist_model import (
 
 # Source-name resolution (alias map, metadata, streamable) — single source of truth,
 # dependency-free.
-from cstar_forge.forge.source_registry import (
+from cstar.applications.forge.source_registry import (
     DERIVED_BGC_SOURCES,
     resolve_dataset_key,
     resolve_source,
@@ -89,9 +89,12 @@ from cstar_forge.forge.source_registry import (
 if TYPE_CHECKING:
     from datetime import datetime
 
-# Default repo serving the render templates (now at the forge repo root `templates/`,
-# decoupled from the ModelSpec). A ModelSpec pins the serving commit via
-# `templates.commit:`; until pinned we track branch `main`.
+# Default repo serving the render templates: the standalone cstar-forge GitHub repo
+# (at its repo root `templates/`, decoupled from the ModelSpec) -- not the templates
+# now bundled locally at `cstar/additional_files/templates/forge/`, which this
+# git-clone-based resolution flow does not yet consume; that switch lands in a later
+# commit. A ModelSpec pins the serving commit via `templates.commit:`; until pinned we
+# track branch `main`.
 DEFAULT_TEMPLATE_REPO = CodeRepo(
     location="https://github.com/CWorthy-ocean/cstar-forge.git", branch="main"
 )
@@ -160,7 +163,7 @@ def _normalize_user_file(
     if isinstance(value, dict):
         return UserProvidedFile(**value)
 
-    from cstar_forge.forge.user_files import hash_netcdf_contents
+    from cstar.applications.forge.user_files import hash_netcdf_contents
 
     path = Path(value)
     if not path.exists():
@@ -449,7 +452,7 @@ def build_forge_blueprint(
     Parameters mirror the logical inputs a UI would collect. ``dt`` may be supplied
     directly (fully lightweight); if ``None`` it is computed from the CFL criterion,
     which lazily imports ``roms_tools`` (to build the grid for ``ds``) and
-    ``cstar_forge.forge.util``.
+    ``cstar.applications.forge.util``.
 
     ``bgc_mode`` is a per-run toggle mirroring ``use_pio``: it overwrites
     ``cppdefs.marbl`` and gates whether ``code.marbl`` is populated (raising if
@@ -517,7 +520,7 @@ def build_forge_blueprint(
 
     ``v_sponge`` and ``dt`` are both domain-owned numerics with the same pattern:
     if ``None`` (the default), each is derived from the grid -- ``v_sponge`` from
-    grid spacing via ``cstar_forge.forge.util.compute_v_sponge_from_grid``, ``dt``
+    grid spacing via ``cstar.applications.forge.util.compute_v_sponge_from_grid``, ``dt``
     from the CFL criterion via ``_compute_dt_from_cfl`` (builds a grid); pass an
     explicit value (e.g. one restored from a saved DomainSpec) to use it verbatim
     instead. The resolver is the sole writer of both ``domain.v_sponge`` /
@@ -527,14 +530,14 @@ def build_forge_blueprint(
 
     ``forge_version``/``roms_tools_version`` are left ``None`` here by default --
     ``ForgeBlueprint.to_yaml_str`` stamps each with a best-effort value on first
-    save (see ``cstar_forge.forge.forge_blueprint._forge_version`` /
+    save (see ``cstar.applications.forge.blueprint._forge_version`` /
     ``_installed_version``), preserving an explicit value passed here instead
     (e.g. carrying one forward through a re-resolve).
 
     ``grid_file``, if given, is a user-supplied pre-made grid netCDF used in place
     of one Forge would otherwise generate from ``grid_kwargs``. A ``str``/``Path``
     is normalized into a :class:`UserProvidedFile` by hashing the file's contents
-    (``cstar_forge.forge.user_files.hash_netcdf_contents``) -- the file must exist
+    (``cstar.applications.forge.user_files.hash_netcdf_contents``) -- the file must exist
     at authoring time. A dict or ``UserProvidedFile`` carrying both ``location``
     and ``content_hash`` is trusted as-is (the wizard passes this to avoid
     rehashing on every rebuild). Either way, the grid is loaded once here
@@ -1456,11 +1459,11 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> 
     from the grid object instead of ``grid_kwargs``.
     """
     try:
-        from cstar_forge.forge.util import compute_v_sponge_from_grid
+        from cstar.applications.forge.util import compute_v_sponge_from_grid
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(
             "v_sponge was not provided and could not be computed: importing "
-            "cstar_forge.forge.util failed. Pass v_sponge= explicitly to keep "
+            "cstar.applications.forge.util failed. Pass v_sponge= explicitly to keep "
             f"resolution dependency-light. ({exc})"
         ) from exc
     if grid is not None:
@@ -1469,13 +1472,13 @@ def _compute_v_sponge_default(grid_kwargs: dict[str, Any], grid: Any = None) -> 
 
 
 def _compute_dt_from_cfl(grid_kwargs: dict[str, Any], grid: Any) -> float:
-    """Lazily compute dt from the CFL criterion (needs roms_tools + cstar_forge.forge.util)."""
+    """Lazily compute dt from the CFL criterion (needs roms_tools + cstar.applications.forge.util)."""
     try:
-        from cstar_forge.forge.util import compute_timestep_from_cfl
+        from cstar.applications.forge.util import compute_timestep_from_cfl
     except Exception as exc:  # pragma: no cover
         raise RuntimeError(
             "dt was not provided and could not be computed: importing "
-            "cstar_forge.forge.util failed. Pass dt= explicitly to keep resolution "
+            "cstar.applications.forge.util failed. Pass dt= explicitly to keep resolution "
             f"dependency-light. ({exc})"
         ) from exc
     if grid is None:

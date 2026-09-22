@@ -12,6 +12,9 @@ repos:
       - id: end-of-file-fixer
         exclude: \.in$
       - id: check-yaml
+        # roms-tools' to_yaml emits a version-header document before the payload, so
+        # forge's catalog specs, blueprints and fixtures are multi-document YAML.
+        args: ['--allow-multiple-documents']
       - id: check-added-large-files
         args: ['--maxkb=200']
 

@@ -12,7 +12,10 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, meta, nodes, select_autoescape
 
-from cstar_forge.forge.namelist_model import build_namelist, run_time_settings_for_ref
+from cstar.applications.forge.namelist_model import (
+    build_namelist,
+    run_time_settings_for_ref,
+)
 
 
 def _fortran_cdr_file_decl(path: Any, max_line_len: int = 72) -> str:
@@ -394,9 +397,9 @@ def write_roms_namelist(
 
     Thin wrapper over the Pydantic model API: validates ``settings_run_time``
     into the run-time settings class matching ``roms_ref`` (see
-    :func:`~cstar_forge.forge.namelist_model.run_time_settings_for_ref`),
+    :func:`~cstar.applications.forge.namelist_model.run_time_settings_for_ref`),
     transforms it to a :class:`~cstar.roms.namelist.RomsNamelistBase` subclass
-    via :func:`~cstar_forge.forge.namelist_model.build_namelist`, and writes it
+    via :func:`~cstar.applications.forge.namelist_model.build_namelist`, and writes it
     with ``f90nml``. (``cppdefs.opt`` is produced separately via
     :func:`render_roms_settings`.)
 

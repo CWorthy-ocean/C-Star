@@ -1,5 +1,5 @@
 """
-Tests for ``cstar_forge.forge.user_files``: the hashing/verification/staging
+Tests for ``cstar.applications.forge.user_files``: the hashing/verification/staging
 contract for user-supplied pre-made netCDF files (grid / river / CDR forcing).
 """
 
@@ -9,8 +9,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from cstar_forge.forge.forge_blueprint import UserProvidedFile
-from cstar_forge.forge.user_files import (
+from cstar.applications.forge.blueprint import UserProvidedFile
+from cstar.applications.forge.user_files import (
     hash_netcdf_contents,
     stage_user_netcdf,
     verify_user_file,

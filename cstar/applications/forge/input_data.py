@@ -19,22 +19,22 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
-import cstar.applications.roms_marbl.models as cstar_models
 import dask
 import numba
 import roms_tools as rt
 import xarray as xr
 import yaml
-from cstar.orchestration.models import Resource
 from pydantic import BaseModel, ConfigDict, Field
 from threadpoolctl import threadpool_limits
 
-from cstar_forge.forge import source_datasets
-from cstar_forge.forge.forge_blueprint import OpenBoundaries, UserProvidedFile
-from cstar_forge.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
-from cstar_forge.forge.user_files import stage_user_netcdf, verify_user_file
-from cstar_forge.forge.util import mem_log
-from cstar_forge.forge.xarray_lockfix import apply_combinedlock_leak_fix
+import cstar.applications.roms_marbl.models as cstar_models
+from cstar.applications.forge import source_datasets
+from cstar.applications.forge.blueprint import OpenBoundaries, UserProvidedFile
+from cstar.applications.forge.source_registry import ROMS_TOOLS_SOURCE_NAME
+from cstar.applications.forge.user_files import stage_user_netcdf, verify_user_file
+from cstar.applications.forge.util import mem_log
+from cstar.applications.forge.xarray_lockfix import apply_combinedlock_leak_fix
+from cstar.orchestration.models import Resource
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -215,7 +215,7 @@ class InputData:
     end_date: Any
 
     # Output directory for generated NetCDFs — injected by the caller (executor).
-    # Required: input_data no longer resolves paths from cstar_forge.config (so C-Star can
+    # Required: input_data no longer resolves paths from cstar.applications.forge.config (so C-Star can
     # supply its own when the forge application relocates). kw_only so subclasses can
     # declare required positional fields without dataclass default-ordering conflicts.
     input_data_dir: Path = field(kw_only=True)
@@ -1354,7 +1354,7 @@ class RomsMarblInputData(InputData):
         Memoized per dataset key so initial_conditions + forcing.boundary (+ the BGC
         physics-boundary companion) share one reference instead of each rebuilding it.
         """
-        from cstar_forge.forge.glorys_subchunk import build_ref_for_files
+        from cstar.applications.forge.glorys_subchunk import build_ref_for_files
 
         key = self.source_data.dataset_key_for_source(name, glorys_layout=glorys_layout)
         ref = self._subchunk_refs.get(key)

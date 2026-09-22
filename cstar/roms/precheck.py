@@ -28,7 +28,7 @@ shape of ``RomsNamelistBase.model_dump()`` (or an individual group's
 settings-dict vocabulary (which renames several of these via
 ``serialization_alias``, e.g. forge's ``frc_output.output_period`` ->
 ``output_period_frc``) -- a consumer with a forge-shaped dict must first
-convert it (see ``cstar_forge.forge.namelist_model.build_namelist`` /
+convert it (see ``cstar.applications.forge.namelist_model.build_namelist`` /
 ``canonical_output_sections_for_precheck``).
 """
 
@@ -43,7 +43,7 @@ def _get(section: Any, key: str) -> Any:
     """Read ``key`` off ``section``, which is either a plain dict (e.g. a
     ``RomsNamelistBase.model_dump()`` value) or a typed pydantic section model
     (e.g. a live ``RomsNamelistBase`` group instance) -- mirrors
-    ``cstar_forge.forge.namelist_model.check_extract_divides_rst``.
+    ``cstar.applications.forge.namelist_model.check_extract_divides_rst``.
     """
     if section is None:
         return None
@@ -296,7 +296,7 @@ def check_output_streams_divide_rst(
     - ``output_period_rst == 0`` (the monthly-restart convention) passes
       trivially for every stream, since ``mod(0, x) == 0``.
     - Raises on the *first* violating stream found (in ``do_precheck``'s call
-      order), matching :func:`cstar_forge.forge.namelist_model.check_extract_divides_rst`'s
+      order), matching :func:`cstar.applications.forge.namelist_model.check_extract_divides_rst`'s
       fail-fast contract -- it does not aggregate every violation.
     """
     basic_output = (

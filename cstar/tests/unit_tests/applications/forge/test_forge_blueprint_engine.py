@@ -1,17 +1,18 @@
 """
-Tests for ``cstar_forge.forge.forge_blueprint_engine`` -- primarily
+Tests for ``cstar.applications.forge.engine`` -- primarily
 ``sources_to_forcing_override``, the ForgeBlueprint -> executor forcing-override
 conversion, and its interaction with ``ForgeBlueprint.content_hash()``.
 
-Reuses ``tests.test_forge_blueprint``'s ``_build`` fixture helper (a full,
+Reuses ``test_forge_blueprint``'s ``_build`` fixture helper (a full,
 resolver-built ``ForgeBlueprint`` off the bundled ``glorys-era5-unified``
 ForcingSpec, which has exactly one bgc source on both initial_conditions and
 forcing.boundary) rather than duplicating it here.
 """
 
-from cstar_forge.forge.forge_blueprint import BgcInterpMethod, BgcSourceItem
-from cstar_forge.forge.forge_blueprint_engine import sources_to_forcing_override
-from tests.test_forge_blueprint import _build
+from test_forge_blueprint import _build
+
+from cstar.applications.forge.blueprint import BgcInterpMethod, BgcSourceItem
+from cstar.applications.forge.engine import sources_to_forcing_override
 
 
 def test_bgc_source_item_fields_reach_forcing_override():

@@ -28,6 +28,17 @@ from __future__ import annotations
 import os
 from typing import Annotated, Any
 
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
+
 from cstar.roms.namelist import (
     BasicOutputSettings,
     BasicOutputSettingsV0_5_0,
@@ -84,16 +95,6 @@ from cstar.roms.namelist import (
 )
 from cstar.roms.precheck import (
     check_output_streams_divide_rst as _check_output_streams_divide_rst,
-)
-from pydantic import (
-    AliasChoices,
-    BaseModel,
-    BeforeValidator,
-    ConfigDict,
-    Field,
-    TypeAdapter,
-    ValidationError,
-    model_validator,
 )
 
 

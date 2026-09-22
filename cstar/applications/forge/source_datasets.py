@@ -100,7 +100,7 @@ def register_dataset(name: str, requires: list[str] | None = None) -> Callable:
 # lightweight ``source_registry`` module (single source of truth, importable
 # without the heavy acquisition deps). Re-exported here for existing consumers.
 # -----------------------------------------
-from cstar_forge.forge.source_registry import (  # noqa: E402,F401  (re-export)
+from cstar.applications.forge.source_registry import (  # noqa: E402,F401  (re-export)
     DERIVED_BGC_SOURCES,
     GLOFAS_CDS_URL,
     GLOFAS_FILENAME,
@@ -162,7 +162,7 @@ class SourceDatasets:
     start_time: datetime | None = None
     end_time: datetime | None = None
     # Injected by the caller (executor). Root dir under which datasets are cached.
-    # Host-independent: source_data no longer resolves paths from cstar_forge.config,
+    # Host-independent: source_data no longer resolves paths from cstar.applications.forge.config,
     # so this can be supplied by C-Star when the forge application relocates.
     source_data_dir: Path | None = None
     # Authoritative logical-name -> {dataset_key, dataset_id, url, streamable} snapshot
@@ -249,7 +249,7 @@ class SourceDatasets:
                     raise ValueError(
                         f"SourceDatasets.source_data_dir must be set to prepare '{name}' — the "
                         "caller must inject the dataset cache root (source_data no longer "
-                        "reads cstar_forge.config)."
+                        "reads cstar.applications.forge.config)."
                     )
 
                 path = handler.func(self)  # call handler with this instance
@@ -311,7 +311,7 @@ class SourceDatasets:
         ``forge_blueprint_resolve._build_forcing``), so it can't disambiguate two
         GLORYS items with different layouts -- always resolve that case live.
         """
-        from cstar_forge.forge.source_registry import resolve_dataset_key
+        from cstar.applications.forge.source_registry import resolve_dataset_key
 
         if not (logical_name.upper() == "GLORYS" and glorys_layout is not None):
             entry = (self.resolved_datasets or {}).get(logical_name.upper())

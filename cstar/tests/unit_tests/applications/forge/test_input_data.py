@@ -21,16 +21,15 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
-import cstar.applications.roms_marbl.models as cstar_models
 import numpy as np
 import pytest
 import roms_tools as rt
 import xarray as xr
-from cstar.orchestration.models import Resource
 
-from cstar_forge import models as forge_models
-from cstar_forge.forge import source_datasets
-from cstar_forge.forge.input_data import (
+import cstar.applications.roms_marbl.models as cstar_models
+from cstar.applications.forge import models as forge_models
+from cstar.applications.forge import source_datasets
+from cstar.applications.forge.input_data import (
     CDR_FORCING_NETCDF_STEM,
     CHILD_IC_PLACEHOLDER_LOCATION,
     INPUT_REGISTRY,
@@ -42,9 +41,10 @@ from cstar_forge.forge.input_data import (
     register_input,
     resolve_input_selection,
 )
-from cstar_forge.forge.source_registry import (
+from cstar.applications.forge.source_registry import (
     STREAMABLE_SOURCES as _REAL_STREAMABLE_SOURCES,
 )
+from cstar.orchestration.models import Resource
 
 
 @contextmanager
@@ -53,7 +53,7 @@ def _patch_xarray_open_dataset_for_input_data(mock_ds):
     Patch xarray.open_dataset where input_data (and roms_tools) resolve it.
 
     Tests use empty ``.touch()`` NetCDF paths; real ``open_dataset`` needs a backend
-    (e.g. netCDF4). Patching only ``xarray.open_dataset`` misses ``cstar_forge.forge.input_data.xr``
+    (e.g. netCDF4). Patching only ``xarray.open_dataset`` misses ``cstar.applications.forge.input_data.xr``
     after import; patching both avoids IO backend errors.
     """
 
@@ -62,7 +62,10 @@ def _patch_xarray_open_dataset_for_input_data(mock_ds):
         yield mock_ds
 
     with (
-        patch("cstar_forge.forge.input_data.xr.open_dataset", side_effect=_fake_open),
+        patch(
+            "cstar.applications.forge.input_data.xr.open_dataset",
+            side_effect=_fake_open,
+        ),
         patch("xarray.open_dataset", side_effect=_fake_open),
     ):
         yield
@@ -195,7 +198,8 @@ def sample_source_data(tmp_path):
 
     # Mock STREAMABLE_SOURCES
     with patch(
-        "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES", {"ERA5"}
+        "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+        {"ERA5"},
     ):
         yield mock_source_data
 
@@ -806,7 +810,8 @@ class TestRomsMarblInputDataHelperMethods:
     def test_resolve_source_block_streamable(self, sample_roms_marbl_input_data):
         """Test _resolve_source_block with streamable source."""
         with patch(
-            "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES", {"ERA5"}
+            "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+            {"ERA5"},
         ):
             sample_roms_marbl_input_data.source_data.dataset_key_for_source.return_value = "ERA5"
             result = sample_roms_marbl_input_data._resolve_source_block("ERA5")
@@ -837,7 +842,8 @@ class TestRomsMarblInputDataHelperMethods:
     ):
         """A streamable source with a None path stays path-less (no path=None leaked)."""
         with patch(
-            "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES", {"ERA5"}
+            "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+            {"ERA5"},
         ):
             sample_roms_marbl_input_data.source_data.dataset_key_for_source.return_value = "ERA5"
             result = sample_roms_marbl_input_data._resolve_source_block(
@@ -858,7 +864,7 @@ class TestRomsMarblInputDataHelperMethods:
         """
         real_sd = source_datasets.SourceDatasets(datasets=["DAI"])
         with patch(
-            "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+            "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
             _REAL_STREAMABLE_SOURCES,
         ):
             sample_roms_marbl_input_data.source_data = real_sd
@@ -1026,7 +1032,8 @@ class TestRomsMarblInputDataHelperMethods:
         dicts emit) stays path-less rather than leaking path=None.
         """
         with patch(
-            "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES", {"ERA5"}
+            "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+            {"ERA5"},
         ):
             base_kwargs = {
                 "source": {"name": "DAI"},
@@ -1044,7 +1051,8 @@ class TestRomsMarblInputDataHelperMethods:
         bgc_source.
         """
         with patch(
-            "cstar_forge.forge.input_data.source_datasets.STREAMABLE_SOURCES", {"ERA5"}
+            "cstar.applications.forge.input_data.source_datasets.STREAMABLE_SOURCES",
+            {"ERA5"},
         ):
             base_kwargs = {
                 "source": {"name": "DAI"},
@@ -1113,7 +1121,7 @@ class TestRomsMarblInputDataHelperMethods:
         nc4_path.touch()
         final_path = tmp_path / "foo_grid.nc"
 
-        with patch("cstar_forge.forge.input_data.subprocess.run") as mock_run:
+        with patch("cstar.applications.forge.input_data.subprocess.run") as mock_run:
 
             def _fake_nccopy(cmd, check):
                 Path(cmd[-1]).touch()
@@ -1137,7 +1145,7 @@ class TestRomsMarblInputDataHelperMethods:
         for p in nc4_paths:
             p.touch()
 
-        with patch("cstar_forge.forge.input_data.subprocess.run") as mock_run:
+        with patch("cstar.applications.forge.input_data.subprocess.run") as mock_run:
 
             def _fake_nccopy(cmd, check):
                 Path(cmd[-1]).touch()
@@ -1293,7 +1301,7 @@ class TestPlannedOutputReuseDetection:
 class TestRomsMarblInputDataGeneration:
     """Tests for input generation methods."""
 
-    @patch("cstar_forge.forge.input_data.rt.Grid")
+    @patch("cstar.applications.forge.input_data.rt.Grid")
     def test_generate_grid(
         self, mock_grid_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1333,8 +1341,8 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.subprocess.run")
-    @patch("cstar_forge.forge.input_data.rt.Grid")
+    @patch("cstar.applications.forge.input_data.subprocess.run")
+    @patch("cstar.applications.forge.input_data.rt.Grid")
     def test_generate_grid_with_use_pio_converts_to_cdf5(
         self, mock_grid_class, mock_run, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1381,7 +1389,7 @@ class TestRomsMarblInputDataGeneration:
         assert out_path.exists()
         assert not nc4_path.exists()
 
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
     def test_generate_initial_conditions(
         self, mock_ic_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1408,7 +1416,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
     def test_generate_initial_conditions_forwards_regrid_options(
         self, mock_ic_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1430,7 +1438,7 @@ class TestRomsMarblInputDataGeneration:
         assert mock_ic_class.call_args.kwargs["regrid_method"] == "xesmf"
         assert mock_ic_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
 
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
     def test_generate_initial_conditions_multiple_paths(
         self, mock_ic_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1453,7 +1461,7 @@ class TestRomsMarblInputDataGeneration:
             == 2
         )
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing(
         self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1481,8 +1489,8 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.subprocess.run")
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.subprocess.run")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_with_use_pio_converts_to_cdf5(
         self, mock_sf_class, mock_run, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1522,7 +1530,7 @@ class TestRomsMarblInputDataGeneration:
         assert out_path.exists()
         assert not nc4_path.exists()
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_forwards_regrid_options(
         self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1546,7 +1554,7 @@ class TestRomsMarblInputDataGeneration:
         assert mock_sf_class.call_args.kwargs["regrid_method"] == "xesmf"
         assert mock_sf_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_missing_type(
         self, mock_sf_class, sample_roms_marbl_input_data
     ):
@@ -1559,7 +1567,7 @@ class TestRomsMarblInputDataGeneration:
             )
         assert "type" in str(exc_info.value).lower()
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_generate_surface_forcing_reuse_skips_roms_tools_calls(
         self, mock_sf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1591,7 +1599,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_generate_boundary_forcing(
         self, mock_bf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1621,7 +1629,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
+    @patch("cstar.applications.forge.input_data.rt.TidalForcing")
     def test_generate_tidal_forcing(
         self, mock_tf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1648,7 +1656,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
+    @patch("cstar.applications.forge.input_data.rt.TidalForcing")
     def test_generate_tidal_forcing_forwards_regrid_options(
         self, mock_tf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1671,7 +1679,7 @@ class TestRomsMarblInputDataGeneration:
         assert mock_tf_class.call_args.kwargs["regrid_method"] == "scipy"
         assert mock_tf_class.call_args.kwargs["extrap_method"] == "nearest_s2d"
 
-    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
+    @patch("cstar.applications.forge.input_data.rt.TidalForcing")
     def test_generate_tidal_forcing_reuse_skips_roms_tools_calls(
         self, mock_tf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1698,7 +1706,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
     def test_generate_river_forcing(
         self, mock_rf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1736,7 +1744,7 @@ class TestRomsMarblInputDataGeneration:
             > 0
         )
 
-    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
     def test_generate_river_forcing_reuse_skips_roms_tools_calls(
         self, mock_rf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1777,7 +1785,7 @@ class TestRomsMarblInputDataGeneration:
             == nriver
         )
 
-    @patch("cstar_forge.forge.input_data.rt.CDRForcing")
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
     def test_generate_cdr_forcing(
         self, mock_cdr_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -1815,7 +1823,9 @@ class TestRomsMarblInputDataGeneration:
 
     def test_generate_cdr_forcing_empty_list(self, sample_roms_marbl_input_data):
         """Test _generate_cdr_forcing with empty cdr_list returns early."""
-        with patch("cstar_forge.forge.input_data.rt.CDRForcing") as mock_cdr_class:
+        with patch(
+            "cstar.applications.forge.input_data.rt.CDRForcing"
+        ) as mock_cdr_class:
             sample_roms_marbl_input_data._generate_cdr_forcing(
                 key="cdr_forcing", cdr_list=[]
             )
@@ -1832,7 +1842,7 @@ class TestRomsMarblInputDataGeneration:
         asserts were *called*. This is the "grid-less construction really works"
         guarantee the resolver/wizard's "no grid injection" design decision depends on.
         """
-        from cstar_forge.forge_blueprint_resolve import read_cdr_forcing_yaml
+        from cstar.applications.forge.resolve import read_cdr_forcing_yaml
 
         sample = Path(__file__).parent / "fixtures" / "cdr_forcing_sample.yaml"
         cdr_kwargs = read_cdr_forcing_yaml(sample)
@@ -1873,8 +1883,8 @@ class TestRomsMarblInputDataGeneration:
         with pytest.raises(NotImplementedError):
             sample_roms_marbl_input_data._generate_corrections()
 
-    @patch("cstar_forge.forge.input_data.rt.make_nesting_info")
-    @patch("cstar_forge.forge.input_data.rt.Grid")
+    @patch("cstar.applications.forge.input_data.rt.make_nesting_info")
+    @patch("cstar.applications.forge.input_data.rt.Grid")
     def test_generate_grid_with_child(
         self,
         mock_grid_class,
@@ -1940,8 +1950,8 @@ class TestRomsMarblInputDataGeneration:
         assert extract_data["theta_b_chd"] == mock_child.theta_b
         assert extract_data["hc_chd"] == mock_child.hc
 
-    @patch("cstar_forge.forge.input_data.rt.make_nesting_info")
-    @patch("cstar_forge.forge.input_data.rt.Grid")
+    @patch("cstar.applications.forge.input_data.rt.make_nesting_info")
+    @patch("cstar.applications.forge.input_data.rt.Grid")
     def test_generate_grid_extract_file_is_basename(
         self,
         mock_grid_class,
@@ -1987,7 +1997,7 @@ class TestRomsMarblInputDataGeneration:
         assert extract_file == "nesting.nc"
         assert "/" not in str(extract_file)
 
-    @patch("cstar_forge.forge.input_data.rt.Grid")
+    @patch("cstar.applications.forge.input_data.rt.Grid")
     def test_generate_grid_without_child_nesting_info_is_none(
         self, mock_grid_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -2182,7 +2192,7 @@ class TestCdrCustomFileForcing:
 
     def test_volume_file_sets_ncdr_and_cdr_volume_true(self, cdr_input_data, tmp_path):
         cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=4, family="volume")
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
@@ -2206,7 +2216,7 @@ class TestCdrCustomFileForcing:
 
     def test_trcflx_file_sets_cdr_volume_false(self, cdr_input_data, tmp_path):
         cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=2, family="trcflx")
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
@@ -2219,7 +2229,7 @@ class TestCdrCustomFileForcing:
         assert rt_settings["cdr_volume"] is False
 
     def test_accepts_custom_file_as_plain_dict(self, cdr_input_data, tmp_path):
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=5, family="volume")
         custom_file_dict = {
@@ -2247,7 +2257,7 @@ class TestCdrCustomFileForcing:
     ):
         cdr_nc = tmp_path / "bad_cdr.nc"
         _write_cdr_netcdf(cdr_nc, ncdr=2, family=family, omit=omit)
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
@@ -2264,7 +2274,7 @@ class TestCdrCustomFileForcing:
             {"cdr_volume": (("cdr_time",), np.ones(3))},
         )
         ds.to_netcdf(cdr_nc)
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(cdr_nc), content_hash=hash_netcdf_contents(cdr_nc)
@@ -2281,7 +2291,7 @@ class TestCdrCustomFileForcing:
         describe the REUSED file (what ROMS actually reads), not the custom_file,
         with a warning when the two disagree.
         """
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         output_path = cdr_input_data._forcing_filename(CDR_FORCING_NETCDF_STEM)
         _write_cdr_netcdf(output_path, ncdr=3, family="volume")
@@ -2303,11 +2313,11 @@ class TestCdrCustomFileForcing:
         assert rt_settings["ncdr_parm"] == 3
         assert rt_settings["cdr_volume"] is True
 
-    @patch("cstar_forge.forge.input_data.rt.CDRForcing")
+    @patch("cstar.applications.forge.input_data.rt.CDRForcing")
     def test_does_not_construct_rt_cdrforcing(
         self, mock_cdr_class, cdr_input_data, tmp_path
     ):
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         cdr_nc = _write_cdr_netcdf(tmp_path / "user_cdr.nc", ncdr=2, family="volume")
         custom_file = forge_models.UserProvidedFile(
@@ -2320,7 +2330,7 @@ class TestCdrCustomFileForcing:
 
     @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
     def test_stages_via_nccopy_when_pio(self, cdr_input_data, tmp_path):
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         cdr_input_data.use_pio = True
         cdr_nc = _write_cdr_netcdf(
@@ -2437,7 +2447,7 @@ class TestRiverCustomFileForcing:
         xr.Dataset(
             {"river_volume": (("river_time", "nriver"), np.ones((4, 2)))}
         ).to_netcdf(river_nc)
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
@@ -2451,7 +2461,7 @@ class TestRiverCustomFileForcing:
             )
 
     def test_stages_file_and_sets_run_time_settings(self, river_input_data, tmp_path):
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         river_nc = _write_river_netcdf(
             tmp_path / "user_river.nc", nriver=3, eta_rho=22, xi_rho=24
@@ -2488,7 +2498,7 @@ class TestRiverCustomFileForcing:
         """sources_to_forcing_override dumps custom_file as a plain dict (mode="json"
         model_dump) -- the executor branch must accept either form.
         """
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=4)
         custom_file_dict = {
@@ -2509,7 +2519,7 @@ class TestRiverCustomFileForcing:
         river_nc = _write_river_netcdf(
             tmp_path / "user_river.nc", nriver=2, eta_rho=5, xi_rho=5
         )
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
@@ -2526,7 +2536,7 @@ class TestRiverCustomFileForcing:
         self, river_input_data, tmp_path
     ):
         river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2, ntracers=2)
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
@@ -2544,7 +2554,7 @@ class TestRiverCustomFileForcing:
         self, river_input_data, tmp_path
     ):
         river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2, ntracers=5)
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         custom_file = forge_models.UserProvidedFile(
             location=str(river_nc), content_hash=hash_netcdf_contents(river_nc)
@@ -2566,7 +2576,7 @@ class TestRiverCustomFileForcing:
         skipped -- and nriv/settings describe the REUSED file (what ROMS actually
         reads), not the custom_file, with a warning when the two disagree.
         """
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         output_path = river_input_data._forcing_filename("river")
         _write_river_netcdf(output_path, nriver=3)
@@ -2588,11 +2598,11 @@ class TestRiverCustomFileForcing:
         assert output_path.read_bytes() == reused_bytes
         assert river_input_data._settings_run_time["river_frc"]["nriv"] == 3
 
-    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
     def test_does_not_construct_rt_riverforcing(
         self, mock_rf_class, river_input_data, tmp_path
     ):
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         river_nc = _write_river_netcdf(tmp_path / "user_river.nc", nriver=2)
         custom_file = forge_models.UserProvidedFile(
@@ -2609,7 +2619,7 @@ class TestRiverCustomFileForcing:
 
     @pytest.mark.skipif(shutil.which("nccopy") is None, reason="nccopy not installed")
     def test_stages_via_nccopy_when_pio(self, river_input_data, tmp_path):
-        from cstar_forge.forge.user_files import hash_netcdf_contents
+        from cstar.applications.forge.user_files import hash_netcdf_contents
 
         river_input_data.use_pio = True
         river_nc = _write_river_netcdf(
@@ -2662,7 +2672,7 @@ class TestNumbaNumThreadsClamping:
     def test_clamps_requested_threads_to_configured_ceiling(self, monkeypatch):
         import numba
 
-        from cstar_forge.forge.input_data import _numba_num_threads
+        from cstar.applications.forge.input_data import _numba_num_threads
 
         monkeypatch.setattr(numba.config, "NUMBA_NUM_THREADS", 4)
         monkeypatch.setattr(numba, "get_num_threads", lambda: 4)
@@ -2677,7 +2687,7 @@ class TestNumbaNumThreadsClamping:
     def test_does_not_clamp_when_already_within_ceiling(self, monkeypatch):
         import numba
 
-        from cstar_forge.forge.input_data import _numba_num_threads
+        from cstar.applications.forge.input_data import _numba_num_threads
 
         monkeypatch.setattr(numba.config, "NUMBA_NUM_THREADS", 16)
         monkeypatch.setattr(numba, "get_num_threads", lambda: 16)
@@ -2704,7 +2714,7 @@ class TestGenerateAllDaskNumWorkersGuard:
     """
 
     @pytest.mark.parametrize("bad_value", [0, -1])
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     @patch("xarray.combine_by_coords")
     @patch("xarray.open_dataset")
     def test_non_positive_dask_num_workers_does_not_raise(
@@ -2720,7 +2730,7 @@ class TestGenerateAllDaskNumWorkersGuard:
         # guards actually executes -- below 16 cores generate_all always falls
         # back to the conservative 1-thread pin regardless of dask_num_workers.
         monkeypatch.setattr(
-            "cstar_forge.forge.input_data.os.sched_getaffinity",
+            "cstar.applications.forge.input_data.os.sched_getaffinity",
             lambda _pid: set(range(32)),
             raising=False,  # not available on macOS
         )
@@ -2752,12 +2762,12 @@ class TestGenerateAllDaskNumWorkersGuard:
 class TestRomsMarblInputDataGenerateAll:
     """Tests for generate_all method."""
 
-    @patch("cstar_forge.forge.input_data.rt.Grid")
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
-    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
-    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
+    @patch("cstar.applications.forge.input_data.rt.Grid")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.TidalForcing")
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
     def test_generate_all_basic(
         self,
         mock_river,
@@ -2879,7 +2889,7 @@ class TestRomsMarblInputDataGenerateAll:
         assert sample_roms_marbl_input_data._settings_compile_time
         assert sample_roms_marbl_input_data._settings_run_time
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     @patch("xarray.combine_by_coords")
     @patch("xarray.open_dataset")
     def test_generate_all_test_mode(
@@ -2920,11 +2930,11 @@ class TestRomsMarblInputDataGenerateAll:
         # The exact behavior depends on the order of steps
         assert result is not None
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
-    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
-    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.TidalForcing")
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     @patch("xarray.combine_by_coords")
     @patch("xarray.open_dataset")
     def test_generate_all_only_restricts_to_selected_categories(
@@ -3002,12 +3012,12 @@ class TestRomsMarblInputDataGenerateAll:
         assert elements.forcing.tidal.data == []
         assert elements.forcing.river.data == []
 
-    @patch("cstar_forge.forge.input_data.rt.Grid")
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
-    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
-    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
+    @patch("cstar.applications.forge.input_data.rt.Grid")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.TidalForcing")
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
     def test_generate_all_no_clobber_with_files(
         self,
         mock_river,
@@ -3121,14 +3131,14 @@ class TestRomsMarblInputDataGenerateAll:
         assert sample_roms_marbl_input_data._settings_run_time
         assert (sample_roms_marbl_input_data.input_data_dir / "existing.nc").exists()
 
-    @patch("cstar_forge.forge.input_data.rt.RiverForcing")
-    @patch("cstar_forge.forge.input_data.rt.TidalForcing")
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.RiverForcing")
+    @patch("cstar.applications.forge.input_data.rt.TidalForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
     @patch("xarray.combine_by_coords")
     @patch("xarray.open_dataset")
-    @patch("cstar_forge.forge.input_data.rt.partition_netcdf")
+    @patch("cstar.applications.forge.input_data.rt.partition_netcdf")
     def test_generate_all_with_partition_files(
         self,
         mock_partition,
@@ -3230,21 +3240,23 @@ class TestRomsMarblInputDataGenerateAll:
         )
 
         # Patch at class level so the registry uses the patched methods
-        with patch("cstar_forge.forge.input_data.RomsMarblInputData._generate_grid"):
+        with patch(
+            "cstar.applications.forge.input_data.RomsMarblInputData._generate_grid"
+        ):
             with patch(
-                "cstar_forge.forge.input_data.RomsMarblInputData._generate_initial_conditions"
+                "cstar.applications.forge.input_data.RomsMarblInputData._generate_initial_conditions"
             ):
                 with patch(
-                    "cstar_forge.forge.input_data.RomsMarblInputData._generate_surface_forcing"
+                    "cstar.applications.forge.input_data.RomsMarblInputData._generate_surface_forcing"
                 ):
                     with patch(
-                        "cstar_forge.forge.input_data.RomsMarblInputData._generate_boundary_forcing"
+                        "cstar.applications.forge.input_data.RomsMarblInputData._generate_boundary_forcing"
                     ):
                         with patch(
-                            "cstar_forge.forge.input_data.RomsMarblInputData._generate_tidal_forcing"
+                            "cstar.applications.forge.input_data.RomsMarblInputData._generate_tidal_forcing"
                         ):
                             with patch(
-                                "cstar_forge.forge.input_data.RomsMarblInputData._generate_river_forcing"
+                                "cstar.applications.forge.input_data.RomsMarblInputData._generate_river_forcing"
                             ):
                                 # This should raise NotImplementedError since partition_files=True
                                 # But actually _partition_files doesn't raise NotImplementedError,
@@ -3264,7 +3276,7 @@ class TestRomsMarblInputDataGenerateAll:
 class TestRomsMarblInputDataPartitionFiles:
     """Tests for _partition_files method."""
 
-    @patch("cstar_forge.forge.input_data.rt.partition_netcdf")
+    @patch("cstar.applications.forge.input_data.rt.partition_netcdf")
     def test_partition_files_basic(
         self, mock_partition, sample_roms_marbl_input_data, tmp_path
     ):
@@ -3298,7 +3310,7 @@ class TestRomsMarblInputDataPartitionFiles:
         # But since we're skipping grid and initial_conditions, and the input_list
         # determines what gets partitioned, we need to check the actual behavior
 
-    @patch("cstar_forge.forge.input_data.rt.partition_netcdf")
+    @patch("cstar.applications.forge.input_data.rt.partition_netcdf")
     def test_partition_files_skips_empty(
         self, mock_partition, sample_roms_marbl_input_data
     ):
@@ -3353,7 +3365,7 @@ class TestRomsMarblInputDataPartitionFiles:
         with pytest.raises(ValueError, match="incompatible with file"):
             sample_roms_marbl_input_data._partition_files()
 
-    @patch("cstar_forge.forge.input_data.rt.partition_netcdf")
+    @patch("cstar.applications.forge.input_data.rt.partition_netcdf")
     def test_partition_files_skips_none_location(
         self, mock_partition, sample_roms_marbl_input_data, tmp_path
     ):
@@ -3380,7 +3392,7 @@ class TestRomsMarblInputDataPartitionFiles:
         # Should not call partition_netcdf for None location
         # The resource should be kept as-is
 
-    @patch("cstar_forge.forge.input_data.rt.partition_netcdf")
+    @patch("cstar.applications.forge.input_data.rt.partition_netcdf")
     def test_partition_files_creates_multiple_resources(
         self, mock_partition, sample_roms_marbl_input_data, tmp_path
     ):
@@ -3621,7 +3633,7 @@ class TestSubchunkDefaults:
     def test_pipeline_defaults_are_subchunk_on(self):
         import inspect
 
-        from cstar_forge.forge.forge_blueprint_engine import process_forge_blueprint
+        from cstar.applications.forge.engine import process_forge_blueprint
 
         assert (
             inspect.signature(process_forge_blueprint).parameters["subchunk"].default
@@ -3639,10 +3651,14 @@ class TestSubchunkDefaults:
         )
         assert parser.parse_args([]).subchunk is True
         assert parser.parse_args(["--no-subchunk"]).subchunk is False
-        # And the real CLI no longer exposes the dropped experiment flag.
+        # And the real CLI no longer exposes the dropped experiment flag. The native
+        # `cstar forge run` typer command has not been wired up yet in this checkout
+        # (see cstar.applications.forge.runtime's module docstring: "arriving in a
+        # later commit") -- skip until it lands.
+        pytest.importorskip("cstar.applications.forge.cli")
         from typer.testing import CliRunner
 
-        from cstar_forge import cli
+        from cstar.applications.forge import cli
 
         result = CliRunner().invoke(cli.app, ["run", "--help"])
         # Escape-stripped: rich colours the help under a colour-forcing CI environment.
@@ -3829,7 +3845,7 @@ class TestBoundaryBgcSources:
             sample_partitioning,
         )
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_bgc_sources_resolved_and_forwarded_in_one_call(
         self, mock_bf_class, multi_bgc_boundary_input_data, tmp_path
     ):
@@ -3876,7 +3892,7 @@ class TestBoundaryBgcSources:
 
         assert len(data.roms_marbl_blueprint_elements.forcing.boundary.data) == 3
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_per_source_serialize_dask_reaches_only_that_bgc_write(
         self, mock_bf_class, multi_bgc_boundary_input_data, tmp_path
     ):
@@ -3927,7 +3943,7 @@ class TestBoundaryBgcSources:
             assert "serialize_dask" not in item["source"]
 
     @pytest.mark.parametrize("source_name", ["WOA_BGC", "UNIFIED"])
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_planned_and_generated_boundary_bgc_suffix_match(
         self, mock_bf_class, source_name, sample_roms_marbl_input_data, tmp_path
     ):
@@ -3970,7 +3986,7 @@ class TestBoundaryBgcSources:
             f"{planned_bgc[0].name!r} for source {source_name!r}"
         )
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_global_serialize_flag_is_the_fallback_for_unset_sources(
         self, mock_bf_class, multi_bgc_boundary_input_data, tmp_path
     ):
@@ -4000,7 +4016,7 @@ class TestBoundaryBgcSources:
         assert mock_bf.bgc[0].save.call_args.kwargs["serialize_dask"] is True
         assert mock_bf.bgc[1].save.call_args.kwargs["serialize_dask"] is False
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_no_bgc_sources_builds_physics_only(
         self, mock_bf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -4025,7 +4041,7 @@ class TestBoundaryBgcSources:
             mock_bf.physics.save.call_args.args[0], serialize_dask=None
         )
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_mixed_reuse_raises_rather_than_silently_rebuilding_a_subset(
         self, mock_bf_class, multi_bgc_boundary_input_data
     ):
@@ -4055,7 +4071,7 @@ class TestBoundaryBgcSources:
             )
         mock_bf_class.assert_not_called()
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_full_reuse_skips_construction(
         self, mock_bf_class, multi_bgc_boundary_input_data
     ):
@@ -4087,7 +4103,7 @@ class TestBoundaryBgcSources:
         mock_bf_class.assert_not_called()
         assert len(data.roms_marbl_blueprint_elements.forcing.boundary.data) == 3
 
-    @patch("cstar_forge.forge.input_data.rt.BoundaryForcing")
+    @patch("cstar.applications.forge.input_data.rt.BoundaryForcing")
     def test_same_source_split_across_items_by_use_vars_gets_distinct_filenames(
         self, mock_bf_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -4136,7 +4152,7 @@ class TestInitialConditionsMultipleBgcSources:
     happen inside roms-tools now (see ``_generate_initial_conditions``).
     """
 
-    @patch("cstar_forge.forge.input_data.rt.InitialConditions")
+    @patch("cstar.applications.forge.input_data.rt.InitialConditions")
     def test_bgc_sources_resolved_and_forwarded_in_one_call(
         self, mock_ic_class, sample_roms_marbl_input_data, tmp_path
     ):
@@ -4178,7 +4194,7 @@ class TestInitialConditionsMultipleBgcSources:
         ``bgc_sources=[]``/``bgc_model=None`` -- the plain physics-only path.
         """
         with patch(
-            "cstar_forge.forge.input_data.rt.InitialConditions"
+            "cstar.applications.forge.input_data.rt.InitialConditions"
         ) as mock_ic_class:
             mock_ic = MagicMock()
             ic_path = sample_roms_marbl_input_data.input_data_dir / "ic.nc"
@@ -4248,7 +4264,9 @@ class TestExecutorOwnedSettings:
         with (
             patch.object(rt.Grid, "to_yaml"),
             patch.object(rt.Grid, "save"),
-            patch("cstar_forge.forge.input_data.rt.make_nesting_info") as mock_nesting,
+            patch(
+                "cstar.applications.forge.input_data.rt.make_nesting_info"
+            ) as mock_nesting,
         ):
             data._generate_grid(key="grid")
         return mock_nesting
@@ -4306,7 +4324,7 @@ class TestExecutorOwnedSettings:
         mock_nesting = self._run_grid_step(data)
         assert mock_nesting.call_args.kwargs["include_bgc"] is False
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_has_bgc_populates_bgc_interp_frc(
         self, mock_sf_class, make_input_data, tmp_path
     ):
@@ -4325,7 +4343,7 @@ class TestExecutorOwnedSettings:
         )
         assert "interp_frc" in data._settings_run_time["bgc"]
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_no_bgc_skips_bgc_runtime_section(
         self, mock_sf_class, make_input_data, tmp_path
     ):
@@ -4344,7 +4362,7 @@ class TestExecutorOwnedSettings:
         )
         assert "bgc" not in data._settings_run_time
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_interp_frc_immune_to_resolver_seeded_defaults(
         self, mock_sf_class, make_input_data, tmp_path
     ):
@@ -4374,7 +4392,7 @@ class TestExecutorOwnedSettings:
         )
         assert data._settings_run_time["blk_frc"]["interp_frc"] == 1
 
-    @patch("cstar_forge.forge.input_data.rt.SurfaceForcing")
+    @patch("cstar.applications.forge.input_data.rt.SurfaceForcing")
     def test_interp_frc_mismatch_within_same_run_raises(
         self, mock_sf_class, make_input_data, tmp_path
     ):

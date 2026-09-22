@@ -4,23 +4,16 @@ C-Star-discoverable application via :class:`ForgeRunner` + :class:`ForgeApplicat
 https://c-star.readthedocs.io/en/latest/custom_applications.html).
 
 Not part of the "forge application" boundary that ``tests/test_forge_app_boundary.py``
-guards -- like ``cstar_forge/run.py``, this module is **host-resolution glue**: it
-reaches into ``cstar_forge.config`` (via ``cstar_forge.run.process``) to resolve the
-host, which the guarded ``cstar_forge/forge/`` modules must never do. It stays
-disposable for the same reason ``run.py`` is: when forge relocates into C-Star
-wholesale, C-Star supplies its own host resolution and this module is rewritten, not
-carried over as-is.
+guards -- like ``runtime.py``, this module is **host-resolution glue**: it reaches
+into ``cstar.applications.forge.config`` (via ``cstar.applications.forge.runtime.process``)
+to resolve the host, which the guarded ``cstar.applications.forge`` modules that
+implement blueprint processing itself must never do.
 
-Discovered by ``cstar.applications.core.get_application`` through the
-``cstar.applications`` entry-point group, which ``pyproject.toml`` declares as::
-
-    [project.entry-points."cstar.applications"]
-    forge = "cstar_forge.forge.app"
-
-C-Star imports this module the first time an ``application: forge`` blueprint is
-resolved, so its :func:`register_application` decorator runs and its own entrypoint
-can run a forge blueprint directly: ``cstar blueprint run forge_blueprint.yaml``.
-An installed cstar-forge is all that requires -- no environment variables.
+Discovered by ``cstar.applications.core.get_application`` as a built-in application,
+the same way ``roms_marbl`` is: ``get_application`` imports the in-tree
+``cstar.applications.forge`` package, whose ``__init__.py`` imports this module so its
+:func:`register_application` decorator runs. No entry point or environment variable is
+involved.
 
 Scope (2026-07, first cut): :meth:`ForgeRunner.run` generates ROMS-MARBL inputs and
 emits the downstream ``roms_marbl`` blueprint (``B_{name}.yaml``), then stops -- it
@@ -40,11 +33,10 @@ from cstar.applications.core import (
     RunnerResult,
     register_application,
 )
+from cstar.applications.forge.blueprint import DEFAULT_APPLICATION, ForgeBlueprint
 from cstar.entrypoint.runner import BlueprintRunner
 from cstar.execution.file_system import JobFileSystemManager
 from cstar.execution.handler import ExecutionStatus
-
-from cstar_forge.forge.forge_blueprint import DEFAULT_APPLICATION, ForgeBlueprint
 
 if t.TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +53,7 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
     async def run(self) -> RunnerResult[ForgeBlueprint]:
         """Generate ROMS-MARBL inputs and emit the downstream ``roms_marbl`` blueprint.
 
-        Delegates to ``cstar_forge.run.process`` (host-resolution glue) ->
+        Delegates to ``cstar.applications.forge.runtime.process`` (host-resolution glue) ->
         ``forge_blueprint_engine.process_forge_blueprint`` -> the ``ForgeExecutor``
         substitution seam (``ensure_source_data`` -> ``generate_inputs`` ->
         ``configure_build``). Synchronous and heavy (network fetches, roms-tools
@@ -73,7 +65,7 @@ class ForgeRunner(BlueprintRunner[ForgeBlueprint]):
         RunnerResult
             The result of the blueprint processing.
         """
-        from cstar_forge import run as forge_run
+        from cstar.applications.forge import runtime as forge_run
 
         try:
             executor = forge_run.process(self.blueprint)

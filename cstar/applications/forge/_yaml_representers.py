@@ -10,7 +10,7 @@ The primary defense is coercing enums to their values at the Forge/roms-tools bo
 belt-and-suspenders: a global ``Enum`` representer registered on ``yaml.SafeDumper`` so any
 enum that reaches a SafeDumper by some *other* path still serializes as its value. Because
 ``add_multi_representer`` matches via the type's MRO, a subclass such as roms-tools'
-``NoAliasDumper`` inherits it. Imported for its side effect from ``cstar_forge.forge``.
+``NoAliasDumper`` inherits it. Imported for its side effect from ``cstar.applications.forge``.
 
 Note: this does NOT fix filename construction (a Forge f-string no dumper touches) — that is
 the primary fix's job.

@@ -34,7 +34,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-_PATCHED_FLAG = "_cstar_forge_all_or_nothing_acquire"
+_PATCHED_FLAG = "_cstar_all_or_nothing_acquire"
 
 
 def apply_combinedlock_leak_fix() -> bool:

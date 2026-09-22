@@ -16,13 +16,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-import cstar.applications.roms_marbl.models as cstar_models
 import roms_tools as rt
 import xarray as xr
 import yaml
-from cstar.base.additional_code import AdditionalCode
-from cstar.orchestration.models import Resource
-from cstar.orchestration.serialization import deserialize
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -32,8 +28,9 @@ from pydantic import (
     model_validator,
 )
 
-from cstar_forge.forge import input_data, source_datasets
-from cstar_forge.forge.forge_blueprint import (
+import cstar.applications.roms_marbl.models as cstar_models
+from cstar.applications.forge import input_data, source_datasets
+from cstar.applications.forge.blueprint import (
     CDR_MODES,
     DEFAULT_WORKING_ROOT,
     ROMS_RUN_SEGMENT,
@@ -42,8 +39,8 @@ from cstar_forge.forge.forge_blueprint import (
     infer_cdr_mode,
     vert_kwargs_from_grid_kwargs,
 )
-from cstar_forge.forge.host import HostPaths
-from cstar_forge.forge.namelist_model import (
+from cstar.applications.forge.host import HostPaths
+from cstar.applications.forge.namelist_model import (
     RunTimeSettings,
     build_namelist,
     check_output_streams_divide_rst,
@@ -52,9 +49,12 @@ from cstar_forge.forge.namelist_model import (
     ensure_cdr_output_marbl_diagnostics,
     run_time_settings_for_ref,
 )
-from cstar_forge.forge.settings import render_roms_settings, write_roms_namelist
-from cstar_forge.forge.user_files import verify_user_file
-from cstar_forge.forge.util import mem_log
+from cstar.applications.forge.settings import render_roms_settings, write_roms_namelist
+from cstar.applications.forge.user_files import verify_user_file
+from cstar.applications.forge.util import mem_log
+from cstar.base.additional_code import AdditionalCode
+from cstar.orchestration.models import Resource
+from cstar.orchestration.serialization import deserialize
 
 log = logging.getLogger(__name__)
 
@@ -220,7 +220,7 @@ class ForgeExecutor(BaseModel):
             "A user-supplied pre-made grid netCDF (from ForgeBlueprint "
             "``domain.grid_file``), used in place of building the grid from "
             "``grid_kwargs``. When set, ``model_post_init`` verifies it "
-            "(``cstar_forge.forge.user_files.verify_user_file``), skips "
+            "(``cstar.applications.forge.user_files.verify_user_file``), skips "
             "topography resolution (already baked into the file), and loads the "
             "grid via ``rt.Grid(filename=...)``; nesting is unsupported alongside "
             "it (the ForgeBlueprint schema already forbids the combination)."
@@ -306,7 +306,7 @@ class ForgeExecutor(BaseModel):
         description=(
             "Injected runtime location (working_dir + source_data_cache + machine "
             "identity). Required for all produced-artifact paths and source-data caching; "
-            "the executor reads no host paths from cstar_forge.config."
+            "the executor reads no host paths from cstar.applications.forge.config."
         ),
     )
     verbose: bool = Field(
@@ -421,7 +421,7 @@ class ForgeExecutor(BaseModel):
         """Return the injected host, raising a clear error if it was not provided.
 
         Every produced-artifact path routes under ``host.working_dir``; the executor
-        reads no host paths from ``cstar_forge.config``, so a host is mandatory.
+        reads no host paths from ``cstar.applications.forge.config``, so a host is mandatory.
         """
         if self.host is None:
             raise ValueError(
@@ -1673,7 +1673,7 @@ class ForgeExecutor(BaseModel):
         subchunk: bool = True,
         test: bool = False,
         only: set[str] | None = None,
-    ) -> cstar_models.RomsMarblBlueprint:
+    ) -> cstar_models.RomsMarblBlueprint | None:
         """
         Generate ROMS input files and update the in-memory blueprint in place.
 
@@ -1718,8 +1718,11 @@ class ForgeExecutor(BaseModel):
 
         Returns
         -------
-        cstar_models.RomsMarblBlueprint
-            The blueprint updated with all input file locations.
+        cstar_models.RomsMarblBlueprint or None
+            The blueprint updated with all input file locations, or ``None``
+            when ``test=True`` truncates the generation loop early -- callers
+            passing ``test=True`` (unit tests only) must not use the return
+            value.
 
         Raises
         ------
@@ -1794,7 +1797,7 @@ class ForgeExecutor(BaseModel):
             )
 
         if test:
-            return
+            return None
 
         # Update the blueprint with the generated input data.
         roms_marbl_blueprint_dict = self.roms_marbl_blueprint.model_dump()
@@ -2013,7 +2016,7 @@ class ForgeExecutor(BaseModel):
         because the Grid/``align_grids`` calls run during ``model_post_init``, i.e.
         before any post-construction method call could set it.
         """
-        from cstar_forge.forge.forge_blueprint_engine import (
+        from cstar.applications.forge.engine import (
             forge_blueprint_to_builder_kwargs,
         )
 

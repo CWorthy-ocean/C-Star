@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from cstar_forge.domain_catalog import (
+from cstar.catalog.domain_catalog import (
     _DEFAULT_CATALOG_ROOT,
     DomainCatalog,
     LayeredCatalog,
@@ -59,7 +59,7 @@ def test_is_github_catalog_url():
 
 def test_github_catalog_uses_org_and_repo():
     url = "https://github.com/CWorthy-ocean/cstar-forge"
-    with patch("cstar_forge.domain_catalog.fsspec.filesystem") as mock_fs:
+    with patch("cstar.catalog.domain_catalog.fsspec.filesystem") as mock_fs:
         instance = mock_fs.return_value
         instance.protocol = "github"
         instance.exists = lambda _path: False
@@ -89,7 +89,7 @@ def test_parse_github_catalog_url_invalid():
 def isolated_catalog(tmp_path):
     import shutil
 
-    from cstar_forge.domain_catalog import _DEFAULT_CATALOG_ROOT
+    from cstar.catalog.domain_catalog import _DEFAULT_CATALOG_ROOT
 
     root = tmp_path / "catalog"
     # Copy the BUNDLED catalog (not default_catalog.catalog_root, which is now
@@ -99,7 +99,7 @@ def isolated_catalog(tmp_path):
 
 
 def test_register_output_writes_and_rescans(isolated_catalog):
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     out = _cat.output_data("standard")
     isolated_catalog.register_output("my-output", out, description="test out")
@@ -108,7 +108,7 @@ def test_register_output_writes_and_rescans(isolated_catalog):
 
 
 def test_register_output_refuses_collision(isolated_catalog):
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     out = _cat.output_data("standard")
     with pytest.raises(FileExistsError):
@@ -116,7 +116,7 @@ def test_register_output_refuses_collision(isolated_catalog):
 
 
 def test_register_forcing_writes_and_rescans(isolated_catalog):
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     fdata = _cat.forcing_data("glorys-era5-unified")
     fi = {
@@ -133,7 +133,7 @@ def test_register_forcing_no_longer_accepts_cdr_forcing(isolated_catalog):
     """CDR configuration moved out of ForcingSpec into its own CdrSpec entry
     type -- register_forcing must no longer accept a cdr_forcing kwarg.
     """
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     fdata = _cat.forcing_data("glorys-era5-unified")
     fi = {
@@ -224,7 +224,7 @@ def test_register_cdr_refuses_collision(isolated_catalog):
 
 
 def test_register_domain_from_dict_round_trips(isolated_catalog):
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     ddata = _cat.domain_data("wio-toy")
     isolated_catalog.register_domain_from_dict("my-domain", ddata)
@@ -234,7 +234,7 @@ def test_register_domain_from_dict_round_trips(isolated_catalog):
 
 
 def test_register_model_from_settings_clones_code_block(isolated_catalog):
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     base_dir = _cat.model_dir("cson_roms-marbl_v0.1")
     isolated_catalog.register_model_from_settings(
@@ -253,7 +253,7 @@ def test_register_model_from_settings_clones_code_block(isolated_catalog):
 
 
 def test_register_model_from_settings_applies_live_overrides(isolated_catalog):
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     base_dir = _cat.model_dir("cson_roms-marbl_v0.1")
     base_code = _cat.model_data("cson_roms-marbl_v0.1")["code"]
@@ -277,7 +277,7 @@ def test_register_model_from_settings_applies_live_overrides(isolated_catalog):
 
 
 def test_register_model_from_settings_applies_marbl_ref(isolated_catalog):
-    from cstar_forge.domain_catalog import default_catalog as _cat
+    from cstar.catalog.domain_catalog import default_catalog as _cat
 
     base_dir = _cat.model_dir("cson_roms-marbl_v0.1")
     base_code = _cat.model_data("cson_roms-marbl_v0.1")["code"]
@@ -316,7 +316,7 @@ def _write_domain(root: Path, name: str, **extra) -> None:
 class TestLayeredCatalog:
     """New coverage for the layered-catalog refactor (LayeredCatalog, DomainCatalog
     read_only/label, user_catalog_root, and the wizard's badge-aware dropdown
-    options -- see cstar_forge/domain_catalog.py and forge_blueprint_wizard.py).
+    options -- see cstar/catalog/domain_catalog.py and cstar/wizard/wizard.py).
     """
 
     # -- union reads, precedence, collisions ------------------------------
@@ -344,7 +344,7 @@ class TestLayeredCatalog:
             label="bottom",
         )
 
-        with caplog.at_level(logging.WARNING, logger="cstar_forge.domain_catalog"):
+        with caplog.at_level(logging.WARNING, logger="cstar.catalog.domain_catalog"):
             layered = LayeredCatalog([top, bottom])
 
         assert "domain:shared-domain" in caplog.text
@@ -513,7 +513,7 @@ class TestLayeredCatalog:
         # filesystem() factory is mocked (mirroring test_github_catalog_uses_org_and_repo
         # above), so this only exercises the read_only-forcing logic, not fsspec/HTTP.
         url = "https://github.com/CWorthy-ocean/cstar-forge"
-        with patch("cstar_forge.domain_catalog.fsspec.filesystem") as mock_fs:
+        with patch("cstar.catalog.domain_catalog.fsspec.filesystem") as mock_fs:
             instance = mock_fs.return_value
             instance.protocol = "github"
             instance.exists = lambda _path: False
@@ -538,26 +538,24 @@ class TestLayeredCatalog:
     ):
         first = tmp_path / "first"
         second = tmp_path / "second"
-        monkeypatch.setenv(
-            "CSTAR_FORGE_CATALOG", os.pathsep.join([str(first), str(second)])
-        )
+        monkeypatch.setenv("CSTAR_CATALOG", os.pathsep.join([str(first), str(second)]))
         assert user_catalog_root() == first.expanduser().resolve()
 
     def test_user_catalog_root_default_is_home_anchored(self, monkeypatch, tmp_path):
-        # conftest.py forces CSTAR_FORGE_CATALOG globally for test isolation --
+        # conftest.py forces CSTAR_CATALOG globally for test isolation --
         # monkeypatch it away for this test only, never unset it globally.
-        monkeypatch.delenv("CSTAR_FORGE_CATALOG", raising=False)
+        monkeypatch.delenv("CSTAR_CATALOG", raising=False)
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
-        assert user_catalog_root() == tmp_path / "cstar-forge-data" / "catalog"
+        assert user_catalog_root() == tmp_path / "cstar" / "catalog"
 
     # -- laziness -------------------------------------------------------------
 
     def test_default_catalog_is_lazy_and_creates_nothing(self, tmp_path):
         nonexistent = tmp_path / "does-not-exist" / "catalog"
         env = dict(os.environ)
-        env["CSTAR_FORGE_CATALOG"] = str(nonexistent)
+        env["CSTAR_CATALOG"] = str(nonexistent)
         code = (
-            "import cstar_forge.domain_catalog as dc\n"
+            "import cstar.catalog.domain_catalog as dc\n"
             "assert dc._default_catalog is None\n"
             "import pathlib\n"
             f"assert not pathlib.Path({str(nonexistent)!r}).exists()\n"
@@ -591,11 +589,12 @@ class TestLayeredCatalog:
 
     def test_wizard_default_blueprint_path_under_user_layer(self):
         pytest.importorskip("ipywidgets")
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import ForgeBlueprintWizard
 
         wiz = ForgeBlueprintWizard()
         result = wiz._default_blueprint_path("some-name")
-        expected_dir = Path(os.environ["CSTAR_FORGE_CATALOG"]).expanduser().resolve()
+        expected_dir = Path(os.environ["CSTAR_CATALOG"]).expanduser().resolve()
         assert (
             Path(result)
             == expected_dir / "blueprints" / "some-name.forge_blueprint.yaml"
@@ -603,7 +602,8 @@ class TestLayeredCatalog:
 
     def test_wizard_dd_options_mixed_badges_are_all_tuples(self, tmp_path):
         pytest.importorskip("ipywidgets")
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import ForgeBlueprintWizard
 
         top_root = tmp_path / "top"
         bottom_root = tmp_path / "bottom"
@@ -652,7 +652,8 @@ class TestLayeredCatalog:
         and staying compatible with a plain sentinel prefix.
         """
         pytest.importorskip("ipywidgets")
-        from cstar_forge.forge_blueprint_wizard import ForgeBlueprintWizard
+        pytest.importorskip("cstar.wizard.wizard")
+        from cstar.wizard.wizard import ForgeBlueprintWizard
 
         root = tmp_path / "cat"
         shutil.copytree(_DEFAULT_CATALOG_ROOT, root)
@@ -675,22 +676,22 @@ class TestReviewFixes:
             cat.register_output("review-fix-probe", {"x": 1})
 
     def test_user_catalog_root_ignores_empty_env_segments(self, monkeypatch, tmp_path):
-        from cstar_forge.domain_catalog import user_catalog_root
+        from cstar.catalog.domain_catalog import user_catalog_root
 
-        monkeypatch.setenv("CSTAR_FORGE_CATALOG", os.pathsep + str(tmp_path / "cat"))
+        monkeypatch.setenv("CSTAR_CATALOG", os.pathsep + str(tmp_path / "cat"))
         assert user_catalog_root() == (tmp_path / "cat").resolve()
 
     def test_user_catalog_root_rejects_local_top(self, monkeypatch):
-        from cstar_forge.domain_catalog import user_catalog_root
+        from cstar.catalog.domain_catalog import user_catalog_root
 
-        monkeypatch.setenv("CSTAR_FORGE_CATALOG", "local")
+        monkeypatch.setenv("CSTAR_CATALOG", "local")
         with pytest.raises(ValueError, match="read-only"):
             user_catalog_root()
 
     def test_build_catalog_stack_rejects_local_top_and_appends_bundled(
         self, monkeypatch, tmp_path
     ):
-        from cstar_forge.domain_catalog import build_catalog_stack
+        from cstar.catalog.domain_catalog import build_catalog_stack
 
         with pytest.raises(ValueError, match="read-only"):
             build_catalog_stack(["local"])
@@ -703,7 +704,7 @@ class TestReviewFixes:
     def test_layered_copy_domain_into_standalone_and_uniqueness(
         self, monkeypatch, tmp_path
     ):
-        from cstar_forge.domain_catalog import build_catalog_stack
+        from cstar.catalog.domain_catalog import build_catalog_stack
 
         stack = build_catalog_stack([str(tmp_path / "mine")])
         target = DomainCatalog(
@@ -717,7 +718,7 @@ class TestReviewFixes:
             stack.copy_domain("wio-toy", stack)
 
     def test_layered_path_helpers_delegate_to_top(self, tmp_path):
-        from cstar_forge.domain_catalog import build_catalog_stack
+        from cstar.catalog.domain_catalog import build_catalog_stack
 
         stack = build_catalog_stack([str(tmp_path / "mine")])
         d = stack.roms_marbl_blueprint_dir_for("MacOS", "bp1")
