@@ -54,6 +54,8 @@ class TestRun:
         ):
             assert option in output, option
         assert "python -m cstar.applications.forge.runtime" not in output
+        # The dropped experiment flag must not resurface.
+        assert "--stage-ic-sources" not in output
 
     def test_options_map_to_run_blueprint_kwargs(self):
         with patch(

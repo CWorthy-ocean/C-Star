@@ -40,7 +40,16 @@ def disable_cli_color() -> Generator[None]:
     `GITHUB_ACTIONS`, `FORCE_COLOR`, or `PY_COLORS` is set), which embeds ANSI
     escape codes in captured CLI output and breaks message assertions.
     """
-    with mock.patch.dict(os.environ, {"NO_COLOR": "1"}):
+    # typer reads GITHUB_ACTIONS/FORCE_COLOR once, when typer.rich_utils is first
+    # imported, and bakes the result into FORCE_TERMINAL. A test outside this
+    # directory can trigger that import with colour still forced, so pin the
+    # module constant as well as the environment.
+    import typer.rich_utils
+
+    with (
+        mock.patch.dict(os.environ, {"NO_COLOR": "1"}),
+        mock.patch.object(typer.rich_utils, "FORCE_TERMINAL", None),
+    ):
         for var in ("FORCE_COLOR", "PY_COLORS", "GITHUB_ACTIONS"):
             os.environ.pop(var, None)
         yield

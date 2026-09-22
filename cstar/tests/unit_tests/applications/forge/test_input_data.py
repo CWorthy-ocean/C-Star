@@ -12,7 +12,6 @@ Tests cover:
 - Edge cases and error handling
 """
 
-import re
 import shutil
 import sys
 from contextlib import contextmanager
@@ -3639,28 +3638,6 @@ class TestSubchunkDefaults:
             inspect.signature(process_forge_blueprint).parameters["subchunk"].default
             is True
         )
-
-    def test_run_cli_default_and_opt_out(self):
-        import argparse
-
-        # Reach into run_blueprint's parser indirectly: parse just the flag pair
-        # the way argparse.BooleanOptionalAction wires it.
-        parser = argparse.ArgumentParser()
-        parser.add_argument(
-            "--subchunk", action=argparse.BooleanOptionalAction, default=True
-        )
-        assert parser.parse_args([]).subchunk is True
-        assert parser.parse_args(["--no-subchunk"]).subchunk is False
-        # And the real CLI no longer exposes the dropped experiment flag.
-        from typer.testing import CliRunner
-
-        import cstar.cli.forge as cli
-
-        result = CliRunner().invoke(cli.app, ["run", "--help"])
-        # Escape-stripped: rich colours the help under a colour-forcing CI environment.
-        output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
-        assert "--no-subchunk" in output
-        assert "--stage-ic-sources" not in output
 
 
 def _make_input_data(
